@@ -89,6 +89,26 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
   }
 }
 
+/** Current configured value for a target, or undefined when unset. The
+ * read-side twin of credentialIsConfigured for host-side resolution (the
+ * D2 routine sandbox resolves bearer credentials through this seam). */
+export function credentialValue(config: CredentialConfig, id: CredentialTargetId): string | undefined {
+  switch (id) {
+    case "xaiApiKey":
+      return config.xai?.key;
+    case "boxToken":
+      return config.box?.token;
+    case "opencodeGoApiKey":
+      return config.opencodeGo?.apiKey;
+    case "ttsKey":
+      return config.tts?.key;
+    case "fishAudioKey":
+      return config.tts?.fishKey;
+    case "openaiImageApiKey":
+      return config.imageGen?.key;
+  }
+}
+
 /** A still-pending credential card for this target — the set a newer
  * request supersedes. Provided, dismissed, and already-superseded cards
  * keep their settled state untouched. */

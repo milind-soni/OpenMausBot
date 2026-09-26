@@ -288,6 +288,11 @@ const featureConfigSchema = z.object({
    * enabled; a one-shot that fails or answers junk leaves the first-message
    * snippet in place — see llmThreadTitlesEnabled. */
   llmThreadTitles: z.boolean().optional(),
+  /** Prototype: routines may execute a reviewed script in a sandboxed child
+   * instead of an LLM turn (ADR: docs/design/adr-d2-scripted-routine-sandbox.md).
+   * Server-only and off until explicitly enabled by hand, because the
+   * runtime is proven by a canary in plain-Node parent modes only. */
+  scriptedRoutines: z.boolean().optional(),
 });
 /** First-run progress. Kept in the workspace config rather than a browser so
  * it survives cleared site data and is shared by every paired client. Hint
@@ -515,7 +520,7 @@ export interface AppConfig {
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; scriptedRoutines?: boolean };
   /** First-run progress; see onboardingConfigSchema. */
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[] };
   /** Named browser sessions any bot can be pointed at. */
@@ -737,6 +742,15 @@ export function claudeUserMcpEnabled(cfg: AppConfig): boolean {
  * answers anything unusable leaves the snippet untouched. */
 export function llmThreadTitlesEnabled(cfg: AppConfig): boolean {
   return cfg.features?.llmThreadTitles === true;
+}
+
+/** Prototype gate for scripted routine runs (D2 sandbox). Off unless an
+ * explicit `true` is set by hand in ~/.openmausbot/config.json
+ * (`{"features": {"scriptedRoutines": true}}`) and the server restarts.
+ * Server-only: the Electron-embedded parent stays dark until its packaged
+ * build passes the runtime canary (ADR section 10). */
+export function scriptedRoutinesEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.scriptedRoutines === true;
 }
 
 /** Config sections no provider driver reads. A write that touches only

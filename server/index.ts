@@ -36,6 +36,7 @@ import {
   CREDENTIAL_TARGETS,
   credentialResumeOutcome,
   credentialIsConfigured,
+  credentialValue,
   isPendingCredentialRequest,
   isCredentialTargetId,
   type CredentialTargetId,
@@ -150,6 +151,7 @@ import {
   sharedComputersEnabled,
   builtInBrowserEnabled,
   llmThreadTitlesEnabled,
+  scriptedRoutinesEnabled,
   browserProfileReplacementConflict,
   browserProfilePartitionTarget,
   syncCredentialEnv,
@@ -392,7 +394,8 @@ import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
-import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { RoutineManager, type Routine, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { abortAllScriptedRoutineRuns, runScriptedRoutine } from "./routine-sandbox.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import { BrowserRuntime } from "./browser-runtime.ts";
@@ -8973,6 +8976,19 @@ const commsBus: CommsBus = {
 _loadPending();
 
 routines = new RoutineManager({
+  // Scripted routines (D2 sandbox) run reviewed scripts in a child process:
+  // no task, no thread, no admission seat. Flag off (the default) leaves
+  // this manager byte-identical to today's behavior.
+  ...(scriptedRoutinesEnabled(cfg)
+    ? {
+        runScripted: (_run: RoutineRun, routine: Routine, abortSignal?: AbortSignal) =>
+          runScriptedRoutine(routine, {
+            resolveCredential: (credentialId: string) =>
+              isCredentialTargetId(credentialId) ? credentialValue(cfg, credentialId) : undefined,
+            abortSignal,
+          }),
+      }
+    : {}),
   emit: broadcast,
   hasPendingDelegations: (threadId) => pendingThreads().includes(threadId) ||
     [...delegationWatch.values()].some((watch) => watch.sourceThreadId === threadId) ||
@@ -21651,7 +21667,7 @@ if (TUNNEL_SOCKET) {
 
 const gracefulShutdown = createGracefulShutdown({
   cleanup: [
-    () => {
+    async () => {
       followupsReady = false;
       companyShutdown = true;
       if (workspaceAccessTimer) clearInterval(workspaceAccessTimer);
@@ -21666,6 +21682,7 @@ const gracefulShutdown = createGracefulShutdown({
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();
       routines?.stop();
+      await abortAllScriptedRoutineRuns();
       calendarCalls?.stop();
       webhookIngress?.server.close();
       tunnelListener?.close();
