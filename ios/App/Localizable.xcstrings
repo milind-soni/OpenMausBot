@@ -1859,6 +1859,26 @@
         }
       }
     },
+    "Jump to latest": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ir para o mais recente"
+          }
+        }
+      }
+    },
+    "Jump to latest messages": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ir para as mensagens mais recentes"
+          }
+        }
+      }
+    },
     "Loading models": {
       "localizations": {
         "pt-BR": {

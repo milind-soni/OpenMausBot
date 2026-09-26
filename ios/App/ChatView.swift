@@ -61,6 +61,11 @@ struct ChatView: View {
     @State private var islandExpanded = false
     @State private var islandVisible = false
     @State private var facePhase: CGFloat = 0
+    /// Reading scrollback: the end of the transcript is below the screen, so
+    /// the Jump to latest pill is offered. Tracked from two edges rather than
+    /// a scroll offset, because iOS 16 has no scroll-position API.
+    @State private var viewportBottom: CGFloat = 0
+    @State private var showsJumpToLatest = false
 
     @AppStorage(PrefKey.islandIntro) private var islandIntro = IslandIntro.oncePerBot.rawValue
     @AppStorage(PrefKey.islandSeen) private var islandSeen = ""
@@ -75,6 +80,12 @@ struct ChatView: View {
     /// The live bubble's scroll target. A constant because there is at most
     /// one per chat and it has no message id to borrow.
     static let liveBubbleId = "companion.live"
+    /// The last thing in the transcript, after any live bubble: where Jump to
+    /// latest lands, and the edge measured to decide whether to offer it.
+    static let transcriptEndId = "companion.end"
+    /// How far the end may sit below the screen before the pill appears — a
+    /// small overscroll or a half-hidden last line is not scrollback.
+    static let jumpToLatestThreshold: CGFloat = 160
 
     /// The live chat record, so busy/unread stay current as frames land.
     private var current: Chat {
@@ -230,6 +241,19 @@ struct ChatView: View {
                                 .id(Self.liveBubbleId)
                                 .accessibilityLabel("\(current.name) is working")
                         }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(Self.transcriptEndId)
+                            // Only a change of answer touches state: this
+                            // fires on every scrolled frame.
+                            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { end in
+                                let reading = end - viewportBottom > Self.jumpToLatestThreshold
+                                if reading != showsJumpToLatest {
+                                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { showsJumpToLatest = reading }
+                                }
+                            }
+                            .accessibilityHidden(true)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -270,6 +294,30 @@ struct ChatView: View {
                     .frame(maxWidth: .infinity, alignment: .top)
                     .ignoresSafeArea(edges: .top)
                     .allowsHitTesting(false)
+                }
+                // Reading scrollback — one tap back to the end, streaming or
+                // not, the same pill the desktop chat offers.
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom in
+                    viewportBottom = bottom
+                }
+                .overlay(alignment: .bottom) {
+                    if showsJumpToLatest {
+                        Button {
+                            withAnimation { proxy.scrollTo(Self.transcriptEndId, anchor: .bottom) }
+                        } label: {
+                            Label("Jump to latest", systemImage: "arrow.down")
+                                .font(.footnote.weight(.medium))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(.regularMaterial, in: Capsule())
+                                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
+                                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Jump to latest messages")
+                        .padding(.bottom, 10)
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    }
                 }
                 .task {
                     // grow, hold a beat, shrink — the face rides along
