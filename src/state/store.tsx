@@ -384,7 +384,7 @@ export interface Bot {
   unread: boolean;
   busy?: boolean;
   /** what the bot is doing, as the harness sees it; busy is derived from it */
-  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
+  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
   /** The selected thread's turn-start anchor (epoch ms) while busy, else null;
    * fed to the Thinking timer so elapsed time survives thread switches. */
   turnStartedAt?: number | null;

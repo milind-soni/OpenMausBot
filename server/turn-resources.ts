@@ -9,6 +9,10 @@ export type TurnOwner = {
    * one incident, not two (Claude settles the follow-up interrupt as
    * exit_before_result, which reads there like a fresh failure). */
   lazyClaimFailureReported?: boolean;
+  /** The computer resource this turn parked waiting for (#1651). Set at the
+   * wait ceiling: the lazy-claim rejection path registers the resume from
+   * it, and the completion fold settles the turn as parked, not failed. */
+  computerParkedOn?: string;
 };
 
 /** One harness owns the data directory. Claims are synchronous and last for
@@ -46,6 +50,15 @@ export class TurnResources {
    * could not finish. The owner's other claims stand until settle. */
   releaseOne(resource: string, owner: TurnOwner): void {
     if (this.owns(resource, owner)) this.owners.delete(resource);
+  }
+
+  /** Whether any live owner holds this resource: the parked-resume drain's
+   * gate (#1651) — a resume fires only when the seat it queued on is free. */
+  free(resource: string): boolean {
+    for (const key of this.owners.keys()) {
+      if (overlaps(key, resource)) return false;
+    }
+    return true;
   }
 }
 

@@ -5,7 +5,7 @@ export interface TeamMapBot {
   section?: string;
   chiefOfStaff?: boolean;
   busy?: boolean;
-  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
+  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
 }
 
 export interface TeamMapSnapshot {
