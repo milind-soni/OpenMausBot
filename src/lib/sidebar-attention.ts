@@ -1,7 +1,7 @@
 export type SidebarAttentionBot = {
   unread?: boolean;
   busy?: boolean;
-  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
+  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
 };
 
 export type SidebarAttentionGroup = {

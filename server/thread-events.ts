@@ -212,7 +212,7 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
         typeof value.waitedMs === "number" &&
         Number.isFinite(value.waitedMs) &&
         value.waitedMs >= 0 &&
-        (value.outcome === "acquired" || value.outcome === "gave_up" || value.outcome === "stopped")
+        (value.outcome === "acquired" || value.outcome === "gave_up" || value.outcome === "parked" || value.outcome === "stopped")
       );
     case "item.started":
       return (value.itemType === "tool" || value.itemType === "reasoning") && stringOrMissing(value.title);

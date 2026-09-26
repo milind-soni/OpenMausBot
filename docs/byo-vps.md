@@ -115,7 +115,7 @@ the first thread that calls a computer tool (a screenshot, a click, a command th
 with that turn until it ends; threads that never touch the computer tools are never held up. A thread that
 reaches for the screen while another holds it shows
 
-> Waiting for its turn on this computer — *bot* is running *thread*. Starts automatically when that finishes.
+> Waiting for its turn on this computer — *position* in queue — *bot* is running *thread*. Starts automatically when that finishes.
 
 and its computer calls are refused with a note telling the model to pause screen work; the chip settles as
 "Computer free — continuing" when the desktop lands, or "Stopped waiting for the computer" if the turn ends

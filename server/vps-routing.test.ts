@@ -633,9 +633,11 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
           held: true, helpOpen: false,
           blockedReason: "Another thread is using this computer. This call was not performed. Pause computer work until that thread finishes, then take a fresh screenshot before acting.",
         });
-        await until(async () => (await activities(refill.threadId)).includes(
-          "Waiting for its turn on this computer — TCPR operator is running Queue check. Starts automatically when that finishes.",
-        ), "the wait chip naming the holder");
+        // The chip may carry its queue position and, once the resource has
+        // wait history, an estimate suffix (#1652). The holder it names is
+        // the fact under test here, so the shape stays pinned around it.
+        const waitChip = /^Waiting for its turn on this computer(?: — \d+(?:st|nd|rd|th) in queue)? — TCPR operator is running Queue check\. Starts automatically when that finishes(?:; recent waits here have taken [^.]+)?\.$/;
+        await until(async () => (await activities(refill.threadId)).some((name) => waitChip.test(name)), "the wait chip naming the holder");
 
         // both turns finish; the wait resolves as free-and-continuing or as
         // stopped (with the duration it waited), depending on which turn
