@@ -414,6 +414,8 @@ export async function launchVerificationServer(
     turnkey?: { url: string; organizationId: string; apiPublicKey: string; apiPrivateKey: string };
     /** Where sign-in links open (OMB_PUBLIC_URL): a loopback front end, e.g. a production build behind a rewrite proxy. */
     publicUrl?: string;
+    /** The header in which that front end names each visitor (NATION_CLIENT_IP_HEADER). */
+    clientIpHeader?: string;
   },
   /** Owned loopback provider fixtures only. Credentials are configured over the admin API. */
   hostedComputerApis?: { orgo?: string; daytona?: string },
@@ -425,7 +427,8 @@ export async function launchVerificationServer(
   if (accounts && (!(accounts.founderEmails ?? []).every((email) => /^[\w.+-]+@example\.test$/.test(email))
     || (accounts.payments && (!loopbackUrl.test(accounts.payments.rpc) || !/^0x[0-9a-fA-F]{40}$/.test(accounts.payments.treasury)))
     || (accounts.turnkey && !loopbackUrl.test(accounts.turnkey.url))
-    || (accounts.publicUrl !== undefined && !/^http:\/\/(?:localhost|127\.0\.0\.1):[1-9]\d{0,4}(?:\/[\w-]+)*$/.test(accounts.publicUrl)))) {
+    || (accounts.publicUrl !== undefined && !/^http:\/\/(?:localhost|127\.0\.0\.1):[1-9]\d{0,4}(?:\/[\w-]+)*$/.test(accounts.publicUrl))
+    || (accounts.clientIpHeader !== undefined && !/^[a-z0-9-]{1,64}$/.test(accounts.clientIpHeader)))) {
     throw new ControlOmbError("Account verification requires example.test founders and owned loopback chain and wallet services");
   }
   if (composioFixtureApi && !/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(composioFixtureApi)) {
@@ -531,6 +534,7 @@ export async function launchVerificationServer(
     NATION_ACCOUNTS: "1",
     NATION_MAIL_OUTBOX: "1",
     ...(accounts.publicUrl ? { OMB_PUBLIC_URL: accounts.publicUrl } : {}),
+    ...(accounts.clientIpHeader ? { NATION_CLIENT_IP_HEADER: accounts.clientIpHeader } : {}),
     ...(accounts.founderEmails?.length ? { OMB_SIGNIN_EMAILS: accounts.founderEmails.join(",") } : {}),
     ...(accounts.payments ? {
       NATION_TREASURY_ROBINHOOD: accounts.payments.treasury,

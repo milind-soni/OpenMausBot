@@ -23,13 +23,13 @@ import type { AccountMailer } from "./account-mail.ts";
 import { json, readBody } from "./harness/http.ts";
 import {
   clearSessionCookie,
+  clientAddress,
   isLoopbackHost,
   isProxied,
   isSameOrigin,
   labelFromUserAgent,
   parseCookies,
   requestOrigin,
-  requestSource,
   serializeSessionCookie,
 } from "./request-auth.ts";
 import { cookieMaxAgeSeconds, type Scope, type SessionRegistry } from "./sessions.ts";
@@ -66,15 +66,6 @@ export interface AccountGateway {
   /** Sign-in routes, and every API request from a browser signed in to an
    * account. True when this answered; false leaves the request to the desk. */
   handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean>;
-}
-
-/** The caller's address, the way the credit grant reads it
- * (server/routes/nation-credits.ts): X-Real-IP only when the operator says
- * the proxy in front replaces it (NATION_TRUST_PROXY=1). Behind a rewrite
- * proxy every browser otherwise shares that proxy's few addresses. */
-export function clientAddress(req: IncomingMessage, env: NodeJS.ProcessEnv = process.env): string {
-  const forwarded = env.NATION_TRUST_PROXY === "1" ? req.headers["x-real-ip"] : undefined;
-  return typeof forwarded === "string" && /^[0-9a-f:.]{2,45}$/i.test(forwarded) ? forwarded : requestSource(req);
 }
 
 /** a…e@example.com: enough to read a log, not enough to collect addresses from one. */

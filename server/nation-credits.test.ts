@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { encodeEventTopics, encodeAbiParameters, pad, parseAbiItem, toHex, type Hex } from "viem";
-import { CreditLedger, creditSettings, creditChains, invoiceChain, invoiceTokenAmount, micros, type CreditAccount, type CreditChain, type CreditInvoice } from "./nation-credits.ts";
+import { CreditLedger, creditSettings, creditChains, invoiceChain, invoiceTokenAmount, mailboxOf, micros, type CreditAccount, type CreditChain, type CreditInvoice } from "./nation-credits.ts";
 import { LATE_PAYMENT_WINDOW_MS, SCAN_CHUNK_BLOCKS, confirmCreditPayment, creditScanIntervalMs, scanCreditPayments, scanErrorText, verifyCreditPayment, type PaymentRpc } from "./nation-payments.ts";
 import { creditPlan, liveInvoices } from "./routes/nation-credits.ts";
 
@@ -147,6 +147,28 @@ describe("credit ledger", () => {
     expect(db.grant(account("d"), "other-ip", "a", now).granted).toBe(false);
     expect(db.grant(account("c"), "same-ip", "c", now + 86_400_000).granted).toBe(true);
     expect(db.grant({ ...account("temp"), email: "new@sub.mailinator.com" }, "fresh-ip", "fresh-device", now).granted).toBe(false);
+  });
+  it("gives one starter credit per inbox, whatever +tag or Gmail dots the address adds", () => {
+    const db = ledger(), now = Date.UTC(2026, 8, 27);
+    const as = (id: string, email: string): CreditAccount => ({ id, verified: true, email });
+    expect(db.grant(as("a", "jane.doe@gmail.com"), "ip-a", "device-a", now).granted).toBe(true);
+    for (const [id, email] of [["b", "janedoe+ads@gmail.com"], ["c", "j.a.n.e.d.o.e@googlemail.com"]]) {
+      expect(db.grant(as(id, email), `ip-${id}`, `device-${id}`, now)).toEqual({ granted: false, reason: "This email address already received starter credit." });
+    }
+    // Outside Gmail a dot is part of the name; a +tag still is not.
+    expect(db.grant(as("d", "jane.doe@example.test"), "ip-d", "device-d", now).granted).toBe(true);
+    expect(db.grant(as("e", "janedoe@example.test"), "ip-e", "device-e", now).granted).toBe(true);
+    expect(db.grant(as("f", "jane.doe+x@example.test"), "ip-f", "device-f", now).granted).toBe(false);
+    expect(mailboxOf("+only@example.test")).toBe("+only@example.test");
+  });
+  it("stops starter credit at the daily total, whatever networks and devices ask", () => {
+    const db = ledger({ NATION_FREE_GRANTS_PER_DAY: "2" }), now = Date.UTC(2026, 8, 27);
+    expect(db.grant(account("a"), "ip-a", "a", now).granted).toBe(true);
+    expect(db.grant(account("b"), "ip-b", "b", now).granted).toBe(true);
+    expect(db.grant(account("c"), "ip-c", "c", now)).toEqual({ granted: false, reason: "Today's starter credit has all been given out. Try again tomorrow." });
+    expect(db.grant(account("c"), "ip-c", "c", now + 86_400_000).granted).toBe(true);
+    expect(creditSettings({}).grantsPerDay).toBe(1000);
+    for (const bad of ["0", "1.5", "abc"]) expect(() => creditSettings({ NATION_FREE_GRANTS_PER_DAY: bad })).toThrow();
   });
   it("debits actual cost times markup once, blocks zero, and retains in-flight overruns", () => {
     const db = ledger({ NATION_CREDIT_MARKUP: "1.25" }); db.grant(account(), "ip", "device");

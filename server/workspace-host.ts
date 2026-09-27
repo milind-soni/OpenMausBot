@@ -159,7 +159,7 @@ export const INHERITED_ENVIRONMENT = [
   // credit prices and payment rules (the scan itself runs only here)
   "NATION_TREASURY_ROBINHOOD", "NATION_RPC_ROBINHOOD", "NATION_TOKEN_USD_PRICE", "NATION_TOKEN_DISCOUNT",
   "NATION_FREE_CREDIT_USD", "NATION_CREDIT_MARKUP", "NATION_LOW_BALANCE_USD", "NATION_PACKS_USD",
-  "NATION_FREE_GRANTS_PER_IP_PER_DAY", "NATION_CONFIRMATIONS", "NATION_DISPOSABLE_EMAIL_DOMAINS",
+  "NATION_FREE_GRANTS_PER_IP_PER_DAY", "NATION_FREE_GRANTS_PER_DAY", "NATION_CONFIRMATIONS", "NATION_DISPOSABLE_EMAIL_DOMAINS",
   "NATION_PUBLIC_NAME",
   // cloud computers' endpoint, and the Chrome the browser engine starts
   // (production pins its exact path for the Chrome sandbox profile)

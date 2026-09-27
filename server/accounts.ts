@@ -39,6 +39,14 @@ export function magicLinksPerHour(env: NodeJS.ProcessEnv = process.env): number 
   return Number.isInteger(count) && count >= 1 && count <= 100_000 ? count : 500;
 }
 
+/** Links one network may ask for per hour; NATION_MAGIC_LINKS_PER_NETWORK_PER_HOUR,
+ * default MAGIC_LINK_LIMITS.perSource. Behind a web front end whose visitors
+ * cannot be told apart (no NATION_CLIENT_IP_HEADER), every visitor is one network. */
+export function magicLinksPerNetworkPerHour(env: NodeJS.ProcessEnv = process.env): number {
+  const count = Number(env.NATION_MAGIC_LINKS_PER_NETWORK_PER_HOUR);
+  return Number.isInteger(count) && count >= 1 && count <= 100_000 ? count : MAGIC_LINK_LIMITS.perSource.count;
+}
+
 export interface AccountUser {
   id: string;
   email: string;
@@ -175,7 +183,7 @@ export class AccountStore {
         return Math.max(1_000, Number(rows[rows.length - limit.count]!.created_at) + limit.windowMs - now);
       };
       const waitEmail = limited("email", address, MAGIC_LINK_LIMITS.perEmail);
-      const waitSource = limited("source_hash", sourceHash, MAGIC_LINK_LIMITS.perSource);
+      const waitSource = limited("source_hash", sourceHash, { ...MAGIC_LINK_LIMITS.perSource, count: magicLinksPerNetworkPerHour(this.env) });
       const sentLastHour = Number(this.db.prepare("SELECT COUNT(*) AS n FROM account_magic_links WHERE created_at>?").get(now - 60 * 60_000)?.n ?? 0);
       const waitEveryone = sentLastHour >= magicLinksPerHour(this.env) ? 5 * 60_000 : 0;
       if (waitEmail || waitSource || waitEveryone) {

@@ -1,8 +1,9 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { clientAddress, createAccountGateway, LINK_EXPIRED, maskEmail, SIGNED_OUT, SIGNUPS_FULL } from "./account-gateway.ts";
+import { createAccountGateway, LINK_EXPIRED, maskEmail, SIGNED_OUT, SIGNUPS_FULL } from "./account-gateway.ts";
 import type { AccountMailer, MagicLinkMail } from "./account-mail.ts";
 import { AccountStore, type WorkspaceRef } from "./accounts.ts";
+import { clientAddress } from "./request-auth.ts";
 import type { Scope } from "./sessions.ts";
 
 const servers: Server[] = [];
@@ -104,6 +105,19 @@ describe("sending a sign-in link", () => {
     expect(limited.body.error).toMatch(/Too many sign-in emails/);
   });
 
+  it("counts each visitor behind a web front end once the operator names its header", async () => {
+    // Every request reaches the server from the front end's one address, as
+    // through a Vercel rewrite; only the named header tells visitors apart.
+    const viaFrontEnd = (visitor: string) => ({ "x-forwarded-for": `${visitor}, 76.76.21.9`, "x-vercel-forwarded-for": visitor });
+    const exhaust = async (call: Awaited<ReturnType<typeof setup>>["call"]) => {
+      for (let i = 0; i < 20; i++) expect((await call("/api/auth/magic/start", { body: { email: `a${i}@example.test` }, headers: viaFrontEnd("198.51.100.7") })).status).toBe(200);
+      expect((await call("/api/auth/magic/start", { body: { email: "a20@example.test" }, headers: viaFrontEnd("198.51.100.7") })).status).toBe(429);
+      return (await call("/api/auth/magic/start", { body: { email: "b@example.test" }, headers: viaFrontEnd("203.0.113.44") })).status;
+    };
+    expect(await exhaust((await setup()).call)).toBe(429);
+    expect(await exhaust((await setup({ env: { NATION_CLIENT_IP_HEADER: "x-vercel-forwarded-for" } })).call)).toBe(200);
+  });
+
   it("reports a mail failure without putting the link in the log", async () => {
     const { call, logs } = await setup({ failMail: true });
     const reply = await call("/api/auth/magic/start", { body: { email: "alice@example.test" } });
@@ -168,8 +182,8 @@ describe("using a sign-in link", () => {
 });
 
 describe("requests from a signed-in account", () => {
-  async function signedIn() {
-    const context = await setup();
+  async function signedIn(env?: NodeJS.ProcessEnv) {
+    const context = await setup({ env });
     await context.call("/api/auth/magic/start", { body: { email: "alice@example.test" } });
     const verified = await context.call("/api/auth/magic/verify", { body: { token: context.tokenFrom(context.mail[0]!) } });
     const cookie = verified.cookies[0]!.split(";")[0]!;
@@ -184,6 +198,12 @@ describe("requests from a signed-in account", () => {
     expect(forwarded).toEqual([{ ref: { id: workspace.id, userId: workspace.userId, email: "alice@example.test" }, ip: "127.0.0.1", path: "/api/bots?limit=5" }]);
     // the cookie's term slides
     expect(reply.cookies[0]).toMatch(/^nation_account=nas_/);
+  });
+
+  it("give the workspace the visitor's address that the web front end names", async () => {
+    const { call, cookie, forwarded } = await signedIn({ NATION_CLIENT_IP_HEADER: "x-vercel-forwarded-for" });
+    await call("/api/credits/status", { headers: { cookie, "x-forwarded-for": "76.76.21.9", "x-vercel-forwarded-for": "198.51.100.7" } });
+    expect(forwarded.map((item) => item.ip)).toEqual(["198.51.100.7"]);
   });
 
   it("never reach the workspace server's own loopback routes", async () => {
@@ -232,5 +252,23 @@ describe("helpers", () => {
     expect(clientAddress(req, { NATION_TRUST_PROXY: "1" })).toBe("203.0.113.9");
     const forged = { headers: { "x-real-ip": "1.2.3.4, evil" }, socket: { remoteAddress: "127.0.0.1" } } as unknown as IncomingMessage;
     expect(clientAddress(forged, { NATION_TRUST_PROXY: "1" })).toBe("127.0.0.1");
+  });
+
+  it("reads a web front end's visitor header only from the proxy on this machine", () => {
+    const env = { NATION_CLIENT_IP_HEADER: "X-Vercel-Forwarded-For" };
+    const via = (remoteAddress: string, headers: Record<string, string>) => ({ headers, socket: { remoteAddress } }) as unknown as IncomingMessage;
+    const edge = { "x-forwarded-for": "76.76.21.9" };
+    expect(clientAddress(via("127.0.0.1", { ...edge, "x-vercel-forwarded-for": "198.51.100.7" }), env)).toBe("198.51.100.7");
+    expect(clientAddress(via("127.0.0.1", { ...edge, "x-vercel-forwarded-for": "198.51.100.7, 76.76.21.9" }), env)).toBe("198.51.100.7");
+    expect(clientAddress(via("::1", { ...edge, "x-vercel-forwarded-for": "::ffff:198.51.100.7" }), env)).toBe("198.51.100.7");
+    expect(clientAddress(via("127.0.0.1", { ...edge, "x-vercel-forwarded-for": "2001:db8::7" }), env)).toBe("2001:db8::7");
+    // unset, missing or not an address: the proxy hop, as before
+    expect(clientAddress(via("127.0.0.1", { ...edge, "x-vercel-forwarded-for": "198.51.100.7" }), {})).toBe("76.76.21.9");
+    expect(clientAddress(via("127.0.0.1", edge), env)).toBe("76.76.21.9");
+    expect(clientAddress(via("127.0.0.1", { ...edge, "x-vercel-forwarded-for": "evil\n<script>" }), env)).toBe("76.76.21.9");
+    // a connection that did not come through this machine's proxy is its own source
+    expect(clientAddress(via("192.0.2.1", { "x-vercel-forwarded-for": "198.51.100.7" }), env)).toBe("192.0.2.1");
+    // a workspace behind the gateway keeps reading the X-Real-IP the gateway wrote
+    expect(clientAddress(via("127.0.0.1", { "x-real-ip": "203.0.113.9", "x-vercel-forwarded-for": "198.51.100.7" }), { ...env, NATION_TRUST_PROXY: "1" })).toBe("203.0.113.9");
   });
 });

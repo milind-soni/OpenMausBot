@@ -5,7 +5,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 import { creditAccount, nationLedger } from "../nation-credit-context.ts";
 import { creditChains, creditError, invoiceChain, USD_SCALE, type CreditLedger } from "../nation-credits.ts";
 import { chainClient, confirmCreditPayment } from "../nation-payments.ts";
-import { parseCookies } from "../request-auth.ts";
+import { clientAddressDetail, parseCookies } from "../request-auth.ts";
 
 const invoiceSchema = z.object({ chain: z.number().int(), packUsd: z.number().positive(), token: z.string().regex(/^0x[0-9a-f]{40}$/i).optional() }).strict();
 const confirmSchema = z.object({ invoiceId: z.string().uuid(), txHash: z.string().regex(/^0x[0-9a-f]{64}$/i) }).strict();
@@ -36,6 +36,15 @@ export function createNationCreditRoutes(): RouteHandler {
     if (path.startsWith("/api/admin/credits")) {
       if (!account.exempt) return json(res, 403, { error: "Owner/admin access required." });
       if (path === "/api/admin/credits" && method === "GET") return json(res, 200, ledger.admin());
+      // The owner's own request, as per-network limits see it: after a deploy,
+      // `address` should be the owner's own public address, not the web front
+      // end's; `headers` shows which one names it (NATION_CLIENT_IP_HEADER).
+      if (path === "/api/admin/credits/client-address" && method === "GET") {
+        const named = process.env.NATION_CLIENT_IP_HEADER?.trim().toLowerCase();
+        const headers = [...new Set(["x-forwarded-for", "x-real-ip", "x-vercel-forwarded-for", ...(named && /^[a-z0-9-]{1,64}$/.test(named) ? [named] : [])])];
+        const value = (name: string) => { const raw = req.headers[name]; return (Array.isArray(raw) ? raw[0] : raw)?.slice(0, 200) ?? null; };
+        return json(res, 200, { ...clientAddressDetail(req), peer: req.socket.remoteAddress ?? null, headers: Object.fromEntries(headers.map((name) => [name, value(name)])) });
+      }
       if (path === "/api/admin/credits/reconcile" && method === "POST") {
         const input = reconcileSchema.parse(await readBody(req));
         const call = ledger.db.prepare("SELECT state,created_at FROM credit_calls WHERE id=?").get(input.callId);
@@ -55,10 +64,8 @@ export function createNationCreditRoutes(): RouteHandler {
       const supplied = parseCookies(req.headers.cookie).get("nation_device");
       const device = supplied && /^[0-9a-f-]{36}$/i.test(supplied) ? supplied : randomUUID();
       if (device !== supplied) res.setHeader("set-cookie", `nation_device=${device}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${auth.kind === "loopback" ? "" : "; Secure"}`);
-      // Only trust this header when the operator has configured the reverse proxy to replace it.
-      const forwarded = process.env.NATION_TRUST_PROXY === "1" ? req.headers["x-real-ip"] : undefined;
-      const ip = (typeof forwarded === "string" && /^[0-9a-f:.]+$/i.test(forwarded) ? forwarded : req.socket.remoteAddress) ?? "";
-      const grant = ledger.grant(account, ip, device);
+      // The visitor, as the account gateway counts them (server/request-auth.ts clientAddress).
+      const grant = ledger.grant(account, clientAddressDetail(req).address, device);
       const balanceUsd = Math.max(0, ledger.balance(account.id) / USD_SCALE);
       // Treasuries are stored lowercase; show them checksummed, as a wallet shows the address.
       const chains = creditChains().map(({ rpc: _rpc, ...chain }) => ({ ...chain, treasury: getAddress(chain.treasury) }));

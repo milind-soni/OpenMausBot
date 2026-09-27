@@ -222,7 +222,9 @@ from each other, with the live check that must pass before public invites open.
 The [signup landing record](paid-acquisition-2026-09-27.md) covers the product introduction
 before sign-in and opt-in registration measurement. The [ad visitor journey record](ad-visitor-journey-2026-09-27.md)
 follows a phone visitor from an ad through signup, a first reply and Top up on the production
-build, with the API failing and a deploy landing mid-visit.
+build, with the API failing and a deploy landing mid-visit. The [visitor address record](visitor-address-2026-09-27.md)
+shows why accounts from ads opened with $0.00 credit, and how sign-in and starter credit count
+each visitor behind the web app instead of Vercel.
 
 Keep the JSON from `wait` and `messages`, the exact command sequence, and the
 fixture's printed log path. Evidence must show both the action and the resulting

@@ -91,6 +91,13 @@ describe("sign-in links", () => {
     for (let i = 0; i < 5; i++) expect(accounts.requestMagicLink(`crowd${i}@example.test`, `198.51.100.${i}`).ok).toBe(true);
     expect(accounts.requestMagicLink("crowd9@example.test", "198.51.100.9").ok).toBe(false);
   });
+
+  it("lets the operator set the per-network limit for a front end whose visitors look alike", () => {
+    const { accounts } = store({ env: { NATION_MAGIC_LINKS_PER_NETWORK_PER_HOUR: "25" } });
+    for (let i = 0; i < 25; i++) expect(accounts.requestMagicLink(`user${i}@example.test`, "76.76.21.9").ok).toBe(true);
+    expect(accounts.requestMagicLink("late@example.test", "76.76.21.9").ok).toBe(false);
+    expect(store({ env: { NATION_MAGIC_LINKS_PER_NETWORK_PER_HOUR: "0" } }).accounts.requestMagicLink("a@example.test", "x").ok).toBe(true);
+  });
 });
 
 describe("accounts and workspaces", () => {

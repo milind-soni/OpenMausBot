@@ -190,13 +190,52 @@ function originPattern(entry: string): RegExp | null {
  * an interface) is the source itself, and its forwarded header is ignored. */
 export function requestSource(req: IncomingMessage): string {
   const peer = req.socket?.remoteAddress || "unknown";
-  // An IPC listener's only peer is the tunnel gateway on this machine.
-  const viaLocalProxy = ipcPeer(req) || peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
   // The LAST hop is the one the adjacent (trusted, same-machine) proxy wrote;
   // earlier hops are whatever the client or an outer proxy put there.
-  const hops = viaLocalProxy ? (headerValue(req.headers["x-forwarded-for"]) ?? "").split(",").map((h) => h.trim()).filter(Boolean) : [];
+  const hops = viaLocalProxy(req) ? (headerValue(req.headers["x-forwarded-for"]) ?? "").split(",").map((h) => h.trim()).filter(Boolean) : [];
   const forwarded = hops.length ? hops[hops.length - 1] : undefined;
   return sanitizeSource(forwarded || peer);
+}
+
+function viaLocalProxy(req: IncomingMessage): boolean {
+  const peer = req.socket?.remoteAddress;
+  // An IPC listener's only peer is the tunnel gateway on this machine.
+  return ipcPeer(req) || peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
+}
+
+/** A visitor's address and what named it: "x-real-ip", the header in
+ * NATION_CLIENT_IP_HEADER, or "proxy" for requestSource. */
+export interface ClientAddress { address: string; from: string }
+
+/** Whom per-network limits count (sign-in links, the sign-in lockout,
+ * starter credit). NATION_TRUST_PROXY=1: X-Real-IP, which the server in front
+ * writes (a workspace behind the account gateway). NATION_CLIENT_IP_HEADER:
+ * the header in which a web front end such as the NATION web app on Vercel
+ * names the visitor, read only from a request that came through the proxy on
+ * this machine; without it, every browser behind that front end counts as
+ * the front end's few addresses. Anyone who reaches the server directly can
+ * write that header too, so what it feeds keeps limits of its own that no
+ * header changes (one starter credit per mailbox and a daily total). */
+export function clientAddressDetail(req: IncomingMessage, env: NodeJS.ProcessEnv = process.env): ClientAddress {
+  const realIp = env.NATION_TRUST_PROXY === "1" ? plainAddress(headerValue(req.headers["x-real-ip"])) : null;
+  if (realIp) return { address: realIp, from: "x-real-ip" };
+  const header = env.NATION_CLIENT_IP_HEADER?.trim().toLowerCase();
+  if (header && /^[a-z0-9-]{1,64}$/.test(header) && viaLocalProxy(req)) {
+    // The first entry is the visitor; later ones are proxies that passed it on.
+    const visitor = plainAddress(headerValue(req.headers[header])?.split(",")[0]);
+    if (visitor) return { address: visitor, from: header };
+  }
+  return { address: requestSource(req), from: "proxy" };
+}
+
+export function clientAddress(req: IncomingMessage, env: NodeJS.ProcessEnv = process.env): string {
+  return clientAddressDetail(req, env).address;
+}
+
+/** An IP address as a header carries it, or null; IPv4-mapped IPv6 as IPv4. */
+function plainAddress(value: string | undefined): string | null {
+  const text = value?.trim().replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, "") ?? "";
+  return text && isIP(text) ? text : null;
 }
 
 /** Only what an address can contain, bounded, so a hostile header cannot

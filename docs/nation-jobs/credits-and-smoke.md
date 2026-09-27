@@ -139,7 +139,12 @@ zero. Normal settled usage is never edited by that operation.
 An email must come from the existing verified sign-in session. A paired device
 alone is not a verified account. Wallet verification uses a five-minute,
 single-use, session-bound signed nonce; it authorizes no payment. Starter grants
-are unique by account, limited by IP per UTC day, and unique per device cookie.
+are unique by account and by inbox (a +tag, and dots in a Gmail name, reach the
+same inbox), limited by IP per UTC day and in all per UTC day, and unique per
+device cookie. Behind the web app on Vercel the IP is the visitor's only when
+`NATION_CLIENT_IP_HEADER` names Vercel's visitor header; otherwise every visitor
+counts as Vercel's few addresses. Anyone who reaches the server directly can
+write that header, which the inbox and daily limits bound.
 IP and device values are hashed in storage. Known disposable email domains and
 operator additions are blocked. The bundled disposable-domain list is finite;
 maintain the additional list as abuse patterns change. Clearing cookies can
@@ -168,6 +173,8 @@ ERC-20 transfer, and transaction-hash fallback. Wallet network gas is separate.
 | NATION_LOW_BALANCE_USD | 0.50 |
 | NATION_PACKS_USD | 15,49,99 |
 | NATION_FREE_GRANTS_PER_IP_PER_DAY | 2 |
+| NATION_FREE_GRANTS_PER_DAY | 1000 |
+| NATION_CLIENT_IP_HEADER | unset; x-vercel-forwarded-for behind the web app on Vercel |
 | NATION_CONFIRMATIONS | 3 |
 | NATION_TREASURY_ROBINHOOD | unset; top-up hidden (NATION_TREASURY_BASE is ignored) |
 | NATION_TOKEN_USD_PRICE | unset; $NATION not offered |

@@ -14,7 +14,7 @@ const digest = (value: string) => createHash("sha256").update(value).digest("hex
 
 export interface CreditTier { id: string; name: string; usd: number; creditUsd: number; popular: boolean }
 /** nationDiscount: share of the pack price a $NATION payment skips (0.2 = send 20% less; the credit is unchanged). */
-export interface CreditSettings { freeUsd: number; markup: number; lowUsd: number; packs: number[]; grantsPerIp: number; confirmations: number; tiers: CreditTier[]; nationDiscount: number }
+export interface CreditSettings { freeUsd: number; markup: number; lowUsd: number; packs: number[]; grantsPerIp: number; grantsPerDay: number; confirmations: number; tiers: CreditTier[]; nationDiscount: number }
 
 const DEFAULT_TIERS: CreditTier[] = [
   { id: "starter", name: "Starter", usd: 15, creditUsd: 15, popular: false },
@@ -31,8 +31,10 @@ export function creditSettings(env: NodeJS.ProcessEnv = process.env): CreditSett
   const packs = (env.NATION_PACKS_USD ?? "15,49,99").split(",").map(value => Number(value.trim()));
   if (!packs.length || packs.length > 20 || packs.some(value => !Number.isFinite(value) || value <= 0 || value > 1_000_000 || !Number.isInteger(value * 100))) throw creditError("Invalid NATION_PACKS_USD");
   const grantsPerIp = number("NATION_FREE_GRANTS_PER_IP_PER_DAY", 2, 1, 1000);
+  // Starter credits in all per UTC day: a ceiling no request header can move.
+  const grantsPerDay = number("NATION_FREE_GRANTS_PER_DAY", 1000, 1, 1_000_000);
   const confirmations = number("NATION_CONFIRMATIONS", 3, 1, 10000);
-  if (!Number.isInteger(grantsPerIp) || !Number.isInteger(confirmations)) throw creditError("Grant and confirmation limits must be whole numbers");
+  if (!Number.isInteger(grantsPerIp) || !Number.isInteger(grantsPerDay) || !Number.isInteger(confirmations)) throw creditError("Grant and confirmation limits must be whole numbers");
   const defaultByUsd = new Map(DEFAULT_TIERS.map(t => [t.usd, t]));
   const tiers: CreditTier[] = [...new Set(packs)].map((usd, i) => {
     const def = defaultByUsd.get(usd);
@@ -41,7 +43,17 @@ export function creditSettings(env: NodeJS.ProcessEnv = process.env): CreditSett
   // An empty NATION_TOKEN_DISCOUNT= line means the default, not "no discount"; set 0 to turn it off.
   const nationDiscount = env.NATION_TOKEN_DISCOUNT?.trim() ? number("NATION_TOKEN_DISCOUNT", 0.2, 0, 0.9) : 0.2;
   return { freeUsd: number("NATION_FREE_CREDIT_USD", 3, 2, 5), markup: number("NATION_CREDIT_MARKUP", 1, 0.01, 100),
-    lowUsd: number("NATION_LOW_BALANCE_USD", 0.5, 0, 1000), packs: [...new Set(packs)], grantsPerIp, confirmations, tiers, nationDiscount };
+    lowUsd: number("NATION_LOW_BALANCE_USD", 0.5, 0, 1000), packs: [...new Set(packs)], grantsPerIp, grantsPerDay, confirmations, tiers, nationDiscount };
+}
+/** The inbox an address delivers to: a +tag, and dots in a Gmail name, reach
+ * the same one, so they share its one starter credit. */
+export function mailboxOf(email: string): string {
+  const at = email.lastIndexOf("@");
+  let local = email.slice(0, at).trim().toLowerCase(), domain = email.slice(at + 1).trim().toLowerCase();
+  local = local.split("+")[0] || local;
+  if (domain === "googlemail.com") domain = "gmail.com";
+  if (domain === "gmail.com") local = local.replace(/\./g, "") || local;
+  return `${local}@${domain}`;
 }
 export interface CreditAccount { id: string; verified: boolean; email?: string; exempt?: boolean }
 /** token_amount: expected ERC-20 transfer uint256 value as decimal string; empty string means use amount_micros (legacy USDC invoices).
@@ -117,6 +129,8 @@ export class CreditLedger {
       CREATE INDEX IF NOT EXISTS credit_ledger_user ON credit_ledger(user_id, created_at);
       CREATE TABLE IF NOT EXISTS credit_grants(user_id TEXT PRIMARY KEY REFERENCES credit_accounts(id), ip_hash TEXT NOT NULL, device_hash TEXT NOT NULL UNIQUE, day TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS credit_grants_ip_day ON credit_grants(ip_hash, day);
+      CREATE INDEX IF NOT EXISTS credit_grants_day ON credit_grants(day);
+      CREATE TABLE IF NOT EXISTS credit_grant_mailboxes(mailbox_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS credit_invoices(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES credit_accounts(id), chain INTEGER NOT NULL, treasury TEXT NOT NULL, token TEXT NOT NULL, pack_micros INTEGER NOT NULL, amount_micros INTEGER NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, paid_tx TEXT UNIQUE, from_block TEXT NOT NULL, token_amount TEXT NOT NULL DEFAULT '', discount_bps INTEGER NOT NULL DEFAULT 0, UNIQUE(chain,amount_micros));
       CREATE TABLE IF NOT EXISTS credit_wallets(session_id TEXT PRIMARY KEY, address TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS credit_challenges(id TEXT PRIMARY KEY, session_id TEXT NOT NULL, address TEXT NOT NULL, message TEXT NOT NULL, expires_at INTEGER NOT NULL);
@@ -162,10 +176,15 @@ export class CreditLedger {
     if (!ip || !device || device.length > 256) return { granted: false, reason: "A verified device is required for starter credit." };
     return this.transaction(() => {
       if (this.db.prepare("SELECT 1 FROM credit_grants WHERE user_id=?").get(account.id)) return { granted: false, reason: "Starter credit already received" };
+      const mailboxHash = account.email ? digest(`mailbox:${mailboxOf(account.email)}`) : null;
+      if (mailboxHash && this.db.prepare("SELECT 1 FROM credit_grant_mailboxes WHERE mailbox_hash=?").get(mailboxHash)) return { granted: false, reason: "This email address already received starter credit." };
       const day = new Date(now).toISOString().slice(0, 10), ipHash = digest(ip), deviceHash = digest(device);
+      const today = Number(this.db.prepare("SELECT COUNT(*) AS count FROM credit_grants WHERE day=?").get(day)?.count ?? 0);
+      if (today >= this.settings.grantsPerDay) return { granted: false, reason: "Today's starter credit has all been given out. Try again tomorrow." };
       const count = Number(this.db.prepare("SELECT COUNT(*) AS count FROM credit_grants WHERE ip_hash=? AND day=?").get(ipHash, day)?.count ?? 0);
       if (count >= this.settings.grantsPerIp || this.db.prepare("SELECT 1 FROM credit_grants WHERE device_hash=?").get(deviceHash)) return { granted: false, reason: "Starter credit is unavailable for this device or network." };
       this.db.prepare("INSERT INTO credit_grants VALUES(?,?,?,?)").run(account.id, ipHash, deviceHash, day);
+      if (mailboxHash) this.db.prepare("INSERT INTO credit_grant_mailboxes VALUES(?,?)").run(mailboxHash, account.id);
       this.row(account.id, "free", micros(this.settings.freeUsd), "Starter credit", { reference: `free:${account.id}`, now });
       return { granted: true, reason: "Starter credit ready" };
     });
