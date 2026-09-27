@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { reasonWorthShowing, takeInvitedEmailFromLocation } from "./session";
+import { reasonWorthShowing, takeInvitedEmailFromLocation, verifyMagicLink } from "./session";
+
+it("preserves the server's new-workspace signal without trusting truthy strings", async () => {
+  for (const [created, expected] of [[true, { ok: true, created: true }], [false, { ok: true, created: false }], ["true", { ok: true }], [undefined, { ok: true }]] as const) {
+    const fakeFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true, created }), { status: 200 }));
+    expect(await verifyMagicLink({ token: "fixture", label: "test" }, fakeFetch)).toEqual(expected);
+  }
+});
 
 describe("what the pair page says about why it was shown", () => {
   it("stays quiet for the ordinary no-session case and repeats anything else", () => {

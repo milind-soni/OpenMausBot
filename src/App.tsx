@@ -1,4 +1,5 @@
 import { NationCredits, NationCreditsProvider, isFullPlansPath } from "@/components/NationCredits";
+import "katex/dist/katex.min.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Menu } from "lucide-react";
 import { StoreProvider, apiUrl, useStore } from "@/state/store";

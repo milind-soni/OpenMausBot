@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Archive, Coins, FlaskConical, Monitor, Palette, Search, User, Users, X, Building2 } from "lucide-react";
 import { api, apiUrl, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
+import { AdMeasurementPreference } from "./AdMeasurementPreference";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
@@ -642,6 +643,7 @@ export function SettingsModal() {
                 <div>
                   {ownPreferences && <LanguageRow />}
                   <AnalyticsRow />
+                  <AdMeasurementPreference />
                 </div>
                 {operator && (
                   <>

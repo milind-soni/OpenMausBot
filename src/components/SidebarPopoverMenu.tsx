@@ -47,12 +47,15 @@ export function SidebarPopoverMenu({
   ariaLabel,
   openOnHover = false,
   renderTrigger,
+  footer,
 }: {
   /** `data-tour` id for the trigger button */
   tourId?: string;
   items: SidebarMenuItem[];
   ariaLabel: string;
   openOnHover?: boolean;
+  /** In-place feedback for actions that keep the menu open. */
+  footer?: React.ReactNode;
   renderTrigger: (state: {
     open: boolean;
     attention: boolean;
@@ -193,6 +196,7 @@ export function SidebarPopoverMenu({
               </button>
             </div>
           ))}
+          {footer}
         </div>
       )}
     </div>

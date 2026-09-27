@@ -6,6 +6,7 @@
 // of private conversations to a third party. Email submissions call
 // identify(), so PostHog's Persons tab doubles as the collected-email list.
 import posthog from "posthog-js";
+import { setAdMeasurementAllowed } from "./ad-measurement";
 
 const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
 
@@ -46,6 +47,7 @@ export function optAction(enabled: boolean, running: boolean): OptAction {
 
 /** Flip the setting and act on it immediately, in both directions. */
 export function setAnalyticsEnabled(enabled: boolean) {
+  if (!enabled) setAdMeasurementAllowed(false);
   choice = enabled; // before persisting: the decision must not depend on it
   try {
     localStorage.setItem(OPT_OUT_KEY, enabled ? "0" : "1");

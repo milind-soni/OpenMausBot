@@ -16,6 +16,7 @@ import {
   HelpCircle,
   Keyboard,
   Loader2,
+  LogOut,
   RefreshCw,
   Settings as SettingsIcon,
   CreditCard,
@@ -33,6 +34,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
 import { useNationCredits } from "@/lib/nation-credits-ctx";
+import { useAccountSession } from "@/lib/use-account-session";
 
 /** "Milind Soni" Ã¢â€ â€™ "MS", "milind" Ã¢â€ â€™ "M", "you@x.dev" Ã¢â€ â€™ "Y", unset Ã¢â€ â€™ "?" */
 export function profileInitials(profile?: { name?: string; email?: string }): string {
@@ -193,6 +195,7 @@ export function SidebarProfileMenu() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const triggerRef = useRef<HTMLSpanElement>(null);
   const credits = useNationCredits();
+  const account = useAccountSession();
 
   const profile = state.config?.profile;
   const name = profileLabel(profile);
@@ -250,6 +253,15 @@ export function SidebarProfileMenu() {
       icon: <TelegramIcon size={17} />,
       onSelect: () => void openExternalLink(FEEDBACK_URL),
     },
+    ...(account.session?.kind === "session" ? [{
+      key: "sign-out",
+      label: account.busy ? t("settings.account.signingOut") : t("settings.account.signOut"),
+      icon: account.busy ? <Loader2 size={18} className="animate-spin" /> : <LogOut size={18} />,
+      separatorBefore: true,
+      disabled: account.busy,
+      keepOpen: true,
+      onSelect: () => void account.onSignOut(),
+    } satisfies SidebarMenuItem] : []),
   ];
 
   return (
@@ -257,6 +269,11 @@ export function SidebarProfileMenu() {
       <SidebarPopoverMenu
         items={items}
         ariaLabel={name}
+        footer={account.failed ? (
+          <p role="alert" className="px-3.5 py-2 text-[13px] text-danger">
+            {t("settings.account.signOutError")}
+          </p>
+        ) : null}
         renderTrigger={({ open }) => (
           <span
             ref={triggerRef}
