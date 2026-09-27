@@ -180,6 +180,10 @@ confirmation, manual codes, retries and saved-server identity validation.
 The [Android transcript checks](android-transcript.md) cover completed-turn
 folds, Hidden reasoning, and compact webhook messages through real Compose UI.
 
+The [Android Live call checks](android-live-calls.md) cover the `/api/live/*`
+client, the `live.call` frame, the call manager's state machine, the call bar,
+and an emulator smoke against the fixture and the fake GPT-Live.
+
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.
 
