@@ -4,7 +4,7 @@
 // and status on one line, a crown after a Chief of Staff's name, and a
 // thread list only under a bot that has more than one thread — opened from
 // its "› N" control and lined up with the bot's name. What each row shows
-// is decided in CompanionCore's `RosterBotRow`; this file is layout.
+// is decided in CompanionCore's `CompactBotRow`; this file is layout.
 import SwiftUI
 import CompanionCore
 
@@ -62,9 +62,7 @@ struct CompactBotEntry: View {
         let _ = snoozeTick
         let live = session.state.bot(bot.id) ?? bot
         let queued = session.state.queuedThreadIds
-        let row = RosterBotRow(
-            bot: live, density: .compact, hasPendingCard: hasPendingCard, queuedThreadIds: queued
-        )
+        let row = CompactBotRow(bot: live, hasPendingCard: hasPendingCard, queuedThreadIds: queued)
         VStack(alignment: .leading, spacing: 0) {
             rowLine(live, row)
             if row.listsThreads(expanded: expanded, searching: searching) {
@@ -76,7 +74,7 @@ struct CompactBotEntry: View {
 
     // MARK: - The bot's line
 
-    private func rowLine(_ bot: Bot, _ row: RosterBotRow) -> some View {
+    private func rowLine(_ bot: Bot, _ row: CompactBotRow) -> some View {
         HStack(spacing: 0) {
             Button(action: openRow) {
                 HStack(spacing: 0) {
@@ -150,7 +148,7 @@ struct CompactBotEntry: View {
     /// little is left for a word of it the role steps aside rather than
     /// showing a sliver. At the accessibility text sizes the name wraps
     /// rather than clips.
-    private func nameAndRole(_ bot: Bot, _ row: RosterBotRow) -> some View {
+    private func nameAndRole(_ bot: Bot, _ row: CompactBotRow) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 6) {
                 // Laid out first, so the role takes only what the name
@@ -171,7 +169,7 @@ struct CompactBotEntry: View {
         }
     }
 
-    private func name(_ bot: Bot, _ row: RosterBotRow) -> some View {
+    private func name(_ bot: Bot, _ row: CompactBotRow) -> some View {
         HStack(spacing: 6) {
             Text(verbatim: bot.name)
                 .font(.body.weight(.semibold))
@@ -213,7 +211,7 @@ struct CompactBotEntry: View {
 
     // MARK: - The threads beneath it
 
-    private func threadList(_ bot: Bot, row: RosterBotRow, queued: Set<String>) -> some View {
+    private func threadList(_ bot: Bot, row: CompactBotRow, queued: Set<String>) -> some View {
         // A name match lists everything; otherwise only what matched.
         let groups = bot.threadGroups(
             matching: bot.name.localizedCaseInsensitiveContains(query) ? "" : query,

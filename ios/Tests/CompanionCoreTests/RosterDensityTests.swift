@@ -1,9 +1,9 @@
-// What a home-list row shows at each density, without a screen.
+// The list density setting, and what a compact home-list row shows,
+// without a screen.
 //
 // Compact is one line per bot: no preview, a "› N" control only where there
-// is a list to open, and status as small marks. Comfortable is the original
-// two-line row with its "Threads" disclosure beneath every bot. Both read
-// the same facts, so switching density never changes what a bot is doing.
+// is a list to open, and status as small marks. Comfortable rows keep their
+// original logic in the app target; the UI tests cover them.
 import XCTest
 @testable import CompanionCore
 
@@ -22,8 +22,8 @@ final class RosterDensityTests: XCTestCase {
         XCTAssertEqual(RosterDensity.allCases, [.comfortable, .compact])
     }
 
-    /// The desktop also stores "icons"; a phone has no avatars-only mode, and
-    /// a value it cannot read must land on the default, not on comfortable.
+    /// A value this build cannot read — a density a later version adds, or a
+    /// damaged store — lands on the default, not on comfortable.
     func testUnreadableStoredValuesFallBackToCompact() {
         XCTAssertEqual(RosterDensity(stored: "icons"), .compact)
         XCTAssertEqual(RosterDensity(stored: ""), .compact)
@@ -113,14 +113,8 @@ final class RosterDensityTests: XCTestCase {
 
     // MARK: - Compact row
 
-    func testCompactRowIsOneLineWithoutAPreview() {
-        let row = RosterBotRow(bot: bot(tasks: [task("a")]), density: .compact, hasPendingCard: false)
-        XCTAssertFalse(row.showsPreview)
-        XCTAssertFalse(row.showsThreadsRow)
-    }
-
     func testSingleThreadBotHasNoThreadControl() {
-        let row = RosterBotRow(bot: bot(tasks: [task("a")]), density: .compact, hasPendingCard: false)
+        let row = CompactBotRow(bot: bot(tasks: [task("a")]), hasPendingCard: false)
         XCTAssertEqual(row.threadCount, 1)
         XCTAssertFalse(row.showsThreadControl)
         XCTAssertFalse(row.listsThreads(expanded: true, searching: false))
@@ -128,7 +122,7 @@ final class RosterDensityTests: XCTestCase {
     }
 
     func testMultiThreadBotOpensItsListWithNewThreadAtTheEnd() {
-        let row = RosterBotRow(bot: bot(tasks: [task("a"), task("b")]), density: .compact, hasPendingCard: false)
+        let row = CompactBotRow(bot: bot(tasks: [task("a"), task("b")]), hasPendingCard: false)
         XCTAssertTrue(row.showsThreadControl)
         XCTAssertEqual(row.threadCount, 2)
         XCTAssertFalse(row.listsThreads(expanded: false, searching: false))
@@ -140,11 +134,11 @@ final class RosterDensityTests: XCTestCase {
     /// Search lists what matched under every bot, as the desktop does;
     /// results are not a place to create a thread.
     func testSearchListsMatchesWithoutNewThread() {
-        let single = RosterBotRow(bot: bot(tasks: [task("a")]), density: .compact, hasPendingCard: false)
+        let single = CompactBotRow(bot: bot(tasks: [task("a")]), hasPendingCard: false)
         XCTAssertTrue(single.listsThreads(expanded: false, searching: true))
         XCTAssertFalse(single.endsWithNewThread(expanded: false, searching: true))
 
-        let multi = RosterBotRow(bot: bot(tasks: [task("a"), task("b")]), density: .compact, hasPendingCard: false)
+        let multi = CompactBotRow(bot: bot(tasks: [task("a"), task("b")]), hasPendingCard: false)
         XCTAssertTrue(multi.listsThreads(expanded: true, searching: true))
         XCTAssertFalse(multi.endsWithNewThread(expanded: true, searching: true))
     }
@@ -152,7 +146,7 @@ final class RosterDensityTests: XCTestCase {
     func testCompactWorkingRowSwapsTheTimeForASpinner() {
         var working = bot(tasks: [task("a")])
         working.busy = true
-        let row = RosterBotRow(bot: working, density: .compact, hasPendingCard: false)
+        let row = CompactBotRow(bot: working, hasPendingCard: false)
         XCTAssertTrue(row.showsSpinner)
         XCTAssertFalse(row.showsTime)
     }
@@ -162,41 +156,26 @@ final class RosterDensityTests: XCTestCase {
         waiting.activity = "waiting-on-you"
         var bot = bot(tasks: [waiting])
         bot.busy = true
-        let row = RosterBotRow(bot: bot, density: .compact, hasPendingCard: false)
+        let row = CompactBotRow(bot: bot, hasPendingCard: false)
         XCTAssertTrue(row.showsWaiting)
         XCTAssertFalse(row.showsSpinner)
         XCTAssertTrue(row.showsTime)
     }
 
-    func testChiefOfStaffIsMarkedInCompactOnly() {
+    func testOnlyTheChiefOfStaffWearsTheCrown() {
         var chief = bot(tasks: [task("a")])
         chief.chiefOfStaff = true
-        XCTAssertTrue(RosterBotRow(bot: chief, density: .compact, hasPendingCard: false).showsChiefBadge)
-        XCTAssertFalse(RosterBotRow(bot: chief, density: .comfortable, hasPendingCard: false).showsChiefBadge)
-        XCTAssertFalse(RosterBotRow(bot: bot(tasks: [task("a")]), density: .compact, hasPendingCard: false).showsChiefBadge)
+        XCTAssertTrue(CompactBotRow(bot: chief, hasPendingCard: false).showsChiefBadge)
+        XCTAssertFalse(CompactBotRow(bot: bot(tasks: [task("a")]), hasPendingCard: false).showsChiefBadge)
     }
 
     /// The dot stays as it was: hidden while the bot works.
     func testUnreadDotHidesWhileWorking() {
         var unread = bot(tasks: [task("a")])
         unread.unread = true
-        XCTAssertTrue(RosterBotRow(bot: unread, density: .compact, hasPendingCard: false).showsUnreadDot)
+        XCTAssertTrue(CompactBotRow(bot: unread, hasPendingCard: false).showsUnreadDot)
         unread.busy = true
-        XCTAssertFalse(RosterBotRow(bot: unread, density: .compact, hasPendingCard: false).showsUnreadDot)
-    }
-
-    // MARK: - Comfortable row keeps what shipped
-
-    func testComfortableKeepsPreviewTimeAndThreadsRow() {
-        var working = bot(tasks: [task("a")])
-        working.busy = true
-        let row = RosterBotRow(bot: working, density: .comfortable, hasPendingCard: false)
-        XCTAssertTrue(row.showsPreview)
-        XCTAssertTrue(row.showsThreadsRow)
-        XCTAssertTrue(row.showsTime)
-        XCTAssertTrue(row.showsSpinner)
-        XCTAssertFalse(row.showsThreadControl)
-        XCTAssertFalse(row.endsWithNewThread(expanded: true, searching: false))
+        XCTAssertFalse(CompactBotRow(bot: unread, hasPendingCard: false).showsUnreadDot)
     }
 
     // MARK: - The preview fixture the UI tests and screenshots use

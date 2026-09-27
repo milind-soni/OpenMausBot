@@ -1,13 +1,15 @@
 // How much each row on the home list says.
 //
-// The phone follows the desktop sidebar's density setting
-// (`src/lib/sidebar-preferences.ts`) without its avatars-only mode, which a
-// phone has no room to need. Comfortable is the original two-line row with a
-// "Threads" disclosure beneath every bot; compact is one line per bot, status
-// as small marks, and a thread list only where there is one to open.
+// Like the desktop sidebar's density setting
+// (`src/lib/sidebar-preferences.ts`), without its avatars-only mode, which a
+// phone has no room to need, and stored per device. Unlike the desktop, a
+// new install starts compact. Comfortable is the original two-line row with
+// a "Threads" disclosure beneath every bot; compact is one line per bot,
+// status as small marks, and a thread list only where there is one to open.
 //
-// The decisions live here, away from SwiftUI, so both densities read the
-// same facts and the rules can be tested without a screen.
+// Compact's row decisions live here, away from SwiftUI, so they can be tested
+// without a screen. Comfortable rows keep their original logic in the app's
+// `ChatRow` and `BotThreadTree`.
 import Foundation
 
 public enum RosterDensity: String, CaseIterable, Codable, Sendable {
@@ -17,8 +19,9 @@ public enum RosterDensity: String, CaseIterable, Codable, Sendable {
     /// What a new install shows.
     public static let `default`: RosterDensity = .compact
 
-    /// A stored choice, read defensively: anything unreadable — including
-    /// the desktop's "icons" — lands on the default rather than a surprise.
+    /// A stored choice, read defensively: anything this build cannot read —
+    /// a density a later version adds, or a damaged store — lands on the
+    /// default rather than a surprise.
     public init(stored: String?) {
         self = stored.flatMap(RosterDensity.init(rawValue:)) ?? .default
     }
@@ -78,66 +81,46 @@ extension Bot {
     }
 }
 
-/// Everything one bot's row decides, as data.
-public struct RosterBotRow: Equatable, Sendable {
-    public let density: RosterDensity
+/// What one bot's line in the compact list shows, as data.
+public struct CompactBotRow: Equatable, Sendable {
     public let status: RosterRowStatus
-    /// Threads behind the compact "› N" control.
+    /// Threads behind the "› N" control.
     public let threadCount: Int
-    public let isChief: Bool
-    public let unread: Bool
+    /// The Chief of Staff crown after the name.
+    public let showsChiefBadge: Bool
+    let unread: Bool
 
-    public init(
-        bot: Bot,
-        density: RosterDensity,
-        hasPendingCard: Bool,
-        queuedThreadIds: Set<String> = []
-    ) {
-        self.density = density
+    public init(bot: Bot, hasPendingCard: Bool, queuedThreadIds: Set<String> = []) {
         status = bot.rosterStatus(hasPendingCard: hasPendingCard)
         threadCount = bot.rosterThreadCount(queuedThreadIds: queuedThreadIds)
-        isChief = bot.chiefOfStaff == true
+        showsChiefBadge = bot.chiefOfStaff == true
         unread = bot.unread
     }
 
-    /// Compact is one line: no last-message preview.
-    public var showsPreview: Bool { density == .comfortable }
+    /// Only a bot with a list to open gets "› N". One thread is the bot
+    /// itself: tapping the row already opens it.
+    public var showsThreadControl: Bool { threadCount >= 2 }
 
-    /// Comfortable keeps its "Threads N" disclosure beneath every bot.
-    public var showsThreadsRow: Bool { density == .comfortable }
-
-    /// Compact gives the "› N" control only to a bot with a list to open.
-    /// One thread is the bot itself: tapping the row already opens it.
-    public var showsThreadControl: Bool { density == .compact && threadCount >= 2 }
-
-    /// The Chief of Staff crown after the name. Comfortable keeps the look
-    /// it shipped with.
-    public var showsChiefBadge: Bool { density == .compact && isChief }
-
-    /// Compact rows put the spinner where the time was.
-    public var showsTime: Bool { !(density == .compact && status == .working) }
+    /// The spinner stands where the time was.
+    public var showsTime: Bool { status != .working }
 
     public var showsSpinner: Bool { status == .working }
 
     public var showsWaiting: Bool { status == .waitingOnYou }
 
-    /// As it always was: the dot steps aside while the bot works.
+    /// The dot steps aside while the bot works.
     public var showsUnreadDot: Bool { unread && status != .working }
 
     /// Whether the bot's threads are listed beneath its row. A search lists
-    /// what matched under every bot, as the desktop does; otherwise compact
-    /// lists only a bot the person opened with its "› N" control.
+    /// what matched under every bot, as the desktop does; otherwise only a
+    /// bot the person opened with its "› N" control.
     public func listsThreads(expanded: Bool, searching: Bool) -> Bool {
-        switch density {
-        case .comfortable: searching || expanded
-        case .compact: searching || (expanded && showsThreadControl)
-        }
+        searching || (expanded && showsThreadControl)
     }
 
-    /// A compact list the person opened ends with "+ New thread". Search
-    /// results are not a place to create one, and comfortable keeps its "+"
-    /// on the "Threads" row.
+    /// A list the person opened ends with "+ New thread". Search results
+    /// are not a place to create one.
     public func endsWithNewThread(expanded: Bool, searching: Bool) -> Bool {
-        density == .compact && !searching && expanded && showsThreadControl
+        !searching && expanded && showsThreadControl
     }
 }
