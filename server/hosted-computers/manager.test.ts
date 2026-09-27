@@ -3,11 +3,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { HostedComputerManager } from "./manager.ts";
-import { createComputerProvider } from "./providers.ts";
+import { createComputerProvider, orgoProvider } from "./providers.ts";
 import { hostedComputersStatus } from "../../shared/hosted-computers.ts";
 import { startFakeHostedComputers, hostedFixtureConfig, HOSTED_PNG } from "../testing/fake-hosted-computers.ts";
 
 afterEach(() => vi.unstubAllEnvs());
+
+it("Orgo verifies workspace ownership across POST and GET response formats", async () => {
+  let row: Record<string, unknown> = { id: "computer-one", name: "owned", status: "running", project_id: "workspace-fixture" };
+  const provider = orgoProvider(hostedFixtureConfig.orgo!, vi.fn(async () => new Response(JSON.stringify(row))) as typeof fetch);
+  expect(await provider.get("computer-one", "owned")).toMatchObject({ id: "computer-one" });
+  row = { ...row, workspace_id: "another-workspace" };
+  await expect(provider.get("computer-one", "owned")).rejects.toMatchObject({ status: 409 });
+  delete row.workspace_id; delete row.project_id;
+  await expect(provider.get("computer-one", "owned")).rejects.toMatchObject({ status: 409 });
+});
 
 it.each(["orgo", "daytona"] as const)("%s: scoped machines survive sleep and server restart using the real adapter", async provider => {
   const fixture = await startFakeHostedComputers();

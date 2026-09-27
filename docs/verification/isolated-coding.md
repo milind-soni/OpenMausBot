@@ -1,11 +1,11 @@
 # Isolated member coding
 
 NATION's API agent can call `computer_code_start` and `computer_code_status`
-when its assigned computer is Daytona and coding is explicitly enabled.
+when its assigned computer is Orgo or Daytona and coding is explicitly enabled.
 Codex runs inside that computer, using a persistent named project at
 `~/.nation-coding/<project>`. Each account keeps the existing private workspace
 and provider machine ownership boundary. Native engines on the shared NATION
-host remain unavailable to members. Orgo keeps its existing computer tools.
+host remain unavailable to members. Both providers retain their computer tools.
 
 The server fixes the model, bills each inference to the conversation's credit
 sponsor, and gives the remote job only a short-lived capability. That capability
@@ -14,7 +14,8 @@ turn ends, is stopped, loses its computer lease, or the server restarts. The
 public proxy forwards only to an already-running workspace; it never creates
 a session. Main model and infrastructure credentials stay on the backend.
 
-Each job is limited to ten minutes and 32 sequential model requests, each with
+Each job is limited to four minutes on Orgo (within its five-minute command
+limit), or ten minutes on Daytona, and 32 sequential model requests, each with
 at most 8,192 output tokens. Missing model cost blocks further spending through
 the existing unconfirmed-call ledger. Results are buffered until cost is known.
 The remote supervisor checks its lease every two seconds (five-second network
@@ -30,6 +31,13 @@ shell network access follows that sandbox policy. Configure needed project
 dependencies in the snapshot or through the existing computer tools.
 
 ## Configure
+
+For Orgo, configure and test the workspace credentials in Admin. Coding installs
+Node 24.16.0 with an official checksum check and Codex 0.157.1 under `/opt` on
+the assigned computer. New computers request 4 GB RAM, 0.5 vCPU and 20 GB disk.
+The account needs a separate computer slot and resources for each provisioned
+member computer. Run the same sandbox preflight below on the actual computer.
+Continue with steps 3–4, selecting Cloud/Orgo instead of Daytona.
 
 1. Build `deploy/Daytona.coding.Dockerfile` with `deploy/` as its build
    context. It pins Codex CLI to 0.157.1 under `/opt/nation-codex` and sets
@@ -59,8 +67,9 @@ dependencies in the snapshot or through the existing computer tools.
    Keep `NATION_MEMBER_HOST_ENGINES` disabled.
 
 Do not set `NATION_TEST_CODING` in production; it permits loopback HTTP only
-for disposable fixtures. No automatic install, live account changes, or
-production activation is performed by these tests.
+for disposable fixtures. The live Orgo acceptance installs its pinned runtime
+on disposable computers; the tests never activate production coding or alter
+production account data.
 
 ## Reproduce
 
@@ -92,26 +101,28 @@ runs this acceptance test on a clean Linux CI runner, including for drafts.
 
 ## Live acceptance
 
-The current [dated verification record](isolated-coding-2026-09-27.md) separates
-passing runtime checks from the remaining live acceptance. Keep the PR draft
+The current [Orgo verification record](isolated-coding-orgo-2026-09-27.md) records
+real provider and signed-in app acceptance. Keep the PR draft
 and production coding disabled until both real-model provider acceptance and
 the signed-in two-account staging workflow pass.
 
-`scripts/verify-isolated-coding-live.ts` exercises real Daytona, Codex, the HTTPS
+`scripts/verify-isolated-coding-live.ts` exercises real Orgo or Daytona, Codex, the HTTPS
 capability gateway, OpenRouter and an isolated local credit ledger. It creates
 two disposable computers and checks actual files/tests, independent billing,
 later-task persistence, cancellation and restart capability loss. This is a
 provider/service acceptance, not a browser or signed-in app acceptance.
 
 Run on an owned staging backend with Node >=24 and dependencies installed.
-Supply `DAYTONA_API_KEY` and `OPENROUTER_API_KEY` through the backend environment;
+Supply `DAYTONA_API_KEY` (Daytona) or `ORGO_API_KEY` and `ORGO_WORKSPACE_ID`
+(Orgo), plus `OPENROUTER_API_KEY`, through the backend environment;
 never copy them into the guest or command logs. Set:
 
 ```sh
 export NATION_CODING_ACCEPTANCE=1
+export NATION_ACCEPTANCE_PROVIDER=orgo # or daytona
 export NATION_CODING_MODEL=openai/gpt-5.4-mini
 export NATION_CODING_PUBLIC_ORIGIN=https://your-staging-gateway.example
-export NATION_ACCEPTANCE_SNAPSHOT=your-prepared-snapshot
+export NATION_ACCEPTANCE_SNAPSHOT=your-prepared-snapshot # Daytona only
 export NATION_ACCEPTANCE_PORT=18879
 node --experimental-strip-types scripts/verify-isolated-coding-live.ts
 ```
@@ -133,3 +144,11 @@ Do not point it at application data or another user's computer registry.
 After this passes, repeat through the signed-in staging app: two accounts,
 separate sponsor balances, real edits/tests, cancellation, and workspace restart.
 Verify persisted files and refused old capabilities before enabling members.
+
+`scripts/verify-isolated-coding-app-live.ts` drives the signed-in Orgo workflow
+with a fresh app home and two fixture accounts. It requires the same Orgo and
+model environment, plus `NATION_ACCEPTANCE_ROOT` pointing to a passing provider
+fixture. It reassigns only that fixture's two computers, avoiding extra paid
+slots, and writes transcripts and evidence to a new temporary directory. Use
+computers whose `app-acceptance` projects do not already exist; the test asserts
+that each project starts without the other account's owner file.

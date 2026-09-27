@@ -10,7 +10,7 @@ import { hostedFixtureConfig } from "./testing/fake-hosted-computers.ts";
 
 const account = (id: string) => ({ id, verified: true });
 const payload = (command: string) => JSON.parse(Buffer.from(command.match(/'([A-Za-z0-9+/=]+)'$/)![1], "base64").toString());
-async function fixture() {
+async function fixture(providerName: "orgo" | "daytona" = "daytona") {
   const root = mkdtempSync(join(process.env.NATION_TEST_CODEX_BIN ? dirname(process.cwd()) : tmpdir(), "nation-coding-test-"));
   const pending: Array<{ input: any; command: string; finish: (value: any) => void }> = [];
   const machines = new Map<string, any>();
@@ -45,9 +45,9 @@ async function fixture() {
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   env.NATION_CODING_PUBLIC_ORIGIN = `http://127.0.0.1:${(server.address() as any).port}`;
-  const owner = (key: string): CodingOwner => ({ key, provider: "daytona", threadId: key, generation: "one", account: account(key), current: () => true });
+  const owner = (key: string): CodingOwner => ({ key, provider: providerName, threadId: key, generation: "one", account: account(key), current: () => true });
   const alice = owner("alice"), bob = owner("bob");
-  await manager.start("daytona", "alice", true); await manager.start("daytona", "bob", true);
+  await manager.start(providerName, "alice", true); await manager.start(providerName, "bob", true);
   const start = async (who = alice) => { const task = coding.start(who, "project", "Fix the failing test."); await vi.waitFor(() => expect(pending.length).toBeGreaterThan(0)); return task; };
   const request = (input: any, body: unknown = { input: "hello", tools: [], stream: true }, token = input.token) => fetch(input.url + "/responses", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
   return { root, coding, manager, alice, bob, start, pending, upstream, charges, request, requestShapes, env,
@@ -55,10 +55,12 @@ async function fixture() {
     close: async () => { for (const p of pending) p.finish({ exitCode: 0, stdout: JSON.stringify({ status: "cancelled", text: "stopped" }), stderr: "" }); await new Promise(resolve => setTimeout(resolve, 10)); await new Promise<void>(resolve => server.close(() => resolve())); rmSync(root, { recursive: true, force: true }); } };
 }
 
-it("keeps jobs, scoped capabilities and model charges separate for two users", async () => {
-  const f = await fixture();
+it.each(["orgo", "daytona"] as const)("%s keeps jobs, scoped capabilities and model charges separate for two users", async providerName => {
+  const f = await fixture(providerName);
   try {
     const task = await f.start(); const a = f.pending[0].input;
+    expect(a.expires - Date.now()).toBeLessThanOrEqual(providerName === "orgo" ? 240_000 : 600_000);
+    expect(a.expires - Date.now()).toBeGreaterThan(providerName === "orgo" ? 230_000 : 590_000);
     expect(JSON.stringify(a)).not.toContain("SERVER_ONLY_KEY");
     expect(() => f.coding.status(f.bob, task.taskId)).toThrow();
     expect((await f.request(a, {}, "f".repeat(64))).status).toBe(403);
@@ -67,10 +69,10 @@ it("keeps jobs, scoped capabilities and model charges separate for two users", a
     expect(JSON.parse(f.upstream.mock.calls[0][1].body).model).toBe("openai/coding-fixture");
     expect(f.upstream.mock.calls[0][1].headers.authorization).toBe("Bearer SERVER_ONLY_KEY");
     expect(f.charges[0].settle).toHaveBeenCalledWith(0.02);
-    await expect(f.manager.execute("daytona", "alice", "touch overlapping")).rejects.toMatchObject({ status: 409 });
+    await expect(f.manager.execute(providerName, "alice", "touch overlapping")).rejects.toMatchObject({ status: 409 });
     // A server restart loses memory locks, but cannot overlap the remote job.
-    await expect(f.restartManager().execute("daytona", "alice", "touch after-restart")).rejects.toMatchObject({ status: 409 });
-    await f.manager.execute("daytona", "bob", "echo separate");
+    await expect(f.restartManager().execute(providerName, "alice", "touch after-restart")).rejects.toMatchObject({ status: 409 });
+    await f.manager.execute(providerName, "bob", "echo separate");
     f.coding.revoke("alice", "old-generation");
     expect((await f.request(a)).status).toBe(200);
     f.coding.revoke("alice", "one");

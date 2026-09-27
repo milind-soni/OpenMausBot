@@ -42,7 +42,7 @@ export class IsolatedCoding {
   private deps: { manager: HostedComputerManager; scope: string; env?: NodeJS.ProcessEnv; fetcher?: typeof fetch;
     spend?: typeof beginModelSpend };
   constructor(deps: IsolatedCoding["deps"]) { this.deps = deps; }
-  enabled(provider: AddedProvider) { return provider === "daytona" && Boolean(codingSettings(this.deps.env)); }
+  enabled(provider: AddedProvider) { return (provider === "daytona" || provider === "orgo") && Boolean(codingSettings(this.deps.env)); }
   private active(run: Run) { return run.state === "running" && run.expires > Date.now() && run.owner.current() && !run.controller.signal.aborted; }
   revoke(threadId: string, generation?: string) {
     for (const run of this.runs.values()) if (run.owner.threadId === threadId && (!generation || run.owner.generation === generation)) {
@@ -60,7 +60,7 @@ export class IsolatedCoding {
     }
     if (this.runs.size >= 100) throw failure();
     const token = randomBytes(32).toString("hex"), id = randomBytes(16).toString("hex");
-    const run: Run = { id, owner, hash: hash(token), model: settings.model, expires: Date.now() + 600_000,
+    const run: Run = { id, owner, hash: hash(token), model: settings.model, expires: Date.now() + (owner.provider === "orgo" ? 240_000 : 600_000),
       requests: 0, requesting: false, controller: new AbortController(), state: "running", project };
     this.runs.set(id, run);
     const command = codingCommand({ id, project, prompt, token, model: run.model, expires: run.expires,

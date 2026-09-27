@@ -113,7 +113,7 @@ export class HostedComputerManager {
     });
   }
   code(provider: AddedProvider, key: string, command: string, authorized: () => boolean, expires: number) {
-    if (provider !== "daytona" || command.length > 64_000) return Promise.reject(new ComputerProviderError(400));
+    if (command.length > 64_000) return Promise.reject(new ComputerProviderError(400));
     return this.exclusive(provider, key, async () => {
       const { client, m } = await this.running(provider, key);
       if (!authorized() || !client.code) throw new ComputerProviderError(403);

@@ -1,5 +1,9 @@
 # Isolated coding continuation — 2026-09-27
 
+Historical Daytona investigation. The later [Orgo acceptance](isolated-coding-orgo-2026-09-27.md)
+supersedes the live-model blocker below for Orgo. Daytona still requires
+provider-supported gateway access.
+
 PR [#41](https://github.com/devnord23/nation-team-chat/pull/41) remains draft.
 Production coding is not enabled. No production app process, credentials or
 member data was modified. The approved staging nginx route was added on the VPS.

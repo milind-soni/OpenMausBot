@@ -76,7 +76,7 @@ it.each(["orgo", "daytona"] as const)("%s: Admin enables it and member turns use
   const origin = `http://127.0.0.1:${(model.address() as { port: number }).port}`;
   const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, undefined, [], undefined,
     origin, undefined, undefined, undefined, {
-      coding: providerName === "daytona",
+      coding: true,
       founderEmails: ["founder@example.test"],
       payments: { rpc: chain.url, treasury: "0x85E3C2D8f776d9D05b14E108F368070CbD8C1639", confirmations: 1, scanSeconds: 5 },
     }, { orgo: provider.url, daytona: provider.url });
@@ -141,7 +141,7 @@ it.each(["orgo", "daytona"] as const)("%s: Admin enables it and member turns use
     expect(await turn(bob, b, "show")).not.toContain("ALICE_SECRET");
     expect(await turn(bob, b, "save BOB_SECRET")).not.toContain("no computer tool");
     expect(await turn(alice, a, "show")).toContain("ALICE_SECRET");
-    if (providerName === "daytona") {
+    {
       const balance = async (who: ReturnType<typeof browser>) => (await who.request("/api/credits/status")).body.balanceUsd as number;
       const aliceBefore = await balance(alice), bobBefore = await balance(bob);
       expect(await turn(alice, a, "code save ALICE_CODE_SECRET")).toContain("ALICE_CODE_SECRET");

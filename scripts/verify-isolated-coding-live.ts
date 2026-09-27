@@ -1,4 +1,4 @@
-// Explicit opt-in acceptance against disposable Daytona computers and a new
+// Explicit opt-in acceptance against disposable provider computers and a new
 // local credit database. Never imports the user's app configuration or data.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -7,7 +7,9 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 assert.equal(process.env.NATION_CODING_ACCEPTANCE, "1", "Explicit live acceptance opt-in required");
-for (const key of ["DAYTONA_API_KEY", "OPENROUTER_API_KEY", "NATION_CODING_MODEL", "NATION_CODING_PUBLIC_ORIGIN", "NATION_ACCEPTANCE_SNAPSHOT"]) assert(process.env[key], `${key} required`);
+const providerName = process.env.NATION_ACCEPTANCE_PROVIDER ?? "daytona";
+assert(providerName === "daytona" || providerName === "orgo");
+for (const key of ["OPENROUTER_API_KEY", "NATION_CODING_MODEL", "NATION_CODING_PUBLIC_ORIGIN", ...(providerName === "daytona" ? ["DAYTONA_API_KEY", "NATION_ACCEPTANCE_SNAPSHOT"] : ["ORGO_API_KEY", "ORGO_WORKSPACE_ID"])]) assert(process.env[key], `${key} required`);
 assert(new URL(process.env.NATION_CODING_PUBLIC_ORIGIN!).protocol === "https:");
 const root = process.env.NATION_ACCEPTANCE_ROOT || mkdtempSync(join(tmpdir(), "nation-live-coding-"));
 assert.equal(dirname(realpathSync(root)), realpathSync(tmpdir()));
@@ -30,12 +32,13 @@ delete process.env.NATION_PRODUCT_OWNER;
 delete process.env.NATION_PRODUCT_ADMIN;
 const { IsolatedCoding } = await import("../server/isolated-coding.ts");
 const { HostedComputerManager } = await import("../server/hosted-computers/manager.ts");
-const { daytonaProvider } = await import("../server/hosted-computers/providers.ts");
+const { createComputerProvider } = await import("../server/hosted-computers/providers.ts");
 const { nationLedger } = await import("../server/nation-credit-context.ts");
 type Owner = import("../server/isolated-coding.ts").CodingOwner;
 type Machine = import("../server/hosted-computers/providers.ts").Machine;
-const config = { daytona: { enabled: true, apiKey: process.env.DAYTONA_API_KEY!, snapshot: process.env.NATION_ACCEPTANCE_SNAPSHOT!, user: "root" as const } };
-const provider = await daytonaProvider(config.daytona);
+const config = { daytona: { enabled: true, apiKey: process.env.DAYTONA_API_KEY!, snapshot: process.env.NATION_ACCEPTANCE_SNAPSHOT!, user: "root" as const },
+  orgo: { enabled: true, apiKey: process.env.ORGO_API_KEY!, workspaceId: process.env.ORGO_WORKSPACE_ID! } };
+const provider = await createComputerProvider(providerName, config);
 const machines: Machine[] = [];
 const capabilities = new Map<string, { token: string; url: string }>();
 const remember = (m: Machine) => { if (!machines.some(existing => existing.id === m.id)) machines.push(m); return m; };
@@ -62,7 +65,7 @@ const server = createServer((req, res) => {
 });
 await new Promise<void>(resolve => server.listen(Number(process.env.NATION_ACCEPTANCE_PORT ?? 18879), "127.0.0.1", resolve));
 const ledger = nationLedger();
-const owner = (id: string): Owner => ({ provider: "daytona", key: id, threadId: id, generation: "one", account: { id, verified: true }, current: () => true });
+const owner = (id: string): Owner => ({ provider: providerName, key: id, threadId: id, generation: "one", account: { id, verified: true }, current: () => true });
 const alice = owner("acceptance-alice"), bob = owner("acceptance-bob");
 ledger.grant(alice.account, "acceptance-alice", "acceptance-alice");
 ledger.grant(bob.account, "acceptance-bob", "acceptance-bob");
@@ -86,9 +89,9 @@ const run = async (who: Owner, prompt: string) => {
   return task;
 };
 try {
-  note({ phase: "start", root, model: process.env.NATION_CODING_MODEL, snapshot: config.daytona.snapshot });
-  await manager.start("daytona", alice.key, true);
-  await manager.start("daytona", bob.key, true);
+  note({ phase: "start", root, provider: providerName, model: process.env.NATION_CODING_MODEL, snapshot: config.daytona.snapshot });
+  await manager.start(providerName, alice.key, true);
+  await manager.start(providerName, bob.key, true);
   assert.notEqual(machines[0].id, machines[1].id);
   note({ phase: "machines", machines });
   const preflight = Buffer.from(readFileSync(new URL("../deploy/verify-isolated-coding.sh", import.meta.url), "utf8").replaceAll("\r\n", "\n")).toString("base64");
@@ -102,28 +105,29 @@ except urllib.error.HTTPError as error:
 print('PASS: guest reaches HTTPS gateway; unauthenticated request denied')
 `).toString("base64");
   for (const machine of machines) {
+    await provider.prepareCoding?.(machine);
     const sandbox = await provider.execute(machine, `printf '%s' '${preflight}' | base64 -d | sh`);
     note({ phase: "sandbox-preflight", machine: machine.id, ...sandbox });
     assert.equal(sandbox.exitCode, 0, "Prepared snapshot must support workspace-write confinement");
     const gateway = await provider.execute(machine, `printf '%s' '${networkCheck}' | base64 -d | python3`);
     note({ phase: "gateway-preflight", machine: machine.id, ...gateway });
-    assert.equal(gateway.exitCode, 0, "Guest must reach the gateway before paid acceptance; check Daytona organization network policy");
+    assert.equal(gateway.exitCode, 0, "Guest must reach the gateway before paid acceptance; check provider network policy");
   }
   const a0 = ledger.balance(alice.account.id), b0 = ledger.balance(bob.account.id);
   await run(alice, "Create add.py with add(a,b), and test_add.py using unittest to assert add(2,3)==5. Write owner.txt containing ALICE_ACCEPTANCE. Run python3 -m unittest -v. Report the actual test result. Do not stop until files exist and tests pass.");
   const a1 = ledger.balance(alice.account.id);
   assert(a1 < a0); assert.equal(ledger.balance(bob.account.id), b0);
-  const checkA = await manager.execute("daytona", alice.key, "cd ~/.nation-coding/acceptance && cat owner.txt && python3 -m unittest -v");
+  const checkA = await manager.execute(providerName, alice.key, "cd ~/.nation-coding/acceptance && cat owner.txt && python3 -m unittest -v");
   assert.equal(checkA.exitCode, 0); assert.match(checkA.stdout, /ALICE_ACCEPTANCE/); assert.match(checkA.stdout, /OK/);
   note({ phase: "alice-files-and-tests", result: checkA });
   await run(bob, "Check whether owner.txt or add.py exists in this project. Neither should exist. Create owner.txt containing BOB_ACCEPTANCE and test_owner.py using unittest asserting that exact file content. Run python3 -m unittest -v and report actual results.");
   assert.equal(ledger.balance(alice.account.id), a1); assert(ledger.balance(bob.account.id) < b0);
-  const checkB = await manager.execute("daytona", bob.key, "cd ~/.nation-coding/acceptance && test ! -e add.py && cat owner.txt && python3 -m unittest -v");
+  const checkB = await manager.execute(providerName, bob.key, "cd ~/.nation-coding/acceptance && test ! -e add.py && cat owner.txt && python3 -m unittest -v");
   assert.equal(checkB.exitCode, 0); assert.match(checkB.stdout, /BOB_ACCEPTANCE/); assert.doesNotMatch(checkB.stdout, /ALICE_ACCEPTANCE/);
   note({ phase: "bob-files-and-tests", result: checkB });
   await run(alice, "Read the existing owner.txt and add.py. Keep both files. Add a unittest asserting add(-2,2)==0 to test_add.py, then run python3 -m unittest -v.");
   const probe = "cd ~/.nation-coding/acceptance && cat owner.txt && python3 -m unittest -v";
-  const persistent = await manager.execute("daytona", alice.key, probe);
+  const persistent = await manager.execute(providerName, alice.key, probe);
   assert.equal(persistent.exitCode, 0); assert.match(persistent.stdout, /ALICE_ACCEPTANCE/);
   note({ phase: "later-task-persistence", result: persistent });
   for (const mode of ["cancel", "restart"] as const) {
