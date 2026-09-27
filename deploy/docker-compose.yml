@@ -14,7 +14,7 @@ services:
       args:
         ENGINES: ${ENGINES:-}
     # prebuilt on every main push; `docker compose up --build` builds from source instead
-    image: ghcr.io/milind-soni/openmausbot:latest
+    image: ghcr.io/devnord23/nation-team-chat:latest
     restart: unless-stopped
     volumes:
       - data:/data
@@ -33,7 +33,7 @@ services:
       OMB_SIGNIN_EMAILS: ${OMB_SIGNIN_EMAILS:-}
       OMB_SIGNIN_MEMBER_EMAILS: ${OMB_SIGNIN_MEMBER_EMAILS:-}
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q nation-team-chat"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -1,4 +1,5 @@
 import type { HostedComputersConfig, AddedProvider } from "../../shared/hosted-computers.ts";
+import { ORGO_CODING_BOOTSTRAP } from "./orgo-coding.ts";
 
 export type Machine = { id: string; name: string; state: string };
 export type Screen = { png: string; format: "png" | "jpeg" };
@@ -12,6 +13,9 @@ export interface ComputerProvider {
   stop(machine: Machine): Promise<void>;
   screenshot(machine: Machine): Promise<Screen>;
   execute(machine: Machine, command: string): Promise<CommandResult>;
+  /** Bounded coding job, inside the same authenticated sandbox. */
+  code?(machine: Machine, command: string): Promise<CommandResult>;
+  prepareCoding?(machine: Machine): Promise<void>;
 }
 
 export class ComputerProviderError extends Error {
@@ -52,7 +56,11 @@ export function orgoProvider(config: NonNullable<HostedComputersConfig["orgo"]>,
   }
   function machine(raw: unknown, name: string): Machine {
     const data = raw as Record<string, unknown>;
-    if (!data || !safeId(data.id) || data.name !== name || data.workspace_id !== workspace || typeof data.status !== "string") throw new ComputerProviderError(409);
+    // Orgo POST uses workspace_id; GET uses project_id. Both identify the
+    // configured workspace. Conflicting or missing ownership fails closed.
+    if (!data || !safeId(data.id) || data.name !== name ||
+      (data.workspace_id ?? data.project_id) !== workspace ||
+      (data.project_id !== undefined && data.project_id !== workspace) || typeof data.status !== "string") throw new ComputerProviderError(409);
     const state = data.status === "running" || data.status === "suspended" ? "running"
       : data.status === "frozen" || data.status === "stopped" ? "stopped" : data.status;
     return { id: data.id, name, state };
@@ -61,7 +69,12 @@ export function orgoProvider(config: NonNullable<HostedComputersConfig["orgo"]>,
     if (!safeId(id)) throw new ComputerProviderError(400);
     return machine(await request(`/computers/${id}`), name);
   };
+  const prepareCoding = async (m: Machine) => {
+    const data = await request(`/computers/${m.id}/bash`, { command: ORGO_CODING_BOOTSTRAP, timeout: 180 }, 215_000);
+    if (data.exit_code !== 0) throw new ComputerProviderError();
+  };
   return {
+    prepareCoding,
     async check() {
       const data = await request(`/workspaces/${workspace}`);
       if (data.id !== workspace || !Array.isArray(data.desktops)) throw new ComputerProviderError();
@@ -75,22 +88,30 @@ export function orgoProvider(config: NonNullable<HostedComputersConfig["orgo"]>,
     },
     get,
     async create(name) {
-      return machine(await request("/computers", { workspace_id: workspace, name, os: "linux", ram: 4, cpu: 1 }, 90_000), name);
+      return machine(await request("/computers", { workspace_id: workspace, name, os: "linux", ram: 4, cpu: 0.5, disk_size_gb: 20 }, 90_000), name);
     },
     async start(m) {
       if (m.state !== "running") {
         if (m.state !== "stopped") throw new ComputerProviderError(409);
-        await request(`/computers/${m.id}/start`, {}, 90_000);
+        await request(`/computers/${m.id}/start`, {}, 335_000);
       }
       return get(m.id, m.name);
     },
-    async stop(m) { if (m.state === "running") await request(`/computers/${m.id}/stop`, {}, 90_000); },
+    async stop(m) { if (m.state === "running") await request(`/computers/${m.id}/stop`, {}, 335_000); },
     async screenshot(m) {
       const data = await request(`/computers/${m.id}/screenshot?response_format=base64&format=png`);
       return screen(data.image, "png");
     },
     async execute(m, command) {
       const data = await request(`/computers/${m.id}/bash`, { command, timeout: 60 }, 95_000);
+      if (!Number.isInteger(data.exit_code) || typeof data.output !== "string") throw new ComputerProviderError();
+      return { exitCode: Number(data.exit_code), stdout: data.output.slice(-32_000), stderr: "" };
+    },
+    async code(m, command) {
+      await prepareCoding(m);
+      // The supervisor's four-minute deadline leaves room under Orgo's
+      // five-minute command ceiling to cancel/reap and return its receipt.
+      const data = await request(`/computers/${m.id}/bash`, { command, timeout: 300 }, 335_000);
       if (!Number.isInteger(data.exit_code) || typeof data.output !== "string") throw new ComputerProviderError();
       return { exitCode: Number(data.exit_code), stdout: data.output.slice(-32_000), stderr: "" };
     },
@@ -127,7 +148,7 @@ export async function daytonaProvider(config: NonNullable<HostedComputersConfig[
     },
     async get(id, name) { return machine(await client.get(id), name); },
     async create(name) {
-      const s = await client.create({ name, snapshot: config.snapshot, labels: { nation_owner: name },
+      const s = await client.create({ name, snapshot: config.snapshot, ...(config.user ? { user: config.user } : {}), labels: { nation_owner: name },
         public: false, autoStopInterval: 30, autoDeleteInterval: -1, ephemeral: false }, { timeout: 90 });
       return machine(s, name);
     },
@@ -142,6 +163,10 @@ export async function daytonaProvider(config: NonNullable<HostedComputersConfig[
     async screenshot(m) { const s = await getSandbox(m); const result = await s.computerUse.screenshot.takeFullScreen(); return screen(result.screenshot, "png"); },
     async execute(m, command) {
       const result = await (await getSandbox(m)).process.executeCommand(command, undefined, undefined, 60);
+      return { exitCode: result.exitCode, stdout: result.result.slice(-32_000), stderr: "" };
+    },
+    async code(m, command) {
+      const result = await (await getSandbox(m)).process.executeCommand(command, undefined, undefined, 620);
       return { exitCode: result.exitCode, stdout: result.result.slice(-32_000), stderr: "" };
     },
   };

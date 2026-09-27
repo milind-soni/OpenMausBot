@@ -40,6 +40,7 @@ import { compactBudget, contextWindowFor, shouldCompact } from "./context-budget
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
 import { HostedComputerManager } from "./hosted-computers/manager.ts";
+import { CODING_PATH, IsolatedCoding } from "./isolated-coding.ts";
 import { createComputerProvider } from "./hosted-computers/providers.ts";
 import { createHostedComputerRoutes } from "./routes/hosted-computers.ts";
 import { isAddedProvider, addedProviderConfigured, hostedComputersStatus, type AddedProvider } from "../shared/hosted-computers.ts";
@@ -590,6 +591,7 @@ let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefine
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
 const hostedComputers = new HostedComputerManager(join(DATA_DIR, "hosted-computers"), ENVIRONMENT_ID, () => cfg.hostedComputers ?? {});
+const isolatedCoding = new IsolatedCoding({ manager: hostedComputers, scope: process.env.NATION_WORKSPACE_ID ?? "operator" });
 const anyCloudConfigured = () => box.boxConfigured(cfg) || hostedComputers.configured("orgo") || hostedComputers.configured("daytona");
 const hostedModels = hostedModelPolicy(DATA_DIR);
 const providerConfigs = () => hostedModels ? hostedModels.configs() : instanceConfigs(cfg);
@@ -970,6 +972,7 @@ function mintInternalCapability(capability: Omit<InternalCapability, "orphanExpi
 }
 
 function revokeInternalCapabilityGeneration(threadId: string, generation: string): void {
+  isolatedCoding.revoke(threadId, generation);
   forgetTurnConnectorIdentities(threadId, generation);
   for (const [token, capability] of internalCapabilities) {
     if (capability.threadId === threadId && capability.generation === generation) {
@@ -996,6 +999,7 @@ function revokeInternalCapabilitiesForThread(threadId: string): void {
 }
 
 function revokeAllInternalCapabilities(): void {
+  for (const threadId of activeInternalGenerationByThread.keys()) isolatedCoding.revoke(threadId);
   computerSelectionTurns.clear();
   turnConnectorIdentities.clear();
   internalCapabilities.clear();
@@ -4852,7 +4856,8 @@ async function attachBotHosted(bot: BotRecord, owner: TurnOwner, provider: Added
   };
   return { capture,
     integration: { command: process.execPath, args: [SPAWNED_PROXIES.hostedComputer],
-      env: { ...AGENTS_NODE_FLAG, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`, NATION_COMPUTER_TOKEN: token } } };
+      env: { ...AGENTS_NODE_FLAG, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`, NATION_COMPUTER_TOKEN: token,
+        ...(isolatedCoding.enabled(provider) ? { NATION_CODING_TOOLS: "1" } : {}) } } };
 }
 
 /** The bot's own Box. Explicit Cloud may create/wake; Auto only attaches a
@@ -12076,6 +12081,7 @@ ROUTES.push(createWorkspacePreferencesRoutes({
 }));
 ROUTES.push(createNationCreditRoutes());
 ROUTES.push(createHostedComputerRoutes({
+  coding: isolatedCoding,
   manager: hostedComputers, bot: id => store.bot(id) ?? undefined, enabled: () => agentComputersEnabled(cfg) && !computerProviderConfigTransitions.has("orgo") && !computerProviderConfigTransitions.has("daytona"),
   access: (id, auth) => { const access = computerRouteAccess(id, auth); return access === "admin" ? id : access?.key ?? null; },
   busy: id => botHasActiveTurn(id) || boxLifecycleBusyBots.has(id), claim: key => claimBotComputerLifecycle(key),
@@ -12084,7 +12090,12 @@ ROUTES.push(createHostedComputerRoutes({
     if (!cap || cap.kind !== "computer" || !cap.hostedProvider || !cap.computerKey) return null;
     const owner = { botId: cap.botId, threadId: cap.threadId, generation: cap.generation };
     if (!turnResources.owns(`computer:hosted:${cap.hostedProvider}:${cap.computerKey}`, owner) || computerControl.snapshot(cap.computerKey).held) return null;
-    return { provider: cap.hostedProvider, key: cap.computerKey };
+    const account = threadSponsorAccount(cap.threadId);
+    return { provider: cap.hostedProvider, key: cap.computerKey, ...(account ? { codingOwner: {
+      provider: cap.hostedProvider, key: cap.computerKey, threadId: cap.threadId, generation: cap.generation, account,
+      current: () => Boolean(authorizedInternalCapability(authorization)) && agentComputersEnabled(cfg) &&
+        turnResources.owns(`computer:hosted:${cap.hostedProvider}:${cap.computerKey}`, owner) && !computerControl.snapshot(cap.computerKey!).held,
+    } } : {}) };
   },
 }));
 // No payments are enabled without a configured treasury. Scans only read chain data.
@@ -12194,6 +12205,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     // Email-link sign-in, and every API request from a browser signed in to
     // an account: those go to the account's own workspace, never this desk.
+    const codingRoute = CODING_PATH.exec(path);
+    if (codingRoute) {
+      if (workspaceHost && codingRoute[1] !== "operator") return await workspaceHost.forwardCoding(req, res, codingRoute[1]);
+      if (await isolatedCoding.handle(req, res, path)) return;
+      return json(res, 403, { error: "Coding task authorization ended." });
+    }
     if (accountGateway && await accountGateway.handle(req, res, url)) return;
     // Sign in with an emailed code (server/account-signin.ts). Public like
     // /api/auth/pair, JSON-only for the same reason, and counted against the

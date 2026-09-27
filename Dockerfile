@@ -19,6 +19,7 @@ RUN npm install -g pnpm@10.33.0
 # The image never runs Electron, so skip its ~100MB postinstall download.
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 # every workspace member's manifest must exist before install resolves the lockfile
 COPY apps/docs/package.json ./apps/docs/package.json
 COPY cloudflare/control-plane/package.json ./cloudflare/control-plane/package.json
@@ -29,7 +30,9 @@ COPY cloudflare/control-plane/package.json ./cloudflare/control-plane/package.js
 COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs
 RUN pnpm install --frozen-lockfile
 COPY . .
-RUN pnpm build:server && pnpm exec vite build
+# This server serves the SPA and API at the origin root. The Vercel build's
+# /swarm/ prefix is handled by Vercel rewrites, which are absent here.
+RUN pnpm build:server && pnpm exec vite build --base / --outDir dist
 
 FROM node:24-bookworm-slim
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
@@ -72,5 +75,5 @@ ENV HOME=/data \
 VOLUME ["/data"]
 USER maus
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot || exit 1
+  CMD curl -sf http://127.0.0.1:8799/api/health | grep -q nation-team-chat || exit 1
 CMD ["node", "dist-server/index.js"]

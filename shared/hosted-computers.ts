@@ -10,7 +10,9 @@ export const hostedComputersSchema = z.object({
   orgo: z.object({ enabled: z.boolean().optional(), apiKey: key,
     workspaceId: z.string().trim().max(128).regex(/^[A-Za-z0-9_-]*$/).optional() }).optional(),
   daytona: z.object({ enabled: z.boolean().optional(), apiKey: key,
-    snapshot: z.string().trim().max(256).optional() }).optional(),
+    snapshot: z.string().trim().max(256).optional(),
+    // Operator-selected OS user inside the account's isolated computer.
+    user: z.enum(["daytona", "root"]).optional() }).optional(),
 }).strict();
 export type HostedComputersConfig = z.infer<typeof hostedComputersSchema>;
 export type HostedComputersStatus = {

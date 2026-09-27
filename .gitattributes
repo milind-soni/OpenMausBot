@@ -6,7 +6,13 @@
 shared/mascot-bodies.ts text eol=lf
 # git runs hooks through sh; a CRLF shebang line is "/bin/sh^M: bad interpreter" on every platform.
 scripts/git-hooks/* text eol=lf
+# Linux fixtures execute these shebangs directly. CRLF makes env look for
+# an executable named "node\r" and silently removes the fake browser tools.
+server/testing/*.mjs text eol=lf
 deploy/podman/*.sh text eol=lf
+deploy/install-isolated-coding.sh text eol=lf
+deploy/verify-isolated-coding.sh text eol=lf
+deploy/Daytona.coding.Dockerfile text eol=lf
 ios/Sources/CompanionCore/MausBodies.swift text eol=lf
 android/app/src/main/kotlin/com/openmausbot/companion/ui/MausBodies.kt text eol=lf
 # Vendor patch hashes and original notices must survive Windows checkout

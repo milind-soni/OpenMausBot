@@ -1,0 +1,52 @@
+name: Isolated coding runtime
+
+on:
+  pull_request:
+    paths:
+      - server/isolated-coding*
+      - server/hosted-computer*
+      - server/routes/hosted-computers.ts
+      - server/workspace-host.ts
+      - .github/workflows/isolated-coding.yml
+  push:
+    branches: [codex/isolated-member-coding]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: isolated-coding-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Prepare Ubuntu's bubblewrap user namespace profile
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap apparmor-profiles apparmor-utils
+          if [ -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict ]; then
+            sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+            sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          fi
+      - name: Install pinned CLI in a disposable directory
+        run: npm install --prefix "$RUNNER_TEMP/nation-codex" --ignore-scripts --no-audit --no-fund @openai/codex@0.157.1
+      - name: Real CLI and supervisor, synthetic model and billing
+        run: |
+          export NATION_TEST_CODEX_BIN="$RUNNER_TEMP/nation-codex/node_modules/.bin/codex"
+          "$NATION_TEST_CODEX_BIN" --version
+          pnpm exec vitest run server/isolated-coding.test.ts server/isolated-coding-runner.test.ts
+      - name: Two users through the real app and workspace gateway
+        run: pnpm exec vitest run server/hosted-computers.e2e.test.ts server/hosted-computers/manager.test.ts server/routes/hosted-computers.test.ts server/nation-computer-isolation.e2e.test.ts

@@ -3,10 +3,13 @@ import { isAddedProvider, type AddedProvider } from "../../shared/hosted-compute
 import type { HostedComputerManager } from "../hosted-computers/manager.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import type { RequestAuth } from "../request-auth.ts";
+import type { CodingOwner, IsolatedCoding } from "../isolated-coding.ts";
 
 type Bot = { id: string; computer?: string; cloudBackend?: string };
 const empty = z.object({}).strict();
 const command = z.object({ command: z.string().trim().min(1).max(4000) }).strict();
+const codeTask = z.object({ project: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/), prompt: z.string().trim().min(1).max(8000) }).strict();
+const codeStatus = z.object({ taskId: z.string().regex(/^[a-f0-9]{32}$/) }).strict();
 const unavailable = "This cloud computer is unavailable. Please retry or contact NATION support.";
 export function createHostedComputerRoutes(deps: {
   manager: HostedComputerManager;
@@ -15,16 +18,18 @@ export function createHostedComputerRoutes(deps: {
   enabled: () => boolean;
   busy: (id: string) => boolean;
   claim: (key: string) => () => void;
-  authorizeTool: (authorization: string | string[] | undefined) => { provider: AddedProvider; key: string } | null;
+  coding?: IsolatedCoding;
+  authorizeTool: (authorization: string | string[] | undefined) => { provider: AddedProvider; key: string; codingOwner?: CodingOwner } | null;
 }): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
-    const internal = path.match(/^\/api\/internal\/hosted-computer\/(execute|screenshot)$/);
+    const internal = path.match(/^\/api\/internal\/hosted-computer\/(execute|screenshot|code_start|code_status)$/);
     if (internal) {
       if (method !== "POST") return json(res, 405, { error: "Method not allowed" });
       if (!deps.enabled()) return json(res, 403, { error: unavailable });
       const target = deps.authorizeTool(req.headers.authorization);
       if (!target) return json(res, 403, { error: "This computer turn is no longer available." });
-      const parsed = (internal[1] === "execute" ? command : empty).safeParse(await readBody(req));
+      const schema = internal[1] === "execute" ? command : internal[1] === "code_start" ? codeTask : internal[1] === "code_status" ? codeStatus : empty;
+      const parsed = schema.safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "Invalid computer request" });
       const current = deps.authorizeTool(req.headers.authorization);
       if (!current || current.provider !== target.provider || current.key !== target.key || !deps.enabled()) return json(res, 403, { error: "This computer turn ended." });
@@ -33,6 +38,23 @@ export function createHostedComputerRoutes(deps: {
         return deps.enabled() && cap?.provider === target.provider && cap.key === target.key;
       };
       try {
+        if (internal[1] === "code_start" || internal[1] === "code_status") {
+          if (!deps.coding || !current.codingOwner) return json(res, 403, { error: unavailable });
+          const owner = current.codingOwner;
+          if (internal[1] === "code_start") {
+            const input = codeTask.parse(parsed.data);
+            return json(res, 200, deps.coding.start(owner, input.project, input.prompt));
+          }
+          const id = codeStatus.parse(parsed.data).taskId;
+          // A bounded wait keeps long coding jobs in the normal tool loop.
+          let result = deps.coding.status(owner, id);
+          for (let n = 0; n < 60 && result.state === "running"; n++) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            if (!authorized()) throw new Error("Coding turn ended");
+            result = deps.coding.status(owner, id);
+          }
+          return json(res, 200, result);
+        }
         const result = internal[1] === "execute"
           ? await deps.manager.execute(target.provider, target.key, command.parse(parsed.data).command, authorized)
           : await deps.manager.screenshot(target.provider, target.key);

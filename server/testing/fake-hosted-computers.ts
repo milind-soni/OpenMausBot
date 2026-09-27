@@ -2,6 +2,7 @@
 // No mocks of SDK methods: contract drift reaches these fixtures as unknown routes.
 import { createServer } from "node:http";
 import type { HostedComputersConfig } from "../../shared/hosted-computers.ts";
+import { ORGO_CODING_BOOTSTRAP } from "../hosted-computers/orgo-coding.ts";
 
 export const HOSTED_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 export const hostedFixtureConfig: HostedComputersConfig = {
@@ -10,7 +11,7 @@ export const hostedFixtureConfig: HostedComputersConfig = {
   daytona: { enabled: true, snapshot: "desktop-fixture", apiKey: "daytona-fixture-secret" },
 };
 type Desktop = { id: string; name: string; state: string; labels: Record<string, string>; files: Map<string, string> };
-export async function startFakeHostedComputers() {
+export async function startFakeHostedComputers(onCode?: (machine: Desktop, command: string) => Promise<{ result: string; exitCode: number }>) {
   const machines: Desktop[] = [];
   const calls: Array<{ method: string; path: string; body: any }> = [];
   const unknown: string[] = [];
@@ -42,7 +43,9 @@ export async function startFakeHostedComputers() {
       const m = machines.find(m => m.id === match[2] || m.name === match[2]);
       if (!m) return json({ message: "Not found" }, 404);
       const action = match[3];
-      if (!action && req.method === "GET") return json(wire(m));
+      if (!action && req.method === "GET") return json(orgo
+        ? { id: m.id, name: m.name, project_id: "workspace-fixture", status: m.state }
+        : wire(m));
       if (action === "/start" && req.method === "POST") { m.state = orgo ? "running" : "started"; return json(wire(m)); }
       if (action === "/stop" && req.method === "POST") { m.state = orgo ? "frozen" : "stopped"; return json(wire(m)); }
       if (action === "/computeruse/start") return json({ status: "started" });
@@ -50,6 +53,11 @@ export async function startFakeHostedComputers() {
       if (action === "/computeruse/screenshot") return json({ screenshot: HOSTED_PNG });
       if (action === "/bash" || action === "/process/execute") {
         const command = String(body.command);
+        if (orgo && command === ORGO_CODING_BOOTSTRAP) return json({ success: true, output: "runtime ready", exit_code: 0 });
+        if (onCode && body.timeout === (orgo ? 300 : 620)) {
+          const result = await onCode(m, command);
+          return json(orgo ? { success: true, output: result.result, exit_code: result.exitCode } : result);
+        }
         const write = command.match(/printf %s (\S+) > (?:\/root\/)?([\w.-]+)/);
         const read = command.match(/cat (?:\/root\/)?([\w.-]+)/);
         let result = ""; let exitCode = 0;
