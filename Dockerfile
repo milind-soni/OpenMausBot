@@ -73,5 +73,5 @@ ENV HOME=/data \
 VOLUME ["/data"]
 USER maus
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot || exit 1
+  CMD curl -sf http://127.0.0.1:8799/api/health | grep -q nation-team-chat || exit 1
 CMD ["node", "dist-server/index.js"]

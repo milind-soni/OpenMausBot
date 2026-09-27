@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -162,7 +162,9 @@ it.skipIf(!process.env.NATION_TEST_CODEX_BIN)("real Codex CLI edits a file throu
     p.finish(result);
     const log = readFileSync(join(f.root, `.nation-coding/project/.runs/${task.taskId}/events.jsonl`), "utf8");
     await vi.waitFor(() => expect(f.coding.status(f.alice, task.taskId).state, `Model requests: ${calls}\nRequest shapes: ${JSON.stringify(f.requestShapes)}\n${log}`).toBe("completed"));
-    expect(readFileSync(join(f.root, ".nation-coding/project/coding-smoke.txt"), "utf8")).toBe("CODING_SMOKE");
+    const edited = join(f.root, ".nation-coding/project/coding-smoke.txt");
+    expect(existsSync(edited), `Model requests: ${calls}\n${log}`).toBe(true);
+    expect(readFileSync(edited, "utf8")).toBe("CODING_SMOKE");
     expect(calls).toBe(2);
     expect(f.charges.every(c => c.settle.mock.calls[0]?.[0] === 0.02)).toBe(true);
   } finally { await f.close(); }
