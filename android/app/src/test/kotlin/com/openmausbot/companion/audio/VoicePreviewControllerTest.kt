@@ -240,10 +240,36 @@ class VoicePreviewControllerTest {
         assertTrue(controller.playing.value)
     }
 
+    /** A preview asks for the focus a Live call holds: refused, not failed, and nothing asked of the audio. */
+    @Test
+    fun `a Live call holding the audio refuses a preview without asking for the focus`() {
+        val focus = FakeFocus(grant = true)
+        var engines = 0
+        val controller = VoicePreviewController(
+            engineFactory = {
+                engines += 1
+                FakeEngine(ok = true)
+            },
+            focus = focus,
+        )
+        focus.callHolds = true
+        assertEquals(VoicePreviewController.DURING_LIVE_CALL, controller.play(byteArrayOf(1)))
+        assertEquals("Voice preview is off during a Live call.", VoicePreviewController.DURING_LIVE_CALL)
+        assertFalse(controller.playing.value)
+        assertEquals(0, focus.requests)
+        assertEquals(0, engines)
+
+        focus.callHolds = false
+        assertNull(controller.play(byteArrayOf(1)))
+        assertTrue(controller.playing.value)
+    }
+
     private class FakeFocus(private val grant: Boolean) : PreviewAudioFocus {
         var requests = 0
         var abandons = 0
         var lastOnInterrupted: (() -> Unit)? = null
+        var callHolds = false
+        override val heldByLiveCall: Boolean get() = callHolds
 
         override fun request(onInterrupted: () -> Unit): Boolean {
             requests += 1

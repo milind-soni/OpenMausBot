@@ -44,7 +44,7 @@ class CompanionPermissions(
      */
     fun discoveryPermissions(): Array<String> = refresh().missingDiscovery.toTypedArray()
 
-    /** Composer mic — checked at the button, never at cold start. */
+    /** Composer mic and Live calls — checked at the button or the call, never at cold start. */
     fun recordAudioGranted(): Boolean = granted(Manifest.permission.RECORD_AUDIO)
 
     private fun read(): Snapshot {

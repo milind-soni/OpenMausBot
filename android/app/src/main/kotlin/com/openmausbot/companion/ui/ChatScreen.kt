@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
@@ -96,6 +98,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.openmausbot.companion.R
+import com.openmausbot.companion.audio.MicrophoneAccess
 import com.openmausbot.companion.core.AttachmentPolicy
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.ChatTarget
@@ -207,6 +210,18 @@ private fun LoadedChat(
     val session = environment.session
     val dictation = environment.dictation
     val chatDrafts = environment.chatDrafts
+    val liveCalls = environment.liveCalls
+    val liveCall by liveCalls.state.collectAsState()
+    var showingLiveSettings by remember { mutableStateOf(false) }
+    // The call that waits on this phone's first-call disclosure.
+    var pendingLiveCall by remember { mutableStateOf<PendingLiveCall?>(null) }
+    fun startLiveCall(call: PendingLiveCall) =
+        liveCalls.start(call.botId, call.threadId, call.botName, MicrophoneAccess { environment.mic.ensure(it) })
+    // A call holds the microphone in every chat, not only its own: the manager
+    // is app-scoped and the call runs on while the person reads another chat,
+    // where dictation's audio focus would end it as "another app took the audio".
+    val callHoldsMic = liveCall.holdsMedia
+    LaunchedEffect(callHoldsMic) { if (callHoldsMic) dictation.stop() }
     val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
     var threadOpenJob by remember { mutableStateOf<Job?>(null) }
@@ -915,6 +930,18 @@ private fun LoadedChat(
                         dictation.stop()
                         if (bot != null) onOpenComputer(bot.id)
                     },
+                    onCall = {
+                        if (bot != null) {
+                            // MicPermissionController holds one pending callback:
+                            // dictation must be off before the call asks.
+                            dictation.stop()
+                            focusManager.clearFocus()
+                            val call = PendingLiveCall(bot.id, threadId, bot.name)
+                            // A phone's first Live call says first what a call sends to OpenAI.
+                            if (liveCalls.disclosureDue) pendingLiveCall = call else startLiveCall(call)
+                        }
+                    },
+                    showCall = LiveCallRules.offersCall(liveCall, state.liveCall),
                     // A bot's face and its name pill are both the door to its
                     // profile; a room has no profile, so its pill opens the same
                     // sheet the + does.
@@ -932,6 +959,16 @@ private fun LoadedChat(
                         .widthIn(max = CHAT_CONTENT_MAX_WIDTH),
                 )
             }
+
+            LiveCallBarHost(
+                chat = chat,
+                onSettings = { showingLiveSettings = true },
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .widthIn(max = CHAT_CONTENT_MAX_WIDTH)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+            )
 
             Composer(
                 modifier = Modifier
@@ -1003,6 +1040,7 @@ private fun LoadedChat(
                     publishFrom(composer)
                 },
                 onToggleDictation = {
+                    if (callHoldsMic) return@Composer
                     focusManager.clearFocus()
                     dictation.toggle(capturing = draft)
                 },
@@ -1049,6 +1087,22 @@ private fun LoadedChat(
                 onOpenOverview(it)
                 showingProfile = false
             },
+        )
+    }
+
+    if (showingLiveSettings) {
+        LiveCallSettingsSheet(onDismiss = { showingLiveSettings = false })
+    }
+
+    pendingLiveCall?.let { call ->
+        LiveCallDisclosureDialog(
+            onStart = {
+                pendingLiveCall = null
+                liveCalls.acceptDisclosure()
+                startLiveCall(call)
+            },
+            // Records nothing: the next tap shows it again.
+            onCancel = { pendingLiveCall = null },
         )
     }
 
@@ -1101,8 +1155,8 @@ private val HEADER_SCRIM_FADE = 24.dp
 private val HEADER_CLEARANCE = 128.dp
 
 /**
- * Back on the left with the rest-of-app unread count, the bot's computer on the
- * right, and the bot itself between them over its name.
+ * Back on the left with the rest-of-app unread count, a Live call and the bot's
+ * computer on the right, and the bot itself between them over its name.
  *
  * The strip behind the two buttons is opaque and then fades out, so the
  * transcript slides under the chrome and disappears rather than stopping at a
@@ -1115,6 +1169,13 @@ private fun ChatHeader(
     unreadElsewhere: Int,
     onBack: () -> Unit,
     onWatchComputer: () -> Unit,
+    onCall: () -> Unit,
+    /**
+     * False while this phone is on a call (the bar has the controls) and while
+     * the computer reports one running from another device, which has to hang
+     * up first: [LiveCallRules.offersCall].
+     */
+    showCall: Boolean,
     onOpenProfile: () -> Unit,
     onOpenThreads: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1144,8 +1205,16 @@ private fun ChatHeader(
         ) {
             BackPill(unreadElsewhere = unreadElsewhere, onBack = onBack)
             Spacer(Modifier.weight(1f))
-            // The computer is a bot idea; a room has none (§12).
+            // The computer and the phone are bot ideas; a room has neither (§12).
             if (chat is Chat.BotChat) {
+                if (showCall) {
+                    ChromeButton(
+                        icon = Icons.Filled.Call,
+                        contentDescription = "Call ${chat.name}",
+                        onClick = onCall,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 ChromeButton(
                     painter = painterResource(R.drawable.ic_display),
                     contentDescription = "Watch ${chat.name}'s computer",
@@ -1737,3 +1806,6 @@ private fun Composer(
         }
     }
 }
+
+/** A Live call the phone button asked for, while the first-call disclosure is up. */
+private data class PendingLiveCall(val botId: String, val threadId: String, val botName: String)

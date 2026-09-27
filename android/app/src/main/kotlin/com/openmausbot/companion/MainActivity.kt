@@ -179,6 +179,7 @@ class MainActivity : ComponentActivity() {
             avatars = app.avatars,
             voicePreview = app.voicePreview,
             voiceNotes = app.voiceNotes,
+            liveCalls = app.liveCalls,
             dictation = dictation,
             chatDrafts = chatDrafts,
             requestPermissions = { permissions -> permissionRequests.request(permissions) },

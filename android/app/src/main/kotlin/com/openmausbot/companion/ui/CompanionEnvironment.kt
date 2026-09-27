@@ -2,6 +2,7 @@ package com.openmausbot.companion.ui
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.openmausbot.companion.audio.LiveCallManager
 import com.openmausbot.companion.audio.VoicePreviewPlayer
 import com.openmausbot.companion.audio.VoiceNotePlayer
 import com.openmausbot.companion.avatar.AvatarImageStore
@@ -54,10 +55,11 @@ class CameraPermissionController(
 }
 
 /**
- * Microphone permission for composer dictation. Asked only from the mic button,
- * through [PermissionRequests] so the asked-flag has a single owner. Callers
- * pass a result callback; a stop that races the system sheet is discarded by
- * [SpeechDictation]'s generation guard, not by dropping this callback.
+ * Microphone permission for composer dictation and Live calls. Asked from the
+ * mic button or when a call starts, through [PermissionRequests] so the
+ * asked-flag has a single owner. Callers pass a result callback; a stop that
+ * races the system sheet is discarded by [SpeechDictation]'s generation guard,
+ * not by dropping this callback.
  */
 class MicPermissionController(
     private val isGranted: () -> Boolean,
@@ -116,6 +118,8 @@ class CompanionEnvironment(
     val voicePreview: VoicePreviewPlayer,
     /** One-at-a-time transcript voice notes; app-scoped, pauses in place. */
     val voiceNotes: VoiceNotePlayer,
+    /** This phone's Live call: media, captions, controls. App-scoped; ends on process ON_STOP. */
+    val liveCalls: LiveCallManager,
     /** Composer dictation; bind to the chat screen lifecycle. */
     val dictation: SpeechDictation,
     /**

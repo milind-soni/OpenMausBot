@@ -60,7 +60,7 @@ class CompanionPermissionsTest {
         assertFalse(permissions.recordAudioGranted())
         assertFalse(
             permissions.discoveryPermissions().contains(Manifest.permission.RECORD_AUDIO),
-            "RECORD_AUDIO must only be asked from the mic button",
+            "RECORD_AUDIO is asked from the mic button or when a Live call starts, never at startup",
         )
         recordAudioGranted = true
         assertTrue(permissions.recordAudioGranted())

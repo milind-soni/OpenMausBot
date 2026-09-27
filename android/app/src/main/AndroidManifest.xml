@@ -30,11 +30,18 @@
         android:name="android.hardware.camera.autofocus"
         android:required="false" />
     <!--
-      Composer dictation only. Asked at the mic button, never at startup — the
-      app is fully usable without it, and the IME's own mic is not a substitute
-      for this lifecycle (frozen base, partials, teardown).
+      Composer dictation and Live calls. Asked at the mic button or when a
+      call starts, never at startup — the app is fully usable without it, and
+      the IME's own mic is not a substitute for this lifecycle (frozen base,
+      partials, teardown).
     -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!--
+      Live calls route the voice to the speaker or the earpiece through
+      AudioManager (MODE_IN_COMMUNICATION, setCommunicationDevice). A normal
+      permission, granted at install; the WebRTC AAR declares none itself.
+    -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-feature
         android:name="android.hardware.microphone"
         android:required="false" />

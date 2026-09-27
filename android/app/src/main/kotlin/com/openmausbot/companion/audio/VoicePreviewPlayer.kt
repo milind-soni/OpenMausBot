@@ -10,6 +10,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.openmausbot.companion.ui.LiveCallRules
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,10 +49,12 @@ class VoicePreviewPlayer internal constructor(
     constructor(
         context: Context,
         processLifecycle: Lifecycle = ProcessLifecycleOwner.get().lifecycle,
+        /** This phone's Live call holds the audio ([AudioFocusGate]). */
+        liveCallHoldsAudio: () -> Boolean = { false },
     ) : this(
         controller = VoicePreviewController(
             engineFactory = { MediaPlayerPreviewEngine() },
-            focus = AudioFocusGate(context.applicationContext),
+            focus = AudioFocusGate(context.applicationContext, liveCallHoldsAudio),
         ),
         processLifecycle = processLifecycle,
     )
@@ -146,6 +149,9 @@ class VoicePreviewController(
     val playbackErrors: SharedFlow<String> = _playbackErrors.asSharedFlow()
 
     fun play(data: ByteArray): String? = synchronized(lock) {
+        // Never while this phone's Live call holds the audio: a preview
+        // fetched before the call started would take its focus and end it.
+        if (focus.heldByLiveCall) return DURING_LIVE_CALL
         stopInternal(abandonFocus = true)
         if (!focus.request(onInterrupted = ::onFocusInterrupted)) {
             focus.abandon()
@@ -227,6 +233,9 @@ class VoicePreviewController(
     companion object {
         /** `AgentProfileView.previewVoice` failure copy. */
         const val PLAYBACK_ERROR: String = "The generated audio could not be played."
+
+        /** The refusal while this phone's Live call holds the audio. */
+        const val DURING_LIVE_CALL: String = LiveCallRules.PREVIEW_DURING_CALL
     }
 }
 
@@ -247,13 +256,27 @@ interface PreviewAudioFocus {
      */
     fun request(onInterrupted: () -> Unit): Boolean
     fun abandon()
+
+    /**
+     * This phone's Live call holds the audio. Nothing may ask for the focus
+     * then: a voice note or a preview that took it would end the call.
+     */
+    val heldByLiveCall: Boolean get() = false
 }
 
+/**
+ * The one gate voice notes and voice previews ask for the audio through. It
+ * refuses while this phone's Live call holds the audio ([liveCallHoldsAudio],
+ * the call manager's `holdsMedia`), as the iPhone's `VoiceNoteCenter` does.
+ */
 internal class AudioFocusGate(
     context: Context,
+    private val liveCallHoldsAudio: () -> Boolean = { false },
 ) : PreviewAudioFocus {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var focusRequest: AudioFocusRequest? = null
+
+    override val heldByLiveCall: Boolean get() = liveCallHoldsAudio()
 
     private val attributes: AudioAttributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_MEDIA)

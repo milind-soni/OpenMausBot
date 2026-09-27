@@ -2,6 +2,7 @@ package com.openmausbot.companion
 
 import android.app.Application
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.openmausbot.companion.audio.LiveCallManager
 import com.openmausbot.companion.audio.VoicePreviewPlayer
 import com.openmausbot.companion.audio.VoiceNotePlayer
 import com.openmausbot.companion.avatar.AvatarImageStore
@@ -57,6 +58,8 @@ class OpenMausApp : Application() {
         private set
     lateinit var voiceNotes: VoiceNotePlayer
         private set
+    lateinit var liveCalls: LiveCallManager
+        private set
     lateinit var linger: SessionLingerController
         private set
     lateinit var shareInbox: ShareInbox
@@ -89,8 +92,18 @@ class OpenMausApp : Application() {
             notificationSink = notifications,
         )
         avatars = AvatarImageStore(fetch = session::avatarData)
-        voicePreview = VoicePreviewPlayer(this)
-        voiceNotes = VoiceNotePlayer(this)
+        // Live calls hold media across screens, and end when the process
+        // leaves the foreground — not when a rotation recreates the Activity —
+        // so the manager is app-scoped and observes the process lifecycle, as
+        // the linger controller below does.
+        liveCalls = LiveCallManager(this, session, appScope)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(liveCalls)
+        // A voice note or a voice preview asks for the audio focus, and the
+        // call ends when it loses that focus: both players refuse while the
+        // call holds the audio, whatever asks them to play.
+        val liveCallHoldsAudio = { liveCalls.state.value.holdsMedia }
+        voicePreview = VoicePreviewPlayer(this, liveCallHoldsAudio = liveCallHoldsAudio)
+        voiceNotes = VoiceNotePlayer(this, liveCallHoldsAudio = liveCallHoldsAudio)
 
         // iOS resets the avatar cache inside signOut. Observe Unpaired here so
         // the platform cache cannot outlive the pairing that minted its URLs.

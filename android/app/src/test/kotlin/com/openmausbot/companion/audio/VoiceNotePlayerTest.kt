@@ -253,10 +253,44 @@ class VoiceNotePlayerTest {
         assertEquals(1, focus.abandons)
     }
 
+    /**
+     * The one place a note asks for the audio refuses it while this phone's
+     * Live call holds it, however the request got there (a download that
+     * finished after the call started, a resume): the call would lose the
+     * focus and end. Nothing playing or paused is touched.
+     */
+    @Test
+    fun `a Live call holding the audio refuses play and resume without asking for the focus`() {
+        val focus = FakeFocus(grant = true)
+        val engines = ArrayDeque<FakeEngine>()
+        val controller = VoiceNoteController(
+            engineFactory = { FakeEngine(ok = true).also(engines::add) },
+            focus = focus,
+        )
+        assertNull(controller.play("a", byteArrayOf(1)))
+        controller.pause()
+        val paused = controller.playback.value
+        assertEquals(1, focus.requests)
+
+        focus.callHolds = true
+        assertEquals(VoiceNoteController.DURING_LIVE_CALL, controller.play("b", byteArrayOf(2)))
+        assertEquals(VoiceNoteController.DURING_LIVE_CALL, controller.resume())
+        assertEquals(1, focus.requests, "no focus asked for while the call holds it")
+        assertEquals(1, engines.size, "no engine made")
+        assertEquals(0, engines.single().releases, "the paused note is kept")
+        assertEquals(paused, controller.playback.value)
+
+        focus.callHolds = false
+        assertNull(controller.resume())
+        assertTrue(controller.playback.value?.playing == true)
+    }
+
     private class FakeFocus(var grant: Boolean) : PreviewAudioFocus {
         var requests = 0
         var abandons = 0
         var lastOnInterrupted: (() -> Unit)? = null
+        var callHolds = false
+        override val heldByLiveCall: Boolean get() = callHolds
 
         override fun request(onInterrupted: () -> Unit): Boolean {
             requests += 1

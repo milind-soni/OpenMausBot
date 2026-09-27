@@ -81,6 +81,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.openmausbot.companion.audio.VoiceNoteController
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.AttachedMessageContent
 import com.openmausbot.companion.core.generatedImages
@@ -176,6 +177,11 @@ fun MessageRow(
                     fontSize = 12.sp,
                     color = secondaryTint,
                 )
+            }
+
+            // A request the person spoke on a Live call; the harness labels it.
+            if (mine && message.via == "call") {
+                Text(text = "via call", fontSize = 12.sp, color = secondaryTint)
             }
 
             message.reactions?.takeIf { it.isNotEmpty() }?.let { reactions ->
@@ -727,6 +733,10 @@ private fun voiceNoteClock(ms: Long): String {
  * rather than talking over it. The clip's bytes are fetched through the same
  * authenticated file route as image thumbnails, but only on first play — a
  * note nobody opens costs no request, and a replay never refetches.
+ *
+ * While this phone is on a Live call the play button is off, with the reason
+ * under the bubble: a note asks for the audio focus the call holds, and the
+ * call ends when it loses it (as the profile sheet keeps its voice preview off).
  */
 @Composable
 private fun VoiceNoteAttachmentView(
@@ -737,6 +747,8 @@ private fun VoiceNoteAttachmentView(
     val foreground = if (message.role == Message.Role.USER) BubbleColor.mineText else MaterialTheme.colorScheme.onSurface
     val session = LocalCompanion.current.session
     val player = LocalCompanion.current.voiceNotes
+    val liveCall by LocalCompanion.current.liveCalls.state.collectAsState()
+    val callHoldsAudio = liveCall.holdsMedia
     val scope = rememberCoroutineScope()
     val key = remember(message.id, note.path) { message.id + ":" + note.path }
     var clip by remember(message.id, note.path) { mutableStateOf<VoiceNoteClipState>(VoiceNoteClipState.NotLoaded) }
@@ -744,7 +756,10 @@ private fun VoiceNoteAttachmentView(
     var scrub by remember(key) { mutableStateOf<Float?>(null) }
 
     fun startPlayback(data: ByteArray) {
-        if (player.play(key, data) != null) clip = VoiceNoteClipState.Failed
+        val failure = player.play(key, data) ?: return
+        // A Live call took the audio while the clip downloaded: the player
+        // refused it, and the clip waits, ready, for the call to end.
+        if (failure != VoiceNoteController.DURING_LIVE_CALL) clip = VoiceNoteClipState.Failed
     }
 
     fun loadAndPlay() {
@@ -797,74 +812,89 @@ private fun VoiceNoteAttachmentView(
     val durationSeconds = durationMs?.let { it / 1000f } ?: 0f
     val positionMs = scrub?.toLong() ?: (active?.positionMs ?: 0L)
 
-    Row(
-        modifier = Modifier
-            .widthIn(max = 360.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(foreground.copy(alpha = 0.10f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
+    // Pausing never takes the audio; starting or resuming would.
+    val playable = playing || !callHoldsAudio
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
             modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary)
-                .clickable(role = Role.Button) {
-                    when {
-                        playing -> player.pause()
-                        clip is VoiceNoteClipState.Loading -> Unit
-                        active != null && player.resumable(key) ->
-                            if (player.resume() != null) clip = VoiceNoteClipState.Failed
-                        clip is VoiceNoteClipState.Ready ->
-                            startPlayback((clip as VoiceNoteClipState.Ready).data)
-                        else -> loadAndPlay()
-                    }
-                }
-                .semantics {
-                    contentDescription = if (playing) "Pause voice note" else "Play voice note"
-                },
-            contentAlignment = Alignment.Center,
+                .widthIn(max = 360.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(foreground.copy(alpha = 0.10f))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            when {
-                clip is VoiceNoteClipState.Loading && active == null ->
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = Color.White,
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = if (playable) 1f else 0.38f))
+                    .clickable(role = Role.Button, enabled = playable) {
+                        when {
+                            playing -> player.pause()
+                            // Disabled is how it looks; this is what stops a tap
+                            // that reaches the click action anyway.
+                            callHoldsAudio -> Unit
+                            clip is VoiceNoteClipState.Loading -> Unit
+                            active != null && player.resumable(key) ->
+                                player.resume()?.let { if (it != VoiceNoteController.DURING_LIVE_CALL) clip = VoiceNoteClipState.Failed }
+                            clip is VoiceNoteClipState.Ready ->
+                                startPlayback((clip as VoiceNoteClipState.Ready).data)
+                            else -> loadAndPlay()
+                        }
+                    }
+                    .semantics {
+                        contentDescription = if (playing) "Pause voice note" else "Play voice note"
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    clip is VoiceNoteClipState.Loading && active == null ->
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White,
+                        )
+                    playing -> VoiceNotePauseGlyph(Color.White)
+                    else -> Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
                     )
-                playing -> VoiceNotePauseGlyph(Color.White)
-                else -> Icon(
-                    imageVector = Icons.Filled.PlayArrow,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp),
-                )
+                }
             }
+            Slider(
+                // The slider works in seconds; without an explicit range Compose clamps
+                // it to 0f..1f and scrubs can only land inside the first second.
+                value = if (durationSeconds > 0f) (positionMs / 1000f).coerceIn(0f, durationSeconds) else 0f,
+                valueRange = if (durationSeconds > 0f) 0f..durationSeconds else 0f..1f,
+                onValueChange = { scrub = it * 1000f },
+                onValueChangeFinished = {
+                    val target = scrub
+                    scrub = null
+                    if (target != null && active != null) player.seek(key, target.toLong())
+                },
+                // Like the desktop range input: no scrubbing until the length is known.
+                enabled = active != null && durationMs != null,
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { contentDescription = "Seek voice note" },
+            )
+            Text(
+                voiceNoteClock(positionMs) + " / " + (durationMs?.let(::voiceNoteClock) ?: "--:--"),
+                fontSize = 11.sp,
+                color = foreground.copy(alpha = 0.80f),
+            )
         }
-        Slider(
-            // The slider works in seconds; without an explicit range Compose clamps
-            // it to 0f..1f and scrubs can only land inside the first second.
-            value = if (durationSeconds > 0f) (positionMs / 1000f).coerceIn(0f, durationSeconds) else 0f,
-            valueRange = if (durationSeconds > 0f) 0f..durationSeconds else 0f..1f,
-            onValueChange = { scrub = it * 1000f },
-            onValueChangeFinished = {
-                val target = scrub
-                scrub = null
-                if (target != null && active != null) player.seek(key, target.toLong())
-            },
-            // Like the desktop range input: no scrubbing until the length is known.
-            enabled = active != null && durationMs != null,
-            modifier = Modifier
-                .weight(1f)
-                .semantics { contentDescription = "Seek voice note" },
-        )
-        Text(
-            voiceNoteClock(positionMs) + " / " + (durationMs?.let(::voiceNoteClock) ?: "--:--"),
-            fontSize = 11.sp,
-            color = foreground.copy(alpha = 0.80f),
-        )
+        if (!playable) {
+            Text(
+                LiveCallRules.VOICE_NOTE_DURING_CALL,
+                fontSize = 11.sp,
+                color = foreground.copy(alpha = 0.80f),
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
     }
 }
 

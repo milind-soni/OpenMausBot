@@ -7,6 +7,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.openmausbot.companion.ui.LiveCallRules
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -54,10 +55,12 @@ class VoiceNotePlayer internal constructor(
     constructor(
         context: Context,
         processLifecycle: Lifecycle = ProcessLifecycleOwner.get().lifecycle,
+        /** This phone's Live call holds the audio ([AudioFocusGate]). */
+        liveCallHoldsAudio: () -> Boolean = { false },
     ) : this(
         controller = VoiceNoteController(
             engineFactory = { MediaPlayerVoiceNoteEngine() },
-            focus = AudioFocusGate(context.applicationContext),
+            focus = AudioFocusGate(context.applicationContext, liveCallHoldsAudio),
         ),
         processLifecycle = processLifecycle,
     )
@@ -78,7 +81,9 @@ class VoiceNotePlayer internal constructor(
     /**
      * Start [key] from its beginning. Any note already playing is released
      * first (the one-voice rule: the newcomer takes the window's voice).
-     * @return null on success, or failure copy for the bubble's retry row.
+     * @return null on success, [VoiceNoteController.DURING_LIVE_CALL] while
+     * this phone's Live call holds the audio (the clip waits), or failure
+     * copy for the bubble's retry row.
      */
     fun play(key: String, data: ByteArray): String? = controller.play(key, data)
 
@@ -127,6 +132,11 @@ class VoiceNoteController(
     val playbackErrors: SharedFlow<VoiceNotePlaybackError> = _playbackErrors.asSharedFlow()
 
     fun play(key: String, data: ByteArray): String? = synchronized(lock) {
+        // The one place a note asks for the audio: never while this phone's
+        // Live call holds it, however the request got here (a download that
+        // finished after the call started, say). Losing the focus would end
+        // the call. Nothing playing or paused is touched.
+        if (focus.heldByLiveCall) return DURING_LIVE_CALL
         releaseInternal(abandonFocus = true)
         if (!focus.request(onInterrupted = ::onFocusInterrupted)) {
             focus.abandon()
@@ -185,6 +195,7 @@ class VoiceNoteController(
         val state = _playback.value ?: return null
         val current = engine ?: return null
         if (state.playing) return null
+        if (focus.heldByLiveCall) return DURING_LIVE_CALL
         if (!focus.request(onInterrupted = ::onFocusInterrupted)) {
             focus.abandon()
             return PLAYBACK_ERROR
@@ -293,6 +304,9 @@ class VoiceNoteController(
     companion object {
         /** Failure copy for the bubble's retry row. */
         const val PLAYBACK_ERROR: String = "The voice note could not be played."
+
+        /** The refusal while this phone's Live call holds the audio: not a failure, the clip waits. */
+        const val DURING_LIVE_CALL: String = LiveCallRules.VOICE_NOTE_DURING_CALL
     }
 }
 

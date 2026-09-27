@@ -100,6 +100,10 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val player = environment.voicePreview
+    // A running Live call holds the audio. A preview asks for transient focus,
+    // which would end the call as "another app took the audio" — the reason
+    // ChatScreen keeps dictation off during a call, too.
+    val liveCall by environment.liveCalls.state.collectAsState()
 
     // The record the sheet was opened on, so the form has an origin even after
     // the fleet drops the agent; `current` is what every action is applied to.
@@ -524,8 +528,11 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
                     ActionRow(
                         text = "Preview voice",
                         painter = R.drawable.ic_volume_up,
-                        enabled = ProfileRules.canPreview(busy, config, form.voice),
+                        enabled = ProfileRules.canPreview(busy, config, form.voice) && !liveCall.holdsMedia,
                         onClick = {
+                            // Disabled is how it looks; this is what stops a tap that
+                            // reaches the click action anyway.
+                            if (environment.liveCalls.state.value.holdsMedia) return@ActionRow
                             scope.launch {
                                 if (!ProfileRules.selectedVoiceCanSpeak(config, form.voice)) {
                                     session.actionError = ProfileRules.PREVIEW_REFUSED
@@ -554,6 +561,9 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
                             }
                         },
                     )
+                    if (liveCall.holdsMedia) {
+                        IconNote(text = LiveCallRules.PREVIEW_DURING_CALL, icon = Icons.Filled.Info)
+                    }
                     ProfileRules.pickAVoiceHint(config, form.voice)?.let { hint ->
                         IconNote(text = hint, icon = Icons.Filled.Info)
                     }

@@ -2,6 +2,12 @@ package com.openmausbot.companion.ui
 
 import android.app.Application
 import android.content.Context
+import com.openmausbot.companion.audio.LiveCallApi
+import com.openmausbot.companion.audio.LiveCallAudioRoute
+import com.openmausbot.companion.audio.LiveCallManager
+import com.openmausbot.companion.audio.LiveCallPreferences
+import com.openmausbot.companion.audio.LiveCallTransportFactory
+import com.openmausbot.companion.audio.SessionLiveCallApi
 import com.openmausbot.companion.audio.VoicePreviewPlayer
 import com.openmausbot.companion.audio.VoiceNotePlayer
 import com.openmausbot.companion.avatar.AvatarImageStore
@@ -60,6 +66,14 @@ internal class WiringScene(
     fleet: Fleet = Fleet(emptyList(), emptyList()),
     /** The transcript voice-note player; null builds a real one, tests inject a fake. */
     voiceNotes: VoiceNotePlayer? = null,
+    /** A fake WebRTC transport for the call bar tests; null builds the production manager, which never creates media on its own. */
+    liveTransports: LiveCallTransportFactory? = null,
+    /** The computer's side of a call, with [liveTransports]; null goes through the real session. */
+    liveApi: LiveCallApi? = null,
+    /** The phone's clock as the call manager reads it, with [liveTransports]. */
+    liveClock: () -> Long = System::currentTimeMillis,
+    /** Whether this phone already made a Live call (the first-call disclosure is behind it), with [liveTransports]. */
+    liveDisclosureShown: Boolean = true,
     /** The body of the nth stream (1-based). Hangs by default, like a live SSE. */
     private val events: (Int) -> Flow<StreamFrame> = { flow { awaitCancellation() } },
 ) {
@@ -90,6 +104,20 @@ internal class WiringScene(
         metadataFn = { throw APIError.Status(404) },
     )
 
+    /** The call manager, built before the players so they can ask it, as the app does. */
+    private val liveCalls: LiveCallManager = if (liveTransports == null) {
+        LiveCallManager(context, session, scope)
+    } else {
+        LiveCallManager(
+            api = liveApi ?: SessionLiveCallApi(session),
+            scope = scope,
+            transports = liveTransports,
+            audio = SilentAudio,
+            preferences = MemoryPreferences(disclosureShown = liveDisclosureShown),
+            clock = liveClock,
+        )
+    }
+
     val environment = CompanionEnvironment(
         session = session,
         permissions = CompanionPermissions(sdkInt = 34, granted = { true }),
@@ -107,8 +135,9 @@ internal class WiringScene(
             openSettings = {},
         ),
         avatars = AvatarImageStore(fetch = { null }),
-        voicePreview = VoicePreviewPlayer(context),
-        voiceNotes = voiceNotes ?: VoiceNotePlayer(context),
+        voicePreview = VoicePreviewPlayer(context, liveCallHoldsAudio = { liveCalls.state.value.holdsMedia }),
+        voiceNotes = voiceNotes ?: VoiceNotePlayer(context, liveCallHoldsAudio = { liveCalls.state.value.holdsMedia }),
+        liveCalls = liveCalls,
         dictation = SpeechDictation(
             context = context,
             hasRecordAudio = { false },
@@ -127,6 +156,18 @@ internal class WiringScene(
 
     private object SilentDiscovery : CompanionDiscovery {
         override fun discover(): Flow<DiscoveryState> = emptyFlow()
+    }
+
+    /** A fresh speaker choice per scene, so scenes cannot read each other's. */
+    private class MemoryPreferences(
+        override var speaker: Boolean = true,
+        override var disclosureShown: Boolean = true,
+    ) : LiveCallPreferences
+
+    private object SilentAudio : LiveCallAudioRoute {
+        override fun begin(speaker: Boolean, onFocusLost: () -> Unit) = Unit
+        override fun setSpeaker(speaker: Boolean) = Unit
+        override fun end() = Unit
     }
 
     private class FakeConnectionStore(private var saved: Connection?) : ConnectionStore {
