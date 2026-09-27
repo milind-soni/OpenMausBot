@@ -129,7 +129,7 @@ export async function daytonaProvider(config: NonNullable<HostedComputersConfig[
     },
     async get(id, name) { return machine(await client.get(id), name); },
     async create(name) {
-      const s = await client.create({ name, snapshot: config.snapshot, labels: { nation_owner: name },
+      const s = await client.create({ name, snapshot: config.snapshot, ...(config.user ? { user: config.user } : {}), labels: { nation_owner: name },
         public: false, autoStopInterval: 30, autoDeleteInterval: -1, ephemeral: false }, { timeout: 90 });
       return machine(s, name);
     },

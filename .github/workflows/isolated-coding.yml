@@ -33,6 +33,14 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Prepare Ubuntu's bubblewrap user namespace profile
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap apparmor-profiles apparmor-utils
+          if [ -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict ]; then
+            sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+            sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          fi
       - name: Install pinned CLI in a disposable directory
         run: npm install --prefix "$RUNNER_TEMP/nation-codex" --ignore-scripts --no-audit --no-fund @openai/codex@0.157.1
       - name: Real CLI and supervisor, synthetic model and billing
