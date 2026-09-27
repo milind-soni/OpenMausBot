@@ -62,7 +62,9 @@ struct CompactBotEntry: View {
         let _ = snoozeTick
         let live = session.state.bot(bot.id) ?? bot
         let queued = session.state.queuedThreadIds
-        let row = CompactBotRow(bot: live, hasPendingCard: hasPendingCard, queuedThreadIds: queued)
+        let row = CompactBotRow(
+            bot: live, hasPendingCard: hasPendingCard, queuedThreadIds: queued, creatingThread: creating
+        )
         VStack(alignment: .leading, spacing: 0) {
             rowLine(live, row)
             if row.listsThreads(expanded: expanded, searching: searching) {
@@ -90,7 +92,9 @@ struct CompactBotEntry: View {
                     let status = RowStatus(
                         waiting: row.showsWaiting, working: row.showsSpinner,
                         stamp: row.showsTime ? RelativeStamp.list(lastActivity) : "",
-                        color: bot.color
+                        color: bot.color,
+                        // the spinner also stands for a thread being made
+                        spinnerLabel: row.status == .working ? "Working" : "Creating…"
                     )
                     if typeSize.isAccessibilitySize {
                         // One line cannot hold a name and a time at these
@@ -546,6 +550,8 @@ private struct RowStatus: View {
     let working: Bool
     let stamp: String
     let color: String
+    /// What VoiceOver calls the spinner.
+    var spinnerLabel: LocalizedStringKey = "Working"
 
     var body: some View {
         HStack(spacing: 6) {
@@ -558,7 +564,7 @@ private struct RowStatus: View {
             if working {
                 ProgressView()
                     .controlSize(.small)
-                    .accessibilityLabel("Working")
+                    .accessibilityLabel(spinnerLabel)
             } else if !stamp.isEmpty {
                 Text(verbatim: stamp)
                     .font(.subheadline)

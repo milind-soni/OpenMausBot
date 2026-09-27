@@ -105,22 +105,32 @@ public struct CompactBotRow: Equatable, Sendable {
     /// hidden while its conversation is busy — which the harness also
     /// reports while the bot waits on the person or on a teammate.
     public let showsUnreadDot: Bool
+    /// A thread asked for from this row — its long-press menu or the
+    /// "+ New thread" line — is being made.
+    public let creatingThread: Bool
 
-    public init(bot: Bot, hasPendingCard: Bool, queuedThreadIds: Set<String> = []) {
+    public init(
+        bot: Bot,
+        hasPendingCard: Bool,
+        queuedThreadIds: Set<String> = [],
+        creatingThread: Bool = false
+    ) {
         status = bot.rosterStatus(hasPendingCard: hasPendingCard)
         threadCount = bot.rosterThreadCount(queuedThreadIds: queuedThreadIds)
         showsChiefBadge = bot.chiefOfStaff == true
         showsUnreadDot = bot.unread && bot.busy != true
+        self.creatingThread = creatingThread
     }
 
     /// Only a bot with a list to open gets "› N". One thread is the bot
     /// itself: tapping the row already opens it.
     public var showsThreadControl: Bool { threadCount >= 2 }
 
-    /// The spinner stands where the time was.
-    public var showsTime: Bool { status != .working }
+    /// The spinner stands where the time was: while a thread works, and
+    /// while a new one is being made, so a long press shows progress too.
+    public var showsSpinner: Bool { creatingThread || status == .working }
 
-    public var showsSpinner: Bool { status == .working }
+    public var showsTime: Bool { !showsSpinner }
 
     public var showsWaiting: Bool { status == .waitingOnYou }
 

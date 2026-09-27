@@ -229,6 +229,27 @@ final class RosterDensityTests: XCTestCase {
         XCTAssertTrue(row.showsTime)
     }
 
+    func testCreatingAThreadShowsTheSpinnerInPlaceOfTheTime() {
+        let resting = CompactBotRow(bot: bot(tasks: [task("a")]), hasPendingCard: false)
+        XCTAssertFalse(resting.showsSpinner)
+        XCTAssertTrue(resting.showsTime)
+
+        let creating = CompactBotRow(bot: bot(tasks: [task("a")]), hasPendingCard: false, creatingThread: true)
+        XCTAssertEqual(creating.status, .idle)
+        XCTAssertTrue(creating.showsSpinner)
+        XCTAssertFalse(creating.showsTime)
+    }
+
+    func testCreatingKeepsTheHandBesideTheSpinner() {
+        var bot = bot(tasks: [task("a")])
+        bot.busy = true
+        bot.activity = "waiting-on-you"
+        let row = CompactBotRow(bot: bot, hasPendingCard: false, creatingThread: true)
+        XCTAssertTrue(row.showsWaiting)
+        XCTAssertTrue(row.showsSpinner)
+        XCTAssertFalse(row.showsTime)
+    }
+
     func testOnlyTheChiefOfStaffWearsTheCrown() {
         var chief = bot(tasks: [task("a")])
         chief.chiefOfStaff = true
