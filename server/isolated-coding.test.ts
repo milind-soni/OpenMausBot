@@ -138,8 +138,10 @@ it.skipIf(!process.env.NATION_TEST_CODEX_BIN)("real Codex CLI edits a file throu
   const f = await fixture();
   try {
     let calls = 0;
+    const toolOutputs: unknown[] = [];
     f.upstream.mockImplementation(async (_url, init) => {
       const body = JSON.parse(init.body);
+      toolOutputs.push(...body.input.filter((item: any) => item.type === "function_call_output"));
       const commandTool = body.tools.find((t: any) => t.name === "exec_command" || t.name === "shell");
       const item = ++calls === 1 ? {
         type: "function_call", id: "fc_1", call_id: "call_1", name: commandTool?.name,
@@ -163,7 +165,7 @@ it.skipIf(!process.env.NATION_TEST_CODEX_BIN)("real Codex CLI edits a file throu
     const log = readFileSync(join(f.root, `.nation-coding/project/.runs/${task.taskId}/events.jsonl`), "utf8");
     await vi.waitFor(() => expect(f.coding.status(f.alice, task.taskId).state, `Model requests: ${calls}\nRequest shapes: ${JSON.stringify(f.requestShapes)}\n${log}`).toBe("completed"));
     const edited = join(f.root, ".nation-coding/project/coding-smoke.txt");
-    expect(existsSync(edited), `Model requests: ${calls}\n${log}`).toBe(true);
+    expect(existsSync(edited), `Model requests: ${calls}\nTool results: ${JSON.stringify(toolOutputs)}\n${log}`).toBe(true);
     expect(readFileSync(edited, "utf8")).toBe("CODING_SMOKE");
     expect(calls).toBe(2);
     expect(f.charges.every(c => c.settle.mock.calls[0]?.[0] === 0.02)).toBe(true);

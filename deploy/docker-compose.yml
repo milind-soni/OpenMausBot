@@ -14,7 +14,7 @@ services:
       args:
         ENGINES: ${ENGINES:-}
     # prebuilt on every main push; `docker compose up --build` builds from source instead
-    image: ghcr.io/milind-soni/openmausbot:latest
+    image: ghcr.io/devnord23/nation-team-chat:latest
     restart: unless-stopped
     volumes:
       - data:/data

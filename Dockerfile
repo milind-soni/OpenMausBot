@@ -30,7 +30,9 @@ COPY cloudflare/control-plane/package.json ./cloudflare/control-plane/package.js
 COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs
 RUN pnpm install --frozen-lockfile
 COPY . .
-RUN pnpm build:server && pnpm exec vite build
+# This server serves the SPA and API at the origin root. The Vercel build's
+# /swarm/ prefix is handled by Vercel rewrites, which are absent here.
+RUN pnpm build:server && pnpm exec vite build --base / --outDir dist
 
 FROM node:24-bookworm-slim
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
