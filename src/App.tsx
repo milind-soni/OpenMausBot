@@ -312,9 +312,11 @@ function Shell() {
               <Loader2 size={20} className="animate-spin" />
               <div className="text-center">
                 <div className="text-[14px]">Connecting to the bot server…</div>
-                <div className="mt-1 text-[12px]">
-                  Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
-                </div>
+                {import.meta.env.DEV ? (
+                  <div className="mt-1 text-[12px]">
+                    Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
+                  </div>
+                ) : null}
               </div>
             </>
           )}

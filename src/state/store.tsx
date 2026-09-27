@@ -1612,6 +1612,11 @@ export function reducer(state: AppState, action: Action): AppState {
       const switchedThread =
         typeof action.bot.threadId === "string" && action.bot.threadId !== before.threadId &&
         !action.bot.tasks?.some((task) => task.threadId === before.threadId);
+      // An empty thread is an account's conversation before it is claimed.
+      // Going to it leaves no transcript to wait for, and one announced from
+      // it was just created, empty. No snapshot follows either announcement,
+      // so waiting would keep the composer locked for good.
+      const awaitsSnapshot = switchedThread && Boolean(before.threadId) && Boolean(action.bot.threadId);
       // As with explicit navigation, the snapshot already includes events
       // buffered while its thread was in the background. Replay only races
       // after this switch begins, not older approval patches.
@@ -1632,7 +1637,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...action.bot,
         threadId: switchedThread ? action.bot.threadId : b.threadId,
         activeLeafId: switchedThread ? null : b.activeLeafId,
-        awaitingThreadSnapshot: switchedThread || b.awaitingThreadSnapshot,
+        awaitingThreadSnapshot: switchedThread ? awaitsSnapshot : b.awaitingThreadSnapshot,
         // Complete bot frames omit this optional field after switching back
         // to Own browser (or deleting a shared profile). Do not retain the
         // previous profile's name and selection in another window.

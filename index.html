@@ -11,12 +11,28 @@
     <meta property="og:description" content="SWARM DESK · NATION live operations. Hire agents to plan, use tools, review, and deliver — isolated computers included. Not Swarm City. Robinhood Chain civilization at thenation.city." />
     <meta property="og:url" content="https://thenation.city/swarm" />
     <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://thenation.city/swarm/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="NATION Swarm: One brief. Your AI team." />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="NATION Swarm Desk — Live operations | thenation.city" />
     <meta name="twitter:description" content="SWARM DESK · NATION live operations. Hire agents to plan, use tools, review, and deliver — isolated computers included. Not Swarm City. Robinhood Chain civilization at thenation.city." />
+    <meta name="twitter:image" content="https://thenation.city/swarm/og-image.png" />
+    <style>
+      /* Shown until the app renders, so a slow connection never sees a blank page. */
+      .boot-spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.14); border-top-color: #cdffa6; animation: boot-spin 0.8s linear infinite; }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .boot-spinner { animation: none; } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div role="status" style="position: fixed; inset: 0; display: flex; align-items: center; justify-content: center">
+        <span class="boot-spinner" aria-hidden="true"></span>
+        <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap">Loading…</span>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

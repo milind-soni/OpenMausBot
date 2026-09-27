@@ -2,7 +2,8 @@
  * Nation credit top-up UX.
  *
  * Full Plans is the one place credit is bought:
- *   – thenation.city/subscription (vercel.json rewrite) and <base>/subscription render it
+ *   – <base>subscription renders it (thenation.city/swarm/subscription); the root
+ *     /subscription still does wherever it reaches the app, for links shared before
  *   – ?pack=15|49|99 starts checkout for that pack; ?asset=USDG|NATION pre-selects the pay token
  *   – the top strip's "Top up", Settings → Billing & Credits and the account menu's
  *     "Add credits" all navigate there with a full page load
@@ -20,13 +21,13 @@ import { cn } from "@/lib/cn";
 
 const BASE_URL = import.meta.env.BASE_URL;
 
-/** Where Full Plans lives. Production hosts answer thenation.city/subscription (a vercel.json
- * rewrite; the desktop server serves the app for every path), while the Vite dev server only
- * serves paths under the base. */
-export function fullPlansHref(dev: boolean, base: string): string {
-  return dev ? `${base}subscription`.replace(/\/\//g, "/") : "/subscription";
+/** Where Full Plans lives: under the app's own base, the one prefix every host forwards to
+ * the app. thenation.city sends only /swarm/* here, so its root /subscription is the city
+ * site's 404 page. */
+export function fullPlansHref(base: string): string {
+  return `${base}subscription`.replace(/\/\//g, "/");
 }
-export const FULL_PLANS_HREF = fullPlansHref(import.meta.env.DEV, BASE_URL);
+export const FULL_PLANS_HREF = fullPlansHref(BASE_URL);
 
 /** The public URL and the base-relative one both render Full Plans. */
 export function isFullPlansPath(pathname: string, base: string): boolean {

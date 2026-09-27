@@ -22,7 +22,7 @@ export function PhonePreview({ className }: { className?: string }) {
           </div>
           {/* chat header */}
           <div className="flex items-center gap-1.5 border-b border-hairline/40 px-3 py-1.5">
-            <img src="/bot-faces/coordinator.svg" alt="" width={16} height={16} style={{ borderRadius: "4px" }} />
+            <img src={`${import.meta.env.BASE_URL}bot-faces/coordinator.svg`} alt="" width={16} height={16} style={{ borderRadius: "4px" }} />
             <span className="text-[9.5px] font-semibold text-ink">Nation</span>
             <span className="ml-auto size-1.5 rounded-full bg-success" />
           </div>

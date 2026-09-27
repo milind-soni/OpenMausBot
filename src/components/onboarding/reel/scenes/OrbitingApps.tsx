@@ -163,7 +163,7 @@ export function OrbitingApps({ playing, onCue, onEnded, label }: SceneProps) {
       <div className="absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2">
         <div className="absolute inset-0 -m-6 rounded-full bg-accent/15 blur-2xl" aria-hidden="true" />
         <div className="relative drop-shadow-[0_10px_24px_rgba(0,0,0,0.4)]">
-          <img src="/bot-faces/coordinator.svg" alt="NATION bot" width={76} height={76} style={{ display: "block", borderRadius: "18px" }} />
+          <img src={`${import.meta.env.BASE_URL}bot-faces/coordinator.svg`} alt="NATION bot" width={76} height={76} style={{ display: "block", borderRadius: "18px" }} />
         </div>
       </div>
 

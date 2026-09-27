@@ -219,6 +219,11 @@ The [member workspace computers record](workspace-computers-2026-09-27.md) cover
 computer and a guarded browser for each member workspace, isolated from the founder desk and
 from each other, with the live check that must pass before public invites open.
 
+The [signup landing record](paid-acquisition-2026-09-27.md) covers the product introduction
+before sign-in and opt-in registration measurement. The [ad visitor journey record](ad-visitor-journey-2026-09-27.md)
+follows a phone visitor from an ad through signup, a first reply and Top up on the production
+build, with the API failing and a deploy landing mid-visit.
+
 Keep the JSON from `wait` and `messages`, the exact command sequence, and the
 fixture's printed log path. Evidence must show both the action and the resulting
 state. A green unit test alone does not prove a user workflow.

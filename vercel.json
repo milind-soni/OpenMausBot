@@ -90,7 +90,7 @@
       "destination": "/swarm/admin/index.html"
     },
     {
-      "source": "/swarm/:path*",
+      "source": "/swarm/((?!assets/).*)",
       "destination": "/swarm/index.html"
     }
   ],

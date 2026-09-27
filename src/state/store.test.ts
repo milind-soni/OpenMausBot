@@ -211,6 +211,21 @@ describe("independent bot threads", () => {
     expect(state.backgroundThreadEvents.second).toBeUndefined();
   });
 
+  it("keeps a new account's first conversation open to typing when its first announcements replay", () => {
+    // A new account's first load: the snapshot already holds the conversation
+    // created for it, then the frames queued behind it replay: the bot as it
+    // was announced before that conversation was claimed (no thread, no tasks
+    // this account can see), then as announced once it was.
+    const mine = { threadId: "mine", title: "New task", createdAt: 3, busy: false, activity: "idle" as const, unread: false };
+    const fresh = { ...bot, busy: false, unread: false, activity: "idle" as const, threadId: "mine", tasks: [mine], messages: [], activeLeafId: null };
+    const { messages: _messages, ...announced } = fresh;
+    let state: ReturnType<typeof reducer> = { ...start(), bots: [fresh] };
+    state = reducer(state, { type: "botPatched", bot: { ...announced, threadId: "", tasks: [] } });
+    expect(state.bots[0]?.awaitingThreadSnapshot).toBe(false);
+    state = reducer(state, { type: "botPatched", bot: announced });
+    expect(state.bots[0]).toMatchObject({ threadId: "mine", tasks: [mine], messages: [], awaitingThreadSnapshot: false });
+  });
+
   it("switches atomically when a deletion's full snapshot arrives first", () => {
     const full = { ...bot, threadId: "second", activeLeafId: null, tasks: bot.tasks!.slice(1), messages: [] };
     let state = reducer(start(), { type: "botPatched", bot: full });

@@ -88,7 +88,7 @@ export function AgentChat({ playing, onCue, onEnded, label }: SceneProps) {
         <div className="flex items-start gap-2.5">
           <div className="shrink-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.35)]">
             <img
-              src="/bot-faces/coordinator.svg"
+              src={`${import.meta.env.BASE_URL}bot-faces/coordinator.svg`}
               alt="Nation bot"
               width={34}
               height={34}
