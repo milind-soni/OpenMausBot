@@ -221,6 +221,7 @@ struct CompactBotEntry: View {
             matching: bot.name.localizedCaseInsensitiveContains(query) ? "" : query,
             queuedThreadIds: queued
         )
+        let labelsUnfiled = groups.labelsUnfiledThreads
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(groups) { group in
                 if let folder = group.project {
@@ -229,6 +230,9 @@ struct CompactBotEntry: View {
                         threadLines(group.tasks, bot: bot)
                     }
                 } else {
+                    if labelsUnfiled {
+                        unfiledLabel(bot)
+                    }
                     threadLines(group.tasks, bot: bot)
                 }
             }
@@ -272,6 +276,19 @@ struct CompactBotEntry: View {
         .accessibilityLabel(Text(verbatim: folder.name))
         .accessibilityValue(open ? "Expanded" : "Collapsed")
         .accessibilityIdentifier("folder.\(bot.id).\(folder.id)")
+    }
+
+    /// Unfiled threads start on the same edge as a folder's, so after a
+    /// folder they need a label of their own — the desktop's "Threads".
+    private func unfiledLabel(_ bot: Bot) -> some View {
+        Text("Threads")
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(Color.secondary)
+            .padding(.top, 10)
+            .padding(.bottom, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("unfiled-threads.\(bot.id)")
     }
 
     private func threadLines(_ tasks: [BotTask], bot: Bot) -> some View {

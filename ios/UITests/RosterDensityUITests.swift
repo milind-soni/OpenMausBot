@@ -77,7 +77,24 @@ final class RosterDensityUITests: XCTestCase {
         XCTAssertTrue(name.exists)
         XCTAssertEqual(gmail.frame.minX, name.frame.minX, accuracy: 1)
         XCTAssertEqual(newThread.frame.minX, name.frame.minX, accuracy: 1)
+        // "Plan weekend" is in no folder: it sits under its own label, on
+        // the name's edge, and stays when the Email folder closes.
+        let unfiled = app.descendants(matching: .any)["unfiled-threads.roster-pepper"]
+        XCTAssertTrue(unfiled.exists)
+        XCTAssertEqual(unfiled.label, "Threads")
+        XCTAssertEqual(unfiled.frame.minX, name.frame.minX, accuracy: 1)
+        XCTAssertLessThan(unfiled.frame.maxY, app.buttons["thread.roster-pepper-weekend"].frame.minY + 1)
         recordScreenshot("Pepper's threads opened in place", in: app)
+
+        let email = app.buttons["folder.roster-pepper.email"]
+        email.tap()
+        XCTAssertEqual(email.value as? String, "Collapsed")
+        assertMissing(gmail)
+        XCTAssertTrue(app.buttons["thread.roster-pepper-weekend"].exists)
+        XCTAssertTrue(unfiled.exists)
+        recordScreenshot("Email folder closed, unfiled thread under its label", in: app)
+        email.tap()
+        XCTAssertTrue(gmail.waitForExistence(timeout: 5))
 
         app.buttons["thread.roster-pepper-icloud"].tap()
         assertThread("Triage iCloud", in: app)

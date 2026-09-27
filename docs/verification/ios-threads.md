@@ -52,7 +52,9 @@ folder, one queued) and a hidden routine run, a bot waiting on you, a working
 bot, groups, a bot-to-bot chat and named sections with their own Chief. It
 checks that compact is the default; that a single-thread bot has no thread
 control but its long-press menu offers **New thread**; that Pepper's **› 3**
-lists its threads in line with its name and ends with **New thread**; that
+lists its threads in line with its name and ends with **New thread**, with its
+unfiled thread under a **Threads** label that stays when the Email folder
+closes; that
 **Settings → List density** switches to comfortable and is remembered across
 launches; and, in both densities, that the first section title clears the
 header's buttons and the last row, scrolled to the end, sits wholly above the

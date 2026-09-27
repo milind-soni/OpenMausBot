@@ -94,6 +94,16 @@ extension Bot {
     }
 }
 
+extension [BotThreadGroup] {
+    /// A compact thread list starts every line on the bot's name, folders
+    /// included, so unfiled threads right after a folder would read as part
+    /// of it. They get a quiet "Threads" label whenever a folder is listed
+    /// above them, as the desktop's thread list does.
+    public var labelsUnfiledThreads: Bool {
+        contains { $0.project != nil } && contains { $0.project == nil }
+    }
+}
+
 /// What one bot's line in the compact list shows, as data.
 public struct CompactBotRow: Equatable, Sendable {
     public let status: RosterRowStatus

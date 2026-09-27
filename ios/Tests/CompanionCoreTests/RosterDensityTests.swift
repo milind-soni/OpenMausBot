@@ -250,6 +250,35 @@ final class RosterDensityTests: XCTestCase {
         XCTAssertFalse(row.showsTime)
     }
 
+    // MARK: - The thread list
+
+    func testUnfiledThreadsBelowAFolderGetALabel() {
+        var filed = task("a")
+        filed.projectId = "email"
+        let bot = bot(tasks: [filed, task("b")], projects: [BotProject(id: "email", name: "Email")])
+        XCTAssertTrue(bot.threadGroups().labelsUnfiledThreads)
+    }
+
+    func testNoLabelWithoutBothAFolderAndUnfiledThreads() {
+        var filed = task("a")
+        filed.projectId = "email"
+        let email = BotProject(id: "email", name: "Email")
+        XCTAssertFalse(bot(tasks: [task("a"), task("b")]).threadGroups().labelsUnfiledThreads)
+        XCTAssertFalse(bot(tasks: [filed], projects: [email]).threadGroups().labelsUnfiledThreads)
+        XCTAssertFalse([BotThreadGroup]().labelsUnfiledThreads)
+    }
+
+    /// A search that matches only unfiled threads shows no folder, so no label.
+    func testSearchWithoutAFolderMatchDropsTheLabel() {
+        var filed = task("a")
+        filed.projectId = "email"
+        var plan = task("plan")
+        plan.title = "Plan weekend"
+        let bot = bot(tasks: [filed, plan], projects: [BotProject(id: "email", name: "Email")])
+        XCTAssertFalse(bot.threadGroups(matching: "Plan").labelsUnfiledThreads)
+        XCTAssertTrue(bot.threadGroups(matching: "").labelsUnfiledThreads)
+    }
+
     func testOnlyTheChiefOfStaffWearsTheCrown() {
         var chief = bot(tasks: [task("a")])
         chief.chiefOfStaff = true
@@ -318,7 +347,9 @@ final class RosterDensityTests: XCTestCase {
 
         XCTAssertEqual(state.unsectionedChief?.id, "roster-atlas")
         XCTAssertEqual(try XCTUnwrap(state.bot("roster-atlas")).rosterThreadCount(queuedThreadIds: queued), 1)
-        XCTAssertEqual(try XCTUnwrap(state.bot("roster-pepper")).rosterThreadCount(queuedThreadIds: queued), 3)
+        let pepper = try XCTUnwrap(state.bot("roster-pepper"))
+        XCTAssertEqual(pepper.rosterThreadCount(queuedThreadIds: queued), 3)
+        XCTAssertTrue(pepper.threadGroups(queuedThreadIds: queued).labelsUnfiledThreads)
         XCTAssertEqual(try XCTUnwrap(state.bot("roster-quill")).rosterThreadCount(queuedThreadIds: queued), 2)
         XCTAssertEqual(try XCTUnwrap(state.bot("roster-scout")).rosterStatus(hasPendingCard: false), .waitingOnYou)
         XCTAssertEqual(try XCTUnwrap(state.bot("roster-forge")).rosterStatus(hasPendingCard: false), .working)
@@ -339,12 +370,12 @@ final class RosterDensityTests: XCTestCase {
         return task
     }
 
-    private func bot(tasks: [BotTask]) -> Bot {
+    private func bot(tasks: [BotTask], projects: [BotProject]? = nil) -> Bot {
         Bot(
             id: "bot", threadId: tasks.first?.threadId ?? "bot-thread", name: "Bot", title: "Helper",
             description: "", notifications: true, color: "blue", unread: false,
             modelSelection: ModelSelection(instanceId: "i", model: "m"), createdAt: 1,
-            tasks: tasks
+            tasks: tasks, projects: projects
         )
     }
 }
