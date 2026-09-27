@@ -88,13 +88,16 @@ public struct CompactBotRow: Equatable, Sendable {
     public let threadCount: Int
     /// The Chief of Staff crown after the name.
     public let showsChiefBadge: Bool
-    let unread: Bool
+    /// The comfortable row's rule, exactly: the bot's own unread flag,
+    /// hidden while its conversation is busy — which the harness also
+    /// reports while the bot waits on the person or on a teammate.
+    public let showsUnreadDot: Bool
 
     public init(bot: Bot, hasPendingCard: Bool, queuedThreadIds: Set<String> = []) {
         status = bot.rosterStatus(hasPendingCard: hasPendingCard)
         threadCount = bot.rosterThreadCount(queuedThreadIds: queuedThreadIds)
         showsChiefBadge = bot.chiefOfStaff == true
-        unread = bot.unread
+        showsUnreadDot = bot.unread && bot.busy != true
     }
 
     /// Only a bot with a list to open gets "› N". One thread is the bot
@@ -107,9 +110,6 @@ public struct CompactBotRow: Equatable, Sendable {
     public var showsSpinner: Bool { status == .working }
 
     public var showsWaiting: Bool { status == .waitingOnYou }
-
-    /// The dot steps aside while the bot works.
-    public var showsUnreadDot: Bool { unread && status != .working }
 
     /// Whether the bot's threads are listed beneath its row. A search lists
     /// what matched under every bot, as the desktop does; otherwise only a

@@ -169,13 +169,51 @@ final class RosterDensityTests: XCTestCase {
         XCTAssertFalse(CompactBotRow(bot: bot(tasks: [task("a")]), hasPendingCard: false).showsChiefBadge)
     }
 
-    /// The dot stays as it was: hidden while the bot works.
-    func testUnreadDotHidesWhileWorking() {
+    // The unread dot follows the comfortable row's rule exactly: the bot's
+    // own unread flag, hidden while the bot's own conversation is busy.
+
+    func testUnreadDotHidesWhileTheBotIsBusy() {
         var unread = bot(tasks: [task("a")])
         unread.unread = true
         XCTAssertTrue(CompactBotRow(bot: unread, hasPendingCard: false).showsUnreadDot)
         unread.busy = true
         XCTAssertFalse(CompactBotRow(bot: unread, hasPendingCard: false).showsUnreadDot)
+    }
+
+    /// The harness marks a bot that waits on the person busy, so the dot
+    /// steps aside for the hand, as on a comfortable row.
+    func testUnreadDotHidesWhileWaitingOnYou() {
+        var waiting = task("a")
+        waiting.activity = "waiting-on-you"
+        var bot = bot(tasks: [waiting])
+        bot.unread = true
+        bot.busy = true
+        let row = CompactBotRow(bot: bot, hasPendingCard: false)
+        XCTAssertTrue(row.showsWaiting)
+        XCTAssertFalse(row.showsUnreadDot)
+    }
+
+    /// A teammate wait is painted busy too: no dot, and no spinner either.
+    func testUnreadDotHidesDuringATeammateWait() {
+        var bot = bot(tasks: [task("a")])
+        bot.unread = true
+        bot.busy = true
+        bot.waitingOnTeammate = true
+        let row = CompactBotRow(bot: bot, hasPendingCard: false)
+        XCTAssertFalse(row.showsSpinner)
+        XCTAssertFalse(row.showsUnreadDot)
+    }
+
+    /// Only the bot's own flag hides the dot: work in a sibling thread shows
+    /// its spinner and leaves the dot where the comfortable row keeps it.
+    func testUnreadDotStaysWhileOnlyASiblingThreadWorks() {
+        var sibling = task("b")
+        sibling.activity = "working"
+        var bot = bot(tasks: [task("a"), sibling])
+        bot.unread = true
+        let row = CompactBotRow(bot: bot, hasPendingCard: false)
+        XCTAssertTrue(row.showsSpinner)
+        XCTAssertTrue(row.showsUnreadDot)
     }
 
     // MARK: - The preview fixture the UI tests and screenshots use
