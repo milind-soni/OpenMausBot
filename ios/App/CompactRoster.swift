@@ -72,6 +72,13 @@ struct CompactBotEntry: View {
             }
         }
         .snoozeExpiryTick(live.visibleTasks.nextSnoozeExpiry(), tick: $snoozeTick)
+        // A list opened with "› N" closes when the control goes away (the
+        // bot is down to one thread), so it cannot reopen by itself when the
+        // bot gains a thread again. Also clears a stale open state carried
+        // over from comfortable, where every bot has a Threads row.
+        .onValueChange(of: row.showsThreadControl, initial: true) { shows in
+            if !shows && expanded { expanded = false }
+        }
     }
 
     // MARK: - The bot's line

@@ -289,7 +289,12 @@ struct ChatListView: View {
         }
 
         if let chief = session.state.unsectionedChief {
-            botRows(summaries(for: [chief]))
+            VStack(alignment: .leading, spacing: 0) {
+                botRows(summaries(for: [chief]))
+            }
+            // In compact, a one-line row right under the attention rows
+            // would read as one more of them: set it apart like a section.
+            .padding(.top, density == .compact && !attention.isEmpty ? sectionSpacing : 0)
         }
 
         let pinned = summaries(for: session.state.pinnedBots)
@@ -388,6 +393,8 @@ struct ChatListView: View {
                 .accessibilityIdentifier("new-group")
             }
         }
+        // the "+" grows with its title, and stops where the title does
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         // the "+" is a 44pt target; the title keeps the other titles' rhythm
         .frame(minHeight: showsCreate ? 44 : nil)
         .padding(.top, showsCreate ? 0 : sectionSpacing)
@@ -738,8 +745,11 @@ struct ChatListView: View {
     private func sectionLabel(_ text: Text) -> some View {
         text
             .textCase(.uppercase)
-            // compact rows follow Dynamic Type, so their titles do too
+            // Compact rows follow Dynamic Type, so their titles do too, but
+            // only up to xxxLarge: beyond it they would tower over the
+            // fixed-size rows of Needs attention. Comfortable's never scale.
             .font(density == .compact ? .footnote.weight(.semibold) : .system(size: 13, weight: .semibold))
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .tracking(0.4)
             .foregroundStyle(Color.secondary)
             .padding(.horizontal, 20)
