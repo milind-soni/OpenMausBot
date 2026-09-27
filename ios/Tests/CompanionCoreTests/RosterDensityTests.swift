@@ -111,6 +111,73 @@ final class RosterDensityTests: XCTestCase {
         XCTAssertEqual(bot(tasks: [task("a"), run]).rosterStatus(hasPendingCard: false), .idle)
     }
 
+    // The current thread speaks with the bot's own activity when its entry
+    // carries none: the harness can report a wait on the bot alone.
+
+    func testBotLevelWaitingOnYouShowsTheHandNotTheSpinner() {
+        var bot = bot(tasks: [task("a")])
+        bot.busy = true
+        bot.activity = "waiting-on-you"
+        let row = CompactBotRow(bot: bot, hasPendingCard: false)
+        XCTAssertEqual(row.status, .waitingOnYou)
+        XCTAssertTrue(row.showsWaiting)
+        XCTAssertFalse(row.showsSpinner)
+    }
+
+    func testBotLevelWorkingShowsTheSpinner() {
+        var bot = bot(tasks: [task("a")])
+        bot.activity = "working"
+        XCTAssertEqual(bot.rosterStatus(hasPendingCard: false), .working)
+    }
+
+    func testAThreadsOwnActivityOutranksTheBots() {
+        var current = task("a")
+        current.activity = "idle"
+        var bot = bot(tasks: [current])
+        bot.activity = "waiting-on-you"
+        XCTAssertEqual(bot.rosterStatus(hasPendingCard: false), .idle)
+    }
+
+    func testTheBotsActivitySpeaksOnlyForItsCurrentThread() {
+        var current = task("a")
+        current.activity = "idle"
+        var bot = bot(tasks: [current, task("b")])
+        bot.activity = "waiting-on-you"
+        XCTAssertEqual(bot.rosterStatus(hasPendingCard: false), .idle)
+    }
+
+    /// No task list at all: the row reads the one conversation the thread
+    /// tree stands in for it, with the bot's own activity.
+    func testOlderComputerReadsTheConversationTheThreadTreeSynthesises() {
+        var legacy = bot(tasks: [])
+        legacy.tasks = nil
+        legacy.busy = true
+        legacy.activity = "waiting-on-you"
+        XCTAssertEqual(legacy.rosterStatus(hasPendingCard: false), .waitingOnYou)
+        legacy.activity = nil
+        XCTAssertEqual(legacy.rosterStatus(hasPendingCard: false), .working)
+        legacy.waitingOnTeammate = true
+        XCTAssertEqual(legacy.rosterStatus(hasPendingCard: false), .idle)
+    }
+
+    func testOnlyTheCurrentThreadsProjectionCarriesTheBotsActivity() {
+        var bot = bot(tasks: [task("a"), task("b")])
+        bot.activity = "working"
+        XCTAssertEqual(bot.projected(forThread: "a")?.activity, "working")
+        XCTAssertNil(bot.projected(forThread: "b")?.activity)
+    }
+
+    func testTheBotLevelActivityDecodesFromTheWire() throws {
+        let json = #"""
+        {"id":"b","threadId":"t","name":"B","title":"","description":"","notifications":true,
+         "color":"blue","unread":false,"modelSelection":{"instanceId":"i","model":"m"},
+         "createdAt":1,"busy":true,"activity":"waiting-on-you"}
+        """#
+        let decoded = try JSONDecoder().decode(Bot.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.activity, "waiting-on-you")
+        XCTAssertEqual(decoded.rosterStatus(hasPendingCard: false), .waitingOnYou)
+    }
+
     // MARK: - Compact row
 
     func testSingleThreadBotHasNoThreadControl() {

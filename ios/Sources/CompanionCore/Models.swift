@@ -477,6 +477,11 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     public var modelSelection: ModelSelection
     public var createdAt: Double
     public var busy: Bool?
+    /// What the bot is doing on its current thread: "working",
+    /// "waiting-on-you", "idle", "no-signal" or "dead". Transient on the
+    /// computer, and older computers omit it; a thread's own `activity`
+    /// outranks it.
+    public var activity: String?
     /// A dispatched teammate has not settled yet; the bot itself is waiting
     /// on it rather than working (#1223). Carries the active thread's wait;
     /// per-thread waits live on the task.
@@ -533,6 +538,7 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
         view.threadId = selectedThreadId
         view.modelSelection = task?.modelSelection ?? modelSelection
         view.busy = task?.busy ?? (selectedThreadId == threadId ? busy : false)
+        view.activity = task?.activity ?? (selectedThreadId == threadId ? activity : nil)
         view.waitingOnTeammate = task?.waitingOnTeammate ?? (selectedThreadId == threadId ? waitingOnTeammate : false)
         view.unread = task?.unread ?? (selectedThreadId == threadId ? unread : false)
         view.approvalMode = task?.approvalMode ?? task?.autoApprove.map { $0 ? "auto" : "ask" } ?? approvalMode

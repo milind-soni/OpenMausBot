@@ -67,7 +67,7 @@ extension Bot {
     ///   one of this bot's threads. Cards live in transcripts, which the bot
     ///   record does not carry.
     public func rosterStatus(hasPendingCard: Bool) -> RosterRowStatus {
-        let threads = visibleTasks
+        let threads = statusThreads
         if hasPendingCard || threads.contains(where: { $0.activity == "waiting-on-you" }) {
             return .waitingOnYou
         }
@@ -78,6 +78,19 @@ extension Bot {
             return .working
         }
         return .idle
+    }
+
+    /// The threads a row's status reads: the visible ones, or the one
+    /// conversation the thread tree stands in for an older computer's bot.
+    /// The current thread falls back to the bot's own activity when its
+    /// entry carries none, since the harness can report it on the bot alone.
+    var statusThreads: [BotTask] {
+        (tasks == nil ? [legacyThread] : visibleTasks).map { task in
+            guard task.activity == nil, task.threadId == threadId else { return task }
+            var current = task
+            current.activity = activity
+            return current
+        }
     }
 }
 

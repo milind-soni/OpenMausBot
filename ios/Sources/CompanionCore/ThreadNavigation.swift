@@ -45,6 +45,17 @@ extension [BotTask] {
 }
 
 extension Bot {
+    /// Older computers have one conversation but no task metadata. The
+    /// thread lists, and a compact row's status, stand this in for it.
+    var legacyThread: BotTask {
+        BotTask(
+            threadId: threadId, title: "", createdAt: createdAt,
+            modelSelection: modelSelection, busy: busy, waitingOnTeammate: waitingOnTeammate,
+            unread: unread,
+            approvalMode: approvalMode, autoApprove: autoApprove, alwaysAllow: alwaysAllow
+        )
+    }
+
     /// Within every group, pinned threads come first and the rest follow
     /// the newest update. A folder rises with the thread of its that sits
     /// highest in that order, the same way the desktop sidebar does; saved
@@ -78,12 +89,7 @@ extension Bot {
         if tasks == nil {
             // Older computers have one conversation but no task metadata.
             // An explicitly empty modern list must stay empty.
-            threads = [BotTask(
-                threadId: threadId, title: "", createdAt: createdAt,
-                modelSelection: modelSelection, busy: busy, waitingOnTeammate: waitingOnTeammate,
-                unread: unread,
-                approvalMode: approvalMode, autoApprove: autoApprove, alwaysAllow: alwaysAllow
-            )]
+            threads = [legacyThread]
         } else if includingClosed || !search.isEmpty {
             threads = visibleTasks
         } else {
@@ -145,12 +151,7 @@ extension Bot {
     public func attentionOrderedTasks(queuedThreadIds: Set<String> = []) -> [BotTask] {
         let threads: [BotTask]
         if tasks == nil {
-            threads = [BotTask(
-                threadId: threadId, title: "", createdAt: createdAt,
-                modelSelection: modelSelection, busy: busy, waitingOnTeammate: waitingOnTeammate,
-                unread: unread,
-                approvalMode: approvalMode, autoApprove: autoApprove, alwaysAllow: alwaysAllow
-            )]
+            threads = [legacyThread]
         } else {
             threads = visibleTasks.filter { task in
                 !(task.isClosed || task.isArchived)
