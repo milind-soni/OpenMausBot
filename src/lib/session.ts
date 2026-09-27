@@ -128,7 +128,8 @@ export async function pairWithCode(
 }
 
 /** Server-side JSON exchanges that end in a session cookie. */
-async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: typeof fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+export type AuthResult = { ok: true; created?: boolean } | { ok: false; error: string };
+async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: typeof fetch): Promise<AuthResult> {
   let res: Response;
   try {
     res = await fetchImpl(resolveUrl(path), { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -136,7 +137,10 @@ async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: 
     return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };
   }
   const parsed: unknown = await res.json().catch(() => ({}));
-  if (res.ok) return { ok: true };
+  if (res.ok) {
+    const created = Reflect.get(Object(parsed), "created");
+    return typeof created === "boolean" ? { ok: true, created } : { ok: true };
+  }
   const error = Reflect.get(Object(parsed), "error");
   return { ok: false, error: typeof error === "string" ? error : `${res.status} ${res.statusText}` };
 }
@@ -172,7 +176,7 @@ export async function peekMagicLink(token: string, fetchImpl: typeof fetch = fet
 }
 
 /** Use an emailed link: the server sets the session cookie. */
-export function verifyMagicLink(input: { token: string; label: string }, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+export function verifyMagicLink(input: { token: string; label: string }, fetchImpl: typeof fetch = fetch): Promise<AuthResult> {
   return postAuth("/api/auth/magic/verify", { token: input.token, label: input.label }, fetchImpl);
 }
 

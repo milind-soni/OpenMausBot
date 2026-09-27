@@ -1,12 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
 import { readEnvironment, readSessionState, signInPath, takeLoginTokenFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation } from "./lib/session";
 import { bootstrapBrand } from "./lib/brand";
 import { applySkin, readSkin } from "./lib/skins";
 import { LoginPage } from "./pair/LoginPage";
 import { PairPage } from "./pair/PairPage";
-import "katex/dist/katex.min.css";
+import { startAdMeasurement } from "./lib/ad-measurement";
 import "./styles.css";
 
 // Before the first paint, not inside a component: stamping the skin during
@@ -23,6 +22,7 @@ applySkin(readSkin());
  * request. */
 async function chooseRoot(): Promise<React.ReactNode> {
   const loginToken = takeLoginTokenFromLocation();
+  startAdMeasurement();
   if (loginToken) return <LoginPage initialToken={loginToken} />;
   if (location.pathname.replace(/\/+$/, "") === signInPath().replace(/\/+$/, "")) return <LoginPage />;
   const pairPath = `${import.meta.env.BASE_URL}pair`.replace(/\/\//g, "/");
@@ -33,6 +33,9 @@ async function chooseRoot(): Promise<React.ReactNode> {
     if (environment?.capabilities.accountSignIn) return <LoginPage reason={session.error} />;
     return <PairPage initialCode={null} reason={session.error} />;
   }
+  // First-time visitors only need the sign-in page. Load the workspace and
+  // its editors, renderers and integrations after the session check.
+  const { default: App } = await import("./App");
   return <App />;
 }
 
