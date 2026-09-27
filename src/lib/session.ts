@@ -26,16 +26,33 @@ export function signInPath(): string {
   return resolveUrl("/sign-in");
 }
 
+/** How long the first page waits for the server. A proxy that gives up answers
+ * sooner; one that never answers must not leave the page blank. */
+export const SERVER_ANSWER_MS = 10_000;
+
 /** Ask the server who we are. A 401/403 means "go pair"; a network failure
  * is reported separately so the pair page can say the server is down. */
-export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise<SessionState> {
-  let res: Response;
+export async function readSessionState(fetchImpl: typeof fetch = fetch, timeoutMs = SERVER_ANSWER_MS): Promise<SessionState> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    res = await fetchImpl(resolveUrl("/api/auth/session"), { credentials: "same-origin" });
-  } catch (error) {
-    return { kind: "unreachable", error: error instanceof Error ? error.message : String(error) };
+    let res: Response;
+    try {
+      res = await fetchImpl(resolveUrl("/api/auth/session"), { credentials: "same-origin", signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) return { kind: "unreachable", error: `no answer within ${timeoutMs / 1000} s` };
+      return { kind: "unreachable", error: error instanceof Error ? error.message : String(error) };
+    }
+    const body: unknown = await res.json().catch(() => ({}));
+    // A body cut off by the deadline says nothing about who we are.
+    if (controller.signal.aborted) return { kind: "unreachable", error: `no answer within ${timeoutMs / 1000} s` };
+    return sessionFromResponse(res, body);
+  } finally {
+    clearTimeout(timer);
   }
-  const body: unknown = await res.json().catch(() => ({}));
+}
+
+function sessionFromResponse(res: Response, body: unknown): SessionState {
   const record = Object(body) as Record<string, unknown>; // SAFETY: read with typeof checks below; never trusted as a shape
   if (res.status === 401 || res.status === 403) {
     return { kind: "unauthenticated", error: typeof record.error === "string" ? record.error : `${res.status}` };
@@ -54,12 +71,16 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
 }
 
 /** What this server is and how people sign in to it; null when it cannot be read. */
-export async function readEnvironment(fetchImpl: typeof fetch = fetch): Promise<EnvironmentDescriptor | null> {
+export async function readEnvironment(fetchImpl: typeof fetch = fetch, timeoutMs = SERVER_ANSWER_MS): Promise<EnvironmentDescriptor | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(resolveUrl("/.well-known/nationteamchat/environment"));
+    const res = await fetchImpl(resolveUrl("/.well-known/nationteamchat/environment"), { signal: controller.signal });
     return res.ok ? ((await res.json()) as EnvironmentDescriptor) : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
