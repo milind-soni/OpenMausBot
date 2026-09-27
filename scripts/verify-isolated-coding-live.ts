@@ -2,14 +2,23 @@
 // local credit database. Never imports the user's app configuration or data.
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 assert.equal(process.env.NATION_CODING_ACCEPTANCE, "1", "Explicit live acceptance opt-in required");
 for (const key of ["DAYTONA_API_KEY", "OPENROUTER_API_KEY", "NATION_CODING_MODEL", "NATION_CODING_PUBLIC_ORIGIN", "NATION_ACCEPTANCE_SNAPSHOT"]) assert(process.env[key], `${key} required`);
 assert(new URL(process.env.NATION_CODING_PUBLIC_ORIGIN!).protocol === "https:");
-const root = mkdtempSync(join(tmpdir(), "nation-live-coding-"));
+const root = process.env.NATION_ACCEPTANCE_ROOT || mkdtempSync(join(tmpdir(), "nation-live-coding-"));
+assert.equal(dirname(realpathSync(root)), realpathSync(tmpdir()));
+assert.match(basename(root), /^nation-live-coding-[A-Za-z0-9]+$/);
+const evidence: unknown[] = [];
+if (process.env.NATION_ACCEPTANCE_ROOT) {
+  const previous = JSON.parse(readFileSync(join(root, "evidence.json"), "utf8"));
+  assert(previous.some((row: { phase?: string; root?: string }) => row.phase === "start" && row.root === root));
+  assert(!previous.some((row: { phase?: string; state?: string }) => row.phase === "model-task" && row.state === "completed"), "Use a fresh fixture after any completed model task");
+  evidence.push(...previous);
+}
 process.env.HOME = root;
 process.env.OMB_DATA_DIR = root;
 process.env.NATION_DATA_DIR = root;
@@ -29,8 +38,14 @@ const config = { daytona: { enabled: true, apiKey: process.env.DAYTONA_API_KEY!,
 const provider = await daytonaProvider(config.daytona);
 const machines: Machine[] = [];
 const capabilities = new Map<string, { token: string; url: string }>();
+const remember = (m: Machine) => { if (!machines.some(existing => existing.id === m.id)) machines.push(m); return m; };
 const monitored = { ...provider,
-  create: async (name: string) => { const m = await provider.create(name); machines.push(m); return m; },
+  find: async (name: string) => { const m = await provider.find(name); return m ? remember(m) : null; },
+  get: async (id: string, name: string) => remember(await provider.get(id, name)),
+  create: async (name: string) => {
+    const m = await provider.create(name); machines.push(m);
+    return m;
+  },
   code: async (m: Machine, command: string) => {
     const input = JSON.parse(Buffer.from(command.match(/'([A-Za-z0-9+/=]+)'$/)![1], "base64").toString());
     capabilities.set(input.id, { token: input.token, url: input.url });
@@ -51,7 +66,6 @@ const owner = (id: string): Owner => ({ provider: "daytona", key: id, threadId: 
 const alice = owner("acceptance-alice"), bob = owner("acceptance-bob");
 ledger.grant(alice.account, "acceptance-alice", "acceptance-alice");
 ledger.grant(bob.account, "acceptance-bob", "acceptance-bob");
-const evidence: unknown[] = [];
 const note = (value: unknown) => { evidence.push(value); console.log(JSON.stringify(value)); writeFileSync(join(root, "evidence.json"), JSON.stringify(evidence, null, 2)); };
 const waitFor = async (check: () => Promise<boolean> | boolean, timeout = 120_000) => {
   const end = Date.now() + timeout;
@@ -77,6 +91,24 @@ try {
   await manager.start("daytona", bob.key, true);
   assert.notEqual(machines[0].id, machines[1].id);
   note({ phase: "machines", machines });
+  const preflight = Buffer.from(readFileSync(new URL("../deploy/verify-isolated-coding.sh", import.meta.url), "utf8").replaceAll("\r\n", "\n")).toString("base64");
+  const gatewayUrl = `${new URL(process.env.NATION_CODING_PUBLIC_ORIGIN!).origin}/api/coding-model/operator/${"0".repeat(32)}/lease`;
+  const networkCheck = Buffer.from(`import urllib.request, urllib.error
+try:
+    urllib.request.urlopen(${JSON.stringify(gatewayUrl)}, timeout=10)
+    raise AssertionError('Unauthenticated gateway request was accepted')
+except urllib.error.HTTPError as error:
+    assert error.code == 403, error.code
+print('PASS: guest reaches HTTPS gateway; unauthenticated request denied')
+`).toString("base64");
+  for (const machine of machines) {
+    const sandbox = await provider.execute(machine, `printf '%s' '${preflight}' | base64 -d | sh`);
+    note({ phase: "sandbox-preflight", machine: machine.id, ...sandbox });
+    assert.equal(sandbox.exitCode, 0, "Prepared snapshot must support workspace-write confinement");
+    const gateway = await provider.execute(machine, `printf '%s' '${networkCheck}' | base64 -d | python3`);
+    note({ phase: "gateway-preflight", machine: machine.id, ...gateway });
+    assert.equal(gateway.exitCode, 0, "Guest must reach the gateway before paid acceptance; check Daytona organization network policy");
+  }
   const a0 = ledger.balance(alice.account.id), b0 = ledger.balance(bob.account.id);
   await run(alice, "Create add.py with add(a,b), and test_add.py using unittest to assert add(2,3)==5. Write owner.txt containing ALICE_ACCEPTANCE. Run python3 -m unittest -v. Report the actual test result. Do not stop until files exist and tests pass.");
   const a1 = ledger.balance(alice.account.id);

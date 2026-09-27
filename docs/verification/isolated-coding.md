@@ -31,10 +31,16 @@ dependencies in the snapshot or through the existing computer tools.
 
 ## Configure
 
-1. Build a Daytona desktop snapshot with Python 3, git, Node/npm, and
-   `sh deploy/install-isolated-coding.sh`. This pins Codex CLI to 0.157.1.
-   Verify the image supports Codex's workspace-write sandbox. Do not weaken
-   that sandbox to work around an incompatible image.
+1. Build `deploy/Daytona.coding.Dockerfile` with `deploy/` as its build
+   context. It pins Codex CLI to 0.157.1 under `/opt/nation-codex` and sets
+   `USER root` inside the private account computer. Select `user: "root"` in
+   the operator's Daytona configuration too. The base desktop image's default
+   user cannot create Codex's bubblewrap network namespace; changing only SDK
+   user metadata does not change that image's process user. Root here is
+   confined to that account's provider computer, never the shared backend.
+   Run `deploy/verify-isolated-coding.sh` as the actual execution user after
+   startup. It must prove project write/read, outside-write denial and shell
+   network denial. Do not disable workspace-write to make an image pass.
 2. Configure and test Daytona in Admin, selecting that snapshot. Existing
    machines need the runtime installed separately; changing the snapshot does
    not replace their disks or upgrade them automatically.
@@ -43,6 +49,10 @@ dependencies in the snapshot or through the existing computer tools.
    `NATION_CODING_PUBLIC_ORIGIN` to the public HTTPS origin serving
    `/api/coding-model/*`. A reverse proxy must allow the opaque bearer header
    and allow a response to take up to 190 seconds. No browser cookies are used.
+   Verify this origin is reachable from the guest, not just from the backend.
+   Daytona Tier 1/2 organization restrictions cannot be overridden by sandbox
+   allow lists. Obtain supported gateway access before proceeding; see
+   [Daytona network limits](https://www.daytona.io/docs/en/network-limits/).
 4. Set `NATION_CODING_ENABLED=1` for an isolated staging installation first.
    Existing workspace processes need a graceful restart to inherit changes.
    Select Cloud/Daytona for the agent and use a verified account with credit.
@@ -80,29 +90,46 @@ and billing, and asks the real CLI to write one file in a disposable project.
 No paid model API is called. The separate `Isolated coding runtime` workflow
 runs this acceptance test on a clean Linux CI runner, including for drafts.
 
-## Live acceptance still required
+## Live acceptance
 
-Local verification on 2026-09-27 passed the two-account app workflow, billing,
-gateway and supervisor checks. The broader regression run had 36 passing
-tests, one optional test skipped, and two failures in workspace process
-cleanup. Both failures reproduce on unchanged base commit `c4bef2c`: this
-execution environment reports host PIDs from `/proc` while spawned children
-report namespace PIDs.
+The current [dated verification record](isolated-coding-2026-09-27.md) separates
+passing runtime checks from the remaining live acceptance. Keep the PR draft
+and production coding disabled until both real-model provider acceptance and
+the signed-in two-account staging workflow pass.
 
-The optional real Codex 0.157.1 smoke has **not passed here**: the CLI stalled
-during session initialization before sending any model request and was
-cancelled after 50 seconds. A diagnostic also observed unavailable outbound
-plugin-catalog requests; disabling unused plugin/app startup did not resolve
-the stall. A follow-up trace localizes the wait to sandboxed file metadata
-checks during AGENTS.md discovery, before model inference. Ephemeral native
-sessions also did not resolve it. The exact remaining cause is unconfirmed. Keep this change in draft
-and coding disabled until this smoke passes in the prepared staging snapshot.
+`scripts/verify-isolated-coding-live.ts` exercises real Daytona, Codex, the HTTPS
+capability gateway, OpenRouter and an isolated local credit ledger. It creates
+two disposable computers and checks actual files/tests, independent billing,
+later-task persistence, cancellation and restart capability loss. This is a
+provider/service acceptance, not a browser or signed-in app acceptance.
 
-On an owned staging deployment with the prepared Daytona snapshot, repeat the
-two-account workflow using the real model. Ask for an edit and a test, inspect
-the actual project and test output, then stop a longer task. Confirm the job
-stops and its token is refused. Restart the workspace and confirm files remain
-and the old token stays invalid. Confirm usage settles against only its owner.
-Do this before enabling the feature for public members. Local fixtures do not
-establish live Daytona sandbox support, upstream model compatibility, gateway
-reachability, or coding quality.
+Run on an owned staging backend with Node >=24 and dependencies installed.
+Supply `DAYTONA_API_KEY` and `OPENROUTER_API_KEY` through the backend environment;
+never copy them into the guest or command logs. Set:
+
+```sh
+export NATION_CODING_ACCEPTANCE=1
+export NATION_CODING_MODEL=openai/gpt-5.4-mini
+export NATION_CODING_PUBLIC_ORIGIN=https://your-staging-gateway.example
+export NATION_ACCEPTANCE_SNAPSHOT=your-prepared-snapshot
+export NATION_ACCEPTANCE_PORT=18879
+node --experimental-strip-types scripts/verify-isolated-coding-live.ts
+```
+
+The HTTPS proxy must forward `/api/coding-model/` to that loopback port. The
+script first verifies workspace-write confinement and guest gateway reachability.
+It creates its own temporary home, database and computer registry, emits the
+root path and stores `evidence.json` there. The model and provider are real and
+can incur charges; fixture credit balances are synthetic. It stops its computers
+in `finally` but retains disks and evidence. It never modifies production account
+balances or enables production coding.
+
+After a failure before any completed model task, `NATION_ACCEPTANCE_ROOT` may
+point to the emitted temporary root to reuse those exact computers. The script
+requires its own prior evidence and preserves it. Use a fresh fixture after a
+completed model task so file-isolation assertions start from empty projects.
+Do not point it at application data or another user's computer registry.
+
+After this passes, repeat through the signed-in staging app: two accounts,
+separate sponsor balances, real edits/tests, cancellation, and workspace restart.
+Verify persisted files and refused old capabilities before enabling members.
