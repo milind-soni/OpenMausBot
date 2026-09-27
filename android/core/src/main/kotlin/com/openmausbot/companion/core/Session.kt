@@ -73,6 +73,10 @@ class Session(
     private val metadataFn: suspend (CompanionClient) -> CompanionConnectionMetadata = { client ->
         client.connectionMetadata()
     },
+    /** Test seam: the computer's running Live call, read after a fresh hello. */
+    private val liveCallFn: suspend (CompanionClient) -> LiveCallState? = { client ->
+        client.liveCall()
+    },
     /** Test seam for the handoff between a completed transfer and its caller. */
     private val afterAttachmentDownload: suspend () -> Unit = {},
 ) {
@@ -600,7 +604,7 @@ class Session(
                 // reopens the stream. Holding the lock makes that `finally` wait.
                 streamJob = scope.launch {
                     try {
-                        runStream()
+                        runStream(generation)
                     } finally {
                         gate.withLock {
                             if (streamGeneration == generation) {
@@ -741,7 +745,7 @@ class Session(
             _status.value = Status.Connecting
             val job = scope.launch {
                 try {
-                    runStream()
+                    runStream(generation)
                 } finally {
                     gate.withLock {
                         if (streamGeneration == generation) {
@@ -798,7 +802,7 @@ class Session(
         // published immediately so a concurrent connect() sees it.
         val job = scope.launch {
             try {
-                runStream()
+                runStream(generation)
             } finally {
                 gate.withLock {
                     if (streamGeneration == generation) {
@@ -818,7 +822,8 @@ class Session(
         endpointRefreshJob = null
     }
 
-    private suspend fun runStream() {
+    /** [generation] is the one this stream was launched under; what it starts in the background checks it before writing. */
+    private suspend fun runStream(generation: Int) {
         while (currentCoroutineContext().isActive) {
             val activeClient = client ?: return
             _status.value = Status.Connecting
@@ -840,7 +845,7 @@ class Session(
                             is Frame.Hello -> {
                                 receivedHello = true
                                 if (!payload.resumed) {
-                                    hydrate()
+                                    hydrate(generation)
                                     _state.update { it.resetCursor(payload.cursor) }
                                 }
                                 _status.value = Status.Live
@@ -880,7 +885,7 @@ class Session(
         }
     }
 
-    private suspend fun hydrate() {
+    private suspend fun hydrate(generation: Int) {
         val activeClient = client ?: return
         val fleet = hydrateFn(activeClient, 50)
         _state.update { it.hydrate(fleet) }
@@ -900,6 +905,28 @@ class Session(
                 throw error
             } catch (_: Exception) {
                 emptySet()
+            }
+        }
+        // The fleet snapshot does not carry the Live call. A phone that
+        // reconnects mid-call reads it here; one that reconnects after the
+        // computer restarted learns the call is gone the same way. An older
+        // harness answers 404 and the state is left alone. Off the critical
+        // path, like the engine list above.
+        scope.launch {
+            val readAt = _state.value.liveCallRevision
+            val call = try {
+                liveCallFn(activeClient)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                return@launch
+            }
+            // The stream this read belongs to may be gone by now: another
+            // computer, or a restart whose own read (or frame) is newer. A
+            // late answer must not overwrite either, nor a `live.call` frame
+            // that reached the line while it was out.
+            gate.withLock {
+                if (streamGeneration == generation) _state.update { it.applyLiveCallLookup(call, readAt) }
             }
         }
     }
@@ -1559,6 +1586,91 @@ class Session(
         }
     }
 
+    // ── Live calls ──
+
+    /**
+     * Ask the computer for a Live session for this phone's offer. Throws
+     * [APIError] so the call bar can show the computer's own words; a 401
+     * marks this session revoked the way [cloudDesktop] does. The private
+     * `perform {}` helper is deliberately not used here or below: it writes
+     * `actionError`, which raises the global "Something went wrong" dialog
+     * over a bar that has its own place for errors.
+     */
+    suspend fun startLiveCall(botId: String, threadId: String, sdp: String): LiveCallStart =
+        liveCallRequest { it.startLiveCall(botId, threadId, sdp) }
+
+    /**
+     * Hang up on the computer — this phone's own call, or another device's
+     * from the remote bar. Quiet: a lost answer changes nothing the phone
+     * can act on. The ended call is mirrored into [state] so a bar reading
+     * the computer's side sees it at once, but only while that call still
+     * reads as running there ([CompanionState.applyLiveCallEnd]).
+     *
+     * A 404 means the computer no longer runs that call. If the line here
+     * still shows it running, a frame was missed: the line is read again
+     * rather than guessed at, as the desktop and the iPhone do.
+     */
+    suspend fun endLiveCall(callId: String): LiveCallState? {
+        val connectionId = _connection.value?.id
+        val ended = try {
+            liveCallRequest { it.endLiveCall(callId) }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            val gone = (error as? APIError.Status)?.code == 404
+            if (gone && _connection.value?.id == connectionId && _state.value.showsRunningLiveCall(callId)) {
+                liveCall()
+            }
+            return null
+        }
+        if (_connection.value?.id == connectionId) _state.update { it.applyLiveCallEnd(callId, ended) }
+        return ended
+    }
+
+    /**
+     * The computer's current Live call, mirrored into [state] unless a
+     * `live.call` frame or a hang-up answer reached the line while the read
+     * was out ([CompanionState.applyLiveCallLookup]). Null when there is
+     * none, or the read failed.
+     */
+    suspend fun liveCall(): LiveCallState? {
+        val connectionId = _connection.value?.id
+        val readAt = _state.value.liveCallRevision
+        val call = try {
+            liveCallRequest { liveCallFn(it) }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return null
+        }
+        if (_connection.value?.id == connectionId) _state.update { it.applyLiveCallLookup(call, readAt) }
+        return call
+    }
+
+    suspend fun liveSettings(): LiveSettings? = configStatus()?.live
+
+    /** Throws [APIError] so the settings sheet can say why a change did not stick. */
+    suspend fun updateLiveSettings(patch: LiveSettingsPatch): LiveSettings =
+        liveCallRequest { it.updateLiveSettings(patch) }
+
+    private suspend fun <T> liveCallRequest(body: suspend (CompanionClient) -> T): T {
+        val activeClient = client ?: throw APIError.Transport(OFFLINE_MESSAGE)
+        val connectionId = _connection.value?.id
+        return try {
+            body(activeClient)
+        } catch (error: APIError) {
+            if (error.isUnauthorized) {
+                gate.withLock {
+                    // Only the live computer's 401 may mark this session revoked.
+                    if (connectionId != null && _connection.value?.id == connectionId) {
+                        _status.value = Status.Unauthorized
+                    }
+                }
+            }
+            throw error
+        }
+    }
+
     suspend fun markRead(chat: Chat) {
         perform(quietly = true) {
             when (chat) {
@@ -2201,6 +2313,7 @@ class Session(
         const val SPENT_QR_MESSAGE =
             "That pairing code was already used. Start pairing again on your computer and rescan the new QR code."
         const val THREAD_GONE_MESSAGE = "That thread is no longer on your computer."
+        const val OFFLINE_MESSAGE = "This computer is offline."
 
         /** High-entropy QR token — distinct from a retryable six-digit code. */
         fun isQrCredential(credential: String): Boolean =

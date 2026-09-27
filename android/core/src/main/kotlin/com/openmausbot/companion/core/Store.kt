@@ -59,6 +59,18 @@ data class CompanionState(
     val drainedQueueIds: List<String> = emptyList(),
     /** Edits in flight, by thread. A hydrate keeps them: the request is still running. */
     val pendingEdits: Map<String, PendingEdit> = emptyMap(),
+    /**
+     * The computer's Live call as its `live.call` frames and `GET /api/live/call`
+     * report it — a call another device holds included. This phone's own media
+     * lives in `:app`; this is only what the computer says.
+     */
+    val liveCall: LiveCallState? = null,
+    /**
+     * Bumped by every `live.call` frame and every applied hang-up answer: the
+     * news a `GET /api/live/call` that was out meanwhile is older than
+     * ([applyLiveCallLookup]).
+     */
+    val liveCallRevision: Long = 0,
 ) {
     /** Threads holding at least one queued send. The row label, the Updates
      * pill, and the closed-thread fold all read this, never task activity. */
@@ -66,6 +78,34 @@ data class CompanionState(
         get() = pendingQueued.keys
 
     fun transcript(threadId: String): List<Message> = messages[threadId].orEmpty()
+
+    /** The call while it is on the line; an ended call is kept until the computer clears it, but is not "running". */
+    fun runningLiveCall(): LiveCallState? = liveCall?.takeIf { it.isRunning }
+
+    /** Whether the line reads as [callId] still running. */
+    fun showsRunningLiveCall(callId: String): Boolean = liveCall?.let { it.callId == callId && it.isRunning } == true
+
+    /**
+     * The answer to a `GET /api/live/call` sent when the line was at
+     * [readAt] (its [liveCallRevision]). Dropped when a frame or a hang-up
+     * answer reached the line while it was out: those are newer, and a
+     * lookup that straddles a start would otherwise put back a `null` from
+     * before it and end the call that just began (the iPhone's rule).
+     */
+    fun applyLiveCallLookup(call: LiveCallState?, readAt: Long): CompanionState =
+        if (liveCallRevision == readAt) copy(liveCall = call) else this
+
+    /**
+     * The computer's answer to a hang-up of [callId], applied only while
+     * that call still reads as running here: a frame that already said
+     * `ended`, cleared the line or brought a newer call is later news.
+     */
+    fun applyLiveCallEnd(callId: String, answer: LiveCallState): CompanionState =
+        if (answer.callId == callId && showsRunningLiveCall(callId)) {
+            copy(liveCall = answer, liveCallRevision = liveCallRevision + 1)
+        } else {
+            this
+        }
 
     /** An SSE tail is partial history; only a fetched page establishes its boundary. */
     fun hasLoadedPage(threadId: String): Boolean = hasMore.containsKey(threadId)
@@ -319,6 +359,8 @@ data class CompanionState(
         is Frame.Notify -> copy(notifications = (notifications + frame.notification).takeLast(100))
         is Frame.Runtime -> applyRuntime(frame.event)
         is Frame.Screen -> copy(screens = screens + (frame.botId to ScreenFrame(frame.png, frame.mime)))
+
+        is Frame.LiveCall -> copy(liveCall = frame.call, liveCallRevision = liveCallRevision + 1)
 
         is Frame.Computer, Frame.Config, is Frame.Unknown -> this
     }

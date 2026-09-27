@@ -10,6 +10,7 @@ import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -58,6 +59,10 @@ sealed interface Frame {
     data class Computer(val botId: String, val state: String) : Frame
     data object Config : Frame
     data class Runtime(val event: RuntimeEvent) : Frame
+
+    /** The computer's Live call changed; `call` is null once it is gone. */
+    data class LiveCall(val botId: String, val threadId: String, val call: LiveCallState?) : Frame
+
     data class Unknown(val kind: String) : Frame
 
 }
@@ -133,6 +138,19 @@ object FrameSerializer : KSerializer<Frame> {
                 RuntimeEvent.serializer(),
                 objectValue.required("event"),
             ))
+            // A call object this build cannot read is a broken frame, not
+            // "no call": absorb it the way bot.queued does, and let the next
+            // frame or GET /api/live/call restate the truth. So is a frame
+            // with no `call` at all: only `"call": null` says the line is free.
+            "live.call" -> runCatching {
+                Frame.LiveCall(
+                    botId = objectValue.requiredString("botId"),
+                    threadId = objectValue.requiredString("threadId"),
+                    call = objectValue.required("call").takeUnless { it is JsonNull }?.let {
+                        input.json.decodeFromJsonElement(LiveCallState.serializer(), it)
+                    },
+                )
+            }.getOrNull() ?: Frame.Unknown(kind)
             else -> Frame.Unknown(kind)
         }
     }
@@ -261,6 +279,12 @@ private fun Frame.toJsonObject(output: JsonEncoder): JsonObject = buildJsonObjec
         is Frame.Runtime -> {
             put("kind", "runtime")
             put("event", output.json.encodeToJsonElement(RuntimeEvent.serializer(), event))
+        }
+        is Frame.LiveCall -> {
+            put("kind", "live.call")
+            put("botId", botId)
+            put("threadId", threadId)
+            put("call", call?.let { output.json.encodeToJsonElement(LiveCallState.serializer(), it) } ?: JsonNull)
         }
         is Frame.Unknown -> put("kind", kind)
     }

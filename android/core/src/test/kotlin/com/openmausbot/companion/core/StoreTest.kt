@@ -457,6 +457,58 @@ class StoreTest {
         state = state.apply(Frame.Unknown("routine.run"))
         assertEquals(before, state.bots.size)
     }
+
+    @Test
+    fun aLiveCallFrameReplacesTheCallAndNullClearsIt() {
+        var state = hydrated()
+        assertNull(state.liveCall)
+        val call = LiveCallState("c1", "b1", "t1", "android", "marin", 1.0, LiveCallStatus.LIVE)
+        state = state.apply(Frame.LiveCall("b1", "t1", call))
+        assertEquals(call, state.liveCall)
+        assertEquals(call, state.runningLiveCall())
+        val ended = call.copy(status = LiveCallStatus.ENDED, endReason = "hung-up")
+        state = state.apply(Frame.LiveCall("b1", "t1", ended))
+        assertEquals(ended, state.liveCall)
+        assertNull(state.runningLiveCall())
+        state = state.apply(Frame.LiveCall("b1", "t1", null))
+        assertNull(state.liveCall)
+    }
+
+    @Test
+    fun aLookupAnswerIsDroppedWhenAFrameLandedWhileItWasOut() {
+        val call = LiveCallState("c1", "b1", "t1", "desktop", "marin", 1.0, LiveCallStatus.LIVE)
+        val before = hydrated()
+        val readAt = before.liveCallRevision
+        // The lookup is out; the stream brings the call meanwhile.
+        val framed = before.apply(Frame.LiveCall("b1", "t1", call))
+        assertEquals(call, framed.applyLiveCallLookup(null, readAt).liveCall, "the lookup's older null must not end the call the frame brought")
+        // Nothing reached the line meanwhile: the answer is the news.
+        assertEquals(call, before.applyLiveCallLookup(call, readAt).liveCall)
+        assertNull(framed.applyLiveCallLookup(null, framed.liveCallRevision).liveCall)
+    }
+
+    @Test
+    fun aHangUpAnswerAppliesOnlyWhileItsCallStillReadsAsRunning() {
+        val call = LiveCallState("c1", "b1", "t1", "desktop", "marin", 1.0, LiveCallStatus.LIVE)
+        val ended = call.copy(status = LiveCallStatus.ENDED, endReason = "hung-up")
+        val running = hydrated().apply(Frame.LiveCall("b1", "t1", call))
+        assertTrue(running.showsRunningLiveCall("c1"))
+        assertFalse(running.showsRunningLiveCall("c2"))
+        assertEquals(ended, running.applyLiveCallEnd("c1", ended).liveCall, "the answer takes the bar down now, not on the frame after it")
+
+        // Later news already on the line wins over the answer.
+        val newer = call.copy(callId = "c2")
+        assertEquals(newer, running.apply(Frame.LiveCall("b1", "t1", newer)).applyLiveCallEnd("c1", ended).liveCall, "a newer call stays")
+        assertNull(running.apply(Frame.LiveCall("b1", "t1", null)).applyLiveCallEnd("c1", ended).liveCall, "a cleared line stays clear")
+        val idle = call.copy(status = LiveCallStatus.ENDED, endReason = "idle")
+        val alreadyEnded = running.apply(Frame.LiveCall("b1", "t1", idle))
+        assertFalse(alreadyEnded.showsRunningLiveCall("c1"))
+        assertEquals(idle, alreadyEnded.applyLiveCallEnd("c1", ended).liveCall, "the frame's own reason is not replaced")
+
+        // An applied answer is news too: a lookup that was out across it is older.
+        val readAt = running.liveCallRevision
+        assertEquals(ended, running.applyLiveCallEnd("c1", ended).applyLiveCallLookup(call, readAt).liveCall)
+    }
 }
 
 class StreamingTest {
