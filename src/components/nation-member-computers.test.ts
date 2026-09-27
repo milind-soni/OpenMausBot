@@ -94,3 +94,55 @@ describe("member session", () => {
     }
   });
 });
+
+describe("a member's own workspace", () => {
+  const withConfig = (patch: Record<string, unknown>, render: () => string): string => {
+    const member = fixture.state.config;
+    fixture.state.config = { ...member, ...patch };
+    try {
+      return render();
+    } finally {
+      fixture.state.config = member;
+    }
+  };
+  const own = { personalWorkspace: true, features: { browser: true, computers: true, sharedComputers: false }, browserEngine: { kind: "engine" } };
+  const panel = (target: unknown = bot) => renderToStaticMarkup(createElement(ComputerPanel, { bot: target as never }));
+
+  it("offers where a bot works: its cloud computer, the browser or off, and nothing about desks", () => {
+    const html = withConfig(own, () => panel());
+    expect(html).toContain('data-testid="workspace-computer"');
+    for (const label of ["Works on", "Auto", "Cloud computer", "Browser", "Off"]) expect(html).toContain(label);
+    expect(html).not.toContain('data-testid="member-computer"');
+    expect(html).not.toMatch(DESK_SETUP);
+    expect(html).not.toMatch(/OpenMaus|Claude|Anthropic|Hermes|Venice|Grok|This computer|Local desktop/i);
+  });
+
+  it("offers only what the workspace's config turns on", () => {
+    const cloudOnly = withConfig({ ...own, browserEngine: { kind: "unavailable" } }, () => panel());
+    expect(cloudOnly).toContain("Cloud computer");
+    expect(cloudOnly).not.toContain(">Browser<");
+    const browserOnly = withConfig({ ...own, features: { browser: true, computers: false } }, () => panel());
+    expect(browserOnly).not.toContain("Cloud computer");
+    expect(browserOnly).toContain(">Browser<");
+    const neither = withConfig({ ...own, features: { browser: false, computers: false } }, () => panel());
+    expect(neither).toContain('data-testid="member-computer"');
+    expect(neither).not.toContain("Works on");
+  });
+
+  it("never offers them to a member of a shared desk, whatever the flags say", () => {
+    const html = withConfig({ ...own, personalWorkspace: false }, () => panel());
+    expect(html).toContain('data-testid="member-computer"');
+    expect(html).not.toContain("Works on");
+  });
+
+  it("shows the bot's own cloud computer, or its browser without the owner's profiles", () => {
+    const cloud = withConfig(own, () => panel({ ...(bot as object), computer: "cloud" }));
+    expect(cloud).toContain('data-testid="workspace-cloud-computer"');
+    expect(cloud).toContain("Scout has a cloud computer of its own in your workspace");
+    expect(cloud).not.toMatch(DESK_SETUP);
+    const browsing = withConfig(own, () => panel({ ...(bot as object), computer: "browser" }));
+    expect(browsing).toContain('data-testid="workspace-browser"');
+    expect(browsing).toContain("public websites");
+    expect(browsing).not.toContain("Browser profiles");
+  });
+});

@@ -420,6 +420,10 @@ export function agentBrowserIntegration(input: {
    * never from the ambient process environment — the curated env below
    * otherwise never forwards AGENT_BROWSER_CDP at all (#1396). */
   attachCdpUrl?: string;
+  /** A member workspace's egress guard (browser-egress-guard.ts): every
+   * request Chrome makes, loopback included, goes through this proxy. Set by
+   * the server, never read from the ambient environment. */
+  launch?: { proxy: string; proxyBypass: string; chromeArgs?: string };
 }): { command: string; args: string[]; env: Record<string, string> } {
   const sourceEnv = input.env ?? process.env;
   const env: Record<string, string> = {
@@ -442,6 +446,11 @@ export function agentBrowserIntegration(input: {
   };
   if (input.headless !== false) env.AGENT_BROWSER_HEADLESS = "1";
   if (input.attachCdpUrl) env.AGENT_BROWSER_CDP = input.attachCdpUrl;
+  if (input.launch) {
+    env.AGENT_BROWSER_PROXY = input.launch.proxy;
+    env.AGENT_BROWSER_PROXY_BYPASS = input.launch.proxyBypass;
+    if (input.launch.chromeArgs) env.AGENT_BROWSER_ARGS = input.launch.chromeArgs;
+  }
   // MCP clients may filter the parent environment. Carry the configured
   // Chrome path explicitly without forwarding unrelated secrets or flags.
   for (const name of ["PATH", "AGENT_BROWSER_EXECUTABLE_PATH"] as const) {
@@ -452,6 +461,24 @@ export function agentBrowserIntegration(input: {
     env.AGENT_BROWSER_EXECUTABLE_PATH = bundle.chrome;
   }
   return { command: input.binaryPath, args: ["mcp", "--tools", "core", "--no-webmcp"], env };
+}
+
+/** Close every browser this engine has open under this server's socket
+ * directory. A member workspace does it as it stops, so no Chrome outlives
+ * the workspace that started it. */
+export function closeAllBrowserSessions(binaryPath: string, options: { env?: Record<string, string>; timeoutMs?: number } = {}): Promise<boolean> {
+  return new Promise((done) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(binaryPath, ["close", "--all"], { env: browserRuntimeEnv(options.env ?? {}), stdio: "ignore", windowsHide: true });
+    } catch {
+      done(false);
+      return;
+    }
+    const timer = setTimeout(() => { child.kill("SIGKILL"); done(false); }, options.timeoutMs ?? 5_000);
+    child.once("error", () => { clearTimeout(timer); done(false); });
+    child.once("close", (code) => { clearTimeout(timer); done(code === 0); });
+  });
 }
 
 /** How long a settled-frame capture may take before the turn gives up on it.

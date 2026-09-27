@@ -1,3 +1,4 @@
+import { HostedComputerAdmin } from "./HostedComputerAdmin";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api-client";
 import type { NationAdminConfig } from "./NationAdminPage";
@@ -72,6 +73,7 @@ export function NationIntegrationAdmin({ config }: { config: NationAdminConfig }
         <button disabled={busy || !box.trim()} className="ui-button disabled:opacity-50">Save Box token</button>
       </form>
     </Card>
+    <HostedComputerAdmin initial={status.hostedComputers} />
     <Card title="Self-hosted VPS" subtitle="Use the configured Linux server for isolated agent computers.">
       <p className="mb-3 text-sm text-ink">{status.vps?.configured ? "VPS configured" : "VPS not configured"}</p>
       <form className="space-y-2" onSubmit={event => { event.preventDefault(); if (alias.trim()) void save({ vps: { sshAlias: alias.trim() } }, () => {}); }}>

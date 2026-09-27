@@ -173,6 +173,28 @@ function ipv4Private(address: string): boolean {
     || a >= 224;
 }
 
+/** The eight 16-bit groups of an IPv6 address in any spelling (compressed,
+ * expanded, with a trailing dotted IPv4, with a zone), or null. */
+function ipv6Groups(address: string): number[] | null {
+  let text = address.toLowerCase().replace(/%.*$/, "");
+  const dotted = text.match(/^(.*:)(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (dotted) {
+    const [a, b, c, d] = dotted.slice(2).map(Number) as [number, number, number, number];
+    if ([a, b, c, d].some((octet) => octet > 255)) return null;
+    text = `${dotted[1]}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const fill = 8 - head.length - tail.length;
+  if (halves.length === 2 ? fill < 1 : fill !== 0) return null;
+  const groups = [...head, ...Array.from({ length: halves.length === 2 ? fill : 0 }, () => "0"), ...tail];
+  return groups.every((group) => /^[0-9a-f]{1,4}$/.test(group)) ? groups.map((group) => parseInt(group, 16)) : null;
+}
+
+const ipv4Of = (high: number, low: number) => `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
+
 /** Addresses the reader must never connect to. */
 export function blockedAddress(address: string, allowLoopback = false): boolean {
   const family = isIP(address);
@@ -181,11 +203,25 @@ export function blockedAddress(address: string, allowLoopback = false): boolean 
     return ipv4Private(address);
   }
   if (family === 6) {
-    const lower = address.toLowerCase();
-    if (allowLoopback && lower === "::1") return false;
-    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return blockedAddress(mapped[1], allowLoopback);
-    return lower === "::" || lower === "::1" || /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower) || lower.startsWith("ff") || lower.startsWith("64:ff9b:");
+    // Compared by value, not by spelling: ::ffff:7f00:1 is 127.0.0.1 too.
+    const groups = ipv6Groups(address);
+    if (!groups) return true;
+    const [g0, g1, g2, g3, g4, g5, g6, g7] = groups as [number, number, number, number, number, number, number, number];
+    const zeros = (count: number) => groups.slice(0, count).every((group) => group === 0);
+    if (zeros(7) && g7 === 1) return !allowLoopback;
+    // :: and the retired IPv4-compatible ::a.b.c.d
+    if (zeros(6)) return true;
+    // IPv4-mapped ::ffff:a.b.c.d and IPv4-translated ::ffff:0:a.b.c.d reach that IPv4 address
+    if ((zeros(5) && g5 === 0xffff) || (zeros(4) && g4 === 0xffff && g5 === 0)) return blockedAddress(ipv4Of(g6, g7), allowLoopback);
+    // 6to4 routes to the IPv4 address in its prefix
+    if (g0 === 0x2002) return blockedAddress(ipv4Of(g1, g2));
+    return (g0 & 0xfe00) === 0xfc00 // unique local
+      || (g0 & 0xffc0) === 0xfe80 // link-local
+      || (g0 & 0xffc0) === 0xfec0 // site-local
+      || (g0 & 0xff00) === 0xff00 // multicast
+      || (g0 === 0x64 && g1 === 0xff9b) // NAT64
+      || (g0 === 0x2001 && (g1 === 0 || g1 === 0xdb8)) // Teredo, documentation
+      || (g0 === 0x100 && g1 === 0 && g2 === 0 && g3 === 0); // discard-only
   }
   return true;
 }

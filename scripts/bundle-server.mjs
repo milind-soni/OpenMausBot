@@ -60,6 +60,7 @@ const ENTRY_POINTS = [
   "permission-proxy.ts",
   "connector-proxy.ts",
   "box-computer-mcp.ts",
+  "hosted-computer-mcp.ts",
   "nation-web-mcp.ts",
   "mcp-gate.ts",
   "browser-proxy.ts",
@@ -74,6 +75,9 @@ await build({
   platform: "node",
   target: "node20",
   format: "esm",
+  // Daytona's Axios transport includes CommonJS dependencies that require
+  // Node built-ins at runtime. Keep those working in the standalone ESM bundle.
+  banner: { js: 'import { createRequire as __nationCreateRequire } from "node:module"; const require = __nationCreateRequire(import.meta.url);' },
   outbase: server,
   outdir: join(root, "dist-server"),
   // Written after tsc, replacing its output for these entry points.

@@ -155,6 +155,33 @@ describe("scopes", () => {
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 
+  it("opens a member's own computer and browser routes only where the workspace offers them", () => {
+    const routes: Array<[string, string, "workspaceComputers" | "workspaceBrowser"]> = [
+      ["GET", "/api/bots/b1/computer", "workspaceComputers"],
+      ["POST", "/api/bots/b1/computer/provision", "workspaceComputers"],
+      ["POST", "/api/bots/b1/computer/sleep", "workspaceComputers"],
+      ["POST", "/api/bots/b1/computer/screenshot", "workspaceComputers"],
+      ["GET", "/api/bots/b1/browser/live", "workspaceBrowser"],
+      ["POST", "/api/bots/b1/browser/action", "workspaceBrowser"],
+    ];
+    for (const [method, path, feature] of routes) {
+      expect(requiredScope(method, path), path).toBe("admin");
+      expect(requiredScope(method, path, { [feature]: true }), path).toBe("client");
+    }
+    // Never a member's, whatever a workspace offers: the provider's desktop
+    // link, commands, removal, control, this machine's computers, and every
+    // provider key or engine setting.
+    const everything = { workspaceComputers: true, workspaceBrowser: true };
+    for (const [method, path] of [
+      ["POST", "/api/bots/b1/computer/join"], ["POST", "/api/bots/b1/computer/exec"], ["POST", "/api/bots/b1/computer/remove"],
+      ["POST", "/api/bots/b1/computer/control"], ["POST", "/api/local-computer/run"], ["POST", "/api/bots/b1/local-computer/run"],
+      ["GET", "/api/computers"], ["PUT", "/api/config"], ["PATCH", "/api/config"], ["POST", "/api/instances"],
+      ["POST", "/api/instances/nationApi/login"], ["POST", "/api/team-computers"], ["POST", "/api/browser-engine/install"],
+    ]) {
+      expect(requiredScope(method, path, everything), `${method} ${path}`).toBe("admin");
+    }
+  });
+
   it("limits a client's bot and room edits to display fields, naming the field it refused", () => {
     expect(clientBotPatchViolation({ unread: true })).toBeNull();
     expect(clientBotPatchViolation({ pinned: true, color: "green" })).toBeNull();
@@ -244,6 +271,26 @@ describe("resolveRequestAuth", () => {
     const foreignOrigin = resolve({ host: "127.0.0.1:8799", origin: "https://evil.example" });
     expect(foreignOrigin.status).toBe(403);
     expect(foreignOrigin.error).toBe("forbidden: cross-origin request");
+  });
+
+  it("gives a member workspace no loopback owner: only a session gets in", () => {
+    const strict = (headers: Record<string, string>, path = "/api/bots", method = "GET") =>
+      resolveRequestAuth(request(headers, method), { sessions, cookieName, streamPath: "/api/events", url: new URL(path, "http://x"), loopbackOwner: false });
+    for (const [path, method] of [["/api/bots", "GET"], ["/api/config", "PUT"], ["/api/auth/pairing", "POST"], ["/api/instances", "POST"]]) {
+      const anonymous = strict({ host: "127.0.0.1:8799" }, path, method);
+      expect(anonymous.auth, path).toBeNull();
+      expect(anonymous.status, path).toBe(401);
+    }
+    expect(strict({ host: "localhost:8799", origin: "http://localhost:8799" }).auth).toBeNull();
+    const token = pairedToken(["client"]);
+    expect(strict({ host: "127.0.0.1:8799", authorization: `Bearer ${token}` }).auth?.kind).toBe("session");
+    // its own agent integrations still reach /api/internal/*, with no scope:
+    // that handler checks their per-turn capability
+    expect(strict({ host: "127.0.0.1:8799", authorization: "Bearer omb_cap_x" }, "/api/internal/computer-control", "GET").auth).toEqual({ kind: "loopback", scopes: [] });
+    expect(strict({ host: "127.0.0.1:8799", "x-forwarded-for": "203.0.113.7" }, "/api/internal/browser/mcp", "POST").auth).toBeNull();
+    expect(strict({ host: "thenation.city" }, "/api/internal/browser/mcp", "POST").auth).toBeNull();
+    // the owner path elsewhere is untouched
+    expect(resolve({ host: "127.0.0.1:8799" }).auth?.kind).toBe("loopback");
   });
 
   it("rejects revoked email cookies, bearers and tickets without falling back to loopback ownership", () => {

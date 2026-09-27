@@ -1,7 +1,7 @@
 // A stand-in workspace server for server/workspace-host.test.ts: the three
 // routes the host relies on, plus probes that report what arrived. Its
-// state file ($HOME/fake-state.json) lets a test make it busy or keep it
-// awake, since only the host's own environment list reaches it.
+// state file ($HOME/fake-state.json) lets a test make it busy, keep it awake
+// or slow to exit, since only the host's own environment list reaches it.
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ const key = process.env.NATION_WORKSPACE_KEY ?? "";
 let minted = 0;
 let token = "";
 
-const state = (): { busy?: boolean; keepAlive?: boolean } => {
+const state = (): { busy?: boolean; keepAlive?: boolean; slowExitMs?: number } => {
   try { return JSON.parse(readFileSync(join(process.env.HOME ?? "", "fake-state.json"), "utf8")); } catch { return {}; }
 };
 
@@ -57,4 +57,5 @@ const server = createServer(async (req, res) => {
   send(404, { error: "not found" });
 });
 server.listen(port, "127.0.0.1");
-process.on("SIGTERM", () => process.exit(0));
+// A real workspace takes a moment to put its computers to sleep as it stops.
+process.on("SIGTERM", () => setTimeout(() => process.exit(0), state().slowExitMs ?? 0));

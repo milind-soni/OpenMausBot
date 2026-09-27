@@ -575,18 +575,22 @@ describe("Store", () => {
     const store = new Store(selection);
     const box = store.createBot();
     const vps = store.createBot();
+    const orgo = store.createBot({ cloudBackend: "orgo" });
+    const daytona = store.createBot({ cloudBackend: "daytona" });
     const invalid = store.createBot();
     const absent = store.createBot();
     const raw: BotRecord[] = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
     raw.find((bot) => bot.id === box.id)!.cloudBackend = "box";
     raw.find((bot) => bot.id === vps.id)!.cloudBackend = "vps";
-    (raw.find((bot) => bot.id === invalid.id) as unknown as { cloudBackend: string }).cloudBackend = "daytona";
+    (raw.find((bot) => bot.id === invalid.id) as unknown as { cloudBackend: string }).cloudBackend = "invalid-backend";
     delete raw.find((bot) => bot.id === absent.id)!.cloudBackend;
     writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(raw));
 
     const reloaded = new Store(selection);
     expect(reloaded.bot(box.id)?.cloudBackend).toBe("box");
     expect(reloaded.bot(vps.id)?.cloudBackend).toBe("vps");
+    expect(reloaded.bot(orgo.id)?.cloudBackend).toBe("orgo");
+    expect(reloaded.bot(daytona.id)?.cloudBackend).toBe("daytona");
     expect(reloaded.bot(invalid.id)?.cloudBackend).toBeUndefined();
     expect(reloaded.bot(absent.id)?.cloudBackend).toBeUndefined();
 

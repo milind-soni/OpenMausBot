@@ -13,16 +13,25 @@
 //     key made for that start. Requests are forwarded with that bearer and
 //     never as the loopback owner: owner means admin, and admin could add
 //     engines, keys, MCP servers or computers.
-//   - The NATION API engine only (see workspaceConfig): no desks, no browser,
-//     no computers, no command-line engines on this machine.
+//   - The NATION API engine only (see workspaceConfig): no desks and no
+//     command-line engines on this machine.
+//   - Computers and a browser of its own (see WorkspaceTools): NATION's cloud
+//     computers, one per (workspace, account, bot), never this machine's
+//     desktop, a Local VM, an SSH computer or a shared one; and the built-in
+//     browser behind an egress guard (browser-egress-guard.ts), with its temp
+//     files and sockets in a private directory of its own. When the workspace
+//     stops, any browser process it left and that directory go with it.
+//   - Unauthenticated loopback requests are not its owner, so nothing on this
+//     machine becomes its admin by reaching its port.
 //   - A fixed list of environment values: the model, search and credit
 //     settings this server already runs with. Never this server's data
 //     directory, sign-in lists, mail credentials or desk credentials.
 //   - The credit ledger file this server uses, so payment amounts stay unique
 //     across accounts and the one payment scanner here credits every account.
+import { addedProviderConfigured } from "../shared/hosted-computers.ts";
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { Agent, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { createServer as createNetServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -40,6 +49,95 @@ export const WORKSPACE_NO_ANSWER = "Your workspace did not answer. Try again in 
 export interface SharedWorkspaceSettings {
   modelRouting?: unknown;
   webSearch?: unknown;
+}
+
+/** What a member's bots may use besides chat, decided here at each start. */
+export interface WorkspaceTools {
+  hostedComputers?: import("../shared/hosted-computers.ts").HostedComputersConfig;
+  /** NATION's cloud computers: remote machines, one per (workspace, account, bot). */
+  computers: boolean;
+  /** The built-in browser, run on this machine behind the egress guard. */
+  browser: boolean;
+  /** NATION's cloud computer credential. It reaches a workspace server through
+   * its environment only: never its config file, a response or an engine. */
+  boxToken?: string | null;
+  /** The browser engine this server resolved, reused by workspace servers. */
+  browserEngine?: string | null;
+}
+
+/** The operator's switches: both on unless NATION_WORKSPACE_COMPUTERS=0 or
+ * NATION_WORKSPACE_BROWSER=0. A computer also needs NATION's cloud computer
+ * credential and a browser needs the engine; without them each stays off. */
+export function workspaceTools(env: NodeJS.ProcessEnv, available: { boxToken?: string | null; browserEngine?: string | null; hostedComputers?: import("../shared/hosted-computers.ts").HostedComputersConfig }): WorkspaceTools {
+  const boxToken = available.boxToken?.trim() || null;
+  const browserEngine = available.browserEngine?.trim() || null;
+  return {
+    computers: env.NATION_WORKSPACE_COMPUTERS !== "0" && (boxToken !== null || addedProviderConfigured(available.hostedComputers, "orgo") || addedProviderConfigured(available.hostedComputers, "daytona")),
+    hostedComputers: available.hostedComputers,
+    browser: env.NATION_WORKSPACE_BROWSER !== "0" && browserEngine !== null,
+    boxToken,
+    browserEngine,
+  };
+}
+
+/** A short private directory for one workspace's browser: Chrome's temp files
+ * and agent-browser's sockets. A Unix socket path is capped near 104 bytes,
+ * which a path under the workspace's own folder overruns, so it lives in
+ * /tmp under a name derived from the workspace id. */
+export function workspaceRuntimeDir(workspaceId: string, base = "/tmp"): string {
+  if (!isWorkspaceId(workspaceId)) throw new Error("invalid workspace id");
+  return join(base, `nw-${createHash("sha256").update(workspaceId).digest("hex").slice(0, 12)}`);
+}
+
+/** Create a directory only this server's user may enter, or refuse one that
+ * someone else made first (a link, another owner, or open permissions). */
+export function ensurePrivateDirectory(path: string): void {
+  try {
+    mkdirSync(path, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  const stat = lstatSync(path);
+  const uid = typeof process.getuid === "function" ? process.getuid() : null;
+  if (!stat.isDirectory() || stat.isSymbolicLink() || (uid !== null && stat.uid !== uid) || (stat.mode & 0o077) !== 0) {
+    throw new Error(`${path} is not a private directory of this server`);
+  }
+  for (const name of ["t", "s", "r"]) mkdirSync(join(path, name), { recursive: true, mode: 0o700 });
+}
+
+/** Processes a stopped workspace left behind (a browser daemon, Chrome, a tool
+ * helper): anything whose environment or command line points into its private
+ * directory. Linux only; elsewhere there is no /proc and nothing is found. */
+export function workspaceProcesses(runtimeDir: string, proc = "/proc"): number[] {
+  const markers = [`TMPDIR=${join(runtimeDir, "t")}`, `AGENT_BROWSER_SOCKET_DIR=${join(runtimeDir, "s")}`];
+  let entries: string[];
+  try {
+    entries = readdirSync(proc);
+  } catch {
+    return [];
+  }
+  const found: number[] = [];
+  for (const name of entries) {
+    if (!/^\d+$/.test(name) || Number(name) === process.pid) continue;
+    try {
+      const environ = readFileSync(join(proc, name, "environ"), "latin1").split("\0");
+      const cmdline = readFileSync(join(proc, name, "cmdline"), "latin1").split("\0").join(" ");
+      if (environ.some((entry) => markers.includes(entry)) || cmdline.includes(`${runtimeDir}/`)) found.push(Number(name));
+    } catch {
+      // gone, or not ours to read
+    }
+  }
+  return found;
+}
+
+/** Stop what a workspace left running and remove its private directory. */
+export function tearDownWorkspaceRuntime(runtimeDir: string, log: (line: string) => void = () => {}, proc = "/proc"): void {
+  const leftovers = workspaceProcesses(runtimeDir, proc);
+  for (const pid of leftovers) {
+    try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+  }
+  if (leftovers.length) log(`workspace runtime ${runtimeDir}: stopped ${leftovers.length} process(es) it left behind`);
+  rmSync(runtimeDir, { recursive: true, force: true });
 }
 
 /** Values a workspace server may inherit from this one. Anything not listed stays here. */
@@ -62,6 +160,9 @@ export const INHERITED_ENVIRONMENT = [
   "NATION_FREE_CREDIT_USD", "NATION_CREDIT_MARKUP", "NATION_LOW_BALANCE_USD", "NATION_PACKS_USD",
   "NATION_FREE_GRANTS_PER_IP_PER_DAY", "NATION_CONFIRMATIONS", "NATION_DISPOSABLE_EMAIL_DOMAINS",
   "NATION_PUBLIC_NAME",
+  // cloud computers' endpoint, and the Chrome the browser engine starts
+  // (production pins its exact path for the Chrome sandbox profile)
+  "OMB_BOX_API", "AGENT_BROWSER_EXECUTABLE_PATH", "NATION_TEST_ORGO_API", "NATION_TEST_DAYTONA_API",
 ] as const;
 
 export function workspaceServerEnvironment(parent: NodeJS.ProcessEnv, input: {
@@ -71,10 +172,13 @@ export function workspaceServerEnvironment(parent: NodeJS.ProcessEnv, input: {
   key: string;
   creditsDb: string;
   brandFile?: string | null;
+  /** The workspace's private directory (workspaceRuntimeDir), when it has one. */
+  runtimeDir?: string | null;
+  tools?: WorkspaceTools;
 }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const name of INHERITED_ENVIRONMENT) if (parent[name]) env[name] = parent[name];
-  const temp = join(input.root, "tmp");
+  const temp = input.runtimeDir ? join(input.runtimeDir, "t") : join(input.root, "tmp");
   Object.assign(env, {
     HOME: input.root,
     USERPROFILE: input.root,
@@ -97,29 +201,47 @@ export function workspaceServerEnvironment(parent: NodeJS.ProcessEnv, input: {
     NATION_TRUST_PROXY: "1",
     NATION_WORKSPACE_ID: input.workspaceId,
     NATION_WORKSPACE_KEY: input.key,
+    // Reaching its port from this machine proves nothing: no owner by loopback.
+    NATION_WORKSPACE_LOOPBACK_OWNER: "0",
   });
+  if (input.runtimeDir) {
+    env.AGENT_BROWSER_SOCKET_DIR = join(input.runtimeDir, "s");
+    env.XDG_RUNTIME_DIR = join(input.runtimeDir, "r");
+  }
+  if (input.tools?.computers && input.tools.hostedComputers) env.NATION_HOSTED_COMPUTERS_CONFIG = JSON.stringify(input.tools.hostedComputers);
+  if (input.tools?.computers && input.tools.boxToken) env.BOX_TOKEN = input.tools.boxToken;
+  if (input.tools?.browser && input.tools.browserEngine) env.OMB_AGENT_BROWSER_PATH = input.tools.browserEngine;
   if (input.brandFile) env.NATION_BRAND_FILE = input.brandFile;
   return env;
 }
 
 /** The parts of a workspace's config.json this server owns. Everything else
  * (bots' look, rooms, onboarding) is the workspace's own. */
-export function workspaceConfig(existing: Record<string, unknown>, email: string, shared: SharedWorkspaceSettings = {}): Record<string, unknown> {
+export function workspaceConfig(
+  existing: Record<string, unknown>,
+  email: string,
+  shared: SharedWorkspaceSettings = {},
+  tools: Pick<WorkspaceTools, "computers" | "browser"> = { computers: false, browser: false },
+): Record<string, unknown> {
   const features = existing.features && typeof existing.features === "object" && !Array.isArray(existing.features) ? existing.features as Record<string, unknown> : {};
   const next: Record<string, unknown> = {
     ...existing,
     // The one account that may hold a session here.
     signIn: { admins: [], members: [email] },
-    // NATION API only: no command-line engines, computers or desks. The
-    // server picks its own default model on it; routing picks per turn.
+    // NATION API only: no command-line engines or desks. The server picks its
+    // own default model on it; routing picks per turn.
     instances: { nationApi: { driver: "nation-openrouter", displayName: "NATION API" } },
-    features: { ...features, browser: false, computers: false, sharedComputers: false },
+    // Cloud computers and the guarded browser when this server offers them;
+    // never computer sharing.
+    features: { ...features, browser: tools.browser, computers: tools.computers, sharedComputers: false },
   };
   const selection = next.defaultModelSelection as { instanceId?: unknown } | undefined;
   if (selection && selection.instanceId !== "nationApi") delete next.defaultModelSelection;
   // Never copied in, and removed if present. (`composio` stays: the workspace
   // records its own connected-apps session ids there, and never a key.)
-  for (const key of ["box", "vps", "localVm", "anthropic", "xai", "openaiCompat", "opencodeGo", "customDomain", "cliStartup"]) delete next[key];
+  // `box` carries no key here: the credential arrives by environment only.
+  // `browserEngine` could attach the browser to another Chrome.
+  for (const key of ["box", "hostedComputers", "vps", "localVm", "browserEngine", "anthropic", "xai", "openaiCompat", "opencodeGo", "customDomain", "cliStartup"]) delete next[key];
   const composio = next.composio as Record<string, unknown> | undefined;
   if (composio && typeof composio === "object") delete composio.apiKey;
   if (shared.modelRouting !== undefined) next.modelRouting = shared.modelRouting;
@@ -231,6 +353,10 @@ export interface WorkspaceHostOptions {
   command?: { file: string; args: string[]; cwd?: string };
   brandFile?: () => string | null;
   sharedSettings?: () => SharedWorkspaceSettings;
+  /** Computers and browser for members (workspaceTools); none when absent. */
+  tools?: () => WorkspaceTools;
+  /** Where private browser directories go (workspaceRuntimeDir); /tmp by default. */
+  runtimeBase?: string;
   maxRunning?: number;
   idleMs?: number;
   startTimeoutMs?: number;
@@ -255,6 +381,10 @@ function positiveInteger(value: string | undefined, fallback: number, max: numbe
 export class WorkspaceHost {
   private readonly running = new Map<string, Running>();
   private readonly starting = new Map<string, Promise<Running>>();
+  /** Workspaces being stopped, until their server has exited and cleared its
+   * private directory. A start waits for it: the directory is named for the
+   * workspace, and clearing it stops every process that uses it. */
+  private readonly exiting = new Map<string, Promise<void>>();
   private readonly failures = new Map<string, { count: number; at: number }>();
   private readonly agent = new Agent({ keepAlive: true, maxSockets: 64 });
   private readonly options: WorkspaceHostOptions;
@@ -289,17 +419,32 @@ export class WorkspaceHost {
     return this.running.size;
   }
 
-  /** Create the folder on first use and (re)write the settings this server owns. */
-  prepare(ref: WorkspaceRef): string {
+  /** Create the folder on first use, the private runtime directory for this
+   * start, and (re)write the settings this server owns. */
+  prepare(ref: WorkspaceRef): { root: string; runtimeDir: string | null; tools: WorkspaceTools } {
     const root = this.rootOf(ref.id);
     mkdirSync(join(root, "tmp"), { recursive: true, mode: 0o700 });
     mkdirSync(join(root, "logs"), { recursive: true, mode: 0o700 });
+    let tools: WorkspaceTools = this.options.tools?.() ?? { computers: false, browser: false };
+    let runtimeDir: string | null = workspaceRuntimeDir(ref.id, this.options.runtimeBase);
+    try {
+      // Whatever an earlier run of this workspace left (if this server was
+      // killed, say) goes first: each start gets a fresh directory.
+      tearDownWorkspaceRuntime(runtimeDir, this.log);
+      ensurePrivateDirectory(runtimeDir);
+    } catch (error) {
+      // The browser cannot start without a short private directory, and must
+      // not borrow one: this start goes without it.
+      this.log(`workspace ${ref.id}: no private runtime directory (${error instanceof Error ? error.message : String(error)}); its browser stays off`);
+      runtimeDir = null;
+      tools = { ...tools, browser: false };
+    }
     const configFile = join(root, "config.json");
-    const next = workspaceConfig(readJson(configFile), ref.email, this.options.sharedSettings?.() ?? {});
+    const next = workspaceConfig(readJson(configFile), ref.email, this.options.sharedSettings?.() ?? {}, tools);
     const temp = `${configFile}.${randomBytes(4).toString("hex")}.tmp`;
     writeFileSync(temp, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
     renameSync(temp, configFile);
-    return root;
+    return { root, runtimeDir, tools };
   }
 
   /** The workspace server for this account, started if it is not running. */
@@ -314,6 +459,7 @@ export class WorkspaceHost {
     if (!pending) {
       pending = (async () => {
         if (current) await current.exited;
+        await this.exiting.get(ref.id);
         return this.start(ref);
       })();
       this.starting.set(ref.id, pending);
@@ -331,11 +477,11 @@ export class WorkspaceHost {
       throw Object.assign(new Error(`workspace ${ref.id} failed to start ${failure.count} times; waiting before another try`), { status: 503 });
     }
     await this.makeRoom();
-    const root = this.prepare(ref);
+    const prepared = this.prepare(ref);
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const running = await this.launch(ref, root);
+        const running = await this.launch(ref, prepared);
         this.failures.delete(ref.id);
         return running;
       } catch (error) {
@@ -359,17 +505,20 @@ export class WorkspaceHost {
     return openSync(file, "a", 0o600);
   }
 
-  private async launch(ref: WorkspaceRef, root: string): Promise<Running> {
+  private async launch(ref: WorkspaceRef, prepared: { root: string; runtimeDir: string | null; tools: WorkspaceTools }): Promise<Running> {
+    const { root, runtimeDir, tools } = prepared;
     const port = await freePortPair();
     const key = randomBytes(32).toString("base64url");
     const command = this.options.command ?? ownServerCommand(this.env);
     const log = this.openLog(root);
     let child: ChildProcess;
     try {
+      if (runtimeDir) ensurePrivateDirectory(runtimeDir);
       child = spawn(command.file, command.args, {
         cwd: command.cwd ?? process.cwd(),
         env: workspaceServerEnvironment(this.env, {
           root, port, workspaceId: ref.id, key, creditsDb: this.options.creditsDb, brandFile: this.options.brandFile?.() ?? null,
+          runtimeDir, tools,
         }),
         stdio: ["ignore", log, log],
       });
@@ -377,9 +526,18 @@ export class WorkspaceHost {
       closeSync(log);
     }
     const exited = new Promise<void>((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) return resolve();
-      child.once("exit", () => resolve());
-      child.once("error", () => resolve());
+      const gone = () => {
+        // The workspace's browser processes and private directory end with it.
+        if (runtimeDir) {
+          try { tearDownWorkspaceRuntime(runtimeDir, this.log); } catch (error) {
+            this.log(`workspace ${ref.id}: could not clear its runtime directory: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+        resolve();
+      };
+      if (child.exitCode !== null || child.signalCode !== null) return gone();
+      child.once("exit", gone);
+      child.once("error", gone);
     });
     const stop = async () => {
       child.kill("SIGTERM");
@@ -475,10 +633,12 @@ export class WorkspaceHost {
     if (!running) return;
     running.stopping = true;
     this.running.delete(workspaceId);
+    this.exiting.set(workspaceId, running.exited);
     running.child.kill("SIGTERM");
     const timer = setTimeout(() => running.child.kill("SIGKILL"), 10_000);
     await running.exited;
     clearTimeout(timer);
+    if (this.exiting.get(workspaceId) === running.exited) this.exiting.delete(workspaceId);
     this.log(`workspace ${workspaceId} stopped (${reason})`);
   }
 

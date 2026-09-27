@@ -51,11 +51,20 @@ describe("web search", () => {
 describe("web reader address rules", () => {
   it("blocks private, loopback, link-local, metadata and special ranges", () => {
     for (const address of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "224.0.0.1",
-      "::1", "::", "fc00::1", "fd12::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "not-an-ip"]) {
+      "::1", "::", "fc00::1", "fd12::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "not-an-ip",
+      // every spelling of an embedded IPv4 address is that address
+      "::ffff:7f00:1", "0:0:0:0:0:ffff:127.0.0.1", "0000:0000:0000:0000:0000:FFFF:7F00:0001", "::ffff:a9fe:a9fe", "::ffff:0:127.0.0.1",
+      "::127.0.0.1", "::7f00:1", "2002:7f00:1::", "2002:a9fe:a9fe::1", "64:ff9b::7f00:1", "64:ff9b:1::1",
+      "fe80::1%eth0", "fec0::1", "ff02::1", "2001:db8::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "100::1"]) {
       expect(blockedAddress(address), address).toBe(true);
     }
-    for (const address of ["8.8.8.8", "93.184.216.34", "2606:4700:4700::1111"]) expect(blockedAddress(address), address).toBe(false);
+    for (const address of ["8.8.8.8", "93.184.216.34", "2606:4700:4700::1111", "::ffff:93.184.216.34", "::ffff:5db8:d822", "2002:5db8:d822::1"]) {
+      expect(blockedAddress(address), address).toBe(false);
+    }
     expect(blockedAddress("127.0.0.1", true)).toBe(false);
+    expect(blockedAddress("::1", true)).toBe(false);
+    expect(blockedAddress("::ffff:7f00:1", true)).toBe(false);
+    expect(blockedAddress("2002:7f00:1::", true)).toBe(true);
   });
 
   it("turns HTML into readable text without scripts or markup", () => {

@@ -2,7 +2,8 @@
 // forwarding boundary in each direction, and its lifecycle (one start for
 // concurrent callers, streaming, idle stop, crash recovery) against a
 // stand-in server.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,9 +13,15 @@ import {
   forwardedRequestHeaders,
   ownServerCommand,
   returnedResponseHeaders,
+  ensurePrivateDirectory,
+  tearDownWorkspaceRuntime,
   workspaceConfig,
+  workspaceProcesses,
+  workspaceRuntimeDir,
   workspaceServerEnvironment,
+  workspaceTools,
   WorkspaceHost,
+  type WorkspaceTools,
 } from "./workspace-host.ts";
 import type { WorkspaceRef } from "./accounts.ts";
 
@@ -36,6 +43,7 @@ describe("what a workspace server inherits", () => {
     CONTAINER_HOST: "ssh://root@vps", CONTAINER_SSHKEY: "/root/.ssh/id", OMB_PUBLIC_URL: "https://thenation.city/swarm",
     NATION_TRUSTED_ORIGINS: "https://thenation.city", OMB_HOSTED_MODEL_TOKEN: "omb_workspace_x", NATION_ACCOUNTS: "1",
     ANTHROPIC_API_KEY: "sk-ant", OPENMAUSBOT_INTERNAL_DATA_DIR_LEASE: "lease", TURNKEY_ORGANIZATION_ID: "org",
+    BOX_TOKEN: "box_desk_token", AGENT_BROWSER_EXECUTABLE_PATH: "/opt/chrome/chrome",
   };
   const env = workspaceServerEnvironment(parent, { root: "/data/workspaces/ws_x", port: 41000, workspaceId: REF.id, key: "k".repeat(43), creditsDb: "/data/nation-credits.db", brandFile: "/data/brand.json" });
 
@@ -47,17 +55,22 @@ describe("what a workspace server inherits", () => {
     });
   });
 
-  it("is never the product owner", () => {
+  it("is never the product owner, and nothing on this machine is its owner by loopback", () => {
     expect(env.NATION_PRODUCT_OWNER).toBe("0");
     expect(env.NATION_PRODUCT_ADMIN).toBe("0");
+    expect(env.NATION_WORKSPACE_LOOPBACK_OWNER).toBe("0");
   });
 
   it("keeps model, credit, wallet and connected-app settings, and nothing else", () => {
     expect(env).toMatchObject({ PATH: "/usr/bin", OPENROUTER_API_KEY: "sk-nation", NATION_MODEL_FAST: "fast/model", NATION_TREASURY_ROBINHOOD: "0xabc", COMPOSIO_API_KEY: "ak_x", TURNKEY_ORGANIZATION_ID: "org" });
+    // cloud computers answer at the same endpoint; Chrome is the one this server runs
+    expect(env).toMatchObject({ OMB_BOX_API: "https://box", AGENT_BROWSER_EXECUTABLE_PATH: "/opt/chrome/chrome" });
     for (const name of ["OMB_SIGNIN_EMAILS", "OMB_SIGNIN_MEMBER_EMAILS", "NATION_ACCOUNT_SERVICE_URL", "OMB_CONTROL_PLANE_URL", "NATION_SMTP_URL",
-      "NATION_MAIL_FROM", "NATION_MAIL_OUTBOX", "NATION_ADMIN_PIN", "NATION_MEMBER_HOST_ENGINES", "NATION_WEB_READER_ALLOW_LOOPBACK", "OMB_BOX_API",
+      "NATION_MAIL_FROM", "NATION_MAIL_OUTBOX", "NATION_ADMIN_PIN", "NATION_MEMBER_HOST_ENGINES", "NATION_WEB_READER_ALLOW_LOOPBACK",
       "CONTAINER_HOST", "CONTAINER_SSHKEY", "OMB_PUBLIC_URL", "NATION_TRUSTED_ORIGINS", "OMB_HOSTED_MODEL_TOKEN", "NATION_ACCOUNTS",
-      "ANTHROPIC_API_KEY", "OPENMAUSBOT_INTERNAL_DATA_DIR_LEASE"]) {
+      "ANTHROPIC_API_KEY", "OPENMAUSBOT_INTERNAL_DATA_DIR_LEASE",
+      // the cloud computer credential only ever arrives through workspaceTools
+      "BOX_TOKEN", "OMB_AGENT_BROWSER_PATH", "AGENT_BROWSER_SOCKET_DIR"]) {
       expect(env[name], name).toBeUndefined();
     }
     expect(JSON.stringify(env)).not.toContain("/root/");
@@ -89,6 +102,94 @@ describe("a workspace's own config", () => {
     expect(first.defaultModelSelection).toEqual({ instanceId: "nationApi", model: "moonshotai/kimi-k2" });
     expect(first.webSearch).toEqual({ provider: "brave" });
     expect(workspaceConfig(first, "a@example.test", {}).webSearch).toBeUndefined();
+  });
+});
+
+describe("a workspace's computers and browser", () => {
+  it("uses only enabled managed providers and keeps their credentials out of workspace files", () => {
+    const hostedComputers = { defaultProvider: "orgo" as const, orgo: { enabled: true, workspaceId: "ws", apiKey: "orgo-secret" } };
+    expect(workspaceTools({}, { hostedComputers }).computers).toBe(true);
+    expect(workspaceTools({}, { hostedComputers: { orgo: { ...hostedComputers.orgo, enabled: false } } }).computers).toBe(false);
+    const env = workspaceServerEnvironment({}, { root: "/data/ws", port: 41000, workspaceId: REF.id, key: "k".repeat(43),
+      creditsDb: "/data/credits.db", tools: workspaceTools({}, { hostedComputers }) });
+    expect(JSON.parse(env.NATION_HOSTED_COMPUTERS_CONFIG!)).toEqual(hostedComputers);
+    expect(JSON.stringify(workspaceConfig({ hostedComputers }, "a@example.test", {}))).not.toContain("orgo-secret");
+  });
+  it("are on when this server has NATION's cloud computer credential and a browser engine, unless switched off", () => {
+    const available = { boxToken: "box_desk_token", browserEngine: "/data/tools/agent-browser/0.37.0/agent-browser" };
+    expect(workspaceTools({}, available)).toEqual({ computers: true, browser: true, ...available });
+    expect(workspaceTools({ NATION_WORKSPACE_COMPUTERS: "0", NATION_WORKSPACE_BROWSER: "0" }, available)).toMatchObject({ computers: false, browser: false });
+    expect(workspaceTools({}, { boxToken: " ", browserEngine: null })).toMatchObject({ computers: false, browser: false });
+  });
+
+  it("reach a workspace server through its environment only, each with its own short private directory", () => {
+    const runtimeDir = "/tmp/nw-0123456789ab";
+    const tools: WorkspaceTools = { computers: true, browser: true, boxToken: "box_desk_token", browserEngine: "/opt/agent-browser" };
+    const base = { root: "/data/workspaces/ws_x", port: 41000, workspaceId: REF.id, key: "k".repeat(43), creditsDb: "/data/nation-credits.db" };
+    expect(workspaceServerEnvironment({}, { ...base, runtimeDir, tools })).toMatchObject({
+      TMPDIR: "/tmp/nw-0123456789ab/t", TEMP: "/tmp/nw-0123456789ab/t", TMP: "/tmp/nw-0123456789ab/t",
+      AGENT_BROWSER_SOCKET_DIR: "/tmp/nw-0123456789ab/s", XDG_RUNTIME_DIR: "/tmp/nw-0123456789ab/r",
+      BOX_TOKEN: "box_desk_token", OMB_AGENT_BROWSER_PATH: "/opt/agent-browser", HOME: "/data/workspaces/ws_x",
+    });
+    const off = workspaceServerEnvironment({}, { ...base, runtimeDir: null, tools: { ...tools, computers: false, browser: false } });
+    expect(off.TMPDIR).toBe("/data/workspaces/ws_x/tmp");
+    for (const name of ["BOX_TOKEN", "OMB_AGENT_BROWSER_PATH", "AGENT_BROWSER_SOCKET_DIR", "XDG_RUNTIME_DIR"]) expect(off[name], name).toBeUndefined();
+  });
+
+  it("are the config's cloud computers and browser, never sharing, and never a credential or another Chrome", () => {
+    const next = workspaceConfig({
+      box: { token: "box_in_file" }, browserEngine: { attachCdpUrl: "9222" }, localVm: { mode: "per-bot" }, vps: { sshAlias: "a" },
+      features: { sharedComputers: true, showToolCalls: true },
+    }, "alice@example.test", {}, { computers: true, browser: true });
+    expect(next.features).toEqual({ computers: true, browser: true, sharedComputers: false, showToolCalls: true });
+    for (const key of ["box", "browserEngine", "localVm", "vps"]) expect(next[key], key).toBeUndefined();
+    expect(JSON.stringify(next)).not.toContain("box_in_file");
+  });
+
+  it("keep sockets and temp files in a short directory named for the workspace", () => {
+    const one = workspaceRuntimeDir(REF.id);
+    expect(one).toMatch(/^\/tmp\/nw-[0-9a-f]{12}$/);
+    expect(workspaceRuntimeDir(REF.id)).toBe(one);
+    expect(workspaceRuntimeDir("ws_BBBBBBBBBBBBBBBBBBBBBB")).not.toBe(one);
+    // agent-browser's socket for a member's per-account session fits under the 104-byte limit
+    expect(`${one}/s/bot-${"b".repeat(36)}--u-${"c".repeat(24)}.sock`.length).toBeLessThan(104);
+    expect(() => workspaceRuntimeDir("../../etc")).toThrow();
+  });
+
+  it("refuse a private directory someone else prepared", () => {
+    const base = mkdtempSync(join(tmpdir(), "nation-runtime-"));
+    cleanups.push(() => rmSync(base, { recursive: true, force: true }));
+    const mine = join(base, "nw-mine");
+    ensurePrivateDirectory(mine);
+    expect(statSync(mine).mode & 0o777).toBe(0o700);
+    for (const name of ["t", "s", "r"]) expect(statSync(join(mine, name)).isDirectory()).toBe(true);
+    ensurePrivateDirectory(mine);
+    const open = join(base, "nw-open");
+    mkdirSync(open, { mode: 0o755 });
+    chmodSync(open, 0o755);
+    expect(() => ensurePrivateDirectory(open)).toThrow(/not a private directory/);
+    const link = join(base, "nw-link");
+    symlinkSync(mine, link);
+    expect(() => ensurePrivateDirectory(link)).toThrow(/not a private directory/);
+  });
+
+  it.skipIf(process.platform !== "linux")("end with the workspace: what it left running stops and its directory goes", async () => {
+    const base = mkdtempSync(join(tmpdir(), "nation-runtime-"));
+    cleanups.push(() => rmSync(base, { recursive: true, force: true }));
+    const runtime = join(base, "nw-left");
+    ensurePrivateDirectory(runtime);
+    const leftover = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { env: { PATH: process.env.PATH, TMPDIR: join(runtime, "t") }, stdio: "ignore" });
+    const bystander = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { env: { PATH: process.env.PATH, TMPDIR: base }, stdio: "ignore" });
+    cleanups.push(() => { bystander.kill("SIGKILL"); leftover.kill("SIGKILL"); });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const found = workspaceProcesses(runtime);
+    expect(found).toContain(leftover.pid);
+    expect(found).not.toContain(bystander.pid);
+    const gone = new Promise((resolve) => leftover.once("exit", resolve));
+    tearDownWorkspaceRuntime(runtime);
+    await gone;
+    expect(existsSync(runtime)).toBe(false);
+    expect(bystander.exitCode).toBeNull();
   });
 });
 
@@ -126,13 +227,14 @@ describe("the forwarding boundary", () => {
 });
 
 describe("workspace lifecycle", () => {
-  async function setup(options: { idleMs?: number; maxRunning?: number } = {}) {
+  async function setup(options: { idleMs?: number; maxRunning?: number; tools?: WorkspaceTools } = {}) {
     const dataDir = mkdtempSync(join(tmpdir(), "nation-host-"));
     const lines: string[] = [];
     const host = new WorkspaceHost({
       dataDir, creditsDb: join(dataDir, "nation-credits.db"), env: { PATH: process.env.PATH },
       command: { file: process.execPath, args: ["--experimental-strip-types", "--no-warnings", FAKE] },
       idleMs: options.idleMs ?? 60_000, maxRunning: options.maxRunning, startTimeoutMs: 15_000, log: (line) => lines.push(line),
+      runtimeBase: dataDir, ...(options.tools ? { tools: () => options.tools! } : {}),
     });
     const front: Server = createServer((req, res) => {
       const ref = req.headers["x-test-workspace"] === "b" ? { ...REF, id: "ws_BBBBBBBBBBBBBBBBBBBBBB", email: "bob@example.test" } : REF;
@@ -147,6 +249,56 @@ describe("workspace lifecycle", () => {
     });
     return { host, base, dataDir, lines };
   }
+
+  it("gives a workspace its computers, browser and private directory for as long as it runs", async () => {
+    const tools: WorkspaceTools = { computers: true, browser: true, boxToken: "box_desk_token", browserEngine: "/opt/agent-browser" };
+    const { host, dataDir } = await setup({ tools });
+    await host.ensure(REF);
+    const config = JSON.parse(readFileSync(join(host.rootOf(REF.id), "config.json"), "utf8"));
+    expect(config.features).toMatchObject({ computers: true, browser: true, sharedComputers: false });
+    expect(JSON.stringify(config)).not.toContain("box_desk_token");
+    const runtime = workspaceRuntimeDir(REF.id, dataDir);
+    expect(statSync(runtime).mode & 0o777).toBe(0o700);
+    await host.stop(REF.id, "test");
+    expect(existsSync(runtime)).toBe(false);
+  });
+
+  it.skipIf(process.platform !== "linux")("clears what an earlier run left before it starts again", async () => {
+    const tools: WorkspaceTools = { computers: false, browser: true, browserEngine: "/opt/agent-browser" };
+    const { host, dataDir } = await setup({ tools });
+    // A browser left from a run whose server was killed with this one.
+    const runtime = workspaceRuntimeDir(REF.id, dataDir);
+    ensurePrivateDirectory(runtime);
+    writeFileSync(join(runtime, "s", "stale.sock"), "");
+    const leftover = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { env: { PATH: process.env.PATH, TMPDIR: join(runtime, "t") }, stdio: "ignore" });
+    cleanups.push(() => { leftover.kill("SIGKILL"); });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const gone = new Promise((resolve) => leftover.once("exit", resolve));
+    await host.ensure(REF);
+    await gone;
+    expect(existsSync(join(runtime, "s", "stale.sock"))).toBe(false);
+    expect(statSync(runtime).mode & 0o777).toBe(0o700);
+    expect(host.isRunning(REF.id)).toBe(true);
+  });
+
+  it("starts a stopping workspace again only once the old server has exited and cleared its directory", async () => {
+    const tools: WorkspaceTools = { computers: false, browser: true, browserEngine: "/opt/agent-browser" };
+    const { host, dataDir } = await setup({ tools });
+    const first = await host.ensure(REF) as unknown as { port: number; child: ChildProcess };
+    writeFileSync(join(host.rootOf(REF.id), "fake-state.json"), JSON.stringify({ slowExitMs: 800 }));
+    const stopping = host.stop(REF.id, "test");
+    const again = await host.ensure(REF) as unknown as { port: number; child: ChildProcess };
+    await stopping;
+    expect(first.child.exitCode ?? first.child.signalCode).not.toBeNull();
+    expect(again.port).not.toBe(first.port);
+    // The old server's teardown ran before this start: it neither removed the
+    // new server's directory nor stopped the new server.
+    expect(existsSync(workspaceRuntimeDir(REF.id, dataDir))).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(again.child.exitCode).toBeNull();
+    expect(again.child.signalCode).toBeNull();
+    expect(host.isRunning(REF.id)).toBe(true);
+  });
 
   it("starts once for concurrent requests and forwards through the boundary", async () => {
     const { host, base } = await setup();

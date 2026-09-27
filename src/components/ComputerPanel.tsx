@@ -1,3 +1,4 @@
+import { isAddedProvider } from "../../shared/hosted-computers";
 // The bot's computer, in the right-side slot. Where it runs decides the
 // whole flow: explicit cloud → provision the box on open (idempotent) and preview
 // via SSE frames or a ~4s screenshot poll. macOS local mode keeps the legacy
@@ -38,6 +39,7 @@ import { usePageVisible } from "@/lib/page-visible";
 import { CloudScreenPreview } from "./CloudScreenPreview";
 import { isActiveTurnRefusal, isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
+import { WorkspaceComputerControls, workspaceToolsOn } from "./WorkspaceComputerControls";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
 import { routineRunLabel, routineRunTone } from "@/lib/routine-display";
@@ -162,17 +164,21 @@ export function ComputerPanel(props: {
   onOpenVmWorkspace?: (botId: string) => void;
 }) {
   const { state } = useStore();
-  if (state.config?.isProductOwner === false) return <MemberComputerPanel bot={props.bot} />;
+  if (state.config?.isProductOwner === false || isAddedProvider(props.bot.cloudBackend)) return <MemberComputerPanel bot={props.bot} />;
   return <OwnerComputerPanel {...props} />;
 }
 
 export function MemberComputerPanel({ bot }: { bot: Bot }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const { padClass } = useCaptionChrome();
+  // A member's own workspace may give its bots a cloud computer and the
+  // browser; a shared desk gives members neither.
+  const tools = workspaceToolsOn(state.config);
+  const ownTools = tools.cloud || tools.browser;
   return (
     <aside
       aria-label={t("computer.member.title")}
-      className="animate-panel-in relative flex h-full w-[340px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel"
+      className={cn("animate-panel-in relative flex h-full max-w-full shrink-0 flex-col overflow-y-auto border-l border-hairline/40 bg-panel", ownTools ? "w-[440px]" : "w-[340px]")}
     >
       <div className={cn("flex items-center justify-between px-4 py-3", padClass)}>
         <div className="flex items-center gap-2 text-[13px] font-medium text-ink">
@@ -188,10 +194,12 @@ export function MemberComputerPanel({ bot }: { bot: Bot }) {
         </button>
       </div>
       <div className="px-4 pb-4">
-        <div className="rounded-xl bg-card p-4" data-testid="member-computer">
-          <div className="text-[15px] font-medium text-ink">{t("computer.member.heading")}</div>
-          <p className="mt-1 text-[12.5px] leading-5 text-ink-secondary">{t("computer.member.body", { name: bot.name })}</p>
-        </div>
+        {ownTools ? <WorkspaceComputerControls bot={bot} /> : (
+          <div className="rounded-xl bg-card p-4" data-testid="member-computer">
+            <div className="text-[15px] font-medium text-ink">{t("computer.member.heading")}</div>
+            <p className="mt-1 text-[12.5px] leading-5 text-ink-secondary">{t("computer.member.body", { name: bot.name })}</p>
+          </div>
+        )}
       </div>
     </aside>
   );

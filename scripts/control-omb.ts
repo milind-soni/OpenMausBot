@@ -412,8 +412,13 @@ export async function launchVerificationServer(
     /** Where sign-in links open (OMB_PUBLIC_URL): a loopback front end, e.g. a production build behind a rewrite proxy. */
     publicUrl?: string;
   },
+  /** Owned loopback provider fixtures only. Credentials are configured over the admin API. */
+  hostedComputerApis?: { orgo?: string; daytona?: string },
 ): Promise<VerificationServer> {
   const loopbackUrl = /^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/;
+  if (Object.values(hostedComputerApis ?? {}).some(url => !loopbackUrl.test(url))) {
+    throw new ControlOmbError("Hosted computer verification requires owned loopback providers");
+  }
   if (accounts && (!(accounts.founderEmails ?? []).every((email) => /^[\w.+-]+@example\.test$/.test(email))
     || (accounts.payments && (!loopbackUrl.test(accounts.payments.rpc) || !/^0x[0-9a-fA-F]{40}$/.test(accounts.payments.treasury)))
     || (accounts.turnkey && !loopbackUrl.test(accounts.turnkey.url))
@@ -495,6 +500,8 @@ export async function launchVerificationServer(
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
   if (boxFixtureApi) childEnv.OMB_BOX_API = boxFixtureApi;
+  if (hostedComputerApis?.orgo) childEnv.NATION_TEST_ORGO_API = hostedComputerApis.orgo;
+  if (hostedComputerApis?.daytona) childEnv.NATION_TEST_DAYTONA_API = hostedComputerApis.daytona;
   if (composioFixtureApi) Object.assign(childEnv, { OMB_COMPOSIO_BROKER_URL: composioFixtureApi + "/broker", OMB_COMPOSIO_BROKER_TOKEN: "a".repeat(64) });
   if (testCapabilityKey) childEnv.OMB_TEST_INTERNAL_CAPABILITY_KEY = testCapabilityKey;
   if (hostedMembers) Object.assign(childEnv, {

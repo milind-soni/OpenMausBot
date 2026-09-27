@@ -130,7 +130,7 @@ describe("surfacePrompt", () => {
     expect(text).toContain("verify its result before claiming success");
     expect(text).toContain("Announcing an action is not performing it");
     expect(text).toContain("never act on a different computer or describe a host window as a VM");
-    expect(text).toContain("use OpenMausBot's mounted browser/computer tools first");
+    expect(text).toContain("use Nation Team Chat's mounted browser/computer tools first");
     expect(text).toContain("Do not substitute the provider's own desktop");
   });
 

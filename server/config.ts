@@ -1,3 +1,4 @@
+import { hostedComputersSchema, type HostedComputersConfig } from "../shared/hosted-computers.ts";
 import { CONNECTORS_ENABLED } from "./connector-policy.ts";
 // Config + data dirs. One file, ~/.openmausbot/config.json, env fallbacks:
 //   { "xai": {"key":"xai-â€¦"}, "composio": {"apiKey":"ak_â€¦"}, "box": {"token":"â€¦"},
@@ -398,6 +399,7 @@ const appConfigSchema = z.object({
    * are non-secret local identifiers used to reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
   box: z.object({ token: optionalText }).optional(),
+  hostedComputers: hostedComputersSchema.optional(),
   vps: vpsConfigSchema.optional(),
   /** Optional OpenCode key; persisted write-only and passed only to its child. */
   opencodeGo: z.object({ apiKey: optionalText }).optional(),
@@ -504,6 +506,7 @@ export interface AppConfig {
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
+  hostedComputers?: HostedComputersConfig;
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
@@ -770,6 +773,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "tts",
   "imageGen",
   "vps",
+  "hostedComputers",
   "rooms",
   "threads",
   "context",
@@ -857,6 +861,7 @@ export function loadConfig(): AppConfig {
     const alias = process.env.VPS_SSH_ALIAS.trim();
     cfg.vps = { ...cfg.vps, sshAlias: alias };
   }
+  if (process.env.NATION_HOSTED_COMPUTERS_CONFIG) cfg.hostedComputers = hostedComputersSchema.parse(JSON.parse(process.env.NATION_HOSTED_COMPUTERS_CONFIG));
   cfg.box = { ...cfg.box };
   if (process.env.BOX_TOKEN !== undefined) cfg.box.token = process.env.BOX_TOKEN;
   cfg.opencodeGo = { ...cfg.opencodeGo };
@@ -886,6 +891,7 @@ export function loadConfig(): AppConfig {
  * file value is authoritative again. Fields absent from the patch are
  * untouched. */
 export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads">>): void {
+  if (patch.hostedComputers !== undefined) process.env.NATION_HOSTED_COMPUTERS_CONFIG = JSON.stringify(patch.hostedComputers);
   const secrets: Array<[value: string | undefined, name: string]> = [
     [patch.xai?.key, "XAI_API_KEY"],
     [patch.anthropic?.key, "OMB_ANTHROPIC_API_KEY"],
@@ -933,6 +939,9 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OPENAI_COMPAT_API_KEY",
   "OPENAI_COMPAT_URL",
   "BOX_TOKEN",
+  "NATION_HOSTED_COMPUTERS_CONFIG",
+  "ORGO_API_KEY",
+  "DAYTONA_API_KEY",
   "OPENCODE_API_KEY",
   "OMB_TTS_KEY",
   "OMB_FISH_AUDIO_API_KEY",

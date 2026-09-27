@@ -13,7 +13,10 @@ const MAX_RESPONSE_BYTES = 16_777_216;
 /** Startup, not per-request work: a cold engine spawn can exceed a tight
  * per-request budget before anything has been accepted to guard. */
 const HANDSHAKE_TIMEOUT_MS = 1_000;
-const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Path", "TMPDIR", "TMP", "TEMP", "SystemRoot", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"];
+const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Path", "TMPDIR", "TMP", "TEMP", "SystemRoot", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR",
+  // Where the engine's sockets live: a member workspace keeps them in its own
+  // short private directory (workspace-host.ts), for every engine command.
+  "AGENT_BROWSER_SOCKET_DIR"];
 
 /** MCP, viewer commands, and cleanup must resolve the same HOME/socket paths.
  * Inherit OS plumbing, never the harness's model-provider credentials. */

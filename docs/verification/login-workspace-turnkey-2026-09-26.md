@@ -32,10 +32,12 @@ live Robinhood Chain credit.
   loopback (a key made for that start), never as the loopback owner. An
   account cookie never reaches the desk: a stale, cross-site or forged one is
   refused. A workspace runs NATION API only (no command-line engines, desks,
-  browser or computers), gets an explicit list of environment values (model,
-  search, connected-app, wallet and credit settings; never the desk's data
-  directory, sign-in lists, mail or desk credentials), and is never the
-  product owner.
+  browser or computers; since the
+  [member workspace computers record](workspace-computers-2026-09-27.md), a
+  cloud computer and a guarded browser), gets an explicit list of environment
+  values (model, search, connected-app, wallet and credit settings; never the
+  desk's data directory, sign-in lists, mail or desk credentials), and is
+  never the product owner.
 - **Credits.** Each account's credit id is `email:<sha256(email)>`. Workspaces
   share the public server's ledger file, so invoice amounts stay unique and
   the one payment scan (on the public server) credits every account. Starter

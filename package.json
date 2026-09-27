@@ -82,6 +82,7 @@
   },
   "dependencies": {
     "@clack/prompts": "1.7.0",
+    "@daytona/sdk": "0.218.0",
     "@hpke/core": "1.9.0",
     "@shikijs/langs": "4.4.3",
     "@trycua/cua-driver": "0.28.2",

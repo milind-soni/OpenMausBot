@@ -1,3 +1,4 @@
+import { isAddedProvider } from "../../shared/hosted-computers";
 import { useStore } from "@/state/store";
 import { isProductAdmin } from "@/lib/admin-gate";
 // The Box / Self-hosted VPS segmented control shown under the "Runs on"
@@ -25,14 +26,14 @@ export function CloudBackendPicker({
       <div className="text-[12px] font-medium text-ink">{compact ? "Cloud provider" : "Cloud backend"}</div>
       <div className="mt-0.5 text-[11.5px] text-ink-secondary">
         {compact
-          ? value === "vps" ? "Your own server, connected over SSH." : "A hosted computer managed by Box."
+          ? value === "vps" ? "Your own server, connected over SSH." : "A remote computer managed by NATION."
           : value === "vps"
           ? "Auto reuses a running VPS by default. Enable Start VPS automatically to let Auto create or wake its managed container, or choose Cloud to do it explicitly. Open the live desktop securely from the computer panel."
-          : "Box is the default hosted computer. Choose Self-hosted VPS to use your SSH-configured Linux Docker host."}
+          : "Choose an enabled cloud provider. Changing providers does not move existing files; the previous computer is kept."}
       </div>
       <div className="mt-2 flex overflow-hidden rounded-lg border border-hairline/40">
-        {(["box", "vps"] as const).map((backend, i) => {
-          const configured = backend === "vps" ? state.config?.vps?.configured : state.config?.box?.configured;
+        {(["box", "vps", "orgo", "daytona"] as const).map((backend, i) => {
+          const configured = isAddedProvider(backend) ? state.config?.hostedComputers?.[backend].enabled && state.config.hostedComputers[backend].configured : backend === "vps" ? state.config?.vps?.configured : state.config?.box?.configured;
           const disabled = !configured || (backend === "vps" && !vpsSupported);
           return (
             <button
@@ -48,7 +49,7 @@ export function CloudBackendPicker({
                 value === backend ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
               )}
             >
-              {backend === "vps" ? "Self-hosted VPS" : "Box"}
+              {backend === "vps" ? "Self-hosted VPS" : backend === "orgo" ? "Orgo" : backend === "daytona" ? "Daytona" : "Box"}
             </button>
           );
         })}

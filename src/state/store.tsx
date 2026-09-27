@@ -566,6 +566,7 @@ export interface ConfigStatus {
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   composio: { configured: boolean; mode?: "managed" | "self-hosted" | "unavailable" };
   box: { configured: boolean };
+  hostedComputers?: import("../../shared/hosted-computers").HostedComputersStatus;
   /** Owner-only: NATION-managed web search/reader status (never the key). */
   webTools?: { enabled: boolean; search: { configured: boolean; provider: "brave" | "tavily" | "openrouter" | null; source: string | null }; reader: { configured: boolean }; prices: { searchUsd: number; readUsd: number } };
   vps: { configured: boolean; sshAlias: string };
@@ -624,7 +625,7 @@ export interface ConfigStatus {
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean };
+  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean; computers?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;
@@ -654,13 +655,14 @@ export interface BrowserProfile {
 
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "nationOpenrouter" | "adminGate" | "isProductOwner" | "hostedModelSelection" | "personalWorkspace"
+  "xai" | "composio" | "box" | "hostedComputers" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "nationOpenrouter" | "adminGate" | "isProductOwner" | "hostedModelSelection" | "personalWorkspace"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
   return {
     composio: frame.composio,
     box: frame.box,
+    hostedComputers: frame.hostedComputers,
     vps: frame.vps,
     rooms: frame.rooms,
     threads: frame.threads,

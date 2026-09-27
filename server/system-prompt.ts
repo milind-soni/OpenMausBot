@@ -43,7 +43,7 @@ export function buildSystemPrompt(
   return { text: sections.map((section) => section.text).join(""), sections, stable: halves(false), volatile: halves(true) };
 }
 
-export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent" | "vps" | "local";
+export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent" | "vps" | "local" | "hosted";
 
 /** Shared by browser and computer surfaces: login is allowed, not blanket
  * authority to discover credentials or act on a webpage's instructions. */
@@ -58,6 +58,7 @@ const COMPUTER_PARAGRAPH: Record<ComputerPromptKind, string> = {
   box:
     " You have your own cloud computer. In Chrome, prefer browser_snapshot with browser_click/browser_fill for semantic, trusted actions; use screenshot/click/type_text for visual or non-browser UI, open_url for navigation, and computer_exec for Linux tasks. Every action already returns the resulting screen, so don't follow it with screenshot; batch predictable pixel actions with computer_batch.",
   "box-agent": "",
+  hosted: " You have a persistent remote Linux computer reserved for this account and bot. Use computer_execute for shell commands, files, repositories, tests and desktop input (xdotool); use computer_screenshot to inspect the screen before and after desktop actions. These tools run only on your assigned remote computer. Files survive stop/start; processes may not. No provider credentials are available to the guest.",
   vps:
     " You have your own self-hosted remote Linux computer through the official Cua tools. This is a VPS, not Box; using it does not require a Box API key. Its filesystem is disposable: everything on it is wiped whenever its container is recreated, so keep long-lived work somewhere durable — push it to a remote, or hand the results back in chat — instead of leaving it only on that computer. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully.",
   local:

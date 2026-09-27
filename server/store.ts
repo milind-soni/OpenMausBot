@@ -571,7 +571,7 @@ export class Store {
           botsMigrated = true;
         }
       }
-      if (b.cloudBackend !== undefined && b.cloudBackend !== "box" && b.cloudBackend !== "vps") {
+      if (b.cloudBackend !== undefined && !["box", "vps", "orgo", "daytona"].includes(b.cloudBackend)) {
         delete b.cloudBackend;
         botsMigrated = true;
       }

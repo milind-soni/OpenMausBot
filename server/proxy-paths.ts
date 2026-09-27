@@ -44,6 +44,7 @@ export const SPAWNED_PROXIES = {
   connectors: resolveProxy("connector-proxy"),
   // NATION API chat-runtime tools: the leased Box computer and managed web.
   boxComputer: resolveProxy("box-computer-mcp"),
+  hostedComputer: resolveProxy("hosted-computer-mcp"),
   web: resolveProxy("nation-web-mcp"),
   mcpGate: resolveProxy("mcp-gate"),
   phone: resolveProxy("drivers/phone-proxy"),

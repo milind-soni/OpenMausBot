@@ -8732,7 +8732,7 @@ describe("harness HTTP API", () => {
 
     const saved = await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } });
     expect(saved.status).toBe(200);
-    expect(saved.body.vps).toEqual({ configured: true, sshAlias: "production-vps" });
+    expect(saved.body.vps).toMatchObject({ configured: true, sshAlias: "production-vps" });
     expect(JSON.stringify(saved.body)).not.toContain("privateKey");
 
     const patched = await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "vps" });
@@ -8742,7 +8742,7 @@ describe("harness HTTP API", () => {
     expect(autoStart.status).toBe(200);
     expect(autoStart.body.bot.autoStartVps).toBe(true);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { autoStartVps: "yes" })).status).toBe(400);
-    const invalid = await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "daytona" });
+    const invalid = await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "invalid-backend" });
     expect(invalid.status).toBe(400);
     expect((await api("PATCH", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
   });

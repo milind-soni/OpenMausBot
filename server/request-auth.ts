@@ -262,7 +262,16 @@ export function clearSessionCookie(name: string): string {
  * deliberately listed here. Two client-allowed PATCH routes carry a body
  * filter in the handler (bot and room edits: display fields only). Loopback
  * holds both scopes. */
-export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp; feature?: "sharedComputers" }> = [
+/** Feature gates for client-scoped routes; see ResolveOptions.features. */
+export interface ClientFeatures {
+  sharedComputers?: boolean;
+  /** A member's own workspace (one account, never a shared desk) with NATION cloud computers on. */
+  workspaceComputers?: boolean;
+  /** A member's own workspace with the guarded built-in browser on. */
+  workspaceBrowser?: boolean;
+}
+
+export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp; feature?: keyof ClientFeatures }> = [
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/avatar\/generate$/ },
   { methods: ["GET"], path: /^\/api\/credits\/status$/ },
   { methods: ["POST"], path: /^\/api\/credits\/(?:invoices|confirm|wallet\/(?:challenge|verify))$/ },
@@ -352,9 +361,16 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/config$/ },
   // first-run progress, language and display name; only in a workspace of one's own
   { methods: ["PATCH"], path: /^\/api\/workspace\/preferences$/ },
+  // A member's own workspace: its cloud computer and browser. Each handler
+  // resolves the signed-in account's own computer and browser session, never
+  // the bot's own or another account's.
+  { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/computer$/, feature: "workspaceComputers" },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/computer\/(?:provision|sleep|screenshot)$/, feature: "workspaceComputers" },
+  { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/browser\/live$/, feature: "workspaceBrowser" },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/browser\/action$/, feature: "workspaceBrowser" },
 ];
 
-export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
+export function requiredScope(method: string, path: string, features: ClientFeatures = {}): Scope {
   const upper = method.toUpperCase();
   for (const rule of CLIENT_ALLOW) {
     if (rule.feature && features[rule.feature] !== true) continue;
@@ -398,7 +414,11 @@ export interface ResolveOptions {
   companionMutationToken?: string;
   /** Feature gates that decide whether a client-scoped route exists at all.
    * Absent means off, so an ungated build refuses like one without it. */
-  features?: { sharedComputers?: boolean };
+  features?: ClientFeatures;
+  /** Whether an unauthenticated loopback request is this server's owner. A
+   * member workspace started by the public NATION server says no: reaching
+   * its port from this machine proves nothing (workspace-host.ts). */
+  loopbackOwner?: boolean;
 }
 
 const DESKTOP_OWNER_HEADER = "x-openmausbot-desktop-owner";
@@ -474,6 +494,15 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     return deny(401, "unauthorized: this session has expired or was revoked; pair this device again");
   }
 
+  if (options.loopbackOwner === false) {
+    // Agent integrations on this machine reach /api/internal/* with their own
+    // per-turn capability, which that handler checks. They pass here with no
+    // scope at all, so nothing else is open to them.
+    if (path.startsWith("/api/internal/") && !isProxied(req) && isLoopbackHost(headerValue(req.headers.host))) {
+      return { auth: { kind: "loopback", scopes: [] }, status: 401, error: "" };
+    }
+    return deny(401, "unauthorized: sign in to use this workspace");
+  }
   const proxied = isProxied(req);
   const loopback = !proxied && isLoopbackHost(headerValue(req.headers.host)) && isAllowedOrigin(headerValue(req.headers.origin));
   if (loopback) {
