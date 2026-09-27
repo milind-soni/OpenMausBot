@@ -174,7 +174,7 @@ ERC-20 transfer, and transaction-hash fallback. Wallet network gas is separate.
 | NATION_PACKS_USD | 15,49,99 |
 | NATION_FREE_GRANTS_PER_IP_PER_DAY | 2 |
 | NATION_FREE_GRANTS_PER_DAY | 1000 |
-| NATION_CLIENT_IP_HEADER | unset; x-vercel-forwarded-for behind the web app on Vercel |
+| NATION_CLIENT_IP_HEADER | unset; x-vercel-forwarded-for behind the web app on Vercel, once the owner's live check shows it names the visitor |
 | NATION_CONFIRMATIONS | 3 |
 | NATION_TREASURY_ROBINHOOD | unset; top-up hidden (NATION_TREASURY_BASE is ignored) |
 | NATION_TOKEN_USD_PRICE | unset; $NATION not offered |

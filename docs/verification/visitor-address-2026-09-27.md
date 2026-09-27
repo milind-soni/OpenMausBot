@@ -85,18 +85,33 @@ same 8 tests on main without this change.
 
 ## After the deploy (founder)
 
-1. Deploy the API server with `NATION_CLIENT_IP_HEADER=x-vercel-forwarded-for`
-   and restart it; workspaces pick it up as they restart.
-2. Signed in as the owner, on a phone with Wi-Fi off, open
-   `https://thenation.city/swarm/api/admin/credits/client-address`.
-   - `address` is the phone's own public address and `from` is
-     `x-vercel-forwarded-for`: done.
-   - `address` is a Vercel address although `from` is
-     `x-vercel-forwarded-for`: Vercel did not keep the visitor through both
-     projects. Look under `headers` for one that holds the phone's address and
-     name that one instead; if none does, raise
-     `NATION_FREE_GRANTS_PER_IP_PER_DAY` and
-     `NATION_MAGIC_LINKS_PER_NETWORK_PER_HOUR` for now. The inbox and daily
-     limits stay in force.
-3. Sign up with a new address on a phone that has never signed up: Billing
+Do not set `NATION_CLIENT_IP_HEADER` on trust: first see, on the live path
+(thenation.city, then nation-team-chat.vercel.app, then the API machine's
+proxy), that the header really names the visitor. The inbox limit and the
+daily total apply either way.
+
+1. Deploy the API server with `NATION_CLIENT_IP_HEADER` still unset, and
+   restart it. Addresses are counted as before; the inbox limit, the daily
+   total and the owner's check are live.
+2. Sign in as the owner on a phone with Wi-Fi off. Open
+   `https://thenation.city/swarm/api/admin/credits/client-address`; `from` is
+   still `proxy`. Under `headers`, compare the first entry of
+   `x-vercel-forwarded-for` with the phone's own public address, for example
+   from a what-is-my-IP page on the same phone.
+   - **It is the phone's address:** go on to step 3.
+   - **It is a Vercel address, missing, or not the phone's:** Vercel did not
+     keep the visitor through both projects. Leave the header unset.
+     - Look under `headers` for another header that holds the phone's
+       address. If there is one, it can be named instead after the same
+       checks.
+     - If none does, raise `NATION_FREE_GRANTS_PER_IP_PER_DAY` and
+       `NATION_MAGIC_LINKS_PER_NETWORK_PER_HOUR` for now. The inbox and daily
+       limits stay in force.
+3. Open it again from a second network, such as a laptop on another Wi-Fi.
+   The value must change to that network's address. One that stays the same
+   across networks is Vercel's, not the visitor's.
+4. Only then set `NATION_CLIENT_IP_HEADER=x-vercel-forwarded-for` and restart.
+   Open the check again: `address` is the phone's own and `from` is
+   `x-vercel-forwarded-for`. Workspaces pick it up as they restart.
+5. Sign up with a new address on a phone that has never signed up: Billing
    shows $3.00 credit left.
