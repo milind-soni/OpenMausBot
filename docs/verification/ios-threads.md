@@ -43,7 +43,8 @@ fleet in memory; `-threads-preview-deletion-fails-weekend` refuses the second
 delete to check partial results. These flags are compiled only in Debug.
 They start from the default compact list (`-reset-list-density` drops a
 density saved by an earlier run), where Pepper's threads open from its **› 3**
-control.
+control; the folder-switching and home-search checks also run in comfortable,
+through its Threads row.
 
 `RosterDensityUITests` launches with `-store-preview -roster-preview`.
 `App/RosterPreview.json` is another synthetic, offline fleet: an unsectioned
