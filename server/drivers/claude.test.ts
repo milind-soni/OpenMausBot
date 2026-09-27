@@ -1959,6 +1959,29 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect([firstDone, secondDone].map((e) => (e as { cost?: unknown }).cost)).toEqual([0.01, 0.01]);
   });
 
+  it("measures a resumed process from the restored cost even when its first result has none", async () => {
+    // An overloaded API answers the first turn after --resume with an error
+    // result that carries no total_cost_usd. The next turn on that process
+    // must still be measured from what the CLI restored, not booked whole.
+    const costState = join(scratch, "cost-state-error");
+    mkdirSync(costState);
+    const dump = join(scratch, "resumed-error-dump.json");
+    await create(undefined, { FAKE_CLAUDE_COST_STATE: costState, FAKE_CLAUDE_RESUMED_API_ERROR: "1", FAKE_CLAUDE_DUMP: dump });
+    const threadId = "t-resumed-error-cost";
+    const first = await instance.adapter.sendTurn({ threadId, text: "one", system: "Before.", systemStable: "Before." });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    const failed = await instance.adapter.sendTurn({ threadId, text: "two", system: "After.", systemStable: "After.", resumeCursor: announced });
+    expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === failed.turnId)).toMatchObject({ ok: false, cost: null });
+    const launch = readFileSync(dump, "utf8");
+    const third = await instance.adapter.sendTurn({ threadId, text: "three", system: "After.", systemStable: "After.", resumeCursor: announced });
+    const thirdDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId);
+    // the same resumed process, whose total now reads 0.02
+    expect(readFileSync(dump, "utf8")).toBe(launch);
+    expect(JSON.parse(readFileSync(join(costState, `${announced}.json`), "utf8")).total).toBe(0.02);
+    expect(thirdDone).toMatchObject({ ok: true, cost: 0.01 });
+  });
+
   it.each([false, true])("resets retained native context even with an old cursor supplied: %s", async (withCursor) => {
     await create();
     const dump = join(scratch, "reset.json");

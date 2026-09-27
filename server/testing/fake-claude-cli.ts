@@ -71,6 +71,9 @@
 //                      total already counts the earlier turns. The fake saves
 //                      its running cost per session id here, and a --resume
 //                      launch starts from it.
+//   FAKE_CLAUDE_RESUMED_API_ERROR 1: a --resume launch plays its first turn
+//                      the `api-error` way — an error result with no cost
+//                      figure — and its later turns normally.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawnSync } from "node:child_process";
@@ -161,6 +164,7 @@ function runHooks(event: string, payload: Record<string, unknown>): string {
   return stdout;
 }
 let turnsPlayed = 0;
+let resumedErrorPlayed = false;
 const argAfter = (flag: string): string | null => {
   const i = argv.indexOf(flag);
   return i === -1 ? null : (argv[i + 1] ?? null);
@@ -379,7 +383,9 @@ const playTurn = (prompt: JsonValue) => {
     process.exit(3);
   }
 
-  if (mode === "api-error") {
+  const resumedError = process.env.FAKE_CLAUDE_RESUMED_API_ERROR === "1" && argv.includes("--resume") && !resumedErrorPlayed;
+  if (resumedError) resumedErrorPlayed = true;
+  if (mode === "api-error" || resumedError) {
     const text = process.env.FAKE_CLAUDE_API_ERROR ?? "API Error: 529 Overloaded. This is a server-side issue, usually temporary.";
     out({ type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text }] }, error: "unknown", is_api_error_message: true });
     out({ type: "result", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", result: text });

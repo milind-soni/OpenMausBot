@@ -1710,16 +1710,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (session.child.exitCode === null && !session.closing) armIdle(threadId);
       };
       const currentTurnId = () => session.turn?.turnId ?? turnId;
-      // The process's first result says what --resume restored, which its
-      // turns are measured from; every result is kept for a later resume.
+      // The process's first result with a cost says what --resume restored,
+      // which its turns are measured from; every result is kept for a later
+      // resume. A result without one (an API error) decides nothing yet.
       const noteCostState = (total: unknown, modelUsage: unknown, usage: Parameters<typeof restoredCostBase>[2]) => {
         const state = claudeCostSnapshot(total, modelUsage);
+        if (!state) return;
         if (session.costTotal === undefined) {
-          session.costTotal = state && session.sessionId
+          session.costTotal = session.sessionId
             ? restoredCostBase(readCostHistory()[session.sessionId] ?? [], state, usage)
             : null;
         }
-        if (state && session.sessionId) recordCostState(session.sessionId, state);
+        if (session.sessionId) recordCostState(session.sessionId, state);
       };
 
       const handleLine = (line: string) => {
