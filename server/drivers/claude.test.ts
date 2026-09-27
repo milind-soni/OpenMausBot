@@ -168,6 +168,16 @@ describe("ClaudeDriver.decodeConfig", () => {
     expect(claudeCostSnapshot(null, {})).toBeNull();
   });
 
+  it("matches a resumed turn split over two models by the sum of its growth", () => {
+    // States A=2 ($0.01) and A=3 ($0.02); the resume restored the first, and
+    // the turn used one input token on each of A and B. Its usage counts both.
+    const state = (total: number, models: Record<string, number>) => claudeCostSnapshot(total, Object.fromEntries(
+      Object.entries(models).map(([model, input]) => [model, { inputTokens: input, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 0, costUSD: 0 }]),
+    ))!;
+    const earlier = [state(0.01, { A: 2 }), state(0.02, { A: 3 })];
+    expect(restoredCostBase(earlier, state(0.03, { A: 3, B: 1 }), { input: 2, cacheRead: 0, cacheWrite: 0, output: 0 })).toBe(0.01);
+  });
+
   it("throws on an invalid permissionMode (registry downgrades this to a shadow)", () => {
     expect(() => ClaudeDriver.decodeConfig({ permissionMode: "yolo" })).toThrow(/permissionMode/);
   });

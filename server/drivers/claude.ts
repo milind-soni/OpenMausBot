@@ -894,8 +894,9 @@ export function claudeCostSnapshot(total: unknown, modelUsage: unknown): ClaudeC
  * cost from an earlier state — not always the latest one this driver saw —
  * so that turn's total_cost_usd and modelUsage include the earlier turns.
  * The restored state is the earlier state that sits inside the new counts
- * and leaves exactly this turn's own usage for one model; nothing restored
- * is 0. When no state fits exactly — the CLI saved work that never reported
+ * and leaves exactly this turn's own usage: in one model (usage leaves out
+ * side calls such as a Haiku title) or summed over all models (a turn split
+ * between two); nothing restored is 0. When no state fits exactly — the CLI saved work that never reported
  * a result, like an interrupted turn — the latest state inside the new
  * counts stands, so that work is booked once, with this turn. */
 export function restoredCostBase(
@@ -912,9 +913,11 @@ export function restoredCostBase(
       counts.every((n, i) => n <= (current.models[model]?.[i] ?? 0)));
     if (!within) continue;
     inside = Math.max(inside, state.total);
-    const leavesTurn = Object.entries(current.models).some(([model, counts]) =>
-      counts.every((n, i) => n - (state.models[model]?.[i] ?? 0) === turn[i]));
-    if (leavesTurn) exact = Math.max(exact ?? 0, state.total);
+    const growth = Object.entries(current.models).map(([model, counts]) =>
+      counts.map((n, i) => n - (state.models[model]?.[i] ?? 0)));
+    const isTurn = (counts: number[]) => counts.every((n, i) => n === turn[i]);
+    const summed = turn.map((_, i) => growth.reduce((sum, counts) => sum + counts[i]!, 0));
+    if (growth.some(isTurn) || isTurn(summed)) exact = Math.max(exact ?? 0, state.total);
   }
   return exact ?? inside;
 }
