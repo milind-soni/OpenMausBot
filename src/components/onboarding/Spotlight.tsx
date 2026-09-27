@@ -232,7 +232,7 @@ export function Spotlight({
         >
           <div className="shrink-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.35)]">
             <img
-              src="/nation-logo.svg"
+              src={`${import.meta.env.BASE_URL}nation-logo.svg`}
               alt="NATION"
               width={38}
               height={38}

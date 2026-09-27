@@ -1,6 +1,7 @@
 // NATION soft-tower faces are used on every avatar surface, including pickers.
 import { forwardRef, memo, useEffect, useImperativeHandle, useState } from "react";
 import { NATION_COLOR_NAMES, type NationColor, type NationMotion, type NationState } from "@/lib/mascot";
+import { apiUrl } from "@/lib/api-client";
 import { botAvatarProfile, type BotAvatarCrop } from "../../shared/bot-avatar";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 
@@ -143,9 +144,11 @@ export function BotAvatar({ bot, size = 44, label }: BotAvatarProps) {
       : profile.avatarCrop === "rounded"
         ? "22%"
         : "0";
+  // Stored as server paths (/api/attachments/…, /bot-faces/…); the app may be
+  // served under a base such as /swarm/, and only that prefix reaches it.
   return (
     <img
-      src={profile.avatarUrl}
+      src={profile.avatarUrl && apiUrl(profile.avatarUrl)}
       alt={label ?? (bot.name ? `${bot.name} avatar` : "Bot avatar")}
       width={size}
       height={size}

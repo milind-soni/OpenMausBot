@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   BotAvatar,
@@ -40,6 +40,16 @@ describe("BotAvatar's two avatar outcomes", () => {
     expect(markup).toContain("<img");
     expect(markup).not.toContain("<image");
     expect(markup).not.toContain("radialGradient");
+  });
+
+  it("loads a stored image under the app's base, the only prefix that reaches the app", () => {
+    vi.stubEnv("BASE_URL", "/swarm/");
+    try {
+      expect(renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "circle" })).toContain('src="/swarm/api/attachments/cat.webp"');
+      expect(renderBot({ avatarUrl: "/bot-faces/coordinator.svg", avatarCrop: "circle" })).toContain('src="/swarm/bot-faces/coordinator.svg"');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("renders a soft-tower face image when the crop is mascot", () => {

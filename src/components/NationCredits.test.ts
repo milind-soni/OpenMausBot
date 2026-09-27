@@ -5,8 +5,8 @@ import type { Hex } from "viem";
 
 vi.hoisted(() => {
   vi.stubGlobal("window", { location: { pathname: "/", search: "", assign: vi.fn() } });
-  // Match the production build: the app is served under /swarm/ while thenation.city/subscription
-  // is the public Full Plans URL. With vitest's own base ("/") the two paths would coincide.
+  // Match the production build: the app, Full Plans included, is served under /swarm/. With
+  // vitest's own base ("/") the base-relative and root paths would coincide.
   vi.stubEnv("BASE_URL", "/swarm/");
   vi.stubEnv("DEV", false);
   vi.stubEnv("PROD", true);
@@ -46,10 +46,9 @@ const linkTo = (href: string, text: string) =>
 // ─── Full Plans routing ───────────────────────────────────────────────────────
 
 describe("Full Plans location", () => {
-  it("is thenation.city/subscription in production builds and base-relative on the dev server", () => {
-    expect(fullPlansHref(false, "/swarm/")).toBe("/subscription");
-    expect(fullPlansHref(true, "/swarm/")).toBe("/swarm/subscription");
-    expect(fullPlansHref(true, "/")).toBe("/subscription");
+  it("is under the app's base, the only prefix thenation.city forwards to the app", () => {
+    expect(fullPlansHref("/swarm/")).toBe("/swarm/subscription");
+    expect(fullPlansHref("/")).toBe("/subscription");
   });
 
   it("recognizes both the public path and the base-relative path", () => {
@@ -61,12 +60,12 @@ describe("Full Plans location", () => {
     }
   });
 
-  it("navigates with a full page load to /subscription", () => {
-    expect(FULL_PLANS_HREF).toBe("/subscription");
+  it("navigates with a full page load to /swarm/subscription", () => {
+    expect(FULL_PLANS_HREF).toBe("/swarm/subscription");
     const assign = vi.fn();
     vi.stubGlobal("window", { location: { pathname: "/swarm/", search: "", assign } });
     goToFullPlans();
-    expect(assign).toHaveBeenCalledWith("/subscription");
+    expect(assign).toHaveBeenCalledWith("/swarm/subscription");
   });
 });
 
@@ -212,7 +211,7 @@ describe("Full Plans page", () => {
   };
   const headline = "Permanent credit for your whole AI team.";
 
-  it("renders Full Plans on thenation.city/subscription, with no sheet", () => {
+  it("renders Full Plans on the root /subscription shared before, with no sheet", () => {
     const html = renderAt("/subscription");
     expect(html).toContain('id="full-plans-title"');
     expect(html).toMatch(element("h1", headline));
