@@ -631,7 +631,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           throw new Error("Company model access is unavailable: " + turn.model + " is not approved for your organization. Reconnect your organization; personal billing will not be used.");
         }
         if (!input.environment.OPENMAUSBOT_COMPANY_API_KEY) {
-          throw new Error("Company model access is unavailable: OPENMAUSBOT_COMPANY_API_KEY is missing. Reconnect your organization; personal billing will not be used.");
+          throw new Error("Company model access is unavailable: its managed credential is missing. Reconnect your organization; personal billing will not be used.");
         }
         if (!input.environment.CODEX_HOME) {
           throw new Error("Company model access is unavailable: CODEX_HOME is missing. Reconnect your organization; personal billing will not be used.");

@@ -1419,7 +1419,6 @@ export function LocalComputerSection() {
             {status?.daemonUp && (
               <ActionButton action="pull" pending={pending} onClick={() => void act("pull")}>{t("vm.setup.prepare")}</ActionButton>
             )}
-            {c?.pull && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("vm.setup.showPull")}</summary><div className="mt-2"><CommandLine command={c.pull} /></div></details>}
           </Step>
 
           <Step
@@ -1460,7 +1459,6 @@ export function LocalComputerSection() {
             ) : status?.image ? (
               <ActionButton action="run" pending={pending} onClick={() => void act("run")}>{t("vm.setup.create")}</ActionButton>
             ) : null}
-            {c?.run && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("vm.setup.showCommand")}</summary><div className="mt-2"><CommandLine command={c.run} /></div></details>}
           </Step>
         </div>
       </Card>
@@ -1507,14 +1505,6 @@ export function LocalComputerSection() {
             </ActionButton>
           </div>
         )}
-        <div className="mt-3 break-all text-[11px] text-ink-secondary">
-          {t("vm.safety.workspace", {
-            path: status?.workspace_path ?? t("vm.safety.notCreated"),
-            driver: status?.driver_version ?? "0.20.0",
-            image: status?.image_ref ?? t("vm.safety.notPrepared"),
-          })}
-          {status?.base_image_ref ? <> · {t("vm.safety.baseImage", { image: status.base_image_ref })}</> : null}
-        </div>
       </Card>
     </>
   );

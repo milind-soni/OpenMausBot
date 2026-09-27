@@ -24,6 +24,7 @@ import {
   containerComputerStatus,
   containerRuntimeStatus,
   containerRunArgs,
+  cuaExecArgs,
   dockerSecurityIsHardened,
   localVmRecreatableOnDemand,
   managedImageDockerfile,
@@ -58,8 +59,8 @@ const statusProbe = `${driverExec} status --socket ${CUA_SOCKET}`;
 const healthProbe = `${driverExec} call health_report {} --socket ${CUA_SOCKET}`;
 const readinessProbe =
   `${driverExec} call get_desktop_state {} --socket ${CUA_SOCKET} ` +
-  "--screenshot-out-file /tmp/openmausbot-readiness.png";
-const readinessRead = `docker exec ${CONTAINER} base64 -w0 /tmp/openmausbot-readiness.png`;
+  "--screenshot-out-file /tmp/nation-readiness.png";
+const readinessRead = `docker exec ${CONTAINER} base64 -w0 /tmp/nation-readiness.png`;
 const validPng = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   Buffer.alloc(600),
@@ -196,8 +197,8 @@ describe("containerComputerStatus", () => {
         overall: "ok",
         checks: [],
       }),
-      [`${targetDriverExec} call get_desktop_state {} --socket ${CUA_SOCKET} --screenshot-out-file /tmp/openmausbot-readiness.png`]: "{}\n",
-      [`podman exec ${target.containerName} base64 -w0 /tmp/openmausbot-readiness.png`]: validPng.toString("base64"),
+      [`${targetDriverExec} call get_desktop_state {} --socket ${CUA_SOCKET} --screenshot-out-file /tmp/nation-readiness.png`]: "{}\n",
+      [`podman exec ${target.containerName} base64 -w0 /tmp/nation-readiness.png`]: validPng.toString("base64"),
     });
 
     const status = await containerComputerStatus(fake.run, "win32", target);
@@ -288,8 +289,8 @@ describe("containerComputerStatus", () => {
         overall: "ok",
         checks: [],
       }),
-      [`${targetDriverExec} call get_desktop_state {} --socket ${CUA_SOCKET} --screenshot-out-file /tmp/openmausbot-readiness.png`]: "{}\n",
-      [`docker exec ${target.containerName} base64 -w0 /tmp/openmausbot-readiness.png`]: validPng.toString("base64"),
+      [`${targetDriverExec} call get_desktop_state {} --socket ${CUA_SOCKET} --screenshot-out-file /tmp/nation-readiness.png`]: "{}\n",
+      [`docker exec ${target.containerName} base64 -w0 /tmp/nation-readiness.png`]: validPng.toString("base64"),
     });
 
     const status = await containerComputerStatus(fake.run, "linux", target);
@@ -662,9 +663,7 @@ describe("Cua integration", () => {
   });
 
   it("captures the preview through Cua Driver rather than xdotool or VNC", async () => {
-    const screenshotCall =
-      `${driverExec} call get_desktop_state {} --socket ${CUA_SOCKET} ` +
-      "--screenshot-out-file /tmp/openmausbot-preview.png";
+    const screenshotCall = ["docker", ...cuaExecArgs(["call", "get_desktop_state", "{}", "--socket", CUA_SOCKET, "--screenshot-out-file", "/tmp/nation-preview.png"], { brandDesktop: true })].join(" ");
     const png = validPng;
     const fake = runner({
       "/usr/bin/which docker": "docker\n",
@@ -678,7 +677,7 @@ describe("Cua integration", () => {
       [readinessProbe]: "{}\n",
       [readinessRead]: png.toString("base64"),
       [screenshotCall]: "{}\n",
-      [`docker exec ${CONTAINER} base64 -w0 /tmp/openmausbot-preview.png`]: png.toString("base64"),
+      [`docker exec ${CONTAINER} base64 -w0 /tmp/nation-preview.png`]: png.toString("base64"),
     });
 
     const image = await containerComputerScreenshot(fake.run, "linux");
@@ -704,9 +703,8 @@ describe("Cua integration", () => {
       [healthProbe]: JSON.stringify({ schema_version: "1", overall: "degraded", checks: [] }),
       [readinessProbe]: "{}\n",
       [readinessRead]: png.toString("base64"),
-      [`${driverExec} call get_desktop_state {} --socket ${CUA_SOCKET} ` +
-        "--screenshot-out-file /tmp/openmausbot-preview.png"]: "{}\n",
-      [`docker exec ${CONTAINER} base64 -w0 /tmp/openmausbot-preview.png`]: png.toString("base64"),
+      [["docker", ...cuaExecArgs(["call", "get_desktop_state", "{}", "--socket", CUA_SOCKET, "--screenshot-out-file", "/tmp/nation-preview.png"], { brandDesktop: true })].join(" ")]: "{}\n",
+      [`docker exec ${CONTAINER} base64 -w0 /tmp/nation-preview.png`]: png.toString("base64"),
     });
 
     const frame = await containerComputerFrame(fake.run, "linux");
@@ -865,7 +863,7 @@ describe("setupCommands", () => {
     expect(command).toContain(`--label ${MANAGED_LABEL}=1`);
     expect(command).toContain(`--label ${DRIVER_LABEL}=${CUA_DRIVER_VERSION}`);
     expect(command).toContain(`--label ${WORKSPACE_LABEL}=1`);
-    expect(command).toContain(`--hostname ${CONTAINER}`);
+    expect(command).toContain("--hostname nation-computer");
     expect(command).toContain(
       `--mount type=bind,source=${VM_WORKSPACE_DIR},target=${VM_WORKSPACE_GUEST}`,
     );

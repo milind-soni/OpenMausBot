@@ -1435,7 +1435,7 @@
   "vm.vps.notConfigured": "VPS is not configured.",
   "vm.vps.foundOne": "1 VPS computer found.",
   "vm.vps.foundMany": "{count} VPS computers found.",
-  "vm.vps.orphan": "Orphaned VPS computer Â· ID {id}",
+  "vm.vps.orphan": "Orphaned VPS computer · ID {id}",
   "vm.owner.gone": "Its bot no longer exists",
   "vm.owner.owned": "Owned by this bot",
   "vm.vps.stopFirst": "Stop this bot's work before removing its VPS computer.",

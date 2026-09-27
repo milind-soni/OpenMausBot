@@ -1526,7 +1526,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               undefined,
               promptIdleMs,
               `${DRIVER_KIND} went fully silent ${Math.round(promptIdleMs / 1000)} s after the message and the turn was stopped. ` +
-                "Raise OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS if this model legitimately takes longer to answer.",
+                "Raise NATION_ACP_PROMPT_IDLE_TIMEOUT_MS if this model legitimately takes longer to answer.",
             );
             if (resumeAttempt === 0 && justLoaded && (result?.stopReason === "refusal" || result?.stopReason === "error") &&
                 Date.now() - promptStartedAt < 1500 && !state.settled &&

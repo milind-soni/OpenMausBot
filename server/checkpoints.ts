@@ -204,9 +204,9 @@ function gitEnv(shadow: string, cwd: string): NodeJS.ProcessEnv {
   env.GIT_CONFIG_GLOBAL = join(shadow, "gitconfig");
   env.GIT_CONFIG_SYSTEM = join(shadow, "gitconfig_empty");
   env.GIT_AUTHOR_NAME = "NATION Checkpoint";
-  env.GIT_AUTHOR_EMAIL = "checkpoint@openmausbot.local";
+  env.GIT_AUTHOR_EMAIL = "checkpoint@nation.local";
   env.GIT_COMMITTER_NAME = "NATION Checkpoint";
-  env.GIT_COMMITTER_EMAIL = "checkpoint@openmausbot.local";
+  env.GIT_COMMITTER_EMAIL = "checkpoint@nation.local";
   return env;
 }
 

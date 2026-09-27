@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { CONTAINER, CUA_EXECUTABLE, CUA_SOCKET } from "./container-computer.ts";
 
+import { DESKTOP_BRANDING_SCRIPT } from "./desktop-branding.ts";
+
 const temporary: string[] = [];
 
 afterEach(async () => {
@@ -53,7 +55,7 @@ posixOnly("Local VM Cua MCP bridge", () => {
     expect(result.stderr).toContain(
       `ARGS:exec -i -u cua -e HOME=/home/cua -e DISPLAY=:1 -e CUA_DRIVER_INSTALL_CHANNEL=python_package ` +
         `-e CUA_DRIVER_RS_TELEMETRY_ENABLED=0 ${CONTAINER} ` +
-        `${CUA_EXECUTABLE} mcp --socket ${CUA_SOCKET}`,
+        `sh -c ${DESKTOP_BRANDING_SCRIPT} nation-desktop ${CUA_EXECUTABLE} mcp --socket ${CUA_SOCKET}`,
     );
   });
 
@@ -107,7 +109,7 @@ posixOnly("Local VM Cua MCP bridge", () => {
     expect(result.stderr).toContain(
       `ARGS:exec -i -u cua -e HOME=/home/cua -e DISPLAY=:1 -e CUA_DRIVER_INSTALL_CHANNEL=python_package ` +
         `-e CUA_DRIVER_RS_TELEMETRY_ENABLED=0 ${CONTAINER} ` +
-        `${CUA_EXECUTABLE} mcp --socket ${CUA_SOCKET}`,
+        `sh -c ${DESKTOP_BRANDING_SCRIPT} nation-desktop ${CUA_EXECUTABLE} mcp --socket ${CUA_SOCKET}`,
     );
   });
 });

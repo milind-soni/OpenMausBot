@@ -1,5 +1,11 @@
 # Verifying OpenMausBot
 
+The [desktop branding repair](desktop-branding-2026-09-27.md) covers NATION
+terminal names, existing-guest presentation and removal of legacy settings details.
+
+The [hosted provider verification](hosted-computer-providers.md) covers Orgo
+and Daytona setup, isolated member computers, persistence and packaged adapters.
+
 OpenMausBot has one development control surface: `pnpm control:omb`. It is a
 thin command-line adapter over `scripts/mcp-server.ts`, so verification uses
 the same URL validation, task pinning, bounded transcripts, wait states, and

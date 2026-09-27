@@ -4,6 +4,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { hostname, networkInterfaces } from "node:os";
+import { DESKTOP_HOSTNAME } from "./desktop-branding.ts";
 import { createConnection, createServer, type AddressInfo } from "node:net";
 
 import {
@@ -55,7 +56,7 @@ const FULL_CONTAINER_ID = /^[a-f0-9]{64}$/i;
 const MANAGED_VPS_CONTAINER_NAME = /^openmausbot-vps-[a-z0-9]{1,12}-[a-f0-9]{12}$/;
 const IMAGE_ID = /^sha256:[a-f0-9]{64}$/i;
 const PIDS_LIMIT = 512;
-const SCREENSHOT_PATH = "/tmp/openmausbot-vps-preview.png";
+const SCREENSHOT_PATH = "/tmp/nation-vps-preview.png";
 // The Cua XFCE base includes Pillow in its existing Python environment. Keep
 // this panel-only conversion in the transfer exec: no extra SSH round trip,
 // image rebuild, driver settings change, or second temporary image. Older
@@ -855,6 +856,8 @@ export function vpsContainerRunArgs(
     "-d",
     "--name",
     containerName,
+    "--hostname",
+    DESKTOP_HOSTNAME,
     "--label",
     `${VPS_MANAGED_LABEL}=1`,
     "--label",
@@ -1359,7 +1362,7 @@ export async function vpsComputerScreenshot(
           alias,
           cuaExecArgs(
             ["call", "get_desktop_state", "{}", "--socket", CUA_SOCKET, "--screenshot-out-file", SCREENSHOT_PATH],
-            { container: containerRef },
+            { container: containerRef, brandDesktop: true },
           ),
         ),
         { timeoutMs: 30_000 },
@@ -1374,7 +1377,7 @@ export async function vpsComputerScreenshot(
         "sh",
         "-c",
         SCREENSHOT_TRANSFER,
-        "openmausbot-preview",
+        "nation-preview",
         SCREENSHOT_PATH,
       ]), { timeoutMs: 30_000 })).stdout.trim();
       const checked = wholeScreenshot(Buffer.from(encoded, "base64"));

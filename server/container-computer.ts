@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { DATA_DIR } from "./config.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { DESKTOP_BRANDING_SCRIPT, DESKTOP_HOSTNAME } from "./desktop-branding.ts";
 
 const run = promisify(execFile);
 const SCREENSHOT_STATUS_TTL_MS = 10_000;
@@ -461,7 +462,7 @@ function viewerUrl(password: string | null, port: number | null): string {
  * telemetry knobs can never drift between the Local VM and a VPS container. */
 export function cuaExecArgs(
   args: string[],
-  options: { container?: string; interactive?: boolean } = {},
+  options: { container?: string; interactive?: boolean; brandDesktop?: boolean } = {},
 ): string[] {
   return [
     "exec",
@@ -477,6 +478,10 @@ export function cuaExecArgs(
     "-e",
     "CUA_DRIVER_RS_TELEMETRY_ENABLED=0",
     options.container ?? CONTAINER,
+    // Install the terminal presentation before a desktop is first viewed or
+    // used, including existing guests. The exec preserves MCP stdin/stdout.
+    ...(args[0] === "mcp" || options.brandDesktop
+      ? ["sh", "-c", DESKTOP_BRANDING_SCRIPT, "nation-desktop"] : []),
     CUA_EXECUTABLE,
     ...args,
   ];
@@ -617,7 +622,7 @@ export async function containerComputerStatus(
       ) {
         throw new Error(`Cua health report is ${report.overall ?? "invalid"}`);
       }
-      const readinessShot = "/tmp/openmausbot-readiness.png";
+      const readinessShot = "/tmp/nation-readiness.png";
       await runner(
         status.runtime,
         cuaExecArgs([
@@ -909,7 +914,7 @@ export function containerRunArgs(
   } else {
     common.push(
       "--hostname",
-      target.containerName,
+      DESKTOP_HOSTNAME,
       "--memory",
       "4g",
       "--memory-swap",
@@ -1081,7 +1086,7 @@ export async function containerComputerFrame(
   }
   if (cacheable) screenshotStatusCache.set(target.key, { status, expiresAt: now + SCREENSHOT_STATUS_TTL_MS });
   try {
-    const screenshot = "/tmp/openmausbot-preview.png";
+    const screenshot = "/tmp/nation-preview.png";
     await runner(
       status.runtime,
       cuaExecArgs([
@@ -1092,7 +1097,7 @@ export async function containerComputerFrame(
         CUA_SOCKET,
         "--screenshot-out-file",
         screenshot,
-      ], { container: target.containerName }),
+      ], { container: target.containerName, brandDesktop: true }),
       30_000,
     );
     const { stdout } = await runner(
@@ -1207,4 +1212,3 @@ export function setupCommands(
     view: target.viewerPort ? `http://127.0.0.1:${target.viewerPort}/vnc.html` : "",
   };
 }
-

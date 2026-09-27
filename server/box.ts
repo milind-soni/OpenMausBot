@@ -1220,7 +1220,7 @@ export async function provisionBox(cfg: AppConfig, botId: string, _botName: stri
   const credentialEnv = boxCredentialEnv(cfg);
   cfg = snapshotBoxConfig(cfg);
   if (!boxConfigured(cfg)) {
-    throw new Error('box provider not enabled — add {"box":{"token":"…"}} to ~/.openmausbot/config.json');
+    throw new Error("Cloud computer is not configured. Ask your NATION admin to enable it.");
   }
   await finishPriorDeletionBeforeProvision(cfg, botId);
   const vmName = await boxNameFor(botId);

@@ -928,7 +928,7 @@ describe("CodexDriver turns (fake app-server)", () => {
   it("names a missing Company API key or CODEX_HOME instead of one blanket refusal", async () => {
     await create({ managed: true, environment: { OPENMAUSBOT_COMPANY_API_KEY: "" } });
     await expect(instance.adapter.sendTurn({ threadId: "company-no-key", text: "hi", model: "company-codex-model" }))
-      .rejects.toThrow("OPENMAUSBOT_COMPANY_API_KEY is missing");
+      .rejects.toThrow("managed credential is missing");
     await create({ managed: true, environment: { CODEX_HOME: "" } });
     await expect(instance.adapter.sendTurn({ threadId: "company-no-home", text: "hi", model: "company-codex-model" }))
       .rejects.toThrow("CODEX_HOME is missing");
