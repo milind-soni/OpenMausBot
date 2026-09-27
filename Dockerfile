@@ -19,6 +19,7 @@ RUN npm install -g pnpm@10.33.0
 # The image never runs Electron, so skip its ~100MB postinstall download.
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 # every workspace member's manifest must exist before install resolves the lockfile
 COPY apps/docs/package.json ./apps/docs/package.json
 COPY cloudflare/control-plane/package.json ./cloudflare/control-plane/package.json

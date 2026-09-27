@@ -27,7 +27,22 @@ async function fixture() {
   const env = { NATION_CODING_ENABLED: "1", NATION_CODING_MODEL: "openai/coding-fixture", OPENROUTER_API_KEY: "SERVER_ONLY_KEY", NATION_TEST_CODING: "1", NATION_CODING_PUBLIC_ORIGIN: "" };
   const coding = new IsolatedCoding({ manager, scope: "operator", env, fetcher: upstream,
     spend: () => { const c = { settle: vi.fn(), unconfirmed: vi.fn(), reject: vi.fn(), providerId: vi.fn() }; charges.push(c); return c; } });
-  const server = createServer((req, res) => { void coding.handle(req, res, new URL(req.url!, "http://test").pathname).then(handled => { if (!handled) { res.writeHead(404); res.end(); } }); });
+  const requestShapes: unknown[] = [];
+  const server = createServer((req, res) => {
+    // Disposable fixture diagnostics: record protocol shape, never tokens or input.
+    if (req.method === "POST") {
+      let raw = "";
+      req.on("data", chunk => { raw += chunk; });
+      req.on("end", () => {
+        try {
+          const b = JSON.parse(raw);
+          requestShapes.push({ keys: Object.keys(b), tools: b.tools?.map((t: any) => ({ type: t.type, name: t.name })),
+            store: b.store, background: b.background, previousResponse: Boolean(b.previous_response_id), conversation: Boolean(b.conversation) });
+        } catch { requestShapes.push({ encoding: req.headers["content-encoding"], bytes: raw.length }); }
+      });
+    }
+    void coding.handle(req, res, new URL(req.url!, "http://test").pathname).then(handled => { if (!handled) { res.writeHead(404); res.end(); } });
+  });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   env.NATION_CODING_PUBLIC_ORIGIN = `http://127.0.0.1:${(server.address() as any).port}`;
   const owner = (key: string): CodingOwner => ({ key, provider: "daytona", threadId: key, generation: "one", account: account(key), current: () => true });
@@ -35,7 +50,7 @@ async function fixture() {
   await manager.start("daytona", "alice", true); await manager.start("daytona", "bob", true);
   const start = async (who = alice) => { const task = coding.start(who, "project", "Fix the failing test."); await vi.waitFor(() => expect(pending.length).toBeGreaterThan(0)); return task; };
   const request = (input: any, body: unknown = { input: "hello", tools: [], stream: true }, token = input.token) => fetch(input.url + "/responses", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
-  return { root, coding, manager, alice, bob, start, pending, upstream, charges, request, env,
+  return { root, coding, manager, alice, bob, start, pending, upstream, charges, request, requestShapes, env,
     restartManager: () => new HostedComputerManager(root, "workspace-a", () => hostedFixtureConfig, async () => provider),
     close: async () => { for (const p of pending) p.finish({ exitCode: 0, stdout: JSON.stringify({ status: "cancelled", text: "stopped" }), stderr: "" }); await new Promise(resolve => setTimeout(resolve, 10)); await new Promise<void>(resolve => server.close(() => resolve())); rmSync(root, { recursive: true, force: true }); } };
 }
@@ -134,7 +149,7 @@ it.skipIf(!process.env.NATION_TEST_CODEX_BIN)("real Codex CLI edits a file throu
     }).finally(() => clearTimeout(deadline));
     p.finish(result);
     const log = readFileSync(join(f.root, `.nation-coding/project/.runs/${task.taskId}/events.jsonl`), "utf8");
-    await vi.waitFor(() => expect(f.coding.status(f.alice, task.taskId).state, `Model requests: ${calls}\n${log}`).toBe("completed"));
+    await vi.waitFor(() => expect(f.coding.status(f.alice, task.taskId).state, `Model requests: ${calls}\nRequest shapes: ${JSON.stringify(f.requestShapes)}\n${log}`).toBe("completed"));
     expect(readFileSync(join(f.root, ".nation-coding/project/coding-smoke.txt"), "utf8")).toBe("CODING_SMOKE");
     expect(calls).toBe(2);
     expect(f.charges.every(c => c.settle.mock.calls[0]?.[0] === 0.02)).toBe(true);

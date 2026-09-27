@@ -37,6 +37,7 @@ home.mkdir(exist_ok=True)
 env = {'PATH': os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin'), 'HOME': str(pathlib.Path.home()),
        'CODEX_HOME': str(home), 'NATION_TASK_TOKEN': p['token'], 'LANG': 'C.UTF-8'}
 config = '\n'.join(['model_provider = "nation"', 'approval_policy = "never"', 'model = ' + json.dumps(p['model']),
+    'web_search = "disabled"',
     '[features]', 'daemon_auto_start = false', 'plugins = false', 'apps = false',
     '[model_providers.nation]', 'name = "NATION"', 'wire_api = "responses"',
     'base_url = ' + json.dumps(p['url']), 'env_key = "NATION_TASK_TOKEN"',
