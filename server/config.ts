@@ -1040,6 +1040,20 @@ export function saveConfig(
     }
     disk[key] = merged;
   }
+  if (checkedPatch.hostedComputers !== undefined) {
+    const current = jsonObjectSchema.safeParse(disk.hostedComputers);
+    const previous = current.success ? current.data : {};
+    const merged: JsonObject = { ...previous, ...checkedPatch.hostedComputers };
+    // Provider edits omit unchanged keys. Persist each nested section without
+    // losing the saved credential or the other provider's settings.
+    for (const provider of ["orgo", "daytona"] as const) {
+      const section = checkedPatch.hostedComputers[provider];
+      if (section === undefined) continue;
+      const stored = jsonObjectSchema.safeParse(previous[provider]);
+      merged[provider] = { ...(stored.success ? stored.data : {}), ...section };
+    }
+    disk.hostedComputers = merged;
+  }
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
   // scalar, not a section: the merge loop above only walks objects
   if (checkedPatch.language !== undefined) disk.language = checkedPatch.language;

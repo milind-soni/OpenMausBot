@@ -21,29 +21,46 @@ const probe = createServer();
 probe.listen(0, "127.0.0.1"); await once(probe, "listening");
 const port = probe.address().port;
 await new Promise(resolve => probe.close(resolve));
-const child = spawn(process.execPath, [join(root, "server/index.js")], { cwd: root,
-  env: { ...verificationServerEnvironment({}, data, port), NATION_TEST_ORGO_API: provider.url, NATION_TEST_DAYTONA_API: provider.url },
-  stdio: ["ignore", "pipe", "pipe"] });
 let logs = "";
-child.stdout.on("data", chunk => { logs += chunk; });
-child.stderr.on("data", chunk => { logs += chunk; });
-const exit = once(child, "exit");
+function launch() {
+  const child = spawn(process.execPath, [join(root, "server/index.js")], { cwd: root,
+    env: { ...verificationServerEnvironment({}, data, port), NATION_TEST_ORGO_API: provider.url, NATION_TEST_DAYTONA_API: provider.url },
+    stdio: ["ignore", "pipe", "pipe"] });
+  child.stdout.on("data", chunk => { logs += chunk; });
+  child.stderr.on("data", chunk => { logs += chunk; });
+  return { child, exit: once(child, "exit") };
+}
+let server = launch();
 const api = async (path, body) => {
   const response = await fetch(`http://127.0.0.1:${port}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const result = await response.json();
   assert(response.ok, `${path}: ${JSON.stringify(result)}`);
   return result;
 };
-try {
+async function waitReady() {
   let ready = false;
   for (let attempt = 0; attempt < 100; attempt++) {
     try { if ((await fetch(`http://127.0.0.1:${port}/api/health`)).ok) { ready = true; break; } } catch {}
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert(ready, `Bundled server did not start: ${logs.slice(-2000)}`);
+}
+try {
+  await waitReady();
   const saved = await fetch(`http://127.0.0.1:${port}/api/config`, { method: "PUT", headers: { "content-type": "application/json" },
     body: JSON.stringify({ hostedComputers: hostedFixtureConfig }) });
   assert.equal(saved.status, 200, await saved.text());
+  // A fresh process must recover Admin's settings from disk without the
+  // runtime environment populated by the earlier PUT masking a failed save.
+  server.child.kill("SIGTERM"); await server.exit;
+  server = launch();
+  await waitReady();
+  const restored = await (await fetch(`http://127.0.0.1:${port}/api/config`)).json();
+  for (const backend of ["orgo", "daytona"]) {
+    assert.equal(restored.hostedComputers[backend].configured, true);
+    assert.equal(restored.hostedComputers[backend].enabled, true);
+  }
+  assert(!JSON.stringify(restored).includes("fixture-secret"));
   for (const backend of ["orgo", "daytona"]) {
     const { bot } = await api("/api/bots", { name: `Fixture ${backend}` });
     const patched = await fetch(`http://127.0.0.1:${port}/api/bots/${bot.id}`, { method: "PATCH", headers: { "content-type": "application/json" },
@@ -54,8 +71,8 @@ try {
     await api(`/api/bots/${bot.id}/computer/sleep`, {});
   }
   assert.deepEqual(provider.unknown, []);
-  console.log("Packaged Orgo and Daytona setup, start, screenshot and sleep passed without node_modules.");
+  console.log("Packaged Orgo and Daytona setup, server restart, start, screenshot and sleep passed without node_modules.");
 } finally {
-  child.kill("SIGTERM"); await exit;
+  server.child.kill("SIGTERM"); await server.exit;
   await provider.close(); rmSync(root, { recursive: true, force: true });
 }

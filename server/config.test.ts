@@ -922,6 +922,7 @@ describe("credential env preference", () => {
     "OMB_FISH_AUDIO_API_KEY",
     "OMB_OPENAI_IMAGE_KEY",
     "COMPOSIO_API_KEY",
+    "NATION_HOSTED_COMPUTERS_CONFIG",
   ] as const;
   let saved: Record<string, string | undefined>;
 
@@ -974,6 +975,32 @@ describe("credential env preference", () => {
     expect(loadConfig().customDomain).toBe("https://bots.example.com");
     saveConfig({ customDomain: "" });
     expect(loadConfig()).toMatchObject({ customDomain: "", language: "en", profile: { name: "Workspace owner" } });
+  });
+
+  it("persists hosted provider credentials across process restarts and partial edits", () => {
+    const hostedComputers = {
+      defaultProvider: "daytona" as const,
+      orgo: { enabled: true, apiKey: "orgo-fixture-secret", workspaceId: "workspace-fixture" },
+      daytona: { enabled: true, apiKey: "daytona-fixture-secret", snapshot: "desktop-fixture" },
+    };
+    saveConfig({ hostedComputers });
+    syncCredentialEnv({ hostedComputers });
+    // A restarted process has no runtime credential override to mask a missing file section.
+    delete process.env.NATION_HOSTED_COMPUTERS_CONFIG;
+    expect(loadConfig().hostedComputers).toEqual(hostedComputers);
+    if (process.platform !== "win32") expect(statSync(join(DATA_DIR, "config.json")).mode & 0o777).toBe(0o600);
+
+    saveConfig({ hostedComputers: { orgo: { enabled: false }, daytona: { snapshot: "next-desktop" } } });
+    saveConfig({ hostedComputers: { defaultProvider: "box" }, language: "en" });
+    expect(loadConfig().hostedComputers).toEqual({
+      defaultProvider: "box",
+      orgo: { ...hostedComputers.orgo, enabled: false },
+      daytona: { ...hostedComputers.daytona, snapshot: "next-desktop" },
+    });
+    // Omitted credentials are retained; an explicit empty value removes one.
+    saveConfig({ hostedComputers: { orgo: { apiKey: "" } } });
+    expect(loadConfig().hostedComputers?.orgo?.apiKey).toBe("");
+    expect(loadConfig().hostedComputers?.daytona?.apiKey).toBe("daytona-fixture-secret");
   });
 
   it("merges onboarding progress like any other section", () => {
