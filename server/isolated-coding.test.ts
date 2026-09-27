@@ -11,7 +11,7 @@ import { hostedFixtureConfig } from "./testing/fake-hosted-computers.ts";
 const account = (id: string) => ({ id, verified: true });
 const payload = (command: string) => JSON.parse(Buffer.from(command.match(/'([A-Za-z0-9+/=]+)'$/)![1], "base64").toString());
 async function fixture() {
-  const root = mkdtempSync(join(process.env.NATION_TEST_CODEX_BIN ? process.cwd() : tmpdir(), "nation-coding-test-"));
+  const root = mkdtempSync(join(process.env.NATION_TEST_CODEX_BIN ? dirname(process.cwd()) : tmpdir(), "nation-coding-test-"));
   const pending: Array<{ input: any; command: string; finish: (value: any) => void }> = [];
   const machines = new Map<string, any>();
   const provider = { check: async () => {}, find: async (name: string) => machines.get(name) ?? null,
@@ -134,7 +134,7 @@ it.skipIf(!process.env.NATION_TEST_CODEX_BIN)("real Codex CLI edits a file throu
     }).finally(() => clearTimeout(deadline));
     p.finish(result);
     const log = readFileSync(join(f.root, `.nation-coding/project/.runs/${task.taskId}/events.jsonl`), "utf8");
-    await vi.waitFor(() => expect(f.coding.status(f.alice, task.taskId).state, log).toBe("completed"));
+    await vi.waitFor(() => expect(f.coding.status(f.alice, task.taskId).state, `Model requests: ${calls}\n${log}`).toBe("completed"));
     expect(readFileSync(join(f.root, ".nation-coding/project/coding-smoke.txt"), "utf8")).toBe("CODING_SMOKE");
     expect(calls).toBe(2);
     expect(f.charges.every(c => c.settle.mock.calls[0]?.[0] === 0.02)).toBe(true);

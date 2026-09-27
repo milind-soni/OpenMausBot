@@ -43,7 +43,7 @@ config = '\n'.join(['model_provider = "nation"', 'approval_policy = "never"', 'm
     'request_max_retries = 0', 'stream_max_retries = 0'])
 (home / 'config.toml').write_text(config)
 os.chmod(home / 'config.toml', 0o600)
-args = ['codex', 'exec', '--json', '--skip-git-repo-check', '--sandbox', 'workspace-write',
+args = ['codex', 'exec', '--ephemeral', '--json', '--skip-git-repo-check', '--sandbox', 'workspace-write',
         '--cd', str(root), '--output-last-message', str(run / 'answer.txt'), '-']
 # No credentials or caller-selected executable, model URL, or shell arguments.
 prompt = 'You are a NATION developer agent. Work only on the requested project. Inspect existing work before edits. Run relevant tests and report actual results. Do not push, publish, delete projects, or send messages unless the user explicitly authorized it. The project persists between tasks.\n\n' + p['prompt']

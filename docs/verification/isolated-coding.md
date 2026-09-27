@@ -25,7 +25,7 @@ that process group are governed by the remote computer boundary.
 
 Projects persist across tasks; this does not restore Codex's previous native
 conversation. The NATION agent must supply the request and relevant context.
-The CLI uses its workspace-write sandbox with noninteractive approval policy;
+The CLI uses ephemeral native sessions and its workspace-write sandbox with noninteractive approval policy;
 shell network access follows that sandbox policy. Configure needed project
 dependencies in the snapshot or through the existing computer tools.
 
@@ -77,7 +77,8 @@ For the optional real CLI transport smoke, install the pinned version outside
 this repository and set `NATION_TEST_CODEX_BIN` to its absolute executable path
 when running `server/isolated-coding.test.ts`. It uses synthetic model responses
 and billing, and asks the real CLI to write one file in a disposable project.
-No paid model API is called.
+No paid model API is called. The separate `Isolated coding runtime` workflow
+runs this acceptance test on a clean Linux CI runner, including for drafts.
 
 ## Live acceptance still required
 
@@ -92,7 +93,9 @@ The optional real Codex 0.157.1 smoke has **not passed here**: the CLI stalled
 during session initialization before sending any model request and was
 cancelled after 50 seconds. A diagnostic also observed unavailable outbound
 plugin-catalog requests; disabling unused plugin/app startup did not resolve
-the stall. The exact remaining cause is unconfirmed. Keep this change in draft
+the stall. A follow-up trace localizes the wait to sandboxed file metadata
+checks during AGENTS.md discovery, before model inference. Ephemeral native
+sessions also did not resolve it. The exact remaining cause is unconfirmed. Keep this change in draft
 and coding disabled until this smoke passes in the prepared staging snapshot.
 
 On an owned staging deployment with the prepared Daytona snapshot, repeat the

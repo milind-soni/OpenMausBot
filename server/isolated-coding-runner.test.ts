@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { codingCommand } from "./isolated-coding-runner.ts";
 
-it("runs the real supervisor with persistent projects, minimal secrets and revocable process groups", async () => {
+it.skipIf(process.platform !== "linux")("runs the real supervisor with persistent projects, minimal secrets and revocable process groups", async () => {
   const dir = mkdtempSync(join(tmpdir(), "nation-coding-runner-"));
   const bin = join(dir, "bin"); mkdirSync(bin);
   writeFileSync(join(bin, "codex"), `#!/usr/bin/env python3
