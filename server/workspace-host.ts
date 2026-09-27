@@ -148,6 +148,7 @@ export const INHERITED_ENVIRONMENT = [
   // NATION API: server-held model keys and routing; members never see them
   "OPENROUTER_API_KEY", "OPENROUTER_API_URL", "OPENROUTER_MODEL", "NATION_OPENROUTER_MODEL", "NATION_DEFAULT_MODEL",
   "NATION_MODEL_FAST", "NATION_MODEL_STANDARD", "NATION_MODEL_STRONG", "NATION_IMAGE_MODEL",
+  "NATION_CODING_ENABLED", "NATION_CODING_MODEL", "NATION_CODING_PUBLIC_ORIGIN",
   // web search and reading for agents
   "NATION_SEARCH_PROVIDER", "NATION_SEARCH_API_KEY", "NATION_SEARCH_API_URL", "NATION_SEARCH_MODEL",
   "NATION_SEARCH_PRICE_USD", "NATION_READER_PRICE_USD",
@@ -162,7 +163,7 @@ export const INHERITED_ENVIRONMENT = [
   "NATION_PUBLIC_NAME",
   // cloud computers' endpoint, and the Chrome the browser engine starts
   // (production pins its exact path for the Chrome sandbox profile)
-  "OMB_BOX_API", "AGENT_BROWSER_EXECUTABLE_PATH", "NATION_TEST_ORGO_API", "NATION_TEST_DAYTONA_API",
+  "OMB_BOX_API", "AGENT_BROWSER_EXECUTABLE_PATH", "NATION_TEST_ORGO_API", "NATION_TEST_DAYTONA_API", "NATION_TEST_CODING",
 ] as const;
 
 export function workspaceServerEnvironment(parent: NodeJS.ProcessEnv, input: {
@@ -417,6 +418,32 @@ export class WorkspaceHost {
 
   runningCount(): number {
     return this.running.size;
+  }
+
+  /** A guest's model capability may reach only the coding gateway of an
+   * already-running workspace. Never mint a member session or start a server. */
+  async forwardCoding(req: IncomingMessage, res: ServerResponse, workspaceId: string): Promise<void> {
+    const running = this.running.get(workspaceId);
+    if (!running || running.stopping || !/^Bearer [a-f0-9]{64}$/.test(String(req.headers.authorization ?? ""))) {
+      res.writeHead(403, { "content-type": "application/json" }); res.end('{"error":"Coding task authorization ended."}'); return;
+    }
+    running.inflight++;
+    try {
+      await new Promise<void>(resolve => {
+        const upstream = httpRequest({ host: "127.0.0.1", port: running.port, path: req.url, method: req.method,
+          headers: { authorization: req.headers.authorization, "content-type": "application/json", ...(req.headers.origin ? { origin: req.headers.origin } : {}) },
+          agent: this.agent, timeout: 190_000 }, response => {
+          res.writeHead(response.statusCode ?? 502, { "content-type": response.headers["content-type"] ?? "application/json", "cache-control": "no-store" });
+          response.pipe(res); response.on("end", resolve); response.on("error", () => { res.destroy(); resolve(); });
+        });
+        let bytes = 0;
+        req.on("data", chunk => { bytes += chunk.length; if (bytes > 2_000_000) upstream.destroy(); });
+        upstream.on("timeout", () => upstream.destroy());
+        upstream.on("error", () => { if (!res.headersSent) { res.writeHead(502); res.end(); } else res.destroy(); resolve(); });
+        res.on("close", () => upstream.destroy());
+        req.pipe(upstream);
+      });
+    } finally { running.inflight--; }
   }
 
   /** Create the folder on first use, the private runtime directory for this

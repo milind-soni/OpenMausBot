@@ -12,6 +12,8 @@ export interface ComputerProvider {
   stop(machine: Machine): Promise<void>;
   screenshot(machine: Machine): Promise<Screen>;
   execute(machine: Machine, command: string): Promise<CommandResult>;
+  /** Bounded coding job, inside the same authenticated sandbox. */
+  code?(machine: Machine, command: string): Promise<CommandResult>;
 }
 
 export class ComputerProviderError extends Error {
@@ -142,6 +144,10 @@ export async function daytonaProvider(config: NonNullable<HostedComputersConfig[
     async screenshot(m) { const s = await getSandbox(m); const result = await s.computerUse.screenshot.takeFullScreen(); return screen(result.screenshot, "png"); },
     async execute(m, command) {
       const result = await (await getSandbox(m)).process.executeCommand(command, undefined, undefined, 60);
+      return { exitCode: result.exitCode, stdout: result.result.slice(-32_000), stderr: "" };
+    },
+    async code(m, command) {
+      const result = await (await getSandbox(m)).process.executeCommand(command, undefined, undefined, 620);
       return { exitCode: result.exitCode, stdout: result.result.slice(-32_000), stderr: "" };
     },
   };

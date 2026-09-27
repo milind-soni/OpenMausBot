@@ -10,7 +10,7 @@ export const hostedFixtureConfig: HostedComputersConfig = {
   daytona: { enabled: true, snapshot: "desktop-fixture", apiKey: "daytona-fixture-secret" },
 };
 type Desktop = { id: string; name: string; state: string; labels: Record<string, string>; files: Map<string, string> };
-export async function startFakeHostedComputers() {
+export async function startFakeHostedComputers(onCode?: (machine: Desktop, command: string) => Promise<{ result: string; exitCode: number }>) {
   const machines: Desktop[] = [];
   const calls: Array<{ method: string; path: string; body: any }> = [];
   const unknown: string[] = [];
@@ -50,6 +50,7 @@ export async function startFakeHostedComputers() {
       if (action === "/computeruse/screenshot") return json({ screenshot: HOSTED_PNG });
       if (action === "/bash" || action === "/process/execute") {
         const command = String(body.command);
+        if (onCode && body.timeout === 620) return json(await onCode(m, command));
         const write = command.match(/printf %s (\S+) > (?:\/root\/)?([\w.-]+)/);
         const read = command.match(/cat (?:\/root\/)?([\w.-]+)/);
         let result = ""; let exitCode = 0;

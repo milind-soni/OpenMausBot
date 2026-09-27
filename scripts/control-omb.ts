@@ -396,6 +396,8 @@ export async function launchVerificationServer(
   hostedMembers?: { providerApi: string; memberEmails: string[]; modelRoutes?: { fast?: string; standard?: string; strong?: string };
     /** Loopback stand-in search provider, and a reader allowed to fetch the fixture's own pages. */
     webTools?: boolean;
+    /** Scoped coding gateway against this fixture only; no real credentials. */
+    coding?: boolean;
     /** NATION_TRUSTED_ORIGINS / NATION_TRUSTED_ORIGIN_PATTERNS for a front end behind a rewrite proxy. */
     trustedOrigins?: { exact?: string; patterns?: string } },
   /** Programmatic tests only: enables the secret-gated test capability route. */
@@ -405,6 +407,7 @@ export async function launchVerificationServer(
    * its own workspace server. Founder emails sign in to this server's desk.
    * Payments need an owned loopback Robinhood Chain stand-in. */
   accounts?: {
+    coding?: boolean;
     founderEmails?: string[];
     payments?: { rpc: string; treasury: string; nationPriceUsd?: string; confirmations?: number; scanSeconds?: number };
     /** An owned loopback stand-in for the wallet service (server/testing/fake-turnkey.ts). */
@@ -504,6 +507,8 @@ export async function launchVerificationServer(
   if (hostedComputerApis?.daytona) childEnv.NATION_TEST_DAYTONA_API = hostedComputerApis.daytona;
   if (composioFixtureApi) Object.assign(childEnv, { OMB_COMPOSIO_BROKER_URL: composioFixtureApi + "/broker", OMB_COMPOSIO_BROKER_TOKEN: "a".repeat(64) });
   if (testCapabilityKey) childEnv.OMB_TEST_INTERNAL_CAPABILITY_KEY = testCapabilityKey;
+  if (hostedMembers?.coding || accounts?.coding) Object.assign(childEnv, { NATION_CODING_ENABLED: "1", NATION_CODING_MODEL: "openai/coding-fixture",
+    NATION_CODING_PUBLIC_ORIGIN: `http://127.0.0.1:${port}`, NATION_TEST_CODING: "1" });
   if (hostedMembers) Object.assign(childEnv, {
     // A fixture-only project key: the server must never echo it to anyone.
     COMPOSIO_API_KEY: "ak_hosted_fixture_only",

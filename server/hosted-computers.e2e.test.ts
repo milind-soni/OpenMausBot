@@ -25,22 +25,50 @@ function browser(base: string) {
 }
 
 it.each(["orgo", "daytona"] as const)("%s: Admin enables it and member turns use isolated persistent computers", async providerName => {
-  const provider = await startFakeHostedComputers();
+  const codingJobs: any[] = [];
+  const codingRequests: any[] = [];
+  const provider = await startFakeHostedComputers(async (machine, command) => {
+    const input = JSON.parse(Buffer.from(command.match(/'([A-Za-z0-9+/=]+)'$/)![1], "base64").toString());
+    codingJobs.push(input);
+    const response = await fetch(input.url + "/responses", { method: "POST", headers: {
+      authorization: `Bearer ${input.token}`, "content-type": "application/json" }, body: JSON.stringify({ input: input.prompt, stream: true, model: "caller-cannot-pick" }) });
+    const data = await response.text();
+    if (!response.ok) return { exitCode: 0, result: JSON.stringify({ status: "failed", text: `Fixture coding gateway ${response.status}: ${data}` }) };
+    const write = input.prompt.match(/^save (\S+)$/);
+    if (write) machine.files.set("code.txt", write[1]);
+    return { exitCode: 0, result: JSON.stringify({ status: "completed", text: `Coding receipt: ${machine.files.get("code.txt") ?? "empty"}` }) };
+  });
   const chain = await startFakeRobinhoodChain();
   let seq = 0;
   const model = createServer(async (req, res) => {
     let raw = ""; for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw || "{}");
+    if (req.url?.endsWith("/responses")) {
+      codingRequests.push({ body, authorization: req.headers.authorization });
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ type: "response.completed", response: { id: `gen-coding-${codingRequests.length}`, usage: { cost: 0.01 } } })}\n\n`);
+      return;
+    }
     if (!req.url?.endsWith("/chat/completions")) { res.writeHead(404); res.end(); return; }
     const user = [...body.messages].reverse().find((m: any) => m.role === "user" && typeof m.content === "string");
     const ask = String(user?.content ?? "").trim().split("\n").at(-1) ?? "";
     const replies = body.messages.slice(body.messages.lastIndexOf(user) + 1).filter((m: any) => m.role === "tool");
     const tools = (body.tools ?? []).map((t: any) => t.function.name);
     const write = ask.match(/^save (\S+)$/);
-    const call = replies.length === 0 && tools.includes("computer_execute") && (write || ask === "show");
-    const delta = call ? { tool_calls: [{ index: 0, id: `c-${++seq}`, type: "function", function: { name: "computer_execute",
+    let call = replies.length === 0 && tools.includes("computer_execute") && (write || ask === "show");
+    let delta = call ? { tool_calls: [{ index: 0, id: `c-${++seq}`, type: "function", function: { name: "computer_execute",
       arguments: JSON.stringify({ command: write ? `printf %s ${write[1]} > note.txt` : "cat note.txt" }) } }] }
       : { content: `Result: ${replies.map((m: any) => String(m.content)).join(" | ") || "no computer tool"}` };
+    if (ask.startsWith("code ") && tools.includes("computer_code_start")) {
+      const result = replies.length ? JSON.parse(JSON.parse(replies.at(-1).content).result) : null;
+      if (!result || result.state === "running") {
+        call = true;
+        delta = { tool_calls: [{ index: 0, id: `code-${++seq}`, type: "function", function: {
+          name: result ? "computer_code_status" : "computer_code_start",
+          arguments: JSON.stringify(result ? { taskId: result.taskId } : { project: "fixture-project", prompt: ask.slice(5) }),
+        } }] };
+      }
+    }
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ delta, finish_reason: call ? "tool_calls" : "stop" }], usage: { prompt_tokens: 20, completion_tokens: 5, cost: 0.001 } })}\n\ndata: [DONE]\n\n`);
   });
@@ -48,6 +76,7 @@ it.each(["orgo", "daytona"] as const)("%s: Admin enables it and member turns use
   const origin = `http://127.0.0.1:${(model.address() as { port: number }).port}`;
   const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, undefined, [], undefined,
     origin, undefined, undefined, undefined, {
+      coding: providerName === "daytona",
       founderEmails: ["founder@example.test"],
       payments: { rpc: chain.url, treasury: "0x85E3C2D8f776d9D05b14E108F368070CbD8C1639", confirmations: 1, scanSeconds: 5 },
     }, { orgo: provider.url, daytona: provider.url });
@@ -112,6 +141,26 @@ it.each(["orgo", "daytona"] as const)("%s: Admin enables it and member turns use
     expect(await turn(bob, b, "show")).not.toContain("ALICE_SECRET");
     expect(await turn(bob, b, "save BOB_SECRET")).not.toContain("no computer tool");
     expect(await turn(alice, a, "show")).toContain("ALICE_SECRET");
+    if (providerName === "daytona") {
+      const balance = async (who: ReturnType<typeof browser>) => (await who.request("/api/credits/status")).body.balanceUsd as number;
+      const aliceBefore = await balance(alice), bobBefore = await balance(bob);
+      expect(await turn(alice, a, "code save ALICE_CODE_SECRET")).toContain("ALICE_CODE_SECRET");
+      const aliceAfter = await balance(alice);
+      expect(aliceBefore - aliceAfter).toBeGreaterThanOrEqual(0.01);
+      expect(await balance(bob)).toBe(bobBefore);
+      expect(await turn(bob, b, "code show")).toContain("Coding receipt: empty");
+      expect(bobBefore - await balance(bob)).toBeGreaterThanOrEqual(0.01);
+      expect(await balance(alice)).toBe(aliceAfter);
+      expect(await turn(alice, a, "code show")).toContain("ALICE_CODE_SECRET");
+      expect(codingJobs).toHaveLength(3);
+      expect(codingRequests).toHaveLength(3);
+      expect(codingRequests.every(r => r.body.model === "openai/coding-fixture")).toBe(true);
+      expect(new URL(codingJobs[0].url).pathname.split("/")[3]).not.toBe(new URL(codingJobs[1].url).pathname.split("/")[3]);
+      for (const job of codingJobs) {
+        expect((await fetch(job.url + "/lease", { headers: { authorization: `Bearer ${job.token}` } })).status).toBe(403);
+        expect([...alice.seen, ...bob.seen].join("\n")).not.toContain(job.token);
+      }
+    }
     expect(provider.machines).toHaveLength(2);
     expect((await bob.request(`/api/bots/${a.id}/computer`)).status).toBeGreaterThanOrEqual(400);
     const screen = await alice.request(`/api/bots/${a.id}/computer/screenshot`, "POST", {});

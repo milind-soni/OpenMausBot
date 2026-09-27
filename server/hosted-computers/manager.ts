@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { addedProviderConfigured, type AddedProvider, type HostedComputersConfig } from "../../shared/hosted-computers.ts";
 import { writeFileAtomic } from "../atomic.ts";
@@ -21,6 +21,15 @@ export class HostedComputerManager {
     return `nation-${createHash("sha256").update(`${this.scope}\0${key}`).digest("hex").slice(0, 40)}`;
   }
   private file(provider: AddedProvider, key: string): string { return join(this.root, `${provider}-${this.name(key)}.json`); }
+  private fence(provider: AddedProvider, key: string): string { return this.file(provider, key) + ".coding"; }
+  private assertIdle(provider: AddedProvider, key: string): void {
+    const path = this.fence(provider, key);
+    if (!existsSync(path)) return;
+    // An uncertain execution or server crash never releases a machine early.
+    const expires = Number(readFileSync(path, "utf8"));
+    if (!Number.isFinite(expires) || expires > Date.now()) throw new ComputerProviderError(409);
+    rmSync(path);
+  }
   private read(provider: AddedProvider, key: string): Record | null {
     const file = this.file(provider, key);
     if (!existsSync(file)) return null;
@@ -49,7 +58,7 @@ export class HostedComputerManager {
   private exclusive<T>(provider: AddedProvider, key: string, run: () => Promise<T>): Promise<T> {
     const lock = `${provider}:${key}`;
     if (this.busy.has(lock)) return Promise.reject(new ComputerProviderError(409));
-    const promise = run().catch(error => { throw error instanceof ComputerProviderError ? error : new ComputerProviderError(); }).finally(() => { this.busy.delete(lock); });
+    const promise = Promise.resolve().then(() => { this.assertIdle(provider, key); return run(); }).catch(error => { throw error instanceof ComputerProviderError ? error : new ComputerProviderError(); }).finally(() => { this.busy.delete(lock); });
     this.busy.set(lock, promise);
     return promise;
   }
@@ -101,6 +110,23 @@ export class HostedComputerManager {
       // Resolving a remote machine can outlive the turn which requested it.
       if (!authorized()) throw new ComputerProviderError(403);
       return client.execute(m, command);
+    });
+  }
+  code(provider: AddedProvider, key: string, command: string, authorized: () => boolean, expires: number) {
+    if (provider !== "daytona" || command.length > 64_000) return Promise.reject(new ComputerProviderError(400));
+    return this.exclusive(provider, key, async () => {
+      const { client, m } = await this.running(provider, key);
+      if (!authorized() || !client.code) throw new ComputerProviderError(403);
+      mkdirSync(this.root, { recursive: true, mode: 0o700 });
+      writeFileAtomic(this.fence(provider, key), String(expires + 60_000), { mode: 0o600 });
+      const result = await client.code(m, command);
+      // Only a receipt from our supervisor confirms that its process group
+      // ended; provider timeouts retain the durable fence until its deadline.
+      try {
+        const receipt = JSON.parse(result.stdout.trim());
+        if (result.exitCode === 0 && ["completed", "failed", "cancelled"].includes(receipt.status)) rmSync(this.fence(provider, key), { force: true });
+      } catch { /* uncertain: fenced */ }
+      return result;
     });
   }
 }
