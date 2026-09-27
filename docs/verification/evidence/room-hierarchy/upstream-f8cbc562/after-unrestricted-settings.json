@@ -1,0 +1,32 @@
+{
+  "id": "6bbd760d-e1bf-4946-9efb-eda3b4457c3d",
+  "threadId": "b7e26977-ee01-4737-94eb-f2a0f69a6706",
+  "name": "Development",
+  "memberIds": [
+    "2ce8161e-4158-4572-b384-7bfa52eda02f",
+    "fb54a36c-e41b-491c-bd0b-f6b47de94f10",
+    "3cf3e4d3-116e-4201-b16f-8cca925ea522"
+  ],
+  "defaultResponder": {
+    "kind": "member",
+    "botId": "2ce8161e-4158-4572-b384-7bfa52eda02f"
+  },
+  "bulletin": "",
+  "unread": false,
+  "createdAt": 1789308630785,
+  "busyBotId": null,
+  "tasks": [
+    {
+      "threadId": "b7e26977-ee01-4737-94eb-f2a0f69a6706",
+      "title": "New task",
+      "createdAt": 1789308630785
+    }
+  ],
+  "setupCompletedAt": 1789308630785,
+  "setupSkippedAt": null,
+  "requireRoomDiscussion": true,
+  "incomingGroupIds": null,
+  "working": false,
+  "messages": [],
+  "activeLeafId": null
+}

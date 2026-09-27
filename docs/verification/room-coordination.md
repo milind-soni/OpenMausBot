@@ -23,7 +23,8 @@ original thread. These tests verify orchestration, not live-model planning.
 
 In an ordinary bot chat or group conversation, ask the lead to consult named
 teammates or have them build and review a concrete artifact. No new dashboard,
-incoming-route panel or mandatory discussion. The existing **Finish together** goal loop
+incoming-route restriction or mandatory discussion is required by default. Rooms
+can opt into [discussion before delegation](room-discussion.md). The existing **Finish together** goal loop
 remains unchanged and owns its own teammate turns; it does not run a competing
 handoff loop inside those turns.
 
@@ -223,8 +224,10 @@ stops the descendants it is still waiting on, except a teammate whose turn had
 already started when the person stopped the conversation above it: that process
 is left alone and reports its result. Restart records interruption without
 replaying side effects.
-Limits: four cross-room edges, 24 child requests, 48 executions, 30 minutes per
-root. Failures return to the sender, not a false success. Model quality and
+Limits: four cross-room edges, 24 child requests and 48 executions. The 30-minute
+tree budget pauses during active execution; queued work has a 60-minute window
+and execution gets at least 10 minutes of runway, all within a four-hour wall-clock
+cap. Failures return to the sender, not a false success. Model quality and
 provider availability still matter; this is not a guarantee of autonomous
 correctness or permission to bypass approvals.
 

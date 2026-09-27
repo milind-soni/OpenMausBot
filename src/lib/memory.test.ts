@@ -90,7 +90,9 @@ describe("relativeTime", () => {
   });
 
   it("falls back to a date past a week and never goes negative", () => {
-    expect(relativeTime(now - 10 * 86_400_000, now)).toMatch(/Aug|Sep/);
+    const past = now - 10 * 86_400_000;
+    const localizedDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(past);
+    expect(relativeTime(past, now)).toBe(localizedDate);
     expect(relativeTime(now + 60_000, now)).toBe("just now");
   });
 });

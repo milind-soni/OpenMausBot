@@ -118,6 +118,7 @@ describe("independent bot tasks through the isolated control surface", () => {
       botIds: [peer.id], requestKey: "mailbox-review", message: "MAILBOX_REVIEW: check the release notes.",
     });
     expect(queued.status).toBe(200);
+    expect(queued.body.errors).toEqual([]);
     expect(queued.body.accepted).toHaveLength(1);
     const requestId = queued.body.accepted[0].requestId;
     // The receipt is the sender's honest answer at send time: this peer is
@@ -157,7 +158,7 @@ describe("independent bot tasks through the isolated control surface", () => {
       const bots = (await api("GET", "/api/bots")).body.bots;
       const current = bots.find((bot: any) => bot.id === chief.id);
       return !current.busy && current.messages.some((message: any) =>
-        message.from?.botId === peer.id && message.roomRequest?.id === requestId && message.roomRequest.phase === "result");
+        message.from?.botId === peer.id && message.roomRequest?.id === requestId && message.roomRequest.phase === "result" && message.tool?.ok === true);
     }, { timeout: 20_000 }).toBe(true);
     const bots = (await api("GET", "/api/bots")).body.bots;
     const peerState = bots.find((bot: any) => bot.id === peer.id);

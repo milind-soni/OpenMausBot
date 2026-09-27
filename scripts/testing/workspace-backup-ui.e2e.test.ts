@@ -21,13 +21,13 @@ interface FixtureInfo { ui: string; url: string; dataDir: string; logPath: strin
 describe("full backup Settings in the real renderer", () => {
   let child: ChildProcess | undefined;
   let info: FixtureInfo;
-  afterAll(async () => { await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }); });
+  afterAll(async () => { await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 }); });
 
   (enabled ? it : it.skip)("uses passwords, a file preview and explicit replacement without leaking secrets", async () => {
     let stdout = "";
     let stderr = "";
     child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
-      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     child.stdout!.on("data", (chunk: Buffer) => { stdout += String(chunk); });
     child.stderr!.on("data", (chunk: Buffer) => { stderr += String(chunk); });
@@ -129,7 +129,7 @@ describe("full backup Settings in the real renderer", () => {
     expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/upload')).rawFile")).toBe(true);
     expect(await evaluate("localStorage.getItem('omb-pending-workspace-restore')")).toBe("validated-stage");
     console.log(JSON.stringify({ fixture: info, screenshot: evidence, archiveApi: "simulated; renderer controls real" }));
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
     expect(child.exitCode).toBe(0);
     expect(existsSync(info.dataDir)).toBe(false);
   }, LAUNCH_TIMEOUT_MS + 120_000);

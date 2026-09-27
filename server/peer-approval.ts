@@ -116,6 +116,7 @@ const ACTION_VERB: Record<PeerAction, string> = {
   ask_bot: "contact",
   delegate_bot: "delegate to",
   post_to_room: "post in",
+  discuss_room: "discuss in this room with",
 };
 
 function pushApprovalCard(

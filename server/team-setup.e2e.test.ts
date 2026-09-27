@@ -30,13 +30,15 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     const codex = catalog.find((item: any) => item.instanceId === "codex");
     expect(codex).toBeDefined();
     const selection = (instance: any) => ({ instanceId: instance.instanceId, model: instance.models.default });
+    // Reproduce a starter name colliding with a requested new specialist.
+    const starter = (await api("GET", "/api/bots")).bots[0];
+    expect(starter).toBeDefined();
+    await api("PATCH", `/api/bots/${starter.id}`, { name: "Patch" });
     const chief = (await api("POST", "/api/bots", { name: "Clive", title: "Chief of Staff", section: "Operations", modelSelection: selection(claude) }, 201)).bot;
     await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
     const state = async () => (await api("GET", "/api/bots")).bots;
-    // The fixture starts with a randomly named bot, which can itself be
-    // Mira, Patch, or Quill. Compare identities, not that starter's name.
-    const initialBotIds = new Set((await state()).map((bot: any) => bot.id));
-    const setupBots = async () => (await state()).filter((bot: any) => !initialBotIds.has(bot.id));
+    const existingIds = new Set<string>((await state()).map((bot: any) => bot.id));
+    const createdBots = (bots: any[]) => bots.filter(bot => !existingIds.has(bot.id));
     let previousPid: number | undefined;
     let guardedMessageId: string | undefined;
     const start = async (text: string, sendId?: string) => {
@@ -98,9 +100,10 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     await api("POST", "/api/internal/team-setup-requests", { plan: { ...plan, operations: [build("Bad", "Research", { instanceId: "codex", model: "invented-model" })] } }, 400, token);
     await api("POST", "/api/internal/team-setup-requests", { fromBotId: "foreign", plan }, 403, token);
     const denied = await api("POST", "/api/internal/team-setup-requests", { plan }, 201, token);
-    expect(await setupBots()).toHaveLength(0);
+    expect((await state()).map((bot: any) => bot.id).sort()).toEqual([...existingIds].sort());
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: denied.requestId, behavior: "deny" });
     await finish(); await continueOnce(denied.requestId);
+    expect((await state()).map((bot: any) => bot.id).sort()).toEqual([...existingIds].sort());
     expect((await state()).find((bot: any) => bot.id === chief.id).managedSections).toBeUndefined();
 
     const setupSendId = randomUUID();
@@ -114,7 +117,7 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     expect(card.subtitle).toContain("Chief of Staff: No → Yes");
     // Origin is forgeable by an active bot shell: it cannot self-grant teams.
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" }, 403);
-    expect(await setupBots()).toHaveLength(0);
+    expect((await state()).map((bot: any) => bot.id).sort()).toEqual([...existingIds].sort());
     await finish();
     const waiting = await requestSnapshot();
     expect(waiting).toMatchObject({ messageId: guardedMessageId, phase: "waiting", activeTurnId: null, executionId: expect.any(String) });
@@ -134,14 +137,13 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     expect(replies.every((message: any) => message.requestMessageId === guardedMessageId)).toBe(true);
     expect(replies.at(-1).text).toContain(`team setup decision ${proposed.requestId}:`);
     const saved = await state();
-    const created = saved.filter((bot: any) => !initialBotIds.has(bot.id));
-    expect(created.map((bot: any) => bot.name).sort()).toEqual(["Mira", "Patch", "Quill"]);
-    const engineer = created.find((bot: any) => bot.name === "Patch");
+    expect(createdBots(saved).map(bot => bot.name).sort()).toEqual(["Mira", "Patch", "Quill"]);
+    const engineer = createdBots(saved).find((bot: any) => bot.name === "Patch");
     expect(engineer).toMatchObject({ title: "Implementation and verification engineer", section: "Engineering", chiefOfStaff: true, modelSelection: selection(codex), approvalMode: "ask", autoApprove: false, composio: false });
     expect(engineer.managedSections).toBeUndefined();
     expect(saved.find((bot: any) => bot.id === chief.id).managedSections).toEqual(expect.arrayContaining(plan.newTeams));
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" });
-    expect((await setupBots()).filter((bot: any) => bot.name === "Patch")).toHaveLength(1);
+    expect(createdBots(await state()).filter((bot: any) => bot.name === "Patch")).toHaveLength(1);
     expect(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).pid).toBe(previousPid);
 
     token = await start("Move Patch to Growth and switch its default engine to Claude; retain its existing thread.");
@@ -173,8 +175,8 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     expect((await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: deletion.requestId, behavior: "allow" })).result.bots).toEqual([{ id: engineer.id, name: "Patch", action: "deleted" }]);
     await continueOnce(deletion.requestId);
     expect((await state()).some((bot: any) => bot.id === engineer.id)).toBe(false);
-    expect((await state()).filter((bot: any) => initialBotIds.has(bot.id)).map((bot: any) => bot.id).sort())
-      .toEqual([...initialBotIds].sort());
+    expect((await state()).filter((bot: any) => existingIds.has(bot.id)).map((bot: any) => bot.id).sort())
+      .toEqual([...existingIds].sort());
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: deletion.requestId, behavior: "allow" });
     const room = (await control("new-channel", "--name", "Chief review", "--members", chief.id)).channel;
     unlinkSync(gate);
@@ -187,6 +189,8 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     await api("POST", `/api/threads/${room.activeTaskId}/respond`, { requestId: groupStopped.requestId, behavior: "deny" });
     await stopWithoutResume(groupStopped.requestId, room.activeTaskId, "--channel", room.id);
     expect((await state()).some((bot: any) => bot.name === "NoRestart")).toBe(false);
+    expect((await state()).find((bot: any) => bot.id === starter.id))
+      .toMatchObject({ name: "Patch", threadId: starter.threadId });
     await control("messages", "--bot", chief.id, "--task", chief.threadId, "--limit", "30");
     await control("wait", "--bot", chief.id, "--task", chief.threadId, "--timeout", "15");
     expect(readFileSync(fixture.info.logPath, "utf8")).not.toMatch(/ReferenceError|change listener threw/);

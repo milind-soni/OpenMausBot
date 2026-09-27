@@ -558,6 +558,9 @@ export interface WireGroup {
   /** Computed from the usage ledger, not stored in groups.json. */
   usage?: GroupThreadUsage | null;
   id: string;
+  /** Optional restriction on incoming requests; never grants access. */
+  incomingGroupIds?: string[] | null;
+  requireRoomDiscussion?: boolean;
   /** The active task's thread. Direct-message channels stay single-threaded. */
   threadId: string;
   /** User-created channels have independent tasks, newest first. */

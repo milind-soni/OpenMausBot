@@ -111,6 +111,11 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
           resolve();
         }, 10);
       });
+      // A test releases this gate after observing the intended concurrent state.
+      // The existing run deadline still bounds a gate that is never released.
+      while (plan.waitForFile && !existsSync(plan.waitForFile)) {
+        await new Promise(resolve => { delayTimer = setTimeout(resolve, 25); });
+      }
       if (typeof plan.progressAfterGate === "string") progress?.(plan.progressAfterGate);
       if (plan.delayMs) await new Promise(resolve => { delayTimer = setTimeout(resolve, plan.delayMs); });
       if (plan.fail && !resumed) throw new Error("Scripted addressed agent failure");

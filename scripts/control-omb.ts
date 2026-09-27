@@ -17,7 +17,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
 // `ui` verbs never discover anything: each takes the handle its launch printed.
 const MUTATING = new Set([
-  "new-bot", "new-channel", "send", "send-channel", "interrupt", "set-model", "edit",
+  "new-bot", "new-channel", "room-routes", "send", "send-channel", "interrupt", "set-model", "edit",
   "ui click", "ui type", "ui press", "ui flag", "ui eval",
 ]);
 
@@ -67,6 +67,7 @@ read-only:
 mutating (an explicit --url or OPENMAUSBOT_URL/OMB_PORT is required):
   new-bot --name NAME [--url URL]
   new-channel --name NAME --members ID,ID [--url URL]
+  room-routes --channel ID --from ID,ID [--dry-run] [--url URL]
   send --bot ID --text TEXT [--task ID] [--dry-run] [--url URL]
   send-channel --channel ID --text TEXT [--task ID] [--dry-run] [--url URL]
   interrupt --bot ID [--task ID] [--dry-run] [--url URL]
@@ -211,6 +212,12 @@ export async function runControlOmb(
     }, values.url);
   }
 
+  if (command === "room-routes") {
+    const values = parse(command, args, { channel: { type: "string" }, from: { type: "string" }, "dry-run": { type: "boolean", default: false } });
+    if (typeof values.from !== "string") throw new ControlOmbError("--from is required (empty clears all incoming routes)");
+    const input = { channel_id: required(values.channel, "--channel"), incoming_group_ids: values.from.split(",").map(id => id.trim()).filter(Boolean) };
+    return dryRun(command, values, "update_channel", input) ?? call("update_channel", input, values.url);
+  }
   if (command === "new-channel") {
     const values = parse(command, args, {
       name: { type: "string" },
@@ -389,7 +396,7 @@ export async function launchVerificationServer(
   /** A stand-in enterprise layer (the folder shape core loads) and the key
    * it should accept, so a recipe can prove entitled behaviour offline. */
   enterprise?: { dir: string; licenseKey: string },
-  room?: { scripted: boolean },
+  room?: { scripted: boolean; staticDir?: string; engine?: { cli: string; environment: Record<string, string> } },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
   extraProviders: Array<"codex"> = [],
   /** Programmatic tests only: an owned loopback Box provider, never a live account. */
@@ -417,6 +424,10 @@ export async function launchVerificationServer(
   const fixtureTemp = join(dataDir, "tmp");
   const fixtureDumpPath = join(dataDir, "fake-claude-dump.json");
   mkdirSync(fixtureTemp, { recursive: true });
+  if (room?.engine) {
+    mkdirSync(join(dataDir, ".claude-live"), { recursive: true });
+    writeFileSync(join(dataDir, ".claude-live", "settings.json"), JSON.stringify({ model: room.engine.environment.ANTHROPIC_MODEL }), { mode: 0o600 });
+  }
   const evidenceDir = join(tmpdir(), "openmausbot-verification-evidence");
   mkdirSync(evidenceDir, { recursive: true });
   const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
@@ -432,11 +443,12 @@ export async function launchVerificationServer(
       claude: {
         driver: "claudeAgent",
         displayName: "Verification fixture",
-        config: { cli: FAKE_CLI },
-        ...(room?.scripted ? { environment: { FAKE_CLAUDE_ROOM_PLAN: join(dataDir, "room-plan.json") } } : {}),
+        config: { cli: room?.engine?.cli ?? FAKE_CLI },
+        ...(room?.engine ? { environment: { ...room.engine.environment, CLAUDE_CONFIG_DIR: join(dataDir, ".claude-live") } }
+          : room?.scripted ? { environment: { FAKE_CLAUDE_ROOM_PLAN: join(dataDir, "room-plan.json") } } : {}),
       },
     },
-  }, null, 2));
+  }, null, 2), { mode: 0o600 });
 
   const log = openSync(logPath, "a", 0o600);
   const childEnv = verificationServerEnvironment(parentEnv, dataDir, port);
@@ -453,6 +465,7 @@ export async function launchVerificationServer(
     OMB_AGENT_BROWSER_PATH: browser.binaryPath,
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
+  if (room?.staticDir) childEnv.OMB_STATIC_DIR = room.staticDir;
   if (boxFixtureApi) childEnv.OMB_BOX_API = boxFixtureApi;
   const serverArgs = ["--experimental-strip-types"];
   if (childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE === "1") {
@@ -523,7 +536,7 @@ function requireForegroundTerminal(command: string): void {
   }
 }
 
-async function main() {
+async function runMain() {
   const command = process.argv[2] ?? "help";
   if (command === "ui" && process.argv[3] === "launch") {
     requireForegroundTerminal("ui launch");
@@ -570,6 +583,26 @@ async function main() {
   const result = await runControlOmb(process.argv.slice(2));
   process.stdout.write(typeof result === "string" ? `${result}\n` : `${JSON.stringify(result, null, 2)}\n`);
   if (!controlResultSucceeded(command, result)) process.exitCode = 1;
+}
+
+/** IPC lets test parents request the same cleanup on Windows as terminal Ctrl-C. */
+async function main() {
+  const ownsFixture = process.argv[2] === "launch"
+    || (process.argv[2] === "ui" && process.argv[3] === "launch");
+  if (!ownsFixture || !process.connected) return runMain();
+  const stop = () => { process.emit("SIGINT"); };
+  const onMessage = (message: unknown) => {
+    if (message === "control-omb:stop") stop();
+  };
+  process.on("message", onMessage);
+  process.once("disconnect", stop);
+  try {
+    await runMain();
+  } finally {
+    process.removeListener("message", onMessage);
+    process.removeListener("disconnect", stop);
+    if (process.connected) process.disconnect?.();
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

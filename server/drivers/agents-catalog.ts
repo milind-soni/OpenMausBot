@@ -22,6 +22,10 @@ export interface CatalogProfile {
   externalRuntime: boolean;
   /** A room turn or an ordinary direct chat: one bounded teamwork path. */
   coordinating: boolean;
+  /** A participant turn inside a bounded room discussion: only list_room_targets is mounted. */
+  roomDiscussion?: boolean;
+  /** Whether the current room turn permits convening a bounded room discussion. */
+  roomDiscussionEnabled?: boolean;
   /** In a coordinating turn, may the bot open separate jobs on itself. */
   ownThreadCreation: boolean;
   skillAuthoring: boolean;
@@ -40,6 +44,8 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
   return {
     externalRuntime,
     coordinating: !externalRuntime && env.OMB_ROOM_TURN === "1",
+    roomDiscussion: env.OMB_ROOM_DISCUSSION === "1",
+    roomDiscussionEnabled: env.OMB_ROOM_DISCUSSION_ENABLED === "1",
     ownThreadCreation: env.OMB_OWN_THREAD_CREATION === "1",
     skillAuthoring: env.OMB_SKILL_AUTHORING_ENABLED === "1",
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
@@ -188,6 +194,15 @@ const PROPOSAL_OUTCOME = " Read the result: granted Full Access may apply the ch
 /** Every tool, in the order it is listed. Four peer tools are worded
  * differently for an external runtime, which may poll inside one process. */
 const toolDefinitions = (externalRuntime: boolean) => [
+  {
+    name: "discuss_room",
+    description: "Convene a bounded discussion in your CURRENT group before deciding or delegating. Use currentRoom.members from list_room_targets to select 1-4 other members. Give a concrete proposal and ask them to challenge tradeoffs. Members speak in order, seeing preceding opinions; you resume afterward to accept/reject their suggestions, resolve disagreements and state your decision. Finish your turn after calling; never poll. Only after you resume may you send the resulting brief downstream. Reuse request_key for identical retries.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      member_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 4, uniqueItems: true },
+      topic: { type: "string", minLength: 1, maxLength: 4000 },
+      request_key: { type: "string" },
+    }, required: ["member_ids", "topic", "request_key"] },
+  },
   {
     name: "create_options_card",
     description:
@@ -812,7 +827,7 @@ const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
 // One teamwork path in room turns; keep all unrelated integrations available.
 // Ordinary direct chats use this same bounded coordinator. Goal-owned turns
 // retain their independent loop and cannot start a second coordinator.
-const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots"]);
+const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots", "discuss_room"]);
 const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "send_to_thread", "wait_thread"]);
 const EXTERNAL_TOOL_NAMES = new Set(["list_bots", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
@@ -834,8 +849,11 @@ export function availableTools(profile: CatalogProfile) {
     : SHAREABLE_TOOLS.filter((tool) => !VOICE_TOOL_NAMES.has(tool.name));
   return profile.externalRuntime
     ? BOT_SCOPED_TOOLS.filter(tool => EXTERNAL_TOOL_NAMES.has(tool.name))
+    : profile.roomDiscussion
+    ? VOICE_READY_TOOLS.filter(tool => tool.name === "list_room_targets")
     : profile.coordinating
-    ? VOICE_READY_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && profile.ownThreadCreation))
+    ? VOICE_READY_TOOLS.filter(tool => (!ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && profile.ownThreadCreation)) &&
+        (tool.name !== "discuss_room" || profile.roomDiscussionEnabled))
       .map(tool => tool.name === "start_thread" ? {
         ...tool,
         description: "Open a separate job on yourself with its own history and run, without switching the person's selected conversation. Use only when the user requests independent jobs (for example one review per pull request). Give a short specific title and complete instructions; you can open at most five per turn. This is not a teammate handoff: use coordinate_bots for teammates and their automatic replies. Self-opened jobs cannot recursively open more jobs. If refused, do not retry; explain what remains.",

@@ -1,0 +1,110 @@
+- complementary "Bots and navigation":
+  - button "Collapse sidebar to avatars":
+  - button "Choose sidebar density"
+  - button "New or share":
+  - textbox "Search bots and messages":
+    - /placeholder: Search
+  - button "Group chats" [expanded]:
+    - generic: Group chats
+  - button "Ren Ritsu +1 Development":
+    - img "Ren"
+    - img "Ritsu"
+    - generic: "+1"
+    - generic: Development
+  - button "Collapse Development threads" [expanded]:
+  - group "Development threads":
+    - button "New task":
+      - generic: New task
+    - button "Actions for New task":
+    - button "New thread":
+      - text: New thread
+  - button "Minato Executive No messages yet":
+    - img "Minato"
+    - generic: Executive
+    - generic: No messages yet
+  - button "Expand Executive threads":
+  - button "Bots" [expanded]:
+    - generic: Bots
+  - button "Mako Rename Mako Hi, I'm Mako. What would you like me to do?":
+    - img "Mako"
+    - button "Rename Mako": Mako
+    - generic: Hi, I'm Mako. What would you like me to do?
+  - button "Expand Mako threads":
+  - button "New folder under Mako":
+  - button "Actions for Mako":
+  - button "Ritsu Rename Ritsu Hi, I'm Ritsu. What would you like me to do?":
+    - img "Ritsu"
+    - button "Rename Ritsu": Ritsu
+    - generic: Hi, I'm Ritsu. What would you like me to do?
+  - button "Expand Ritsu threads":
+  - button "New folder under Ritsu":
+  - button "Actions for Ritsu":
+  - button "Ren Rename Ren Hi, I'm Ren. What would you like me to do?":
+    - img "Ren"
+    - button "Rename Ren": Ren
+    - generic: Hi, I'm Ren. What would you like me to do?
+  - button "Expand Ren threads":
+  - button "New folder under Ren":
+  - button "Actions for Ren":
+  - button "Minato Rename Minato Hi, I'm Minato. What would you like me to do?":
+    - img "Minato"
+    - button "Rename Minato": Minato
+    - generic: Hi, I'm Minato. What would you like me to do?
+  - button "Expand Minato threads":
+  - button "New folder under Minato":
+  - button "Actions for Minato":
+  - button "Pixel Rename Pixel Hi, I'm Pixel. What would you like me to do?":
+    - img "Pixel"
+    - button "Rename Pixel": Pixel
+    - generic: Hi, I'm Pixel. What would you like me to do?
+  - button "Expand Pixel threads":
+  - button "New folder under Pixel":
+  - button "Actions for Pixel":
+  - paragraph
+  - button "Tools":
+    - generic: Tools
+  - button "You":
+    - generic: "?"
+    - generic: You
+- main:
+  - generic: Development
+  - button "All threads":
+    - generic: All threads
+    - generic: "1"
+  - button "Find in conversation":
+  - button "Export conversation":
+  - button "Calls currently need the macOS desktop app":
+  - button "Group working folder":
+  - generic "Plain messages go to Ren; @mentions override this":
+    - combobox "Default responder":
+      - 'option "Lead: Ren" [selected]'
+      - 'option "Lead: Ritsu"'
+      - 'option "Lead: Mako"'
+      - option "Everyone responds"
+      - option "Only when mentioned"
+  - button "Manage members — 3 bots in this group":
+    - generic "Ren":
+      - img "Ren"
+    - generic "Ritsu":
+      - img "Ritsu"
+    - generic "Mako":
+      - img "Mako"
+  - generic "Group collaboration settings"
+  - paragraph: Teammates use the existing collaboration and access rules by default. Optionally require a discussion or limit which groups may send requests here.
+  - checkbox "Discuss with members before delegating or concluding incoming work" [checked]
+  - text: Discuss with members before delegating or concluding incoming work
+  - checkbox "Restrict incoming requests to selected groups" [active]
+  - text: Restrict incoming requests to selected groups
+  - button "Add group instructions…":
+    - generic: Add group instructions…
+  - log "Group chat Development":
+    - img "Ren"
+    - img "Ritsu"
+    - img "Mako"
+    - generic: Development
+    - generic: Ren responds by default — @mention someone else to choose them instead.
+  - button "Attach a file":
+  - button "Finish together":
+    - text: Goal
+  - textbox "Message Development":
+    - /placeholder: Message Development — Ren responds

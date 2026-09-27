@@ -7,7 +7,7 @@ import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { executeSharedOperation, sharedCommand, createSharedCua } from "./shared-computer-access.mjs";
+import { executeSharedOperation, sharedCommand, sharedCommandEnvironment, createSharedCua } from "./shared-computer-access.mjs";
 import { createComputerSharing, validateSharedFolders } from "./computer-sharing.mjs";
 
 async function fixture(t) {
@@ -19,6 +19,20 @@ async function fixture(t) {
   return { dir, folder, grant, run };
 }
 const payload = result => JSON.parse(result.content[0].text);
+
+test("Windows shells retain module discovery without inheriting credentials or startup injection", () => {
+  const environment = {
+    PATH: "fixture-bin", HOME: "fixture-home", PATHEXT: ".COM;.EXE;.BAT;.CMD", PSModulePath: "fixture-modules",
+    OPENAI_API_KEY: "fixture-secret", UNKNOWN_PROVIDER_TOKEN: "fixture-secret",
+    NODE_OPTIONS: "--require=fixture-injection", BASH_ENV: "fixture-startup",
+  };
+  assert.deepEqual(sharedCommandEnvironment(environment, "win32"), {
+    PATH: "fixture-bin", HOME: "fixture-home", PATHEXT: ".COM;.EXE;.BAT;.CMD", PSModulePath: "fixture-modules",
+  });
+  assert.deepEqual(sharedCommandEnvironment(environment, "linux"), {
+    PATH: "fixture-bin", HOME: "fixture-home",
+  });
+});
 
 /** What this host's filesystem treats as one directory. APFS and NTFS fold
  * case, APFS also folds Unicode normalization, ext4 folds neither. */
@@ -173,8 +187,10 @@ test("Windows terminal preserves command syntax, pipeline output and exit status
   assert.equal(returned.exitCode, 0); assert.match(returned.output, /fixture-return/);
   const paths = await run("[Console]::WriteLine($env:PSModulePath)");
   assert.equal(paths.exitCode, 0);
-  const modulePaths = paths.output.trim().toLowerCase();
-  assert.ok(modulePaths.startsWith(path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "Modules").toLowerCase()), "built-in modules must be first");
+  // SystemRoot and PSHOME can spell the same directory with different casing.
+  // Resolve the first entry exactly; a textual prefix also accepts sibling paths.
+  assert.equal(await realpath(paths.output.trim().split(";")[0]), await realpath(path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "Modules")), "built-in modules must be first");
+  const modulePaths = paths.output.trim().toLowerCase().split(";");
   assert.ok(modulePaths.includes(path.join(process.env.ProgramFiles, "WindowsPowerShell", "Modules").toLowerCase()), "installed modules must remain available");
   const failed = await run("throw 'fixture-command-failed'");
   assert.notEqual(failed.exitCode, 0); assert.match(failed.output, /fixture-command-failed/);

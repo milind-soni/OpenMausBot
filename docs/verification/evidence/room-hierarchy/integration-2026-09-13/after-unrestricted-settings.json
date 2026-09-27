@@ -1,0 +1,11 @@
+{
+  "id": "ef327f9c-e095-43e1-9c04-b1adc863551b",
+  "name": "Development",
+  "memberIds": [
+    "a4f0095b-ebbd-4a0d-a831-eed11ccfc46c",
+    "e226c662-63d4-4cbe-b080-edff18f43b2a",
+    "ef6c5e09-ee97-4641-bc97-49f90c4f7ee4"
+  ],
+  "requireRoomDiscussion": true,
+  "incomingGroupIds": null
+}

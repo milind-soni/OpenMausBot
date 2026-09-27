@@ -1,5 +1,6 @@
 // Real renderer and routes in a disposable fake-engine workspace only.
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, expect, it } from "vitest";
@@ -12,19 +13,30 @@ import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
 let child: ChildProcess | undefined;
-afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
+let fixtureDataDir: string | undefined;
+afterAll(async () => {
+  await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
+  if (child) expect(child.exitCode).toBe(0);
+  if (fixtureDataDir) expect(existsSync(fixtureDataDir)).toBe(false);
+});
 
 (enabled ? it : it.skip)("creates monthly routines, validates cron, preserves arbitrary expressions and excludes calls", async () => {
   let output = "";
   let stderr = "";
-  child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], { cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+  child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], { cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe", "ipc"] });
   child.stdout!.on("data", chunk => { output += String(chunk); });
   child.stderr!.on("data", chunk => { stderr += String(chunk); });
-  let fixture: { ui: string; url: string; botId: string; logPath: string };
+  let fixture: { ui: string; url: string; botId: string; logPath: string; dataDir: string };
   await expect.poll(() => {
-    if (child!.exitCode !== null) throw new Error(stderr);
+    // Polling retries thrown errors; stop on launcher exit so startup failures
+    // report their stderr immediately instead of waiting the whole deadline.
+    if (child!.exitCode !== null || child!.signalCode !== null) return true;
     try { fixture = JSON.parse(output); return Boolean(fixture.ui); } catch { return false; }
   }, { timeout: 600_000 }).toBe(true);
+  expect(child.exitCode, stderr).toBeNull();
+  expect(child.signalCode, stderr).toBeNull();
+  expect(fixture!.ui, stderr).toBeTruthy();
+  fixtureDataDir = fixture!.dataDir;
   const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", fixture.ui, ...args]) as Promise<Record<string, any>>;
   const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
   const click = (name: string) => ui("click", "--name", name);
@@ -42,6 +54,8 @@ afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
     return field.getBoundingClientRect().height > 0;
   })()`);
 
+  // The launcher handle is available before React finishes rendering the sidebar.
+  await expect.poll(async () => Object.values((await ui("snapshot")).refs as Record<string, { name: string }>).map(element => element.name), { timeout: 10_000 }).toContain("Tools");
   await click("Tools"); await click("Automations");
   await click("Create an automation"); await click("Create a scheduled task");
   await fill('input[placeholder="Add title"]', "Monthly close");
