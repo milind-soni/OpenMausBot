@@ -27,6 +27,13 @@ const same = (a: CodingOwner, b: CodingOwner) => a.key === b.key && a.provider =
 function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(body));
 }
+function localTool(tool: any): boolean {
+  if (["function", "custom", "local_shell"].includes(tool?.type)) return true;
+  // Codex groups local functions into namespaces. A namespace never grants
+  // access to hosted tools, including when an untrusted client nests one.
+  return tool?.type === "namespace" && typeof tool.name === "string" && Array.isArray(tool.tools)
+    && tool.tools.every((child: any) => ["function", "custom"].includes(child?.type));
+}
 
 /** Per-process jobs: restart revokes every capability. Files remain on the
  * user's existing machine; a missing machine is never silently replaced. */
@@ -101,7 +108,7 @@ export class IsolatedCoding {
       // Only model inference is exposed. No remote background jobs, stored
       // response retrieval, caller-selected providers or hosted tools.
       if (body.background || body.previous_response_id || body.conversation || body.store === true ||
-        (body.tools !== undefined && (!Array.isArray(body.tools) || body.tools.some((t: any) => !["function", "custom", "local_shell"].includes(t?.type))))) throw failure();
+        (body.tools !== undefined && (!Array.isArray(body.tools) || !body.tools.every(localTool)))) throw failure();
       const safe = { input: body.input, instructions: body.instructions, tools: body.tools, tool_choice: body.tool_choice,
         parallel_tool_calls: body.parallel_tool_calls, reasoning: body.reasoning, text: body.text,
         model: run.model, stream: true, store: false, include: ["reasoning.encrypted_content"], max_output_tokens: 8192 };

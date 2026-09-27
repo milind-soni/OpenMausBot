@@ -120,6 +120,18 @@ it("requires explicit server configuration and an isolated supported provider", 
   expect(codingSettings({ NATION_CODING_ENABLED: "1", NATION_CODING_MODEL: "openai/test", OPENROUTER_API_KEY: "key", NATION_CODING_PUBLIC_ORIGIN: "http://example.com" })).toBeNull();
 });
 
+it("accepts grouped local tools without permitting nested hosted tools", async () => {
+  const f = await fixture();
+  try {
+    await f.start(); const a = f.pending[0].input;
+    const local = { type: "namespace", name: "project", tools: [{ type: "function", name: "edit", parameters: { type: "object", properties: {} } }] };
+    expect((await f.request(a, { input: "edit", tools: [local] })).status).toBe(200);
+    expect(JSON.parse(f.upstream.mock.calls[0][1].body).tools).toEqual([local]);
+    expect((await f.request(a, { input: "search", tools: [{ ...local, tools: [{ type: "web_search" }] }] })).status).toBe(502);
+    expect(f.upstream).toHaveBeenCalledTimes(1);
+  } finally { await f.close(); }
+});
+
 // Optional: install the pinned CLI outside the repository, then point this at
 // its executable. Model responses and billing remain entirely offline.
 it.skipIf(!process.env.NATION_TEST_CODEX_BIN)("real Codex CLI edits a file through the scoped gateway", async () => {
