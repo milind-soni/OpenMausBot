@@ -20,6 +20,12 @@ function resolveUrl(path: string): string {
   return path.startsWith("/") ? import.meta.env.BASE_URL + path.slice(1) : path;
 }
 
+/** Explicit email sign-in remains available when this browser already has a
+ * member session. Verification replaces that session with the chosen account. */
+export function signInPath(): string {
+  return resolveUrl("/sign-in");
+}
+
 /** Ask the server who we are. A 401/403 means "go pair"; a network failure
  * is reported separately so the pair page can say the server is down. */
 export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise<SessionState> {

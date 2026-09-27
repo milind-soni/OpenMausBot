@@ -11,6 +11,7 @@ import { NationAgentControls } from "./NationAgentControls";
 import { useState } from "react";
 import { CheckCircle2, ChevronLeft, Loader2, Server, ShieldCheck, SlidersHorizontal, XCircle } from "lucide-react";
 import { api } from "@/lib/api-client";
+import { signInPath } from "@/lib/session";
 import type { ConfigStatus } from "@/state/store";
 
 export type NationAdminConfig = Pick<ConfigStatus, "isProductOwner" | "adminGate" | "nationOpenrouter"> & Partial<Pick<ConfigStatus, "composio" | "box" | "hostedComputers" | "vps" | "webTools">>;
@@ -148,6 +149,9 @@ export function NationAdminPage({ config }: { config: NationAdminConfig | null }
           <div className="text-[15px] font-semibold text-ink">Admin access required</div>
           <div className="mt-1 text-[13px]">This page is only available to the account owner.</div>
         </div>
+        {config?.isProductOwner !== true ? (
+          <a href={signInPath()} className="ui-button mt-2">Sign in as owner</a>
+        ) : null}
         <a
           href="/swarm/"
           className="mt-2 flex items-center gap-2 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"

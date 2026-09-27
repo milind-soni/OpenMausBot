@@ -8,9 +8,12 @@ afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 it.each([null, {}, { isProductOwner: false }])("does not show admin controls without a confirmed owner: %j", config => {
   vi.stubGlobal("window", {});
+  vi.stubEnv("BASE_URL", "/swarm/");
   vi.stubGlobal("sessionStorage", { getItem: () => "1" });
   const html = renderToStaticMarkup(createElement(NationAdminPage, { config }));
   expect(html).toContain("Admin access required");
+  expect(html).toContain('href="/swarm/sign-in"');
+  expect(html).toContain("Sign in as owner");
   expect(html).not.toContain("Test connection");
   expect(html).not.toContain("Credits</button>");
 });
@@ -33,6 +36,7 @@ it("keeps the PIN gate on top of confirmed admin access", () => {
     isProductOwner: true, adminGate: { pinRequired: true },
   } }));
   expect(html).toContain("Admin access required");
+  expect(html).not.toContain("Sign in as owner");
   expect(html).not.toContain("Test connection");
 });
 

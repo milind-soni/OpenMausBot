@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NationAdminPage, type NationAdminConfig } from "../components/NationAdminPage";
 import { api, ApiError } from "../lib/api-client";
+import { signInPath } from "../lib/session";
 
 export function AdminApp() {
   const [config, setConfig] = useState<NationAdminConfig | null>(null);
@@ -37,7 +38,7 @@ export function AdminApp() {
     <section className="w-full max-w-md space-y-4 rounded-2xl border border-hairline/40 bg-panel p-8">
       <h1 className="text-xl font-semibold">NATION Admin</h1>
       <p role={error ? "alert" : "status"} className="text-sm text-ink-secondary">{loading ? "Checking admin access…" : error}</p>
-      {signIn ? <a className="block underline" href="/swarm/pair">Sign in</a> : error ? <button className="underline" onClick={() => setAttempt(value => value + 1)}>Try again</button> : null}
+      {signIn ? <a className="block underline" href={signInPath()}>Sign in with email</a> : error ? <button className="underline" onClick={() => setAttempt(value => value + 1)}>Try again</button> : null}
       <a className="block text-sm text-ink-secondary underline" href="/swarm/">Back to Swarm</a>
     </section>
   </main>;

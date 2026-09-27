@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@daytona/sdk@0.218.0>ws': 8.21.3
+
 patchedDependencies:
   '@mermaid-js/parser@2.0.0':
     hash: 349f0052ed1d3318e923a7871a66ebadd1d50e61851793f80f121adbcbb94c31
@@ -5364,8 +5367,8 @@ packages:
       utf-8-validate:
         optional: true
 
-  ws@8.22.0:
-    resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
+  ws@8.21.3:
+    resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -5949,13 +5952,13 @@ snapshots:
       expand-tilde: 2.0.2
       fast-glob: 3.3.3
       form-data: 4.0.6
-      isomorphic-ws: 5.0.0(ws@8.22.0)
+      isomorphic-ws: 5.0.0(ws@8.21.3)
       pathe: 2.0.3
       shell-quote: 1.10.0
       socket.io-client: 4.8.4
       tar: 7.5.22
       tslib: 2.8.1
-      ws: 8.22.0
+      ws: 8.21.3
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -9093,9 +9096,9 @@ snapshots:
 
   isexe@4.0.0: {}
 
-  isomorphic-ws@5.0.0(ws@8.22.0):
+  isomorphic-ws@5.0.0(ws@8.21.3):
     dependencies:
-      ws: 8.22.0
+      ws: 8.21.3
 
   isows@1.0.7(ws@8.21.0):
     dependencies:
@@ -10975,7 +10978,7 @@ snapshots:
 
   ws@8.21.0: {}
 
-  ws@8.22.0: {}
+  ws@8.21.3: {}
 
   xmlbuilder@15.1.1: {}
 

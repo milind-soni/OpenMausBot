@@ -16,9 +16,14 @@ allowBuilds:
   electron: true # postinstall downloads the Electron dist
   esbuild: true # postinstall validates the platform binary
   electron-winstaller: false # unused — Windows builds ship NSIS
+  workerd: false # use the platform package; no postinstall script needed
 onlyBuiltDependencies:
   - electron
   - esbuild
+
+# Keep the SDK's WebSocket client outside the package-release waiting period.
+overrides:
+  '@daytona/sdk@0.218.0>ws': 8.21.3
 
 # Runtime diagnostics use NATION support; algorithms and license notices are unchanged.
 patchedDependencies:

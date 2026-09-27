@@ -265,10 +265,13 @@ it("gives every email its own workspace and keeps the founder desk out of reach"
       ledger.close();
     }
 
-    // 3. The founder signs in to the desk with the same kind of link.
+    // 3. The founder can switch an existing member browser to the desk.
     const founder = browser(base);
+    founder.jar.set("nation_account", alice.jar.get("nation_account")!);
+    expect((await founder.request("/api/config")).body.isProductOwner).toBe(false);
     expect((await signIn(founder, FOUNDER)).verified).toEqual({ ok: true, destination: "desk" });
     expect(founder.jar.has("nation_account")).toBe(false);
+    expect((await founder.request("/api/config")).body.isProductOwner).toBe(true);
     const founderSession = (await founder.request("/api/auth/session")).body;
     expect(founderSession.scopes).toContain("admin");
     const deskNames = (await founder.request("/api/bots")).body.bots.map((bot: any) => bot.name);

@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
-import { readEnvironment, readSessionState, takeLoginTokenFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation } from "./lib/session";
+import { readEnvironment, readSessionState, signInPath, takeLoginTokenFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation } from "./lib/session";
 import { bootstrapBrand } from "./lib/brand";
 import { applySkin, readSkin } from "./lib/skins";
 import { LoginPage } from "./pair/LoginPage";
@@ -24,6 +24,7 @@ applySkin(readSkin());
 async function chooseRoot(): Promise<React.ReactNode> {
   const loginToken = takeLoginTokenFromLocation();
   if (loginToken) return <LoginPage initialToken={loginToken} />;
+  if (location.pathname.replace(/\/+$/, "") === signInPath().replace(/\/+$/, "")) return <LoginPage />;
   const pairPath = `${import.meta.env.BASE_URL}pair`.replace(/\/\//g, "/");
   if (location.pathname === pairPath) return <PairPage initialCode={takePairingCodeFromLocation()} initialEmail={takeInvitedEmailFromLocation()} />;
   const session = await readSessionState();
