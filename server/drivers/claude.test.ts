@@ -178,6 +178,17 @@ describe("ClaudeDriver.decodeConfig", () => {
     expect(restoredCostBase(earlier, state(0.03, { A: 3, B: 1 }), { input: 2, cacheRead: 0, cacheWrite: 0, output: 0 })).toBe(0.01);
   });
 
+  it("measures from the latest known state, not the highest total", () => {
+    // A resume that went back to an older state leaves a later state with a
+    // lower total (4.3538 then 4.2123 in a real session). With no exact fit,
+    // the latest state inside the new counts is the start.
+    const state = (total: number, input: number) => claudeCostSnapshot(total, {
+      A: { inputTokens: input, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 0, costUSD: total },
+    })!;
+    const earlier = [state(0.05, 5), state(0.03, 4)];
+    expect(restoredCostBase(earlier, state(0.06, 8), { input: 1, cacheRead: 0, cacheWrite: 0, output: 0 })).toBe(0.03);
+  });
+
   it("throws on an invalid permissionMode (registry downgrades this to a shadow)", () => {
     expect(() => ClaudeDriver.decodeConfig({ permissionMode: "yolo" })).toThrow(/permissionMode/);
   });

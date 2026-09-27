@@ -896,9 +896,11 @@ export function claudeCostSnapshot(total: unknown, modelUsage: unknown): ClaudeC
  * The restored state is the earlier state that sits inside the new counts
  * and leaves exactly this turn's own usage: in one model (usage leaves out
  * side calls such as a Haiku title) or summed over all models (a turn split
- * between two); nothing restored is 0. When no state fits exactly — the CLI saved work that never reported
- * a result, like an interrupted turn — the latest state inside the new
- * counts stands, so that work is booked once, with this turn. */
+ * between two); nothing restored is 0. When no state fits exactly — the CLI
+ * saved work that never reported a result, like an interrupted turn — the
+ * latest state inside the new counts stands, so that work is booked once,
+ * with this turn. Either way the latest state wins, not the highest total:
+ * a resume that went back to an older state leaves later, lower totals. */
 export function restoredCostBase(
   earlier: readonly ClaudeCostSnapshot[],
   current: ClaudeCostSnapshot,
@@ -908,16 +910,17 @@ export function restoredCostBase(
   const nothing: ClaudeCostSnapshot = { total: 0, models: {} };
   let exact: number | null = null;
   let inside = 0;
+  // oldest first: the session's states in the order they were recorded
   for (const state of [nothing, ...earlier]) {
     const within = Object.entries(state.models).every(([model, counts]) =>
       counts.every((n, i) => n <= (current.models[model]?.[i] ?? 0)));
     if (!within) continue;
-    inside = Math.max(inside, state.total);
+    inside = state.total;
     const growth = Object.entries(current.models).map(([model, counts]) =>
       counts.map((n, i) => n - (state.models[model]?.[i] ?? 0)));
     const isTurn = (counts: number[]) => counts.every((n, i) => n === turn[i]);
     const summed = turn.map((_, i) => growth.reduce((sum, counts) => sum + counts[i]!, 0));
-    if (growth.some(isTurn) || isTurn(summed)) exact = Math.max(exact ?? 0, state.total);
+    if (growth.some(isTurn) || isTurn(summed)) exact = state.total;
   }
   return exact ?? inside;
 }
