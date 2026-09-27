@@ -36,7 +36,7 @@ public enum RosterDensity: String, CaseIterable, Codable, Sendable {
     public var caption: String {
         switch self {
         case .comfortable: "Larger faces, with each bot’s latest message under its name."
-        case .compact: "One line per bot. Bots with more than one thread show how many; tap the number to list them."
+        case .compact: "One line per bot. Bots with more than one active thread show how many; tap the number to list them."
         }
     }
 }

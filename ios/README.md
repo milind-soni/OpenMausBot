@@ -57,10 +57,11 @@ density**, like the desktop sidebar's density:
 - **Compact** (the default) gives each bot and group one line: the face, the
   name, a crown after a Chief of Staff, the role, and the time — replaced by a
   spinner while the bot works, with a hand in the bot's colour when it waits
-  on you. A bot with more than one thread shows **› N**; tap it to list those
-  threads under the bot's name, ending with **New thread**. Long-press any bot
-  for **New thread** and **Manage threads**. Groups are rows too, and the
-  **+** on their title makes a new one.
+  on you. A bot with more than one active thread shows **› N** (closed,
+  archived and snoozed threads are left out, as in the list it opens); tap it
+  to list those threads under the bot's name, ending with **New thread**.
+  Long-press any bot for **New thread** and **Manage threads**. Groups are
+  rows too, and the **+** on their title makes a new one.
 - **Comfortable** keeps the larger two-line rows with the latest message,
   groups as tiles, and a **Threads** row beneath every bot.
 
