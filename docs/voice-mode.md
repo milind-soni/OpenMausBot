@@ -95,6 +95,8 @@ delegate real work to specialists over `ask_bot` — no new machinery required.
 ## Known gaps
 
 - **Calls are macOS-only**, because dictation is. The voice half works everywhere.
+  *(Superseded: Windows and Linux now use a configurable speech-recognition
+  provider. See [universal-voice.md](universal-voice.md).)*
 - **Rooms don't speak yet**, though per-bot voices already exist (`bot.voice`).
 - **No spend meter.** ElevenLabs bills per character. Auto-speak is off by
   default partly for that reason, but the app should eventually show usage.

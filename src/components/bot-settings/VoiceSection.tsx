@@ -5,6 +5,8 @@ import { requestNotificationPermission } from "@/lib/notify";
 import type { Bot } from "@/state/store";
 import { Switch } from "../SettingsPrimitives";
 import { VoiceSettings } from "../VoiceSettings";
+import { SpeechRecognitionSettings } from "../SpeechRecognitionSettings";
+import { speechBridge } from "@/lib/stt/bridge";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 import { useBotEditor } from "./BotEditorContext";
 
@@ -21,6 +23,9 @@ export function VoiceSection({
   return (
     <div className="flex flex-col gap-4">
       <VoiceSettings bot={bot} onPatch={patch} />
+
+      {/* Windows/Linux only: macOS listens with Apple's on-device recognizer. */}
+      {speechBridge()?.kind === "universal" && <SpeechRecognitionSettings />}
 
       <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
         <div>
