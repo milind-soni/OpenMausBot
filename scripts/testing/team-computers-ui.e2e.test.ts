@@ -24,7 +24,7 @@ type Computer = { id: string; name: string; section: string | null; state: strin
   try {
     let stdout = "", stderr = "";
     child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/testing/team-computers-preview.ts")], {
-      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     child.stdout!.on("data", (chunk: Buffer) => { stdout += String(chunk); });
     child.stderr!.on("data", (chunk: Buffer) => { stderr += String(chunk); });
@@ -199,7 +199,7 @@ type Computer = { id: string; name: string; section: string | null; state: strin
         console.info(JSON.stringify({ evidence: path }));
       }
     } finally {
-      await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+      await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
       if (info) expect(existsSync(info.dataDir)).toBe(false);
     }
   }

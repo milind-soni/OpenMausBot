@@ -27,7 +27,7 @@ type BotRecord = {
   try {
     let stdout = "", stderr = "";
     child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
-      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     child.stdout!.on("data", (chunk: Buffer) => { stdout += String(chunk); });
     child.stderr!.on("data", (chunk: Buffer) => { stderr += String(chunk); });
@@ -380,6 +380,6 @@ type BotRecord = {
       writeFileSync(evidence, JSON.stringify({ fixture: info, ...receipts }, null, 2));
       console.info(JSON.stringify({ evidence }));
     }
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
   }
 }, binary ? 240_000 : 720_000);

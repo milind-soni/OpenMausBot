@@ -5,6 +5,7 @@ import { BotSettingsDialog } from "../../src/components/BotSettingsDialog";
 import { RemoteDesktopPanel } from "../../src/components/remote-desktop-panel";
 import { StoreProvider, useStore, type Bot } from "../../src/state/store";
 import { applySkin, readSkin } from "../../src/lib/skins";
+import { setLocale } from "../../src/lib/i18n";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../../shared/computer-contention";
 import "../../src/styles.css";
 
@@ -201,5 +202,8 @@ function Fixture() {
       : !state.settingsOpen && <button onClick={() => dispatch({ type: "toggleComputer", open: true })}>Open computer panel</button>}
   </div>;
 }
+// This entry mounts panels without App, which normally applies config.language.
+// Keep the recipe's accessible labels stable on non-English browser installs.
+setLocale("en");
 applySkin(readSkin());
 createRoot(document.getElementById("root")!).render(<StoreProvider><Fixture /></StoreProvider>);

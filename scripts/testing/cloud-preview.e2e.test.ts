@@ -19,7 +19,7 @@ describe("cloud preview recovery in the real renderer", () => {
   let child: ChildProcess | undefined;
   let preview: MountedPreview | undefined;
   afterAll(async () => {
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
     await preview?.close();
   });
 
@@ -28,7 +28,7 @@ describe("cloud preview recovery in the real renderer", () => {
     let stderr = "";
     let info: FixtureInfo;
     child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
-      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     child.stdout!.on("data", (chunk: Buffer) => { stdout += String(chunk); });
     child.stderr!.on("data", (chunk: Buffer) => { stderr += String(chunk); });
@@ -204,7 +204,7 @@ describe("cloud preview recovery in the real renderer", () => {
       await expect.poll(() => stat("joining")).toBe(false);
     }
     process.stdout.write(`${JSON.stringify({ fixture: info!, previewUrl: preview.previewUrl, transport: "simulated; panels and browser real" })}\n`);
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
     expect(child.exitCode).toBe(0);
     expect(existsSync(info!.dataDir)).toBe(false);
     expect(existsSync(info!.logPath)).toBe(true);
