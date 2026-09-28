@@ -281,7 +281,7 @@ struct ChatListView: View {
                     Haptics.selection()
                     openAttention(entry)
                 } label: {
-                    AttentionRow(entry: entry)
+                    AttentionRow(entry: entry, followsDynamicType: density == .compact)
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 16)
@@ -746,8 +746,8 @@ struct ChatListView: View {
         text
             .textCase(.uppercase)
             // Compact rows follow Dynamic Type, so their titles do too, but
-            // only up to xxxLarge: beyond it they would tower over the
-            // fixed-size rows of Needs attention. Comfortable's never scale.
+            // only up to xxxLarge: beyond it these uppercase labels would
+            // outweigh the names they head. Comfortable's never scale.
             .font(density == .compact ? .footnote.weight(.semibold) : .system(size: 13, weight: .semibold))
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .tracking(0.4)
@@ -818,6 +818,23 @@ struct GroupTile: View {
 /// working, which outranks queued and unread — the same order as the tree.
 struct AttentionRow: View {
     let entry: AttentionThread
+    /// Compact's rows follow Dynamic Type, and these grow with them, in the
+    /// proportions they have at the default size. Comfortable's rows keep
+    /// fixed sizes, and so do these beside them.
+    var followsDynamicType = false
+
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .subheadline) private var scaledTitle: CGFloat = 15
+    @ScaledMetric(relativeTo: .subheadline) private var scaledDetail: CGFloat = 12
+    @ScaledMetric(relativeTo: .subheadline) private var scaledMarkWidth: CGFloat = 24
+
+    /// The title's size, and the mark's beside it.
+    private var titleSize: CGFloat { followsDynamicType ? scaledTitle : 15 }
+    private var detailSize: CGFloat { followsDynamicType ? scaledDetail : 12 }
+    private var markWidth: CGFloat { followsDynamicType ? scaledMarkWidth : 24 }
+    /// A scaled title wraps at the accessibility sizes instead of being cut
+    /// short, as compact's names and thread titles do there.
+    private var titleWraps: Bool { followsDynamicType && typeSize.isAccessibilitySize }
 
     private var waiting: Bool { entry.task.activity == "waiting-on-you" }
     private var working: Bool { !waiting && (entry.task.busy == true || entry.task.activity == "working") }
@@ -837,19 +854,20 @@ struct AttentionRow: View {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: waiting ? "exclamationmark.circle.fill" : queued ? "clock" : "bell.badge.fill")
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.system(size: titleSize, weight: .medium))
                 }
             }
             .foregroundStyle(waiting ? Color.orange : queued ? Color.secondary : Color.accentColor)
-            .frame(width: 24)
+            .frame(width: markWidth)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: entry.task.displayTitle)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: titleSize, weight: .medium))
                     .foregroundStyle(Color.primary)
-                    .lineLimit(1)
+                    .lineLimit(titleWraps ? 3 : 1)
+                    .fixedSize(horizontal: false, vertical: titleWraps)
                 Text("\(entry.botName) · \(statusText)")
-                    .font(.system(size: 12))
+                    .font(.system(size: detailSize))
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)
             }

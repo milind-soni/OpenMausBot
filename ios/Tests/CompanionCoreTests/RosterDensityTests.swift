@@ -250,6 +250,65 @@ final class RosterDensityTests: XCTestCase {
         XCTAssertFalse(row.showsTime)
     }
 
+    // MARK: - The line beneath the name at the accessibility sizes
+
+    /// The time, then the role, a "·" between them: the Android row's order.
+    func testSecondLinePutsTheTimeBeforeTheRole() {
+        let row = CompactBotRow(bot: bot(tasks: [task("a")]), hasPendingCard: false)
+        let line = row.secondLine(stamp: "Saturday", role: "Operations lead")
+        XCTAssertFalse(line.showsWaiting)
+        XCTAssertFalse(line.showsSpinner)
+        XCTAssertEqual(line.words, ["Saturday", "Operations lead"])
+        XCTAssertEqual(line.text, "Saturday · Operations lead")
+        // VoiceOver hears a pause, not the dot.
+        XCTAssertEqual(line.spokenText, "Saturday, Operations lead")
+    }
+
+    /// A "·" only ever stands between two words.
+    func testSecondLineWithOneWordHasNoDot() {
+        let row = CompactBotRow(bot: bot(tasks: [task("a")]), hasPendingCard: false)
+        XCTAssertEqual(row.secondLine(stamp: "Saturday", role: "").text, "Saturday")
+        XCTAssertEqual(row.secondLine(stamp: "Saturday", role: "  ").text, "Saturday")
+        XCTAssertEqual(row.secondLine(stamp: "", role: "Designer").text, "Designer")
+        let blank = row.secondLine(stamp: "", role: "")
+        XCTAssertEqual(blank.words, [])
+        XCTAssertTrue(blank.isEmpty)
+    }
+
+    /// The spinner stands where the time was, so the role follows it alone.
+    func testWorkingSecondLineSwapsTheTimeForTheSpinner() {
+        var working = bot(tasks: [task("a")])
+        working.busy = true
+        let line = CompactBotRow(bot: working, hasPendingCard: false)
+            .secondLine(stamp: "Saturday", role: "Operations lead")
+        XCTAssertTrue(line.showsSpinner)
+        XCTAssertEqual(line.text, "Operations lead")
+        XCTAssertFalse(line.isEmpty)
+    }
+
+    func testCreatingSecondLineShowsTheSpinnerBeforeTheRole() {
+        let line = CompactBotRow(bot: bot(tasks: [task("a")]), hasPendingCard: false, creatingThread: true)
+            .secondLine(stamp: "Saturday", role: "Operations lead")
+        XCTAssertTrue(line.showsSpinner)
+        XCTAssertFalse(line.showsWaiting)
+        XCTAssertEqual(line.text, "Operations lead")
+    }
+
+    /// The hand leads and the time stays, as on one line. With no time and
+    /// no role, the hand alone still makes a line.
+    func testWaitingSecondLineLeadsWithTheHandAndKeepsTheTime() {
+        var waiting = task("a")
+        waiting.activity = "waiting-on-you"
+        var bot = bot(tasks: [waiting])
+        bot.busy = true
+        let row = CompactBotRow(bot: bot, hasPendingCard: false)
+        let line = row.secondLine(stamp: "Saturday", role: "Operations lead")
+        XCTAssertTrue(line.showsWaiting)
+        XCTAssertFalse(line.showsSpinner)
+        XCTAssertEqual(line.text, "Saturday · Operations lead")
+        XCTAssertFalse(row.secondLine(stamp: "", role: "").isEmpty)
+    }
+
     // MARK: - The thread list
 
     func testUnfiledThreadsBelowAFolderGetALabel() {

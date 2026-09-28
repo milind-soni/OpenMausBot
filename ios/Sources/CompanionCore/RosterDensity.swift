@@ -156,4 +156,42 @@ public struct CompactBotRow: Equatable, Sendable {
     public func endsWithNewThread(expanded: Bool, searching: Bool) -> Bool {
         !searching && expanded && showsThreadControl
     }
+
+    /// What the line beneath the name says at the accessibility text sizes,
+    /// where the name takes the row's whole width: the time, then the role,
+    /// in the Android row's order. The marks keep their places from the
+    /// one-line row: the hand before the time, the spinner instead of it.
+    /// - Parameters:
+    ///   - stamp: when the bot last spoke, as the list writes it; empty when
+    ///     it never has.
+    ///   - role: the bot's job; empty when it has none.
+    public func secondLine(stamp: String, role: String) -> CompactSecondLine {
+        let words = [showsTime ? stamp : "", role.trimmingCharacters(in: .whitespacesAndNewlines)]
+        return CompactSecondLine(
+            showsWaiting: showsWaiting,
+            showsSpinner: showsSpinner,
+            words: words.filter { !$0.isEmpty }
+        )
+    }
+}
+
+/// The line beneath a bot's name once the name has a line of its own: its
+/// marks first, then its words.
+public struct CompactSecondLine: Equatable, Sendable {
+    /// The hand, first, while the bot waits on the person.
+    public let showsWaiting: Bool
+    /// The spinner, where the time would be.
+    public let showsSpinner: Bool
+    /// The time, then the role; either can be missing.
+    public let words: [String]
+
+    /// As the row shows it: "Saturday · Operations lead", a "·" only ever
+    /// between two words.
+    public var text: String { words.joined(separator: " · ") }
+
+    /// As VoiceOver reads it: a pause where the row shows the dot.
+    public var spokenText: String { words.joined(separator: ", ") }
+
+    /// Nothing to show: no mark, no time and no role.
+    public var isEmpty: Bool { !showsWaiting && !showsSpinner && words.isEmpty }
 }

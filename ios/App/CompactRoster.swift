@@ -8,8 +8,8 @@
 import SwiftUI
 import CompanionCore
 
-/// Horizontal rhythm shared by bot rows, group rows and the thread lines
-/// beneath a bot, so a thread starts exactly where its bot's name does.
+/// Rhythm shared by bot rows, group rows and the thread lines beneath a
+/// bot, so a thread starts exactly where its bot's name does.
 enum CompactRosterMetrics {
     /// Before the unread-dot gutter: with the gutter, faces start on the
     /// section titles' 20pt edge.
@@ -22,6 +22,12 @@ enum CompactRosterMetrics {
     /// Scaled faces stop growing here, so the largest text sizes spend
     /// their width on names rather than on pictures.
     static let maxFace: CGFloat = 40
+    /// Above and below a row's content on one line; see `RowPadding`.
+    static let rowPadding: CGFloat = 4
+    /// What sits beneath a name at the accessibility sizes: a bot's time
+    /// and role, a group's time. Well below the name's body and the
+    /// one-line row's subheadline, so the name reads first.
+    static let stackedDetail: Font = .footnote
 
     static func nameInset(face: CGFloat) -> CGFloat {
         leading + dotGutter + face + faceSpacing
@@ -96,39 +102,34 @@ struct CompactBotEntry: View {
                     .accessibilityHidden(true)
                     .padding(.trailing, CompactRosterMetrics.faceSpacing)
 
-                    let status = RowStatus(
-                        waiting: row.showsWaiting, working: row.showsSpinner,
-                        stamp: row.showsTime ? RelativeStamp.list(lastActivity) : "",
-                        color: bot.color,
-                        // the spinner also stands for a thread being made
-                        spinnerLabel: row.status == .working ? "Working" : "Creating…"
-                    )
+                    // the spinner also stands for a thread being made
+                    let spinnerLabel: LocalizedStringKey = row.status == .working ? "Working" : "Creating…"
                     if typeSize.isAccessibilitySize {
                         // One line cannot hold a name and a time at these
                         // sizes: the name gets the whole width, whole words
-                        // intact, and the time and role move beneath it.
+                        // intact, and the time and role move beneath it,
+                        // a size smaller so the name reads first.
                         VStack(alignment: .leading, spacing: 2) {
                             name(bot, row)
-                            HStack(spacing: 6) {
-                                status
-                                if !bot.title.isEmpty {
-                                    Text(verbatim: bot.title)
-                                        .font(.subheadline)
-                                        .foregroundStyle(Color.secondary)
-                                        .lineLimit(1)
-                                }
+                            let line = row.secondLine(stamp: RelativeStamp.list(lastActivity), role: bot.title)
+                            if !line.isEmpty {
+                                SecondLine(line: line, color: bot.color, spinnerLabel: spinnerLabel)
                             }
                         }
                         Spacer(minLength: 0)
                     } else {
                         nameAndRole(bot, row)
                         Spacer(minLength: 8)
-                        status
+                        RowStatus(
+                            waiting: row.showsWaiting, working: row.showsSpinner,
+                            stamp: row.showsTime ? RelativeStamp.list(lastActivity) : "",
+                            color: bot.color, spinnerLabel: spinnerLabel
+                        )
                     }
                 }
                 .padding(.leading, CompactRosterMetrics.leading)
                 .padding(.trailing, row.showsThreadControl ? 0 : CompactRosterMetrics.trailing)
-                .padding(.vertical, 4)
+                .modifier(RowPadding())
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -497,10 +498,12 @@ struct CompactRoomRow: View {
             let status = RowStatus(
                 waiting: waiting, working: busy,
                 stamp: busy ? "" : RelativeStamp.list(lastActivity),
-                color: "blue"
+                color: "blue",
+                stampFont: typeSize.isAccessibilitySize ? CompactRosterMetrics.stackedDetail : .subheadline
             )
             if typeSize.isAccessibilitySize {
-                // as on a bot's row: the whole width for the name
+                // as on a bot's row: the whole width for the name, and the
+                // time a size smaller beneath it
                 VStack(alignment: .leading, spacing: 2) {
                     name
                         .lineLimit(3)
@@ -516,9 +519,48 @@ struct CompactRoomRow: View {
         }
         .padding(.leading, CompactRosterMetrics.leading)
         .padding(.trailing, CompactRosterMetrics.trailing)
-        .padding(.vertical, 4)
+        .modifier(RowPadding())
         .frame(minHeight: 44)
         .contentShape(Rectangle())
+    }
+}
+
+/// A row's air above and below. On one line it is 4pt, and the 44pt row
+/// height does the rest; once a row stacks its name over its time, at the
+/// accessibility sizes, it grows with the text, so one row's time does not
+/// run into the next row's name.
+private struct RowPadding: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var stacked = CompactRosterMetrics.rowPadding
+
+    func body(content: Content) -> some View {
+        content.padding(.vertical, typeSize.isAccessibilitySize ? stacked : CompactRosterMetrics.rowPadding)
+    }
+}
+
+/// Beneath a bot's name at the accessibility sizes: the hand or the spinner,
+/// then the time and the role as one quiet line that gives way at its end.
+private struct SecondLine: View {
+    let line: CompactSecondLine
+    let color: String
+    let spinnerLabel: LocalizedStringKey
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if line.showsWaiting || line.showsSpinner {
+                RowStatus(
+                    waiting: line.showsWaiting, working: line.showsSpinner, stamp: "",
+                    color: color, spinnerLabel: spinnerLabel
+                )
+            }
+            if !line.words.isEmpty {
+                Text(verbatim: line.text)
+                    .font(CompactRosterMetrics.stackedDetail)
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(1)
+                    .accessibilityLabel(Text(verbatim: line.spokenText))
+            }
+        }
     }
 }
 
@@ -576,6 +618,9 @@ private struct RowStatus: View {
     let color: String
     /// What VoiceOver calls the spinner.
     var spinnerLabel: LocalizedStringKey = "Working"
+    /// The time's size: subheadline beside the name on one line, smaller
+    /// beneath it.
+    var stampFont: Font = .subheadline
 
     var body: some View {
         HStack(spacing: 6) {
@@ -591,7 +636,7 @@ private struct RowStatus: View {
                     .accessibilityLabel(spinnerLabel)
             } else if !stamp.isEmpty {
                 Text(verbatim: stamp)
-                    .font(.subheadline)
+                    .font(stampFont)
                     .foregroundStyle(Color.secondary)
             }
         }
@@ -599,11 +644,16 @@ private struct RowStatus: View {
     }
 }
 
-/// The Chief of Staff mark after a bot's name: the desktop's crown.
+/// The Chief of Staff mark after a bot's name: the desktop's crown. It
+/// scales with the name, so it keeps its default proportion to it at every
+/// text size instead of outgrowing it at the largest ones.
 struct ChiefBadge: View {
+    /// Caption's size at the default text size, scaled as the name's body is.
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 12
+
     var body: some View {
         Image(systemName: "crown.fill")
-            .font(.caption)
+            .font(.system(size: size))
             .foregroundStyle(Color.accentColor)
             .accessibilityLabel("Chief of Staff")
             .accessibilityIdentifier("chief-badge")
