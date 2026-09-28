@@ -2,6 +2,8 @@ package com.openmausbot.companion.ui
 
 import com.openmausbot.companion.core.AvatarCrop
 import com.openmausbot.companion.core.Bot
+import com.openmausbot.companion.core.BotOverviewGrant
+import com.openmausbot.companion.core.BotOverviewGrantLevel
 import com.openmausbot.companion.core.ConfigFlag
 import com.openmausbot.companion.core.ConfigStatus
 import com.openmausbot.companion.core.ModelSelection
@@ -106,6 +108,30 @@ class ProfileRulesTest {
         assertFalse(ProfileRules.applyLoadedConfig(form, configuredWithoutDefault()).speakReplies)
         assertTrue(ProfileRules.applyLoadedConfig(form, speaking()).speakReplies)
         assertTrue(ProfileRules.applyLoadedConfig(form, null).speakReplies, "unknown changes nothing")
+    }
+
+    @Test
+    fun `provider switch clears stale voice from form and baseline`() {
+        val stale = ProfileForm.of(
+            bot().copy(voice = "elevenlabs-voice", speakReplies = true),
+        )
+        val fishWithoutDefault = ConfigStatus(
+            tts = ConfigFlag(configured = true, ready = false, voice = "", provider = "fish"),
+        )
+
+        val (form, baseline) = ProfileRules.afterVoiceProviderSwitch(
+            form = stale,
+            baseline = stale,
+            config = fishWithoutDefault,
+        )
+
+        assertEquals("", form.voice)
+        assertEquals("", baseline.voice)
+        assertFalse(form.speakReplies, "speech cannot stay enabled with no valid voice")
+        assertTrue(
+            baseline.speakReplies,
+            "the unchanged server value remains the save baseline so Save persists the correction",
+        )
     }
 
     @Test
@@ -351,6 +377,65 @@ class ProfileRulesTest {
     }
 
     @Test
+    fun `the engine picker lists what the desktop lists, in its order`() {
+        val choices = ProfileRules.providerChoices()
+
+        assertEquals(
+            listOf("ElevenLabs", "Fish Audio", "Built-in Mac voices", "Chatterbox (local)"),
+            choices.map { it.label },
+        )
+        assertEquals(
+            listOf("elevenlabs", "fish", "system", "chatterbox"),
+            choices.map { it.id },
+            "the ids are the wire strings, so the selection round-trips through the config write",
+        )
+        assertTrue(choices.all { it.enabled }, "the phone cannot know the host's platform, so it offers every engine")
+    }
+
+    @Test
+    fun `fish audio setup stays on the computer`() {
+        val unconfigured = ConfigStatus(tts = ConfigFlag(configured = false, provider = "fish"))
+        assertEquals(
+            "Fish Audio is not configured",
+            ProfileRules.voiceCopy(unconfigured).unconfiguredNotice,
+        )
+        assertEquals(
+            "Add the shared Fish Audio API key in OpenMausBot on the computer. " +
+                "The key is never returned to this phone.",
+            ProfileRules.voiceCopy(unconfigured).footer,
+        )
+
+        val noDefault = ConfigStatus(tts = ConfigFlag(configured = true, voice = "", provider = "fish"))
+        assertEquals(
+            "No workspace default voice is selected. Choose an agent-specific voice above; " +
+                "synthesis still uses Fish Audio on your computer.",
+            ProfileRules.voiceCopy(noDefault).footer,
+        )
+    }
+
+    @Test
+    fun `chatterbox is never explained as a missing key`() {
+        val noServer = ConfigStatus(tts = ConfigFlag(configured = false, provider = "chatterbox"))
+        assertEquals(
+            "The Chatterbox server is not connected",
+            ProfileRules.voiceCopy(noServer).unconfiguredNotice,
+        )
+        assertEquals(
+            "Add the address of your Chatterbox server in OpenMausBot on the computer to turn " +
+                "speech back on.",
+            ProfileRules.voiceCopy(noServer).footer,
+        )
+
+        val noDefault =
+            ConfigStatus(tts = ConfigFlag(configured = true, voice = "", provider = "chatterbox"))
+        assertEquals(
+            "No workspace default voice is selected. Choose an agent-specific voice above; " +
+                "synthesis still uses your Chatterbox server.",
+            ProfileRules.voiceCopy(noDefault).footer,
+        )
+    }
+
+    @Test
     fun `the shape selector offers the four crops in the Swift's order`() {
         assertEquals(
             listOf("Mascot", "Circle", "Rounded", "Square"),
@@ -381,6 +466,46 @@ class ProfileRulesTest {
         assertEquals(AvatarCrop.MASCOT, form.crop)
         assertEquals("", form.voice)
         assertFalse(form.speakReplies)
+    }
+
+    @Test
+    fun `connector grants render one read-only row per service in the server's order`() {
+        val rows = ProfileRules.connectorGrantRows(
+            listOf(
+                BotOverviewGrant("gmail", BotOverviewGrantLevel.All, toolCount = 0),
+                BotOverviewGrant("google_calendar", BotOverviewGrantLevel.Partial, toolCount = 2),
+                BotOverviewGrant("notion", BotOverviewGrantLevel.None, toolCount = 0),
+                BotOverviewGrant("linear", BotOverviewGrantLevel.Partial, toolCount = 1),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                ConnectorGrantRow("Gmail", "All tools"),
+                ConnectorGrantRow("Google calendar", "2 tools"),
+                ConnectorGrantRow("Notion", "No tools"),
+                ConnectorGrantRow("Linear", "1 tool"),
+            ),
+            rows,
+        )
+    }
+
+    @Test
+    fun `absent grants have no rows for the sheet to draw`() {
+        assertEquals(emptyList<ConnectorGrantRow>(), ProfileRules.connectorGrantRows(null))
+        // An empty list is the explicit no-tools record; its no-tools line
+        // belongs to the sheet, and the rules hand it no rows to draw.
+        assertEquals(emptyList<ConnectorGrantRow>(), ProfileRules.connectorGrantRows(emptyList()))
+    }
+
+    @Test
+    fun `a partial grant reads its tool count verbatim`() {
+        assertEquals(
+            listOf(ConnectorGrantRow("Github", "0 tools")),
+            ProfileRules.connectorGrantRows(
+                listOf(BotOverviewGrant("github", BotOverviewGrantLevel.Partial, toolCount = 0)),
+            ),
+        )
     }
 
     private fun voices() = listOf(

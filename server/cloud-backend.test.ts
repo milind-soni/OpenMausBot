@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BOX_ACCOUNT_RESOURCES_ERROR,
+  BOAT_ACCOUNT_RESOURCES_ERROR,
   CLOUD_BACKEND_CHANGE_ERROR,
   VPS_ALIAS_CHANGE_ERROR,
   VPS_ALIAS_RESOURCES_ERROR,
-  boxAccountResourceChangeError,
+  boatAccountResourceChangeError,
   cloudBackendChangeError,
   vpsAliasChangeError,
   vpsAliasResourceChangeError,
@@ -31,13 +31,13 @@ describe("cloud backend switching", () => {
     expect(vpsAliasChangeError("old-vps", "new-vps", false)).toBeNull();
   });
 
-  it("allows Box token rotation only when the replacement sees the same resources", () => {
+  it("allows Boat token rotation only when the replacement sees the same resources", () => {
     const current = [{ boxId: "bx_23456789", name: "ogb-scope-bot-hash" }];
-    expect(boxAccountResourceChangeError(current, [...current])).toBeNull();
-    expect(boxAccountResourceChangeError(current, null)).toBe(BOX_ACCOUNT_RESOURCES_ERROR);
-    expect(boxAccountResourceChangeError(current, [{ ...current[0]!, boxId: "bx_3456789a" }]))
-      .toBe(BOX_ACCOUNT_RESOURCES_ERROR);
-    expect(boxAccountResourceChangeError([], null)).toBeNull();
+    expect(boatAccountResourceChangeError(current, [...current])).toBeNull();
+    expect(boatAccountResourceChangeError(current, null)).toBe(BOAT_ACCOUNT_RESOURCES_ERROR);
+    expect(boatAccountResourceChangeError(current, [{ ...current[0]!, boxId: "bx_3456789a" }]))
+      .toBe(BOAT_ACCOUNT_RESOURCES_ERROR);
+    expect(boatAccountResourceChangeError([], null)).toBeNull();
   });
 
   it("keeps an SSH alias attached while its VPS still has local computers", () => {

@@ -63,8 +63,9 @@ export async function browserProxyRequest(
     }
     return { jsonrpc: "2.0", id, result: payload.result };
   } catch (error) {
-    return failure(id, message.method, error instanceof Error && !/fetch failed|abort|timeout/i.test(error.message)
-      ? error.message : "Browser connection was interrupted. Do not repeat the action until its state is checked.");
+    const detail = error instanceof Error && !/fetch failed|abort|timeout/i.test(error.message)
+      ? error.message : "Browser connection was interrupted. Do not repeat the action until its state is checked.";
+    return failure(id, message.method, detail + " This failure does not establish that all browsers are unavailable. Inspect available connections with select_computer if that tool is present. Keep the requested computer and account; do not bypass a permission refusal or human takeover, and do not repeat an uncertain action without checking its result.");
   }
 }
 

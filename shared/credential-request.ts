@@ -11,10 +11,10 @@ export const CREDENTIAL_TARGETS = {
     helpUrl: "https://console.x.ai/",
   },
   boxToken: {
-    label: "Box API key",
-    description: "Gives bots an isolated cloud computer when Box is selected.",
-    placeholder: "Paste your Box API key",
-    helpUrl: "https://docs.ascii.dev/box/api-keys",
+    label: "Boat API key",
+    description: "Gives bots an isolated cloud computer when Boat is selected.",
+    placeholder: "Paste your Boat API key",
+    helpUrl: "https://docs.boat.dev/api-keys",
   },
   opencodeGoApiKey: {
     label: "OpenCode API key",
@@ -28,6 +28,12 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "Paste your ElevenLabs API key",
     helpUrl: "https://elevenlabs.io/app/settings/api-keys",
   },
+  fishAudioKey: {
+    label: "Fish Audio API key",
+    description: "Enables Fish Audio voices in calls.",
+    placeholder: "Paste your Fish Audio API key",
+    helpUrl: "https://fish.audio/app/api-keys/",
+  },
   openaiImageApiKey: {
     label: "OpenAI API key",
     description: "Used only to generate custom bot avatar images.",
@@ -39,9 +45,10 @@ export const CREDENTIAL_TARGETS = {
 export type CredentialTargetId = keyof typeof CREDENTIAL_TARGETS;
 export type CredentialConfig = {
   xai?: { key?: string };
+  // The persisted config section keeps its historical name: cfg.box.
   box?: { token?: string };
   opencodeGo?: { apiKey?: string };
-  tts?: { key?: string };
+  tts?: { key?: string; fishKey?: string };
   imageGen?: { key?: string };
 };
 
@@ -59,6 +66,8 @@ export function credentialConfigPatch(id: CredentialTargetId, value: string): Cr
       return { opencodeGo: { apiKey: value } };
     case "ttsKey":
       return { tts: { key: value } };
+    case "fishAudioKey":
+      return { tts: { fishKey: value } };
     case "openaiImageApiKey":
       return { imageGen: { key: value } };
   }
@@ -74,15 +83,20 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.opencodeGo?.apiKey);
     case "ttsKey":
       return Boolean(config.tts?.key);
+    case "fishAudioKey":
+      return Boolean(config.tts?.fishKey);
     case "openaiImageApiKey":
       return Boolean(config.imageGen?.key);
   }
 }
 
-export function isReusableCredentialRequest(
+/** A still-pending credential card for this target — the set a newer
+ * request supersedes. Provided, dismissed, and already-superseded cards
+ * keep their settled state untouched. */
+export function isPendingCredentialRequest(
   message: {
     kind?: unknown;
-    secret?: { target?: unknown; provided?: unknown; dismissed?: unknown };
+    secret?: { target?: unknown; provided?: unknown; dismissed?: unknown; superseded?: unknown };
     from?: { botId?: unknown };
   },
   target: CredentialTargetId,
@@ -94,6 +108,7 @@ export function isReusableCredentialRequest(
     message.secret?.target === target &&
     message.secret.provided !== true &&
     message.secret.dismissed !== true &&
+    message.secret.superseded !== true &&
     (!roomThread || message.from?.botId === requestingBotId)
   );
 }

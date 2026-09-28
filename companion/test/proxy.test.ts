@@ -377,6 +377,19 @@ describe("the sidecar in front of an unmodified harness", () => {
     expect(smuggled.status).toBe(400);
   });
 
+  it("creates a bot through companion pairing without host defaults or settings access", async () => {
+    const before = (await device("GET", "/api/bots")).body.bots;
+    const created = await device("POST", "/api/bots");
+    expect(created.status).toBe(201);
+    const id = created.body.bot.id;
+    expect(before.some((bot: { id: string }) => bot.id === id)).toBe(false);
+    const after = (await device("GET", "/api/bots")).body.bots;
+    expect(after).toHaveLength(before.length + 1);
+    expect(after.some((bot: { id: string }) => bot.id === id)).toBe(true);
+    expect((await device("GET", "/api/bot-defaults")).status).toBe(404);
+    expect((await device("PATCH", `/api/bots/${id}`, { body: { soul: "not permitted" } })).status).toBe(404);
+  });
+
   it("only remembers an always-allow key carried by a pending card", async () => {
     const { body } = await device("GET", "/api/bots");
     const bot = body.bots[0];

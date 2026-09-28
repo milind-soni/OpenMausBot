@@ -14,8 +14,9 @@ import { Menu, app } from "electron";
  * @param {() => void} input.onConnect
  * @param {(id: string) => void} input.onForget
  * @param {() => void} input.onOpenSettings
+ * @param {() => void} input.onOrganizationSignIn
  */
-export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget, onOpenSettings }) {
+export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget, onOpenSettings, onOrganizationSignIn }) {
   const isMac = process.platform === "darwin";
   const active = environments.find((e) => e.id === activeId) ?? null;
   const server = {
@@ -29,7 +30,8 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
         click: () => onSwitch(e.id),
       })),
       { type: "separator" },
-      { label: "Connect hosted workspace…", click: onConnect },
+      { id: "organization-sign-in", label: "Sign in with your organization…", click: onOrganizationSignIn },
+      { label: "Connect to a server…", click: onConnect },
       { label: "Add Server from Copied Pairing Link…", click: () => onAddFromClipboard() },
       {
         label: active ? `Forget “${active.name}”` : "Forget Server",

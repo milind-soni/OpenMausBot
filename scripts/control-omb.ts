@@ -14,6 +14,10 @@ import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+/** Deterministic name for the seeded starter bot of a verification fixture,
+ * deliberately outside the server/names.ts pool so no suite can plan a bot
+ * that collides with the starter (#1257). */
+export const FIXTURE_STARTER_BOT_NAME = "Fixture Starter";
 const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
 // `ui` verbs never discover anything: each takes the handle its launch printed.
 const MUTATING = new Set([
@@ -325,68 +329,18 @@ export interface VerificationServer {
   close(): Promise<void>;
 }
 
-/** Start one foreground-owned, fake-engine server with no access to user data. */
-export async function launchVerificationServer(
-  parentEnv: NodeJS.ProcessEnv = process.env,
-  signal?: AbortSignal,
-  localVm?: { binDir: string; host: string; sshKey: string; staticDir: string },
-  browser?: { binaryPath: string; executablePath: string },
-  /** A stand-in enterprise layer (the folder shape core loads) and the key
-   * it should accept, so a recipe can prove entitled behaviour offline. */
-  enterprise?: { dir: string; licenseKey: string },
-  room?: { scripted: boolean },
-  /** Optional repository-owned fake providers for multi-engine setup checks. */
-  extraProviders: Array<"codex"> = [],
-  /** Programmatic tests only: an owned loopback Box provider, never a live account. */
-  boxFixtureApi?: string,
-): Promise<VerificationServer> {
-  if (boxFixtureApi) {
-    if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boxFixtureApi)) {
-      throw new ControlOmbError("Box verification requires an explicit loopback HTTP provider");
-    }
-    try { new URL(boxFixtureApi); }
-    catch { throw new ControlOmbError("Box verification requires a valid loopback port"); }
-  }
-  if (localVm) {
-    const endpoint = new URL(localVm.host);
-    if (endpoint.protocol !== "ssh:" || endpoint.hostname !== "127.0.0.1" || endpoint.password) {
-      throw new ControlOmbError("Local VM verification requires an explicit loopback Podman machine");
-    }
-  }
-  const port = await freePortBlock([0, 1]);
-  if (signal?.aborted) throw new ControlOmbError("verification launch cancelled");
-  const url = `http://127.0.0.1:${port}`;
-  // Native browser daemons use UNIX sockets; a macOS temp home can exceed
-  // their path limit. This is still an owned, randomly named fixture only.
-  const dataDir = mkdtempSync(join(browser && process.platform !== "win32" ? "/tmp" : tmpdir(), "openmausbot-verify-data-"));
-  const fixtureTemp = join(dataDir, "tmp");
-  const fixtureDumpPath = join(dataDir, "fake-claude-dump.json");
-  mkdirSync(fixtureTemp, { recursive: true });
-  const evidenceDir = join(tmpdir(), "openmausbot-verification-evidence");
-  mkdirSync(evidenceDir, { recursive: true });
-  const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({
-    ...(boxFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
-    instances: {
-      ...(extraProviders.includes("codex") ? { codex: {
-        driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
-      } } : {}),
-      claude: {
-        driver: "claudeAgent",
-        displayName: "Verification fixture",
-        config: { cli: FAKE_CLI },
-        ...(room?.scripted ? { environment: { FAKE_CLAUDE_ROOM_PLAN: join(dataDir, "room-plan.json") } } : {}),
-      },
-    },
-  }, null, 2));
-
-  const log = openSync(logPath, "a", 0o600);
+/** The environment of a verification server child: a temporary home in
+ * `dataDir`, the fake engine's knobs from `parentEnv`, node on PATH, and
+ * nothing else from the parent shell. A test that restarts its own fixture
+ * server on the same data uses this too. */
+export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, dataDir: string, port: number): NodeJS.ProcessEnv {
   const childEnv: NodeJS.ProcessEnv = {};
   const platformKeys = new Set(["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"]);
   for (const [key, value] of Object.entries(parentEnv)) {
     const normalized = key.toUpperCase();
     if (value && platformKeys.has(normalized)) childEnv[normalized] = value;
   }
+  const fixtureTemp = join(dataDir, "tmp");
   Object.assign(childEnv, {
     HOME: dataDir,
     USERPROFILE: dataDir,
@@ -407,7 +361,7 @@ export async function launchVerificationServer(
     // failure paths (exit-early, dead-session, hang...) through the real
     // server. Nothing else from the parent shell reaches the fixture.
     FAKE_CLAUDE_MODE: parentEnv.FAKE_CLAUDE_MODE || "happy",
-    FAKE_CLAUDE_DUMP: fixtureDumpPath,
+    FAKE_CLAUDE_DUMP: join(dataDir, "fake-claude-dump.json"),
     // Keep the environment hermetic while allowing POSIX to resolve the
     // fake CLI's `#!/usr/bin/env node` shebang. Windows resolves that same
     // fixture through spawnCli without a shell.
@@ -419,6 +373,77 @@ export async function launchVerificationServer(
     // FAKE_CLAUDE_DUMP stays the launcher's: assertions read fixtureDumpPath.
     if (key.startsWith("FAKE_CLAUDE_") && key !== "FAKE_CLAUDE_DUMP" && value) childEnv[key] = value;
   }
+  // A test's key for relaying an organization library into the fixture
+  // (POST /api/testing/org-library); the route does not exist without it.
+  if (parentEnv.OMB_TEST_ORG_LIBRARY_KEY) childEnv.OMB_TEST_ORG_LIBRARY_KEY = parentEnv.OMB_TEST_ORG_LIBRARY_KEY;
+  // Voice-note e2e fault injection: arms the one-shot audio-append failure
+  // prelude inside the fixture server (see fail-audio-append-once.mjs).
+  if (parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE) {
+    childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE = parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE;
+  }
+  return childEnv;
+}
+
+/** Start one foreground-owned, fake-engine server with no access to user data. */
+export async function launchVerificationServer(
+  parentEnv: NodeJS.ProcessEnv = process.env,
+  signal?: AbortSignal,
+  localVm?: { binDir: string; host: string; sshKey: string; staticDir: string },
+  browser?: { binaryPath: string; executablePath: string },
+  /** A stand-in enterprise layer (the folder shape core loads) and the key
+   * it should accept, so a recipe can prove entitled behaviour offline. */
+  enterprise?: { dir: string; licenseKey: string },
+  room?: { scripted: boolean },
+  /** Optional repository-owned fake providers for multi-engine setup checks. */
+  extraProviders: Array<"codex"> = [],
+  /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
+  boatFixtureApi?: string,
+): Promise<VerificationServer> {
+  if (boatFixtureApi) {
+    if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boatFixtureApi)) {
+      throw new ControlOmbError("Boat verification requires an explicit loopback HTTP provider");
+    }
+    try { new URL(boatFixtureApi); }
+    catch { throw new ControlOmbError("Boat verification requires a valid loopback port"); }
+  }
+  if (localVm) {
+    const endpoint = new URL(localVm.host);
+    if (endpoint.protocol !== "ssh:" || endpoint.hostname !== "127.0.0.1" || endpoint.password) {
+      throw new ControlOmbError("Local VM verification requires an explicit loopback Podman machine");
+    }
+  }
+  const port = await freePortBlock([0, 1]);
+  if (signal?.aborted) throw new ControlOmbError("verification launch cancelled");
+  const url = `http://127.0.0.1:${port}`;
+  // Native browser daemons use UNIX sockets; a macOS temp home can exceed
+  // their path limit. This is still an owned, randomly named fixture only.
+  const dataDir = mkdtempSync(join(browser && process.platform !== "win32" ? "/tmp" : tmpdir(), "openmausbot-verify-data-"));
+  const fixtureTemp = join(dataDir, "tmp");
+  const fixtureDumpPath = join(dataDir, "fake-claude-dump.json");
+  mkdirSync(fixtureTemp, { recursive: true });
+  const evidenceDir = join(tmpdir(), "openmausbot-verification-evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({
+    ...(boatFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
+    instances: {
+      // The synthetic map omits the default computer engine. Register it
+      // only when an owned Boat provider backs this fixture's cloud panel.
+      ...(boatFixtureApi ? { computer: { driver: "boxAgent" } } : {}),
+      ...(extraProviders.includes("codex") ? { codex: {
+        driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
+      } } : {}),
+      claude: {
+        driver: "claudeAgent",
+        displayName: "Verification fixture",
+        config: { cli: FAKE_CLI },
+        ...(room?.scripted ? { environment: { FAKE_CLAUDE_ROOM_PLAN: join(dataDir, "room-plan.json") } } : {}),
+      },
+    },
+  }, null, 2));
+
+  const log = openSync(logPath, "a", 0o600);
+  const childEnv = verificationServerEnvironment(parentEnv, dataDir, port);
   // Opt-in live Local VM fixture: keep the temporary home and fake engine,
   // granting only the explicitly selected machine connection and static UI.
   if (localVm) Object.assign(childEnv, {
@@ -432,8 +457,13 @@ export async function launchVerificationServer(
     OMB_AGENT_BROWSER_PATH: browser.binaryPath,
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
-  if (boxFixtureApi) childEnv.OMB_BOX_API = boxFixtureApi;
-  const child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server", "index.ts")], {
+  if (boatFixtureApi) childEnv.OMB_BOX_API = boatFixtureApi;
+  const serverArgs = ["--experimental-strip-types"];
+  if (childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE === "1") {
+    serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "fail-audio-append-once.mjs")).href);
+  }
+  serverArgs.push(join(ROOT, "server", "index.ts"));
+  const child = spawn(process.execPath, serverArgs, {
     cwd: ROOT,
     env: childEnv,
     stdio: ["ignore", log, log],
@@ -460,6 +490,40 @@ export async function launchVerificationServer(
       if (Date.now() >= deadline) throw new Error(`verification server did not become ready; see ${logPath}`);
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
+  } catch (error) {
+    await waitForExit(child, { signal: "SIGTERM" });
+    await removeTempDir(dataDir);
+    throw error;
+  }
+
+  // The first-run seed gives the starter a random friendly name from
+  // server/names.ts, and that pool shares names with bots e2e suites plan
+  // ("Quill" among them). A name-based assertion then reports the starter as
+  // a phantom leaked bot and flakes (#1257). Pin the name so fixture state is
+  // deterministic for every suite built on this launcher; identity remains
+  // the honest comparison in tests either way.
+  try {
+    const timeout = AbortSignal.timeout(1_000);
+    const list = await fetch(`${url}/api/bots`, {
+      headers: { origin: url },
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+    const body = list.ok ? await list.json() as { bots?: Array<{ id: string }> } : null;
+    const seeded = body?.bots;
+    if (!Array.isArray(seeded) || seeded.length !== 1) {
+      throw new Error(`verification fixture did not seed exactly one starter bot; see ${logPath}`);
+    }
+    // The list request may consume most of its own budget, so the rename
+    // gets a fresh timeout; sharing one signal could abort a healthy PATCH
+    // and terminate the whole fixture over a slow first request.
+    const renameTimeout = AbortSignal.timeout(1_000);
+    const rename = await fetch(`${url}/api/bots/${seeded[0].id}/profile`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: url },
+      body: JSON.stringify({ name: FIXTURE_STARTER_BOT_NAME }),
+      signal: signal ? AbortSignal.any([signal, renameTimeout]) : renameTimeout,
+    });
+    if (!rename.ok) throw new Error(`verification starter rename failed (${rename.status}); see ${logPath}`);
   } catch (error) {
     await waitForExit(child, { signal: "SIGTERM" });
     await removeTempDir(dataDir);

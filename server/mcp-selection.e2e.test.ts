@@ -71,7 +71,7 @@ it("imports atomically and mounts the selected MCP servers in fresh direct and r
     expect(JSON.stringify(imported.body)).not.toContain(secret);
     const before = (await api("GET", "/api/mcp/servers")).body;
     expect((await api("POST", "/api/mcp/servers/import", { json: JSON.stringify({ newone: command, notes: command }) })).status).toBe(409);
-    expect((await api("POST", "/api/mcp/servers/import", { json: JSON.stringify({ newone: command, bad: { url: "https://invalid.example/mcp" } }) })).status).toBe(400);
+    expect((await api("POST", "/api/mcp/servers/import", { json: JSON.stringify({ newone: command, bad: { url: "ftp://invalid.example/mcp" } }) })).status).toBe(400);
     expect((await api("GET", "/api/mcp/servers")).body).toEqual(before);
     expect((await api("POST", "/api/mcp/servers/notes/test")).body).toMatchObject({ ok: true, tools: [{ name: "read_notes" }] });
     const { bot } = await control(["new-bot", "--name", "MCP fixture"]) as { bot: Bot };

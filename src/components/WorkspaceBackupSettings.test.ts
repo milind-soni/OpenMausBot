@@ -51,7 +51,7 @@ describe("Settings full backups", () => {
     expect(html).toContain("Saved account credentials and connections are not included");
     expect(html).toContain("existing credentials on the destination stay unchanged");
     expect(html).toContain("not automatically redacted");
-    expect(html).not.toContain("Replace workspace");
+    expect(html).not.toContain("Replace installation");
     const preview = renderToStaticMarkup(createElement(WorkspaceBackupSummaryView, { summary }));
     for (const text of ["Validated backup", "0.1.71", "Bots", "Threads", "Messages", "Fixture warning", "External CLI sign-ins"]) expect(preview).toContain(text);
   });
@@ -89,7 +89,7 @@ describe("Settings full backups", () => {
     expect(fixture.api.mock.calls[1]).toEqual(["/api/workspace-backup/upload", { method: "POST", headers: { "content-type": "application/octet-stream" }, body: file }]);
     expect(JSON.parse(fixture.api.mock.calls[2][1].body)).toEqual({ id: "upload-id", password: "correct horse battery" });
     view = render();
-    const replace = () => render().nodes.find((node) => node.type === "button" && node.props.children === "Replace workspace")!;
+    const replace = () => render().nodes.find((node) => node.type === "button" && node.props.children === "Replace installation")!;
     expect(replace().props.disabled).toBe(true);
     const confirm = view.nodes.filter((node) => node.type === "input" && !node.props.type)[0];
     change(confirm, "replace"); expect(replace().props.disabled).toBe(true);
@@ -108,7 +108,7 @@ describe("Settings full backups", () => {
     fixture.api.mockResolvedValueOnce({ id: "upload" }).mockRejectedValueOnce(new Error("Wrong password"));
     submit(render().nodes.filter((node) => node.type === "form")[1]); await flush();
     const html = render().html;
-    expect(html).toContain('role="alert"'); expect(html).toContain("Wrong password"); expect(html).not.toContain("Replace workspace");
+    expect(html).toContain('role="alert"'); expect(html).toContain("Wrong password"); expect(html).not.toContain("Replace installation");
   });
 
   it("reuploads the selected file if its upload or validated stage expires", async () => {
@@ -123,7 +123,7 @@ describe("Settings full backups", () => {
     await validate();
     change(render().nodes.find((node) => node.type === "input" && !node.props.type)!, "REPLACE");
     fixture.api.mockRejectedValueOnce(expired);
-    render().nodes.find((node) => node.type === "button" && node.props.children === "Replace workspace")!.props.onClick!(); await flush();
+    render().nodes.find((node) => node.type === "button" && node.props.children === "Replace installation")!.props.onClick!(); await flush();
     expect(render().html).not.toContain("Validated backup");
     fixture.api.mockResolvedValueOnce({ id: "upload-final" }).mockResolvedValueOnce({ id: "stage-final", summary });
     await validate();
@@ -176,7 +176,7 @@ describe("Settings full backups", () => {
     fixture.api.mockRejectedValueOnce(Object.assign(new Error("Sign-in required"), { status }));
     render(true); fixture.effects[0](); await flush();
     const view = render(true);
-    expect(view.html).toContain("Retry"); expect(view.html).toContain("This does not undo the workspace restore.");
+    expect(view.html).toContain("Retry"); expect(view.html).toContain("This does not undo the installation restore.");
     expect(view.html).not.toContain("Normal app");
     expect(storage).toEqual(before); expect(window.location.reload).not.toHaveBeenCalled();
     view.nodes.find((node) => node.type === "button" && node.props.children === "Continue without restoring drafts")!.props.onClick!();

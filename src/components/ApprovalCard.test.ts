@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ApprovalCard } from "./ApprovalCard";
-import { PendingApprovalPanel, spokenApprovalPrompt, type Pending } from "./PendingApproval";
+import { pendingApprovals, PendingApprovalPanel, spokenApprovalPrompt, type Pending } from "./PendingApproval";
 import type { Bot, Message } from "@/state/store";
 import { skillRequestBehavior } from "../../shared/skill-request";
 
@@ -410,5 +410,40 @@ describe("ApprovalCard tool-call kinds", () => {
     );
     expect(spoken).toContain("Mochi wants to take an action");
     expect(spoken).not.toContain("wants to other");
+  });
+});
+
+describe("ApprovalCard expired proposals", () => {
+  const expiredMessage = (): Message => ({
+    id: "profile-expired-card",
+    role: "bot",
+    kind: "options",
+    at: 1,
+    card: {
+      title: "Set up Scout?",
+      subtitle: 'Name: "Scout" → "Kiwi"',
+      options: ["Confirm", "Cancel"],
+      requestId: "req-expired",
+      tool: "update_profile",
+      expired: true,
+      profileRequest: {
+        version: 1, requestId: "req-expired", botId: "bot-1", threadId: "thread-1", targetBotId: "bot-1", targetName: "Scout",
+        createdAt: 1, reason: "you asked", changes: { name: "Kiwi" }, before: { name: "Scout" }, expectedRevision: "r",
+      },
+    },
+  });
+  const bot = { id: "bot-1", name: "Scout" } as never as Bot;
+
+  it("marks a dead proposal as expired instead of waiting for an answer", () => {
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: expiredMessage() }));
+    expect(html).toContain("Expired — ask for a fresh proposal");
+    expect(html).not.toContain("Waiting for your confirmation below");
+    expect(html).not.toContain("data-tour=\"approval\"");
+  });
+
+  it("keeps an expired proposal out of the composer's decision queue", () => {
+    const live = expiredMessage();
+    live.card!.expired = undefined;
+    expect(pendingApprovals([live, expiredMessage()]).map((pending) => pending.requestId)).toEqual(["req-expired"]);
   });
 });

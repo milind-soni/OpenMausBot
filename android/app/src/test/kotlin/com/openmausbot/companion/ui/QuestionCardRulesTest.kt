@@ -67,4 +67,15 @@ class QuestionCardRulesTest {
     fun `tabs fall back to a number only where the model named nothing`() {
         assertEquals(listOf("Model", "Question 2"), QuestionCardRules.tabLabels(questions))
     }
+
+    @Test
+    fun `only an agent-composed ask badges the question card`() {
+        assertTrue(
+            QuestionCardRules.agentComposed(
+                message(card(QuestionRequestCardData(questions = questions, origin = "output"))),
+            ),
+        )
+        assertFalse(QuestionCardRules.agentComposed(message(card(QuestionRequestCardData(questions = questions)))))
+        assertFalse(QuestionCardRules.agentComposed(message(null)))
+    }
 }

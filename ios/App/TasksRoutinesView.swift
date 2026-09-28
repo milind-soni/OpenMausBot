@@ -23,7 +23,7 @@ struct TasksRoutinesView: View {
 
             Section("Routines") {
                 if routines.isEmpty && !loading {
-                    ContentUnavailableView("No routines", systemImage: "calendar.badge.plus", description: Text("Schedule recurring or one-time agent work."))
+                    EmptyStateView("No routines", systemImage: "calendar.badge.plus", description: Text("Schedule recurring or one-time agent work."))
                 }
                 ForEach(routines) { routine in
                     let canToggle = routine.canToggle()
@@ -261,7 +261,7 @@ private struct RoutineEditorView: View {
                             .tag(RoutineRunLocation.maus)
                         Label("Cloud VM", systemImage: "cloud")
                             .tag(RoutineRunLocation.cloud)
-                            .selectionDisabled(!cloudSelectable)
+                            .rowSelectionDisabled(!cloudSelectable)
                     }
                     .pickerStyle(.inline)
 
@@ -277,9 +277,9 @@ private struct RoutineEditorView: View {
                     if runOn == .maus {
                         Text("Uses this agent's selected model and computer setting on the paired computer.")
                     } else if runAvailability?.cloudReady == true {
-                        Text("Runs the agent and its tools inside its Box virtual machine. The VM wakes automatically for each run; keep OpenMausBot running so its scheduler can launch the job.")
+                        Text("Runs the agent and its tools inside its Boat virtual machine. The VM wakes automatically for each run; keep OpenMausBot running so its scheduler can launch the job.")
                     } else {
-                        Text("This existing Cloud VM choice is preserved, but it cannot run until the paired computer has a configured Box API key and an available Box agent.")
+                        Text("This existing Cloud VM choice is preserved, but it cannot run until the paired computer has a configured Boat API key and an available Boat agent.")
                     }
                 }
 
@@ -287,7 +287,7 @@ private struct RoutineEditorView: View {
                     Picker("Repeats", selection: $kind) {
                         if kind == .unknown {
                             Text("Newer schedule").tag(RoutineSchedule.Kind.unknown)
-                                .selectionDisabled()
+                                .rowSelectionDisabled()
                         }
                         Text("One time").tag(RoutineSchedule.Kind.once)
                         Text("Selected days").tag(RoutineSchedule.Kind.daily)
@@ -405,7 +405,7 @@ private struct RoutineEditorView: View {
                 }
             }
             .onAppear { if botId.isEmpty { botId = session.state.bots.first(where: { $0.hidden != true })?.id ?? "" } }
-            .onChange(of: kind) { _, nextKind in
+            .onValueChange(of: kind) { nextKind in
                 guard nextKind == .interval, !intervalTimeoutDefaultApplied else { return }
                 timeoutMinutes = timeoutMinutes ?? 30
                 intervalTimeoutDefaultApplied = true

@@ -78,6 +78,11 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/config$/ },
   { method: "GET", path: /^\/api\/events$/ },
   { method: "GET", path: /^\/api\/instances$/ },
+  // Run Claude Code's own `claude update` on the host when a turn failed
+  // because it is too old for the model. A fixed command against the host's
+  // configured CLI; the harness refuses it while any Claude turn is running.
+  // Instance ids may carry dots, so a dots-only segment is refused outright.
+  { method: "POST", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/claude-update$/ },
   { method: "GET", path: /^\/api\/team-map$/ },
   // Sidecar-owned, authenticated endpoint metadata. The proxy terminates it
   // locally; it never becomes a newly exposed harness route.
@@ -102,6 +107,7 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // Electron opens it into the OS-encrypted credential store.
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/compact$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
@@ -146,7 +152,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // App-owned profile images. Upload is image-only and capped at 10 MB by
   // the harness; GET is a single bare generated filename, never a path.
   { method: "POST", path: /^\/api\/attachments$/ },
-  { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp)$/i },
+  // Voice notes are served from the same dir as .mp3; the harness honors
+  // Range on them so a phone player can seek without the whole clip.
+  { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp|mp3)$/i },
   // Share-sheet documents are raw, capped at 25 MiB, and stored under a
   // generated filename by the harness. The display name stays in the query;
   // only this exact upload route crosses the companion boundary.

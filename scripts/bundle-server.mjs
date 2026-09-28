@@ -41,10 +41,15 @@ const yamlEsmPlugin = {
 // Every file run as its own process. Keep in sync with the spawn sites above.
 const ENTRY_POINTS = [
   "index.ts",
+  "message-search.worker.ts",
   // the `openmausbot` command (serve/pair/sessions/status) for the npm
   // package, the container image and checkouts; pair-cli.ts stays as an alias
   "openmausbot.ts",
   "pair-cli.ts",
+  "workspace-backup.worker.ts",
+  // the OMB Cloud Pro home image's entry point (deploy/fly/Dockerfile): it
+  // spawns index.js beside it and the Caddy edge
+  "cloud-home-start.ts",
   // The packaged smoke probe imports this manifest directly. Importing the
   // shared avatar contract widens TypeScript's inferred emit root to the repo,
   // so tsc may place its copy under dist-server/server/. Bundle an explicit
@@ -52,8 +57,9 @@ const ENTRY_POINTS = [
   // package smoke probe also imports local-computer.js directly.
   "proxy-paths.ts",
   "local-computer.ts",
-  "computer-proxy.ts",
   "local-computer-proxy.ts",
+  // the hook helper Claude Code runs at PostToolUse/PreCompact/SessionStart/Stop
+  "hooks/omb-hook.ts",
   "container-mcp.ts",
   "vps-container-mcp.ts",
   "permission-proxy.ts",
@@ -125,10 +131,13 @@ await build({
   logLevel: "info",
 });
 
-// The enterprise layer (enterprise/LICENSE; delete the folder for pure OSS)
-// is loaded by path from <root>/enterprise/server/index.{ts,js}. A package
-// or image has no TypeScript runtime, so ship it bundled; the npm package
-// copies this file to enterprise/server/index.js beside the server.
+// The enterprise layer (enterprise/LICENSE; delete the folder for pure OSS).
+// A package or image has no TypeScript runtime, so ship it bundled to
+// dist-server/enterprise/server/index.js, where server/enterprise.ts finds it
+// inside the server root: the Docker image and the packaged desktop carry
+// dist-server/ alone. The npm package also copies it to
+// <package>/enterprise/server/index.js, beside the server. Its own license
+// travels with it either way.
 if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
   await build({
     entryPoints: [join(root, "enterprise", "server", "index.ts")],
@@ -140,6 +149,7 @@ if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
     allowOverwrite: true,
     logLevel: "info",
   });
+  copyFileSync(join(root, "enterprise", "LICENSE"), join(root, "dist-server", "enterprise", "LICENSE"));
 }
 
 // pi-mcp-extension.ts is NOT an OpenMausBot entry point: it is loaded by the

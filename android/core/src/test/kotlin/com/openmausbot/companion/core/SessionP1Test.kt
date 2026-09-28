@@ -69,6 +69,21 @@ class SessionP1Test {
     }
 
     @Test
+    fun editRestoresOnlyConfirmedCancellationsNeverAlreadyDrainedSends() = runTest {
+        val session = session()
+        val chat = Chat.BotChat(bot("b1", "task-a", "task-a"))
+        val queued = QueuedSend("queue-a", "must run only once")
+        server.enqueue(json("{}"))
+        assertTrue(session.cancelQueued(queued, chat))
+        server.enqueue(json("""{"error":"no such queued message"}""", code = 404))
+        assertEquals(false, session.cancelQueued(queued, chat))
+        assertNull(session.actionError, "Delete may quietly retire a stale row")
+        server.enqueue(json("""{"error":"dispatch already started"}""", code = 409))
+        assertEquals(false, session.cancelQueued(queued, chat))
+        assertEquals("dispatch already started", session.actionError)
+    }
+
+    @Test
     fun changingAModelReturnsTheCapturedTaskModelNotTheSiblingOrProfileDefault() = runTest {
         val chosen = ModelSelection("instance", "new-a")
         val captured = bot("b1", "task-a", "task-a", "task-b")

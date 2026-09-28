@@ -406,6 +406,24 @@ describe("API onboarding", () => {
     ui.assertConsumed();
   });
 
+  it("keeps custom API setup after the built-in endpoints", async () => {
+    const deps = dependencies();
+    const ui = prompts({
+      choices: [2, 3, 0], answers: ["https://custom.example.test/v1"],
+      secrets: ["fixture-custom-key"], confirms: [true, true],
+    });
+    expect(await runSetup(options, ui.io, deps)).toBe(true);
+    expect(ui.io.choose.mock.calls[1]?.[1]).toEqual([
+      "OpenAI API", "OpenRouter", "Groq", "Other OpenAI-compatible endpoint",
+    ]);
+    expect(deps.verify).toHaveBeenCalledWith("https://custom.example.test/v1", "fixture-custom-key", "fixture-default");
+    const cfg = loadConfig();
+    expect(cfg.instances?.[cfg.defaultModelSelection!.instanceId]).toMatchObject({
+      driver: "openai-compat", config: { url: "https://custom.example.test/v1", key: "fixture-custom-key" },
+    });
+    ui.assertConsumed();
+  });
+
   it("reuses an API connection without changing its endpoint or key and preselects the saved model", async () => {
     const deps = dependencies();
     const first = prompts({ choices: [2, 0, 1], secrets: ["fixture-first-key"], confirms: [true, true] });

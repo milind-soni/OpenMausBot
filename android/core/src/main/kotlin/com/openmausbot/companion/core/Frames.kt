@@ -8,6 +8,7 @@ import kotlinx.serialization.descriptors.buildClassSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonEncoder
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
@@ -16,6 +17,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -48,6 +50,7 @@ sealed interface Frame {
     data class Thread(val threadId: String, val activeLeafId: String?) : Frame
     data class Bot(val bot: com.openmausbot.companion.core.Bot) : Frame
     data class BotDeleted(val botId: String) : Frame
+    data class BotQueued(val queues: Map<String, List<QueuedSend>>) : Frame
     data class Room(val room: com.openmausbot.companion.core.Room) : Frame
     data class RoomDeleted(val groupId: String) : Frame
     data class Notify(val notification: NotificationFrame) : Frame
@@ -106,6 +109,7 @@ object FrameSerializer : KSerializer<Frame> {
                 objectValue.required("bot"),
             ))
             "bot.deleted" -> Frame.BotDeleted(objectValue.requiredString("botId"))
+            "bot.queued" -> decodeBotQueued(objectValue) ?: Frame.Unknown(kind)
             "group" -> Frame.Room(input.json.decodeFromJsonElement(
                 com.openmausbot.companion.core.Room.serializer(),
                 objectValue.required("group"),
@@ -174,6 +178,24 @@ private fun JsonObject.requiredString(name: String): String =
     required(name).jsonPrimitive.contentOrNull
         ?: throw SerializationException("Frame field '$name' must be a string")
 
+/**
+ * A bot.queued frame is a wholesale snapshot of the server's steer queues.
+ * A queues object this build cannot read is a broken frame, not the server
+ * saying every queue is empty - reading it as one would retire every held
+ * row on a glitch. Fall back to Unknown; the next frame or fleet snapshot
+ * restates the truth. Bad entries inside a readable list still drop out
+ * one by one.
+ */
+private fun decodeBotQueued(objectValue: JsonObject): Frame.BotQueued? = runCatching {
+    Frame.BotQueued(
+        queues = objectValue.required("queues").jsonObject.mapValues { (_, entries) ->
+            entries.jsonArray.mapNotNull { element ->
+                runCatching { element.jsonObject.queuedSendOrNull() }.getOrNull()
+            }
+        },
+    )
+}.getOrNull()
+
 private fun Frame.toJsonObject(output: JsonEncoder): JsonObject = buildJsonObject {
     when (this@toJsonObject) {
         is Frame.Hello -> {
@@ -203,6 +225,14 @@ private fun Frame.toJsonObject(output: JsonEncoder): JsonObject = buildJsonObjec
         is Frame.BotDeleted -> {
             put("kind", "bot.deleted")
             put("botId", botId)
+        }
+        is Frame.BotQueued -> {
+            put("kind", "bot.queued")
+            put("queues", buildJsonObject {
+                queues.forEach { (threadId, sends) ->
+                    put(threadId, JsonArray(sends.map { it.toJsonObject() }))
+                }
+            })
         }
         is Frame.Room -> {
             put("kind", "group")

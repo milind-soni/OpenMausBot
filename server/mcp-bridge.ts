@@ -1,6 +1,6 @@
 // The shared stdio bridge for the host computer, Local VM, and BYO VPS.
 //
-// It is almost transparent — bytes in, bytes out — with two deliberate
+// It is almost transparent — bytes in, bytes out — with three deliberate
 // near-side exceptions:
 //
 //   1. `ping`. The bundled cua-driver (through at least v0.22.1) does not
@@ -9,6 +9,11 @@
 //   2. The who-is-driving `gate` (opt-in via `gate`). While the person holds
 //      control of this computer, a `tools/call` from the agent is answered
 //      with a refusal here and never forwarded.
+//   3. `tools/list` schemas. Every engine passes a tool's inputSchema to its
+//      model provider, and strict providers refuse a root that is not a plain
+//      object — failing the whole turn. The answer to a tools/list is
+//      rewritten to a provider-safe root (see mcp-tool-schema.ts); the far
+//      end still validates each call against its own schema.
 //
 // Both behaviors live here so neither entry point can drift:
 //   1. Exit without truncation. `process.exit()` in a close/error handler
@@ -24,6 +29,7 @@ import { StringDecoder } from "node:string_decoder";
 
 import { CONTROL_REFUSAL_PLAIN, createControlClient } from "./control-client.ts";
 import { augmentedPath } from "./env-path.ts";
+import { createToolListNormalizer } from "./mcp-tool-schema.ts";
 
 // 45s of TOTAL silence before the bridge even probes. An MCP session is
 // legitimately quiet between tool calls and a slow screenshot can take tens
@@ -38,14 +44,14 @@ export interface BridgeLiveness {
   args: string[];
 }
 
-/** Run the liveness command; alive means "exited 0 within the timeout". The
- * probe is its own short-lived process, so it cannot inherit the wedged
- * connection it is diagnosing. */
-export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOUT_MS): Promise<boolean> {
+/** Run the liveness command; alive means "exited 0 within the timeout". A
+ * separate bounded command checks the transport without waiting for an
+ * answer on the possibly wedged MCP stream. */
+export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOUT_MS, env?: NodeJS.ProcessEnv): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(probe.command, probe.args, {
       shell: false,
-      env: { ...process.env, PATH: augmentedPath() },
+      env: env ?? { ...process.env, PATH: augmentedPath() },
       stdio: ["ignore", "ignore", "ignore"],
     });
     const timer = setTimeout(() => {
@@ -289,8 +295,10 @@ export function runMcpBridge(options: BridgeOptions): void {
         }
       : {}),
   });
+  const toolLists = createToolListNormalizer();
   let pendingInput = Promise.resolve();
   const inbound = createLineSplitter((line) => {
+    toolLists.observeRequest(line);
     const completion = intercept(line);
     if (completion) pendingInput = completion;
   });
@@ -307,7 +315,7 @@ export function runMcpBridge(options: BridgeOptions): void {
   // Injected responses and refusals must never land inside one of the
   // child's half-written frames, so the child's stdout is re-emitted at
   // line granularity as well.
-  const outbound = createLineSplitter((line) => process.stdout.write(line + "\n"));
+  const outbound = createLineSplitter((line) => process.stdout.write(toolLists.rewriteResponse(line) + "\n"));
   child.stdout.on("data", (chunk) => outbound.push(chunk));
   child.stdout.on("end", () => outbound.flush());
 
@@ -321,7 +329,7 @@ export function runMcpBridge(options: BridgeOptions): void {
     const liveness = options.liveness;
     watchdog = createInactivityWatchdog({
       inactivityMs: BRIDGE_INACTIVITY_MS,
-      probe: () => runLivenessProbe(liveness),
+      probe: () => runLivenessProbe(liveness, PROBE_TIMEOUT_MS, options.env),
       onDead: () => {
         process.stderr.write(
           `${options.label} transport went silent and stopped answering liveness probes; ending the bridge\n`,

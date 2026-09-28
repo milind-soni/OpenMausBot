@@ -29,6 +29,7 @@ describe("GrokDriver turns (fake fetch)", () => {
   /** Script of responses/errors consumed in order; empty = succeed with text. */
   let script: Array<{ status?: number; sse?: string }> = [];
   let calls = 0;
+  let requestedModels: string[] = [];
 
   const create = async () => {
     instance = await GrokDriver.create({
@@ -46,9 +47,11 @@ describe("GrokDriver turns (fake fetch)", () => {
     process.env.FAKE_GROK_RETRY_SCALE = "0.001";
     previousFetch = globalThis.fetch;
     calls = 0;
+    requestedModels = [];
     // SAFETY: the stub only returns real Response objects, the sole member
     // of fetch's return type this driver consumes.
-    globalThis.fetch = (async () => {
+    globalThis.fetch = (async (_url, init) => {
+      requestedModels.push((JSON.parse(String(init?.body)) as { model: string }).model);
       const step = script.shift();
       calls++;
       if (!step || step.sse !== undefined) return sseResponse(step?.sse ?? SSE_BODY("done from fake grok"));
@@ -94,8 +97,36 @@ describe("GrokDriver turns (fake fetch)", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { dir: string; msg: { model?: string } });
-    expect(entries.find((entry) => entry.dir === "out")?.msg.model).toBe("grok-4");
+    expect(entries.find((entry) => entry.dir === "out")?.msg.model).toBe("grok-4.7");
+    expect(requestedModels).toEqual(["grok-4.7"]);
+    expect(instance.models.options).toContainEqual({ id: "grok-4.7", label: "Grok 4.7", contextWindow: 500_000 });
   });
+
+  it("smoke: offers ask_user and returns the person's reply verbatim", async () => {
+    const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
+      + JSON.stringify(JSON.stringify({ questions: [{ question: "Ship the fixture?", options: [{ label: "Yes" }, { label: "No" }] }] }))
+      + '}}]}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const bodies: string[] = [];
+    // SAFETY: the stub only returns real Response objects, the sole member
+    // of fetch's return type this driver consumes.
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      calls++;
+      bodies.push(String(init?.body));
+      return sseResponse(bodies.length === 1 ? askBody : SSE_BODY("done from fake grok"));
+    }) as typeof fetch;
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-ask", text: "go" });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "question", tool: "ask_user", choices: ["Yes", "No"] });
+    const reply = "The user answered your questions.\n\nQ: Ship the fixture?\nA: Yes";
+    expect(await instance.adapter.respondToRequest("t-ask", opened.requestId!, { behavior: "answer", message: reply })).toBe("answered");
+    const completed = await recorder.until((event) => event.type === "turn.completed");
+    expect(completed).toMatchObject({ ok: true });
+    expect(bodies[0]).toContain('"ask_user"');
+    expect(JSON.parse(JSON.parse(bodies[1]!).messages.at(-1).content).result).toBe(reply);
+  }, 20_000);
 
   it("auto-retries transient 429/5xx responses, then completes once", async () => {
     script = [{ status: 429 }, { status: 503 }];

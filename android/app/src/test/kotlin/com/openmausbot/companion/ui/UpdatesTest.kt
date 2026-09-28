@@ -6,6 +6,7 @@ import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.PendingApproval
+import com.openmausbot.companion.core.QueuedSend
 import com.openmausbot.companion.core.ToolActivity
 import java.util.Locale
 import kotlin.test.Test
@@ -109,12 +110,13 @@ class UpdatesTest {
                 tasks = listOf(
                     BotTask("thread-bot-1", "Gmail", 0.0, activity = "waiting-on-you", busy = true),
                     BotTask("icloud", "iCloud", 1.0, busy = true),
-                    BotTask("queued", "Outlook", 2.0, activity = "queued", unread = true),
+                    BotTask("queued", "Outlook", 2.0, unread = true),
                     BotTask("done", "Calendar", 3.0, unread = true),
                 ),
             )),
             streaming = mapOf("icloud" to "Sorting the iCloud inbox"),
             messages = mapOf("done" to listOf(text("done-1", "Calendar is ready"))),
+            pendingQueued = mapOf("queued" to listOf(QueuedSend("q1", "Summarize the inbox"))),
         )
 
         val updates = state.updates
@@ -130,6 +132,27 @@ class UpdatesTest {
             updates.map { it.line },
         )
         assertEquals(4, updates.map { it.id }.toSet().size)
+    }
+
+    @Test
+    fun `a queued activity string alone is not an update, only held sends are`() {
+        // the server never sends queued as activity; only the client's queue
+        // state makes the pill say Queued
+        val dead = CompanionState(bots = listOf(bot(name = "Pepper").copy(
+            tasks = listOf(BotTask("thread-bot-1", "Gmail", 0.0, activity = "queued")),
+        )))
+        assertEquals(emptyList(), dead.updates)
+
+        val held = CompanionState(
+            bots = listOf(bot(name = "Pepper").copy(
+                tasks = listOf(BotTask("thread-bot-1", "Gmail", 0.0, activity = "queued")),
+            )),
+            pendingQueued = mapOf(
+                "thread-bot-1" to listOf(QueuedSend("q1", "first"), QueuedSend("q2", "second")),
+            ),
+        )
+        assertEquals(listOf(UpdateKind.WORKING), held.updates.map { it.kind })
+        assertEquals("2 messages queued", held.updates.single().line)
     }
 
     @Test

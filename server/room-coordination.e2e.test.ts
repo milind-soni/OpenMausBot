@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
+import { PEER_ACCESS_HELP } from "./peer-roster.ts";
 
+/** Exercise the real coordination proxy in disposable rooms with a scripted provider. */
 async function withRooms(test: (f: any) => Promise<void>) {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const env = { OPENMAUSBOT_URL: session.info.url };
@@ -33,6 +35,75 @@ async function withRooms(test: (f: any) => Promise<void>) {
   } finally { await session.close(); }
 }
 
+/** Grant a Chief supervision of team A and seat it beside both fixture peers. */
+async function addSupervisingChief(f: any, section = "") {
+  const chief = (await f.cli("new-bot", "--name", "Supervisor")).bot;
+  await f.api(`/api/bots/${chief.id}`, { section, chiefOfStaff: true, managedSections: ["A"], acknowledgePeerScope: true }, "PATCH");
+  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, chief.id] });
+  f.plan[chief.id] = { reply: "Supervisor checked the work" };
+  return chief;
+}
+
+it.each(["", "Leadership"])("lists and coordinates with a supervising Chief and same-section peer in the same room (Chief section %j)", section => withRooms(async f => {
+  const chief = await addSupervisingChief(f, section);
+  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id, f.target.id], request_key: "same-room", message: "Review the work here" } }];
+  // The fresh coordination brief carries the recipient's own live roster:
+  // dispatch-time data must ride the user turn, fenced with its own markers
+  // so it can never blend into the assignment text around it.
+  f.plan[f.target.id] = { reply: "Built CSV", expectContextIncludes: ["[LIVE TEAMMATES]", `[id: ${f.sender.id}]`] };
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const discovery = JSON.parse(f.provider().find((turn: any) => turn.botId === f.sender.id).evidence[1].result.content[0].text);
+  expect(discovery.rooms.find((room: any) => room.id === f.source.id).members.map((bot: any) => bot.id)).toEqual(expect.arrayContaining([chief.id, f.target.id]));
+  const children = f.nodes().filter((node: any) => node.parentId);
+  expect(children.map((node: any) => node.botId).sort()).toEqual([chief.id, f.target.id].sort());
+  expect(children.every((node: any) => node.status === "completed" && node.groupId === f.source.id && node.threadId === f.source.activeTaskId)).toBe(true);
+}), 45_000);
+
+it.each(["unmanaged", "outsider", "disallowed-peer"])("refuses supervisor room coordination with %s", reason => withRooms(async f => {
+  const chief = await addSupervisingChief(f);
+  if (reason === "unmanaged") await f.api(`/api/bots/${chief.id}`, { managedSections: [] }, "PATCH");
+  if (reason === "outsider") {
+    const outsider = (await f.cli("new-bot", "--name", "Outsider", "--section", "Finance")).bot;
+    await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, chief.id, outsider.id] });
+  }
+  if (reason === "disallowed-peer") await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { bot_ids: [chief.id], request_key: "refused", message: "Do not bypass the room boundary" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  const turn = f.provider().find((entry: any) => entry.botId === f.sender.id);
+  expect(turn.evidence.find((entry: any) => entry.step).response.result.isError).toBe(true);
+  if (reason === "disallowed-peer") expect(JSON.parse(turn.evidence[1].result.content[0].text).rooms).toEqual([]);
+  else expect(turn.evidence[1].result.isError).toBe(true);
+}), 45_000);
+
+it("does not extend supervisor access to a different room", () => withRooms(async f => {
+  const chief = await addSupervisingChief(f);
+  await f.tool("update_channel", { channel_id: f.destination.id, member_ids: [chief.id] });
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [chief.id], request_key: "other-room", message: "Keep supervisor access in the shared conversation" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
+  const discovery = JSON.parse(f.provider().find((turn: any) => turn.botId === f.sender.id).evidence[1].result.content[0].text);
+  expect(discovery.rooms.some((room: any) => room.id === f.destination.id)).toBe(false);
+}), 45_000);
+
+it("refuses queued same-room supervisor work when the owner revokes supervision", () => withRooms(async f => {
+  const chief = await addSupervisingChief(f);
+  const gateFile = join(f.session.info.dataDir, "supervisor-result.gate");
+  f.plan[chief.id] = { reply: "PRIVATE_SUPERVISOR_RESULT" };
+  f.plan[f.sender.id].gateFile = gateFile;
+  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id], request_key: "supervisor", message: "Review this work" } }];
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15000 }).toBe("queued");
+  await request(`/api/bots/${chief.id}`, { method: "PATCH", headers: { Origin: f.session.info.url }, body: JSON.stringify({ managedSections: [] }) }, f.session.info.url);
+  writeFileSync(gateFile, "release");
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes().find((node: any) => node.parentId).status).toBe("failed");
+  expect(f.provider().some((turn: any) => turn.botId === chief.id)).toBe(false);
+  expect(JSON.stringify(await f.messages(f.source.activeTaskId))).not.toContain("PRIVATE_SUPERVISOR_RESULT");
+  expect((await f.messages(f.source.activeTaskId)).some((message: any) => message.tool?.name.includes("Result withheld"))).toBe(true);
+}), 45_000);
+
 it("refuses a disallowed peer without starting the recipient", () => withRooms(async f => {
   await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
   f.plan[f.sender.id].steps[0].expectError = true;
@@ -55,6 +126,7 @@ it("runs room-destined work in the room's own conversation, opening no thread on
   expect(after.some((task: any) => task.openedBy)).toBe(false);
   expect((await f.messages(f.destination.activeTaskId)).some((m: any) => m.text?.includes("Please build CSV"))).toBe(true);
   expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
+  expect(JSON.stringify(f.provider().find((turn: any) => turn.botId === f.target.id).prompt).match(/Please build CSV/g)).toHaveLength(1);
 }), 45_000);
 
 it("lets an explicitly authorized Chief coordinate another team, which can consult its own specialist", () => withRooms(async f => {
@@ -66,11 +138,17 @@ it("lets an explicitly authorized Chief coordinate another team, which can consu
     steps: [{ arguments: { group_id: reviewRoom.id, bot_ids: [reviewer.id], request_key: "test", message: "Check the CSV output" } }],
     reply: "Sent for verification", resumeReply: "CSV implemented and checked",
   };
-  f.plan[reviewer.id] = { reply: "CSV checks passed" };
+  // Multi-line on purpose: results reach the transcript inside a JSON
+  // envelope, so a newline is escaped there. A raw substring compare would
+  // miss it and re-append the brief on top of a transcript that already has
+  // it — the duplication the dedup exists to prevent.
+  f.plan[reviewer.id] = { reply: "CSV checks passed\nrow count matches\nno nulls" };
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.provider().map((turn: any) => turn.botId)).toEqual([f.sender.id, f.target.id, reviewer.id, f.target.id, f.sender.id]);
   expect(f.nodes().every((n: any) => n.status === "completed")).toBe(true);
   expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
+  const resumedPrompt = f.provider().filter((turn: any) => turn.botId === f.target.id).at(-1).prompt;
+  expect(JSON.stringify(resumedPrompt).match(/CSV checks passed/g)).toHaveLength(1);
   const bots = (await f.api("/api/bots")).bots;
   expect(bots.find((b: any) => b.id === f.target.id).managedSections).toBeUndefined();
   expect(bots.find((b: any) => b.id === reviewer.id).managedSections).toBeUndefined();
@@ -150,13 +228,15 @@ it("refuses same-room coordination in a mixed section room", () => withRooms(asy
 }), 45_000);
 
 it("rechecks section membership before queued work dispatch and withholds its result", () => withRooms(async f => {
-  f.plan[f.target.id].delayMs = 2000; f.savePlan();
+  const gateFile = join(f.session.info.dataDir, "recipient-section-change.gate");
+  f.plan[f.target.id].gateFile = gateFile; f.savePlan();
   await f.cli("send", "--bot", f.target.id, "--text", "Independent task");
   await f.start();
   await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 10_000 }).toBe("queued");
   // Model a user changing the fixture's settings from its served UI mid-turn.
   await request(`/api/bots/${f.target.id}`, { method: "PATCH", headers: { Origin: f.session.info.url },
     body: JSON.stringify({ section: "Other company" }) }, f.session.info.url);
+  writeFileSync(gateFile, "release");
   expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().find((n: any) => n.parentId).status).toBe("failed");
   expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
@@ -193,6 +273,28 @@ it("returns a provider failure to the sender and resumes it to handle the failur
   const source = await f.messages(f.source.activeTaskId);
   expect(source.some((m: any) => m.roomRequest?.phase === "result" && m.tool?.name.includes("failed"))).toBe(true);
   expect(source.some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
+}), 45_000);
+
+// A duplicate request_key on a failed node used to be receipted "queued"
+// with a promise that its result would resume the sender — but a terminal
+// node never reruns and its report already fired, so the coordinator would
+// wait on an auto-resume that never comes. The receipt must say the earlier
+// assignment is dead and a retry needs a new request_key.
+it("receipts a retried duplicate of a failed hand-off as failed, not queued behind a resume that never comes", () => withRooms(async f => {
+  f.plan[f.target.id].fail = true;
+  f.plan[f.sender.id].resumeSteps = [{ arguments: f.plan[f.sender.id].steps[0].arguments }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.provider().map((turn: any) => turn.botId)).toEqual([f.sender.id, f.target.id, f.sender.id]);
+  const [assigned, retried] = f.provider().filter((turn: any) => turn.botId === f.sender.id);
+  expect(assigned.resumed).toBe(false);
+  const first = JSON.parse(assigned.evidence.find((entry: any) => entry.step).response.result.content[0].text);
+  expect(first.receipts[0]).toMatchObject({ botId: f.target.id, outcome: "queued" });
+  expect(retried.resumed).toBe(true);
+  const retry = JSON.parse(retried.evidence.find((entry: any) => entry.step).response.result.content[0].text);
+  expect(retry.accepted[0]).toMatchObject({ botId: f.target.id, duplicate: true, status: "failed" });
+  expect(retry.receipts[0]).toMatchObject({ botId: f.target.id, outcome: "failed" });
+  expect(retry.receipts[0].detail).toContain("failed and will not rerun or resume you");
+  expect(f.nodes().filter((n: any) => n.parentId)).toHaveLength(1);
 }), 45_000);
 
 it("keeps a busy recipient queued and rejects revoked peer access before dispatch", () => withRooms(async f => {
@@ -262,6 +364,10 @@ it.each(["allow", "deny"])("presents all peer approvals together and dispatches 
   else expect(f.nodes().filter((n: any) => n.parentId)).toMatchObject([
     { status: "completed", approvalGranted: true }, { status: "completed", approvalGranted: true },
   ]);
+  const posted = (await f.messages(f.destination.activeTaskId)).filter((m: any) => m.roomRequest?.phase === "request");
+  expect(posted).toHaveLength(behavior === "deny" ? 0 : 1);
+  if (behavior === "allow") expect(posted[0].text).toBe("@Engineer @Reviewer Please build CSV");
+
 }), 45_000);
 
 it("pins a busy destination's task even when its active task changes", () => withRooms(async f => {
@@ -288,6 +394,13 @@ it("consults multiple existing members and returns once, with no discussion prer
   const source = await f.messages(f.source.activeTaskId);
   expect(source.filter((m: any) => m.comm).map((m: any) => m.comm.withBotId)).toEqual([f.target.id, reviewer.id]);
   expect(source.filter((m: any) => m.text === "Reviewed downstream outcome")).toHaveLength(1);
+  const requests = source.filter((m: any) => m.roomRequest?.phase === "request");
+  expect(requests).toHaveLength(1);
+  expect(requests[0].text).toBe("@Engineer @Reviewer Give one risk from your role");
+  for (const id of [f.target.id, reviewer.id]) {
+    expect(JSON.stringify(f.provider().find((turn: any) => turn.botId === id).prompt).match(/Give one risk from your role/g)).toHaveLength(1);
+  }
+
   const tools = f.provider()[0].evidence[0].result.tools.map((t: any) => t.name);
   expect(tools).toContain("coordinate_bots");
   expect(tools).toContain("request_credential");
@@ -323,4 +436,75 @@ it("waits for busy peers and then completes without the user relaying messages",
   expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().every((n: any) => n.status === "completed")).toBe(true);
   expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
+}), 45_000);
+
+// An unresolvable bot_ids entry used to get "The addressed agent no longer
+// exists" whether it had ever been a bot id or not, carrying no id and no
+// way back, so a model reads its teammate as permanently gone. Both cases
+// now name the id the caller sent and point at list_bots, like the other
+// comms refusals in the server.
+it.each([
+  ["a name nobody has in a bot_ids slot", false],
+  ["a hidden teammate's id", true],
+] as const)("refuses %s with a message the caller can act on", (_case, hidden) => withRooms(async f => {
+  if (hidden) await f.api(`/api/bots/${f.target.id}`, { hidden: true }, "PATCH");
+  const botId = hidden ? f.target.id : "Nobody";
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [botId], message: "Review CSV", request_key: "review" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
+  const refused = f.provider().find((turn: any) => turn.botId === f.sender.id)
+    .evidence.find((entry: any) => entry.step).response.result.content[0].text;
+  expect(refused).toBe(hidden
+    ? `The bot with id "${botId}" is no longer available — call list_bots for the ones you can reach`
+    : `No bot with id or name "${botId}" — call list_bots and copy the exact id from the result. ${PEER_ACCESS_HELP}`);
+}), 45_000);
+
+// The Chief's roster names teammates, so a Chief reaches for the name it can
+// see. A name that means exactly one reachable teammate is the teammate; the
+// work runs as if the id had been sent. Two teammates sharing a name is the
+// person's naming, so that is refused with the way to the ids, not guessed.
+it("resolves a unique teammate name in a bot_ids slot, and refuses an ambiguous one", () => withRooms(async f => {
+  f.plan[f.sender.id].steps = [{ arguments: { group_id: f.destination.id, bot_ids: [f.target.name], request_key: "work", message: "Please build CSV" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const node = f.nodes().find((n: any) => n.parentId);
+  expect(node.botId).toBe(f.target.id);
+  expect(node.status).toBe("completed");
+  expect((await f.messages(f.destination.activeTaskId)).some((m: any) => m.text?.includes("Please build CSV"))).toBe(true);
+
+  const twin = (await f.cli("new-bot", "--name", f.target.name, "--section", "A")).bot;
+  expect(twin.id).not.toBe(f.target.id);
+  f.plan[f.sender.id] = { steps: [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [f.target.name], message: "Review CSV", request_key: "review" } }], reply: "Refused" };
+  f.savePlan(); await f.cli("send-channel", "--channel", f.source.id, "--text", "@Director Ask again");
+  expect((await f.wait()).status).toBe("settled");
+  const refused = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1)
+    .evidence.find((entry: any) => entry.step).response.result.content[0].text;
+  expect(refused).toBe(`2 reachable teammates are named "${f.target.name}" — call list_bots and use the id of the one you mean`);
+}), 60_000);
+
+
+it("does not repeat a shared brief or rerun recipients on an identical tool retry", () => withRooms(async f => {
+  const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
+  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, reviewer.id] });
+  const args = { bot_ids: [f.target.id, reviewer.id], message: "Review the release checklist", request_key: "release" };
+  f.plan[f.sender.id].steps = [{ arguments: args }, { arguments: args }];
+  f.plan[reviewer.id] = { reply: "Release checklist reviewed" };
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const requests = (await f.messages(f.source.activeTaskId)).filter((m: any) => m.roomRequest?.phase === "request");
+  expect(requests).toHaveLength(1);
+  expect(requests[0].text).toBe("@Engineer @Reviewer Review the release checklist");
+  expect(f.provider().map((turn: any) => turn.botId)).toEqual([f.sender.id, f.target.id, reviewer.id, f.sender.id]);
+}), 45_000);
+
+it("keeps genuinely different room briefs separate", () => withRooms(async f => {
+  const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
+  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, reviewer.id] });
+  f.plan[f.sender.id].steps = [
+    { arguments: { bot_ids: [f.target.id], message: "Check the migration", request_key: "migration" } },
+    { arguments: { bot_ids: [reviewer.id], message: "Check the documentation", request_key: "docs" } },
+  ];
+  f.plan[reviewer.id] = { reply: "Documentation reviewed" };
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const requests = (await f.messages(f.source.activeTaskId)).filter((m: any) => m.roomRequest?.phase === "request");
+  expect(requests.map((m: any) => m.text)).toEqual(["@Engineer Check the migration", "@Reviewer Check the documentation"]);
 }), 45_000);

@@ -63,7 +63,7 @@ export async function runPhoneSetup(
     const device = await io.choose("Use OpenMausBot on your phone?", [
       "Skip for now",
       "iPhone / iPad — native app or Safari",
-      "Android — web browser",
+      "Android — app or browser",
     ], 0);
     if (device === 0) return skip();
     const phone: PhoneKind = device === 1 ? "ios" : "android";
@@ -129,7 +129,7 @@ export function phonePairingInstructions(
   return [
     phone === "ios"
       ? "On iPhone or iPad, scan the QR with Camera to open Safari. If you already have the OpenMausBot iOS app, use its pairing scanner or paste the full pairing link there."
-      : "On Android, scan the QR with Camera and open it in your web browser. This link is for the web app, not the Android native pairing scanner.",
+      : "On Android, open the OpenMausBot app and scan the QR with its pairing scanner. The QR is an app link, so Camera will not open it in a browser.",
     `Or open ${origin}/pair on your phone and enter the code.`,
     "Choose Connect on the phone. Scanning a QR does not mean the phone is paired.",
     "The code works once and expires after five minutes. This phone receives client access: chat and approvals, not settings or pairing administration.",

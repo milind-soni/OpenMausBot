@@ -2,13 +2,18 @@
 // Fake of the pi coding agent's `--mode rpc --no-session` stdio surface, for
 // driver contract tests of server/drivers/pi.ts. Speaks pi's JSON-RPC-over-
 // stdio protocol: answers get_available_models / new_session / switch_session
-// / set_model, and streams a scripted turn in response to `prompt`. Failure
+// / set_model / steer, and streams a scripted turn in response to `prompt`. Failure
 // modes mirror how the real CLI misbehaves:
 //
-//   FAKE_PI_MODE   happy (default) | tooluse | permission | interleave | turn-error | no-models | exit-early
+//   FAKE_PI_MODE   happy (default) | tooluse | permission | interleave | question-select | question-input
+//                  | turn-error | no-models | exit-early | compaction | compaction-recovery
+//                  | compaction-recovery-upstream | prompt-reject
 //   FAKE_PI_MODELS comma-separated provider/model pairs (default "ollama-cloud/glm-5.2,openai/gpt-4o")
 //   FAKE_PI_DUMP   path to append {argv, env} JSON, so a test can assert argv shape
 //                  and env hygiene (no leaked secrets into the pi child).
+//   FAKE_PI_STEER_REFUSE script an explicit success:false steer refusal
+//   FAKE_PI_STEER_OUT_OF_ORDER hold the first steer's refusal until a second
+//                  frame arrives, then answer refusal-for-first / success-for-second
 
 import { appendFileSync, readFileSync } from "node:fs";
 
@@ -72,6 +77,9 @@ if (mode === "exit-early") {
 const send = (obj: any) => process.stdout.write(JSON.stringify(obj) + "\n");
 let sessionCounter = 0;
 let currentSessionFile: string | null = null;
+// FAKE_PI_STEER_OUT_OF_ORDER parks the first steer frame until a second one
+// arrives, so a test can force both waiters to exist before any response.
+const heldSteerFrames: any[] = [];
 
 // A faithful happy turn: a couple of text deltas then a terminal turn_end.
 const streamTurn = () => {
@@ -100,6 +108,66 @@ const streamErrorTurn = () => {
   send({ type: "agent_end" });
 };
 
+// compaction: a happy turn whose context crosses the auto-compaction
+// threshold mid-run - compaction_start/end fire after the prompt ack and
+// before turn_end, the exact moment a receipt-based prompt split must
+// notice its delivery being summarized away.
+const streamCompactionTurn = () => {
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  send({ type: "compaction_start", reason: "threshold" });
+  send({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false, willRetry: false });
+  send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "compacted" } });
+  send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } });
+  send({ type: "agent_end" });
+};
+
+// compaction-recovery: post-run overflow recovery — the run "ends"
+// (turn_end + a non-terminal agent_end), then compaction summarises the
+// session and the run resumes for one more turn before the terminal
+// agent_end. The second half is delayed so it lands after the first
+// agent_end, exactly the sequence a driver must not treat as finished at
+// turn_end: killing the child there would silence the late compaction
+// events that invalidate the prompt-split receipt.
+const streamCompactionRecoveryTurn = () => {
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "recovered" } });
+  send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } });
+  send({ type: "agent_end", isTerminal: false });
+  setTimeout(() => {
+    send({ type: "compaction_start", reason: "overflow" });
+    send({ type: "compaction_end", reason: "overflow", result: undefined, aborted: false, willRetry: false });
+    send({ type: "agent_start" });
+    send({ type: "turn_start" });
+    send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "ok" } });
+    send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 4, output: 1 } }, usage: { input: 4, output: 1 } });
+    send({ type: "agent_end", isTerminal: true });
+  }, 30);
+};
+
+// compaction-recovery-upstream: the same post-run overflow recovery in
+// upstream pi's dialect — agent_end frames carry willRetry instead of
+// isTerminal, and the run closes with agent_settled after the final
+// agent_end.
+const streamCompactionRecoveryUpstreamTurn = () => {
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "recovered" } });
+  send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } });
+  send({ type: "agent_end", willRetry: true });
+  setTimeout(() => {
+    send({ type: "compaction_start", reason: "overflow" });
+    send({ type: "compaction_end", reason: "overflow", result: undefined, aborted: false, willRetry: true });
+    send({ type: "agent_start" });
+    send({ type: "turn_start" });
+    send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "ok" } });
+    send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 4, output: 1 } }, usage: { input: 4, output: 1 } });
+    send({ type: "agent_end", willRetry: false });
+    send({ type: "agent_settled" });
+  }, 30);
+};
+
 // tooluse: one tool turn (stopReason toolUse, pi auto-continues) then a text
 // turn — exactly the sequence that broke the settle-on-toolUse bug.
 const streamToolTurn = () => {
@@ -121,6 +189,25 @@ const streamPermissionTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
   send({ type: "extension_ui_request", id: "ask-1", method: "select", title: "Run bash: echo hi?", options: ["Allow once", "Deny"] });
+  // wait for the answer before finishing
+};
+
+// question-select: a select ask that is genuinely a question — named
+// options the driver must surface as choices + a structured question.
+const streamQuestionSelectTurn = () => {
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  send({ type: "extension_ui_request", id: "ask-select", method: "select", title: "Which color?",
+    options: process.env.FAKE_PI_QUESTION_OPTIONS ? JSON.parse(process.env.FAKE_PI_QUESTION_OPTIONS) : ["Blue", "Green"] });
+  // wait for the answer before finishing
+};
+
+// question-input: a free-text ask — no options, the typed answer returns
+// verbatim.
+const streamQuestionInputTurn = () => {
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  send({ type: "extension_ui_request", id: "ask-input", method: "input", title: "Which city?" });
   // wait for the answer before finishing
 };
 
@@ -178,11 +265,19 @@ function handle(cmd: any) {
       });
       return;
     case "new_session":
+      if (mode === "session-error") {
+        send({ type: "response", command: "new_session", success: false, error: "fake pi: session unavailable" });
+        return;
+      }
       sessionCounter += 1;
       currentSessionFile = `/fake/pi-session-${sessionCounter}.json`;
       send({ type: "response", command: "new_session", success: true, data: { sessionId: `s-${sessionCounter}`, sessionFile: currentSessionFile } });
       return;
     case "switch_session":
+      if (mode === "session-error") {
+        send({ type: "response", command: "switch_session", success: false, error: "fake pi: session unavailable" });
+        return;
+      }
       currentSessionFile = cmd.sessionPath ?? currentSessionFile;
       send({ type: "response", command: "switch_session", success: true, data: { sessionId: "s-resumed", sessionFile: currentSessionFile } });
       return;
@@ -209,6 +304,11 @@ function handle(cmd: any) {
       send({ type: "response", command: "set_thinking_level", success: true });
       return;
     case "prompt":
+      if (mode === "prompt-reject") {
+        // mirrors pi rejecting a prompt submitted while a compaction runs
+        send({ type: "response", command: "prompt", success: false, error: "fake pi: compaction in progress" });
+        return;
+      }
       if (process.env.FAKE_PI_DUMP) {
         try {
           appendFileSync(
@@ -223,12 +323,62 @@ function handle(cmd: any) {
       send({ type: "response", command: "prompt", success: true });
       if (mode === "tooluse") streamToolTurn();
       else if (mode === "permission") streamPermissionTurn();
+      else if (mode === "question-select") streamQuestionSelectTurn();
+      else if (mode === "question-input") streamQuestionInputTurn();
       else if (mode === "interleave") streamInterleaveTurn();
       else if (mode === "turn-error") streamErrorTurn();
+      else if (mode === "compaction") streamCompactionTurn();
+      else if (mode === "compaction-recovery") streamCompactionRecoveryTurn();
+      else if (mode === "compaction-recovery-upstream") streamCompactionRecoveryUpstreamTurn();
       else streamTurn();
       return;
+    case "steer": {
+      // Mid-turn input frame: ack like the real runtime (success only after
+      // session.steer accepted it), echoing the frame's correlation id the
+      // way the real RPC runtime does. FAKE_PI_STEER_REFUSE scripts an
+      // explicit success:false refusal so the driver's tri-state mapping is
+      // testable.
+      if (process.env.FAKE_PI_DUMP) {
+        try {
+          appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ steer: { id: cmd.id, message: cmd.message } }) + "\n");
+        } catch {
+          /* never let dumping break a run */
+        }
+      }
+      const steerAck = (frame: any, success: boolean) =>
+        send({
+          type: "response",
+          command: "steer",
+          ...(frame.id !== undefined ? { id: frame.id } : {}),
+          ...(success ? { success: true } : { success: false, error: "fake pi: nothing to steer" }),
+        });
+      if (process.env.FAKE_PI_STEER_OUT_OF_ORDER) {
+        if (heldSteerFrames.length === 0) {
+          heldSteerFrames.push(cmd);
+          return;
+        }
+        // Both frames are now in flight: answer the FIRST with an explicit
+        // refusal and the SECOND with success, in that order, so a driver
+        // that keys waiters by command name alone hands the refusal to the
+        // wrong caller.
+        steerAck(heldSteerFrames[0], false);
+        steerAck(cmd, true);
+        heldSteerFrames.length = 0;
+        return;
+      }
+      steerAck(cmd, !process.env.FAKE_PI_STEER_REFUSE);
+      return;
+    }
     case "extension_ui_response":
+      if (process.env.FAKE_PI_DUMP) {
+        try {
+          appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ uiResponse: cmd }) + "\n");
+        } catch {
+          /* never let dumping break a run */
+        }
+      }
       if (cmd.id === "ask-1") finishPermissionTurn();
+      else if (cmd.id === "ask-select" || cmd.id === "ask-input") finishPermissionTurn();
       return;
     case "abort":
       send({ type: "turn_end", message: { stopReason: "cancelled", usage: { input: 0, output: 0 } }, usage: { input: 0, output: 0 } });

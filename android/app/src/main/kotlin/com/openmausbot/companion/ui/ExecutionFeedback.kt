@@ -1,5 +1,6 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.core.ActivityDetail
 import kotlin.math.PI
 import kotlin.math.cos
 
@@ -45,9 +46,12 @@ enum class TranscriptTail {
  * bubble would be a bubble about nothing.
  */
 object LiveTail {
-    fun of(streaming: String?, reasoning: String?, busy: Boolean): TranscriptTail = when {
+    fun of(
+        streaming: String?, reasoning: String?, busy: Boolean,
+        detail: ActivityDetail = ActivityDetail.FULL,
+    ): TranscriptTail = when {
         !streaming.isNullOrEmpty() -> TranscriptTail.STREAM
-        !reasoning.isNullOrEmpty() -> TranscriptTail.REASONING
+        detail != ActivityDetail.HIDDEN && !reasoning.isNullOrEmpty() -> TranscriptTail.REASONING
         busy -> TranscriptTail.WORKING
         else -> TranscriptTail.NONE
     }

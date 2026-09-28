@@ -143,7 +143,17 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
       const originalLeaf = bot.activeLeafId;
 
       // edit → fork + a fresh turn on the new branch
-      expect((await api("POST", `/api/bots/${created.id}/messages/${original.id}/edit`, { text: "edited question" })).status).toBe(202);
+      const editBody = { text: "edited question", sendId: "edit-retry-0000000001" };
+      const firstEdit = await api("POST", `/api/bots/${created.id}/messages/${original.id}/edit`, editBody);
+      expect(firstEdit.status).toBe(202);
+      expect(firstEdit.body.message.sendId).toBe("edit-retry-0000000001");
+      // a network retry of the same edit answers with the same fork, even
+      // while that fork's own turn is still running, and never forks again
+      const retried = await api("POST", `/api/bots/${created.id}/messages/${original.id}/edit`, editBody);
+      expect(retried.status).toBe(202);
+      expect(retried.body.message.id).toBe(firstEdit.body.message.id);
+      const reused = await api("POST", `/api/bots/${created.id}/messages/${original.id}/edit`, { text: "something else", sendId: "edit-retry-0000000001" });
+      expect(reused.status).toBe(409);
       await waitFor(async () => {
         const b = await getBot(created.id);
         const edited = b.messages.find((m: Msg) => m.role === "user" && m.text === "edited question");
@@ -156,6 +166,7 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
       bot = await getBot(created.id);
       const edited: Msg = bot.messages.find((m: Msg) => m.role === "user" && m.text === "edited question");
       expect(edited.parentId).toBe(original.parentId); // sibling versions
+      expect(bot.messages.filter((m: Msg) => m.role === "user" && m.text === "edited question")).toHaveLength(1);
 
       // the visible path carries only the edited branch…
       const path = activePath(bot.messages, bot.activeLeafId);

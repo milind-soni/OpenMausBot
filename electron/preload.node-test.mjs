@@ -69,7 +69,44 @@ test("onOpenAppSettings subscribes to the exact app:open-settings channel, forwa
   assert.equal(cbCalls.length, 2);
 
   unsubscribe();
-  assert.equal(subscriberCount("app:open-settings"), 0);
+  assert.equal(subscriberCount("app:open-settings"), 1, "the preload retains its cold-start listener");
   emit("app:open-settings");
   assert.equal(cbCalls.length, 2);
+});
+
+test("an organisation action arriving before React subscriptions is delivered exactly once after mount", async () => {
+  emit("app:open-settings", "organization");
+  const calls = [];
+  const unsubscribe = exposed.api.onOpenAppSettings(section => calls.push(["app", section]));
+  const unsubscribePanel = exposed.api.onOpenAppSettings(section => calls.push(["panel", section]));
+  assert.deepEqual(calls, []);
+  await Promise.resolve();
+  assert.deepEqual(calls, [["app", "organization"], ["panel", "organization"]]);
+  unsubscribe(); unsubscribePanel();
+  const late = exposed.api.onOpenAppSettings(section => calls.push(["late", section]));
+  await Promise.resolve();
+  assert.equal(calls.length, 2, "later subscriptions must not reopen Settings");
+  late();
+});
+
+test("a transient subscription cannot consume a cold-start action before the actual mount", async () => {
+  emit("app:open-settings", "organization");
+  const calls = [];
+  exposed.api.onOpenAppSettings(section => calls.push(section))();
+  await Promise.resolve();
+  assert.deepEqual(calls, []);
+  const unsubscribe = exposed.api.onOpenAppSettings(section => calls.push(section));
+  await Promise.resolve();
+  assert.deepEqual(calls, ["organization"]);
+  unsubscribe();
+});
+
+test("native Settings requests accept only the fixed organisation section", () => {
+  const calls = [];
+  const unsubscribe = exposed.api.onOpenAppSettings(section => calls.push(section));
+  emit("app:open-settings", "organization");
+  emit("app:open-settings", "https://other.example");
+  emit("app:open-settings", { section: "organization", url: "https://other.example" });
+  assert.deepEqual(calls, ["organization", undefined, undefined]);
+  unsubscribe();
 });

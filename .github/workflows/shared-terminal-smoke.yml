@@ -1,17 +1,8 @@
 name: Shared terminal smoke
 
 on:
+  # Main CI runs both tests on Windows; keep this for focused manual reruns.
   workflow_dispatch:
-  push:
-    paths:
-      - electron/shared-computer-access*
-      - server/shared-computers.e2e.test.ts
-      - .github/workflows/shared-terminal-smoke.yml
-  pull_request:
-    paths:
-      - electron/shared-computer-access*
-      - server/shared-computers.e2e.test.ts
-      - .github/workflows/shared-terminal-smoke.yml
 
 permissions:
   contents: read

@@ -2,7 +2,6 @@
 // real provider, OAuth account, MCP package, or user data is used.
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
@@ -25,14 +24,21 @@ describe("bot setup and tools in the real renderer", () => {
   let child: ChildProcess | undefined;
   let info: FixtureInfo;
   afterAll(async () => {
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    if (child?.connected) child.send("stop");
+    await waitForExit(child, { graceMs: 30_000 });
   });
 
   (enabled ? it : it.skip)("creates roles, configures per-bot MCP access, and recovers a rejected preset", async () => {
     let stdout = "";
     let stderr = "";
-    child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
-      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+    // Windows kill("SIGINT") terminates immediately instead of delivering a
+    // catchable signal. Ask the disposable launcher to run its normal cleanup.
+    const launcher = new URL("./control-omb-ui.ts", import.meta.url).href;
+    const bootstrap = `import { launchUi } from ${JSON.stringify(launcher)};
+      process.on('message', message => { if (message === 'stop') process.emit('SIGINT'); });
+      try { await launchUi([]); } finally { process.disconnect(); }`;
+    child = spawn(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", bootstrap], {
+      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     child.stdout!.on("data", (chunk: Buffer) => { stdout += String(chunk); });
     child.stderr!.on("data", (chunk: Buffer) => { stderr += String(chunk); });
@@ -40,7 +46,7 @@ describe("bot setup and tools in the real renderer", () => {
     await expect.poll(() => {
       if (child!.exitCode !== null || child!.signalCode !== null) throw new Error(`UI launcher exited: ${stderr}`);
       try { info = JSON.parse(stdout); return Boolean(info.ui); } catch { return false; }
-    }, { timeout: LAUNCH_TIMEOUT_MS, interval: 250 }).toBe(true);
+    }, { timeout: LAUNCH_TIMEOUT_MS + 120_000, interval: 250 }).toBe(true);
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", info.ui, ...args]) as Promise<Record<string, any>>;
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const click = (name: string) => ui("click", "--name", name);
@@ -57,12 +63,15 @@ describe("bot setup and tools in the real renderer", () => {
       await ui("click", "--ref", `@${profile![0]}`);
       await click("Access");
     };
-    const clickRole = async (title: string) => {
-      const state = await ui("snapshot", "--interactive");
-      const matches = Object.entries(state.refs as Record<string, { role: string; name: string }>)
-        .filter(([, entry]) => entry.role === "button" && entry.name.startsWith(`${title} `));
-      expect(matches).toHaveLength(1);
-      await ui("click", "--ref", `@${matches[0][0]}`);
+    const chooseRole = async (roleId: string) => {
+      await expect.poll(snapshot, { timeout: 10_000 }).toContain("Starting role");
+      await evaluate(`(() => {
+        const select = [...document.querySelectorAll('[role=dialog] select')].find(el => [...el.options].some(option => option.value === ${JSON.stringify(roleId)}));
+        if (!select || select.disabled) throw new Error("Starting role is unavailable");
+        select.value = ${JSON.stringify(roleId)};
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`);
     };
     const dialogCount = () => evaluate("document.querySelectorAll('[role=dialog]').length");
     const original = await bots();
@@ -85,14 +94,16 @@ describe("bot setup and tools in the real renderer", () => {
       return true;
     })()`);
     await press("Control+n");
-    await clickRole(coder.title);
+    await chooseRole(coder.id);
+    expect(await evaluate("window.botCreateRequests")).toBe(0);
+    await click("Create bot");
     await expect.poll(() => evaluate("window.botCreateRequests"), { timeout: 10_000 }).toBe(1);
     await press("Escape");
     expect(await dialogCount()).toBe(0);
     await press("Control+n");
     expect(await evaluate("document.querySelector('[role=dialog]')?.getAttribute('aria-busy')")).toBe("true");
-    expect(await evaluate("[...document.querySelectorAll('[role=dialog] button')].filter(b => b.getAttribute('aria-label') !== 'Close').every(b => b.disabled)")).toBe(true);
-    await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent.includes('Blank bot')).click()");
+    expect(await evaluate("[...document.querySelectorAll('[role=dialog] fieldset button, [role=dialog] input, [role=dialog] select, [role=dialog] textarea')].every(b => b.matches(':disabled'))")).toBe(true);
+    await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent.includes('Create bot')).click()");
     expect(await evaluate("window.botCreateRequests")).toBe(1);
     // Close remains usable; a slow server must not trap the user in a modal.
     await click("Close");
@@ -124,10 +135,10 @@ describe("bot setup and tools in the real renderer", () => {
         .filter(([, entry]) => entry.role === "button" && entry.name.includes("$0.01"));
       expect(cost).toHaveLength(1);
       await ui("click", "--ref", `@${cost[0][0]}`);
-      await expect.poll(usageExpanded).toBe("true");
+      await expect.poll(usageExpanded, { timeout: 10_000 }).toBe("true");
       expect(await snapshot()).toContain("All bots");
       // Allow subpixel rounding at the bottom edge of the scroll viewport.
-      await expect.poll(() => evaluate("(() => { const row = document.querySelector('[data-bot-settings-section=usage]'); const rect = row?.getBoundingClientRect(); return rect ? Math.max(-rect.top, rect.bottom - innerHeight) : 9999; })()")).toBeLessThanOrEqual(1);
+      await expect.poll(() => evaluate("(() => { const row = document.querySelector('[data-bot-settings-section=usage]'); const rect = row?.getBoundingClientRect(); return rect ? Math.max(-rect.top, rect.bottom - innerHeight) : 9999; })()"), { timeout: 10_000 }).toBeLessThanOrEqual(1);
     };
     await openHeaderUsage();
     await click("Usage");
@@ -183,8 +194,8 @@ describe("bot setup and tools in the real renderer", () => {
     await press("Escape");
     expect(await dialogCount()).toBe(0);
 
-    // Only this disposable page intercepts one profile PATCH. POST really
-    // persists a bot, so recovery must show that bot instead of orphaning it.
+    // A failed profile step must roll back the incomplete bot and leave the
+    // editable draft available for a single successful retry.
     const beforeFailure = await bots();
     await evaluate(`(() => {
       const fetch = window.fetch.bind(window);
@@ -200,19 +211,21 @@ describe("bot setup and tools in the real renderer", () => {
     })()`);
     const ops = BOT_ROLES.find((role) => role.id === "ops")!;
     await press("Control+n");
-    await clickRole(ops.title);
-    await expect.poll(async () => (await bots()).length, { timeout: 10_000 }).toBe(beforeFailure.length + 1);
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Your bot was created, but its preset could not be fully applied.");
-    expect((await bots()).filter((bot) => !beforeFailure.some((old) => old.id === bot.id))).toMatchObject([{ name: ops.name }]);
+    await chooseRole(ops.id);
+    await click("Create bot");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Fixture preset rejected");
+    expect((await bots()).map(bot => bot.id)).toEqual(beforeFailure.map(bot => bot.id));
     expect(await dialogCount()).toBe(1);
-    expect(await snapshot()).toContain("Standing instructions");
-    await press("Escape");
-    expect(await dialogCount()).toBe(0);
+    await click("Create bot");
+    await expect.poll(async () => (await bots()).length, { timeout: 10_000 }).toBe(beforeFailure.length + 1);
+    await expect.poll(dialogCount, { timeout: 10_000 }).toBe(0);
+    expect((await bots()).filter(bot => !beforeFailure.some(old => old.id === bot.id))).toMatchObject([{ name: ops.name, soul: ops.soul }]);
     const logs = await ui("console");
     expect((logs.messages as Array<{ type: string; text: string }>).filter((entry) => entry.type === "error")).toEqual([]);
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    if (child?.connected) child.send("stop");
+    await waitForExit(child, { graceMs: 30_000 });
     expect(child.exitCode).toBe(0);
     expect(existsSync(info.dataDir)).toBe(false);
     expect(existsSync(info.logPath)).toBe(true);
-  }, LAUNCH_TIMEOUT_MS + 180_000);
+  }, LAUNCH_TIMEOUT_MS + 300_000);
 });

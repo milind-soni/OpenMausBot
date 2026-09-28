@@ -8,7 +8,7 @@ function plainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
-function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto = false, threadId, modelSelection, updateBotDefault, threadOnly = false) {
+function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto = false, threadId, modelSelection, updateBotDefault, threadOnly = false, allThreads = false) {
   if (typeof requestId !== "string" || !REQUEST_ID.test(requestId)) {
     throw new Error("invalid trusted approval-mode request id");
   }
@@ -16,6 +16,10 @@ function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto
     throw new Error("invalid bot id for trusted approval mode");
   }
   if (!APPROVAL_MODES.has(mode)) throw new Error("invalid trusted approval mode");
+  if (typeof allThreads !== "boolean" || (allThreads && (threadId !== undefined || threadOnly ||
+    modelSelection !== undefined || updateBotDefault !== undefined || (mode !== "full" && mode !== "ask")))) {
+    throw new Error("invalid all-threads approval selection");
+  }
   if (typeof threadOnly !== "boolean" || (threadOnly && (threadId === undefined || modelSelection !== undefined || updateBotDefault !== undefined))) {
     throw new Error("invalid thread-only approval selection");
   }
@@ -39,6 +43,7 @@ function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto
     ...(acknowledgeLocalAuto ? { acknowledgeLocalAuto: true } : {}),
     ...(threadId !== undefined ? { threadId } : {}),
     ...(threadOnly ? { threadOnly: true } : {}),
+    ...(allThreads ? { allThreads: true } : {}),
     ...(modelSelection !== undefined ? { modelSelection, updateBotDefault } : {}),
   };
 }
@@ -119,8 +124,8 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
   const usedRequestIds = new Set();
   const latestRequestByBot = new Map();
 
-  function nextMessage(botId, mode, acknowledgeLocalAuto = false, threadId, modelSelection, updateBotDefault, threadOnly = false) {
-    const message = trustedApprovalModeRequest(randomId(), botId, mode, acknowledgeLocalAuto, threadId, modelSelection, updateBotDefault, threadOnly);
+  function nextMessage(botId, mode, acknowledgeLocalAuto = false, threadId, modelSelection, updateBotDefault, threadOnly = false, allThreads = false) {
+    const message = trustedApprovalModeRequest(randomId(), botId, mode, acknowledgeLocalAuto, threadId, modelSelection, updateBotDefault, threadOnly, allThreads);
     if (usedRequestIds.has(message.requestId)) {
       throw new Error("Trusted approval-mode request id was reused");
     }
@@ -143,7 +148,7 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
     }
     let message;
     try {
-      message = nextMessage(botId, mode, options.acknowledgeLocalAuto ?? false, options.threadId, options.modelSelection, options.updateBotDefault, options.threadOnly ?? false);
+      message = nextMessage(botId, mode, options.acknowledgeLocalAuto ?? false, options.threadId, options.modelSelection, options.updateBotDefault, options.threadOnly ?? false, options.allThreads ?? false);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -165,6 +170,7 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
         mode: message.mode,
         modelThreadId: message.modelSelection ? message.threadId : undefined,
         threadOnly: Boolean(message.threadOnly),
+        allThreads: Boolean(message.allThreads),
         threadId: message.threadId,
         resolve,
         reject,
@@ -198,7 +204,7 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
         waiting.reject(error);
         return;
       }
-      request(waiting.proc, waiting.botId, "ask", waiting.threadOnly ? { threadId: waiting.threadId, threadOnly: true } : {}).then(
+      request(waiting.proc, waiting.botId, "ask", waiting.allThreads ? { allThreads: true } : waiting.threadOnly ? { threadId: waiting.threadId, threadOnly: true } : {}).then(
         () => waiting.reject(error),
         (recoveryError) => waiting.reject(new Error(
           `${error instanceof Error ? error.message : String(error)}; the pending ${waiting.mode} selection could not be cleared: ${
@@ -223,7 +229,11 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
       const waiting = pending.get(message.requestId);
       if (!waiting || waiting.proc !== proc || waiting.phase !== "committing") return true;
       const taskMode = message.bot?.tasks?.find(task => task.threadId === waiting.threadId)?.approvalMode;
-      if (message.ok !== true || message.bot?.id !== waiting.botId || taskMode !== waiting.mode) {
+      const matches = waiting.allThreads
+        ? message.bot?.approvalMode === waiting.mode && Array.isArray(message.bot?.tasks) &&
+          message.bot.tasks.every(task => task.approvalMode === waiting.mode)
+        : taskMode === waiting.mode;
+      if (message.ok !== true || message.bot?.id !== waiting.botId || !matches) {
         failAmbiguously(message.requestId, new Error("The thread approval change was not committed"));
       } else settle(message.requestId, ({ resolve }) => resolve(message.bot));
       return true;
@@ -271,7 +281,7 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
         // startup revokes the surviving journal to Ask; a reported failure
         // can therefore never leave the bot elevated.
         try {
-          if (waiting.threadOnly) waiting.phase = "committing";
+          if (waiting.threadOnly || waiting.allThreads) waiting.phase = "committing";
           proc.postMessage(trustedApprovalModeCommit(
             requestId,
             waiting.botId,
@@ -281,7 +291,7 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
           failAmbiguously(requestId, error instanceof Error ? error : new Error(String(error)));
           return true;
         }
-        if (!waiting.threadOnly) settle(requestId, ({ resolve, resultBot }) => resolve(resultBot));
+        if (!waiting.threadOnly && !waiting.allThreads) settle(requestId, ({ resolve, resultBot }) => resolve(resultBot));
         return true;
       }
       try {

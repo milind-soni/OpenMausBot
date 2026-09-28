@@ -13,6 +13,8 @@ import type { ModelSelection } from "./contracts.ts";
 import {
   buildDelegationFailurePrompt,
   buildDelegationRevivalPrompt,
+  busyHoldCapText,
+  DELEGATION_BUSY_HOLD_MAX_MS,
   DELEGATION_TTL_MS,
   DELEGATION_WAKE_MAX_PER_WINDOW,
   DELEGATION_WAKE_WINDOW_MS,
@@ -31,7 +33,7 @@ import {
   threadsWaitingOn,
   _pendingCount,
 } from "./delegations.ts";
-import { peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
+import { cancelPeerApprovalsForThread, peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
 import { Store, type BotRecord, type GroupRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
@@ -74,6 +76,13 @@ async function waitFor<T>(predicate: () => T | undefined | false, timeout = 2_00
     await new Promise((r) => setTimeout(r, 25));
   }
 }
+
+it.each([
+  [1_000, "1 minute"], [60_000, "1 minute"], [120_000, "2 minutes"],
+  [3_600_000, "1 hour"], [5_400_000, "90 minutes"], [7_200_000, "2 hours"],
+])("formats the configured busy-hold cap %s as %s", (duration, label) => {
+  expect(busyHoldCapText(duration as number)).toBe(label);
+});
 
 describe("queueDelegation", () => {
   let store: Store;
@@ -121,6 +130,17 @@ describe("queueDelegation", () => {
     }, 1);
     expect(result.result).toBe("no_target");
     expect(_pendingCount(from.threadId)).toBe(0);
+  });
+
+  it("accepts six handoffs per source thread and refuses the seventh", () => {
+    const item = { toBotId: target.id, message: "next task", depth: 0 };
+    for (let index = 0; index < 6; index++) {
+      expect(queueDelegation(commsBus, from, item, 1).result).toBe("ok");
+    }
+    expect(queueDelegation(commsBus, from, item, 1).result).toBe("too_many");
+    expect(_pendingCount(from.threadId)).toBe(6);
+    const sibling = store.createTask(from.id, "Separate work", false)!;
+    expect(queueDelegation(commsBus, from, item, 1, sibling.threadId).result).toBe("ok");
   });
 
   it("queues, broadcasts, and drops a 'Delegated to @Target' chip on the source thread", () => {
@@ -502,6 +522,46 @@ describe("drainDelegations", () => {
     expect(runTarget).not.toHaveBeenCalled();
   });
 
+  it.each(["deny", "expired", "cancelled"] as const)("records %s approval outcomes without dispatch or a late revival", async (outcome) => {
+    vi.useFakeTimers();
+    try {
+      store.patchBot(from.id, { approvePeerComms: true });
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+      const runTarget = vi.fn();
+      const settled = vi.fn();
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget, settled);
+      await vi.advanceTimersByTimeAsync(0);
+      const card = store.messagesFor(from.threadId).find(m => m.card?.requestId)!;
+      expect(card).toBeDefined();
+      if (outcome === "expired") await vi.advanceTimersByTimeAsync(15 * 60_000);
+      else if (outcome === "cancelled") cancelPeerApprovalsForThread(from.threadId);
+      else resolvePeerComms(approvalBus, card.card!.requestId!, "deny");
+      await vi.advanceTimersByTimeAsync(0);
+      const receipt = findDelegationReceipt(queued.id!)!;
+      expect(receipt).toMatchObject({
+        status: outcome === "deny" ? "denied" : outcome,
+        approvalOutcome: outcome,
+        approvalSource: outcome === "deny" ? "user" : "system",
+      });
+      expect(receipt.result).toBe(outcome === "deny" ? "the user denied this handoff"
+        : outcome === "expired" ? "the approval card expired without an answer" : "the approval was cancelled before a decision");
+      expect(settled).toHaveBeenCalledTimes(1);
+      expect(_pendingCount(from.threadId)).toBe(0);
+      expect(runTarget).not.toHaveBeenCalled();
+      expect(resolvePeerComms(approvalBus, card.card!.requestId!, "allow")).toBe(false);
+      if (outcome !== "deny") {
+        expect(store.messagesFor(from.threadId).some(m => m.tool?.name?.includes("denied by user"))).toBe(false);
+        expect(buildDelegationFailurePrompt(target.name, receipt.result!)).not.toContain("user denied");
+      }
+      _resetPending();
+      _loadPending();
+      expect(findDelegationReceipt(queued.id!)).toEqual(receipt);
+    } finally {
+      cancelPeerApprovalsForThread(from.threadId);
+      vi.useRealTimers();
+    }
+  });
+
   it("does not revive discarded work when an already-open approval is allowed", async () => {
     store.patchBot(from.id, { approvePeerComms: true });
     const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
@@ -832,6 +892,33 @@ describe("delegations survive a restart", () => {
     expect(loaded.queuedAt).toBeGreaterThanOrEqual(before);
   });
 
+  it("renews an elapsed busy window on restart without extending a still-valid one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      store.patchBot(target.id, { busy: true });
+      queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "held", depth: 0 }, 1);
+      drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, vi.fn());
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const heldAt = Date.now();
+      const readBusySince = (): number => JSON.parse(readFileSync(file(), "utf8"))[from.threadId][0].busySince;
+      expect(readBusySince()).toBe(heldAt);
+
+      vi.setSystemTime(heldAt + DELEGATION_BUSY_HOLD_MAX_MS);
+      _loadPending();
+      const renewedAt = Date.now();
+      expect(readBusySince()).toBe(renewedAt);
+      expect(expireStaleDelegations(buses.commsBus, Date.now())).toBe(0);
+
+      vi.setSystemTime(renewedAt + 60_000);
+      _loadPending();
+      expect(readBusySince()).toBe(renewedAt);
+      vi.setSystemTime(renewedAt + DELEGATION_BUSY_HOLD_MAX_MS);
+      expect(expireStaleDelegations(buses.commsBus, Date.now())).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("clamps a future queuedAt (clock moved back, hand-edited file) to now instead of making it un-expirable", () => {
     const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(DATA_DIR, { recursive: true });
@@ -906,6 +993,7 @@ describe("busy waits and expiry", () => {
 
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
+    _resetPending();
     store = new Store(selection);
     from = store.createBot();
     target = store.createBot();
@@ -961,6 +1049,49 @@ describe("busy waits and expiry", () => {
     drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
     await waitFor(() => runTarget.mock.calls.length === 1);
     expect(_pendingCount(from.threadId)).toBe(0);
+  });
+
+  it("dispatches a classic handoff while another thread keeps the bot busy, when the standing thread and a slot are free", async () => {
+    // One working thread no longer blocks a classic handoff: admission is
+    // the same test startTurn applies to a direct turn on the standing
+    // thread — the thread free, a slot free, no group turn — never
+    // whole-bot idleness.
+    const asked: Array<[string, string]> = [];
+    const admitBus: CommsBus = {
+      ...commsBus,
+      canAdmitDirectTurn: (botId, threadId) => {
+        asked.push([botId, threadId]);
+        return true;
+      },
+    };
+    store.patchBot(target.id, { busy: true });
+    const queued = queueDelegation(admitBus, from, { toBotId: target.id, message: "now please", depth: 0 }, 1);
+    const runTarget = vi.fn();
+    drainDelegations(admitBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => runTarget.mock.calls.length === 1 && _pendingCount(from.threadId) === 0);
+
+    expect(asked).toContainEqual([target.id, target.threadId]);
+    expect(runTarget.mock.calls[0][0]).toBe(target.id);
+    expect(chipCount("waiting")).toBe(0);
+    expect(findDelegationReceipt(queued.id!)).toBeNull();
+  });
+
+  it("holds a classic handoff while admission refuses the standing thread, then delivers when it frees", async () => {
+    // The refusal covers every reason startTurn refuses a direct turn: the
+    // standing thread busy, the bot at capacity, or a live group turn.
+    let admit = false;
+    const holdBus: CommsBus = { ...commsBus, canAdmitDirectTurn: () => admit };
+    store.patchBot(target.id, { busy: true });
+    queueDelegation(holdBus, from, { toBotId: target.id, message: "when you can", depth: 0 }, 1);
+    const runTarget = vi.fn();
+    drainDelegations(holdBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => chipCount("waiting — they're busy;") === 1);
+    expect(runTarget).not.toHaveBeenCalled();
+
+    admit = true;
+    drainDelegations(holdBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => runTarget.mock.calls.length === 1 && _pendingCount(from.threadId) === 0);
+    expect(chipCount("waiting — they're busy;")).toBe(1);
   });
 
   it("posts one waiting chip per handoff, however many drains run while the target is busy", async () => {
@@ -1039,7 +1170,6 @@ describe("busy waits and expiry", () => {
 
       drainDelegations(commsBus, approvalBus, from.threadId, runTarget, onSettled);
       await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
-      releaseDelegationsWaitingOn(target.id);
 
       vi.setSystemTime(new Date(Date.now() + DELEGATION_TTL_MS));
       drainDelegations(commsBus, approvalBus, from.threadId, runTarget, onSettled);
@@ -1054,6 +1184,118 @@ describe("busy waits and expiry", () => {
       expect(chipCount("Delegation to @Helper expired — not picked up within 24 hours")).toBe(1);
       expect(settled).toEqual(["expired"]);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("expires a busy hold at the cap — hours, not the 24-hour TTL — and wakes the delegator", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      store.patchBot(target.id, { busy: true });
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0 }, 1);
+      const runTarget = vi.fn();
+      const settled: string[] = [];
+      const onSettled = (receipt: { status: string }) => void settled.push(receipt.status);
+
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget, onSettled);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+
+      // far short of the 24-hour delivery window, past the busy-hold cap
+      vi.setSystemTime(new Date(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS));
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget, onSettled);
+      await waitFor(() => _pendingCount(from.threadId) === 0);
+
+      expect(runTarget).not.toHaveBeenCalled();
+      expect(findDelegationReceipt(queued.id!)).toMatchObject({
+        status: "expired",
+        toBotName: "Helper",
+        result: "@Helper was still busy after 2 hours",
+      });
+      expect(chipCount("Delegation to @Helper expired — still busy after 2 hours")).toBe(1);
+      expect(chipCount("Delegation to @Helper expired — not picked up within 24 hours")).toBe(0);
+      expect(settled).toEqual(["expired"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps holding a busy handoff that has not reached the busy-hold cap", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      store.patchBot(target.id, { busy: true });
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0 }, 1);
+      const runTarget = vi.fn();
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+
+      vi.setSystemTime(new Date(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS - 1_000));
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+
+      expect(runTarget).not.toHaveBeenCalled();
+      expect(_pendingCount(from.threadId)).toBe(1);
+      expect(findDelegationReceipt(queued.id!)).toBeNull();
+      // the pending map is module-level: clear the held item so the next
+      // test's sweep does not inherit it
+      discardDelegations(commsBus, from.threadId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sweeps a past-cap busy hold and keeps under-cap ones queued", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      store.patchBot(target.id, { busy: true });
+      const stale = queueDelegation(commsBus, from, { toBotId: target.id, message: "stale", depth: 0 }, 1);
+      drainDelegations(commsBus, approvalBus, from.threadId, vi.fn());
+      await waitFor(() => pendingDelegationInfo(stale.id!)?.waiting === true);
+      // The marker is set synchronously, before the fire-and-forget drain's
+      // finally releases ownership. A sweep must run after that release.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      vi.setSystemTime(new Date(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS));
+      const fresh = queueDelegation(commsBus, from, { toBotId: target.id, message: "fresh", depth: 0 }, 1);
+
+      const settled: string[] = [];
+      const expired = expireStaleDelegations(commsBus, Date.now(), (receipt) => void settled.push(receipt.status));
+
+      expect(expired).toBe(1);
+      expect(_pendingCount(from.threadId)).toBe(1);
+      expect(pendingDelegationInfo(fresh.id!)).not.toBeNull();
+      expect(findDelegationReceipt(stale.id!)).toMatchObject({
+        status: "expired",
+        result: "@Helper was still busy after 2 hours",
+      });
+      expect(chipCount("Delegation to @Helper expired — still busy after 2 hours")).toBe(1);
+      expect(settled).toEqual(["expired"]);
+      // the pending map is module-level: clear the kept item so the next
+      // test's sweep does not inherit it
+      discardDelegations(commsBus, from.threadId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not count source work or a previous busy period toward a fresh busy hold", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0 }, 1);
+      vi.setSystemTime(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS);
+      store.patchBot(target.id, { busy: true });
+      const runTarget = vi.fn();
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+      expect(findDelegationReceipt(queued.id!)).toBeNull();
+      vi.setSystemTime(Date.now() + DELEGATION_BUSY_HOLD_MAX_MS - 1000);
+      releaseDelegationsWaitingOn(target.id);
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+      vi.setSystemTime(Date.now() + 2000);
+      expect(expireStaleDelegations(commsBus, Date.now())).toBe(0);
+      expect(findDelegationReceipt(queued.id!)).toBeNull();
+      expect(runTarget).not.toHaveBeenCalled();
+    } finally {
+      discardDelegations(commsBus, from.threadId);
       vi.useRealTimers();
     }
   });
@@ -1272,7 +1514,8 @@ describe("peer wake helpers", () => {
     let now = 1_000_000;
     const budget = new DelegationWakeBudget(() => now);
 
-    for (let i = 0; i < DELEGATION_WAKE_MAX_PER_WINDOW; i++) {
+    expect(DELEGATION_WAKE_MAX_PER_WINDOW).toBe(6);
+    for (let i = 0; i < 6; i++) {
       expect(budget.tryAcquire("t1")).toBe(true);
     }
     // cap reached — no further wakes within the same window

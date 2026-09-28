@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const sounds = vi.hoisted(() => ({ enabled: true }));
+vi.mock("./notification-preferences", () => ({
+  notificationSoundsEnabled: () => sounds.enabled,
+}));
+
 import {
   buildNotificationOptions,
   requestNotificationPermission,
@@ -33,7 +38,10 @@ function installNotification(permission: NotificationPermission, focused = false
   return { notices, requestPermission };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  sounds.enabled = true;
+});
 
 describe("desktop notifications", () => {
   it("does not request permission from a background notification frame", () => {
@@ -62,6 +70,15 @@ describe("desktop notifications", () => {
     showNotification(frame, vi.fn(), undefined, frame.threadId);
 
     expect(notices).toHaveLength(0);
+  });
+
+  it("shows a spend notice even over the thread it points at, in its own stack", () => {
+    const { notices } = installNotification("granted", true);
+
+    showNotification({ ...frame, kind: "spend", title: "Monthly spend limit reached" }, vi.fn(), "https://avatar.test/a.png", frame.threadId);
+
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.options).toMatchObject({ tag: "openmausbot:spend", icon: undefined });
   });
 
   it("still alerts a focused app when another task is visible", () => {
@@ -113,6 +130,22 @@ describe("desktop notifications", () => {
 
     showNotification(frame, vi.fn(), null);
     expect(notices[1]?.options?.icon).toBeUndefined();
+  });
+});
+
+describe("notification sounds", () => {
+  it("lets the platform play its sound by default", () => {
+    const { notices } = installNotification("granted");
+    showNotification(frame, vi.fn());
+    expect(notices[0]?.options?.silent).toBeUndefined();
+  });
+
+  it("posts silently when sounds are muted on this computer, keeping the banner", () => {
+    sounds.enabled = false;
+    const { notices } = installNotification("granted");
+    showNotification(frame, vi.fn());
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.options).toMatchObject({ body: frame.body, silent: true });
   });
 });
 

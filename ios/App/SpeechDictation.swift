@@ -95,7 +95,7 @@ final class SpeechDictation: ObservableObject {
             return
         }
 
-        let mic = await AVAudioApplication.requestRecordPermission()
+        let mic = await MicrophonePermission.request()
         guard gen == generation, !Task.isCancelled else {
             return
         }
@@ -137,6 +137,11 @@ final class SpeechDictation: ObservableObject {
             throw CaptureError.noRecognizer
         }
         self.recognizer = recognizer
+
+        // Take ownership of the shared session before reconfiguring it:
+        // the audible voice note (if any) pauses here, and transcript
+        // playback stays off until teardown() returns the session.
+        VoiceNoteCenter.shared.beginInputOwnership(.dictation)
 
         let session = AVAudioSession.sharedInstance()
         // `.record` rather than `.playAndRecord`: this is composer
@@ -245,6 +250,7 @@ final class SpeechDictation: ObservableObject {
         audioEngine = nil
         recognizer = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        VoiceNoteCenter.shared.endInputOwnership(.dictation)
     }
 
     private enum CaptureError: Error {

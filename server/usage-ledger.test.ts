@@ -53,6 +53,28 @@ describe("usage ledger files", () => {
     const rows = readUsage(dataDir, { from: new Date("2026-09-01T00:00:00Z"), to: new Date("2026-10-31T23:59:59Z") });
     expect(rows.map((r) => r.botId)).toEqual(["b1", "b2", "b3"]);
     expect(rows[1]!.costUsd).toBeNull();
+    // a cost is labelled with where it came from; an unpriced row has no label
+    expect(rows[0]!.costSource).toBe("reported");
+    expect(rows[1]).not.toHaveProperty("costSource");
+  });
+
+  it("carries the prompt byte split when present and drops malformed values", async () => {
+    appendUsage(dataDir, row({ at: "2026-09-03T10:00:00.000Z", promptBytes: { stable: 21_396, volatile: 8_102 } }));
+    appendUsage(dataDir, row({ at: "2026-09-03T11:00:00.000Z", promptBytes: { stable: -4, volatile: "big" } as unknown as { stable: number; volatile: number } }));
+    await flushUsageLedger(dataDir);
+    const rows = readUsage(dataDir, { from: new Date("2026-09-01T00:00:00Z"), to: new Date("2026-09-30T23:59:59Z") });
+    expect(rows[0]!.promptBytes).toEqual({ stable: 21_396, volatile: 8_102 });
+    expect(rows[1]).not.toHaveProperty("promptBytes");
+  });
+
+  it("stores an estimate as such, and drops a label that has no cost behind it", async () => {
+    appendUsage(dataDir, row({ at: "2026-09-03T10:00:00.000Z", costUsd: 0.25, costSource: "estimated" }));
+    appendUsage(dataDir, row({ at: "2026-09-03T11:00:00.000Z", costUsd: null, costSource: "estimated" }));
+    await flushUsageLedger(dataDir);
+    const rows = readUsage(dataDir, { from: new Date("2026-09-01T00:00:00Z"), to: new Date("2026-09-30T23:59:59Z") });
+    expect(rows[0]).toMatchObject({ costUsd: 0.25, costSource: "estimated" });
+    expect(rows[1]!.costUsd).toBeNull();
+    expect(rows[1]).not.toHaveProperty("costSource");
   });
 
   it("filters by time, skips torn lines and foreign rows, and never stores a negative or fractional token", async () => {
@@ -125,6 +147,15 @@ describe("usage summaries", () => {
     expect(summarizeUsage([], "day")).toEqual({ groups: [], total: expect.objectContaining({ turns: 0, costUsd: null }) });
   });
 
+  it("groups by routine, with every non-routine turn in one manual bucket", () => {
+    const summary = summarizeUsage(rows, "routine");
+    expect(summary.groups.map((g) => [g.key, g.label, g.turns, g.costUsd])).toEqual([
+      ["routine:r1", "Morning digest", 1, 0.5],
+      ["manual", "Not from a routine", 3, expect.closeTo(0.013, 6)],
+    ]);
+    expect(summary.total.turns).toBe(4);
+  });
+
   it("prices groups from the operator's list and adds a billable column to the CSV only then", () => {
     const prices = { default: { inputPerMillion: 1000, outputPerMillion: 2000 }, "codex/gpt-5": { inputPerMillion: 0, outputPerMillion: 0 } };
     const priced = summarizeUsage(rows, "bot", prices);
@@ -134,8 +165,8 @@ describe("usage summaries", () => {
     expect(priced.groups[1]!.billableUsd).toBeCloseTo((1200 * 1000 + 300 * 2000) / 1e6, 9);
     expect(priced.total.billableUsd).toBeCloseTo(priced.groups[0]!.billableUsd! + priced.groups[1]!.billableUsd!, 9);
     expect(summarizeUsage(rows, "bot").total.billableUsd).toBeNull();
-    expect(usageCsv([rows[0]!], prices).split("\n")[0]).toContain(",cost_usd,billable_usd,thread");
-    expect(usageCsv([rows[0]!], prices).split("\n")[1]).toContain(",0.012,1.8,t1");
+    expect(usageCsv([rows[0]!], prices).split("\n")[0]).toContain(",cost_usd,cost_source,billable_usd,thread");
+    expect(usageCsv([rows[0]!], prices).split("\n")[1]).toContain(",0.012,reported,1.8,t1");
     expect(usageCsv([rows[0]!]).split("\n")[0]).not.toContain("billable_usd");
   });
 
@@ -152,10 +183,25 @@ describe("usage summaries", () => {
       { ...rows[1]!, botName: '=HYPERLINK("x")', trigger: { kind: "user", email: "a,b@example.test" } },
     ]);
     const lines = csv.trim().split("\n");
-    expect(lines[0]).toBe("time,bot,model,engine,triggered_by,input_tokens,output_tokens,cached_input_tokens,cost_usd,thread");
-    expect(lines[1]).toBe("2026-09-01T10:00:00.000Z,Scout,claude-sonnet-5,claudeAgent,ada@example.test,1200,300,900,0.012,t1");
+    expect(lines[0]).toBe("time,bot,model,engine,triggered_by,input_tokens,output_tokens,cached_input_tokens,cost_usd,cost_source,thread");
+    expect(lines[1]).toBe("2026-09-01T10:00:00.000Z,Scout,claude-sonnet-5,claudeAgent,ada@example.test,1200,300,900,0.012,reported,t1");
     expect(lines[2]).toContain("\"'=HYPERLINK(\"\"x\"\")\"");
     expect(lines[2]).toContain('"a,b@example.test"');
-    expect(lines[2]).toMatch(/,,t1$/);
+    expect(lines[2]).toMatch(/,,,t1$/);
+    expect(usageCsv([{ ...rows[0]!, costSource: "estimated" }]).split("\n")[1]).toContain(",0.012,estimated,t1");
+  });
+
+  it("keeps estimates apart from reported cost, and reads rows written before estimates existed as reported", () => {
+    const estimated = { ...rows[1]!, costUsd: 0.2, costSource: "estimated" as const };
+    const legacy = { ...rows[0]! }; // costUsd 0.012, no costSource
+    const summary = summarizeUsage([legacy, estimated, rows[2]!], "bot");
+    expect(summary.total.costUsd).toBeCloseTo(0.712, 9);
+    expect(summary.total.estimatedUsd).toBeCloseTo(0.2, 9);
+    expect(summary.total.unpriced).toBe(0);
+    const clerk = summary.groups.find((g) => g.label === "Clerk")!;
+    expect(clerk).toMatchObject({ costUsd: 0.2, estimatedUsd: 0.2 });
+    expect(summary.groups.find((g) => g.label === "Scout")!.estimatedUsd).toBeNull();
+    // an unpriced row is still counted as unpriced, never as a $0 estimate
+    expect(summarizeUsage([rows[1]!], "bot").total).toMatchObject({ costUsd: null, estimatedUsd: null, unpriced: 1 });
   });
 });

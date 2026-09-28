@@ -76,6 +76,7 @@ fun CompanionRoot(
     val welcomeSeen by onboarding.welcomeSeen.collectAsState()
     val notificationPromptSeen by onboarding.notificationPromptSeen.collectAsState()
     val notificationPending by onboarding.notificationPending.collectAsState()
+    val appearanceSkin by environment.chatPreferences.appearanceSkin.collectAsState()
 
     // Settings, reachable from the unpaired home. iOS puts it in a toolbar
     // `NavigationLink`; there is no navigator in the unpaired world, so this is
@@ -192,7 +193,7 @@ fun CompanionRoot(
         tapCoordinator.onPending(session, target, onPendingTargetConsumed)
     }
 
-    CompanionTheme {
+    CompanionTheme(skin = appearanceSkin) {
         // One place for system insets: the app draws edge to edge, and every
         // screen wants the same answer — keep content clear of the status bar,
         // the gesture bar, and the keyboard.

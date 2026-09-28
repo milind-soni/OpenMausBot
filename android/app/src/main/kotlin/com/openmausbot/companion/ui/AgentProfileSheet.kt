@@ -70,10 +70,12 @@ import com.openmausbot.companion.core.AvatarCrop
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.BotProfilePatch
+import com.openmausbot.companion.core.BotOverviewGrant
 import com.openmausbot.companion.core.ConfigStatus
 import com.openmausbot.companion.core.Instance
 import com.openmausbot.companion.core.ModelSelection
 import com.openmausbot.companion.core.Voice
+import com.openmausbot.companion.core.VoiceProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -116,6 +118,10 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
     var voices by remember { mutableStateOf<List<Voice>>(emptyList()) }
     var config by remember { mutableStateOf<ConfigStatus?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var switchingEngine by remember { mutableStateOf(false) }
+    // Read-only facts from the overview route; reloads on reopen, so plain
+    // remember — there is nothing here a rotation needs to defend.
+    var grants by remember { mutableStateOf<List<BotOverviewGrant>?>(null) }
 
     // The Model section. The draft survives rotation; the catalog is reloaded.
     var instances by remember { mutableStateOf<List<Instance>>(emptyList()) }
@@ -137,6 +143,12 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
     }
 
     LaunchedEffect(Unit) {
+        // Grants are a supplementary read a connected workspace's overview
+        // route can make slow; it must not stall the config, voice, and
+        // model loads above it. It runs as an independent child — quiet,
+        // because a failed fetch leaves this section absent, not the
+        // profile erroring.
+        launch { grants = session.loadOverview(opened.id, quiet = true)?.grants }
         val loaded = coroutineScope {
             val status = async { session.configStatus() }
             val options = async { session.voiceOptions() }
@@ -221,6 +233,40 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
                         icon = Icons.Filled.Info,
                         onClick = { onOpenOverview(bot.id) },
                     )
+                }
+
+                // Per-bot tool grants ride the overview route, so the sheet
+                // reads the same summary the overview screen does — read-only,
+                // because the editor lives in the desktop app. Nothing draws
+                // on computers that predate grants; an empty record is the
+                // explicit no-tools state and says so.
+                grants?.let { grantList ->
+                    val grantRows = ProfileRules.connectorGrantRows(grantList)
+                    FormSection(
+                        header = ProfileRules.CONNECTED_APPS,
+                        footer = ProfileRules.CONNECTED_APPS_FOOTER,
+                    ) {
+                        if (grantRows.isEmpty()) {
+                            Text(
+                                ProfileRules.GRANTS_NONE_ANY,
+                                fontSize = 15.sp,
+                                color = secondaryTint,
+                            )
+                        } else {
+                            grantRows.forEach { row ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = MIN_TOUCH_TARGET),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(row.service, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                    Text(row.summary, fontSize = 15.sp, color = secondaryTint)
+                                }
+                            }
+                        }
+                    }
                 }
 
                 FormSection(header = "Model", footer = ModelRules.FOOTER) {
@@ -475,7 +521,38 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
                     )
                 }
 
-                VoiceSection(config = config) {
+                VoiceSection(
+                    config = config,
+                    switching = switchingEngine,
+                    onSwitchEngine = { next ->
+                        // The desktop's Voice engine group: one field of the
+                        // ordinary config write, then a fresh voice list,
+                        // because every engine names its own voices.
+                        if (switchingEngine || config?.voiceProvider == next) return@VoiceSection
+                        scope.launch {
+                            switchingEngine = true
+                            try {
+                                val updated = session.switchVoiceProvider(next)
+                                if (updated != null) {
+                                    val (resetForm, resetBaseline) = ProfileRules.afterVoiceProviderSwitch(
+                                        form = form,
+                                        baseline = baseline,
+                                        config = updated,
+                                    )
+                                    form = resetForm
+                                    baseline = resetBaseline
+                                    config = updated
+                                    // Never render or preview the previous
+                                    // provider's identifiers while reloading.
+                                    voices = emptyList()
+                                    voices = session.voiceOptions()
+                                }
+                            } finally {
+                                switchingEngine = false
+                            }
+                        }
+                    },
+                ) {
                     ChoicePicker(
                         label = "Voice",
                         choices = ProfileRules.voiceChoices(config, voices, form.voice),
@@ -619,11 +696,27 @@ internal fun ChoicePicker(
  * value a rule returns — the screen once drew a correct sentence in the wrong
  * slot with the whole suite green — and, like `DataTableCard`, the assertion
  * has to be over what is mounted. `VoiceSectionWiringTest` mounts exactly this.
+ *
+ * The engine picker rides above the branch: like the desktop's Voice engine
+ * group it is drawn in every state, because switching away is how you repair
+ * an engine whose credential is missing.
  */
 @Composable
-internal fun VoiceSection(config: ConfigStatus?, canSpeak: @Composable () -> Unit) {
+internal fun VoiceSection(
+    config: ConfigStatus?,
+    switching: Boolean = false,
+    onSwitchEngine: (VoiceProvider) -> Unit = {},
+    canSpeak: @Composable () -> Unit,
+) {
     val copy = ProfileRules.voiceCopy(config)
     FormSection(header = "Voice", footer = copy.footer) {
+        ChoicePicker(
+            label = "Voice engine",
+            choices = ProfileRules.providerChoices(),
+            selected = (config?.voiceProvider ?: VoiceProvider.ELEVENLABS).wire,
+            onSelect = { next -> onSwitchEngine(VoiceProvider.fromWire(next)) },
+            enabled = !switching,
+        )
         if (copy.unconfiguredNotice != null) {
             IconNote(text = copy.unconfiguredNotice, painter = R.drawable.ic_volume_off)
         } else {

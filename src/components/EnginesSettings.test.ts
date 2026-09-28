@@ -31,7 +31,11 @@ function render(authenticated: boolean, options: { email?: string; signOut?: boo
 
 describe("Settings → Engines → Codex", () => {
   it("makes browser sign-in discoverable in Settings, not only the model picker", () => {
-    expect(render(false)).toContain("Connect ChatGPT");
+    const html = render(false);
+    expect(html).toContain("Connect ChatGPT");
+    expect(html).toContain("Provider icon");
+    expect(html).toContain("Google Gemini");
+    expect(html).toContain("Upload a custom provider icon for Codex");
   });
 
   it("shows a connected account without offering to replace it", () => {
@@ -63,6 +67,25 @@ describe("Settings → Engines → Codex", () => {
 });
 
 describe("Settings → Engines → setup cards", () => {
+  it("shows every Company provider as read-only while preserving personal controls", () => {
+    vi.stubGlobal("window", {});
+    fixture.bots = [];
+    fixture.instances = ["claudeAgent", "codex", "openai-compat"].map((driverKind) => ({
+      instanceId: `company.fixture.${driverKind}`, displayName: `Company ${driverKind}`, driverKind, readOnly: true,
+      snapshot: { state: "available", authenticated: true }, models: { default: "model", options: [] },
+      // Ignore even accidentally supplied mutation metadata for read-only rows.
+      authentication: { method: "device-code", signOut: true }, install: { signInCommand: "fixture login" },
+    }));
+    const companyOnly = renderToStaticMarkup(createElement(EnginesSettings));
+    for (const driver of ["claudeAgent", "codex", "openai-compat"]) expect(companyOnly).toContain(`Company ${driver}`);
+    expect(companyOnly).toContain("managed by your organization");
+    for (const control of ["Set CLI", "CLI path and updates", "Sign out of ChatGPT", "Update Claude", "fixture login"]) expect(companyOnly).not.toContain(control);
+    fixture.instances.push({ instanceId: "personal", displayName: "Personal Claude", driverKind: "claudeAgent", cliDefault: "claude",
+      snapshot: { state: "available" }, models: { default: "sonnet", options: [] } });
+    const withPersonal = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(withPersonal).toContain("Set CLI"); expect(withPersonal).toContain("CLI path and updates"); expect(withPersonal).toContain("Update Claude");
+  });
+
   it("preserves one-click server installs and updates inside engine cards", () => {
     vi.stubGlobal("window", {});
     vi.stubGlobal("navigator", { userAgent: "Linux" });
@@ -80,6 +103,27 @@ describe("Settings → Engines → setup cards", () => {
     const html = renderToStaticMarkup(createElement(EnginesSettings));
     expect(html).toContain("Update Kimi on this server");
     expect(html).not.toContain("Install Kimi on this server");
+  });
+
+  it("shows a standing warning from the snapshot without a command to run", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    fixture.instances = [{
+      instanceId: "claude", displayName: "Claude", driverKind: "claudeAgent", cliDefault: "claude",
+      snapshot: {
+        state: "available", authenticated: true,
+        warning: { title: "Bots inherit this machine's Claude Code setup", message: "OMB_CLAUDE_INHERIT_USER_CONFIG=1 is set." },
+      },
+      models: { default: "model", options: [] },
+    }];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain("data-engine-warning-notice");
+    expect(html).toContain("Bots inherit this machine&#x27;s Claude Code setup");
+    expect(html).toContain("OMB_CLAUDE_INHERIT_USER_CONFIG=1 is set.");
+    expect(html).not.toContain("data-engine-update-notice");
+    delete fixture.instances[0].snapshot.warning;
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("data-engine-warning-notice");
   });
 
   it("exposes managed Antigravity setup and keeps custom engines free of cloud sign-in", () => {

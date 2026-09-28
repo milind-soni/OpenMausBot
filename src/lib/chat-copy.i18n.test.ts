@@ -59,7 +59,12 @@ describe("usage chip", () => {
     setLocale("pt-br");
     expect(usageDetail(usage)).toContain("entrada");
     expect(usageDetail(usage)).toContain("saída");
-    expect(usageChip(usage)).toContain("tok");
+    // Cost outranks tokens in the chip (usage.ts:140), so this fixture — which
+    // carries a costUsd — shows the cost. The translated token unit, which is
+    // what this i18n test is really guarding, appears only when the engine
+    // reports no cost.
+    expect(usageChip(usage)).toBe("$0.02");
+    expect(usageChip({ ...usage, costUsd: null })).toContain("entrada");
     expect(costCaption("subscription")).toBe("equivalente — está na sua assinatura, não é cobrado");
     expect(costCaption(undefined)).toBe("conforme informado pelo mecanismo");
   });

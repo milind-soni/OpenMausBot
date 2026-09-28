@@ -335,6 +335,29 @@ class DecodingTest {
     }
 
     @Test
+    fun decodesVoiceProvidersWithTheServersFallback() {
+        fun provider(json: String) = CompanionJson.decodeFromString<ConfigStatus>(json).voiceProvider
+
+        assertEquals(VoiceProvider.ELEVENLABS, provider("""{"tts":{"configured":true,"provider":"elevenlabs"}}"""))
+        assertEquals(VoiceProvider.FISH, provider("""{"tts":{"configured":true,"provider":"fish"}}"""))
+        assertEquals(VoiceProvider.SYSTEM, provider("""{"tts":{"configured":false,"provider":"system"}}"""))
+        assertEquals(
+            VoiceProvider.CHATTERBOX,
+            provider("""{"tts":{"configured":true,"provider":"chatterbox","baseUrl":"http://127.0.0.1:4123"}}"""),
+        )
+        assertEquals(
+            VoiceProvider.ELEVENLABS,
+            provider("""{"tts":{"configured":true}}"""),
+            "an older desktop predates the field entirely",
+        )
+        assertEquals(
+            VoiceProvider.ELEVENLABS,
+            provider("""{"tts":{"configured":true,"provider":"cartesia"}}"""),
+            "an engine this build has never heard of falls back the way the server does",
+        )
+    }
+
+    @Test
     fun decodesEveryCapturedFrame() {
         val frames = decodeFixture<List<StreamFrame>>("sse-frames")
         assertTrue(frames.isNotEmpty())
@@ -393,6 +416,17 @@ class DecodingTest {
         )
         assertEquals(Message.Kind.UNKNOWN, message.kind)
         assertEquals("Stripe fired", message.text)
+    }
+
+    @Test
+    fun aCompactionMessageDecodesItsRecord() {
+        val message = CompanionJson.decodeFromString<Message>(
+            """{"id":"c1","role":"bot","kind":"compaction","at":1,"text":"[compaction] Earlier: …",
+               "compaction":{"summary":"Earlier: the user asked for X.","firstKeptId":"c1","tokensBefore":12345,"by":"person"}}""",
+        )
+        assertEquals(Message.Kind.COMPACTION, message.kind)
+        assertEquals("Earlier: the user asked for X.", message.compaction?.summary)
+        assertEquals(12345, message.compaction?.tokensBefore)
     }
 
     @Test
@@ -480,18 +514,66 @@ class DecodingTest {
         )
         assertEquals(ThreadCloser("pm", "Parker", 9.0), closed.closedBy)
         assertTrue(closed.isClosed)
-        assertEquals("closed by Parker", closed.bylineLabel)
+        assertEquals("closed by Parker", closed.bylineLabel())
 
         val open = CompanionJson.decodeFromString<BotTask>(
             """{"threadId":"t1","title":"","createdAt":1,"openedBy":{"botId":"pm","name":"Parker","at":2}}""",
         )
         assertNull(open.closedBy)
         assertFalse(open.isClosed)
-        assertEquals("opened by Parker", open.bylineLabel)
-        assertNull(CompanionJson.decodeFromString<BotTask>("""{"threadId":"t1","title":"","createdAt":1}""").bylineLabel)
+        assertEquals("opened by Parker", open.bylineLabel())
+        assertNull(CompanionJson.decodeFromString<BotTask>("""{"threadId":"t1","title":"","createdAt":1}""").bylineLabel())
         decodeFixture<Fleet>("bots-paged").bots.flatMap { it.tasks.orEmpty() }.forEach { task ->
             assertFalse(task.isClosed, task.threadId)
         }
+    }
+
+    @Test
+    fun decodesSnoozedUntilAsSentinelTimestampOrNothing() {
+        // 0 sleeps until activity, a timestamp sleeps until the clock passes
+        // it, and an older payload simply never slept.
+        val asleep = CompanionJson.decodeFromString<BotTask>(
+            """{"threadId":"t1","title":"","createdAt":1,"snoozedUntil":0}""",
+        )
+        assertEquals(0.0, asleep.snoozedUntil)
+        assertTrue(asleep.isSnoozed(now = 500L))
+
+        val timed = CompanionJson.decodeFromString<BotTask>(
+            """{"threadId":"t2","title":"","createdAt":1,"snoozedUntil":900}""",
+        )
+        assertEquals(900.0, timed.snoozedUntil)
+        assertTrue(timed.isSnoozed(now = 500L))
+        assertFalse(timed.isSnoozed(now = 901L))
+        assertEquals("Snoozed", timed.bylineLabel(now = 500L))
+
+        val awake = CompanionJson.decodeFromString<BotTask>("""{"threadId":"t3","title":"","createdAt":1}""")
+        assertNull(awake.snoozedUntil)
+        assertFalse(awake.isSnoozed(now = 500L))
+        decodeFixture<Fleet>("bots-paged").bots.flatMap { it.tasks.orEmpty() }.forEach { task ->
+            assertNull(task.snoozedUntil, task.threadId)
+        }
+    }
+
+    @Test
+    fun archivedMeansTheStampIsPresentEvenAtZero() {
+        // The task API accepts any epoch number, so archivedAt 0 is archived —
+        // the same presence rule the desktop's isArchived uses.
+        val atZero = CompanionJson.decodeFromString<BotTask>(
+            """{"threadId":"t1","title":"","createdAt":1,"archivedAt":0}""",
+        )
+        assertTrue(atZero.isArchived)
+        assertEquals("Archived", atZero.bylineLabel())
+
+        val never = CompanionJson.decodeFromString<BotTask>("""{"threadId":"t1","title":"","createdAt":1}""")
+        assertFalse(never.isArchived)
+        assertNull(never.bylineLabel())
+
+        val closedToo = CompanionJson.decodeFromString<BotTask>(
+            """{"threadId":"t1","title":"","createdAt":1,"archivedAt":5,
+               "closedBy":{"botId":"pm","name":"Parker","at":9}}""",
+        )
+        assertTrue(closedToo.isArchived)
+        assertEquals("closed by Parker", closedToo.bylineLabel())
     }
 
     @Test
@@ -527,5 +609,68 @@ class DecodingTest {
         decodeFixture<ThreadPage>("thread-page").messages.forEach { message ->
             assertNull(message.threadRef, message.id)
         }
+    }
+
+    @Test
+    fun decodesTheClaudeUpdateFlagOnAnErrorChipAndItsAbsence() {
+        val flagged = CompanionJson.decodeFromString<Message>(
+            """{"id":"m5","role":"bot","kind":"activity","at":1,
+               "tool":{"name":"error: this model needs a newer Claude Code","ok":false,
+                       "setup":true,"claudeUpdate":true}}""",
+        )
+        assertEquals(Message.Kind.ACTIVITY, flagged.kind)
+        assertEquals(false, flagged.tool?.ok)
+        assertEquals(true, flagged.tool?.setup)
+        assertEquals(true, flagged.tool?.claudeUpdate)
+
+        val plain = CompanionJson.decodeFromString<Message>(
+            """{"id":"m6","role":"bot","kind":"activity","at":1,
+               "tool":{"name":"error: engine is not signed in","ok":false,"setup":true}}""",
+        )
+        assertNull(plain.tool?.claudeUpdate)
+    }
+
+    @Test
+    fun grantsSummarizeAllPartialAndNonePerService() {
+        val overview = decodeFixture<BotOverview>("bot-overview-grants")
+
+        assertEquals(
+            listOf(
+                BotOverviewGrant("gmail", BotOverviewGrantLevel.Partial, toolCount = 2),
+                BotOverviewGrant("notion", BotOverviewGrantLevel.None, toolCount = 0),
+                BotOverviewGrant("slack", BotOverviewGrantLevel.All, toolCount = 0),
+            ),
+            overview.grants,
+        )
+        // The plain fixture predates grants; absence must read as absence.
+        assertNull(decodeFixture<BotOverview>("bot-overview").grants)
+    }
+
+    @Test
+    fun unknownGrantShapesDoNotBreakTheOverview() {
+        fun overviewOf(grants: String): BotOverview = CompanionJson.decodeFromString(
+            """
+            {"who": {"name": "Kiwi", "title": "", "blurb": "", "soulLead": ""},
+             "does": [], "reaches": [], "wont": [], "recent": [], "grants": $grants}
+            """.trimIndent(),
+        )
+
+        // A level a newer computer adds falls back to partial, keeping its row.
+        assertEquals(
+            listOf(BotOverviewGrant("gmail", BotOverviewGrantLevel.Partial, toolCount = 7)),
+            overviewOf("""[{"slug": "gmail", "level": "scoped", "toolCount": 7}]""").grants,
+        )
+        // Entries the decoder cannot read are dropped; siblings survive.
+        assertEquals(
+            listOf(BotOverviewGrant("slack", BotOverviewGrantLevel.All, toolCount = 0)),
+            overviewOf(
+                """[{"slug": "gmail", "level": 3}, {"slug": "slack", "level": "all", "toolCount": 0}]""",
+            ).grants,
+        )
+        // A malformed container reads as absent — an explicit no-tools
+        // record is an empty array, never this.
+        assertNull(overviewOf("5").grants)
+        // The explicit no-tools record is the empty array, and it decodes.
+        assertEquals(emptyList<BotOverviewGrant>(), overviewOf("[]").grants)
     }
 }

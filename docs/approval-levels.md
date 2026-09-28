@@ -12,7 +12,7 @@ Access, OMB also applies its own configuration tools without another approval.
 | **Ask for approval** | Requests approval for commands and file changes, the way the provider's supervised mode does. |
 | **Auto-accept edits** | Approves file edits automatically; other actions can still require approval. Offered where the provider has such a mode (Claude, Grok, Antigravity). |
 | **Approve for me** | Uses the provider's automatic review on Codex, Claude, Cursor, and Grok to approve routine actions and ask about others. Providers without an equivalent fall back to asking. |
-| **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native permission prompts are answered for you. OMB profile changes, routine actions, team setup, bot deletion, and enabled skill authoring apply without a second approval. Peer-review prompts are skipped within the bot's authorized scope. Delegation uses the receiving bot's setting, never the sender's. Actual questions and missing credentials still need your input. |
+| **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native permission prompts are answered for you. OMB profile changes, routine actions, team setup, bot deletion, and enabled skill authoring apply without a second approval. Peer-review prompts are skipped within the bot's authorized scope. Delegation uses the receiving bot's setting, never the sender's — except from a Chief of Staff with Full access (below). Actual questions and missing credentials still need your input. |
 | **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
 
 Full access is an elevated-risk standing approval. Full and Custom can only be
@@ -36,6 +36,22 @@ into another Allow/Deny card.
 A turn a webhook, a routine, or another bot started runs in the bot's level
 like any other turn. The decision log records that nobody was at the keyboard
 when such a turn asked.
+
+### A Chief of Staff's Full access covers the work it delegates
+
+Approvals were where a team's owner spent their day: every teammate a Chief
+handed work to stopped that work to ask the owner, one card every few
+minutes, across the whole team. So a **Chief of Staff with Full access passes
+that access on**. Work it delegates from a Full-access conversation —
+`delegate_bot`, and `coordinate_bots` into a teammate's thread — runs with
+Full access whatever the teammate's own level: the delegated thread is
+switched to Full, stays Full, and opens with a line saying so ("Full access —
+delegated by Clive, a Chief of Staff with Full access"). Work a Full-access
+Chief hands out inside a room runs Full for that turn. The teammate's own
+default and its other conversations do not change; a teammate whose engine
+has no Full mode keeps its own level; an ordinary bot's delegation still uses
+the recipient's setting; a Chief delegating from an Ask conversation passes
+nothing on. Questions and missing credentials still reach you.
 
 ## Answering a request
 
@@ -82,6 +98,28 @@ still require an answer. A Chief or
 teammate can delegate work to this bot without downgrading its explicit Auto
 (full access) grant. It does not enable Auto on any other bot.
 
+## Asking you questions
+
+Every engine can stop and ask, and no approval level ever answers a question
+for you: Ask, Auto-accept edits, Auto, and Full access all leave a question
+card for a person. What differs per engine is only how the ask travels:
+
+| Engine family | How an ask travels | Multiple questions at once |
+| --- | --- | --- |
+| Claude Code | Structured round-trip (its own `AskUserQuestion`) | Yes — capped at 4 by the CLI |
+| Codex | Structured round-trip | Yes — up to 6 |
+| Grok Build, Minimax, OpenAI-compatible endpoints | The injected `ask_user` tool | Yes — up to 6 |
+| ACP engines (Cursor, Antigravity, Gemini CLI, Qwen Code, OpenCode, …) | Option-match round-trip on the ACP permission request | One at a time — the request carries one choice set |
+| Pi | Free-text round-trip over `extension_ui_request` | One at a time |
+| BoatAgent (cloud computer) | A fenced `omb-ask` block in the run's final output; the turn stays open until you answer or the ask times out | Yes — up to 6 |
+
+A question the harness parsed out of model-authored output rather than a
+real tool call — the BoatAgent transport — carries an "Agent-composed
+question" badge on the card, and the decision log records it with
+`origin: output`. Flat clients (notifications, older companion builds)
+see plain buttons only when a card asks a single choice question; a
+multi-question card renders its structured form on current apps instead.
+
 ## Provider mappings
 
 | Provider | Ask | Auto-accept edits | Auto | Full access |
@@ -92,6 +130,8 @@ teammate can delegate work to this bot without downgrading its explicit Auto
 | Antigravity | Native `default` | Native `auto_edit` | Legacy `auto` behaves as Ask; UI Auto selects Full access | Native `yolo` plus automatic approval of remaining tool-permission requests; shown as Auto |
 | Grok Build | Native `default` | Native `acceptEdits` | Native `--permission-mode auto`; availability of Grok's reviewer depends on its feature rollout | Native `bypassPermissions` plus automatic approval of remaining tool-permission requests |
 | OpenCode | Ask | not offered | Ask | Approve individual ACP permission requests, never task questions |
+| Qwen Code | Native `default` | Native `--approval-mode auto-edit` | Native `--approval-mode auto` (Qwen's LLM classifier approves safe actions, blocks risky ones) | `--yolo`, plus automatic approval of remaining ACP permission requests |
+| Gemini CLI | Native `default` | Native `--approval-mode auto_edit` | Ask (no reviewer) | `--yolo`, plus automatic approval of remaining ACP permission requests |
 | Other/custom engines | Ask | not offered | Ask | Not offered until a provider mapping is implemented |
 
 These settings apply on each turn, including resumed conversations. Switching

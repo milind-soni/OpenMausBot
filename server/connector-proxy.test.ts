@@ -251,4 +251,96 @@ describe("connector MCP bridge", () => {
       error: { code: -32000, message: "connected apps are unavailable" },
     });
   });
+
+  it("filters a JSON tools/list response down to the bot's grants", async () => {
+    const upstream = await listen((request, response) => {
+      request.resume();
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 21,
+        result: {
+          tools: [
+            { name: "COMPOSIO_SEARCH_TOOLS" },
+            { name: "COMPOSIO_GET_TOOL_SCHEMAS" },
+            { name: "COMPOSIO_MULTI_EXECUTE_TOOL" },
+            { name: "GMAIL_SEND_EMAIL" },
+            { name: "GMAIL_GET_EMAIL" },
+            { name: "GMAIL_MANAGE_CONNECTIONS" },
+            { name: "SLACK_POST_MESSAGE" },
+            { name: "SLACK_MANAGE_CONNECTIONS" },
+          ],
+        },
+      }));
+    });
+    const lines = start({
+      OMB_CONNECTOR_UPSTREAM_URL: upstream,
+      OMB_CONNECTOR_ALLOWED_TOOLS: JSON.stringify({ gmail: { tools: ["GMAIL_SEND_EMAIL"] } }),
+    });
+    child!.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 21, method: "tools/list", params: {} }) + "\n");
+    const reply = await nextJson(lines);
+    expect(reply.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      "COMPOSIO_SEARCH_TOOLS",
+      "COMPOSIO_GET_TOOL_SCHEMAS",
+      "COMPOSIO_MULTI_EXECUTE_TOOL",
+      "GMAIL_SEND_EMAIL",
+      "GMAIL_MANAGE_CONNECTIONS",
+    ]);
+  });
+
+  it("filters an SSE tools/list response the same as JSON", async () => {
+    const frame = {
+      jsonrpc: "2.0",
+      id: 22,
+      result: {
+        tools: [
+          { name: "COMPOSIO_MULTI_EXECUTE_TOOL" },
+          { name: "NOTION_CREATE_PAGE" },
+          { name: "NOTION_WAIT_FOR_CONNECTIONS" },
+          { name: "GMAIL_SEND_EMAIL" },
+        ],
+      },
+    };
+    const upstream = await listen((request, response) => {
+      request.resume();
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end("data: " + JSON.stringify(frame) + "\n\n");
+    });
+    const lines = start({
+      OMB_CONNECTOR_UPSTREAM_URL: upstream,
+      OMB_CONNECTOR_ALLOWED_TOOLS: JSON.stringify({ notion: { tools: ["NOTION_CREATE_PAGE"] } }),
+    });
+    child!.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 22, method: "tools/list", params: {} }) + "\n");
+    const reply = await nextJson(lines);
+    expect(reply.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      "COMPOSIO_MULTI_EXECUTE_TOOL",
+      "NOTION_CREATE_PAGE",
+      "NOTION_WAIT_FOR_CONNECTIONS",
+    ]);
+  });
+
+  it("relays the unfiltered list with no allowlist env or an unreadable one", async () => {
+    for (const allowlist of [undefined, "{not json"]) {
+      const upstream = await listen((request, response) => {
+        request.resume();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          jsonrpc: "2.0",
+          id: 23,
+          result: { tools: [{ name: "GMAIL_SEND_EMAIL" }, { name: "SLACK_POST_MESSAGE" }] },
+        }));
+      });
+      const lines = start({
+        OMB_CONNECTOR_UPSTREAM_URL: upstream,
+        ...(allowlist === undefined ? {} : { OMB_CONNECTOR_ALLOWED_TOOLS: allowlist }),
+      });
+      child!.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 23, method: "tools/list", params: {} }) + "\n");
+      const reply = await nextJson(lines);
+      expect(reply.result.tools).toHaveLength(2);
+      child!.kill("SIGKILL");
+      child = null;
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+      server = null;
+    }
+  });
 });

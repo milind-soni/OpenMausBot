@@ -134,7 +134,7 @@ final class WalkieController: ObservableObject {
         let speech = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
         }
-        guard speech == .authorized, await AVAudioApplication.requestRecordPermission() else {
+        guard speech == .authorized, await MicrophonePermission.request() else {
             return fail(String(localized: "Walkie needs Microphone and Speech Recognition access. Turn them on in Settings."))
         }
         recognizer = Dictation.localeCandidates()
@@ -280,6 +280,10 @@ final class WalkieController: ObservableObject {
         phase = .sending
         Haptics.impact(.light)
         let baseline = Set(session.state.transcript(forThread: target.threadId).map(\.id))
+        // Walkie speaks through ElevenLabs on the phone. Only carry the
+        // agent's saved voice across when the computer is using the same
+        // provider; Fish, system, and Chatterbox IDs are not compatible.
+        let voiceId = await session.configStatus()?.walkieAgentVoice(target.voice)
         session.actionError = nil
         await session.send(words, to: .bot(target))
         if let error = session.actionError {
@@ -292,7 +296,8 @@ final class WalkieController: ObservableObject {
         }
         draft = ""
         pending = Pending(
-            threadId: target.threadId, name: target.name, voiceId: target.voice,
+            threadId: target.threadId, name: target.name,
+            voiceId: voiceId,
             baseline: baseline, sentAt: Date()
         )
         reply = ""

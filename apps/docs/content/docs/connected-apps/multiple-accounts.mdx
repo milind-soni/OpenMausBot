@@ -21,3 +21,7 @@ OpenMausBot asks for a label on every new account, including the first, so the C
 Each connected account appears separately with its alias and status. Disconnect removes only the chosen account and leaves the others active.
 
 OpenMausBot caps each toolkit at five usable accounts. If a provider or Composio project policy prevents another authorization, use a separate OpenMausBot installation or configuration rather than reauthorizing over a working account.
+
+## Grants apply to tools, not accounts
+
+Per-bot tool grants say which tools a bot may call on a service; they do not pick an account. When several accounts could run a tool, the bot still selects one explicitly, and a grant covers every account of that service on the installation. To keep one bot away from a specific account, put that account in a separate installation or configuration.

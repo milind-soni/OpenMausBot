@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   browserProfileDeletionBlockReason,
-  browserProfilePartitionId,
   browserProfilesForPatch,
   browserProfilesMutation,
   newBrowserProfileId,
@@ -27,12 +26,6 @@ describe("browser profile partition routing", () => {
     { id: "client", name: "Client", partitionId: "Client" },
     { id: "personal", name: "Personal" },
   ];
-
-  it("resolves an immutable legacy partition without changing the public id", () => {
-    expect(browserProfilePartitionId(profiles, "client")).toBe("Client");
-    expect(browserProfilePartitionId(profiles, "personal")).toBe("personal");
-    expect(browserProfilePartitionId(profiles, "missing")).toBe("missing");
-  });
 
   it("strips internal partition metadata from config PATCH payloads", () => {
     expect(browserProfilesForPatch(profiles)).toEqual([

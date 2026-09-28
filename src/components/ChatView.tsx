@@ -20,8 +20,10 @@ import {
   X,
 } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
-import { useCaptionChrome } from "@/components/DesktopCapabilities";
-import { cachedInput, costCaption, formatTokens, formatUsd, hasFiniteCost, usageChip, usageDetail } from "@/lib/usage";
+import { MessageActions, messageActionClass } from "@/components/MessageActions";
+import { useSpeech } from "@/lib/tts/useSpeech";
+import { useCaptionChrome, useDesktopCapabilities } from "@/components/DesktopCapabilities";
+import { contextChip, contextDetail, contextShare, costCaption, formatUsd, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "@/lib/usage";
 import {
   api,
   currentTaskBot,
@@ -36,6 +38,9 @@ import {
   type Message,
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
+import { ClaudeUpdatePrompt } from "./ClaudeUpdatePrompt";
+import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
+import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
 import { isProviderSafetyBlock, PROVIDER_SAFETY_GUIDANCE, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
 import { BotAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
@@ -45,6 +50,7 @@ import { peerLine, type PeerLine } from "@/lib/peer-message";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
 import { VerifyCard } from "./VerifyCard";
@@ -60,7 +66,9 @@ import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
-import { AttachmentGallery, collectMessageFiles } from "./AttachmentGallery";
+import { AttachmentGallery, collectMessageFiles, splitMessageAttachments } from "./AttachmentGallery";
+import { ScreenFrame } from "./ScreenFrame";
+import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle";
 import { BotActivityPicker, TaskPicker } from "./TaskPicker";
 import { ModelPicker } from "./ModelPicker";
@@ -68,11 +76,12 @@ import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 
 import { SpeakButton } from "./SpeakButton";
 import { CallButton, CallOverlay } from "./CallView";
+import { effectivePlace, toolPlace, type EffectivePlace } from "@/lib/place";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { useFocusMessage } from "@/lib/focus-message";
-import { groupTranscript } from "@/lib/activity-runs";
+import { groupTranscript, isRecoveryActivity } from "@/lib/activity-runs";
 import { ActivityRun } from "./ActivityRun";
 import { TurnNarrationRun } from "./TurnNarrationRun";
 import { webhookMessageView } from "@/lib/webhook-message";
@@ -146,19 +155,37 @@ export function ErrorRow({
   message,
   onRetry,
   setupInstance,
+  claudeUpdateInstance,
 }: {
   message: string;
   onRetry?: () => void;
   setupInstance?: InstanceInfo;
+  /** The Claude engine to update when this turn failed because its Claude
+   * Code is too old for the model. */
+  claudeUpdateInstance?: InstanceInfo;
 }) {
+  const { capabilities, ready } = useDesktopCapabilities();
+  const failedPermissions = missingMacCuaPermissions(message);
+  const currentPermissions = missingMacCuaPermissions(capabilities.localComputer.message);
+  const macCuaReason = ready && capabilities.host.platform === "darwin" &&
+    capabilities.localComputer.available === false && capabilities.localComputer.reasonCode !== "remote-server" &&
+    message.startsWith("CUA Driver is not ready for this computer — ") &&
+    failedPermissions.length > 0 && failedPermissions.join(",") === currentPermissions.join(",")
+    ? macCuaPermissionMessage(currentPermissions)
+    : null;
   return (
     <div className="flex justify-start">
       <div className="w-fit max-w-[min(42rem,78%)] rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13.5px] text-danger">
         <div className="flex items-start gap-2">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-          <span className="min-w-0 break-words">{message}</span>
+          <span className="min-w-0 break-words">{macCuaReason ?? message}</span>
         </div>
-        {isProviderSafetyBlock(message) ? (
+        {macCuaReason && <details className="mt-2 text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("computer.mac.permission.driverDetail")}</summary><p className="mt-1 break-words">{message}</p></details>}
+        {macCuaReason &&
+          <MacCuaRecoveryActions reason={message} />}
+        {claudeUpdateInstance ? (
+          <ClaudeUpdatePrompt instance={claudeUpdateInstance} onRetry={onRetry} />
+        ) : isProviderSafetyBlock(message) ? (
           <p className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">
             {PROVIDER_SAFETY_GUIDANCE}{" "}
             <a href={PROVIDER_SAFETY_HELP_URL} target="_blank" rel="noreferrer" className="underline">About provider safety checks</a>
@@ -179,6 +206,12 @@ export function ErrorRow({
       </div>
     </div>
   );
+}
+
+/** Only a local, editable Claude Code engine can be updated from chat; a
+ * company-managed one is the organisation's to update. */
+export function claudeUpdateTarget(engine: InstanceInfo | undefined): InstanceInfo | undefined {
+  return engine?.driverKind === "claudeAgent" && !engine.readOnly ? engine : undefined;
 }
 
 /** One bad markdown node must not white-screen the app — the transcript
@@ -296,13 +329,26 @@ function Bubble({
   const mentionPeers = useMemo(() => state.bots.filter((peer) => peer.id !== bot.id), [state.bots, bot.id]);
   const [expanded, setExpanded] = useState(false);
   const [viewRaw, setViewRaw] = useState(false);
+  const speech = useSpeech();
+  const speaking = speech.messageId === message.id && speech.status !== "idle";
   const text = peer ? peer.body : (message.text ?? "");
-  const generatedPaths = useMemo(() => message.attachments?.map((attachment) => attachment.path) ?? [], [message.attachments]);
-  const linkedFiles = useMemo(() => user ? [] : collectMessageFiles(text, generatedPaths), [user, text, generatedPaths]);
+  const attached = useMemo(() => splitMessageAttachments(message.attachments), [message.attachments]);
+  const generatedPaths = attached.images;
+  const linkedFiles = useMemo(
+    () => user ? [] : [...attached.files, ...collectMessageFiles(text, [...attached.images, ...attached.files.map((file) => file.path)])],
+    [user, text, attached],
+  );
+  const voiceNotes = useMemo(
+    () => message.attachments?.filter((attachment): attachment is VoiceNoteAttachment => attachment.kind === "audio") ?? [],
+    [message.attachments],
+  );
   const webhookView = user ? webhookMessageView(text) : null;
   const attachments = user && !webhookView ? splitTranscriptAttachments(text) : null;
   const visibleText = webhookView?.task ?? attachments?.display ?? text;
   const hasAttachments = Boolean(attachments && (attachments.images.length || attachments.files.length));
+  // A message that is only attachments is just the files: no bubble around them.
+  const attachmentsOnly = !webhookView && !replyTarget && !visibleText.trim() &&
+    (user ? hasAttachments : generatedPaths.length + linkedFiles.length > 0);
   const collapsible =
     user && !webhookView && !expanded && (visibleText.length > USER_COLLAPSE_CHARS || visibleText.split("\n").length > USER_COLLAPSE_LINES);
 
@@ -318,34 +364,35 @@ function Bubble({
   const versions = user ? messageVersions(bot, message) : [message];
   const versionIndex = versions.findIndex((v) => v.id === message.id);
   const switchTo = (v: Message | undefined) => {
-    if (v && !bot.busy) dispatch({ type: "switchBranch", botId: bot.id, threadId: bot.threadId, messageId: v.id });
+    // an edit still waiting for its server fork has no branch to switch to yet
+    if (v && !bot.busy && !v.id.startsWith("optimistic-")) dispatch({ type: "switchBranch", botId: bot.id, threadId: bot.threadId, messageId: v.id });
   };
 
   return (
     <div className={cn("group flex w-full flex-col", user ? "animate-msg-in items-end" : "items-start")}>
       {peer && <PeerLabel peer={peer} />}
       <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
-        {/* editing rewinds the thread, so it waits for the turn to end —
-            same rule as the version switcher below */}
-        {user && message.kind === "text" && !webhookView && !hasAttachments && !bot.busy && (
-          <button
-            onClick={onStartEdit}
-            aria-label={t("chat.editMessage")}
-            className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
-            title={t("chat.editMessage")}
-          >
-            <Pencil size={14} />
-          </button>
-        )}
-        {user && Boolean(visibleText.trim()) && <CopyButton text={visibleText} />}
         {user && (
-          <>
+          <MessageActions side="user">
+            {/* editing rewinds the thread, so it waits for the turn to end —
+                same rule as the version switcher below */}
+            {message.kind === "text" && !webhookView && !hasAttachments && !bot.busy && !message.id.startsWith("optimistic-") && (
+              <button
+                onClick={onStartEdit}
+                aria-label={t("chat.editMessage")}
+                title={t("chat.editMessage")}
+                className={messageActionClass}
+              >
+                <Pencil size={14} />
+              </button>
+            )}
+            {Boolean(visibleText.trim()) && <CopyButton text={visibleText} className="opacity-100" />}
             <button
               type="button"
               onClick={onReply}
               aria-label={t("chat.replyToMessage")}
-              className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
               title={t("chat.reply")}
+              className={messageActionClass}
             >
               <MessageSquareReply size={14} />
             </button>
@@ -359,15 +406,12 @@ function Bubble({
                 })
               }
               aria-label={bot.pinnedMessageId === message.id ? t("chat.unpinMessage") : t("chat.pinMessage")}
-              className={cn(
-                "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
-                remoteClient && "hidden",
-              )}
               title={bot.pinnedMessageId === message.id ? t("chat.unpinHint") : t("chat.pinHint")}
+              className={cn(messageActionClass, remoteClient && "hidden")}
             >
               {bot.pinnedMessageId === message.id ? <PinOff size={14} /> : <Pin size={14} />}
             </button>
-          </>
+          </MessageActions>
         )}
         <div
           className={cn(
@@ -375,9 +419,11 @@ function Bubble({
             emerging && "turn-answer",
             user && webhookView
               ? "overflow-hidden border border-accent/25 bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
-              : user
-                ? "bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
-                : "bg-card px-4 py-2.5 text-ink",
+              : attachmentsOnly
+                ? "text-ink"
+                : user
+                  ? "bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
+                  : "bg-card px-4 py-2.5 text-ink",
           )}
           title={new Date(message.at).toLocaleString()}
         >
@@ -435,6 +481,13 @@ function Bubble({
             </>
           ) : (
             <MessageBoundary key={viewRaw ? "raw" : "rendered"} fallbackText={text || t("chat.generatedImage")}>
+              {voiceNotes.length > 0 && (
+                <div className={cn("flex flex-col", (text || generatedPaths.length > 0 || linkedFiles.length > 0) && "mb-2")}>
+                  {voiceNotes.map((note) => (
+                    <VoiceNoteBubble key={note.path} attachment={note} />
+                  ))}
+                </div>
+              )}
               <AttachmentGallery images={generatedPaths} files={linkedFiles} message={{ threadId: bot.threadId, messageId: message.id }} className={text ? undefined : "mb-0"} eager={eagerAttachments} />
               {viewRaw && text ? (
                 <RawMarkdownView text={text} />
@@ -445,30 +498,28 @@ function Bubble({
           )}
         </div>
         {!user && (
-          <>
-            <div className="flex flex-col gap-0.5 self-end pb-0.5">
-              {text && <CopyButton text={text} />}
-              {text && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((r) => !r)} />}
-              {message.kind === "text" && text && !peer && (
-                <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} />
-              )}
-              {isLastBotText && !bot.busy && onRegenerate && (
-                <button
-                  onClick={onRegenerate}
-                  aria-label={t("chat.regenerate")}
-                  title={t("chat.regenerate")}
-                  className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
-                >
-                  <RefreshCw size={14} />
-                </button>
-              )}
-            </div>
+          <MessageActions side="bot" forceOpen={viewRaw || speaking}>
+            {text && <CopyButton text={text} className="opacity-100" />}
+            {text && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((r) => !r)} className="opacity-100" />}
+            {message.kind === "text" && text && !peer && (
+              <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} className="opacity-100" />
+            )}
+            {isLastBotText && !bot.busy && onRegenerate && (
+              <button
+                onClick={onRegenerate}
+                aria-label={t("chat.regenerate")}
+                title={t("chat.regenerate")}
+                className={messageActionClass}
+              >
+                <RefreshCw size={14} />
+              </button>
+            )}
             <button
               type="button"
               onClick={onReply}
               aria-label={t("chat.replyToMessage")}
-              className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
               title={t("chat.reply")}
+              className={messageActionClass}
             >
               <MessageSquareReply size={14} />
             </button>
@@ -482,20 +533,17 @@ function Bubble({
                 })
               }
               aria-label={bot.pinnedMessageId === message.id ? t("chat.unpinMessage") : t("chat.pinMessage")}
-              className={cn(
-                "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
-                remoteClient && "hidden",
-              )}
               title={bot.pinnedMessageId === message.id ? t("chat.unpinHint") : t("chat.pinHint")}
+              className={cn(messageActionClass, remoteClient && "hidden")}
             >
               {bot.pinnedMessageId === message.id ? <PinOff size={14} /> : <Pin size={14} />}
             </button>
-          </>
+          </MessageActions>
         )}
         <span
           className={cn(
             "self-end pb-1 text-[11px] tabular-nums text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100",
-            user ? "order-first mr-1" : "ml-1",
+            user ? "order-first mr-2" : "ml-2",
           )}
         >
           {formatTime(message.at)}
@@ -559,7 +607,7 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
 }
 
 /** A tool run: spinner while live, check/cross once settled. */
-function ActivityChip({ message }: { message: Message }) {
+function ActivityChip({ message, place = "auto" }: { message: Message; place?: EffectivePlace }) {
   const { state, dispatch } = useStore();
   const tool = message.tool;
   if (!tool) return null;
@@ -582,19 +630,7 @@ function ActivityChip({ message }: { message: Message }) {
       </div>
     );
   }
-  return <ToolActivity tool={tool} />;
-}
-
-function ScreenFrame({ png, mime }: { png: string; mime?: string }) {
-  return (
-    <div className="flex justify-start">
-      <img
-        src={`data:${mime ?? "image/png"};base64,${png}`}
-        alt={t("chat.botScreen")}
-        className="w-fit max-w-[min(42rem,78%)] rounded-2xl border border-hairline/40"
-      />
-    </div>
-  );
+  return <ToolActivity tool={tool} place={toolPlace(tool.name, place)} />;
 }
 
 /** The settled transcript, memoized as one unit: during streaming every
@@ -643,7 +679,14 @@ const MessagesList = memo(function MessagesList({
   // Finished tool chips become compact runs; settled assistant narration
   // becomes one reversible turn row while the terminal answer stays visible.
   const items = useMemo(() => groupTranscript(messages), [messages, locale]);
+  // Where this conversation works, for the place icon on screen and page tools.
+  const place = effectivePlace(bot, bot.tasks?.find((task) => task.threadId === bot.threadId));
   const newestMessageId = messages.at(-1)?.id;
+  // Settlement can append bookkeeping after the failure. Retry still belongs
+  // to that final conversational row, including after a Claude update.
+  const retryableMessageId = [...transcript].reverse().find((message) =>
+    message.kind !== "digest" && message.kind !== "compaction"
+  )?.id;
   const newestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id;
   // A search hit inside a folded run has to open it: the fold keeps the
   // row out of the DOM, and there is nothing for the scroll to land on.
@@ -715,7 +758,7 @@ const MessagesList = memo(function MessagesList({
               <ActivityRun messages={item.messages} forceOpen={item.messages.some((step) => step.id === focusedId)}>
                 {item.messages.map((step) => (
                   <div key={step.id} className="contents" data-mid={step.id}>
-                    <ActivityChip message={step} />
+                    <ActivityChip message={step} place={place} />
                   </div>
                 ))}
               </ActivityRun>
@@ -729,18 +772,27 @@ const MessagesList = memo(function MessagesList({
               return m.secret ? <SecretRequestCard botId={bot.id} threadId={bot.threadId} message={m} /> : null;
             case "connector":
               return m.connector ? <ConnectorCard botId={bot.id} threadId={bot.threadId} message={m} /> : null;
-            case "options":
+            case "options": {
               // a live permission ask gets the approval box; a structured
               // ask gets the question box; anything else keeps the list
               // card. The first-run quiz drops out once they talk.
-              if (m.card?.requestId && m.card.questionRequest) {
-                return <QuestionCard threadId={bot.threadId} bot={bot} message={m} />;
-              }
-              if (m.card?.requestId && m.card.tool) {
-                return <ApprovalCard bot={bot} message={m} />;
-              }
-              if (shouldHideOnboardingCard(m, transcript)) return null;
-              return <OptionCard botId={bot.id} threadId={bot.threadId} message={m} />;
+              // Cards are bot-authored and persisted, so one that will not
+              // draw must fall back to its text on every open, not take the
+              // whole page down every time this chat is selected.
+              const card = m.card?.requestId && m.card.questionRequest ? (
+                <QuestionCard threadId={bot.threadId} bot={bot} message={m} />
+              ) : m.card?.requestId && m.card.tool ? (
+                <ApprovalCard bot={bot} message={m} />
+              ) : shouldHideOnboardingCard(m, transcript) ? null : (
+                <OptionCard botId={bot.id} threadId={bot.threadId} message={m} />
+              );
+              if (!card) return null;
+              return (
+                <MessageBoundary fallbackText={m.card?.subtitle || m.card?.title || ""}>
+                  {card}
+                </MessageBoundary>
+              );
+            }
             case "routine.run": {
               const executionThreadId = m.routineRun?.executionThreadId;
               const canOpen = executionThreadId && state.bots.some((candidate) =>
@@ -760,6 +812,14 @@ const MessagesList = memo(function MessagesList({
               );
             }
             case "activity": {
+              if (isRecoveryActivity(m)) {
+                return (
+                  <div role="status" className="flex w-fit max-w-full items-start gap-2 rounded-xl border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink-secondary">
+                    <RefreshCw size={13} aria-hidden="true" className="mt-0.5 shrink-0" />
+                    <span className="min-w-0 break-words">{m.tool?.name.slice(9).trim()}</span>
+                  </div>
+                );
+              }
               // a failed turn is an error, not a tool run — render it as one.
               // bot⇄bot comm chips and opened-thread chips stay because they
               // link to another conversation.
@@ -768,14 +828,20 @@ const MessagesList = memo(function MessagesList({
                 return (
                   <ErrorRow
                     message={m.tool.name.slice(6).trim()}
-                    onRetry={m.id === messages.at(-1)?.id && canRetryLast ? onRegenerate : undefined}
+                    onRetry={m.id === retryableMessageId && canRetryLast ? onRegenerate : undefined}
                     setupInstance={m.tool.setup ? engine : undefined}
+                    claudeUpdateInstance={m.tool.claudeUpdate ? claudeUpdateTarget(engine) : undefined}
                   />
                 );
               }
               if (!showToolCalls && !m.comm && !m.threadRef) return null;
-              return <ActivityChip message={m} />;
+              return <ActivityChip message={m} place={place} />;
             }
+            case "digest":
+              // the summary of the turn's tool chips: shown under the same setting
+              return showToolCalls ? <DigestChip message={m} /> : null;
+            case "compaction":
+              return <CompactionChip message={m} />;
             case "screen":
               return m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null;
             default:
@@ -1006,17 +1072,18 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     }, 520);
   }, [lastMessage?.id, lastMessage?.role, lastMessage?.kind]);
   const presenceVisible = waiting || popping !== null;
-  // Wall-clock anchor for the working row's elapsed readout — set when the
-  // turn starts, cleared when it settles, reset on bot switch.
+  // Wall-clock anchor for the working row's elapsed readout — the server
+  // stamps the turn's real start (turnStartedAt), so switching threads keeps
+  // the count truthful; Date.now() only covers servers without the stamp.
   const [busySince, setBusySince] = useState<number | null>(null);
   useEffect(() => {
-    setBusySince(bot.busy ? Date.now() : null);
-  }, [bot.busy, bot.id, bot.threadId]);
+    setBusySince(bot.busy ? bot.turnStartedAt ?? Date.now() : null);
+  }, [bot.busy, bot.id, bot.threadId, bot.turnStartedAt]);
 
   // regenerate = fork the last user message with the same text — reuses the
   // existing branch machinery, so the old answer stays reachable via ‹ ›
   const regenerate = useCallback(() => {
-    if (lastUserMessage?.text && !bot.busy) {
+    if (lastUserMessage?.text && !bot.busy && !lastUserMessage.id.startsWith("optimistic-")) {
       dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: lastUserMessage.id, text: lastUserMessage.text });
     }
   }, [lastUserMessage, bot.busy, bot.id, bot.threadId, dispatch]);
@@ -1070,9 +1137,12 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   // Expanding prepends rows: capture the height first, then after the commit
   // shift scrollTop by the growth so the message under the cursor stays put
   // (browser scroll anchoring is disabled on this container).
-  const preExpandHeight = useRef<number | null>(null);
+  // The captured height belongs to the thread it was taken in: a switch
+  // between the capture and the commit would otherwise shift the new
+  // thread's viewport by the old one's growth.
+  const preExpandHeight = useRef<{ key: string; height: number } | null>(null);
   const showEarlier = () => {
-    preExpandHeight.current = scrollRef.current?.scrollHeight ?? null;
+    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
     // expanding means reading scrollback — never let a mid-expand stream
     // event pin the viewport back to the bottom
     setBottomFollow(false);
@@ -1081,19 +1151,45 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   };
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (preExpandHeight.current === null || !el) return;
-    el.scrollTop += el.scrollHeight - preExpandHeight.current;
+    const captured = preExpandHeight.current;
+    if (!captured || !el) return;
     preExpandHeight.current = null;
+    if (captured.key !== transcriptKey) return;
+    el.scrollTop += el.scrollHeight - captured.height;
     // keep the resume-follow heuristic from reading the restore as a
     // downward user scroll
     previousScrollTop.current = el.scrollTop;
-  }, [transcriptWindow.start]);
+    // transcriptKey is a dependency so a switch runs this and drops a capture
+    // that belongs to the thread being left.
+  }, [transcriptWindow.start, transcriptKey]);
 
   const showLater = () => {
     setBottomFollow(false);
     const nextEnd = Math.min(messages.length, endIndex + TRANSCRIPT_WINDOW_SIZE);
     setTranscriptWindow((w) => ({ ...w, end: nextEnd >= messages.length ? null : nextEnd }));
   };
+
+  // Scrollback across the network: the snapshot holds a bounded page, and
+  // everything before it is still on the server. Asking for it prepends rows
+  // exactly like expanding the local window, so the same height capture keeps
+  // the viewport still — here it is applied when the transcript grows at the
+  // front rather than when the boundary moves.
+  const olderPending = Boolean(state.loadingOlder[bot.threadId]);
+  const loadOlder = () => {
+    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
+    setBottomFollow(false);
+    dispatch({ type: "loadOlderMessages", threadId: bot.threadId });
+  };
+  const oldestId = messages[0]?.id;
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const captured = preExpandHeight.current;
+    if (!captured || !el) return;
+    preExpandHeight.current = null;
+    if (captured.key !== transcriptKey) return;
+    el.scrollTop += el.scrollHeight - captured.height;
+    previousScrollTop.current = el.scrollTop;
+  }, [oldestId, transcriptKey]);
 
   // keyboard is a scroll gesture too (upstream lesson): PageUp/Home/ArrowUp
   // break follow like an upward wheel; the at-end onScroll check re-arms it.
@@ -1177,6 +1273,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             </span>
           )}
           {bot.busy && <WorkingDots className="text-ink-secondary" />}
+          {!bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">Teammates working</span>}
         </div>
         <div
           className="flex shrink-0 items-center gap-2"
@@ -1202,7 +1299,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             messages={messages}
             botName={bot.name}
           />
-          {bot.busy && (
+          {(bot.busy || bot.waitingForTeammates) && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id, threadId: bot.threadId })}
               className={cn(
@@ -1327,7 +1424,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           aria-live="polite"
           aria-label={t("chat.conversationWith", { name: bot.name })}
         >
-          {hiddenCount > 0 && (
+          {hiddenCount > 0 ? (
             <div className="flex justify-center pt-2">
               <button
                 onClick={showEarlier}
@@ -1336,7 +1433,17 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
                 {t("chat.showEarlier", { count: hiddenCount })}
               </button>
             </div>
-          )}
+          ) : bot.hasMore ? (
+            <div className="flex justify-center pt-2">
+              <button
+                onClick={loadOlder}
+                disabled={olderPending}
+                className="rounded-full border border-hairline/40 bg-panel px-3 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-60"
+              >
+                {olderPending ? t("chat.loadingEarlier") : t("chat.loadEarlier")}
+              </button>
+            </div>
+          ) : null}
           <MessagesList
             bot={bot}
             locale={activeLocale()}
@@ -1408,7 +1515,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           request can restore the old task without spilling into the newly
           selected one. ArrowUp-to-edit stays gated on busy because editing
           rewinds the thread, which a live turn forbids (the server 409s it). */}
-      <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2]">
+      <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2]">
       {/* The bot's run in this ask as a checklist, once it is worth one (a
           verified step, or more than one command). Save fills this thread's
           composer with the run and the person's request and hands the caret
@@ -1438,7 +1545,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         onClearReply={clearReply}
         onConsumeReply={consumeReply}
         onRestoreReply={restoreReply}
-        onEditLast={lastUserMessage && !lastUserMessageHasAttachments && !bot.busy
+        onEditLast={lastUserMessage && !lastUserMessageHasAttachments && !bot.busy && !lastUserMessage.id.startsWith("optimistic-")
           ? () => setEditingId(lastUserMessage.id)
           : undefined}
       />
@@ -1457,27 +1564,33 @@ function UsageChip({ bot }: { bot: Bot }) {
   const text = usage ? usageChip(usage) : "";
   if (!usage || !text) return null;
   const billing = state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)?.snapshot.billing;
+  const share = contextShare(usage);
   const detail = [
     usage.turns === 1 ? t("chat.usage.turnsOne") : t("chat.usage.turnsMany", { count: usage.turns }),
     usageDetail(usage),
+    lastTurnDetail(usage),
+    contextDetail(usage),
     // the whole thread rides along on every turn, so most of "in" is the
     // model re-reading what it already saw — say so, or the figure reads as
-    // a bug (issue #527)
-    cachedInput(usage) > 0 ? t("chat.usage.cachedNote") : null,
+    // a bug (issue #527); past 80% of the window the fix is a new thread
+    share?.tone === "danger" ? t("chat.usage.contextNudge") : null,
     hasFiniteCost(usage.costUsd) ? `${formatUsd(usage.costUsd)} ${costCaption(billing)}` : null,
   ]
     .filter(Boolean)
     .join("\n");
-  // folded: one figure — cost when the engine reports one, else tokens
-  const short = usage.costUsd !== null ? formatUsd(usage.costUsd) : formatTokens(usage.input + usage.output);
+  // Keep the unit visible in the compact header too.
+  const short = text;
+  const ctx = contextChip(usage);
   return (
     <button
       onClick={() => dispatch({ type: "toggleSettings", open: true, section: "usage" })}
       className="whitespace-nowrap rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[12px] tabular-nums text-ink-secondary hover:bg-raised hover:text-ink @max-4xl/chathead:px-2"
       title={detail}
+      data-testid="usage-chip"
     >
       <span className="@max-4xl/chathead:hidden">{text}</span>
       <span className="hidden @max-4xl/chathead:inline">{short}</span>
+      {ctx && <span className={cn("ml-1.5 @max-4xl/chathead:hidden", share?.tone === "danger" ? "text-danger" : share?.tone === "warning" ? "text-warning" : "")} data-testid="usage-context">{ctx}</span>}
     </button>
   );
 }

@@ -77,6 +77,7 @@ export function ApprovalCard({
   const card = message.card;
   if (!card) return null;
   const settled = card.answered;
+  const expired = card.expired === true;
   const isRoutineRequest = Boolean(card.routineRequest);
   const isSkillRequest = Boolean(card.skillRequest);
   const isProfileRequest = Boolean(card.profileRequest);
@@ -108,10 +109,10 @@ export function ApprovalCard({
 
   return (
     <div
-      data-tour={settled ? undefined : "approval"}
+      data-tour={settled || expired ? undefined : "approval"}
       className={cn(
         "w-full max-w-[840px] rounded-2xl border bg-card p-4",
-        settled ? "border-hairline/30 opacity-70" : "border-accent/40",
+        settled || expired ? "border-hairline/30 opacity-70" : "border-accent/40",
       )}
     >
       <div className="flex items-baseline justify-between gap-3">
@@ -155,7 +156,11 @@ export function ApprovalCard({
       {/* The decision lives in the composer (one place to answer, and it
           can't be scrolled past); here we only record what happened. */}
       <div className="mt-3 flex items-center gap-1.5 text-[13px] text-ink-secondary">
-        {settled === "allow" ? (
+        {expired ? (
+          <>
+            <X size={14} /> {t("approval.status.expired")}
+          </>
+        ) : settled === "allow" ? (
           <>
             <Check size={14} className="text-success" />
             {isTeamSetup ? (card.teamSetupRequest?.deletion ? "Bot deleted" : "Team setup applied") : skillSettledLabel ??

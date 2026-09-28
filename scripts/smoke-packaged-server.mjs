@@ -12,7 +12,7 @@
 // how the bug escaped. The copy is the whole point; do not "simplify" it away.
 import { execFile, spawn } from "node:child_process";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,10 @@ const fixtureEnv = {
   XDG_DATA_HOME: join(home, ".local", "share"),
   OMB_DATA_DIR: join(home, ".openmausbot"),
   OMB_PORT: String(port),
+  // Not a genuine key: enough to make the server look for its enterprise
+  // layer and say whether it found one (checked below), never enough to
+  // unlock anything.
+  OMB_LICENSE_KEY: "omb1.not.real",
   ...(browserBundle ? {
     OMB_RESOURCES_PATH: staging,
     // A global engine on the developer's PATH must not make this test pass.
@@ -111,6 +115,14 @@ while (Date.now() < deadline) {
   await new Promise((resolve) => setTimeout(resolve, 300));
 }
 
+let searchReport = null;
+if (listening) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/search?q=packaged-worker-probe`, { signal: AbortSignal.timeout(10_000) });
+    searchReport = { status: response.status, body: await response.json() };
+  } catch (error) { searchReport = { error: String(error) }; }
+}
+
 let browserReport = null;
 if (browserBundle && listening) {
   try {
@@ -138,6 +150,17 @@ writeFileSync(
     "console.log(JSON.stringify({ resolved: SPAWNED_PROXIES, missing }));",
   ].join("\n"),
 );
+
+// The packaged tree carries the bundled enterprise layer inside the server
+// root (server/enterprise/server/index.js). server/enterprise.ts must find it
+// there, or a licensed install silently runs the open-source edition.
+const layerShipped = existsSync(join(staging, "server", "enterprise", "server", "index.js"));
+let editionReport = null;
+if (listening) {
+  try {
+    editionReport = await (await fetch(`http://127.0.0.1:${port}/api/edition`, { signal: AbortSignal.timeout(5_000) })).json();
+  } catch (error) { editionReport = { error: String(error) }; }
+}
 
 let proxyReport = null;
 try {
@@ -203,12 +226,44 @@ if (listening) {
   }
 }
 
+// An HTTP export must actually start the bundled worker outside the checkout.
+// Existence checks alone cannot catch an unbundled transitive dependency.
+let backupReport = null;
+if (listening) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/workspace-backup/export`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "packaged-fixture-password-only" }), signal: AbortSignal.timeout(30_000),
+    });
+    assert.equal(response.status, 200, "Packaged backup worker did not export successfully");
+    const archive = await response.json();
+    assert.equal(archive.summary.format, "openmaus.workspace-backup");
+    const download = await fetch(`http://127.0.0.1:${port}/api/workspace-backup/download/${archive.id}`);
+    assert.equal(download.status, 200);
+    const bytes = Buffer.from(await download.arrayBuffer());
+    assert.equal(bytes.length, archive.bytes);
+    assert.equal(bytes.subarray(0, 16).toString(), "OMB-WORKSPACE-1\n");
+    backupReport = { ok: true, bytes: bytes.length };
+  } catch (error) { backupReport = { error: String(error) }; }
+}
+
 cleanup();
 
 if (!listening) {
   console.error(`the packaged server never served /api/health on port ${port}.`);
   console.error(`exit code: ${child.exitCode}`);
   console.error(output.trim() || "(no output)");
+  process.exit(1);
+}
+
+if (searchReport?.status !== 200 || !Array.isArray(searchReport.body?.hits)) {
+  console.error("The packaged read-only search worker did not respond:", searchReport);
+  process.exit(1);
+}
+
+if (layerShipped && (!editionReport || editionReport.error || String(editionReport.notice ?? "").includes("no enterprise layer exists"))) {
+  console.error("the packaged server ships an enterprise layer but did not find it:");
+  console.error(JSON.stringify(editionReport, null, 2));
   process.exit(1);
 }
 
@@ -242,7 +297,13 @@ if (
 }
 
 const count = Object.keys(proxyReport.resolved).length;
+if (!backupReport?.ok) {
+  console.error("the packaged backup worker failed its encrypted export smoke:", backupReport);
+  process.exit(1);
+}
 console.log(`packaged server started with no node_modules in reach (port ${port}) ✓`);
 console.log(`all ${count} spawned proxy paths resolve inside the packaged server dir ✓`);
 console.log("packaged MCP stdio server reached the API and flushed its final frames ✓");
+console.log("packaged backup worker exported an encrypted archive ✓");
+if (layerShipped) console.log("packaged server found its enterprise layer inside the server dir ✓");
 if (browserBundle) console.log(`packaged browser discovered without installation; access remains opt-in ✓ ${JSON.stringify(browserReport)}`);

@@ -53,6 +53,12 @@ class PairingRouteError(val attemptedRoutes: List<String>) : IOException(
         "(${attemptedRoutes.joinToString()}). Keep Phone access turned on in OpenMausBot, then try again.",
 )
 
+/** Keep the same code and request id after an uncertain redemption or rate-limit refusal. */
+class ServerPairingRetryError(cause: IOException) : IOException(
+    if (cause is APIError.Status && cause.code == 429) cause.message
+    else "Could not finish connecting to the server. Try again with the same code.", cause,
+)
+
 internal const val SCOPED_IPV6_HTTP_HOST = "scoped-ipv6.openmausbot.invalid"
 
 /**
@@ -124,6 +130,8 @@ class CompanionClient(
     private val endpoint = connection.httpEndpoint(baseClient.dns)
 
     private val actionClient = baseClient.newBuilder()
+        .followRedirects(baseClient.followRedirects && !connection.pairedWithServer)
+        .followSslRedirects(baseClient.followSslRedirects && !connection.pairedWithServer)
         .dns(endpoint?.dns ?: baseClient.dns)
         .callTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .connectTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -137,6 +145,8 @@ class CompanionClient(
      * Connect/read/write idle limits, no overall call deadline.
      */
     private val uploadClient = baseClient.newBuilder()
+        .followRedirects(baseClient.followRedirects && !connection.pairedWithServer)
+        .followSslRedirects(baseClient.followSslRedirects && !connection.pairedWithServer)
         .dns(endpoint?.dns ?: baseClient.dns)
         .callTimeout(0, TimeUnit.MILLISECONDS)
         .connectTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -145,6 +155,8 @@ class CompanionClient(
         .build()
 
     private val streamingClient = baseClient.newBuilder()
+        .followRedirects(baseClient.followRedirects && !connection.pairedWithServer)
+        .followSslRedirects(baseClient.followSslRedirects && !connection.pairedWithServer)
         .dns(endpoint?.dns ?: baseClient.dns)
         .callTimeout(0, TimeUnit.MILLISECONDS)
         .connectTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -153,12 +165,38 @@ class CompanionClient(
         .build()
 
     private val avatarGenerationClient = baseClient.newBuilder()
+        .followRedirects(baseClient.followRedirects && !connection.pairedWithServer)
+        .followSslRedirects(baseClient.followSslRedirects && !connection.pairedWithServer)
         .dns(endpoint?.dns ?: baseClient.dns)
         .callTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .connectTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .writeTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
+
+    /**
+     * Claude Code's own updater can take minutes on the computer, so this
+     * route gets its own deadline instead of the twenty-second action one.
+     */
+    private val claudeUpdateClient = baseClient.newBuilder()
+        .followRedirects(baseClient.followRedirects && !connection.pairedWithServer)
+        .followSslRedirects(baseClient.followSslRedirects && !connection.pairedWithServer)
+        .dns(endpoint?.dns ?: baseClient.dns)
+        .callTimeout(CLAUDE_UPDATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .connectTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(CLAUDE_UPDATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .writeTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+
+    /** Read identity without sending the saved bearer to a potentially replaced server. */
+    suspend fun environment(): ServerEnvironment {
+        connection.requireServerTransport()
+        val publicClient = CompanionClient(connection, null, actionClient)
+        return publicClient.send(
+            publicClient.makeRequest("GET", "/.well-known/openmausbot/environment"),
+            publicClient.actionClient.newBuilder().followRedirects(false).followSslRedirects(false).build(),
+        )
+    }
 
     suspend fun health(): JsonObject = send(makeRequest("GET", "/api/health"))
 
@@ -225,6 +263,22 @@ class CompanionClient(
         .mapTo(mutableSetOf(), Instance::instanceId)
 
     suspend fun config(): ConfigStatus = send(makeRequest("GET", "/api/config"))
+
+    /**
+     * The engine is a setting, not a secret, so it rides the ordinary config
+     * write — the same one `VoiceSettings.tsx` sends from its Voice engine
+     * group. Only the provider field is written; keys and server addresses
+     * stay on the computer.
+     */
+    suspend fun updateVoiceProvider(provider: VoiceProvider): ConfigStatus = send(
+        makeRequest(
+            "PUT",
+            "/api/config",
+            body = buildJsonObject {
+                put("tts", buildJsonObject { put("provider", provider.wire) })
+            },
+        ),
+    )
 
     suspend fun connectorCatalog(): ConnectorCatalog =
         send(makeRequest("GET", "/api/connectors/catalog"))
@@ -396,6 +450,23 @@ class CompanionClient(
             avatarGenerationClient,
         ).bot
 
+    /**
+     * Run Claude Code's updater for one engine on the computer and return the
+     * version it now reports. The harness refuses while a Claude turn is
+     * running, and its refusal is already worded for a person.
+     */
+    suspend fun updateClaude(instanceId: String): String {
+        if (!isSafeInstanceId(instanceId)) throw APIError.BadUrl
+        return send<ClaudeUpdateResponse>(
+            makeRequest(
+                "POST",
+                "/api/instances/$instanceId/claude-update",
+                body = JsonObject(emptyMap()),
+            ),
+            claudeUpdateClient,
+        ).version
+    }
+
     suspend fun previewVoice(text: String, voiceId: String): ByteArray {
         val raw = perform(makeRequest(
             "POST",
@@ -470,7 +541,8 @@ class CompanionClient(
      * same thing takes the message off the phone while it is still queued on
      * the computer, and it then arrives anyway.
      */
-    suspend fun cancelQueued(queueId: String, to: MessageDestination) {
+    // A drained row can disappear, but only a confirmed cancellation permits Edit to restore it.
+    suspend fun cancelQueued(queueId: String, to: MessageDestination): Boolean {
         if (!isSafeRouteId(queueId)) throw APIError.BadUrl
         val route = when (to) {
             is MessageDestination.Bot -> "/api/bots/${safeRouteId(to.id)}/queue/$queueId"
@@ -478,11 +550,12 @@ class CompanionClient(
         }
         try {
             sendUnit(makeRequest("DELETE", route, body = jsonBody("threadId" to to.threadId)))
+            return true
         } catch (error: APIError.Status) {
             if (error.code != 404) throw error
             // The harness's own words, not Throwable.message, which falls
             // back to generic text for a 404 and would swallow everything.
-            if (error.serverMessage?.contains(ALREADY_DRAINED, ignoreCase = true) == true) return
+            if (error.serverMessage?.contains(ALREADY_DRAINED, ignoreCase = true) == true) return false
             throw APIError.Status(
                 404,
                 "This computer is too old to take back a queued message. Update OpenMausBot on it.",
@@ -550,12 +623,29 @@ class CompanionClient(
             body = jsonBody("emoji" to emoji),
         )).message
 
-    suspend fun edit(botId: String, messageId: String, text: String, threadId: String? = null) {
-        sendUnit(makeRequest(
+    /**
+     * Fork the conversation at a user message. Returns the computer's new
+     * message when the response carries one. [sendId] makes a retry of the same
+     * edit answer with the existing fork instead of forking twice.
+     */
+    suspend fun edit(
+        botId: String,
+        messageId: String,
+        text: String,
+        threadId: String? = null,
+        sendId: String? = null,
+    ): Message? {
+        val raw = perform(makeRequest(
             "POST",
             "/api/bots/${segment(botId)}/messages/${segment(messageId)}/edit",
-            body = jsonBody("text" to text, "threadId" to threadId),
+            body = jsonBody("text" to text, "threadId" to threadId, "sendId" to sendId),
         ))
+        check(raw)
+        // The fork already happened; an unreadable body only costs the early
+        // swap, and the event stream still delivers the same fork.
+        return runCatching {
+            CompanionJson.decodeFromString<EditResponse>(raw.data.toString(Charsets.UTF_8)).message
+        }.getOrNull()
     }
 
     suspend fun setActiveBranch(botId: String, messageId: String, threadId: String? = null): String =
@@ -581,6 +671,51 @@ class CompanionClient(
             "PATCH",
             "/api/bots/${segment(botId)}/tasks/${segment(threadId)}",
             body = jsonBody("title" to title),
+        ))
+    }
+
+    /**
+     * 0 sleeps until new activity, a timestamp until it passes, and null — a
+     * real JSON null, not an omitted field — wakes the thread now. Long
+     * milliseconds, never Double: the stamp must not travel in scientific
+     * notation, and an omitted field would leave the snooze untouched.
+     */
+    suspend fun snoozeTask(botId: String, threadId: String, snoozedUntil: Long?) {
+        sendUnit(makeRequest(
+            "PATCH",
+            "/api/bots/${segment(botId)}/tasks/${segment(threadId)}",
+            body = buildJsonObject { put("snoozedUntil", JsonPrimitive(snoozedUntil)) },
+        ))
+    }
+
+    /** The unarchive PATCH carries an explicit null, so jsonBody's skip-nulls
+     * rule cannot be used here. Stamps are whole milliseconds: a Double would
+     * serialize large ones in scientific notation. */
+    suspend fun setTaskPinned(botId: String, threadId: String, pinned: Boolean) {
+        sendUnit(makeRequest(
+            "PATCH",
+            "/api/bots/${segment(botId)}/tasks/${segment(threadId)}",
+            body = buildJsonObject { put("pinned", pinned) },
+        ))
+    }
+
+    /** Title is echoed so an older server does not rename the thread to empty. */
+    suspend fun setRoomTaskPinned(groupId: String, threadId: String, pinned: Boolean, title: String) {
+        sendUnit(makeRequest(
+            "PATCH",
+            "/api/groups/${segment(groupId)}/tasks/${segment(threadId)}",
+            body = buildJsonObject {
+                put("pinned", pinned)
+                put("title", title)
+            },
+        ))
+    }
+
+    suspend fun setTaskArchived(botId: String, threadId: String, archivedAt: Double?) {
+        sendUnit(makeRequest(
+            "PATCH",
+            "/api/bots/${segment(botId)}/tasks/${segment(threadId)}",
+            body = buildJsonObject { put("archivedAt", JsonPrimitive(archivedAt?.toLong())) },
         ))
     }
 
@@ -648,6 +783,7 @@ class CompanionClient(
         rawBody: RequestBody? = null,
     ): Request {
         require(body == null || rawBody == null)
+        if (connection.pairedWithServer) connection.requireServerTransport()
         val base = endpoint?.baseUrl ?: throw APIError.BadUrl
         val url = base.newBuilder().encodedPath(path).apply {
             query.forEach { (name, value) -> addQueryParameter(name, value) }
@@ -702,7 +838,20 @@ class CompanionClient(
         }
     }
 
+    /** Every authenticated action, including shares to inactive saved servers, checks identity. */
     private suspend fun perform(
+        request: Request,
+        requestClient: OkHttpClient = actionClient,
+    ): RawResponse {
+        if (token != null && connection.serverEnvironmentId != null &&
+            environment().environmentId != connection.serverEnvironmentId
+        ) {
+            throw APIError.Status(401, "This address belongs to a different server. Pair again to continue.")
+        }
+        return performUnchecked(request, requestClient)
+    }
+
+    private suspend fun performUnchecked(
         request: Request,
         requestClient: OkHttpClient = actionClient,
     ): RawResponse = suspendCancellableCoroutine { continuation ->
@@ -757,6 +906,8 @@ class CompanionClient(
 
         private const val ACTION_TIMEOUT_SECONDS = 20L
         private const val AVATAR_GENERATION_TIMEOUT_SECONDS = 150L
+        /** The harness allows the updater three minutes; leave room to hear back. */
+        private const val CLAUDE_UPDATE_TIMEOUT_SECONDS = 200L
         private const val STREAM_IDLE_TIMEOUT_SECONDS = 90L
         private const val AVATAR_MAX_BYTES = 10 * 1_024 * 1_024
         const val SHARE_FILE_MAX_BYTES = 25 * 1_024 * 1_024
@@ -859,6 +1010,16 @@ class CompanionClient(
 
         private fun safeRouteId(value: String): String = if (isSafeRouteId(value)) value else throw APIError.BadUrl
 
+        /**
+         * Engine instance ids are `[\w.-]+` on the harness — dots allowed, which
+         * [isSafeRouteId] rightly refuses everywhere else. ASCII only, and never
+         * a bare dot segment.
+         */
+        private fun isSafeInstanceId(value: String): Boolean =
+            value != "." && value != ".." && INSTANCE_ID.matches(value)
+
+        private val INSTANCE_ID = Regex("^[A-Za-z0-9_.-]+$")
+
         private fun isSafeSendId(value: String): Boolean = value.length in 16..80 && isSafeRouteId(value)
 
         private fun validConnectorSlug(value: String): Boolean =
@@ -905,6 +1066,30 @@ class CompanionClient(
             put("durationMinutes", input.durationMinutes)
             if (input.timeoutMinutes != null) put("timeoutMinutes", input.timeoutMinutes)
             else if (input.clearTimeout) put("timeoutMinutes", JsonNull)
+        }
+
+        suspend fun pairWithServer(
+            connection: Connection,
+            code: String,
+            label: String,
+            attemptId: String,
+            client: OkHttpClient = OkHttpClient(),
+        ): ServerPairResponse {
+            connection.requireServerTransport()
+            val companion = CompanionClient(connection, token = null, baseClient = client)
+            val pairClient = client.newBuilder()
+                .dns(companion.endpoint?.dns ?: client.dns)
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .callTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .connectTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .readTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .writeTimeout(PAIR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .build()
+            return companion.send(companion.makeRequest(
+                "POST", "/api/auth/pair",
+                body = jsonBody("code" to code, "label" to label, "attemptId" to attemptId),
+            ), pairClient)
         }
 
         suspend fun pair(

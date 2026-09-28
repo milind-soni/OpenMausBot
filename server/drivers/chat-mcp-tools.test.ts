@@ -1,7 +1,9 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { crc32 } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { augmentedPath } from "../env-path.ts";
 import { ChatToolSessionError, mountChatTools, type ChatToolSession } from "./chat-mcp-tools.ts";
 
 const dirs: string[] = [];
@@ -31,7 +33,7 @@ function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
         const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
         const message = JSON.parse(line);
         calls.push(message);
-        writeFileSync(receipt, JSON.stringify({pid:process.pid,calls}));
+        writeFileSync(receipt, JSON.stringify({pid:process.pid,path:process.env.PATH,omb:Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith("OMB_"))),calls}));
         ${body}
         if (message.method === "initialize") reply(message, {protocolVersion:"2024-11-05",capabilities:{tools:{}}});
         else if (message.method === "tools/list") reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}]});
@@ -42,12 +44,12 @@ function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
   chmodSync(script, 0o755);
   const controller = new AbortController();
   controllers.push(controller);
-  const server = { command: script, args: [], env: { RECEIPT: receipt } };
+  const server: { command: string; args: string[]; env: Record<string, string> } = { command: script, args: [], env: { RECEIPT: receipt } };
   return {
     dir, receipt, controller, server,
-    read: () => JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; calls: Array<{ method: string; params?: { name?: string; arguments?: unknown } }> },
-    async mount() {
-      const session = await mountChatTools({ custom: { audit: server } }, controller.signal);
+    read: () => JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; path: string; omb: Record<string, string>; calls: Array<{ method: string; params?: { name?: string; arguments?: unknown } }> },
+    async mount(computerUse = false, localComputer = false) {
+      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { audit: server } }, controller.signal, computerUse);
       sessions.push(session);
       return session;
     },
@@ -59,6 +61,7 @@ function alive(pid: number): boolean {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const controller of controllers.splice(0)) controller.abort();
   await Promise.all(sessions.splice(0).map((session) => session.close()));
   for (const dir of dirs.splice(0)) rmSync(dir, { force: true, recursive: true });
@@ -79,6 +82,36 @@ describe("Chat MCP session", () => {
     await session.close();
     expect(alive(pid)).toBe(false);
     await expect(session.execute("audit_write", { value: "again" }, f.controller.signal)).rejects.toThrow("closed");
+  });
+
+  it("starts servers with the widened PATH rather than the bare one the desktop shell inherits", async () => {
+    // Launched from Finder, the harness sees only the system directories;
+    // the widened PATH is what the Claude and Codex drivers already hand out.
+    const widened = augmentedPath();
+    vi.stubEnv("PATH", "/usr/bin:/bin");
+    const f = fixture();
+    await f.mount();
+    expect(f.read().path).toBe(widened);
+  });
+
+  it("lets a PATH set on the server descriptor win over the widened one", async () => {
+    const f = fixture();
+    const own = `${augmentedPath()}:/opt/own-tools`;
+    f.server.env = { ...f.server.env, PATH: own };
+    await f.mount();
+    expect(f.read().path).toBe(own);
+  });
+
+  it("keeps the operator's control-plane secrets from a chat bot's tool servers, but not what the descriptor grants", async () => {
+    const secrets = ["OMB_CLOUD_READY_TOKEN", "OMB_CLOUD_BOOTSTRAP", "OMB_LICENSE_KEY", "OMB_INSTALLATION_CREDENTIAL"];
+    for (const name of secrets) vi.stubEnv(name, "should-not-leak");
+    vi.stubEnv("OMB_CLOUDFLARED_PATH", "/usr/local/bin/cloudflared");
+    const f = fixture();
+    f.server.env = { ...f.server.env, OMB_COMMS_TOKEN: "turn-capability" };
+    await f.mount();
+    const seen = f.read().omb;
+    expect(seen).toMatchObject({ OMB_CLOUDFLARED_PATH: "/usr/local/bin/cloudflared", OMB_COMMS_TOKEN: "turn-capability" });
+    for (const name of secrets) expect(seen).not.toHaveProperty(name);
   });
 
   it("mounts only supported descriptors and preserves conversations with no tools", async () => {
@@ -202,7 +235,7 @@ describe("Chat MCP session", () => {
     await vi.waitFor(() => {
       receipt = JSON.parse(readFileSync(f.receipt, "utf8"));
       expect(receipt.helper).toBeGreaterThan(0);
-    });
+    }, { timeout: 10_000 });
     f.controller.abort();
     await rejected;
     expect(alive(receipt.pid)).toBe(false);
@@ -211,6 +244,44 @@ describe("Chat MCP session", () => {
 });
 
 describe("Chat MCP schema validation", () => {
+  it("retains native unsigned/composition constraints while exposing an object schema", async () => {
+    const f = fixture("", { type: "object", properties: { value: { type: "integer", format: "uint32" } },
+      anyOf: [{ required: ["value"] }], additionalProperties: false });
+    const session = await f.mount(true);
+    expect(session.definitions[0].function.parameters).not.toHaveProperty("anyOf");
+    expect(session.definitions[0].function.description).toContain('"anyOf"');
+    expect(() => session.validate("audit_write", {})).toThrow("input schema");
+    expect(() => session.validate("audit_write", { value: -1 })).toThrow("input schema");
+    expect(() => session.validate("audit_write", { value: 2 ** 32 })).toThrow("input schema");
+    expect(() => session.validate("audit_write", { value: 42 })).not.toThrow();
+  });
+
+  it.each([false, true])("carries large images from custom and built-in servers (built-in: %s)", async local => {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jBv0AAAAASUVORK5CYII=", "base64");
+    const chunk = Buffer.alloc(2 * 1024 * 1024 + 12);
+    chunk.writeUInt32BE(chunk.length - 12, 0); chunk.write("tEXt", 4); chunk.write("fixture\0", 8);
+    chunk.writeUInt32BE(crc32(chunk.subarray(4, -4)), chunk.length - 4);
+    const data = Buffer.concat([png.subarray(0, -12), chunk, png.subarray(-12)]).toString("base64");
+    const f = fixture('if(message.method === "tools/call") { reply(message,{content:[{type:"image",mimeType:"image/png",data:process.env.IMAGE}]}); continue; }');
+    f.server.env.IMAGE_FILE = join(f.dir, "image.txt");
+    writeFileSync(f.server.env.IMAGE_FILE, data);
+    writeFileSync(join(f.dir, "fake-mcp.mjs"), readFileSync(join(f.dir, "fake-mcp.mjs"), "utf8").replace('import { writeFileSync }', 'import { writeFileSync, readFileSync }').replace('process.env.IMAGE', 'readFileSync(process.env.IMAGE_FILE,"utf8")'));
+    const session = await f.mount(true, local);
+    const result = await session.execute(local ? "computer_write" : "audit_write", { value: "screenshot" }, f.controller.signal);
+    expect(result).toEqual({ ok: true, text: "Screenshot captured.", images: [{ type: "image_url", image_url: { url: `data:image/png;base64,${data}` } }] });
+  });
+
+  it("keeps a bounded frame limit for image-enabled custom servers", async () => {
+    const f = fixture('if(message.method === "tools/call") { process.stdout.write("x".repeat(32*1024*1024+1)); continue; }');
+    const session = await f.mount(true);
+    await expect(session.execute("audit_write", { value: "large" }, f.controller.signal)).rejects.toThrow(/frame|limit/i);
+  });
+
+  it("rejects malformed image results without claiming execution success", async () => {
+    const f = fixture('if(message.method === "tools/call") { reply(message,{content:[{type:"image",mimeType:"image/png",data:"not-base64"}]}); continue; }');
+    const session = await f.mount(true);
+    await expect(session.execute("audit_write", { value: "screenshot" }, f.controller.signal)).rejects.toThrow("Invalid or oversized MCP image");
+  });
   it.each([
     { type: "object", properties: { value: { type: "string", minLength: 2 } }, required: ["value"] },
     { type: "object", properties: { value: { type: "string", enum: ["a"], minLength: 2 } }, required: ["value"] },

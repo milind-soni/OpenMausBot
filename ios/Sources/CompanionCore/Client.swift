@@ -453,6 +453,34 @@ public enum APIError: Error, LocalizedError, Sendable {
     }
 }
 
+/// What the harness answered about a send. Either the message went straight
+/// in (a message the event stream will deliver), or the thread was busy and
+/// the harness is holding it: queued true plus the queueId and threadId that
+/// identify the held line. Every field is optional because the two shapes
+/// are disjoint and the client reads only the half it got.
+public struct SendReceipt: Decodable, Sendable {
+    public var queued: Bool?
+    public var queueId: String?
+    public var threadId: String?
+    /// "capacity" is the known value; anything else still parses.
+    public var reason: String?
+
+    public init(queued: Bool? = nil, queueId: String? = nil, threadId: String? = nil, reason: String? = nil) {
+        self.queued = queued
+        self.queueId = queueId
+        self.threadId = threadId
+        self.reason = reason
+    }
+}
+
+/// What the respond route answered about a card. Only the plain and peer
+/// approval paths speak it; the specialized card resolvers write their own
+/// shapes, so `outcome` is optional and a body without one reads as nil
+/// rather than as a failure.
+private struct RespondResponse: Decodable {
+    let outcome: String?
+}
+
 /// The exact conversation a retriable send belongs to. Carrying the thread
 /// as well as the bot/room id prevents a Share Extension retry from landing
 /// in a different task if the desktop switches tasks while iOS is suspended.
@@ -640,6 +668,16 @@ public struct CompanionClient: Sendable {
     private func send(_ request: URLRequest) async throws {
         let (data, response) = try await perform(request)
         try Self.check(response, data)
+    }
+
+    /// A send that succeeded is a send that succeeded: the harness's own
+    /// message for it arrives on the event stream, so the receipt here is
+    /// best-effort state. A body this build cannot read means "not queued"
+    /// rather than a failed send.
+    private func sendForReceipt(_ request: URLRequest) async throws -> SendReceipt {
+        let (data, response) = try await perform(request)
+        try Self.check(response, data)
+        return (try? JSONDecoder().decode(SendReceipt.self, from: data)) ?? SendReceipt()
     }
 
     private func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
@@ -1068,6 +1106,19 @@ public struct CompanionClient: Sendable {
         return data
     }
 
+    /// Fetch a parked voice note with the paired-device bearer token — the
+    /// same authenticated /api/attachments route avatar bytes ride, never a
+    /// bare URL a page could steer. The name follows the route's own
+    /// discipline (readAttachment in server/attachments.ts): one bare
+    /// generated mp3 filename.
+    public func voiceNote(path: String) async throws -> Data {
+        guard let name = Self.voiceNoteFileName(path) else { throw APIError.badURL }
+        let request = try makeRequest("GET", "/api/attachments/\(name)")
+        let (data, response) = try await perform(request)
+        try Self.check(response, data)
+        return data
+    }
+
     private static func validAvatarPath(_ path: String) -> Bool {
         let prefix = "/api/attachments/"
         guard path.hasPrefix(prefix) else { return false }
@@ -1086,8 +1137,55 @@ public struct CompanionClient: Sendable {
         return validStem && ["png", "jpg", "gif", "webp"].contains(String(ext))
     }
 
+    /// The attachment route resolves exactly one bare `[A-Za-z0-9-]+.mp3`
+    /// filename; anything else must not become a request. Directory parts
+    /// are dropped the way the web bubble's attachmentBasename drops them,
+    /// and the full /api/attachments/ prefix is tolerated like avatar paths.
+    static func voiceNoteFileName(_ path: String) -> String? {
+        var name = path
+        if name.hasPrefix("/api/attachments/") {
+            name = String(name.dropFirst("/api/attachments/".count))
+        }
+        if let slash = name.lastIndex(of: "/") {
+            name = String(name[name.index(after: slash)...])
+        }
+        guard let dot = name.lastIndex(of: "."), dot != name.startIndex else { return nil }
+        let stem = name[..<dot]
+        let ext = name[name.index(after: dot)...]
+        let validStem = !stem.isEmpty && stem.utf8.allSatisfy { byte in
+            (48...57).contains(byte)
+                || (65...90).contains(byte)
+                || (97...122).contains(byte)
+                || byte == 45
+        }
+        return validStem && ext == "mp3" ? name : nil
+    }
+
     public func voices() async throws -> [Voice] {
         try await send(try makeRequest("GET", "/api/tts/voices"), as: VoiceListResponse.self).voices
+    }
+
+    /// Switch the voice engine. A provider is a setting, not a secret: it
+    /// rides the ordinary config write, and whichever credential the newly
+    /// selected engine needs appears beside it in settings.
+    public func setVoiceProvider(_ provider: VoiceProvider) async throws -> ConfigStatus {
+        try await send(
+            try makeRequest("PUT", "/api/config", body: ["tts": ["provider": provider.wireValue]]),
+            as: ConfigStatus.self
+        )
+    }
+
+    /// Save the Chatterbox address and model id in one write — an address
+    /// without its model (or the reverse) is half a setting, exactly as on
+    /// the desktop.
+    public func saveChatterboxServer(baseURL: String, model: String) async throws -> ConfigStatus {
+        try await send(
+            try makeRequest(
+                "PUT", "/api/config",
+                body: ["tts": ["baseUrl": baseURL, "model": model]]
+            ),
+            as: ConfigStatus.self
+        )
     }
 
     public func routines() async throws -> (routines: [Routine], runs: [RoutineRun]) {
@@ -1334,24 +1432,27 @@ public struct CompanionClient: Sendable {
         ).bots
     }
 
-    public func send(text: String, toBot botId: String, threadId: String? = nil) async throws {
+    @discardableResult
+    public func send(text: String, toBot botId: String, threadId: String? = nil) async throws -> SendReceipt {
         var body = ["text": text]
         if let threadId { body["threadId"] = threadId }
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/messages", body: body))
+        return try await sendForReceipt(try makeRequest("POST", "/api/bots/\(botId)/messages", body: body))
     }
 
-    public func send(text: String, toRoom groupId: String) async throws {
-        try await send(try makeRequest("POST", "/api/groups/\(groupId)/messages", body: ["text": text]))
+    @discardableResult
+    public func send(text: String, toRoom groupId: String) async throws -> SendReceipt {
+        return try await sendForReceipt(try makeRequest("POST", "/api/groups/\(groupId)/messages", body: ["text": text]))
     }
 
     /// Retry-safe send used by short-lived clients such as Share Extensions.
     /// `sendId` names the logical send, while `threadId` freezes the selected
     /// task so a retry can never drift to a newly active conversation.
+    @discardableResult
     public func send(
         text: String,
         to destination: MessageDestination,
         sendId: String
-    ) async throws {
+    ) async throws -> SendReceipt {
         let route: String
         let threadId: String
         switch destination {
@@ -1365,11 +1466,82 @@ public struct CompanionClient: Sendable {
             threadId = selectedThreadId
         }
         guard Self.validRouteID(threadId), Self.validSendID(sendId) else { throw APIError.badURL }
-        try await send(try makeRequest(
+        return try await sendForReceipt(try makeRequest(
             "POST",
             route,
             body: ["text": text, "threadId": threadId, "sendId": sendId]
         ))
+    }
+
+    /// Take back a message the harness is holding.
+    ///
+    /// An entry that drained a moment ago is not an error worth showing —
+    /// that is the outcome the caller wanted. But that is matched positively
+    /// on the harness's own wording and never on the status alone: a computer
+    /// too old to have this route answers 404 for it, and reading that as
+    /// "already drained" would take the message off the phone while it is
+    /// still queued on the computer, and it would then arrive anyway.
+    /// Returns true only for a confirmed cancellation. A stale queue row can
+    /// be retired after a drained response, but its words must not be resent.
+    @discardableResult
+    public func cancelQueued(queueId: String, to destination: MessageDestination) async throws -> Bool {
+        let route: String
+        let body: [String: Any]?
+        switch destination {
+        case let .bot(id, threadId):
+            guard Self.validRouteID(id), Self.validRouteID(queueId), Self.validRouteID(threadId) else {
+                throw APIError.badURL
+            }
+            route = "/api/bots/\(id)/queue/\(queueId)"
+            body = ["threadId": threadId]
+        case let .room(id, _):
+            guard Self.validRouteID(id), Self.validRouteID(queueId) else { throw APIError.badURL }
+            route = "/api/groups/\(id)/queue/\(queueId)"
+            body = nil
+        }
+        do {
+            try await send(try makeRequest("DELETE", route, body: body))
+            return true
+        } catch let APIError.status(code, message) where code == 404 {
+            guard message?.localizedCaseInsensitiveContains(Self.alreadyDrainedQueueMessage) == true else {
+                throw APIError.status(
+                    code: 404,
+                    message: "This computer is too old to take back a queued message. Update OpenMausBot on it."
+                )
+            }
+            return false
+        }
+    }
+
+    /// Run Claude Code's own updater on the computer for one engine instance,
+    /// returning the version it now reports. The harness refuses while other
+    /// Claude turns are running; its error text is written for people and
+    /// comes through as the thrown `APIError`.
+    public func updateClaude(instanceId: String) async throws -> String {
+        guard Self.validInstanceID(instanceId) else { throw APIError.badURL }
+        var request = try makeRequest(
+            "POST",
+            "/api/instances/\(instanceId)/claude-update",
+            body: [:]
+        )
+        // The updater downloads and installs a new CLI; the server allows it
+        // up to three minutes. Leave room for its own timeout error rather
+        // than replacing it with the normal twenty-second transport timeout.
+        request.timeoutInterval = 200
+        return try await send(request, as: ClaudeUpdateResponse.self).version
+    }
+
+    private struct ClaudeUpdateResponse: Decodable {
+        let version: String
+    }
+
+    /// Matches the harness's `[\w.-]+` instance route component.
+    private static func validInstanceID(_ value: String) -> Bool {
+        !value.isEmpty && value != "." && value != ".."
+            && value.utf8.allSatisfy { byte in
+                (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
+                    || byte == 45 || byte == 95 || byte == 46
+            }
     }
 
     private static func validRouteID(_ value: String) -> Bool {
@@ -1383,22 +1555,33 @@ public struct CompanionClient: Sendable {
         (16...80).contains(value.utf8.count) && validRouteID(value)
     }
 
+    /// The harness's own answer when the entry is not in its queue. Matched
+    /// positively, never on the status alone — see cancelQueued.
+    private static let alreadyDrainedQueueMessage = "no such queued message"
+
     /// Answer an approval or a question.
     ///
     /// Addressed by thread rather than by bot on purpose: a request raised
     /// inside a room belongs to whichever member is speaking, and the
-    /// harness already knows which that is.
+    /// harness already knows which that is. Returns the server's outcome
+    /// when the body carries one, so a caller can tell an ask that never
+    /// ran (`unavailable`) from one that landed; the specialized card
+    /// branches answer in their own shapes and read as nil.
+    @discardableResult
     public func respond(
         threadId: String,
         requestId: String,
         behavior: String,
         message: String? = nil,
         reviewedSha256: String? = nil
-    ) async throws {
+    ) async throws -> String? {
         var body: [String: Any] = ["requestId": requestId, "behavior": behavior]
         if let message { body["message"] = message }
         if let reviewedSha256 { body["reviewedSha256"] = reviewedSha256 }
-        try await send(try makeRequest("POST", "/api/threads/\(threadId)/respond", body: body))
+        let request = try makeRequest("POST", "/api/threads/\(threadId)/respond", body: body)
+        let (data, response) = try await perform(request)
+        try Self.check(response, data)
+        return (try? JSONDecoder().decode(RespondResponse.self, from: data))?.outcome
     }
 
     /// Remember a grant so the same tool stops asking. The harness decides
@@ -1451,10 +1634,27 @@ public struct CompanionClient: Sendable {
         ).message
     }
 
-    public func edit(botId: String, messageId: String, text: String, threadId: String? = nil) async throws {
+    /// Fork the conversation at a user message. Returns the computer's new
+    /// message when the response carries one. `sendId` makes a retry of the
+    /// same edit answer with the existing fork instead of forking twice.
+    @discardableResult
+    public func edit(
+        botId: String,
+        messageId: String,
+        text: String,
+        threadId: String? = nil,
+        sendId: String? = nil
+    ) async throws -> Message? {
         var body = ["text": text]
         if let threadId { body["threadId"] = threadId }
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/messages/\(messageId)/edit", body: body))
+        if let sendId { body["sendId"] = sendId }
+        let (data, response) = try await perform(
+            try makeRequest("POST", "/api/bots/\(botId)/messages/\(messageId)/edit", body: body)
+        )
+        try Self.check(response, data)
+        // The fork already happened; an unreadable body only costs the early
+        // swap, and the event stream still delivers the same fork.
+        return (try? JSONDecoder().decode(EditResponse.self, from: data))?.message
     }
 
     public func setActiveBranch(botId: String, messageId: String, threadId: String? = nil) async throws -> String {
@@ -1478,6 +1678,40 @@ public struct CompanionClient: Sendable {
 
     public func renameTask(botId: String, threadId: String, title: String) async throws {
         try await send(try makeRequest("PATCH", "/api/bots/\(botId)/tasks/\(threadId)", body: ["title": title]))
+    }
+
+    /// Snooze a bot thread: 0 sleeps until its next activity, a timestamp
+    /// (epoch milliseconds) until that moment, and nil wakes it now — JSON
+    /// null is how "stop snoozing" travels, not an omitted field.
+    public func snoozeTask(botId: String, threadId: String, snoozedUntil: Double?) async throws {
+        try await send(try makeRequest(
+            "PATCH", "/api/bots/\(botId)/tasks/\(threadId)",
+            body: ["snoozedUntil": snoozedUntil ?? NSNull()]
+        ))
+    }
+
+    /// Archive puts a thread away without deleting it; `nil` brings it
+    /// back. The server accepts any epoch timestamp to archive and JSON null
+    /// to unarchive, matching the desktop's thread row action.
+    public func archiveTask(botId: String, threadId: String, archivedAt: Double?) async throws {
+        try await send(try makeRequest("PATCH", "/api/bots/\(botId)/tasks/\(threadId)", body: [
+            "archivedAt": archivedAt ?? NSNull(),
+        ]))
+    }
+
+    public func setTaskPinned(botId: String, threadId: String, pinned: Bool) async throws {
+        try await send(try makeRequest("PATCH", "/api/bots/\(botId)/tasks/\(threadId)", body: [
+            "pinned": pinned,
+        ]))
+    }
+
+    /// `title` is the thread's current title. An older server ignores `pinned`
+    /// and would turn a body without `title` into an empty rename.
+    public func setRoomTaskPinned(groupId: String, threadId: String, pinned: Bool, title: String) async throws {
+        try await send(try makeRequest("PATCH", "/api/groups/\(groupId)/tasks/\(threadId)", body: [
+            "pinned": pinned,
+            "title": title,
+        ]))
     }
 
     public func deleteTask(botId: String, threadId: String) async throws -> Bot {

@@ -2,8 +2,11 @@ package com.openmausbot.companion.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.QuickReply
+import com.openmausbot.companion.ui.AppearanceSkin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,6 +34,11 @@ class ChatPreferences(
     private val _quickReplies = MutableStateFlow(QuickReply.decode(prefs.getString(QUICK_REPLIES, "").orEmpty()))
     val quickReplies: StateFlow<List<QuickReply>> = _quickReplies.asStateFlow()
 
+    private val _appearanceSkin = MutableStateFlow(
+        AppearanceSkin.fromWire(prefs.getString(APPEARANCE_SKIN, null)),
+    )
+    val appearanceSkin: StateFlow<AppearanceSkin> = _appearanceSkin.asStateFlow()
+
     fun setActivityDetail(detail: ActivityDetail) {
         if (_activityDetail.value == detail && prefs.contains(ACTIVITY_DETAIL)) return
         // The value is small and changed only from Settings. Commit makes a
@@ -51,6 +59,12 @@ class ChatPreferences(
 
     fun resetQuickReplies() = setQuickReplies(QuickReply.DEFAULTS)
 
+    fun setAppearanceSkin(skin: AppearanceSkin) {
+        if (_appearanceSkin.value == skin && prefs.getString(APPEARANCE_SKIN, null) == skin.wireValue) return
+        prefs.edit().putString(APPEARANCE_SKIN, skin.wireValue).commit()
+        _appearanceSkin.value = skin
+    }
+
     fun lastShareDestination(connectionId: String): String? =
         prefs.getString(destinationKey(connectionId), null)?.takeIf(String::isNotBlank)
 
@@ -60,11 +74,30 @@ class ChatPreferences(
         prefs.edit().putString(key, destinationId).commit()
     }
 
+    /** Only a generic roster tap restores this preference; explicit links keep their target. */
+    fun restoringThread(chat: Chat, connectionId: String?): Chat {
+        if (chat !is Chat.BotChat || connectionId == null) return chat
+        val threadId = prefs.getString(threadKey(connectionId, chat.id), null) ?: return chat
+        return chat.bot.forTask(threadId)?.let(Chat::BotChat) ?: chat
+    }
+
+    fun rememberThread(chat: Chat, connectionId: String?) {
+        if (chat !is Chat.BotChat || connectionId == null) return
+        val key = threadKey(connectionId, chat.id)
+        if (prefs.getString(key, null) != chat.threadId) {
+            prefs.edit().putString(key, chat.threadId).commit()
+        }
+    }
+
     companion object {
         const val NAME = "openmaus.chat-preferences"
         const val FILE = "$NAME.xml"
         private const val ACTIVITY_DETAIL = "companion.prefs.activityDetail"
         private const val QUICK_REPLIES = "companion.prefs.quickReplies"
+        private const val APPEARANCE_SKIN = "companion.prefs.appearanceSkin"
+
+        private fun threadKey(connectionId: String, botId: String): String =
+            "thread.last-opened.${connectionId.length}:$connectionId$botId"
 
         private fun destinationKey(connectionId: String): String =
             "share.last-destination.$connectionId"

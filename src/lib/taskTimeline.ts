@@ -1,11 +1,11 @@
-import { redactSecretsInText } from "../../server/redact.js";
+import { redactSecretsInText } from "../../shared/redact.js";
 
 /** The persisted message fields this pure projection needs. Keeping this
  * structural avoids pulling the renderer's TSX store into server tests. */
 export interface TimelineMessage {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest" | "compaction";
   text?: string;
   tool?: { name: string; summary?: string; ok?: boolean };
   png?: string;

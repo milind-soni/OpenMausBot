@@ -73,6 +73,23 @@ describe("RoutineRunCard", () => {
     expect(markup).toContain("The team needs a missing credential.");
   });
 
+  it("labels a queued run held behind a busy target as deferred", () => {
+    const markup = renderToStaticMarkup(createElement(RoutineRunCard, {
+      message: message("queued", { deferredAt: Date.UTC(2026, 8, 14, 12) }),
+    }));
+
+    expect(markup).toContain("Deferred: target busy");
+    expect(markup).not.toContain("Queued");
+    expect(markup).toContain('aria-label="Morning brief routine run: Deferred: target busy"');
+  });
+
+  it("keeps the plain queued label when no deferral was recorded", () => {
+    const markup = renderToStaticMarkup(createElement(RoutineRunCard, { message: message("queued") }));
+
+    expect(markup).toContain("Queued");
+    expect(markup).not.toContain("Deferred: target busy");
+  });
+
   it("does not describe delegated work as a question or approval", () => {
     const markup = renderToStaticMarkup(createElement(RoutineRunCard, {
       message: message("waiting", { summary: "Waiting for delegated work to finish." }),

@@ -26,6 +26,7 @@ export interface OpenAICompatConfig {
   key?: string;
   model?: string;
   provider?: string;
+  managedModels?: string[];
 }
 
 function isOpenRouterUrl(url: string): boolean {
@@ -40,9 +41,11 @@ function isOpenRouterUrl(url: string): boolean {
 function decodeConfig(raw: unknown): OpenAICompatConfig {
   const config = (raw ?? {}) as Record<string, unknown>;
   if (config.tools !== undefined && typeof config.tools !== "boolean") throw new Error("tools must be a boolean");
+  if (config.managedModels !== undefined && (!Array.isArray(config.managedModels) || !config.managedModels.length || config.managedModels.some(model => typeof model !== "string" || !model.trim()))) throw new Error("Invalid managed models.");
   const envUrl = process.env.OPENAI_COMPAT_URL;
   return {
     ...(config.tools !== undefined ? { tools: config.tools as boolean } : {}),
+    ...(config.managedModels ? { managedModels: config.managedModels as string[] } : {}),
     url: (typeof config.url === "string" && config.url ? config.url : envUrl || "https://openrouter.ai/api/v1")
       .replace(/\/+$/, ""),
     apiKeyEnv: typeof config.apiKeyEnv === "string" && config.apiKeyEnv
@@ -93,7 +96,9 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       process.env[config.apiKeyEnv] ??
       process.env.OPENAI_COMPAT_API_KEY ??
       "";
-    let catalog: ModelCatalog = config.model
+    let catalog: ModelCatalog = config.managedModels
+      ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
+      : config.model
       ? {
           default: config.model,
           options: DEFAULT_MODELS.options.some((model) => model.id === config.model)
@@ -103,6 +108,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       : DEFAULT_MODELS;
 
     const fetchModels = async () => {
+      if (config.managedModels) return;
       if (!apiKey) return;
       try {
         const response = await fetch(`${config.url}/models`, {
@@ -141,12 +147,14 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       apiKey,
       apiUrl: config.url,
       tools: config.tools,
+      computerUse: true,
       models: () => catalog,
       refreshModels: fetchModels,
       requestBody: (model, messages, stream) => ({
         model,
         messages,
         stream,
+        stream_options: stream ? { include_usage: true } : undefined,
         ...(config.provider && isOpenRouterUrl(config.url)
           ? { provider: { order: [config.provider], allow_fallbacks: false } }
           : {}),

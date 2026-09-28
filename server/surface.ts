@@ -1,14 +1,15 @@
 // Where a bot's hands land — and therefore where the person goes when it
 // needs them. A turn can mount two places at once (a computer plus the
 // built-in browser), which is exactly what confused people: "do this on the
-// web" landed in the cloud box's Chrome one turn and in the Browser tab the
+// web" landed in the cloud boat's Chrome one turn and in the Browser tab the
 // next, and the "needs your hands" plea never said which. Everything that
 // decides or describes a surface lives here, so the picker, the dispatch,
 // the system prompt and the notification cannot drift apart.
 
-/** A place a bot can act. `cloud` covers both the Box and VPS backends —
+/** A place a bot can act. `cloud` covers both the Boat and VPS backends —
  * from the person's seat they are the same "cloud computer" panel. */
-export type Surface = "cloud" | "vm" | "local" | "browser";
+import type { Surface } from "../shared/wire.ts";
+export type { Surface };
 
 /** The bot's "Works on" setting; undefined = Auto. */
 export type Destination = Surface | "off" | undefined;
@@ -28,7 +29,7 @@ export interface SurfacePlan {
   browser: boolean;
   /** The surface this Auto turn was held to by the task's pin, or null. */
   pinned: Surface | null;
-  /** The pin pointed somewhere that no longer exists; the caller forgets it. */
+  /** Reserved for a deliberate migration; unavailable targets retain their pin. */
   clearPin: boolean;
   /** One prompt sentence when the chosen destination cannot be honoured. */
   note: string;
@@ -55,19 +56,24 @@ const NO_BROWSER_NOTE =
 const OFF_NOTE =
   " This bot's \"Works on\" setting is Off, so no computer and no built-in browser are mounted this turn: you cannot open a page, click, or type on any screen. If the user asks for something that needs one, tell them Works on is Off in this bot's settings — never claim you are opening a browser you do not have.";
 
-/** Decide what a turn mounts from the bot's destination, the task's pin
- * and what is actually reachable. Explicit choices are strict: Off mounts
- * neither surface, a computer destination keeps whatever browser the bot
- * has (the prompt tells the model which to use), a browser destination
- * mounts only the browser. Auto follows the task's pin while the pinned
- * place still exists, and otherwise re-resolves the way it always has. */
+/** Decide what a turn mounts. One place per turn: a computer destination
+ * mounts only that computer (web work happens in its own browser), a browser
+ * destination mounts only the built-in browser, Off mounts nothing. A
+ * conversation pin — set by the person from the composer, or by the
+ * conversation's own first turn on Auto — wins over the bot's default, so a
+ * thread never changes place under someone; only Off overrides it. An
+ * Auto-recorded pin is the machine's memory, not a person's choice: it yields
+ * when the bot's Works on later changes and no longer matches, while a
+ * person's pin (including legacy pins of unknown origin) keeps winning until
+ * they clear it. Auto without a pin leaves
+ * the computer choice to the dispatch, which then mounts the browser only
+ * when no computer was reached. A pin the turn cannot honour is retained and
+ * reported instead of being swapped silently. */
 export function resolveSurface(input: {
   destination: Destination;
   pinnedSurface?: Surface | null;
   /** The built-in browser may mount: workspace flag, bot switch and engine. */
   browserOn: boolean;
-  /** Which pinned surfaces could be mounted right now (Auto only). */
-  available?: Partial<Record<Surface, boolean>>;
 }): SurfacePlan {
   const { destination, browserOn } = input;
   // Off is the whole answer: no computer and no browser. It used to withhold
@@ -80,25 +86,25 @@ export function resolveSurface(input: {
   if (destination === "off") {
     return { computer: "off", browser: false, pinned: null, clearPin: false, note: OFF_NOTE };
   }
+  const pin = input.pinnedSurface ?? null;
+  if (pin === "browser") {
+    if (browserOn) return { computer: "off", browser: true, pinned: "browser", clearPin: false, note: "" };
+    // A missing browser is not permission to act on the host instead. Keep
+    // the chosen place so a retry or unrelated provider failure cannot move
+    // the task to a different signed-in computer.
+    return { computer: "off", browser: false, pinned: pin, clearPin: false,
+      note: " This conversation is pinned to the built-in browser, but its tools are unavailable this turn. No computer is mounted instead. Do not claim to have used it; a different place must be selected before acting there." };
+  }
+  if (pin) return { computer: pin, browser: false, pinned: pin, clearPin: false, note: "" };
   if (destination === "browser") {
     return browserOn
       ? { computer: "off", browser: true, pinned: null, clearPin: false, note: "" }
       : { computer: "off", browser: false, pinned: null, clearPin: false, note: NO_BROWSER_NOTE };
   }
   if (destination !== undefined) {
-    return { computer: destination, browser: browserOn, pinned: null, clearPin: false, note: "" };
+    return { computer: destination, browser: false, pinned: null, clearPin: false, note: "" };
   }
-  const pin = input.pinnedSurface ?? null;
-  if (pin === null) {
-    return { computer: undefined, browser: browserOn, pinned: null, clearPin: false, note: "" };
-  }
-  const reachable = pin === "browser" ? browserOn : input.available?.[pin] === true;
-  if (!reachable) {
-    return { computer: undefined, browser: browserOn, pinned: null, clearPin: true, note: "" };
-  }
-  return pin === "browser"
-    ? { computer: "off", browser: true, pinned: "browser", clearPin: false, note: "" }
-    : { computer: pin, browser: false, pinned: pin, clearPin: false, note: "" };
+  return { computer: undefined, browser: browserOn, pinned: null, clearPin: false, note: "" };
 }
 
 /** How the prompt and the app name a surface. Deliberately the same words
@@ -117,12 +123,20 @@ export function surfaceLabel(surface: Surface): string {
   }
 }
 
+/** Said once per task, so the person hears the place before the first click
+ * lands there. Same words as the panel and the composer chip. */
+const RESTATE_SENTENCE =
+  " Before your first action on a screen or page in a task, say in one short sentence where you are working, using that same name.";
+
+const SURFACE_AUTHORITY =
+  " For browser and computer tasks, use OpenMausBot's mounted browser/computer tools first: inspect the target, perform the action, and verify its result before claiming success. Discover deferred tools by their server/name when needed. Do not substitute the provider's own desktop, a shell-launched browser, or another automation path for the selected OpenMausBot surface. Ordinary code and file tasks may still use their normal tools. Announcing an action is not performing it. A request naming another place does not move these tools: this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser. If the requested place differs from the mounted one, explain the mismatch and ask the user to change the conversation's computer selector; never act on a different computer or describe a host window as a VM.";
+
 /** The one paragraph that says where this turn's work happens. Assembled
  * from what was actually mounted, never from the setting, so the model is
  * only ever told about tools it can call. */
 export function surfacePrompt(
   mounted: MountedSurfaces,
-  opts: { pinned?: Surface | null; note?: string } = {},
+  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean } = {},
 ): string {
   const computer = mounted.computer ? surfaceLabel(mounted.computer) : null;
   let text = "";
@@ -136,9 +150,19 @@ export function surfacePrompt(
     text =
       " Everything you do on screen happens in the built-in browser tab; there is no desktop, file or shell computer this turn. If you need the user to sign in, tell them it is in the Browser tab of the Computer panel.";
   }
-  if (opts.pinned) {
-    text += ` This task has been running on ${surfaceLabel(opts.pinned)}; keep using it unless the user says otherwise.`;
+  if (text) text += RESTATE_SENTENCE + (opts.canSelect
+    ? SURFACE_AUTHORITY.replace("explain the mismatch and ask the user to change the conversation's computer selector", "inspect connected choices with select_computer and select the requested available place; on a pending result end this turn so OpenMausBot can reconnect the correct tools and continue the original request")
+    : SURFACE_AUTHORITY);
+  else if (!opts.note && !opts.canSelect) {
+    text = " No computer or built-in browser tools are mounted this turn. You cannot open apps, click, or inspect a screen through OpenMausBot. If asked for screen work, explain this and ask the user to choose and connect a computer in the Computer panel; do not claim to have opened or checked it.";
   }
+  if (opts.pinned) {
+    text += ` This conversation is pinned to ${surfaceLabel(opts.pinned)}; changing places requires ${opts.canSelect ? "select_computer or " : ""}the conversation's computer selector, not a different tool name.`;
+  }
+  if (opts.canSelect) text += " For a screen task, use select_computer with no arguments when you need to inspect the actual available targets. Choose the requested place from its result; if the user left the place open, use a suitable available target or surface auto instead of asking them to operate the menu. Browser-only work can stay in Browser; when it needs desktop apps or capabilities the current Browser lacks, select an available Local VM without asking the user to switch it manually. Choose before taking actions, and do not repeat actions already completed if the task must continue elsewhere. OpenMausBot can start an existing configured computer and highlight the selected target. If the right tools are already mounted, use them directly. On a pending switch, end this turn: the original request resumes automatically with the new tools, and then you must carry out the task. Only ask for input for a genuine blocker, such as missing setup, required sign-in or an approval. Never silently replace an explicitly requested VM with the host desktop.";
+  if (opts.canSelect) text += " If no suitable computer is running but its provider is configured, select_computer can provision one for this computer task; reuse existing resources first. Do not provision merely for ordinary chat or inspection.";
+  if (opts.canSelect && !computer && !mounted.browser) text += " No computer or browser tools are mounted yet; select_computer is the way to connect them before screen work, not a reason to claim you already performed it.";
+  if (computer || mounted.browser) text += " For online research, use the selected OpenMausBot browser when a search service is unavailable. A failed tool proves only that this attempt failed, not that every browser is unavailable. Inspect the current page after navigation; report a sign-in page, redirect or error as such. A completed model turn is not proof that the user's task succeeded.";
   return text + (opts.note ?? "");
 }
 

@@ -41,6 +41,14 @@ The official managed OpenMausBot service keeps X disabled until it owns an appro
 
 Connect more than one account for the same toolkit and give each a clear alias such as `work`, `personal`, or `client-acme`. When several accounts could perform an action, OpenMausBot requires explicit selection instead of silently replacing the first connection.
 
+## Limit which tools a bot may use
+
+Connecting a service makes its tools available to the workspace; it does not hand every bot every tool. Open a bot's settings on the desktop and, under **Connected apps**, choose per service whether that bot gets **all tools**, an **exact list** of tools, or **no tools**.
+
+By default every bot keeps all tools on the apps it can see — nothing changes when you upgrade or connect a new app until you assign a grant. Once a bot has any grant, services missing from its list grant it nothing. Imported bots and shareable packages always land with no grants.
+
+Phones show each bot's grants read-only in its profile under **App tools**. Editing happens on the computer; a paired phone can never change grants.
+
 ## Disconnecting
 
 Disconnecting an account revokes the upstream grant. It does not only hide the account in the local UI. Other accounts for the same toolkit remain connected.

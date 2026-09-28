@@ -44,7 +44,7 @@ Choose one connection method:
 After the connection is ready:
 
 - **iPhone/iPad:** scan the QR with Camera to open Safari. If you already have the OpenMausBot iOS app, use its pairing scanner or paste the full link there.
-- **Android:** scan with Camera and open the link in your web browser. This CLI link does **not** work with the current Android native app's companion-pairing scanner.
+- **Android:** the QR is an app link, so scan it inside the OpenMausBot app. To use a browser instead, open the web address printed above it and type the code.
 
 Choose **Connect** on the phone. Scanning alone is not a successful pairing. The code is private, single-use, and expires after five minutes. Guided phone pairing grants client access for chat and approvals, not settings or pairing administration.
 

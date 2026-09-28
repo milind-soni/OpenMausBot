@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { StoreProvider, type Bot, type Group } from "@/state/store";
 import { BotThreadList, GroupThreadList } from "./Sidebar";
+import { formatUpdatedAt } from "./SidebarThreadRow";
 import { GroupTaskPicker, TaskPicker } from "./TaskPicker";
 import { workingFolderLabel } from "./ComposerTray";
 
@@ -21,18 +22,21 @@ const bot: Bot = {
 
 describe("sidebar bot threads", () => {
   it("hides generated workspace IDs while retaining useful user-chosen folder names", () => {
-    expect(workingFolderLabel("/tmp/fixture/task-workspaces/maus/idle", "maus", "idle")).toBe("Thread workspace");
-    expect(workingFolderLabel("C:\\fixture\\task-workspaces\\maus\\idle\\", "maus", "idle")).toBe("Thread workspace");
+    expect(workingFolderLabel("/tmp/fixture/task-workspaces/maus/idle", "maus", "idle")).toBe("Task folder");
+    expect(workingFolderLabel("C:\\fixture\\task-workspaces\\maus\\idle\\", "maus", "idle")).toBe("Task folder");
     expect(workingFolderLabel("/Users/example/Projects/Website/", "maus", "idle")).toBe("Website");
     expect(workingFolderLabel("/Users/example/task-workspaces/notes", "maus", "idle")).toBe("notes");
   });
-  it("shows indented named threads with separate presence and a usable New thread action", () => {
+  it("shows named threads flush with the bot row, with separate presence and no trailing New thread row", () => {
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot, selected: true })));
     expect(markup).toContain('aria-label="Maus threads"');
     expect(markup).toContain('data-sidebar-thread-row="idle" aria-current="page"');
-    expect(markup).toContain("Long research · Working");
-    expect(markup).toContain("Needs approval · Waiting · Unread");
-    expect(markup).toContain("New thread");
+    expect(markup).toContain(`Long research · ${formatUpdatedAt(2)} · Working`);
+    expect(markup).toContain(`Needs approval · ${formatUpdatedAt(3)} · Waiting · Unread`);
+    // New thread lives on the bot row as an icon beside New folder; the list
+    // carries no indent rail and no trailing text button
+    expect(markup).not.toContain("New thread");
+    expect(markup).not.toContain("border-l");
     expect(markup).not.toContain("disabled");
     expect(markup).not.toContain("test");
   });
@@ -43,6 +47,14 @@ describe("sidebar bot threads", () => {
     const single = render({ ...bot, tasks: [bot.tasks![1]!] });
     expect(single).toContain("All threads");
     expect(single).not.toContain('disabled=""');
+  });
+
+  it("shows fresh threads with a relative stamp while the tooltip keeps the full date", () => {
+    const recent = Date.now() - 5 * 60_000;
+    const fresh = { ...bot, unread: false, busy: false, activity: "idle" as const, tasks: [{ threadId: "fresh", title: "Fresh question", createdAt: recent, busy: false, activity: "idle" as const }] };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot: fresh, selected: true })));
+    expect(markup).toContain("5 min ago");
+    expect(markup).toContain(`title="Fresh question · ${formatUpdatedAt(recent)}"`);
   });
 
   it("groups folder threads under one bot while keeping loose threads and empty folders reachable", () => {
@@ -98,13 +110,12 @@ describe("sidebar bot threads", () => {
     expect(markup).toContain('aria-label="Launch team threads"');
     expect(markup).toContain('data-sidebar-thread-row="group-current" aria-current="page"');
     expect(markup).toContain("Previous review");
-    expect(markup).toContain("New thread");
-    expect(markup).not.toContain('disabled=""');
+    // New thread lives on the room row now, not at the end of the list
+    expect(markup).not.toContain("New thread");
     const picker = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupTaskPicker, { group })));
     expect(picker).toContain('aria-label="All threads"');
     expect(picker).not.toContain("Tasks");
     const working = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupThreadList, { group: { ...group, working: true }, selected: true })));
-    expect(working).toContain('title="Launch plan · Working"');
-    expect(working).toContain('disabled=""');
+    expect(working).toContain(`title="Launch plan · ${formatUpdatedAt(3)} · Working"`);
   });
 });

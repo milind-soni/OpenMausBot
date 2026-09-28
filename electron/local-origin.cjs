@@ -15,7 +15,17 @@ function getLocalOrigin() {
 
 /** The origin of the frame that sent an IPC message, or null when unknown. */
 function senderOrigin(event) {
-  const url = event?.senderFrame?.url ?? (typeof event?.sender?.getURL === "function" ? event.sender.getURL() : "");
+  const frameUrl = event?.senderFrame?.url;
+  // Electron can briefly report an empty URL for the main frame while the
+  // local renderer is committing a navigation (including after restoring a
+  // company workspace). Fall back to WebContents only for that exact main
+  // frame. A child frame with an empty URL still fails closed: it must never
+  // inherit the trusted origin of its parent page.
+  const emptyKnownChild =
+    event?.senderFrame &&
+    event?.sender?.mainFrame &&
+    event.senderFrame !== event.sender.mainFrame;
+  const url = frameUrl || (!emptyKnownChild && typeof event?.sender?.getURL === "function" ? event.sender.getURL() : "");
   try {
     return new URL(url).origin;
   } catch {

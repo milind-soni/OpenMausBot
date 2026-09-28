@@ -1014,15 +1014,21 @@ describe("goal-driven channel runs", () => {
       memberIds: [looper.id],
       setup: { bulletin: "", defaultResponder: { kind: "member", botId: looper.id } },
     })).body.group;
-    expect((await api("POST", `/api/groups/${room.id}/messages`, {
+    const started = await api("POST", `/api/groups/${room.id}/messages`, {
       text: "Keep trying forever",
       mode: "goal",
-    })).status).toBe(202);
+    });
+    expect(started.status).toBe(202);
+    // Per-turn digests can push the original card out of a tail page.
+    // Anchor its identity beside this exact accepted user message, then
+    // observe that same receipt through the bounded scrollback endpoint.
+    const initial = await api("GET", `/api/threads/${started.body.threadId}/messages?around=${started.body.message.id}&limit=3`);
+    const card = initial.body.messages.find((message: { kind: string }) => message.kind === "goal.run");
+    expect(card).toMatchObject({ id: expect.any(String) });
 
     await expect.poll(async () => {
-      const state = (await api("GET", "/api/bots?messages=40")).body;
-      const current = state.groups.find((candidate: { id: string }) => candidate.id === room.id);
-      return current?.messages.find((message: { kind: string }) => message.kind === "goal.run")?.goalRun;
+      const page = await api("GET", `/api/threads/${started.body.threadId}/messages?around=${card.id}&limit=1`);
+      return page.body.messages[0]?.goalRun;
     }, { timeout: 15_000 }).toMatchObject({ status: "limit-reached", turnCount: 13, maxTurns: 13 });
   });
 

@@ -12,7 +12,11 @@ An operator configures the workspace with an HTTPS `OMB_ADMIN_URL` origin,
 its `OMB_ADMIN_WORKSPACE` slug, its exact HTTPS `OMB_PUBLIC_URL`, and an
 active `admin` entitlement. Partial or invalid hosted configuration denies
 remote access; it never enables legacy email or QR sign-in as a fallback.
-Credential-free, unproxied loopback owner access remains available for recovery.
+Unproxied loopback without a session is a *service*, not the owner, on a hosted
+workspace (see [shared-workspace trust](shared-workspace-trust.md)): it keeps
+health, the Slack worker's guarded routes and the bots' capability routes, and
+every admin change needs a session. For recovery an operator restarts with
+`OMB_LOOPBACK_TRUST=owner`.
 The `identity.example.test` URLs below illustrate external identity-service
 endpoints; requests use the configured `OMB_ADMIN_URL`, not the tenant origin.
 

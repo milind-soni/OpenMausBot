@@ -3,6 +3,7 @@
 // old file's email. Only the protocol's display email leaves this helper.
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { userHome } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 
 const MAX_OUTPUT = 16_384;
@@ -12,7 +13,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * configured home is not absolute (the login controller refuses those too). */
 export function codexHome(env: Record<string, string | undefined>): string | null {
   if (env.CODEX_HOME) return isAbsolute(env.CODEX_HOME) ? resolve(env.CODEX_HOME) : null;
-  const home = env.HOME || env.USERPROFILE || homedir();
+  const home = userHome(env);
   return isAbsolute(home) ? join(home, ".codex") : null;
 }
 

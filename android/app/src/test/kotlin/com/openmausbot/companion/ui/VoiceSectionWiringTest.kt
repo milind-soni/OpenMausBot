@@ -66,6 +66,17 @@ class VoiceSectionWiringTest {
     private val systemFooter =
         "Your computer's built-in voices need no key, and it reports none it can use. " +
             "Switch the voice engine in OpenMausBot on the computer to turn speech back on."
+    private val chatterboxNotice = "The Chatterbox server is not connected"
+    private val chatterboxFooter =
+        "Add the address of your Chatterbox server in OpenMausBot on the computer to turn " +
+            "speech back on."
+
+    /**
+     * The engine picker rides above the branch, so its label leads every
+     * sequence. The collapsed field reports no text for the selected engine;
+     * the row is there, and which engine it holds is the picker's business.
+     */
+    private val engine = listOf("Voice engine")
 
     /** Everything the merged tree carries, in the order the tree carries it. */
     private fun spoken(node: SemanticsNode): List<String> = buildList {
@@ -85,7 +96,7 @@ class VoiceSectionWiringTest {
     @Test
     fun `the unconfigured section states the engine, then explains the remedy`() {
         assertEquals(
-            listOf("VOICE", elevenLabsNotice, elevenLabsFooter),
+            listOf("VOICE") + engine + listOf(elevenLabsNotice, elevenLabsFooter),
             sectionFor(ConfigStatus(tts = ConfigFlag(configured = false))),
             "the short state stands in for the picker; the remedy is the footer under it",
         )
@@ -94,7 +105,7 @@ class VoiceSectionWiringTest {
     @Test
     fun `a section that can speak draws the picker under the ready footer`() {
         assertEquals(
-            listOf("VOICE", pickerSlot, readyFooter),
+            listOf("VOICE") + engine + listOf(pickerSlot, readyFooter),
             sectionFor(ConfigStatus(tts = ConfigFlag(configured = true, voice = "shared-voice"))),
         )
     }
@@ -103,7 +114,7 @@ class VoiceSectionWiringTest {
     fun `the built-in provider's section names no brand in either slot`() {
         val drawn = sectionFor(ConfigStatus(tts = ConfigFlag(configured = false, provider = "system")))
 
-        assertEquals(listOf("VOICE", systemNotice, systemFooter), drawn)
+        assertEquals(listOf("VOICE") + engine + listOf(systemNotice, systemFooter), drawn)
         drawn.forEach { line ->
             assertEquals(false, line.contains("ElevenLabs"), "no brand reaches the screen: $line")
         }
@@ -112,10 +123,19 @@ class VoiceSectionWiringTest {
     @Test
     fun `the built-in provider keeps the picker and the shared footer when it can speak`() {
         assertEquals(
-            listOf("VOICE", pickerSlot, readyFooter),
+            listOf("VOICE") + engine + listOf(pickerSlot, readyFooter),
             sectionFor(
                 ConfigStatus(tts = ConfigFlag(configured = true, voice = "Albert", provider = "system")),
             ),
+        )
+    }
+
+    @Test
+    fun `the chatterbox section offers the switch that repairs it`() {
+        assertEquals(
+            listOf("VOICE") + engine + listOf(chatterboxNotice, chatterboxFooter),
+            sectionFor(ConfigStatus(tts = ConfigFlag(configured = false, provider = "chatterbox"))),
+            "an engine whose credential is missing is exactly when switching engines matters",
         )
     }
 }

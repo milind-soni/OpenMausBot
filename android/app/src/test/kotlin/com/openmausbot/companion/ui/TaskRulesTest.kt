@@ -48,8 +48,78 @@ class TaskRulesTest {
             listOf("helper-0", "t1", "t2", "helper-1", "helper-2"),
             TaskRules.tasks(bot(helpers + own, current = "helper-0")).map { it.threadId },
         )
+        // a held send keeps a closed thread in the open pile — ordering, never filtering
+        assertEquals(
+            listOf("helper-0", "t1", "t2", "helper-1", "helper-2"),
+            TaskRules.tasks(bot(helpers + own), queuedThreadIds = setOf("helper-0")).map { it.threadId },
+        )
         assertTrue(TaskRules.demandsAttention(task("t1").copy(activity = "waiting-on-you")))
         assertFalse(TaskRules.demandsAttention(task("t1").copy(activity = "idle")))
+        // the wire value still counts, as on main; the client flag covers the
+        // queues the harness reports out-of-band
+        assertTrue(TaskRules.demandsAttention(task("t1").copy(activity = "queued")))
+        assertTrue(TaskRules.demandsAttention(task("t1"), queued = true))
+        // main's teammate wait rides along through the shared core rule
+        assertTrue(TaskRules.demandsAttention(task("t1").copy(waitingOnTeammate = true)))
+    }
+
+    @Test
+    fun `equal stamps keep stored order inside the open threads and the closed tail`() {
+        val closer = ThreadCloser(botId = "pm", name = "Parker", at = 9.0)
+        val subject = bot(
+            listOf(
+                task("idle"), task("t1"), task("unread").copy(unread = true),
+                task("queued").copy(activity = "queued"), task("waiting").copy(activity = "waiting-on-you"),
+                task("busy").copy(busy = true), task("helper").copy(closedBy = closer),
+            ),
+        )
+
+        assertEquals(
+            listOf("idle", "t1", "unread", "queued", "waiting", "busy", "helper"),
+            TaskRules.tasks(subject).map { it.threadId },
+        )
+    }
+
+    @Test
+    fun `a pin leads and a newer update rises above an older waiting thread`() {
+        val closer = ThreadCloser(botId = "pm", name = "Parker", at = 9.0)
+        val subject = bot(
+            listOf(
+                task("waiting").copy(activity = "waiting-on-you", updatedAt = 10.0),
+                task("pinned").copy(pinned = true, updatedAt = 5.0, closedBy = closer),
+                task("fresh").copy(updatedAt = 30.0),
+            ),
+            current = "fresh",
+        )
+
+        assertEquals(listOf("pinned", "fresh", "waiting"), TaskRules.tasks(subject).map { it.threadId })
+    }
+
+    @Test
+    fun `archived threads fold to the tail unless they demand attention`() {
+        val tasks = listOf(
+            task("live", "Live"),
+            task("later", "Later").copy(archivedAt = 0.0),
+            task("held", "Held").copy(archivedAt = 5.0, unread = true),
+        )
+        // "held" is archived but unread, so it stays in the open band. Equal
+        // stamps keep stored order, so it does not jump ahead of "live".
+        // Only the quiet "later" folds to the tail.
+        assertEquals(
+            listOf("live", "held", "later"),
+            TaskRules.tasks(bot(tasks)).map { it.threadId },
+        )
+    }
+
+    @Test
+    fun `archiving waits for work to settle`() {
+        // A modern bot paints per-task busy, so the task alone decides.
+        val modern = bot(listOf(task("run").copy(busy = false)))
+        assertFalse(TaskRules.canArchive(task("run").copy(activity = "working"), modern))
+        assertFalse(TaskRules.canArchive(task("run").copy(activity = "running"), modern))
+        assertFalse(TaskRules.canArchive(task("run").copy(busy = true), modern))
+        assertTrue(TaskRules.canArchive(task("run").copy(activity = "waiting-on-you"), modern))
+        assertTrue(TaskRules.canArchive(task("run"), modern))
     }
 
     @Test
@@ -72,6 +142,7 @@ class TaskRulesTest {
         val busy = bot(tasks, current = "t1", busy = true)
         assertFalse(TaskRules.canCreate(busy))
         assertFalse(TaskRules.canDelete(task("t2"), busy))
+        assertFalse(TaskRules.canArchive(task("t2"), busy))
         assertTrue(TaskRules.canSwitch(task("t2"), busy))
     }
 
@@ -87,6 +158,8 @@ class TaskRulesTest {
         assertTrue(TaskRules.canSwitch(idle, subject))
         assertTrue(TaskRules.canDelete(idle, subject))
         assertFalse(TaskRules.canDelete(running, subject))
+        assertTrue(TaskRules.canArchive(idle, subject))
+        assertFalse(TaskRules.canArchive(running, subject))
     }
 
     @Test
@@ -95,6 +168,7 @@ class TaskRulesTest {
         val idle = bot(tasks, current = "t1", busy = false)
         assertTrue(TaskRules.canCreate(idle))
         assertTrue(TaskRules.canDelete(task("t2"), idle))
+        assertTrue(TaskRules.canArchive(task("t2"), idle))
         assertTrue(TaskRules.canSwitch(task("t2"), idle))
     }
 
@@ -137,6 +211,7 @@ class TaskRulesTest {
         val execution = task("run-thread").copy(routineRunId = "run-1", busy = true)
         val subject = bot(listOf(legacy, results, execution), current = "results", busy = true)
 
+        // Equal stamps keep stored order. The open thread does not float.
         assertEquals(listOf(legacy, results), TaskRules.tasks(subject))
         assertEquals(listOf(legacy, results), TaskRules.tasks(Chat.BotChat(subject)))
         assertEquals(3, subject.tasks?.size)

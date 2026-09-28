@@ -20,6 +20,11 @@ final class WalkieMic: @unchecked Sendable {
 
     /// Set up the session and start the engine. Safe to call again.
     func warm() async throws {
+        await MainActor.run {
+            // Pause the audible voice note and pin playback off before the
+            // queue below reconfigures the shared session for recording.
+            VoiceNoteCenter.shared.beginInputOwnership(.walkie)
+        }
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
             queue.async {
                 do {
@@ -57,6 +62,12 @@ final class WalkieMic: @unchecked Sendable {
             }
             self.engine = nil
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            Task { @MainActor in
+                // Return the session only after it is deactivated, so a
+                // voice note starting in between cannot have its session
+                // torn down by the line above.
+                VoiceNoteCenter.shared.endInputOwnership(.walkie)
+            }
         }
     }
 

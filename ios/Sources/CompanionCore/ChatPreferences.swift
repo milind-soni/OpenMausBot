@@ -95,10 +95,25 @@ public struct QuickReply: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// A transcript entry: either a message, or a folded run of activity.
+/// A completed turn's intermediate replies. The terminal answer stays outside.
+public struct AssistantTurnFold: Hashable, Sendable {
+    public let turnId: String
+    public let messages: [Message]
+    public let elapsed: Double
+
+    public var label: String {
+        guard elapsed >= 1_000 else { return "Worked" }
+        let seconds = Int(elapsed / 1_000)
+        let duration = seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(String(format: "%02d", seconds % 60))s"
+        return "Worked for \(duration)"
+    }
+}
+
+/// A transcript entry: a message, a run of tools, or completed narration.
 public enum TranscriptRow: Identifiable, Hashable, Sendable {
     case message(Message)
     case activityRun([Message])
+    case assistantTurn(AssistantTurnFold)
 
     /// The message a row answers for — its first, which is the one whose
     /// time and sender the transcript reads.
@@ -106,6 +121,7 @@ public enum TranscriptRow: Identifiable, Hashable, Sendable {
         switch self {
         case let .message(message): message
         case let .activityRun(items): items[0]
+        case let .assistantTurn(turn): turn.messages[0]
         }
     }
 
@@ -113,6 +129,7 @@ public enum TranscriptRow: Identifiable, Hashable, Sendable {
         switch self {
         case let .message(message): message.id
         case let .activityRun(items): "run.\(items[0].id)"
+        case let .assistantTurn(turn): "turn.\(turn.turnId)"
         }
     }
 
@@ -123,6 +140,7 @@ public enum TranscriptRow: Identifiable, Hashable, Sendable {
         switch self {
         case let .message(message): message.at
         case let .activityRun(items): items.last?.at ?? head.at
+        case let .assistantTurn(turn): turn.messages.last?.at ?? head.at
         }
     }
     public var role: Message.Role { head.role }
@@ -145,13 +163,15 @@ public func rosterPreview(_ messages: [Message], detail: ActivityDetail) -> Stri
     case let .activityRun(items):
         let running = items.contains { $0.tool?.ok == nil }
         return "\(running ? "Running" : "Ran") \(items.count) steps"
+    case let .assistantTurn(turn):
+        return turn.label
     }
 }
 
 /// What a single message reads as in a roster row.
 func previewText(of message: Message) -> String {
     switch message.kind {
-    case .text: return message.text ?? ""
+    case .text: return message.webhookContent?.task ?? message.text ?? ""
     // a pending card's question is the preview; the roster row already
     // says "waiting on you" beside it
     case .options:
@@ -161,7 +181,20 @@ func previewText(of message: Message) -> String {
         return message.secret?.label ?? message.text ?? "Credential required"
     case .activity: return message.tool?.name ?? ""
     case .screen: return "Screenshot"
+    case .digest: return ""
+    case .compaction: return message.compaction?.chipText ?? message.text ?? ""
     case .unknown: return message.text ?? ""
+    }
+}
+
+/// Rows the harness writes about a turn rather than in it: tool chips and,
+/// since Phase 0, the digest and compaction receipts. Hidden together,
+/// because a reader who turned activity off does not want the summary of
+/// exactly those calls either.
+public func isActivityReceipt(_ message: Message) -> Bool {
+    switch message.kind {
+    case .activity, .digest, .compaction: return true
+    default: return false
     }
 }
 
@@ -171,39 +204,68 @@ func previewText(of message: Message) -> String {
 /// the successful noise, and losing the one chip that says something went
 /// wrong would make `reduced` a worse default than `full`.
 public func transcriptRows(_ messages: [Message], detail: ActivityDetail) -> [TranscriptRow] {
-    switch detail {
-    case .full:
-        return messages.map(TranscriptRow.message)
-    case .hidden:
-        return messages.filter { $0.kind != .activity }.map(TranscriptRow.message)
-    case .reduced:
-        var rows: [TranscriptRow] = []
-        var run: [Message] = []
-
-        // A run of one is not worth a summary — emit the chip itself.
-        func flush() {
-            if run.count > 1 {
-                rows.append(.activityRun(run))
-            } else {
-                rows.append(contentsOf: run.map(TranscriptRow.message))
-            }
-            run.removeAll()
+    let messages = messages.filter { $0.kind != .digest }
+    // Fold only explicitly completed turns; never guess that the last reply
+    // is final on an older server or while the bot is still working.
+    var narration: [String: [Message]] = [:]
+    var startedAt: [String: Double] = [:]
+    var lastUserAt: Double?
+    var folds: [String: AssistantTurnFold] = [:]
+    var hiddenIDs = Set<String>()
+    for message in messages {
+        if message.role == .user { lastUserAt = message.at }
+        guard message.role == .bot, message.kind == .text,
+              let turnID = message.turnId, !turnID.isEmpty else { continue }
+        if message.turnTerminal == true {
+            guard let items = narration.removeValue(forKey: turnID), !items.isEmpty else { continue }
+            folds[items[0].id] = AssistantTurnFold(
+                turnId: turnID, messages: items,
+                elapsed: max(0, message.at - (startedAt[turnID] ?? items[0].at))
+            )
+            hiddenIDs.formUnion(items.map(\.id))
+        } else {
+            if narration[turnID] == nil { startedAt[turnID] = lastUserAt ?? message.at }
+            narration[turnID, default: []].append(message)
         }
-
-        for message in messages {
-            guard message.kind == .activity else {
-                flush()
-                rows.append(.message(message))
-                continue
-            }
-            if message.tool?.ok == false {
-                flush()
-                rows.append(.message(message))
-                continue
-            }
-            run.append(message)
-        }
-        flush()
-        return rows
     }
+
+    var rows: [TranscriptRow] = []
+    var run: [Message] = []
+
+    // A run of one is not worth a summary — emit the chip itself.
+    func flush() {
+        if run.count > 1 {
+            rows.append(.activityRun(run))
+        } else {
+            rows.append(contentsOf: run.map(TranscriptRow.message))
+        }
+        run.removeAll()
+    }
+
+    for message in messages {
+        if let turn = folds[message.id] {
+            flush()
+            rows.append(.assistantTurn(turn))
+            continue
+        }
+        if hiddenIDs.contains(message.id) { continue }
+        if detail == .hidden && isActivityReceipt(message) { continue }
+        if detail != .reduced {
+            rows.append(.message(message))
+            continue
+        }
+        guard message.kind == .activity else {
+            flush()
+            rows.append(.message(message))
+            continue
+        }
+        if message.tool?.ok == false {
+            flush()
+            rows.append(.message(message))
+            continue
+        }
+        run.append(message)
+    }
+    flush()
+    return rows
 }

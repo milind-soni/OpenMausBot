@@ -15,9 +15,23 @@ export interface BotOverview {
   reaches: string[];
   wont: string[];
   recent: Array<{ at: number; summary: string }>;
+  /** Per-service connector tool grants, for read-only display. Absent when
+   * the bot carries no grants record — then composio alone decides. */
+  grants?: BotOverviewGrant[];
   /** Optional setup ideas, each pointing at the relevant settings section.
    * These are customization suggestions, not requirements for chatting. */
   setup: SetupStep[];
+}
+
+/** One service's tool grants as a client should summarize them. Mirrors the
+ * levels the web grant editor already renders (connector-grants.ts): "all"
+ * is a whole-service wildcard, "partial" is an exact list whose size is
+ * toolCount, "none" is a service granted nothing. */
+export interface BotOverviewGrant {
+  slug: string;
+  level: "all" | "partial" | "none";
+  /** Granted tool count; 0 unless level is "partial". */
+  toolCount: number;
 }
 
 export type SetupStepId = "identity" | "soul" | "folder" | "apps" | "schedule";
@@ -46,6 +60,7 @@ export interface OverviewFacts {
     | "approvePeerComms"
     | "peers"
     | "composio"
+    | "connectorTools"
     | "browser"
     | "chiefOfStaff"
     | "managedSections"
@@ -196,6 +211,22 @@ function couldUseApps(facts: OverviewFacts): boolean {
   return facts.bot.composio !== false && facts.connectedApps.configured && Boolean(facts.engine?.composioMcp);
 }
 
+/** Summarize a bot's connectorTools record for the Overview. Undefined in,
+ * undefined out: a bot with no record keeps legacy all-tools behavior and
+ * the field stays off the wire. An explicit record — even an empty one —
+ * becomes a (possibly empty) list, sorted by slug so both phones and the
+ * web dialog render it in one deterministic order. */
+export function grantsSummary(connectorTools: BotRecord["connectorTools"]): BotOverviewGrant[] | undefined {
+  if (connectorTools === undefined) return undefined;
+  return Object.entries(connectorTools)
+    .map(([slug, grant]): BotOverviewGrant => {
+      if (grant.tools === "*") return { slug, level: "all", toolCount: 0 };
+      if (grant.tools.length > 0) return { slug, level: "partial", toolCount: grant.tools.length };
+      return { slug, level: "none", toolCount: 0 };
+    })
+    .sort((a, b) => (a.slug < b.slug ? -1 : 1));
+}
+
 function computerReach(computer: BotRecord["computer"]): string | null {
   switch (computer) {
     case "cloud":
@@ -272,6 +303,7 @@ export function buildBotOverview(facts: OverviewFacts): BotOverview {
     reaches: reachesLines(facts),
     wont: wontLines(facts),
     recent: facts.recent,
+    grants: grantsSummary(facts.bot.connectorTools),
     setup: setupSteps(facts),
   };
 }

@@ -116,7 +116,7 @@ const header = (headers: Record<string, string | string[] | undefined>, name: st
   return Array.isArray(v) ? v.join("\n") : (v ?? "");
 };
 
-async function pairingCode(scopes?: string[]): Promise<{ code: string; url: string | null; hint: string | null }> {
+async function pairingCode(scopes?: string[]): Promise<{ code: string; credential: string; url: string | null; inviteUrl: string | null; serverName: string; hint: string | null }> {
   const opened = await call("/api/auth/pairing", { method: "POST", body: JSON.stringify(scopes ? { scopes } : {}) });
   expect(opened.status).toBe(200);
   return opened.body;
@@ -358,6 +358,77 @@ describe("pairing", () => {
     expect((await call("/api/bots", { headers: remote("10.0.0.4", { cookie }) })).status).toBe(401);
   });
 
+  // The native companion apps were written against the desktop's companion
+  // sidecar and POST /api/pair with their own body and response shapes. A
+  // self-hosted server had no such route, so a phone could reach it, pass the
+  // health probe, and then ask for a credential the server could not issue.
+  it("pairs a native companion app on its own route, with the body shape it sends", async () => {
+    const opened = await pairingCode(["client"]);
+    expect(opened.credential).toMatch(/^omb_pair_[A-Za-z0-9_-]{43}$/);
+
+    const paired = await call("/api/pair", {
+      method: "POST",
+      headers: remote("10.0.0.31"),
+      body: JSON.stringify({ credential: opened.credential, deviceName: "Pixel 9", pairRequestId: "11111111-2222-4333-8444-555555555555" }),
+    });
+    expect(paired.status).toBe(200);
+    // Exactly the fields android/core's PairResponseSerializer requires.
+    expect(typeof paired.body.token).toBe("string");
+    expect(paired.body.token.startsWith("omb_sess_")).toBe(true);
+    expect(paired.body.serverName).toBe(opened.serverName);
+    expect(paired.body.device.name).toBe("Pixel 9");
+    expect(typeof paired.body.device.id).toBe("string");
+    expect(typeof paired.body.device.createdAt).toBe("number");
+    expect(typeof paired.body.device.lastSeenAt).toBe("number");
+
+    // The token it returns is an ordinary session: it works, and it appears
+    // among the sessions an owner can revoke.
+    const used = await call("/api/bots", { headers: remote("10.0.0.31", { authorization: `Bearer ${paired.body.token}` }) });
+    expect(used.status).toBe(200);
+    const listed = await call("/api/auth/sessions");
+    expect(listed.body.sessions.some((s: { label: string }) => s.label === "Pixel 9")).toBe(true);
+
+    // Single use, shared with the typed code: the window is gone.
+    const again = await call("/api/pair", {
+      method: "POST",
+      headers: remote("10.0.0.32"),
+      body: JSON.stringify({ credential: opened.credential, deviceName: "Pixel 9" }),
+    });
+    expect(again.status).toBe(401);
+    const byCode = await call("/api/auth/pair", {
+      method: "POST",
+      headers: remote("10.0.0.32"),
+      body: JSON.stringify({ code: opened.code, label: "same window" }),
+    });
+    expect(byCode.status).toBe(401);
+  });
+
+  it("offers the app-scheme invite the Android scanner can read", async () => {
+    const opened = await pairingCode(["client"]);
+    expect(opened.inviteUrl).not.toBeNull();
+    const invite = new URL(opened.inviteUrl!);
+    // Android's PairingInvite.parse rejects anything that is not this exact
+    // scheme and host, which is why the https link in `url` cannot be scanned
+    // by the app (android/core Connection.kt).
+    expect(invite.protocol).toBe("openmausbot:");
+    expect(invite.host).toBe("pair");
+    expect(invite.searchParams.get("address")).toBe(PUBLIC_URL);
+    expect(invite.searchParams.get("token")).toBe(opened.credential);
+    expect(invite.searchParams.get("name")).toBe(opened.serverName);
+    // Both links open the same single window.
+    expect(opened.url).toBe(`${PUBLIC_URL}/pair#code=${opened.code}`);
+  });
+
+  it("refuses a native pairing body that is not JSON", async () => {
+    const opened = await pairingCode(["client"]);
+    const refused = await call("/api/pair", {
+      method: "POST",
+      headers: remote("10.0.0.33", { "content-type": "text/plain" }),
+      body: opened.credential,
+    });
+    expect(refused.status).toBe(415);
+  });
+
   it("only accepts JSON for the exchange, and replays a lost response by attempt id", async () => {
     const opened = await pairingCode();
     const form = await call("/api/auth/pair", { method: "POST", headers: { ...remote("10.0.0.20"), "content-type": "application/x-www-form-urlencoded" }, body: `code=${opened.code}` });
@@ -452,7 +523,7 @@ describe("pairing", () => {
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser" }]);
     }
     function expectAdminConfig(config: any) {
-      expect(config.profile).toEqual({ name: "Updated fixture", email: "updated-private@example.invalid" });
+      expect(config.profile).toEqual({ name: "Updated fixture", email: "updated-private@example.invalid", aboutMe: "" });
       expect(config.vps).toEqual({ configured: true, sshAlias: "fixture-private-host" });
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser", partitionId: "fixture-private-partition" }]);
     }

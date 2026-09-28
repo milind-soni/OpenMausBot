@@ -32,7 +32,7 @@ It checks:
 - The production native menu's Connect item requests Settings; its saved
   workspace items dispatch fixed IDs. Settings can switch connections and
   cancel or confirm forgetting just one saved connection.
-- The local app opens Connected workspaces as a top-level Settings page, even
+- The local app opens Servers as a top-level Settings page, even
   before local provider onboarding. Native requests also clear stale Settings
   searches, so the requested page actually becomes visible.
 - A page outside the declared local origin receives no saved-list/mutation
@@ -68,9 +68,9 @@ smoke as an authenticated connection to a customer's server.
 
 ## User flow
 
-In a desktop build with this feature, choose the workspace dropdown above the
-sidebar search → **Connect hosted workspace…**, or open **Settings → Connected
-workspaces**. Enter the server's HTTPS address or full pairing link and an
+In a desktop build with this feature, choose the server dropdown above the
+sidebar search → **Connect to a server…**, or open **Settings →
+Servers**. Enter the server's HTTPS address or full pairing link and an
 optional name. Confirm the host in the native dialog, then complete pairing or
 email sign-in on that server. To generate an owner link without the CLI's
 phone wizard, run `npx openmausbot pair --label "My desktop"` on the server.
@@ -101,7 +101,7 @@ remembered for that workspace identity and paired session, not repeated on
 every switch. A different sign-in or server identity requires a new review.
 Older servers need updating before they advertise this capability.
 
-**Choose access**, or **Settings → Connected workspaces → Computer access**:
+**Choose access**, or **Settings → Servers → Computer access**:
 
 - Pick specific folders. They start read-only; **Allow edits** permits create
   and hash-guarded overwrite, not delete. Paths stay inside the chosen folder;

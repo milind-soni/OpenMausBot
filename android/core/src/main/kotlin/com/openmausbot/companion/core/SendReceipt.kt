@@ -1,5 +1,10 @@
 package com.openmausbot.companion.core
 
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import kotlinx.serialization.Serializable
 
 /**
@@ -51,4 +56,30 @@ data class SendReceiptBody(
 }
 
 /** A message waiting in the harness's steer queue, as this client knows it. */
-data class QueuedSend(val queueId: String, val text: String)
+data class QueuedSend(val queueId: String, val text: String) {
+    /**
+     * The composer text after this held send is pulled back for editing. Its
+     * words lead — they were written first — and anything already typed stays
+     * below them after a blank line, so an edit never drops a draft.
+     */
+    fun editDraft(keeping: String): String =
+        if (keeping.isBlank()) text else "$text\n\n$keeping"
+}
+
+/**
+ * One held send off the wire, as the steer-queue snapshot emits it. Both
+ * fields are required: an entry without the pair is not something a row can
+ * be built from, so it drops out the way a lossy array does on iOS. The
+ * server's advisory reason field is not kept - the text renders either way.
+ */
+internal fun JsonObject.queuedSendOrNull(): QueuedSend? {
+    val queueId = this["queueId"]?.jsonPrimitive?.contentOrNull ?: return null
+    val text = this["text"]?.jsonPrimitive?.contentOrNull ?: return null
+    return QueuedSend(queueId, text)
+}
+
+/** The wire shape of a held send, for frames this client re-encodes. */
+internal fun QueuedSend.toJsonObject(): JsonObject = buildJsonObject {
+    put("queueId", queueId)
+    put("text", text)
+}

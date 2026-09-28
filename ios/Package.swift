@@ -12,7 +12,7 @@ let package = Package(
     // macOS 13 rather than 14: the core needs nothing newer than
     // URLSession.bytes (macOS 12), and `swift test` should run on whatever
     // Mac is to hand. The app's iOS 17 floor lives in project.yml.
-    platforms: [.iOS(.v17), .macOS(.v13)],
+    platforms: [.iOS(.v16), .macOS(.v13)],
     products: [
         .library(name: "CompanionCore", targets: ["CompanionCore"])
     ],

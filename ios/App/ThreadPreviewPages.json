@@ -1,0 +1,36 @@
+{
+  "preview-icloud": {
+    "messages": [
+      {
+        "id": "preview-icloud-user",
+        "role": "user",
+        "kind": "text",
+        "at": 1789088460000,
+        "text": "Keep my iCloud inbox in this separate conversation."
+      },
+      {
+        "id": "preview-icloud-reply",
+        "parentId": "preview-icloud-user",
+        "role": "bot",
+        "kind": "text",
+        "at": 1789088490000,
+        "text": "I am reviewing iCloud here, without the Gmail thread."
+      }
+    ],
+    "hasMore": false,
+    "activeLeafId": "preview-icloud-reply"
+  },
+  "preview-weekend": {
+    "messages": [
+      {
+        "id": "preview-weekend-user",
+        "role": "user",
+        "kind": "text",
+        "at": 1789088520000,
+        "text": "Plan a weekend trip in this separate conversation."
+      }
+    ],
+    "hasMore": false,
+    "activeLeafId": "preview-weekend-user"
+  }
+}

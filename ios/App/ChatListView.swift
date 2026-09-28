@@ -84,7 +84,7 @@ struct ChatListView: View {
                 .refreshable { await session.refresh() }
                 .overlay {
                     if rosterIsEmpty {
-                        ContentUnavailableView(
+                        EmptyStateView(
                             query.isEmpty ? "No bots yet" : "Nothing matches",
                             systemImage: query.isEmpty ? "bubble.left.and.bubble.right" : "magnifyingglass",
                             description: Text(
@@ -106,23 +106,31 @@ struct ChatListView: View {
             .overlay(alignment: .top) {
                 if CompanionLayout.supportsIslandPresentation {
                     NeedsYouIsland(
-                        update: session.state.updates.first { $0.kind == .needsYou },
-                        hasIsland: IslandGeometry.hasIsland(topInset: geo.safeAreaInsets.top)
+                        update: session.state.updates.first { $0.kind == .needsYou }
                     ) { chat in path.append(chat) }
                 }
             }
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Chat.self) { ChatView(chat: $0) }
-            .onChange(of: session.notificationChat) { _, chat in
+            .onValueChange(of: session.notificationChat) { chat in
                 guard let chat else { return }
                 path.append(chat)
                 session.consumeNotificationChat()
+            }
+            .onValueChange(of: session.pendingChat) { chat in
+                guard let chat else { return }
+                path.append(chat)
+                session.consumePendingChat()
             }
             .task {
                 if let chat = session.notificationChat {
                     path.append(chat)
                     session.consumeNotificationChat()
+                }
+                if let chat = session.pendingChat {
+                    path.append(chat)
+                    session.consumePendingChat()
                 }
             }
 #if DEBUG
@@ -245,8 +253,31 @@ struct ChatListView: View {
 
     // MARK: - Sidebar sections
 
+    /// Every thread across every bot that needs the person right now — the
+    /// same rule and order as the thread tree, so the inbox can never
+    /// disagree with it.
+    private var attention: [AttentionThread] {
+        crossBotAttentionThreads(session.state.bots)
+    }
+
     @ViewBuilder
     private var rosterSections: some View {
+        if !attention.isEmpty {
+            sectionLabel(Text("Needs attention"))
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+            ForEach(attention) { entry in
+                Button {
+                    Haptics.selection()
+                    openAttention(entry)
+                } label: {
+                    AttentionRow(entry: entry)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+            }
+        }
+
         if let chief = session.state.unsectionedChief {
             botRows(summaries(for: [chief]))
         }
@@ -331,7 +362,9 @@ struct ChatListView: View {
     private func botRows(_ rows: [ChatSummary]) -> some View {
         ForEach(Array(rows.enumerated()), id: \.element.id) { index, summary in
             VStack(spacing: 0) {
-                NavigationLink(value: summary.chat) {
+                Button {
+                    path.append(session.threadSelection.restoringThread(summary.chat, connectionID: session.connection?.id))
+                } label: {
                     ChatRow(
                         chat: summary.chat,
                         preview: summary.preview,
@@ -536,7 +569,12 @@ struct ChatListView: View {
 
     private func matchesThread(_ chat: Chat) -> Bool {
         guard case let .bot(bot) = chat else { return false }
-        return !bot.threadGroups(matching: query).isEmpty
+        return !bot.threadGroups(matching: query, queuedThreadIds: session.state.queuedThreadIds).isEmpty
+    }
+
+    private func openAttention(_ entry: AttentionThread) {
+        guard let bot = entry.destinationBot(in: session.state) else { return }
+        path.append(Chat.bot(bot))
     }
 
     private func summaries(for bots: [Bot]) -> [ChatSummary] {
@@ -622,6 +660,56 @@ struct GroupTile: View {
 
     private func memberBots(_ room: Room) -> [Bot] {
         room.memberIds.compactMap { session.state.bot($0) }
+    }
+}
+
+/// One thread that needs the person, from any bot: title, status, and the
+/// bot it belongs to, ready to jump straight there. Waiting outranks
+/// working, which outranks queued and unread — the same order as the tree.
+struct AttentionRow: View {
+    let entry: AttentionThread
+
+    private var waiting: Bool { entry.task.activity == "waiting-on-you" }
+    private var working: Bool { !waiting && (entry.task.busy == true || entry.task.activity == "working") }
+    private var queued: Bool { !waiting && !working && entry.task.activity == "queued" }
+
+    private var statusText: String {
+        if waiting { return "Waiting on you" }
+        if working { return "Working" }
+        if queued { return "Queued" }
+        return "Unread"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if working {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: waiting ? "exclamationmark.circle.fill" : queued ? "clock" : "bell.badge.fill")
+                        .font(.system(size: 15, weight: .medium))
+                }
+            }
+            .foregroundStyle(waiting ? Color.orange : queued ? Color.secondary : Color.accentColor)
+            .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: entry.task.displayTitle)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                Text("\(entry.botName) · \(statusText)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(entry.task.displayTitle), \(entry.botName), \(statusText)")
     }
 }
 

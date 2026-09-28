@@ -53,6 +53,7 @@ final class Session: ObservableObject {
     @Published private(set) var state = CompanionState()
     @Published private(set) var connection: Connection?
     @Published private(set) var connections: [Connection] = []
+    let threadSelection = BotThreadSelection()
     /// Whether the live pairing may administer the workspace — see
     /// `Connection.canAdminister`. Views hide owner-only controls when this
     /// is false rather than offer buttons the server would answer 403 to.
@@ -79,6 +80,10 @@ final class Session: ObservableObject {
     /// A notification response that should be pushed by the roster's
     /// NavigationStack after the exact detached task has been activated.
     @Published private(set) var notificationChat: Chat?
+
+    /// A chat a deep link asked for, consumed by the roster's
+    /// NavigationStack the same way a notification response is.
+    @Published private(set) var pendingChat: Chat?
 
     private var client: CompanionClient?
     /// Ciphertext-only operations survive navigation and transient
@@ -120,6 +125,17 @@ final class Session: ObservableObject {
     /// for the same attachment path.
     private var avatarFetches: [String: (id: UUID, task: Task<Data?, Never>)] = [:]
     private var avatarCacheGeneration = 0
+    /// Voice-note bytes for the transcript bubbles. Clips are short but a
+    /// busy thread can carry several; a small cost-bounded window keeps
+    /// replay from refetching without pinning the whole transcript.
+    private let voiceNoteCache: NSCache<NSString, NSData> = {
+        let cache = NSCache<NSString, NSData>()
+        cache.countLimit = 32
+        cache.totalCostLimit = 32 * 1_024 * 1_024
+        return cache
+    }()
+    private var voiceNoteFetches: [String: (id: UUID, task: Task<Data?, Never>)] = [:]
+    private var voiceNoteCacheGeneration = 0
     /// Full image bytes are already fetched to draw a thumbnail. Keep a small,
     /// cost-bounded window so tapping that thumbnail opens immediately instead
     /// of downloading the same image twice.
@@ -166,7 +182,7 @@ final class Session: ObservableObject {
         let arguments = ProcessInfo.processInfo.arguments
         if (arguments.contains("-store-preview") || arguments.contains("-computer-switcher-preview")),
            let url = Bundle.main.url(
-               forResource: arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
+               forResource: arguments.contains("-images-preview") ? "ImagePreview" : arguments.contains("-chat-update-preview") ? "ChatUpdatePreview" : arguments.contains("-chat-presentation-preview") ? "ChatPresentationPreview" : arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
                withExtension: "json"
            ),
            let data = try? Data(contentsOf: url),
@@ -193,7 +209,69 @@ final class Session: ObservableObject {
             } else {
                 connections = [preview]
             }
+            if arguments.contains("-images-preview") {
+                let config = URLSessionConfiguration.ephemeral
+                config.protocolClasses = [ImagePreviewProtocol.self]
+                client = CompanionClient(connection: preview, token: "image-fixture-token", session: URLSession(configuration: config))
+            }
+            if arguments.contains("-voice-preview") {
+                let config = URLSessionConfiguration.ephemeral
+                config.protocolClasses = [VoicePreviewProtocol.self]
+                client = CompanionClient(connection: preview, token: "voice-fixture-token", session: URLSession(configuration: config))
+            }
             state.hydrate(fleet)
+            if arguments.contains("-chat-focus-preview") {
+                // Put the requested reply several screens inside the fold.
+                var messages = state.messages["preview-gmail"] ?? []
+                if let index = messages.firstIndex(where: { $0.id == "progress2" }) {
+                    var parent = "progress"
+                    let narration = (1...12).map { number -> Message in
+                        var step = messages[index]
+                        step.id = "preview-long-\(number)"
+                        step.at = 1789088401000 + Double(number)
+                        step.text = String(repeating: "Inspecting the dependency graph for step \(number). ", count: 8)
+                        step.turnId = "preview-turn"
+                        step.parentId = parent
+                        parent = step.id
+                        return step
+                    }
+                    messages[index].parentId = parent
+                    messages.insert(contentsOf: narration, at: index)
+                    state.messages["preview-gmail"] = messages
+                }
+                focusedMessageId = "progress2"
+            }
+            if arguments.contains("-chat-compaction-preview"),
+               var receipt = state.messages["preview-gmail"]?.last {
+                receipt.id = "preview-compaction"
+                receipt.kind = .compaction
+                receipt.at = 1789088405000
+                receipt.turnId = nil
+                receipt.turnTerminal = nil
+                receipt.parentId = "answer"
+                receipt.compaction = Compaction(summary: "Earlier context preserved for the next turn.", tokensBefore: 12345)
+                state.apply(.message(threadId: "preview-gmail", message: receipt))
+                var digest = receipt
+                digest.id = "preview-digest"
+                digest.kind = .digest
+                digest.compaction = nil
+                digest.at = 1789088406000
+                digest.parentId = receipt.id
+                digest.text = "Digest must stay hidden"
+                state.apply(.message(threadId: "preview-gmail", message: digest))
+            }
+            if arguments.contains("-chat-reasoning-preview"),
+               let frameURL = Bundle.main.url(forResource: "ChatReasoningPreview", withExtension: "json"),
+               let frameData = try? Data(contentsOf: frameURL),
+               let frame = try? JSONDecoder().decode(Frame.self, from: frameData) {
+                state.apply(frame)
+            }
+            if arguments.contains("-threads-preview"),
+               let pagesURL = Bundle.main.url(forResource: "ThreadPreviewPages", withExtension: "json"),
+               let pagesData = try? Data(contentsOf: pagesURL),
+               let pages = try? JSONDecoder().decode([String: ThreadPage].self, from: pagesData) {
+                for (threadID, page) in pages { state.merge(page, intoThread: threadID) }
+            }
             status = .live
             return
         }
@@ -398,16 +476,33 @@ final class Session: ObservableObject {
         }
     }
 
-    func receivePairingURL(_ url: URL) {
-        guard let invite = PairingInvite.parse(url) else {
+    func receiveURL(_ url: URL) {
+        guard let link = CompanionDeepLink.parse(url) else {
             actionError = "That pairing invitation is not valid. Start pairing again on your computer."
             return
         }
-        pairingInvite = CompanionPairingInvitePolicy.nextInvite(
-            current: pairingInvite,
-            after: .received(invite)
-        )
-        pairingRequested = true
+        switch link {
+        case let .pairing(invite):
+            pairingInvite = CompanionPairingInvitePolicy.nextInvite(
+                current: pairingInvite,
+                after: .received(invite)
+            )
+            pairingRequested = true
+        case let .chat(threadId):
+            openChat(threadId: threadId)
+        }
+    }
+
+    /// A deep link that names a chat. An id this phone does not know — a
+    /// stale widget row, a thread deleted since — lands on the roster
+    /// silently: it is not the person's mistake, so it is not worth a banner.
+    func openChat(threadId: String) {
+        guard let chat = state.chat(forThread: threadId) else { return }
+        pendingChat = chat
+    }
+
+    func consumePendingChat() {
+        pendingChat = nil
     }
 
     func beginPairing() {
@@ -915,12 +1010,19 @@ final class Session: ObservableObject {
     // is a phone that disagrees with the laptop.
 
     func send(_ text: String, to chat: Chat) async {
+        let connectionID = client?.connection.id
+        var receipt: SendReceipt?
         await perform {
             switch chat {
-            case let .bot(bot): try await $0.send(text: text, toBot: bot.id, threadId: bot.threadId)
-            case let .room(room): try await $0.send(text: text, toRoom: room.id)
+            case let .bot(bot): receipt = try await $0.send(text: text, toBot: bot.id, threadId: bot.threadId)
+            case let .room(room): receipt = try await $0.send(text: text, toRoom: room.id)
             }
         }
+        // The receipt describes a queue on the computer this request went
+        // to. A machine switched mid-flight has already reset state for the
+        // computer now on screen, and that row must not land in it.
+        guard client?.connection.id == connectionID else { return }
+        rememberQueuedSend(from: receipt, text: text)
     }
 
     /// Send a composer draft with app-owned attachments. The destination
@@ -936,6 +1038,7 @@ final class Session: ObservableObject {
             actionError = "This computer is offline."
             return false
         }
+        let connectionID = client.connection.id
         actionError = nil
         do {
             try AttachmentPolicy.validate(attachments)
@@ -959,13 +1062,7 @@ final class Session: ObservableObject {
                 }
             }
 
-            let destination: MessageDestination
-            switch chat {
-            case let .bot(bot):
-                destination = .bot(id: bot.id, threadId: bot.threadId)
-            case let .room(room):
-                destination = .room(id: room.id, threadId: room.threadId)
-            }
+            let destination = chat.destination
             let draftKey = AttachmentDraftKey(
                 destination: destination,
                 text: text,
@@ -1015,7 +1112,13 @@ final class Session: ObservableObject {
                 urls: [],
                 attachments: uploaded
             )
-            try await client.send(text: message, to: destination, sendId: sendID)
+            let receipt = try await client.send(text: message, to: destination, sendId: sendID)
+            // The send succeeded on the computer it was addressed to, so the
+            // draft clears either way. Its queue row belongs to that computer,
+            // and must not be drawn on one selected mid-upload.
+            if self.client?.connection.id == connectionID {
+                rememberQueuedSend(from: receipt, text: text)
+            }
             attachmentSendIDs.removeValue(forKey: draftKey)
             actionError = nil
             return true
@@ -1028,6 +1131,63 @@ final class Session: ObservableObject {
         } catch {
             actionError = error.localizedDescription
             return false
+        }
+    }
+
+    /// The harness's answer to a send, when it held the message instead of
+    /// delivering it. This is wire state, not optimism: the row exists
+    /// because the computer said it does, identified by its queueId.
+    private func rememberQueuedSend(from receipt: SendReceipt?, text: String) {
+        guard let receipt, receipt.queued == true,
+              let queueId = receipt.queueId, let threadId = receipt.threadId
+        else { return }
+        state.rememberQueued(
+            QueuedSend(
+                queueId: queueId,
+                text: text,
+                reason: receipt.reason == "capacity" ? "capacity" : nil
+            ),
+            threadId: threadId
+        )
+    }
+
+    /// Take back a held message. The row only goes when the computer agrees;
+    /// an entry that already drained counts as agreement.
+    /// True only when the computer confirmed cancellation, so an
+    /// edit never hands back words that already joined a turn.
+    @discardableResult
+    func cancelQueued(_ send: QueuedSend, threadId: String, in chat: Chat) async -> Bool {
+        let connectionID = client?.connection.id
+        let destination: MessageDestination
+        switch chat {
+        case let .bot(bot): destination = .bot(id: bot.id, threadId: threadId)
+        case let .room(room): destination = .room(id: room.id, threadId: threadId)
+        }
+        var agreed = false
+        var cancelled = false
+        await perform {
+            cancelled = try await $0.cancelQueued(queueId: send.queueId, to: destination)
+            agreed = true
+        }
+        // The cancel landed on the computer that owned the row. One selected
+        // mid-request has already reset state; its rows are not this cancel's
+        // to retire.
+        guard agreed, client?.connection.id == connectionID else { return false }
+        state.cancelQueued(queueId: send.queueId, threadId: threadId)
+        return cancelled
+    }
+
+    /// Run Claude Code's updater for one engine instance on the computer.
+    /// Returns the version it now reports. Throws with the harness's own
+    /// message (already written for people) so the card can show it; an
+    /// unpaired device is flagged the same way `perform` does.
+    func updateClaude(instanceId: String) async throws -> String {
+        guard let client else { throw APIError.transport("Not connected to a computer.") }
+        do {
+            return try await client.updateClaude(instanceId: instanceId)
+        } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+            throw error
         }
     }
 
@@ -1267,6 +1427,11 @@ final class Session: ObservableObject {
         )
         if let prepared = preparedPhoneCredentials[requestIdentity] {
             return prepared
+        }
+        guard #available(iOS 17.0, *) else {
+            // HPKE, which seals the credential end to end, is iOS 17 and up.
+            // There is no weaker path worth offering for a secret.
+            throw PhoneSecretError.requiresNewerOS
         }
         let envelope = try PhoneSecretCrypto.encrypt(
             value,
@@ -1590,8 +1755,87 @@ final class Session: ObservableObject {
         } catch { actionError = error.localizedDescription; return false }
     }
 
+    /// Snooze or wake a bot thread. Desktop parity: bots only — group
+    /// threads have no snooze on the wire either.
+    func snoozeTask(_ task: BotTask, for bot: Bot, snoozedUntil: Double?) async -> Bool {
+        guard let client else { return false }
+        do {
+            try await client.snoozeTask(botId: bot.id, threadId: task.threadId, snoozedUntil: snoozedUntil)
+            await refresh()
+            return true
+        } catch { actionError = error.localizedDescription; return false }
+    }
+
+    @discardableResult
+    func setTaskPinned(_ task: BotTask, pinned: Bool, in chat: Chat) async -> Bool {
+        guard let client else { return false }
+        setPinnedLocally(task, pinned: pinned, in: chat)
+        do {
+            switch chat {
+            case let .bot(bot):
+                try await client.setTaskPinned(botId: bot.id, threadId: task.threadId, pinned: pinned)
+            case let .room(room):
+                try await client.setRoomTaskPinned(groupId: room.id, threadId: task.threadId, pinned: pinned, title: task.title)
+            }
+            await refresh()
+            return true
+        } catch {
+            setPinnedLocally(task, pinned: task.pinned == true, in: chat)
+            actionError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Move the row before the server answers, and put it back if the write fails.
+    private func setPinnedLocally(_ task: BotTask, pinned: Bool, in chat: Chat) {
+        let value: Bool? = pinned ? true : nil
+        switch chat {
+        case let .bot(bot):
+            guard let botIndex = state.bots.firstIndex(where: { $0.id == bot.id }),
+                  var tasks = state.bots[botIndex].tasks,
+                  let taskIndex = tasks.firstIndex(where: { $0.threadId == task.threadId }) else { return }
+            tasks[taskIndex].pinned = value
+            state.bots[botIndex].tasks = tasks
+        case let .room(room):
+            guard let roomIndex = state.rooms.firstIndex(where: { $0.id == room.id }),
+                  var tasks = state.rooms[roomIndex].tasks,
+                  let taskIndex = tasks.firstIndex(where: { $0.threadId == task.threadId }) else { return }
+            tasks[taskIndex].pinned = value
+            state.rooms[roomIndex].tasks = tasks
+        }
+    }
+
+    @discardableResult
+    func setTaskArchived(_ task: BotTask, for bot: Bot, archivedAt: Double?) async -> Bool {
+        guard let client else { return false }
+        do {
+            try await client.archiveTask(botId: bot.id, threadId: task.threadId, archivedAt: archivedAt)
+            await refresh()
+            return true
+        } catch { actionError = error.localizedDescription; return false }
+    }
+
     @discardableResult
     func deleteTask(_ task: BotTask, for bot: Bot) async -> Bot? {
+#if DEBUG
+        // The native UI fixture has no paired client. This explicit launch
+        // mode exercises list updates and a partial batch failure entirely
+        // offline, without touching a person's conversations.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-threads-preview-deletion"),
+           var updated = state.bot(bot.id),
+           task.threadId != bot.threadId,
+           updated.visibleTasks.contains(where: { $0.threadId == task.threadId && !$0.isWorking }) {
+            if arguments.contains("-threads-preview-deletion-fails-weekend")
+                && task.threadId == "preview-weekend" {
+                actionError = "Synthetic deletion failure"
+                return nil
+            }
+            updated.tasks?.removeAll { $0.threadId == task.threadId }
+            state.apply(.bot(updated))
+            return updated
+        }
+#endif
         guard let client else { return nil }
         do {
             let updated = try await client.deleteTask(botId: bot.id, threadId: task.threadId)
@@ -1729,12 +1973,62 @@ final class Session: ObservableObject {
         for fetch in avatarFetches.values { fetch.task.cancel() }
         avatarFetches.removeAll()
         avatarCache.removeAllObjects()
+        voiceNoteCacheGeneration += 1
+        for fetch in voiceNoteFetches.values { fetch.task.cancel() }
+        voiceNoteFetches.removeAll()
+        voiceNoteCache.removeAllObjects()
     }
 
     func voiceOptions() async -> [Voice] {
         guard let client else { return [] }
         do { return try await client.voices() }
         catch { actionError = error.localizedDescription; return [] }
+    }
+
+    /// Cached voice-note bytes for the transcript bubble, shaped like
+    /// avatarData so replay and scroll-back never refetch the same clip.
+    func voiceNoteData(for note: MessageVoiceNote) async -> Data? {
+        guard let client else { return nil }
+        let key = note.path as NSString
+        if let cached = voiceNoteCache.object(forKey: key) { return cached as Data }
+        let generation = voiceNoteCacheGeneration
+        let fetch: (id: UUID, task: Task<Data?, Never>)
+        if let pending = voiceNoteFetches[note.path] {
+            fetch = pending
+        } else {
+            let pending = (
+                id: UUID(),
+                task: Task<Data?, Never> { try? await client.voiceNote(path: note.path) }
+            )
+            voiceNoteFetches[note.path] = pending
+            fetch = pending
+        }
+        let data = await fetch.task.value
+        if voiceNoteFetches[note.path]?.id == fetch.id { voiceNoteFetches.removeValue(forKey: note.path) }
+        guard !Task.isCancelled, generation == voiceNoteCacheGeneration, let data else { return nil }
+        voiceNoteCache.setObject(data as NSData, forKey: key, cost: data.count)
+        return data
+    }
+
+    /// Switch the workspace's voice engine. The fresh status comes back so
+    /// the caller can re-derive every provider-dependent row in place.
+    func setVoiceProvider(_ provider: VoiceProvider) async -> ConfigStatus? {
+        guard let client else { return nil }
+        do { return try await client.setVoiceProvider(provider) }
+        catch { actionError = error.localizedDescription; return nil }
+    }
+
+    func saveChatterboxServer(baseURL: String, model: String) async -> ConfigStatus? {
+        guard let client else { return nil }
+        do { return try await client.saveChatterboxServer(baseURL: baseURL, model: model) }
+        catch { actionError = error.localizedDescription; return nil }
+    }
+
+    /// The host's platform, which decides whether its built-in voices are a
+    /// real engine choice there or a row that must stay disabled.
+    func serverEnvironment() async -> ServerEnvironment? {
+        guard let client else { return nil }
+        return try? await client.environment()
     }
 
     func previewVoice(_ voiceId: String, for bot: Bot) async -> Data? {
@@ -1932,8 +2226,31 @@ final class Session: ObservableObject {
         } catch { actionError = error.localizedDescription }
     }
 
+    /// Edit and retry. The edited text replaces the old message on screen
+    /// the moment it is sent, hiding the old answer, and the computer's fork
+    /// takes over as soon as either its response or its stream frames land.
+    /// A failed edit simply drops the stand-in, so the old branch returns.
     func edit(_ message: Message, for bot: Bot, text: String) async {
-        await perform { try await $0.edit(botId: bot.id, messageId: message.id, text: text, threadId: bot.threadId) }
+        guard client != nil else { return }
+        let threadId = bot.threadId
+        let connectionId = connection?.id
+        let pending = PendingEdit(sourceId: message.id, text: text, baseLeafId: state.bot(forThread: threadId)?.activeLeafId)
+        state.pendingEdits[threadId] = pending
+        defer {
+            if state.pendingEdits[threadId] == pending { state.pendingEdits[threadId] = nil }
+        }
+        await perform {
+            let fork = try await $0.edit(
+                botId: bot.id,
+                messageId: message.id,
+                text: text,
+                threadId: threadId,
+                sendId: pending.requestId
+            )
+            if let fork, self.connection?.id == connectionId {
+                self.state.adoptEdit(fork, inThread: threadId, expectedPending: pending)
+            }
+        }
     }
 
     func switchVersion(to message: Message, for bot: Bot) async {
@@ -2014,112 +2331,6 @@ final class Session: ObservableObject {
             status = .unauthorized
         } catch {
             if !quietly { actionError = error.localizedDescription }
-        }
-    }
-}
-
-/// A chat is a bot or a room. They share a thread, which is what every
-/// message, approval and page is keyed by.
-enum Chat: Identifiable, Hashable {
-    case bot(Bot)
-    case room(Room)
-
-    var id: String {
-        switch self {
-        case let .bot(bot): return bot.id
-        case let .room(room): return room.id
-        }
-    }
-
-    /// Owner identity remains available for bot APIs. Navigation and activity
-    /// lists must distinguish two conversations belonging to the same bot.
-    var conversationID: String {
-        switch self {
-        case let .bot(bot): return "bot:\(bot.id):\(bot.threadId)"
-        case let .room(room): return "room:\(room.id):\(room.threadId)"
-        }
-    }
-
-    static func == (left: Chat, right: Chat) -> Bool {
-        switch (left, right) {
-        case let (.bot(a), .bot(b)): return a.id == b.id && a.threadId == b.threadId
-        case let (.room(a), .room(b)): return a.id == b.id
-        default: return false
-        }
-    }
-
-    func hash(into hasher: inout Hasher) {
-        switch self {
-        case let .bot(bot):
-            hasher.combine(0)
-            hasher.combine(bot.id)
-            hasher.combine(bot.threadId)
-        case let .room(room):
-            hasher.combine(1)
-            hasher.combine(room.id)
-        }
-    }
-
-    var threadId: String {
-        switch self {
-        case let .bot(bot): return bot.threadId
-        case let .room(room): return room.threadId
-        }
-    }
-
-    var name: String {
-        switch self {
-        case let .bot(bot): return bot.name
-        case let .room(room): return room.name
-        }
-    }
-
-    var threadTitle: String {
-        switch self {
-        case let .bot(bot): return bot.tasks?.first { $0.threadId == bot.threadId }?.displayTitle ?? "Untitled thread"
-        case let .room(room): return room.tasks?.first { $0.threadId == room.threadId }?.displayTitle ?? "Conversation"
-        }
-    }
-
-    var isBot: Bool {
-        if case .bot = self { return true }
-        return false
-    }
-
-    var supportsTasks: Bool {
-        switch self {
-        case .bot: return true
-        // `tasks == nil` means an older paired desktop. Hide the affordance
-        // instead of sending it a route it does not know yet.
-        case let .room(room): return room.dm != true && room.tasks != nil
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case let .bot(bot): return bot.title
-        case let .room(room): return "\(room.memberIds.count) bots"
-        }
-    }
-
-    var unread: Bool {
-        switch self {
-        case let .bot(bot): return bot.unread
-        case let .room(room): return room.unread
-        }
-    }
-
-    var busy: Bool {
-        switch self {
-        case let .bot(bot): return bot.busy ?? false
-        case let .room(room): return room.busyBotId != nil
-        }
-    }
-
-    var color: String {
-        switch self {
-        case let .bot(bot): return bot.color
-        case .room: return "blue"
         }
     }
 }

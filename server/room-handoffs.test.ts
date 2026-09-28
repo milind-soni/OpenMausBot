@@ -7,16 +7,54 @@ import { removeTempDir } from "./testing/cleanup.ts";
 
 const addr = (id: string) => ({ groupId: id, threadId: `${id}-thread`, botId: `${id}-bot` });
 /** Builds an engine over a temp file, with hooks and clock the test can override. */
-async function fixture(test: (engine: RoomHandoffs, hooks: RoomHandoffHooks, file: string) => Promise<void> | void, now: () => number = Date.now) {
+async function fixture(test: (engine: RoomHandoffs, hooks: RoomHandoffHooks, file: string) => Promise<void> | void, now: () => number = Date.now,
+  limits: Partial<typeof ROOM_HANDOFF_LIMITS> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "room-handoff-unit-"));
   const hooks: RoomHandoffHooks = { validate: () => undefined, busy: () => false,
     run: vi.fn(async () => ({ ok: true, text: "done" })), report: vi.fn(), changed: () => {} };
-  try { const file = join(dir, "requests.json"); await test(new RoomHandoffs(file, hooks, now), hooks, file); }
+  try { const file = join(dir, "requests.json"); await test(new RoomHandoffs(file, hooks, now, limits), hooks, file); }
   finally { await removeTempDir(dir); }
 }
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 describe("addressed room request tree", () => {
+  it("starts independent work before its author settles, but resumes only after settlement", () => fixture(async (engine, hooks) => {
+    const source = { botId: "chief", threadId: "chief-chat" };
+    const child = engine.enqueue(source, "turn", undefined, { botId: "builder", threadId: "builder-chat" }, "build", "Build it").node;
+    engine.tick(); await flush(); engine.tick();
+    expect(child.status).toBe("completed");
+    expect(engine.nodes.get("turn")?.status).toBe("source");
+    expect(hooks.run).toHaveBeenCalledTimes(1);
+    engine.sourceSettled("turn", false);
+    engine.tick(); await flush();
+    expect(hooks.run).toHaveBeenCalledTimes(2);
+    expect(engine.nodes.get("turn")?.status).toBe("completed");
+  }));
+  it("keeps same-room work queued until the current speaker settles", () => fixture(async (engine, hooks) => {
+    const child = engine.enqueue(addr("A"), "turn", undefined, { ...addr("A"), botId: "peer" }, "review", "Review it").node;
+    engine.tick(); await flush();
+    expect(child.status).toBe("queued");
+    expect(hooks.run).not.toHaveBeenCalled();
+    engine.sourceSettled("turn", true); engine.tick(); await flush();
+    expect(child.status).toBe("completed");
+  }));
+  it.each([false, true])("keeps accepted nested work when its lead fails (throws: %s)", throws => fixture(async (engine, hooks) => {
+    const chief = { botId: "chief", threadId: "chief" };
+    const lead = { botId: "lead", threadId: "lead" };
+    hooks.run = vi.fn(async (node, resumed) => {
+      if (node.botId === lead.botId && !resumed) {
+        engine.enqueue(lead, "unused", node.id, { botId: "reviewer", threadId: "reviewer" }, "review", "Verify it");
+        if (throws) throw new Error("Lead provider disconnected");
+        return { ok: false, text: "Lead provider disconnected" };
+      }
+      return { ok: true, text: "Verified result" };
+    });
+    engine.enqueue(chief, "source", undefined, lead, "build", "Build it");
+    engine.sourceSettled("source", true);
+    for (let i = 0; i < 8; i++) { engine.tick(); await flush(); }
+    expect([...engine.nodes.values()].every(node => node.status === "completed")).toBe(true);
+    expect(hooks.run).toHaveBeenCalledTimes(4);
+  }));
   it("treats group-less tasks as bounded work, deduplicates pinned threads and rejects direct or mixed cycles", () => fixture(engine => {
     const source = { botId: "clive", threadId: "clive-chat" };
     const target = { botId: "lead", threadId: "lead-task" };
@@ -108,7 +146,7 @@ describe("addressed room request tree", () => {
     engine.enqueue(addr("X"), "other", undefined, addr("Y"), "work", "build", false, false, "x".repeat(20_000));
     expect(engine.nodes.get("other")?.text).toHaveLength(12_000);
   }));
-  it("releases the middle turn before starting its child, then returns and resumes both ancestors", () => fixture(async (engine, hooks) => {
+  it("starts independent children immediately, then returns and resumes both ancestors", () => fixture(async (engine, hooks) => {
     const order: string[] = [];
     hooks.run = async (node, resumed) => {
       order.push(`${node.groupId}:${resumed}`);
@@ -116,7 +154,7 @@ describe("addressed room request tree", () => {
       return { ok: true, text: `${node.groupId} done` };
     };
     engine.enqueue(addr("A"), "turn", undefined, addr("B"), "develop", "build");
-    engine.tick(); expect(order).toEqual([]);
+    engine.tick(); expect(order).toEqual(["B:false", "C:false"]);
     engine.sourceSettled("turn", true);
     for (let i = 0; i < 12; i++) { engine.tick(); await flush(); }
     expect(order).toEqual(["B:false", "C:false", "B:true", "A:true"]);
@@ -167,10 +205,10 @@ describe("addressed room request tree", () => {
     }
     expect(() => engine.enqueue(source, "second-root", parentId, addr("too-deep"), "work", "build")).toThrow("depth");
   }));
-  it("cancels queued work when its source fails and never runs a revoked route", () => fixture(async (engine, hooks) => {
+  it("retains accepted work when its source fails but never runs a revoked route", () => fixture(async (engine, hooks) => {
     engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
     engine.sourceSettled("turn", false); engine.tick(); await flush();
-    expect(hooks.run).not.toHaveBeenCalled();
+    expect(hooks.run).toHaveBeenCalledTimes(1);
     const { node } = engine.enqueue(addr("C"), "turn2", undefined, addr("D"), "work", "build");
     engine.sourceSettled("turn2", true);
     hooks.validate = n => n.id === node.id ? "route revoked" : undefined;
@@ -238,7 +276,7 @@ describe("addressed room request tree", () => {
   }));
 });
 describe("room handoff lifetime budget", () => {
-  it("fails queued work at the ceiling with a message naming the budget, status, and elapsed time", () => {
+  it("parks queued work past the tree ceiling, then fails it at the queue window naming the wait", () => {
     let nowMs = 0;
     return fixture((engine, hooks) => {
       const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
@@ -246,14 +284,36 @@ describe("room handoff lifetime budget", () => {
       hooks.busy = () => true;
       nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 1;
       engine.tick();
+      expect(node.status).toBe("queued");
+      expect(engine.nodes.get("turn")?.status).toBe("waiting");
+      nowMs = ROOM_HANDOFF_LIMITS.queueMs + 1;
+      engine.tick();
       expect(node.status).toBe("failed");
-      expect(node.result).toContain("Room handoff lifetime budget exhausted");
-      expect(node.result).toContain("node was queued");
-      expect(node.result).toContain("30m of the 30m tree lifetime");
+      expect(node.result).toContain("Room handoff queue budget exhausted");
+      expect(node.result).toContain("never started while waiting for a busy teammate");
+      expect(node.result).toContain("60m of the 60m queue window");
       expect(hooks.run).not.toHaveBeenCalled();
     }, () => nowMs);
   });
-  it("keeps a minimum runway for running work past the ceiling, then fails it with its status", async () => {
+  it("runs parked work once the teammate frees up, then resumes the waiting source", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      hooks.busy = () => nowMs <= ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000;
+      const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000;
+      engine.tick(); await flush();
+      expect(node.status).toBe("queued");
+      expect(engine.nodes.get("turn")?.status).toBe("waiting");
+      nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 61_000;
+      engine.tick(); await flush();
+      expect(node.startedAt).toBe(ROOM_HANDOFF_LIMITS.lifetimeMs + 61_000);
+      for (let i = 0; i < 3; i++) { engine.tick(); await flush(); }
+      expect(node.status).toBe("completed");
+      expect(engine.nodes.get("turn")?.status).toBe("completed");
+    }, () => nowMs);
+  });
+  it("pauses the lifetime clock while work executes, then fails it at the wall-clock hard cap", async () => {
     let nowMs = 0;
     await fixture(async (engine, hooks) => {
       let aborted = false;
@@ -263,17 +323,39 @@ describe("room handoff lifetime budget", () => {
       engine.sourceSettled("turn", true);
       nowMs = 24 * 60_000; engine.tick(); await flush();
       expect(node.status).toBe("running");
-      nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000;
+      // Past the tree ceiling and the node's own runway: the fixed clock
+      // failed running work here, but the clock paused at 24m, so only 24m
+      // of the 30m budget has aged and the node keeps executing.
+      nowMs = 24 * 60_000 + ROOM_HANDOFF_LIMITS.minRunwayMs + 1_000;
       engine.tick(); await flush();
       expect(node.status).toBe("running");
       expect(aborted).toBe(false);
-      nowMs = 24 * 60_000 + ROOM_HANDOFF_LIMITS.minRunwayMs + 1;
+      // The hard cap is a stall window measured from the last durable
+      // progress: the 24m dispatch renewed it, and a tree that never stops
+      // executing still dies at the renewed edge.
+      nowMs = 24 * 60_000 + 45 * 60_000 + 1_000;
       engine.tick(); await flush();
       expect(node.status).toBe("failed");
       expect(aborted).toBe(true);
-      expect(node.result).toContain("Room handoff lifetime budget exhausted");
+      expect(node.result).toContain("Room handoff hard cap exhausted");
       expect(node.result).toContain("node was running");
-    }, () => nowMs);
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
+  it("refuses new work when only the hard-cap remainder is too short to honor the runway", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      hooks.run = () => new Promise(() => {});
+      const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      engine.tick(); await flush();
+      expect(node.status).toBe("running");
+      // 40m of wall clock with the tree paused leaves the full 30m lifetime
+      // budget unspent, but only 5m before the 45m hard cap: less runway than
+      // enqueue promises, so admission must refuse the follow-up.
+      nowMs = 40 * 60_000;
+      expect(() => engine.enqueue(node, "follow", node.id, addr("C"), "work", "more"))
+        .toThrow("Room handoff budget exhausted");
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
   });
   it("resumes a waiting parent past the ceiling and gives the follow-up its own runway", async () => {
     let nowMs = 0;
@@ -289,7 +371,8 @@ describe("room handoff lifetime budget", () => {
       engine.sourceSettled("turn", true);
       nowMs = 21 * 60_000; engine.tick(); await flush();
       expect(engine.children("turn")[0].status).toBe("running");
-      // The child finishes inside its own runway but past the tree ceiling.
+      // The child finishes inside its own runway but past the tree ceiling;
+      // its execution paused the clock, so the parent still owes its resume.
       nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000;
       finish.build({ ok: true, text: "done" }); await flush();
       engine.tick(); await flush();
@@ -299,14 +382,108 @@ describe("room handoff lifetime budget", () => {
       expect(parent.status).toBe("running");
       expect(resumedAt).toEqual([ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000]);
       expect(parent.startedAt).toBe(ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000);
+      // The fixed clock failed the resumed parent at its runway edge; the
+      // paused clock kept it alive until the wall-clock hard cap claimed it.
+      // The synthesis carve-out spares the running parent from the cap
+      // itself, and the 31m dispatch renewed the clamp to 76m, so the
+      // lifetime branch fails it just past the renewed edge.
       nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000 + ROOM_HANDOFF_LIMITS.minRunwayMs;
       engine.tick(); await flush();
       expect(parent.status).toBe("running");
-      nowMs += 1;
+      nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000 + 45 * 60_000 + 1_000;
       engine.tick(); await flush();
       expect(parent.status).toBe("failed");
       expect(parent.result).toContain("Room handoff lifetime budget exhausted");
       expect(parent.result).toContain("node was running");
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
+  it("pauses the lifetime clock while work executes and resumes it once execution stops", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "build", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 10 * 60_000; engine.tick(); await flush();
+      expect(engine.children("turn")[0].status).toBe("running");
+      // 19m of wall clock has passed but the clock paused at 10m: the root
+      // has aged 10m, so a follow-up still has a full runway. The fixed
+      // clock refused here with only 1m of lifetime remaining.
+      nowMs = 29 * 60_000;
+      expect(() => engine.enqueue(addr("A"), "turn", undefined, addr("C"), "followup", "more work")).not.toThrow();
+      finish.build({ ok: true, text: "done" }); await flush();
+      hooks.busy = () => true;
+      engine.tick(); await flush();
+      // Execution stopped and the clock resumed: by 46m the root has aged
+      // 27m, and the 3m left cannot serve a minimum runway.
+      nowMs = 46 * 60_000;
+      expect(() => engine.enqueue(addr("A"), "turn", undefined, addr("D"), "late", "more work"))
+        .toThrow(/budget exhausted: only 3m of the 30m tree lifetime remains/);
+    }, () => nowMs);
+  });
+  it("keeps the tree's pause credit for a running descendant after its conversation stops awaiting", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      const source = { botId: "clive", threadId: "clive-chat" };
+      engine.enqueue(source, "turn", undefined, { botId: "lead", threadId: "lead-task" }, "build", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 10 * 60_000; engine.tick(); await flush();
+      const running = engine.children("turn")[0];
+      expect(running.status).toBe("running");
+      engine.stopAwaitingDirect("clive-chat");
+      expect(running.status).toBe("running");
+      // 19m of wall clock with the teammate executing since 10m: the
+      // cancelled root must keep the tree's pause credit, or the running
+      // descendant's follow-up is refused with only 1m of lifetime left.
+      nowMs = 29 * 60_000;
+      engine.tick(); await flush();
+      expect(() => engine.enqueue(running, "unused", running.id, addr("C"), "followup", "more work")).not.toThrow();
+      finish.build({ ok: true, text: "done" }); await flush();
+      for (let i = 0; i < 3; i++) { engine.tick(); await flush(); }
+      expect(running.status).toBe("waiting");
+      expect(engine.children(running.id)[0]?.status).toBe("running");
+    }, () => nowMs);
+  });
+  it("closes the executing pause at settlement so a follow-up before the next tick sees the aged budget", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      let finishBuild!: (result: { ok: boolean; text: string }) => void;
+      hooks.run = node => node.key === "build"
+        ? new Promise<{ ok: boolean; text: string }>(resolve => { finishBuild = resolve; })
+        : Promise.resolve({ ok: true, text: "done" });
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "build", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 10 * 60_000; engine.tick(); await flush();
+      // Execution ran 10m→15m and settled at 15m: the pause must close with
+      // the settlement, not at the next periodic tick. By 32m the root has
+      // aged 27m of its 30m; the still-open span used to lend the follow-up
+      // a full runway here.
+      nowMs = 15 * 60_000; finishBuild({ ok: true, text: "done" }); await flush();
+      nowMs = 32 * 60_000;
+      expect(() => engine.enqueue(addr("A"), "turn", undefined, addr("C"), "followup", "more work"))
+        .toThrow(/budget exhausted: only 3m of the 30m tree lifetime remains/);
+    }, () => nowMs);
+  });
+  it("closes the executing pause when cancelTree stops the tree, so a follow-up sees the aged budget", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      hooks.run = node => node.key === "build"
+        ? new Promise<{ ok: boolean; text: string }>(() => {})
+        : Promise.resolve({ ok: true, text: "done" });
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "build", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 10 * 60_000; engine.tick(); await flush();
+      // Execution ran 10m→15m; cancelRoom stops the whole tree through
+      // cancelTree while build still executes, with no tick in between. The
+      // pause must close there: by 28m the settled tree has aged its full
+      // wall clock, while the still-open span the old code left would lend
+      // the follow-up 18m of pause it no longer has.
+      nowMs = 15 * 60_000; engine.cancelRoom("A");
+      nowMs = 28 * 60_000;
+      expect(() => engine.enqueue(addr("A"), "turn", undefined, addr("C"), "followup", "more work"))
+        .toThrow(/budget exhausted: only 2m of the 30m tree lifetime remains/);
     }, () => nowMs);
   });
   it("refuses follow-up work when the remaining lifetime cannot serve a minimum runway", () => {
@@ -339,4 +516,311 @@ describe("room handoff lifetime budget", () => {
       expect(engine.nodes.get("turn")?.status).not.toBe("failed");
     }, () => nowMs);
   });
+});
+
+
+describe("room handoff hard cap synthesis carve-out", () => {
+  it("grants a dispatchable owed synthesis its turn past the cap, then the tree completes", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 11 * 60_000; engine.tick(); await flush();
+      finish.work({ ok: true, text: "child done" }); await flush();
+      hooks.busy = n => n.id === "turn";
+      engine.tick(); await flush();
+      const parent = engine.nodes.get("turn")!;
+      // One tick reports the settled child; the next flips the parent to
+      // resume, where the busy teammate parks it.
+      expect(parent.status).toBe("waiting");
+      engine.tick(); await flush();
+      expect(parent.status).toBe("resume");
+      // 27m is past the hard cap however it is measured; the owed synthesis
+      // is dispatchable, so the same tick spares it and starts it.
+      nowMs = 27 * 60_000; hooks.busy = () => false;
+      engine.tick(); await flush();
+      expect(parent.status).toBe("running");
+      finish.root({ ok: true, text: "synthesized" }); await flush();
+      engine.tick(); await flush();
+      expect(parent.status).toBe("completed");
+      expect(hooks.report).toHaveBeenCalled();
+    }, () => nowMs, { minRunwayMs: 5 * 60_000, lifetimeMs: 10 * 60_000, hardCapMs: 15 * 60_000 });
+  });
+  it("still fails a true stall past the cap when the owed synthesis cannot run", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 11 * 60_000; engine.tick(); await flush();
+      finish.work({ ok: true, text: "child done" }); await flush();
+      hooks.busy = () => true;
+      engine.tick(); await flush();
+      const parent = engine.nodes.get("turn")!;
+      // One tick reports the settled child; the next flips the parent to
+      // resume, where the busy teammate parks it.
+      expect(parent.status).toBe("waiting");
+      engine.tick(); await flush();
+      expect(parent.status).toBe("resume");
+      nowMs = 27 * 60_000; engine.tick(); await flush();
+      expect(parent.status).toBe("failed");
+      expect(parent.result).toContain("Room handoff hard cap exhausted");
+      expect(node.status).toBe("completed");
+    }, () => nowMs, { minRunwayMs: 5 * 60_000, lifetimeMs: 10 * 60_000, hardCapMs: 15 * 60_000 });
+  });
+  it("bounds an in-flight synthesis past the cap to its minimum runway", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      let aborted = false;
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = (node, _resumed, signal) => new Promise(resolve => {
+        finish[node.key] = resolve;
+        signal.addEventListener("abort", () => { aborted = true; resolve({ ok: false, text: "aborted" }); });
+      });
+      const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 13 * 60_000; engine.tick(); await flush();
+      finish.work({ ok: true, text: "child done" }); await flush();
+      hooks.busy = n => n.id === "turn";
+      engine.tick(); await flush();
+      const parent = engine.nodes.get("turn")!;
+      // One tick reports the settled child; the next flips the parent to
+      // resume, where the busy teammate parks it.
+      expect(parent.status).toBe("waiting");
+      engine.tick(); await flush();
+      expect(parent.status).toBe("resume");
+      nowMs = 14 * 60_000; hooks.busy = () => false;
+      engine.tick(); await flush();
+      expect(parent.status).toBe("running");
+      // 16m is past the tree's 15m wall-clock age: the in-flight synthesis
+      // keeps executing instead of being killed mid-run.
+      nowMs = 16 * 60_000; engine.tick(); await flush();
+      expect(parent.status).toBe("running");
+      expect(aborted).toBe(false);
+      // The spare is bounded: past the runway its dispatch promised, the
+      // normal lifetime branch fails it and the controller aborts.
+      nowMs = 14 * 60_000 + 5 * 60_000 + 1_000;
+      engine.tick(); await flush();
+      expect(parent.status).toBe("failed");
+      expect(aborted).toBe(true);
+      expect(parent.result).toContain("Room handoff lifetime budget exhausted");
+      expect(node.status).toBe("completed");
+    }, () => nowMs, { minRunwayMs: 5 * 60_000, lifetimeMs: 10 * 60_000, hardCapMs: 15 * 60_000 });
+  });
+  it("keeps refusing new follow-up work past the cap", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      hooks.run = () => new Promise(() => {});
+      const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 60_000; engine.tick(); await flush();
+      expect(node.status).toBe("running");
+      // 12m of wall clock with the tree paused since 1m leaves 9m of the
+      // lifetime budget, but less than the 5m runway before the hard cap.
+      nowMs = 12 * 60_000;
+      expect(() => engine.enqueue(node, "follow", node.id, addr("C"), "work", "more"))
+        .toThrow("Room handoff budget exhausted");
+    }, () => nowMs, { minRunwayMs: 5 * 60_000, lifetimeMs: 10 * 60_000, hardCapMs: 15 * 60_000 });
+  });
+});
+
+describe("room handoff hard cap renewal", () => {
+  it("renews the stall window when a child settles", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      engine.tick(); await flush();
+      nowMs = 40 * 60_000; finish.work({ ok: true, text: "child done" }); await flush();
+      hooks.busy = n => n.id === "turn";
+      engine.tick(); await flush();
+      const parent = engine.nodes.get("turn")!;
+      expect(parent.status).toBe("waiting");
+      engine.tick(); await flush();
+      expect(parent.status).toBe("resume");
+      // The settlement at 40m renewed the stall window to 85m, so the busy
+      // park at 84m sits inside it instead of 39m past the old edge.
+      nowMs = 84 * 60_000; engine.tick(); await flush();
+      expect(parent.status).toBe("resume");
+      nowMs = 86 * 60_000; engine.tick(); await flush();
+      expect(parent.status).toBe("failed");
+      expect(parent.result).toContain("Room handoff hard cap exhausted");
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
+  it("renews the stall window when a synthesis dispatches", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      engine.tick(); await flush();
+      nowMs = 20 * 60_000; finish.work({ ok: true, text: "child done" }); await flush();
+      hooks.busy = n => n.id === "turn";
+      engine.tick(); await flush();
+      const parent = engine.nodes.get("turn")!;
+      expect(parent.status).toBe("waiting");
+      engine.tick(); await flush();
+      expect(parent.status).toBe("resume");
+      nowMs = 30 * 60_000; hooks.busy = () => false;
+      engine.tick(); await flush();
+      expect(parent.status).toBe("running");
+      // The synthesis dispatch at 30m renewed the window to 75m; without
+      // the renewal the clamped deadline would already sit at 45m.
+      nowMs = 74 * 60_000; engine.tick(); await flush();
+      expect(parent.status).toBe("running");
+      nowMs = 76 * 60_000; engine.tick(); await flush();
+      expect(parent.status).toBe("failed");
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
+  it("admits follow-up work against the renewed stall window", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      engine.tick(); await flush();
+      nowMs = 40 * 60_000; finish.work({ ok: true, text: "child done" }); await flush();
+      // 42m leaves only 3m before a creation-anchored 45m cap — less than
+      // the runway enqueue must honor. The 40m settlement renewed the
+      // window, so the follow-up is admitted against the renewed edge.
+      nowMs = 42 * 60_000;
+      expect(() => engine.enqueue(addr("A"), "turn", undefined, addr("C"), "follow", "more")).not.toThrow();
+    }, () => nowMs, { hardCapMs: 45 * 60_000, lifetimeMs: 45 * 60_000 });
+  });
+  it("persists the renewal stamp and reloads it", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks, file) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      engine.tick(); await flush();
+      nowMs = 40 * 60_000; finish.work({ ok: true, text: "child done" }); await flush();
+      engine.tick(); await flush();
+      const parent = engine.nodes.get("turn")!;
+      expect(parent.status).toBe("waiting");
+      engine.tick(); await flush();
+      expect(parent.status).toBe("running");
+      nowMs = 42 * 60_000; finish.root({ ok: true, text: "synthesized" }); await flush();
+      engine.tick(); await flush();
+      expect(parent.status).toBe("completed");
+      const saved = JSON.parse(readFileSync(file, "utf8")) as Array<{ id: string; lastProgressAt?: number }>;
+      expect(saved.find(n => n.id === "turn")?.lastProgressAt).toBe(42 * 60_000);
+      const reloaded = new RoomHandoffs(file, hooks, () => nowMs, { hardCapMs: 45 * 60_000 });
+      expect(reloaded.nodes.get("turn")?.lastProgressAt).toBe(42 * 60_000);
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
+});
+
+describe("hard cap expiry digest", () => {
+  it("carries a bounded digest of settled children on expiry", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      hooks.busy = n => n.id === "turn";
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.enqueue(addr("A"), "turn", undefined, addr("C"), "more", "build");
+      engine.sourceSettled("turn", true);
+      engine.tick(); await flush();
+      nowMs = 5 * 60_000;
+      finish.work({ ok: true, text: "alpha result TAIL-END" });
+      finish.more({ ok: true, text: "beta result TAIL-END" }); await flush();
+      engine.tick(); await flush();
+      const parent = engine.nodes.get("turn")!;
+      expect(parent.status).toBe("waiting");
+      engine.tick(); await flush();
+      expect(parent.status).toBe("resume");
+      // Both settlements at 5m renewed the window to 50m; the busy park
+      // expires at 51m and the error still names what the children produced.
+      nowMs = 51 * 60_000; engine.tick(); await flush();
+      expect(parent.status).toBe("failed");
+      expect(parent.result).toContain("Room handoff hard cap exhausted");
+      expect(parent.result).toContain("work [completed] alpha result TAIL-END");
+      expect(parent.result).toContain("more [completed] beta result TAIL-END");
+      expect(parent.result.length).toBeLessThan(5000);
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
+  it("elides digest entries beyond the budget", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      hooks.busy = n => n.id === "turn";
+      for (let i = 0; i < 12; i++) {
+        engine.enqueue(addr("A"), "turn", undefined, addr(`B${i}`), `work${i}`, "build");
+      }
+      engine.sourceSettled("turn", true);
+      engine.tick(); await flush();
+      nowMs = 5 * 60_000;
+      for (let i = 0; i < 12; i++) finish[`work${i}`]({ ok: true, text: "x".repeat(2048) });
+      await flush();
+      engine.tick(); await flush();
+      const parent = engine.nodes.get("turn")!;
+      expect(parent.status).toBe("waiting");
+      engine.tick(); await flush();
+      expect(parent.status).toBe("resume");
+      nowMs = 51 * 60_000; engine.tick(); await flush();
+      expect(parent.status).toBe("failed");
+      expect(parent.result).toContain("Room handoff hard cap exhausted");
+      expect(parent.result).toContain("elided)");
+      expect(parent.result.length).toBeLessThan(5000);
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
+  it("adds no digest when nothing settled", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      hooks.run = () => new Promise(() => {});
+      const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 24 * 60_000; engine.tick(); await flush();
+      expect(node.status).toBe("running");
+      // The 24m dispatch renewed the window to 69m; the hanging child dies
+      // at the edge with the plain expiry line and nothing appended.
+      nowMs = 24 * 60_000 + 45 * 60_000 + 1_000; engine.tick(); await flush();
+      expect(node.status).toBe("failed");
+      expect(node.result).toContain("Room handoff hard cap exhausted");
+      expect(node.result).not.toContain("\n");
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
+});
+
+describe("shared room request display", () => {
+  it("shares one identity across recipients and rejects late additions after real dispatch and restart", () => fixture(async (engine, hooks, file) => {
+    const source = addr("A");
+    const one = engine.enqueue(source, "turn", undefined, addr("B"), "work:b", "Review", false, false, "", "work").node;
+    const two = engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "c" }, "work:c", "Review", false, false, "", "work").node;
+    expect(engine.sharedRequest(one)).toEqual({ id: one.id, botIds: [one.botId, two.botId] });
+    expect(engine.sharedRequest(two)).toEqual(engine.sharedRequest(one));
+    engine.tick();
+    expect(one.status).toBe("running");
+    expect(one.startedAt).toBeDefined();
+    expect(() => engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
+    await flush();
+    expect(one.status).toBe("completed");
+    expect(one.executions).toBe(0); // The root, not this child, owns the execution counter.
+    expect(engine.enqueue(source, "turn", undefined, addr("B"), "work:b", "Review", false, false, "", "work").duplicate).toBe(true);
+    expect(() => engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
+    const restarted = new RoomHandoffs(file, hooks);
+    expect(restarted.sharedRequest(restarted.nodes.get(two.id)!)).toEqual(engine.sharedRequest(two));
+    expect(() => restarted.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
+    expect(restarted.sharedRequest(restarted.nodes.get(one.id)!)).toEqual({ id: one.id, botIds: [one.botId, two.botId] });
+  }));
+  it("does not merge different requests, conversations, senders or direct assignments", () => fixture(engine => {
+    const a = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "one:b", "Review", false, false, "", "one").node;
+    const b = engine.enqueue(addr("A"), "turn", undefined, { ...addr("B"), botId: "c" }, "two:c", "Review", false, false, "", "two").node;
+    const c = engine.enqueue(addr("A"), "other-turn", undefined, addr("B"), "one:b", "Review", false, false, "", "one").node;
+    const d = engine.enqueue(addr("A"), "turn", undefined, addr("D"), "one:d", "Review", false, false, "", "one").node;
+    const direct = engine.enqueue(addr("A"), "turn", undefined, { botId: "direct", threadId: "direct" }, "one:direct", "Review").node;
+    for (const node of [a,b,c,d,direct]) expect(engine.sharedRequest(node)).toEqual({ id: node.id, botIds: [node.botId] });
+    expect(() => engine.enqueue(addr("A"), "turn", undefined, { ...addr("B"), botId: "different" }, "one:different", "Changed", false, false, "", "one")).toThrow("different room work");
+    expect(() => engine.enqueue(addr("A"), "turn", undefined, { ...addr("B"), threadId: "new", botId: "different" }, "one:different", "Review", false, false, "", "one")).toThrow("different room work");
+  }));
 });

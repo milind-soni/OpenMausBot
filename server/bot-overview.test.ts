@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildBotOverview, connectedAppsFacts, setupSteps, soulLead, type OverviewFacts } from "./bot-overview.ts";
+import { buildBotOverview, connectedAppsFacts, grantsSummary, setupSteps, soulLead, type OverviewFacts } from "./bot-overview.ts";
 
 function baseFacts(overrides: Partial<OverviewFacts> = {}): OverviewFacts {
   return {
@@ -282,6 +282,34 @@ describe("connectedAppsFacts", () => {
     expect(await connectedAppsFacts(false, "unconfigured", read)).toEqual({ configured: false, authoritative: true, services: [] });
     expect(await connectedAppsFacts(false, "unreadable", read)).toEqual({ configured: false, authoritative: false, services: [] });
     expect(reads).toBe(0);
+  });
+});
+
+describe("grantsSummary", () => {
+  it("stays off the wire for a bot with no grants record", () => {
+    expect(grantsSummary(undefined)).toBeUndefined();
+    expect(buildBotOverview(baseFacts()).grants).toBeUndefined();
+  });
+
+  it("summarizes wildcards, exact lists and an explicit no-tools record", () => {
+    const grants = grantsSummary({
+      slack: { tools: "*" },
+      gmail: { tools: ["GMAIL_SEND_EMAIL", "GMAIL_FETCH_EMAILS"] },
+    });
+    // sorted by slug, so the order both clients render is deterministic
+    expect(grants).toEqual([
+      { slug: "gmail", level: "partial", toolCount: 2 },
+      { slug: "slack", level: "all", toolCount: 0 },
+    ]);
+    // {} is the explicit no-tools record: an empty list, not an absent one
+    expect(grantsSummary({})).toEqual([]);
+    expect(buildBotOverview(baseFacts({ bot: { ...baseFacts().bot, connectorTools: {} } })).grants).toEqual([]);
+  });
+
+  it("rides along in the built overview for a partial grant set", () => {
+    const connectorTools = { gmail: { tools: ["GMAIL_SEND_EMAIL"] } };
+    const overview = buildBotOverview(baseFacts({ bot: { ...baseFacts().bot, connectorTools } }));
+    expect(overview.grants).toEqual([{ slug: "gmail", level: "partial", toolCount: 1 }]);
   });
 });
 

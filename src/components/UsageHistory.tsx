@@ -1,5 +1,5 @@
 // App settings → Usage → History: what this workspace spent over a period,
-// by bot, model, person, day or engine, from the server's month-by-month
+// by bot, model, person, day, engine or routine, from the server's month-by-month
 // ledger (server/usage-ledger.ts). The card above it sums live tasks; this
 // one survives restarts and exports for an invoice.
 import { useEffect, useState } from "react";
@@ -7,12 +7,12 @@ import { Download, Loader2 } from "lucide-react";
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { formatTokens, formatUsd, hasFiniteCost } from "@/lib/usage";
+import { cachedUsageNote, formatTokens, formatUsd, hasFiniteCost, headlineTokens, tokensColumnLabel } from "@/lib/usage";
 import { Card } from "./SettingsPrimitives";
 import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 
-export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine";
-export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine"];
+export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
+export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine", "routine"];
 export type UsagePeriod = "month" | "lastMonth" | "days30";
 
 export interface UsageGroup {
@@ -22,7 +22,11 @@ export interface UsageGroup {
   input: number;
   output: number;
   cachedInput: number;
+  /** reported and estimated cost together; null when nothing had a price */
   costUsd: number | null;
+  /** the part of costUsd that is an estimate (absent from older servers) */
+  estimatedUsd?: number | null;
+  /** turns on a model with no known price */
   unpriced: number;
   /** the operator's own price, when a list is set and the server is entitled */
   billableUsd?: number | null;
@@ -51,6 +55,7 @@ export function usagePeriodRange(period: UsagePeriod, now = new Date()): { from:
 /** The server can only describe the non-person triggers in English; the
  * app names them itself by key. */
 export function usageGroupLabel(groupBy: UsageGroupBy, group: UsageGroup): string {
+  if (groupBy === "routine") return group.key === "manual" ? t("usage.history.notRoutine") : group.label;
   if (groupBy !== "user") return group.label;
   if (group.key === "owner") return t("usage.history.owner");
   if (group.key === "bot") return t("usage.history.botToBot");
@@ -62,13 +67,28 @@ export function usageExportHref(range: { from: string; to: string }): string {
   return `/api/usage.csv?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
 }
 
-const GROUP_LABEL_KEYS: Record<UsageGroupBy, "usage.history.byBot" | "usage.history.byModel" | "usage.history.byUser" | "usage.history.byDay" | "usage.history.byEngine"> = {
+const GROUP_LABEL_KEYS: Record<UsageGroupBy, "usage.history.byBot" | "usage.history.byModel" | "usage.history.byUser" | "usage.history.byDay" | "usage.history.byEngine" | "usage.history.byRoutine"> = {
   bot: "usage.history.byBot",
   model: "usage.history.byModel",
   user: "usage.history.byUser",
   day: "usage.history.byDay",
   engine: "usage.history.byEngine",
+  routine: "usage.history.byRoutine",
 };
+
+/** A cost cell: "~" in front when part of it is an estimate, a dash when
+ * nothing in the group had a price. */
+function CostCell({ group, strong = false }: { group: UsageGroup; strong?: boolean }) {
+  if (!hasFiniteCost(group.costUsd)) return <span className={cn("text-right tabular-nums", strong ? "" : "text-ink-secondary")}>—</span>;
+  const estimated = hasFiniteCost(group.estimatedUsd) && group.estimatedUsd > 0;
+  return (
+    <span className={cn("text-right tabular-nums", strong ? "" : "text-ink")} title={estimated ? t("usage.history.estimatedPart", { amount: formatUsd(group.estimatedUsd!) }) : undefined}>
+      {estimated && <span className="text-ink-secondary">~</span>}
+      {formatUsd(group.costUsd)}
+      {group.unpriced > 0 && <span className="text-ink-secondary">*</span>}
+    </span>
+  );
+}
 
 /** The table alone, so it renders the same from a fetch or a fixture. */
 export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
@@ -76,6 +96,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
     return <div className="text-[13px] text-ink-secondary">{t("usage.history.empty")}</div>;
   }
   const billable = Boolean(summary.billing);
+  const cachedNote = cachedUsageNote(summary.total);
   const columns = billable ? "grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-5" : "grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-5";
   const money = (value: number | null | undefined) => (hasFiniteCost(value) ? formatUsd(value) : "—");
   return (
@@ -83,7 +104,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
       <div className={cn(columns, "border-b border-hairline/40 pb-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary")}>
         <span>{t(GROUP_LABEL_KEYS[summary.groupBy])}</span>
         <span className="text-right">{t("usage.colTurns")}</span>
-        <span className="text-right">{t("usage.colTokens")}</span>
+        <span className="text-right">{tokensColumnLabel(summary.total)}</span>
         <span className="text-right">{t("usage.colCost")}</span>
         {billable && <span className="text-right">{t("usage.history.colBillable")}</span>}
       </div>
@@ -92,22 +113,25 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
           <span className="truncate text-ink" title={group.label}>{usageGroupLabel(summary.groupBy, group)}</span>
           <span className="text-right tabular-nums text-ink-secondary">{group.turns}</span>
           <span className="text-right tabular-nums text-ink" title={t("usage.history.tokenSplit", { input: formatTokens(group.input), output: formatTokens(group.output), cached: formatTokens(group.cachedInput) })}>
-            {formatTokens(group.input + group.output)}
+            {formatTokens(headlineTokens(group))}
           </span>
-          <span className="text-right tabular-nums text-ink">
-            {hasFiniteCost(group.costUsd) ? formatUsd(group.costUsd) : <span className="text-ink-secondary">—</span>}
-            {group.unpriced > 0 && hasFiniteCost(group.costUsd) && <span className="text-ink-secondary">*</span>}
-          </span>
+          <CostCell group={group} />
           {billable && <span className="text-right tabular-nums text-ink">{money(group.billableUsd)}</span>}
         </div>
       ))}
       <div className={cn(columns, "pt-2.5 text-[13px] font-medium text-ink")}>
         <span>{t("usage.history.total")}</span>
         <span className="text-right tabular-nums">{summary.total.turns}</span>
-        <span className="text-right tabular-nums">{formatTokens(summary.total.input + summary.total.output)}</span>
-        <span className="text-right tabular-nums">{hasFiniteCost(summary.total.costUsd) ? formatUsd(summary.total.costUsd) : "—"}</span>
+        <span className="text-right tabular-nums">{formatTokens(headlineTokens(summary.total))}</span>
+        <CostCell group={summary.total} strong />
         {billable && <span className="text-right tabular-nums">{money(summary.total.billableUsd)}</span>}
       </div>
+      {cachedNote && (
+        <div className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{cachedNote}</div>
+      )}
+      {hasFiniteCost(summary.total.estimatedUsd) && summary.total.estimatedUsd > 0 && (
+        <div className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("usage.history.estimated", { amount: formatUsd(summary.total.estimatedUsd) })}</div>
+      )}
       {summary.total.unpriced > 0 && (
         <div className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("usage.history.unpriced", { count: String(summary.total.unpriced) })}</div>
       )}

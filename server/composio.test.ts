@@ -5,9 +5,11 @@ import type { AppConfig } from "./config.ts";
 import {
   applyManagedBrokerMessage,
   authorizeService,
+  connectedServiceSlugs,
   connectedServices,
   connectionMode,
   connectionStatus,
+  listConnectorTools,
   listToolkits,
   mcpIntegration,
   normalizeAccountAlias,
@@ -16,7 +18,14 @@ import {
   removeService,
   relayMcp,
   setManagedBrokerAccess,
+  validateConnectorGrants,
 } from "./composio.ts";
+import {
+  CONNECTOR_ALLOWED_TOOLS_ENV,
+  CONNECTOR_SERVICE_SLUGS_ENV,
+  parseConnectorServiceSlugsEnv,
+} from "./connector-advertisement.ts";
+import type { ConnectorToolGrant } from "../shared/wire.ts";
 
 let api: Server;
 let origin = "";
@@ -32,6 +41,15 @@ const calls: Array<{
 let malformedConnectedAccounts = false;
 let connectedAccountsUnavailable = false;
 let emptyConnectedAccounts = false;
+// The grant editor's tools/list fixture: null keeps the legacy one-frame
+// {source:"broker"} answer the relayMcp tests assert on.
+let brokerMcpTools: Array<{ name: string; description?: string }> | null = null;
+let brokerToolsListFail = false;
+// What /broker/v1/connectors/connected serves; null falls back to github
+// only, the state the existing validation tests were written against.
+let brokerConnectedServicesBody: { services: Record<string, { connected: boolean; status: string }> } | null = null;
+// What /broker/v1/catalog serves; null falls back to github only.
+let brokerCatalogBody: { items: Array<{ slug: string; name: string }> } | null = null;
 // The project's own auth configs, and the ones the stub Session was created
 // with — a Session only knows the configs named at its creation, which is
 // the whole reason #509 happened.
@@ -54,7 +72,9 @@ beforeAll(async () => {
     });
 
     if (url.pathname.startsWith("/broker/")) {
-      if (req.headers.authorization !== `Bearer ${"a".repeat(64)}`) {
+      // c/d/e/f back the cache-identity tests; b stays invalid so a token
+      // switch can be made to fail on purpose.
+      if (!/^[acdef]{64}$/.test(String(req.headers.authorization ?? "").replace(/^Bearer /, ""))) {
         res.writeHead(401, { "content-type": "application/json" });
         return res.end(JSON.stringify({ error: "invalid broker token" }));
       }
@@ -70,7 +90,9 @@ beforeAll(async () => {
       }
       if (req.method === "GET" && url.pathname === "/broker/v1/connectors/connected") {
         res.writeHead(200, { "content-type": "application/json" });
-        return res.end(JSON.stringify({ services: { github: { connected: true, status: "ACTIVE" } } }));
+        return res.end(JSON.stringify(
+          brokerConnectedServicesBody ?? { services: { github: { connected: true, status: "ACTIVE" } } },
+        ));
       }
       if (req.method === "POST" && url.pathname.endsWith("/authorize")) {
         res.writeHead(200, { "content-type": "application/json" });
@@ -82,9 +104,29 @@ beforeAll(async () => {
       }
       if (req.method === "GET" && url.pathname === "/broker/v1/catalog") {
         res.writeHead(200, { "content-type": "application/json" });
-        return res.end(JSON.stringify({ items: [{ slug: "github", name: "GitHub" }] }));
+        return res.end(JSON.stringify(brokerCatalogBody ?? { items: [{ slug: "github", name: "GitHub" }] }));
       }
       if (req.method === "POST" && url.pathname === "/broker/v1/mcp") {
+        if (brokerMcpTools !== null && body?.method === "initialize") {
+          res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "mcp_grants" });
+          return res.end(JSON.stringify({
+            jsonrpc: "2.0",
+            id: body.id,
+            result: {
+              protocolVersion: "2025-03-26",
+              capabilities: {},
+              serverInfo: { name: "composio-stub", version: "1" },
+            },
+          }));
+        }
+        if (brokerMcpTools !== null && body?.method === "tools/list") {
+          if (brokerToolsListFail) {
+            res.writeHead(500, { "content-type": "application/json" });
+            return res.end(JSON.stringify({ error: { message: "tools list unavailable" } }));
+          }
+          res.writeHead(200, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { tools: brokerMcpTools } }));
+        }
         res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "mcp_broker" });
         return res.end(JSON.stringify({ source: "broker" }));
       }
@@ -93,7 +135,9 @@ beforeAll(async () => {
     }
 
     const apiKey = String(req.headers["x-api-key"] ?? "");
-    if (!["ak_test", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck"].includes(apiKey)) {
+    if (!["ak_test", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
+        "ak_catalog_page_stuck", "ak_catalog_exhausted", "ak_catalog_stalled_total", "ak_catalog_end_short",
+        "ak_catalog_http_no_total"].includes(apiKey)) {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: { message: "invalid project key" } }));
     }
@@ -109,12 +153,89 @@ beforeAll(async () => {
     }
     if (
       req.method === "GET" && url.pathname === "/api/v3/toolkits"
-      && (apiKey === "ak_catalog_pages" || apiKey === "ak_catalog_partial" || apiKey === "ak_catalog_stuck")
+      && (
+        apiKey === "ak_catalog_pages"
+        || apiKey === "ak_catalog_partial"
+        || apiKey === "ak_catalog_stuck"
+        || apiKey === "ak_catalog_page_stuck"
+        || apiKey === "ak_catalog_exhausted"
+        || apiKey === "ak_catalog_stalled_total"
+        || apiKey === "ak_catalog_end_short"
+        || apiKey === "ak_catalog_http_no_total"
+      )
     ) {
       if (apiKey === "ak_catalog_stuck") {
         // A broker deployed before this fix ignores the cursor and replays page one.
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ items: [{ slug: "gmail", name: "Gmail" }], next_cursor: "catalog-page-2" }));
+      }
+      if (apiKey === "ak_catalog_page_stuck") {
+        // Replays page one while minting a fresh cursor every time, so only
+        // current_page exposes the loop.
+        const pageNumber = Number((url.searchParams.get("cursor") ?? "catalog-page-1").split("-").pop());
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          items: [{ slug: "gmail", name: "Gmail" }],
+          next_cursor: "catalog-page-" + (pageNumber + 1),
+          current_page: 1,
+          total_pages: 4,
+        }));
+      }
+      if (apiKey === "ak_catalog_exhausted") {
+        // The last page still offers a cursor; total_pages must end the walk.
+        res.writeHead(200, { "content-type": "application/json" });
+        if (url.searchParams.get("cursor") === "catalog-page-2") {
+          return res.end(JSON.stringify({
+            items: [{ slug: "deepgram", name: "Deepgram" }],
+            next_cursor: "catalog-page-3",
+            current_page: 2,
+            total_pages: 2,
+          }));
+        }
+        return res.end(JSON.stringify({
+          items: [{ slug: "gmail", name: "Gmail" }],
+          next_cursor: "catalog-page-2",
+          current_page: 1,
+          total_pages: 2,
+        }));
+      }
+      if (apiKey === "ak_catalog_stalled_total") {
+        // The live failure mode from #1614: upstream reports the full count
+        // but stops offering cursors after the first page.
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          items: [{ slug: "gmail", name: "Gmail" }],
+          current_page: 1,
+          total_pages: 4,
+          total_items: 1540,
+        }));
+      }
+      if (apiKey === "ak_catalog_end_short") {
+        // Page counts say more pages exist, but no cursor and no total_items
+        // arrive, so only the page metadata can flag the partial catalog.
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          items: [{ slug: "gmail", name: "Gmail" }],
+          current_page: 1,
+          total_pages: 4,
+        }));
+      }
+      if (apiKey === "ak_catalog_http_no_total") {
+        // Reports neither totals nor page counts, so a lost second page can
+        // only be caught by tracking walk completion, not by stalled.
+        if (url.searchParams.get("cursor") === "catalog-page-2") {
+          res.writeHead(502, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: "catalog page unavailable" }));
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          items: [
+            { slug: "gmail", name: "Gmail" },
+            { slug: "bland_ai", name: "Bland AI" },
+            { slug: "currencyscoop", name: "CurrencyScoop" },
+          ],
+          next_cursor: "catalog-page-2",
+        }));
       }
       // Mirrors the real marketplace: a usage-sorted head, then an alphabetical
       // tail only a second page reaches. ak_catalog_partial loses that page.
@@ -126,6 +247,9 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({
           items: [{ slug: "deepgram", name: "Deepgram" }, { slug: "zoom", name: "Zoom" }],
+          current_page: 2,
+          total_pages: 2,
+          total_items: 5,
         }));
       }
       res.writeHead(200, { "content-type": "application/json" });
@@ -136,6 +260,9 @@ beforeAll(async () => {
           { slug: "currencyscoop", name: "CurrencyScoop" },
         ],
         next_cursor: "catalog-page-2",
+        current_page: 1,
+        total_pages: 2,
+        total_items: 5,
       }));
     }
     if (req.method === "GET" && url.pathname === "/api/v3/toolkits") {
@@ -324,10 +451,11 @@ describe.sequential("Composio Sessions", () => {
 
   it("pages the marketplace catalog past the first page", async () => {
     const before = calls.length;
-    const { cards } = await listToolkits({ composio: { apiKey: "ak_catalog_pages" } });
+    const { cards, pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_pages" } });
 
     // "Deepgram" only exists on page two: #634 saw the catalog stop at "CurrencyScoop".
     expect(cards.map((card) => card.slug)).toEqual(["gmail", "bland_ai", "currencyscoop", "deepgram", "zoom"]);
+    expect(pagination).toEqual({ items: 5, totalItems: 5, stalled: false, complete: true });
     const pages = calls.slice(before).filter((call) => call.path === "/api/v3/toolkits");
     expect(pages).toHaveLength(2);
     expect(pages[0]?.query).not.toContain("cursor=");
@@ -346,6 +474,68 @@ describe.sequential("Composio Sessions", () => {
     const { cards } = await listToolkits({ composio: { apiKey: "ak_catalog_stuck" } });
 
     expect(cards).toEqual([expect.objectContaining({ slug: "gmail" })]);
+    expect(calls.slice(before).filter((call) => call.path === "/api/v3/toolkits")).toHaveLength(2);
+  });
+
+  it("stops cleanly when replayed pages hide behind rotating cursors", async () => {
+    const before = calls.length;
+    const { cards, pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_page_stuck" } });
+
+    expect(cards).toEqual([expect.objectContaining({ slug: "gmail" })]);
+    expect(pagination).toEqual({ items: 1, stalled: true, complete: false, reason: "page-stuck" });
+    expect(calls.slice(before).filter((call) => call.path === "/api/v3/toolkits")).toHaveLength(2);
+  });
+
+  it("reports a partial catalog when upstream stops offering cursors before its own total", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_stalled_total" } });
+      expect(pagination).toEqual({ items: 1, totalItems: 1540, stalled: true, complete: false, reason: "end" });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("partial marketplace"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("flags a partial catalog that ends early with only page counts to reveal it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_end_short" } });
+        expect(pagination).toEqual({ items: 1, stalled: true, complete: false, reason: "end" });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("partial marketplace"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("flags a catalog that loses a later page mid-walk", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_partial" } });
+      expect(pagination).toEqual({ items: 3, totalItems: 5, stalled: true, complete: false, reason: "http-error" });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("keeps pagination with the cached catalog", async () => {
+    const first = await listToolkits({ composio: { apiKey: "ak_catalog_stalled_total" } });
+    const before = calls.length;
+    const second = await listToolkits({ composio: { apiKey: "ak_catalog_stalled_total" } });
+    expect(second.pagination).toEqual(first.pagination);
+    expect(calls.slice(before)).toHaveLength(0);
+  });
+
+  it("marks a catalog that lost a page incomplete even with no totals to compare", async () => {
+    const { pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_http_no_total" } });
+    expect(pagination).toEqual({ items: 3, stalled: false, complete: false });
+  });
+
+  it("stops at the reported last page even when a cursor is still offered", async () => {
+    const before = calls.length;
+    const { cards } = await listToolkits({ composio: { apiKey: "ak_catalog_exhausted" } });
+
+    expect(cards.map((card) => card.slug)).toEqual(["gmail", "deepgram"]);
     expect(calls.slice(before).filter((call) => call.path === "/api/v3/toolkits")).toHaveLength(2);
   });
 
@@ -688,6 +878,152 @@ describe.sequential("Composio Sessions", () => {
     });
   });
 
+  it("passes a bot's connector grants to the bridge as an env allowlist", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    const grants: Record<string, ConnectorToolGrant> = { gmail: { tools: ["GMAIL_SEND_EMAIL"] }, slack: { tools: "*" } };
+    const integration = await mcpIntegration(cfg, {
+      harnessUrl: "http://127.0.0.1:8799",
+      commsToken: "secret",
+      botId: "bot-1",
+      threadId: "thread-1",
+      connectorTools: grants,
+    });
+    expect(integration?.env[CONNECTOR_ALLOWED_TOOLS_ENV]).toBe(JSON.stringify(grants));
+  });
+
+  it("omits the allowlist for legacy bots and for oversized grants, warning once", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const legacy = await mcpIntegration(cfg, {
+        harnessUrl: "http://127.0.0.1:8799",
+        commsToken: "secret",
+        botId: "bot-1",
+        threadId: "thread-1",
+      });
+      expect(legacy?.env[CONNECTOR_ALLOWED_TOOLS_ENV]).toBeUndefined();
+      expect(warn).not.toHaveBeenCalled();
+
+      const names = Array.from({ length: 500 }, (_, index) => "GMAIL_TOOL_" + String(index).padStart(3, "0") + "_WITH_" + "A_LONG_DESCRIPTOR_".repeat(6));
+      const oversized = await mcpIntegration(cfg, {
+        harnessUrl: "http://127.0.0.1:8799",
+        commsToken: "secret",
+        botId: "bot-1",
+        threadId: "thread-1",
+        connectorTools: { gmail: { tools: names } },
+      });
+      // The mount survives; only the advertisement filter is skipped.
+      expect(oversized?.args[0]).toContain("connector-proxy");
+      expect(oversized?.env[CONNECTOR_ALLOWED_TOOLS_ENV]).toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0])).toContain("exceeds 32768 bytes");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("passes the connected-service slugs to the bridge alongside the allowlist", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "f".repeat(64) });
+    brokerConnectedServicesBody = {
+      services: {
+        bland_ai: { connected: true, status: "ACTIVE" },
+        bland: { connected: true, status: "ACTIVE" },
+        github: { connected: true, status: "ACTIVE" },
+      },
+    };
+    try {
+      const integration = await mcpIntegration({}, {
+        harnessUrl: "http://127.0.0.1:8799",
+        commsToken: "secret",
+        botId: "bot-1",
+        threadId: "thread-1",
+        connectorTools: { bland: { tools: "*" } },
+      });
+      const slugs = parseConnectorServiceSlugsEnv(integration?.env[CONNECTOR_SERVICE_SLUGS_ENV]);
+      expect(slugs).toContain("bland_ai");
+      expect(slugs).toContain("bland");
+    } finally {
+      brokerConnectedServicesBody = null;
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("reads an unreachable connection inventory as no service slugs", async () => {
+    // No project key and no broker: the inventory cannot run, so the
+    // resolver degrades to the plain split instead of caching a failure.
+    await expect(connectedServiceSlugs({})).resolves.toEqual([]);
+  });
+
+  it("validates grant patches against connected services and the catalog", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    // github and gmail are connected (session toolkits page 1); slack is not.
+    // The ak_test catalog serves x and github.
+    await expect(validateConnectorGrants(cfg, { github: { tools: ["GITHUB_CREATE_ISSUE"] } })).resolves.toBeNull();
+    await expect(validateConnectorGrants(cfg, { github: { tools: "*" } })).resolves.toBeNull();
+    await expect(validateConnectorGrants(cfg, { slack: { tools: ["SLACK_POST_MESSAGE"] } })).resolves.toMatch(/not connected: slack/);
+    await expect(validateConnectorGrants(cfg, { gmail: { tools: ["SLACK_POST_MESSAGE"] } })).resolves.toMatch(/another service: SLACK_POST_MESSAGE/);
+    // gmail is connected (no-auth toolkit) but absent from the live catalog.
+    await expect(validateConnectorGrants(cfg, { gmail: { tools: ["GMAIL_SEND_EMAIL"] } })).resolves.toMatch(/missing from the connected-apps catalog: gmail/);
+  });
+
+  it("never blocks a grant patch when the connection inventory is unreachable, but still checks prefixes", async () => {
+    // No project key and no broker: connectedServices cannot run, so the
+    // connection and catalog checks step aside and call-time enforcement
+    // stays the gate. The prefix check is purely local, so it still runs —
+    // a tool filed under the wrong service is broken no matter what.
+    await expect(validateConnectorGrants({}, { anything: { tools: ["ANYTHING_DO_IT"] } })).resolves.toBeNull();
+    await expect(validateConnectorGrants({}, { gmail: { tools: ["SLACK_POST_MESSAGE"] } })).resolves.toMatch(/another service/);
+    setManagedBrokerAccess({ url: origin + "/broker", token: "a".repeat(64) });
+    try {
+      // The broker serves github as connected and its catalog lists github.
+      await expect(validateConnectorGrants({}, { github: { tools: ["GITHUB_CREATE_ISSUE"] } })).resolves.toBeNull();
+      await expect(validateConnectorGrants({}, { gmail: { tools: ["GMAIL_SEND_EMAIL"] } })).resolves.toMatch(/not connected: gmail/);
+    } finally {
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("accepts an underscored service's own tool names in its grant", async () => {
+    // The prefix check resolves against the connected-service slugs, so
+    // bland_ai keeps its BLAND_AI_* names instead of the first-segment
+    // split filing them under "bland" — and a bland grant cannot capture
+    // them while bland_ai is the connected service.
+    setManagedBrokerAccess({ url: origin + "/broker", token: "f".repeat(64) });
+    brokerConnectedServicesBody = {
+      services: {
+        bland_ai: { connected: true, status: "ACTIVE" },
+        bland: { connected: true, status: "ACTIVE" },
+        github: { connected: true, status: "ACTIVE" },
+      },
+    };
+    brokerCatalogBody = { items: [{ slug: "github", name: "GitHub" }, { slug: "bland_ai", name: "Bland AI" }, { slug: "bland", name: "Bland" }] };
+    try {
+      await expect(validateConnectorGrants({}, { bland_ai: { tools: ["BLAND_AI_MAKE_CALL"] } })).resolves.toBeNull();
+      await expect(validateConnectorGrants({}, { bland: { tools: ["BLAND_AI_MAKE_CALL"] } }))
+        .resolves.toMatch(/another service: BLAND_AI_MAKE_CALL/);
+    } finally {
+      brokerConnectedServicesBody = null;
+      brokerCatalogBody = null;
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("does not reject grants against a catalog walk that never finished", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_catalog_http_no_total", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    // github is connected, but the catalog lost its page mid-walk with no
+    // reported totals: the partial catalog cannot vouch for what it never
+    // saw, so the catalog check steps aside.
+    await expect(validateConnectorGrants(cfg, { github: { tools: ["GITHUB_CREATE_ISSUE"] } })).resolves.toBeNull();
+  });
+
   it("reports connection state, creates auth links and revokes disconnects", async () => {
     const cfg: AppConfig = {
       composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
@@ -844,6 +1180,67 @@ describe.sequential("Composio Sessions", () => {
       expect(linkCalls[0].body).toEqual({ toolkit: "slack", alias: "team" });
     } finally {
       emptyConnectedAccounts = false;
+    }
+  });
+});
+
+describe("connector tool inventory", () => {
+  const initializeCalls = () =>
+    calls.filter((call) => call.path.endsWith("/v1/mcp") && call.body?.method === "initialize");
+
+  it("groups an underscored service under its own slug using the connected services", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "c".repeat(64) });
+    brokerConnectedServicesBody = {
+      services: { bland_ai: { connected: true, status: "ACTIVE" }, github: { connected: true, status: "ACTIVE" } },
+    };
+    brokerMcpTools = [
+      { name: "BLAND_AI_MAKE_CALL", description: "place a call" },
+      { name: "GITHUB_CREATE_ISSUE", description: "open an issue" },
+    ];
+    try {
+      // Without the connected-services candidates the first-segment split
+      // would file BLAND_AI_MAKE_CALL under "bland".
+      await expect(listConnectorTools({})).resolves.toEqual({
+        bland_ai: [{ name: "BLAND_AI_MAKE_CALL", description: "place a call" }],
+        github: [{ name: "GITHUB_CREATE_ISSUE", description: "open an issue" }],
+      });
+    } finally {
+      brokerMcpTools = null;
+      brokerConnectedServicesBody = null;
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("re-walks after a backend switch instead of serving the cached inventory", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "d".repeat(64) });
+    brokerMcpTools = [{ name: "GITHUB_CREATE_ISSUE" }];
+    try {
+      await expect(listConnectorTools({})).resolves.toEqual({ github: [{ name: "GITHUB_CREATE_ISSUE" }] });
+
+      // A different broker token is a different backend: within the 60s
+      // cache window the switch must still serve the new backend's walk.
+      setManagedBrokerAccess({ url: origin + "/broker", token: "e".repeat(64) });
+      brokerMcpTools = [{ name: "SLACK_POST_MESSAGE" }];
+      const before = initializeCalls().length;
+      await expect(listConnectorTools({})).resolves.toEqual({ slack: [{ name: "SLACK_POST_MESSAGE" }] });
+      expect(initializeCalls().length).toBe(before + 1);
+    } finally {
+      brokerMcpTools = null;
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("shares one in-flight walk between concurrent callers", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "a".repeat(64) });
+    brokerMcpTools = [{ name: "GITHUB_CREATE_ISSUE" }, { name: "GITHUB_LIST_REPOS" }];
+    try {
+      const before = initializeCalls().length;
+      const [first, second] = await Promise.all([listConnectorTools({}), listConnectorTools({})]);
+      expect(second).toEqual(first);
+      expect(initializeCalls().length).toBe(before + 1);
+    } finally {
+      brokerMcpTools = null;
+      setManagedBrokerAccess(null);
     }
   });
 });

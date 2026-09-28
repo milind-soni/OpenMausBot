@@ -3,8 +3,11 @@ package com.openmausbot.companion.ui
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.demandsAttention
 import com.openmausbot.companion.core.isClosed
+import com.openmausbot.companion.core.isArchived
 import com.openmausbot.companion.core.displayTitle
+import com.openmausbot.companion.core.listedThreads
 import com.openmausbot.companion.core.threadGroups
 
 /**
@@ -33,23 +36,43 @@ object TaskRules {
      * Filter navigation only; full task state still resolves run logs and approvals.
      * The sheet is the phone's only thread list, so threads a bot closed stay in
      * it — but after every open thread, in their own server order, so a pile of
-     * closed helper threads never buries the person's own. A closed thread that
-     * is running, unread, or the current one is treated as open.
+     * closed helper threads never buries the person's own, and archived
+     * threads fold to the very tail. A folded thread that is running, unread,
+     * or the current one is treated as open.
+     *
+     * Inside each band, order is pin, then newest update. Equal stamps keep
+     * stored order. Attention does not move a row.
      */
-    fun tasks(bot: Bot): List<BotTask> {
+    fun tasks(bot: Bot, queuedThreadIds: Set<String> = emptySet()): List<BotTask> {
         val navigable = bot.threadGroups(includingClosed = true).flatMap { it.tasks }
-        val (open, closed) = navigable.partition { !it.isClosed || demandsAttention(it) || isCurrent(it, bot) }
-        return open + closed
+        val (pinned, rest) = navigable.partition { it.pinned == true }
+        val (surfaced, folded) = rest.partition {
+            (!it.isClosed && !it.isArchived) ||
+                demandsAttention(it, queued = it.threadId in queuedThreadIds) ||
+                isCurrent(it, bot)
+        }
+        val (closed, archived) = folded.partition { !it.isArchived }
+        return listedThreads(pinned) +
+            listedThreads(surfaced) +
+            listedThreads(closed) +
+            listedThreads(archived)
     }
 
-    /** Running, needing the person, or holding something they have not read. */
-    fun demandsAttention(task: BotTask): Boolean =
-        task.busy == true || task.unread == true ||
-            task.activity in setOf("waiting-on-you", "waiting", "working", "running", "queued")
+    /** Running, needing the person, holding a queued send, or holding
+     * something they have not read. */
+    fun demandsAttention(task: BotTask, queued: Boolean = false): Boolean =
+        task.demandsAttention(queued)
+
+    /**
+     * Working is activity or flag: the wire can carry either alone, so the
+     * snooze presets ask the same question the desktop's disabled snooze
+     * buttons ask (`isWorking` in `SidebarThreadRow.tsx`).
+     */
+    fun isWorking(task: BotTask): Boolean = task.activity == "working" || task.busy == true
 
     fun tasks(chat: Chat): List<BotTask> = when (chat) {
         is Chat.BotChat -> tasks(chat.bot)
-        is Chat.RoomChat -> chat.room.tasks.orEmpty()
+        is Chat.RoomChat -> listedThreads(chat.room.tasks.orEmpty())
     }
 
     fun title(task: BotTask): String = task.displayTitle
@@ -91,6 +114,16 @@ object TaskRules {
     fun canRename(bot: Bot): Boolean = true
 
     fun canRename(chat: Chat): Boolean = true
+
+    /** Archiving mid-turn would race the work, as with delete: wait for it. */
+    fun canArchive(task: BotTask, bot: Bot): Boolean =
+        task.activity !in setOf("working", "running") &&
+            if (independent(bot)) task.busy != true else bot.busy != true
+
+    fun canArchive(task: BotTask, chat: Chat): Boolean = when (chat) {
+        is Chat.BotChat -> canArchive(task, chat.bot)
+        is Chat.RoomChat -> task.activity !in setOf("working", "running") && task.busy != true
+    }
 }
 
 /**

@@ -60,7 +60,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
   });
   ipcMain.handle("environments:add-from-link", (_event, link, name) => {
     const parsed = parseHostedWorkspaceLink(link);
-    if (!parsed) throw new Error("Enter an HTTPS workspace address or a full pairing link.");
+    if (!parsed) throw new Error("Enter an HTTPS server address or a full pairing link.");
     calls.push({ kind: "server", link, ...(name === undefined ? {} : { name }) });
     return new Promise((resolve, reject) => { pending = { reject, resolve: (confirmed) => {
       if (confirmed) saved = withEnvironment(saved, { origin: parsed.origin, name }, () => "new-cloud");
@@ -149,17 +149,17 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
 
     win.setSize(780, 800);
     await win.loadURL(`${url}?workspaces=1`);
-    const hostedConnect = button("Connect workspace");
-    const addressLabel = "Workspace address or pairing link";
+    const hostedConnect = button("Connect");
+    const addressLabel = "Server address or pairing link";
     await until(() => evaluate(`Boolean(${hostedConnect}) && document.body.textContent.includes('My cloud team')`), "hosted workspace settings rendered");
     await evaluate("void window.ogb.environments.onOpenSettings(() => { document.body.dataset.settingsRequested = 'yes'; })");
-    await evaluate("document.querySelector('[aria-label=\"Switch workspace: This computer\"]').click()");
+    await evaluate("document.querySelector('[aria-label=\"Switch server: This computer\"]').click()");
     await until(() => evaluate("document.body.dataset.settingsRequested === 'yes'"), "native connect item requested Settings");
     assert.equal(saved.activeId, "local", "opening connection settings did not select a server");
 
     await fill(addressLabel, "http://unsafe.fixture.example");
     await evaluate(`${hostedConnect}.click()`);
-    await until(() => evaluate("document.querySelector('[role=alert]')?.textContent === 'Enter an HTTPS workspace address or a full pairing link.'"), "invalid workspace input rejected visibly");
+    await until(() => evaluate("document.querySelector('[role=alert]')?.textContent === 'Enter an HTTPS server address or a full pairing link.'"), "invalid workspace input rejected visibly");
     await fill(addressLabel, "other.fixture.example");
     await fill("Name (optional)", "Research team");
     const beforeHosted = calls.length;
@@ -220,7 +220,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     await evaluate("document.querySelector('[aria-label=\"Switch to My cloud team\"]').click()");
     await until(() => saved.activeId === "cloud", "Settings switch selected saved workspace");
     menuChoice = "workspace-local";
-    await evaluate("document.querySelector('[aria-label^=\"Switch workspace:\"]').click()");
+    await evaluate("document.querySelector('[aria-label^=\"Switch server:\"]').click()");
     await until(() => saved.activeId === "local", "native menu switched back to local");
     await evaluate("document.querySelector('[aria-label=\"Forget Research team\"]').click()");
     await until(() => calls.at(-1)?.kind === "forget", "forget requested");
@@ -240,22 +240,22 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     // fake-engine server. Opening the page must not require local AI setup.
     win.setSize(1180, 850);
     await win.loadURL(`${url}?app=1&desktop-settings=workspaces&share-computer=cloud`);
-    await until(() => evaluate("document.querySelector('[role=dialog]')?.textContent.includes('Connect hosted workspace')"), "app opens top-level workspace Settings");
+    await until(() => evaluate("document.querySelector('[role=dialog]')?.textContent.includes('Connect to a server')"), "app opens top-level workspace Settings");
     assert.equal(await evaluate("location.search.includes('desktop-settings')"), false, "Settings deep link consumed");
     await until(() => evaluate("document.body.textContent.includes('My cloud team')"), "app Settings loaded connections");
     await until(() => evaluate("document.body.textContent.includes('Computer access · My cloud team')"), "post-pair target opens its access controls");
     assert.equal(await evaluate("location.search.includes('share-computer')"), false);
     await evaluate("document.querySelector('[aria-label=\"Close computer access\"]').click()");
-    assert.equal(await evaluate("document.querySelector('[aria-label=\"Workspace address or pairing link\"]') !== null || [...document.querySelectorAll('label')].some(el => el.textContent.includes('Workspace address or pairing link'))"), true);
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Server address or pairing link\"]') !== null || [...document.querySelectorAll('label')].some(el => el.textContent.includes('Server address or pairing link'))"), true);
     writeFileSync(join(output, "workspace-settings-in-app.png"), (await win.webContents.capturePage()).toPNG());
     await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
-    await until(() => evaluate("!document.body.textContent.includes('Connect hosted workspace')"), "Settings closes normally");
+    await until(() => evaluate("!document.body.textContent.includes('Connect to a server')"), "Settings closes normally");
     win.webContents.send("workspaces:open-settings");
-    await until(() => evaluate("document.querySelector('[role=dialog]')?.textContent.includes('Connect hosted workspace')"), "native request reopens workspace Settings");
+    await until(() => evaluate("document.querySelector('[role=dialog]')?.textContent.includes('Connect to a server')"), "native request reopens workspace Settings");
     await evaluate("(() => { const el = document.querySelector('input[aria-label=\"Search settings\"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'appearance'); el.dispatchEvent(new Event('input', { bubbles: true })); })()");
-    await until(() => evaluate("!document.body.textContent.includes('Connect hosted workspace')"), "Settings search changes section");
+    await until(() => evaluate("!document.body.textContent.includes('Connect to a server')"), "Settings search changes section");
     win.webContents.send("workspaces:open-settings");
-    await until(() => evaluate("document.body.textContent.includes('Connect hosted workspace') && document.querySelector('input[aria-label=\"Search settings\"]').value === ''"), "native connection request clears Settings search");
+    await until(() => evaluate("document.body.textContent.includes('Connect to a server') && document.querySelector('input[aria-label=\"Search settings\"]').value === ''"), "native connection request clears Settings search");
 
     const remote = await open(false);
     assert.deepEqual(await remote.webContents.executeJavaScript("({ server: typeof window.ogb?.environments, companion: typeof window.ogb?.remoteClient, sharing: typeof window.ogb?.computerSharing, node: typeof window.require, workspaceMethods: Object.keys(window.ogb?.workspaces ?? {}) })"),
@@ -305,7 +305,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
       name: "server-connection-fixture",
       resolveId(id) { if (id === "virtual:server-connection") return `\0${id}`; },
       load(id) {
-        if (id === "\0virtual:server-connection") return `import React from 'react'; import { createRoot } from 'react-dom/client'; import { setLocale } from '/src/lib/i18n.ts'; import { StoreProvider } from '/src/state/store.tsx'; import { RemoteComputerSection } from '/src/components/RemoteComputerSection.tsx'; import { ConnectedWorkspacesSettings } from '/src/components/ConnectedWorkspacesSettings.tsx'; import { DesktopWorkspaceSwitcher } from '/src/components/DesktopWorkspaceSwitcher.tsx'; import '/src/styles.css'; setLocale('en'); localStorage.setItem('omb-analytics-opt-out', '1'); const root = createRoot(document.getElementById('root')); if (location.search.includes('app=1')) { document.body.classList.remove('p-4'); import('/src/App.tsx').then(({default: App}) => root.render(React.createElement(App))); } else root.render(React.createElement(StoreProvider, null, location.search.includes('workspaces=1') ? React.createElement('div', { className: 'flex flex-col gap-5 max-w-2xl mx-auto' }, React.createElement(DesktopWorkspaceSwitcher), React.createElement('h1', { className: 'text-lg font-semibold text-ink' }, 'Connected workspaces'), React.createElement(ConnectedWorkspacesSettings)) : React.createElement(RemoteComputerSection)));`;
+        if (id === "\0virtual:server-connection") return `import React from 'react'; import { createRoot } from 'react-dom/client'; import { setLocale } from '/src/lib/i18n.ts'; import { StoreProvider } from '/src/state/store.tsx'; import { RemoteComputerSection } from '/src/components/RemoteComputerSection.tsx'; import { ConnectedWorkspacesSettings } from '/src/components/ConnectedWorkspacesSettings.tsx'; import { DesktopWorkspaceSwitcher } from '/src/components/DesktopWorkspaceSwitcher.tsx'; import '/src/styles.css'; setLocale('en'); localStorage.setItem('omb-analytics-opt-out', '1'); const root = createRoot(document.getElementById('root')); if (location.search.includes('app=1')) { document.body.classList.remove('p-4'); import('/src/App.tsx').then(({default: App}) => root.render(React.createElement(App))); } else root.render(React.createElement(StoreProvider, null, location.search.includes('workspaces=1') ? React.createElement('div', { className: 'flex flex-col gap-5 max-w-2xl mx-auto' }, React.createElement(DesktopWorkspaceSwitcher), React.createElement('h1', { className: 'text-lg font-semibold text-ink' }, 'Servers'), React.createElement(ConnectedWorkspacesSettings)) : React.createElement(RemoteComputerSection)));`;
       },
       configureServer(server) {
         server.middlewares.use((req, res, next) => {

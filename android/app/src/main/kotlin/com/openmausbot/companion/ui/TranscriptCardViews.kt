@@ -61,9 +61,9 @@ import kotlinx.coroutines.launch
 
 /**
  * The three affordances a transcript grows when the reply is more than prose —
- * the port of `ios/App/Cards/GitPRDiffCardView.swift`,
- * `ios/App/Cards/SQLResultTableView.swift` and
- * `ios/App/Cards/AgentThoughtChamberView.swift`.
+ * the port of `ios/App/Cards/GitPRDiffCardView.swift` and
+ * `ios/App/Cards/AgentThoughtChamberView.swift`, plus Android's own data-table
+ * card. iOS now draws a pipe table as markdown; matching that is issue 1707.
  *
  * Whether a reply *is* one of these is `TranscriptCards` in `:core`, and it is
  * strict on purpose: a card that swallowed a paragraph would hide the answer
@@ -244,8 +244,8 @@ private fun DiffLine(line: String) {
  * A table the reader can actually read across, and take away as CSV.
  *
  * Read across in the literal sense: heading row first, then one row at a time,
- * left to right, exactly the order `SQLResultTableView.swift` builds — a
- * `VStack` of `HStack`s. This used to be the transpose of that, a `Row` of
+ * left to right, one row at a time. iOS no longer builds this card (issue
+ * 1707). This used to be the transpose of a row of columns, a `Row` of
  * self-measuring `Column`s, and on an API 34 emulator TalkBack duly announced
  * *"LANGUAGE, Python, Java, Rust, YEAR, 1991, 1995, 2010"*: every value of the
  * first column before the second, so `Python`↔`1991` was not a row at all for
@@ -600,8 +600,8 @@ private fun Disclosure(expanded: Boolean, label: String, onToggle: () -> Unit) {
  * says it happened.
  *
  * `PlatformBridge.copyToPasteboard` ends every copy with `Haptics.selection()`,
- * unconditionally — so Copy Diff (`GitPRDiffCardView.swift`) and Copy CSV
- * (`SQLResultTableView.swift`) are confirmed by feel and not only by a toast
+ * unconditionally — so Copy Diff and Android's Copy CSV are confirmed by feel
+ * and not only by a toast. iOS markdown tables do not offer Copy CSV (issue 1707).
  * neither platform shows. A copy is the one action on these cards with no
  * visible result at all: the button does not move, nothing opens, and the only
  * evidence is in a clipboard the reader has to leave the app to see. That is

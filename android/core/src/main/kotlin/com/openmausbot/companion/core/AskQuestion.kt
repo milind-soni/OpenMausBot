@@ -53,6 +53,12 @@ data class AskQuestion(
 data class QuestionRequestCardData(
     val version: Int = 1,
     val questions: List<AskQuestion> = emptyList(),
+    /**
+     * Where the ask came from: a tool call (null) or a block the harness parsed
+     * out of model-authored output ("output"). Badge data only — it never
+     * changes how a card is answered.
+     */
+    val origin: String? = null,
 )
 
 /**

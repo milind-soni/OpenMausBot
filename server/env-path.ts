@@ -42,6 +42,7 @@ function knownDirs(): string[] {
     join(home, ".volta", "bin"),
     join(home, ".bun", "bin"),
     join(home, ".asdf", "shims"),
+    join(home, ".local", "share", "mise", "shims"), // mise installer
     join(home, ".deno", "bin"),
     join(home, "bin"),
     ...nvmBinDirs(),
@@ -155,6 +156,22 @@ export function resetPathCacheForTests(): void {
   probed = false;
   loginShellPath = null;
   registeredDirs.length = 0;
+}
+
+/** The user's home directory as this platform defines it. Windows keeps the
+ * real profile in USERPROFILE; a HOME that leaks in from a POSIX-flavored
+ * shell is not where Windows CLIs keep their state, so USERPROFILE wins there
+ * and HOME wins everywhere else. */
+export function userHome(env: Record<string, string | undefined> = process.env): string {
+  return process.platform === "win32"
+    ? env.USERPROFILE || env.HOME || homedir()
+    : env.HOME || env.USERPROFILE || homedir();
+}
+
+/** `<user home>/.<name>` — the per-harness state directory every CLI keeps
+ * (`.qwen`, `.grok`, `.codex`…), Windows-correct everywhere. */
+export function harnessHome(name: string, env: Record<string, string | undefined> = process.env): string {
+  return join(userHome(env), `.${name}`);
 }
 
 /** Every `name` binary on the augmented PATH as absolute paths, in PATH
@@ -273,7 +290,12 @@ function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | nu
     return null;
   }
   const dir = dirname(shim);
-  const targets = [...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]
+  // npm's own npm.cmd / npx.cmd, installed beside node.exe, name their entry
+  // in a variable next to a helper script that is not the CLI:
+  // SET "NPX_CLI_JS=%~dp0\node_modules\npm\bin\npx-cli.js". The launcher's
+  // switch to a globally upgraded npm is not followed; this node's npm runs.
+  const npmEntry = /^SET "NP[MX]_CLI_JS=%~dp0\\([^"]+)"/im.exec(text);
+  const targets = [...(npmEntry ? [npmEntry] : []), ...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]
     .map((m) => join(dir, m[1]))
     .filter((p) => isFile(p) && basename(p).toLowerCase() !== "node.exe");
   const script = targets.find((p) => /\.[cm]?js$/i.test(p));

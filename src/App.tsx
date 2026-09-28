@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Menu } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
-import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
+import { useWelcomeViewer, WelcomeGate } from "@/components/onboarding/WelcomeGate";
+import { cloudSignInDue, spotlightsQuiet, type WelcomeViewer } from "@/lib/onboarding";
 import { FirstConversationTour } from "@/components/onboarding/FirstConversationTour";
 import { GuidedTour } from "@/components/onboarding/GuidedTour";
-import { welcomeDue } from "@/lib/onboarding";
 import { ThreadRefsProvider } from "@/components/ThreadRefs";
-import { emailGateDone, initAnalytics } from "@/lib/analytics";
+import { initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
@@ -24,14 +24,17 @@ import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/component
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
+import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
+import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsModal } from "@/components/KeyboardShortcutsModal";
 import { LocalVmWorkspace } from "@/components/LocalVmWorkspace";
 import { TeamMapPage } from "@/components/TeamMapPage";
 import { setLocale } from "@/lib/i18n";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
+import { effectiveLanguage, useLanguageChoice } from "@/lib/language-preference";
 
-function Shell() {
+function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const unreadCount =
@@ -49,10 +52,12 @@ function Shell() {
       dispatch({ type: "toggleAppSettings", open: true, section: "desktopWorkspaces" });
     };
     const url = new URL(window.location.href);
-    if (url.searchParams.get("desktop-settings") === "workspaces") {
+    const requestedSettings = url.searchParams.get("desktop-settings");
+    if (requestedSettings === "workspaces" || (requestedSettings === "organization" && window.ogb.organization && !remoteClient)) {
       url.searchParams.delete("desktop-settings");
       window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-      open();
+      if (requestedSettings === "organization") dispatch({ type: "toggleAppSettings", open: true, section: "organization" });
+      else open();
     }
     return window.ogb.environments.onOpenSettings?.(open);
   }, [dispatch]);
@@ -62,10 +67,10 @@ function Shell() {
   // turn the aside into a containing block for its fixed descendants (see
   // Sidebar.tsx's className comment).
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // Apply the configured UI language the moment config arrives or changes;
-  // "" follows the system. The epoch bump re-renders extracted strings —
-  // t() reads a module variable, so React needs this nudge.
-  const language = state.config?.language ?? "";
+  // Apply this device's language, else the server's default, the moment
+  // either changes; "" follows the system. The epoch bump re-renders
+  // extracted strings — t() reads a module variable, so React needs this nudge.
+  const language = effectiveLanguage(useLanguageChoice(), state.config?.language);
   const [, setLocaleEpoch] = useState(0);
   useEffect(() => {
     setLocale(language || globalThis.navigator?.language);
@@ -90,6 +95,9 @@ function Shell() {
     state.connected &&
     state.instances.length > 0 &&
     !state.instances.some((i) => i.snapshot.state === "available");
+  // An OMB Cloud home with none of the person's own engines signed in yet:
+  // its first run, and every bot until then, is the engine sign-in.
+  const cloudSignIn = cloudSignInDue(viewer, state, engineReady);
 
   // App-wide shortcuts: ⌘N new bot · ⌘1–9 jump to bot · ⌘⇧[ / ⌘⇧] prev/next · ⌘/ or ? shortcuts cheat sheet.
   // Kept deliberately small; every panel already closes on Esc.
@@ -201,7 +209,8 @@ function Shell() {
   // Local-shell only: remote server pages never receive the channel, and ogb
   // is absent in the browser.
   useEffect(() => {
-    return window.ogb?.onOpenAppSettings?.(() => dispatch({ type: "toggleAppSettings", open: true }));
+    return window.ogb?.onOpenAppSettings?.(section => dispatch({ type: "toggleAppSettings", open: true,
+      ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
   }, [dispatch]);
 
   // The viewer outlives ComputerPanel and can target any bot, so release control
@@ -268,6 +277,8 @@ function Shell() {
           onClose={() => setLocalVmWorkspaceBotId(null)}
           onOpenComputer={openComputerFromWorkspace}
         />
+      ) : cloudSignIn ? (
+        <CloudEngineSignIn />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (
@@ -287,17 +298,23 @@ function Shell() {
           )}
         </main>
       )}
+      {/* The panels below are siblings, so their keys must differ even
+          though each is remounted per bot. Two siblings keyed `bot.id`
+          collide in React's keyed reconciliation whenever both are open
+          (Computer panel, then the usage chip): every re-render mounts a
+          fresh settings panel and never removes the previous one, so the
+          panels pile up and Close stops working. */}
       {state.settingsOpen && bot && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} />
-          : <BotSettingsDialog key={bot.id} bot={bot} />
+          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} />
       )}
       {state.computerOpen && bot && (
         remoteClient ? (
-          <RemoteDesktopPanel key={bot.id} bot={bot} />
+          <RemoteDesktopPanel key={`computer:${bot.id}`} bot={bot} />
         ) : (
           <ComputerPanel
-            key={bot.id}
+            key={`computer:${bot.id}`}
             bot={bot}
             onOpenVmWorkspace={openLocalVmWorkspace}
           />
@@ -331,51 +348,20 @@ function Shell() {
   );
 }
 
-/** Opens the welcome flow on a fresh workspace (the server's onboarding
- * record says so) or on request from Settings. The decision waits for the
- * config to arrive, so a returning user never sees the tour flash. */
-function WelcomeGate() {
-  const { state, dispatch } = useStore();
-  const [dismissed, setDismissed] = useState(false);
-  const due =
-    !dismissed &&
-    welcomeDue(state.config, {
-      remoteClient: window.ogb?.remoteClient?.active === true,
-      legacyDone: emailGateDone(),
-    });
-  // A fresh desktop can connect to an existing hosted workspace without
-  // completing local provider onboarding. Closing Settings resumes the tour.
-  if (state.appSettingsOpen && state.appSettingsSection === "desktopWorkspaces") return null;
-  if (!state.welcomeOpen && !due) return null;
-  const bot = state.bots.find((b) => !b.hidden) ?? null;
-  const replay = state.welcomeOpen && !due;
-  return (
-    <WelcomeFlow
-      bot={bot}
-      replay={replay}
-      onDone={() => {
-        setDismissed(true);
-        dispatch({ type: "toggleWelcome", open: false });
-        // the first real finish hands over to the guided tour; a replay does not
-        if (!replay) dispatch({ type: "toggleTour", open: true });
-      }}
-    />
-  );
-}
-
 function Application() {
   useEffect(() => {
     initAnalytics();
   }, []);
+  const viewer = useWelcomeViewer();
   return (
     <DesktopCapabilitiesProvider>
       <StoreProvider>
         <ThreadRefsProvider>
-          <Shell />
+          <Shell viewer={viewer} />
         </ThreadRefsProvider>
-        <WelcomeGate />
+        <WelcomeGate viewer={viewer} />
         <GuidedTour />
-        <FirstConversationTour />
+        <FirstConversationTour quiet={spotlightsQuiet(viewer)} />
       </StoreProvider>
     </DesktopCapabilitiesProvider>
   );

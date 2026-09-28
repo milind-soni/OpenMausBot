@@ -144,6 +144,16 @@ describe("ProviderRegistry", () => {
     expect(described.capabilities.effortLevels).toBeUndefined();
   });
 
+  it("exposes model-variant support without manufacturing an effort list", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    registry.get("a")!.adapter.capabilities.modelVariants = true;
+    const [described] = await registry.describe();
+    expect(described.capabilities.modelVariants).toBe(true);
+    expect(described.capabilities.effortLevels).toBeUndefined();
+  });
+
   it("reports whether an instance supports isolated approval review", async () => {
     const fake = makeFakeDriver();
     const registry = new ProviderRegistry([fake.driver]);

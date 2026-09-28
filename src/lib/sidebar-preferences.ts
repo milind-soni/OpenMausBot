@@ -3,6 +3,7 @@ import { z } from "zod";
 export type SidebarDensity = "comfortable" | "compact" | "icons";
 
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
+export const SIDEBAR_ATTENTION_PINNED_KEY = "openmausbot.sidebarAttentionPinned.v1";
 export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSections.v1";
 export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.v1";
 
@@ -33,6 +34,32 @@ export function saveSidebarDensity(
   try {
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
     target?.setItem(SIDEBAR_DENSITY_KEY, density);
+  } catch {
+    // Private browsing and locked-down webviews may reject localStorage.
+    // The in-memory React state still makes the control useful this session.
+  }
+}
+
+export function parseSidebarAttentionPinned(value: string | null): boolean {
+  return value === "true";
+}
+
+export function loadSidebarAttentionPinned(storage?: Pick<Storage, "getItem"> | null): boolean {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    return parseSidebarAttentionPinned(target?.getItem(SIDEBAR_ATTENTION_PINNED_KEY) ?? null);
+  } catch {
+    return false;
+  }
+}
+
+export function saveSidebarAttentionPinned(
+  pinned: boolean,
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    target?.setItem(SIDEBAR_ATTENTION_PINNED_KEY, String(pinned));
   } catch {
     // Private browsing and locked-down webviews may reject localStorage.
     // The in-memory React state still makes the control useful this session.

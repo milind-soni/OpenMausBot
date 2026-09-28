@@ -57,7 +57,10 @@ unread state shown on each thread. Search matches thread and folder names.
 Internal routine runs are kept out of this list.
 
 Inside a chat, tap the bot/thread name in the header to switch conversations,
-create a thread, or rename/delete one. Tap the avatar for bot settings.
+create a thread, or rename/delete one. In the thread picker, tap **Select** to
+choose several idle threads and delete them after one confirmation. The thread
+currently open on the phone stays in place; switch to one you want to keep
+before selecting the others. Tap the avatar for bot settings.
 Picking a bot thread is local to the phone; it does not move the desktop's
 selection. Draft text and attachments stay with their original thread while
 switching in that chat. Updates also lists sibling conversations separately.

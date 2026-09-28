@@ -23,7 +23,27 @@ export function restoredWorkspaceConfig(portable: unknown, destination: unknown)
 
 /** Exact app-owned authentication paths, not a scan of user document text. */
 export function excludedWorkspaceAuthPath(path: string): boolean {
-  return /^(?:(?:providers|caddy|chrome-profile|\.agent-browser)(?:\/|$)|workspace-credentials\.json$|browser-engine-key$)/.test(path) ||
-    /^(?:config\.json|webhooks\.json|workspace-credentials\.json|browser-engine-key|sessions\.json|tunnel-account\.json)\.\d+(?:\.[0-9a-f-]+)?\.tmp$/.test(path) ||
+  // Machine/provider-specific execution grants are not portable template data.
+  if (/^command-allowlist\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
+  return /^(?:(?:providers|caddy|chrome-profile|\.agent-browser)(?:\/|$)|workspace-credentials\.json$|external-runtimes\.json$|browser-engine-key$)/.test(path) ||
+    /^(?:config\.json|webhooks\.json|workspace-credentials\.json|external-runtimes\.json|browser-engine-key|sessions\.json|tunnel-account\.json)\.\d+(?:\.[0-9a-f-]+)?\.tmp$/.test(path) ||
     /^(?:vm-home|vm-homes\/[^/]+)\/\.browser-profiles(?:\/|$)/.test(path);
+}
+
+/** The Organization library files Electron main downloads and verifies
+ * (docs/desktop-library.md): the catalog, a catalog write in progress, and the
+ * cached release files. Main fetches them again from Admin, and sign-out
+ * deletes them, so a backup never keeps an Organization's package bytes. The
+ * runtime's own `org-library/state.json` and `presets.json` are backed up. Like
+ * the hook tokens below, an archive that holds them still restores. */
+export function redownloadedOrgLibraryPath(path: string): boolean {
+  return /^org-library\/(?:catalog\.json(?:\.[0-9a-f-]{36}\.tmp)?$|blobs(?:\/|$))/.test(path);
+}
+
+/** Per-turn engine hook bearers (`hook-tokens/<digest>.token`, written by the
+ * Claude driver). They are dead once their turn settles, so they are never
+ * exported. Unlike the saved auth paths above they are not refused on import:
+ * v0.1.85 did export them, and such a backup must still restore, without them. */
+export function ephemeralWorkspaceTokenPath(path: string): boolean {
+  return /^hook-tokens(?:\/|$)/.test(path);
 }

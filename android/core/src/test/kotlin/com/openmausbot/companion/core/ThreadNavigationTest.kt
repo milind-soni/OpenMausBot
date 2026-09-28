@@ -56,11 +56,172 @@ class ThreadNavigationTest {
                 activity = when (it) { "waiting" -> "waiting-on-you"; "queued" -> "queued"; else -> "idle" })
         }
         val grouped = bot.copy(tasks = closed + task("run").copy(routineRunId = "internal"))
-        assertEquals(listOf("current", "unread", "busy", "waiting", "queued"),
-            grouped.threadGroups().single().tasks.map { it.threadId })
-        assertEquals(6, grouped.threadGroups(includingClosed = true).single().tasks.size)
+        // Equal stamps keep stored order. orderedThreads is not used by a screen.
+        val listed = grouped.threadGroups().single().tasks
+        assertEquals(listOf("current", "unread", "busy", "waiting", "queued"), listed.map { it.threadId })
+        assertEquals(listOf("waiting", "busy", "queued", "unread", "current"),
+            orderedThreads(listed, grouped.threadId).map { it.threadId })
+        assertEquals(listOf("quiet", "current", "unread", "busy", "waiting", "queued"),
+            grouped.threadGroups(includingClosed = true).single().tasks.map { it.threadId })
         assertTrue(grouped.threadGroups("run").isEmpty())
         assertEquals("run", grouped.forTask("run")?.threadId)
+    }
+
+    @Test
+    fun snoozedThreadsFoldAwayUntilTheirClockRunsOutOrTheyNeedThePerson() {
+        val snoozed = listOf("asleep", "timed", "expired", "unread", "working").map {
+            task(it).copy(
+                snoozedUntil = when (it) { "timed" -> 900.0; "expired" -> 100.0; else -> 0.0 },
+                unread = it == "unread",
+                activity = if (it == "working") "working" else "idle",
+            )
+        }
+        val grouped = bot.copy(tasks = snoozed + task("current").copy(snoozedUntil = 0.0))
+        // the sentinel and a live clock both fold; the current thread and one
+        // that needs the person stay, as does a timestamp already past.
+        // Equal update stamps keep stored order, not attention order.
+        assertEquals(listOf("expired", "unread", "working", "current"),
+            grouped.threadGroups(now = 500L).single().tasks.map { it.threadId })
+        assertEquals(6, grouped.threadGroups(includingClosed = true, now = 500L).single().tasks.size)
+        val pinned = grouped.copy(tasks = grouped.tasks!!.map {
+            when (it.threadId) {
+                "asleep" -> it.copy(pinned = true)
+                "unread" -> it.copy(updatedAt = 100.0)
+                else -> it
+            }
+        })
+        assertEquals(listOf("asleep", "unread", "expired", "working", "current"),
+            pinned.threadGroups(now = 500L).single().tasks.map { it.threadId })
+    }
+
+    @Test
+    fun theNextWakeTickIgnoresSentinelsAndExpiredSnoozes() {
+        val tasks = listOf(
+            task("asleep").copy(snoozedUntil = 0.0),
+            task("past").copy(snoozedUntil = 100.0),
+            task("soon").copy(snoozedUntil = 900.0),
+            task("later").copy(snoozedUntil = 1200.0),
+        )
+        assertEquals(900L, nextSnoozeExpiry(tasks, now = 500L))
+        assertNull(nextSnoozeExpiry(listOf(tasks[0], tasks[1]), now = 500L))
+    }
+
+    @Test
+    fun waitingOnATeammateIsAWaitNotWorkAndKeepsTheThreadVisible() {
+        val wait = task("dispatch").copy(busy = false, activity = "idle", waitingOnTeammate = true)
+        assertTrue(wait.isWaitingOnTeammate)
+        assertFalse(wait.isWorking)
+        assertTrue(wait.demandsAttention())
+
+        // The live #1228 wire paints busy+working+waitingOnTeammate together
+        // during a coordination wait: the flag outranks the painted work.
+        val painted = wait.copy(busy = true, activity = "working")
+        assertTrue(painted.isWorking)
+        assertTrue(painted.isWaitingOnTeammate)
+
+        // Composed with main: waiting and running ride along exactly as on
+        // main and iOS, and the teammate flag is additive on top.
+        assertTrue(wait.copy(activity = "running", busy = false, waitingOnTeammate = null).demandsAttention())
+        assertTrue(wait.copy(activity = "waiting", busy = false, waitingOnTeammate = null).demandsAttention())
+
+        // The wire flag decodes, and a legacy bot-level wait reaches its
+        // single synthesized thread.
+        val decoded = CompanionJson.decodeFromString<BotTask>(
+            """{"threadId":"dispatch","title":"Dispatch","createdAt":0,"waitingOnTeammate":true}"""
+        )
+        assertTrue(decoded.waitingOnTeammate == true)
+        val legacy = bot.copy(busy = false, activity = "idle", waitingOnTeammate = true)
+        val thread = legacy.threadGroups().single().tasks.single()
+        assertEquals("current", thread.threadId)
+        assertTrue(thread.isWaitingOnTeammate)
+    }
+
+    @Test
+    fun pinsLeadAndNewerUpdatesRiseAboveOlderWaitingThreads() {
+        val threads = listOf(
+            task("stale").copy(updatedAt = 10.0, activity = "waiting-on-you"),
+            task("pinned-old").copy(pinned = true, updatedAt = 5.0),
+            task("fresh").copy(updatedAt = 30.0),
+            task("pinned-new").copy(pinned = true, updatedAt = 20.0),
+        )
+        assertEquals(
+            listOf("pinned-new", "pinned-old", "fresh", "stale"),
+            bot.copy(tasks = threads).threadGroups().single().tasks.map { it.threadId },
+        )
+    }
+
+    @Test
+    fun listKeepsStoredOrderWhileAttentionHelperStillRanks() {
+        val threads = listOf(
+            task("old-1"), task("unread").copy(unread = true), task("old-2"),
+            task("queued").copy(activity = "queued"), task("working").copy(busy = true),
+            task("waiting").copy(activity = "waiting-on-you"), task("idle"),
+        )
+        val grouped = bot.copy(tasks = threads)
+
+        assertEquals(
+            listOf("old-1", "unread", "old-2", "queued", "working", "waiting", "idle"),
+            grouped.threadGroups().single().tasks.map { it.threadId },
+        )
+        assertEquals(
+            listOf("waiting", "working", "queued", "unread", "old-1", "old-2", "idle"),
+            orderedThreads(threads, grouped.threadId).map { it.threadId },
+        )
+    }
+
+    @Test
+    fun equalStampsKeepStoredOrderAndSearchKeepsThatOrder() {
+        val threads = listOf(
+            task("idle-b"), task("busy").copy(busy = true), task("idle-a"),
+            task("current"), task("in-folder", folder = "plans"),
+        )
+        val grouped = bot.copy(
+            projects = listOf(BotProject("plans", "Plans")),
+            tasks = threads,
+        )
+
+        assertEquals(
+            listOf("idle-b", "busy", "idle-a", "current"),
+            grouped.threadGroups().single { it.id == "unfiled" }.tasks.map { it.threadId },
+        )
+        assertEquals(
+            listOf("idle-b", "idle-a"),
+            grouped.threadGroups("idle").single().tasks.map { it.threadId },
+        )
+    }
+
+    @Test
+    fun archivedThreadsFoldAwayUnlessTheyDemandAttentionOrAreCurrent() {
+        val archived = listOf("quiet", "current", "unread", "busy", "waiting", "open").map {
+            task(it).copy(
+                archivedAt = if (it == "open") null else 0.0,
+                unread = it == "unread", busy = it == "busy",
+                activity = if (it == "waiting") "waiting-on-you" else "idle",
+            )
+        }
+        val grouped = bot.copy(tasks = archived)
+        // "quiet" folds away. The rest stay in stored order: attention no
+        // longer reorders the tree.
+        assertEquals(listOf("current", "unread", "busy", "waiting", "open"),
+            grouped.threadGroups().single().tasks.map { it.threadId })
+        assertEquals(6, grouped.threadGroups(includingClosed = true).single().tasks.size)
+        assertEquals(listOf("quiet"), grouped.threadGroups("quiet").single().tasks.map { it.threadId })
+    }
+
+    @Test
+    fun aHeldSendKeepsAClosedRowInTheList() {
+        // A queued send is client state, so the closed row stays in the list
+        // in stored order. The wire's own "queued" activity does the same.
+        val closed = task("held").copy(closedBy = closer)
+        val grouped = bot.copy(tasks = listOf(closed, task("open")))
+        assertEquals(listOf("open"), grouped.threadGroups().single().tasks.map { it.threadId })
+        assertEquals(
+            listOf("held", "open"),
+            grouped.threadGroups(queuedThreadIds = setOf("held")).single().tasks.map { it.threadId },
+        )
+        // the wire value still surfaces a row; the client flag covers the rest
+        assertTrue(task("dead").copy(activity = "queued").demandsAttention())
+        assertTrue(task("held").demandsAttention(queued = true))
     }
 
     @Test
@@ -69,7 +230,7 @@ class ThreadNavigationTest {
         val thread = legacy.threadGroups().single().tasks.single()
         assertEquals("current", thread.threadId)
         assertEquals("Untitled thread", thread.displayTitle)
-        assertTrue(thread.demandsAttention)
+        assertTrue(thread.demandsAttention())
         assertTrue(bot.copy(tasks = emptyList()).threadGroups().isEmpty())
         assertTrue(bot.copy(tasks = listOf(task("run").copy(routineRunId = "internal"))).threadGroups().isEmpty())
     }

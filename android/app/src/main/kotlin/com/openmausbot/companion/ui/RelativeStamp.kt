@@ -51,6 +51,18 @@ object RelativeStamp {
         }
     }
 
+    /** Thread row: short date and short time. The default zone is the OS zone. */
+    fun updated(
+        atMillis: Double,
+        zone: ZoneId = ZoneId.systemDefault(),
+        locale: Locale = Locale.getDefault(),
+    ): String {
+        if (atMillis <= 0.0 || !atMillis.isFinite()) return ""
+        return DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT, FormatStyle.SHORT)
+            .withLocale(locale)
+            .format(zoned(atMillis, zone))
+    }
+
     fun time(
         atMillis: Double,
         zone: ZoneId = ZoneId.systemDefault(),

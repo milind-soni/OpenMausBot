@@ -306,6 +306,99 @@ final class StoreTests: XCTestCase {
         XCTAssertNil(bot.projected(forThread: "not-owned"))
     }
 
+    /// root → question → old answer, with the old answer visible.
+    func editableConversation() throws -> (CompanionState, String) {
+        var state = try hydrated()
+        let threadId = try XCTUnwrap(state.bots.first?.threadId)
+        var root = message("root", at: 1, text: "Ready")
+        root.role = .bot
+        var question = message("q1", at: 2, text: "first try")
+        question.parentId = "root"
+        var answer = message("a1", at: 3, text: "old answer")
+        answer.role = .bot
+        answer.parentId = "q1"
+        state.messages[threadId] = [root, question, answer]
+        state.apply(.thread(threadId: threadId, activeLeafId: "a1"))
+        return (state, threadId)
+    }
+
+    func testPendingEditReplacesTheQuestionAndHidesTheOldAnswerAtOnce() throws {
+        var (state, threadId) = try editableConversation()
+        let pending = PendingEdit(sourceId: "q1", text: "second try", at: 4)
+        state.pendingEdits[threadId] = pending
+        let visible = state.visibleTranscript(forThread: threadId)
+        XCTAssertEqual(visible.map(\.id), ["root", pending.placeholderId])
+        XCTAssertEqual(visible.last?.text, "second try")
+        XCTAssertEqual(visible.last?.parentId, "root")
+        // nothing was folded: the computer's transcript is untouched
+        XCTAssertEqual(state.transcript(forThread: threadId).map(\.id), ["root", "q1", "a1"])
+        // a failed edit only drops the stand-in, so the old branch returns
+        state.pendingEdits[threadId] = nil
+        XCTAssertEqual(state.visibleTranscript(forThread: threadId).map(\.id), ["root", "q1", "a1"])
+    }
+
+    func testStreamedForkTakesOverFromThePendingEdit() throws {
+        var (state, threadId) = try editableConversation()
+        state.pendingEdits[threadId] = PendingEdit(sourceId: "q1", text: "second try", at: 4)
+        var fork = message("q2", at: 4, text: "second try")
+        fork.parentId = "root"
+        // the computer's message frame alone is a sibling, not a child of the leaf…
+        state.apply(.message(threadId: threadId, message: fork))
+        // …and its leaf frame moves the branch, which retires the stand-in
+        state.apply(.thread(threadId: threadId, activeLeafId: "q2"))
+        XCTAssertEqual(state.visibleTranscript(forThread: threadId).map(\.id), ["root", "q2"])
+    }
+
+    func testAdoptEditShowsTheForkWhenTheResponseBeatsTheStream() throws {
+        var (state, threadId) = try editableConversation()
+        var fork = message("q2", at: 4, text: "second try")
+        fork.parentId = "root"
+        state.adoptEdit(fork, inThread: threadId)
+        XCTAssertEqual(state.visibleTranscript(forThread: threadId).map(\.id), ["root", "q2"])
+    }
+
+    func testAdoptEditNeverHidesAReplyThatAlreadyArrived() throws {
+        var (state, threadId) = try editableConversation()
+        var fork = message("q2", at: 4, text: "second try")
+        fork.parentId = "root"
+        state.apply(.message(threadId: threadId, message: fork))
+        state.apply(.thread(threadId: threadId, activeLeafId: "q2"))
+        var reply = message("a2", at: 5, text: "new answer")
+        reply.role = .bot
+        reply.parentId = "q2"
+        state.apply(.message(threadId: threadId, message: reply))
+        state.adoptEdit(fork, inThread: threadId)
+        XCTAssertEqual(state.visibleTranscript(forThread: threadId).map(\.id), ["root", "q2", "a2"])
+    }
+
+    func testLateEditResponseDoesNotUndoBranchSelectionOrANewerEdit() throws {
+        var (state, threadId) = try editableConversation()
+        let pending = PendingEdit(sourceId: "q1", text: "second try", baseLeafId: "a1")
+        state.pendingEdits[threadId] = pending
+        var fork = message("q2", at: 4, text: "second try")
+        fork.parentId = "root"
+        state.apply(.thread(threadId: threadId, activeLeafId: "root"))
+        state.adoptEdit(fork, inThread: threadId, expectedPending: pending)
+        XCTAssertEqual(state.activeLeafIds[threadId], "root")
+        XCTAssertTrue(state.transcript(forThread: threadId).contains { $0.id == "q2" })
+
+        state.apply(.thread(threadId: threadId, activeLeafId: "a1"))
+        state.pendingEdits[threadId] = PendingEdit(sourceId: "q1", text: "newer try", baseLeafId: "a1")
+        state.adoptEdit(fork, inThread: threadId, expectedPending: pending)
+        XCTAssertEqual(state.activeLeafIds[threadId], "a1")
+        XCTAssertEqual(state.visibleTranscript(forThread: threadId).last?.text, "newer try")
+    }
+
+    func testMatchingEditResponseCanSelectTheFork() throws {
+        var (state, threadId) = try editableConversation()
+        let pending = PendingEdit(sourceId: "q1", text: "second try", baseLeafId: "a1")
+        state.pendingEdits[threadId] = pending
+        var fork = message("q2", at: 4, text: "second try")
+        fork.parentId = "root"
+        state.adoptEdit(fork, inThread: threadId, expectedPending: pending)
+        XCTAssertEqual(state.visibleTranscript(forThread: threadId).last?.id, "q2")
+    }
+
     func testRoutineExecutionsAreHiddenOnlyFromTheThreadPicker() throws {
         var bot = try XCTUnwrap(try fleet().bots.first)
         bot.threadId = "results"

@@ -39,6 +39,11 @@ export function RoutineList({ routines, runs, bots, loading, error, onOpen, onLo
           <button type="button" onClick={() => onLogs(routine)} aria-label={t("routines.logsFor", { name: routine.name })} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink"><FileText size={12} />{t("routines.logs")}</button>
         </div>
         {latest && (latest.attention || latest.error || latest.output) && <p className={cn("mt-2 line-clamp-2 whitespace-pre-wrap text-[11.5px] leading-relaxed", latest.error ? "text-danger" : "text-ink-secondary")}>{latest.attention || latest.error || latest.output}</p>}
+        {!!routine.failureStreak && <p className="mt-2 text-[11.5px] text-danger">{t("routines.failureStreak", { count: routine.failureStreak })}</p>}
+        {!!routine.skippedRuns && <p className="mt-2 text-[11.5px] text-ink-secondary">
+          {t("routines.skippedRuns", { count: routine.skippedRuns })}
+          {routine.lastSkippedAt != null && <> · {t("routines.lastSkipped", { date: routineDateTime(routine.lastSkippedAt) })}</>}
+        </p>}
       </article>;
     })}
   </div>;

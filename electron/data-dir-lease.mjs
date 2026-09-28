@@ -95,7 +95,7 @@ function ownerPredatesThisBoot(owner) {
 
 /** The only liveness question this module should ever ask about a record. */
 function ownerIsAlive(owner) {
-  return !ownerPredatesThisBoot(owner) && processIsAlive(owner.pid);
+  return !ownerPredatesThisBoot(owner) && processIsAlive(owner.pid) && ownerIdentityMatches(owner);
 }
 
 function isLeaseOwner(value) {
@@ -166,6 +166,63 @@ function processIsAlive(pid) {
     if (error?.code === "EPERM") return true;
     throw leaseError("OpenMausBot could not verify the data-directory lease owner; refusing to start.", error);
   }
+}
+
+function parseWmiDateTime(value) {
+  const raw = String(value).trim();
+  const match = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.(\d{6})([+-]\d{3})$/.exec(raw);
+  if (!match) return null;
+  const [_, year, month, day, hour, minute, second, micro, offset] = match;
+  const ms = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+    Math.floor(Number(micro) / 1000),
+  );
+  const offsetMinutes = Number(offset);
+  return ms - offsetMinutes * 60 * 1000;
+}
+
+function processCreationTimeMs(pid) {
+  if (process.platform !== "win32") return null;
+  try {
+    const output = execFileSync(
+      "wmic",
+      ["process", "where", `ProcessId=${pid}`, "get", "CreationDate", "/format:csv"],
+      { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    for (const line of output.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const lower = trimmed.toLowerCase();
+      if (lower === "node,creationdate" || lower.startsWith("node,")) continue;
+      const parts = trimmed.split(",");
+      const raw = parts[parts.length - 1].trim();
+      const parsed = parseWmiDateTime(raw);
+      if (parsed !== null) return parsed;
+    }
+  } catch {
+    // An unreadable creation time is not a startup failure. The lease falls
+    // back to the pid-only protocol this module has always used.
+  }
+  return null;
+}
+
+/**
+ * A Windows pid can be reused within the same boot by a totally different
+ * process. process.kill(pid, 0) only asks whether *a* process holds the pid.
+ * Compare the process creation time to the lease's createdAt: the original
+ * process was created before it wrote the lease, so a process created after
+ * the lease cannot be the original owner.
+ */
+function ownerIdentityMatches(owner) {
+  if (process.platform !== "win32") return true;
+  const created = processCreationTimeMs(owner.pid);
+  if (created === null) return true;
+  return created < owner.createdAt;
 }
 
 function unlinkExact(path, message) {

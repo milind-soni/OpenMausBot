@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   BASE_IMAGE,
@@ -17,7 +20,6 @@ import {
   VM_WORKSPACE_DIR,
   VM_WORKSPACE_GUEST,
   WORKSPACE_LABEL,
-  computerProxyEnv,
   containerComputerAction,
   containerComputerFrame,
   containerComputerMcp,
@@ -27,6 +29,7 @@ import {
   containerRunArgs,
   dockerSecurityIsHardened,
   localVmRecreatableOnDemand,
+  localVmWorkspaceExists,
   managedImageDockerfile,
   perBotLocalVmTarget,
   podmanSecurityIsHardened,
@@ -34,6 +37,7 @@ import {
   setupCommands,
   type CommandRunner,
   type LocalVmTarget,
+  autoLocalVmAttachable,
 } from "./container-computer.ts";
 
 function runner(responses: Record<string, string | Error>) {
@@ -49,6 +53,24 @@ function runner(responses: Record<string, string | Error>) {
   };
   return { calls, run };
 }
+
+it("recognizes only a durable VM workspace directory as prior provisioning evidence", () => {
+  const root = mkdtempSync(join(tmpdir(), "omb-vm-workspace-"));
+  const target = { ...perBotLocalVmTarget("workspace-fixture"), workspaceDir: join(root, "workspace") };
+  try {
+    expect(localVmWorkspaceExists(target)).toBe(false);
+    writeFileSync(target.workspaceDir, "not a directory");
+    expect(localVmWorkspaceExists(target)).toBe(false);
+    rmSync(target.workspaceDir);
+    mkdirSync(target.workspaceDir);
+    expect(localVmWorkspaceExists(target)).toBe(true);
+    const link = join(root, "linked-workspace");
+    symlinkSync(target.workspaceDir, link, "junction");
+    expect(localVmWorkspaceExists({ ...target, workspaceDir: link })).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 const driverExec =
   `docker exec -u cua -e HOME=/home/cua -e DISPLAY=:1 -e CUA_DRIVER_INSTALL_CHANNEL=python_package ` +
@@ -454,7 +476,7 @@ describe("containerComputerStatus", () => {
 
     expect(status.persistence).toBe("unsafe");
     expect(status.ready).toBe(false);
-    expect(status.problem).toContain("durable workspace");
+    expect(status.problem).toBe("The existing Local VM is missing its durable folder; recreate it");
   });
 
   it("does not mistake an unrelated container executable for Apple container off macOS", async () => {
@@ -604,13 +626,6 @@ describe("containerComputerStatus", () => {
 });
 
 describe("Cua integration", () => {
-  it("hands cloud credentials only to the isolated remote adapter", () => {
-    expect(computerProxyEnv({ boxId: "bx_1", token: "t" })).toEqual({
-      OGB_BOX_ID: "bx_1",
-      OGB_BOX_TOKEN: "t",
-    });
-  });
-
   it("mounts the official Cua MCP server for Local VM turns", () => {
     const connection = containerComputerMcp("podman");
     expect(connection.command).toBe(process.execPath);
@@ -990,5 +1005,19 @@ describe("localVmRecreatableOnDemand", () => {
 
     expect(status.image).toBe(false);
     expect(localVmRecreatableOnDemand(status)).toBe(false);
+  });
+});
+
+describe("Auto's Local VM eligibility", () => {
+  const base = { runtime: "podman", daemonUp: true, image: true, container: "missing", create_supported: true, ready: false } as unknown as Parameters<typeof autoLocalVmAttachable>[0];
+  it("attaches a ready desktop or one whose prepared image can be recreated, and nothing else", () => {
+    expect(autoLocalVmAttachable({ ...base, ready: true, container: "running" })).toBe(true);
+    expect(autoLocalVmAttachable(base)).toBe(true);
+    // never a first-time setup, a stopped image that cannot resume, or a dead daemon
+    expect(autoLocalVmAttachable({ ...base, image: false })).toBe(false);
+    expect(autoLocalVmAttachable({ ...base, daemonUp: false })).toBe(false);
+    expect(autoLocalVmAttachable({ ...base, container: "stopped" })).toBe(false);
+    expect(autoLocalVmAttachable({ ...base, runtime: null })).toBe(false);
+    expect(autoLocalVmAttachable({ ...base, create_supported: false })).toBe(false);
   });
 });

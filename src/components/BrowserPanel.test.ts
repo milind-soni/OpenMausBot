@@ -44,12 +44,16 @@ class FixtureEventSource {
   emit(name: string, data: unknown) {
     for (const listener of this.listeners.get(name) ?? []) listener(new MessageEvent(name, { data: JSON.stringify(data) }));
   }
+  disconnect() {
+    for (const listener of this.listeners.get("error") ?? []) listener(new Event("error") as MessageEvent);
+  }
 }
 const bot = { id: "pepper", name: "Pepper" } as Bot;
 const render = () => renderToStaticMarkup(createElement(LiveBrowser, { bot }));
 type Node = ReactElement<{
   children?: ReactNode; "aria-label"?: string; ref?: RefObject<HTMLInputElement | null>;
   onReturnToToolbar?: () => void; onClick?: (event: unknown) => void; onProfileChanged?: () => void;
+  onFocus?: (event: { target: { select: () => void } }) => void;
   acknowledge?: (seq: number) => void; onDecodeError?: () => void;
 }>;
 const elements = (node: ReactNode): Node[] => {
@@ -83,9 +87,99 @@ beforeEach(() => {
   vi.stubGlobal("window", { confirm: vi.fn(() => true) });
   vi.mocked(api).mockReset().mockResolvedValue({});
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("live browser connection lifecycle", () => {
+  it("restores the address after reconnecting while the old address field was focused", () => {
+    const nodes = renderElements();
+    const connect = fixture.effects[2]!;
+    const cleanup = connect();
+    nodes.find((node) => node.props["aria-label"] === "Browser address")!.props.onFocus!({ target: { select: vi.fn() } });
+    cleanup?.();
+    const replacementCleanup = connect();
+    FixtureEventSource.instances[1]!.emit("tabs", { tabs: [{ tabId: "t1", active: true, title: "Fixture", url: "https://example.test/" }] });
+    expect(fixture.setters[3]).toHaveBeenLastCalledWith("https://example.test/");
+    replacementCleanup?.();
+  });
+
+  it.each(["network", "stream"])("automatically reconnects a %s failure without replaying input or taking control", (failure) => {
+    vi.useFakeTimers();
+    render();
+    const connect = fixture.effects[2]!;
+    const cleanup = connect();
+    const source = FixtureEventSource.instances[0]!;
+    source.emit("ready", { viewerId: "old-viewer" });
+    if (failure === "network") source.disconnect();
+    else source.emit("error", { retryable: true, message: "Stream disconnected" });
+    expect(fixture.queues[0]!.clear).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(999);
+    expect(fixture.setters[0]).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(fixture.setters[0]).toHaveBeenCalledOnce();
+    cleanup?.();
+    const replacementCleanup = connect();
+    FixtureEventSource.instances[1]!.emit("ready", { viewerId: "new-viewer" });
+    expect(api).not.toHaveBeenCalled();
+    expect(fixture.queues[1]!.enqueue).not.toHaveBeenCalled();
+    replacementCleanup?.();
+  });
+
+  it("bounds retries even when a flapping stream sends ready before disconnecting", () => {
+    vi.useFakeTimers();
+    render();
+    const connect = fixture.effects[2]!;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const cleanup = connect();
+      const source = FixtureEventSource.instances.at(-1)!;
+      source.emit("ready", { viewerId: `viewer-${attempt}` });
+      source.disconnect();
+      vi.advanceTimersByTime(30_000);
+      expect(fixture.setters[0]).toHaveBeenCalledTimes(Math.min(attempt + 1, 5));
+      cleanup?.();
+    }
+  });
+
+  it("resets the retry delay only after a healthy heartbeat", () => {
+    vi.useFakeTimers();
+    render();
+    const connect = fixture.effects[2]!;
+    const firstCleanup = connect();
+    FixtureEventSource.instances[0]!.disconnect();
+    vi.advanceTimersByTime(1_000);
+    firstCleanup?.();
+    const cleanup = connect();
+    const source = FixtureEventSource.instances[1]!;
+    source.emit("ready", { viewerId: "healthy" });
+    source.emit("heartbeat", {});
+    source.disconnect();
+    vi.advanceTimersByTime(1_000);
+    expect(fixture.setters[0]).toHaveBeenCalledTimes(2);
+    cleanup?.();
+  });
+
+  it.each(["unmount", "manual reconnect", "profile change"])("cancels scheduled retries on %s", (replacement) => {
+    vi.useFakeTimers();
+    const nodes = renderElements();
+    const cleanup = fixture.effects[2]!();
+    FixtureEventSource.instances[0]!.disconnect();
+    if (replacement === "manual reconnect") click(nodes, "Reconnect view");
+    if (replacement === "profile change") nodes.find((node) => node.type === BrowserProfilesManager)!.props.onProfileChanged!();
+    cleanup?.();
+    fixture.setters[0]!.mockClear();
+    vi.advanceTimersByTime(30_000);
+    expect(fixture.setters[0]).not.toHaveBeenCalled();
+  });
+
+  it("does not retry terminal server refusals", () => {
+    vi.useFakeTimers();
+    render();
+    const cleanup = fixture.effects[2]!();
+    FixtureEventSource.instances[0]!.emit("error", { message: "Browser access is disabled" });
+    vi.advanceTimersByTime(30_000);
+    expect(fixture.setters[0]).not.toHaveBeenCalled();
+    cleanup?.();
+  });
+
   it("does not let an old source error discard the replacement viewer or input queue", () => {
     render();
     // Replay the real connection effect's cleanup/setup, as on reconnect or
@@ -135,6 +229,7 @@ describe("live browser connection lifecycle", () => {
     await settle();
     expect(api).toHaveBeenCalledWith("/api/bots/pepper/browser/action", {
       method: "POST", body: JSON.stringify({ type: "restart", viewerId: "current-viewer" }),
+      timeoutMs: 120_000,
     });
     source.emit("error", { message: "Browser restarted" });
     restart.resolve(); await settle();
@@ -246,6 +341,7 @@ describe("live browser connection lifecycle", () => {
     viewport.props.acknowledge!(8);
     expect(api).toHaveBeenCalledWith("/api/bots/pepper/browser/action", {
       method: "POST", body: JSON.stringify({ type: "ack", seq: 8, viewerId: "old-viewer" }),
+      timeoutMs: 120_000,
     });
     cleanup?.();
     const secondCleanup = connect();

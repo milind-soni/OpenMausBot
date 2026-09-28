@@ -125,6 +125,52 @@ describe("local computer proxy (isolated child and control endpoint)", () => {
     }
   });
 
+  it("hands every engine a provider-safe tools/list, whatever root schema the driver ships", async () => {
+    // cua-driver 0.22.1's browser_prepare root: an anyOf of untyped branches
+    // that strict providers refuse, failing the whole turn.
+    const driver = `
+const readline = require("node:readline");
+const inputSchema = {type:"object",required:[],additionalProperties:true,
+  properties:{pid:{type:"integer"},allow_launch:{type:"boolean"},profile:{type:"object",properties:{mode:{type:"string"}}}},
+  anyOf:[{required:["pid"]},{required:["allow_launch","profile"],properties:{allow_launch:{const:true}}}]};
+readline.createInterface({input: process.stdin}).on("line", (line) => {
+  const message = JSON.parse(line);
+  const result = message.method === "tools/list"
+    ? {tools:[{name:"browser_prepare",inputSchema},{name:"click",inputSchema:{type:"object",properties:{}}}]}
+    : {echo:{inputSchema}};
+  process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:message.id,result}) + "\\n");
+});
+`;
+    const connection = gatedLocalComputer(
+      { command: process.execPath, args: ["-e", driver], env: {}, platform: "win32", scope: "local-computer" },
+      { url: "http://127.0.0.1:1/control", token: "schema-fixture-token" },
+    );
+    const child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env }, stdio: ["pipe", "pipe", "pipe"] });
+    try {
+      const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+      const rpc = async (id: number | string, method: string) => {
+        child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method }) + "\n");
+        const { value } = await lines.next();
+        return JSON.parse(value as string);
+      };
+
+      const listed = await rpc("list-1", "tools/list");
+      const [prepare, click] = listed.result.tools;
+      expect(prepare.inputSchema).toEqual({
+        type: "object",
+        additionalProperties: true,
+        properties: { pid: { type: "integer" }, allow_launch: { type: "boolean" }, profile: { type: "object", properties: { mode: { type: "string" } } } },
+      });
+      expect(click.inputSchema).toEqual({ type: "object", properties: {} });
+
+      // Anything that is not the answer to a tools/list reaches the agent as sent.
+      const other = await rpc(2, "initialize");
+      expect(other.result.echo.inputSchema.anyOf).toHaveLength(2);
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
   it("rejects malformed environment and missing authority without printing connection secrets", () => {
     for (const overrides of [
       { OMB_CUA_ARGS: "not-json-private-value" },

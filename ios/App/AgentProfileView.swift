@@ -22,6 +22,13 @@ struct AgentProfileView: View {
     @State private var prompt = ""
     @State private var voices: [Voice] = []
     @State private var config: ConfigStatus?
+    @State private var engine: VoiceProvider = .elevenlabs
+    @State private var hostIsMac = false
+    @State private var chatterboxURL = ""
+    @State private var chatterboxModel = ""
+    @State private var switchingEngine = false
+    @State private var savingServer = false
+    @State private var serverProblem: String?
     @State private var instances: [Instance] = []
     @State private var modelsLoaded = false
     @State private var selectedInstanceID: String
@@ -107,6 +114,8 @@ struct AgentProfileView: View {
     /// same reason a missing `provider` is: that is the server's own fallback,
     /// and the copy that shipped.
     private var usesSystemVoices: Bool { config?.voiceProvider == .system }
+    private var usesChatterbox: Bool { config?.voiceProvider == .chatterbox }
+    private var usesFishAudio: Bool { config?.voiceProvider == .fish }
 
     var body: some View {
         NavigationStack {
@@ -137,7 +146,7 @@ struct AgentProfileView: View {
                                         .disabled(!instance.snapshot.isAvailable)
                                 }
                             }
-                            .onChange(of: selectedInstanceID) { _, instanceID in
+                            .onValueChange(of: selectedInstanceID) { instanceID in
                                 selectDefaults(for: instanceID)
                             }
 
@@ -243,6 +252,47 @@ struct AgentProfileView: View {
                 }
 
                 Section {
+                    Picker("Voice engine", selection: $engine) {
+                        Text("ElevenLabs").tag(VoiceProvider.elevenlabs)
+                        Text("Fish Audio").tag(VoiceProvider.fish)
+                        Text("Built-in Mac voices")
+                            .tag(VoiceProvider.system)
+                            .disabled(!hostIsMac)
+                        Text("Chatterbox (local)").tag(VoiceProvider.chatterbox)
+                    }
+                    .disabled(switchingEngine)
+
+                    if usesChatterbox {
+                        TextField(
+                            "Chatterbox server address",
+                            text: $chatterboxURL,
+                            prompt: Text("http://127.0.0.1:4123")
+                        )
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        TextField(
+                            "Chatterbox model",
+                            text: $chatterboxModel,
+                            prompt: Text("chatterbox-turbo")
+                        )
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        Button {
+                            Task { await saveChatterboxServer() }
+                        } label: {
+                            HStack {
+                                Text("Save server")
+                                if savingServer { Spacer(); ProgressView() }
+                            }
+                        }
+                        .disabled(savingServer || chatterboxURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        if let serverProblem {
+                            Label(serverProblem, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(Color.orange)
+                        }
+                    }
+
                     if voiceConfigured {
                         Picker("Voice", selection: $voice) {
                             if hasWorkspaceDefaultVoice {
@@ -276,8 +326,11 @@ struct AgentProfileView: View {
                     } else if usesSystemVoices {
                         Label("Built-in Mac voices are unavailable", systemImage: "speaker.slash")
                             .foregroundStyle(.secondary)
-                    } else {
-                        Label("ElevenLabs is not configured", systemImage: "speaker.slash")
+                    } else if !usesChatterbox {
+                        Label(
+                            usesFishAudio ? "Fish Audio is not configured" : "ElevenLabs is not configured",
+                            systemImage: "speaker.slash"
+                        )
                             .foregroundStyle(.secondary)
                     }
                 } header: {
@@ -290,13 +343,21 @@ struct AgentProfileView: View {
                         // `server/tts/index.ts` is reporting that this
                         // computer has no built-in voices to speak with.
                         if usesSystemVoices {
-                            Text("Built-in Mac voices need no key, and this computer has none available. Switch the voice engine to ElevenLabs in this agent's profile on the computer to keep using voice.")
+                            Text("Built-in Mac voices need no key, and this computer has none available. Switch the voice engine above to ElevenLabs to keep using voice.")
+                        } else if usesChatterbox {
+                            Text("Any OpenAI-compatible server running Chatterbox works, no key needed. Save its address and model id above.")
+                        } else if usesFishAudio {
+                            Text("Add the shared Fish Audio key in OpenMausBot on your computer. The key is never returned to iOS.")
                         } else {
                             Text("Add the shared ElevenLabs key in this agent's profile on the computer. The key is never returned to iOS.")
                         }
                     } else if !hasWorkspaceDefaultVoice {
                         if usesSystemVoices {
                             Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the built-in Mac voices on your computer.")
+                        } else if usesChatterbox {
+                            Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the Chatterbox server on your computer.")
+                        } else if usesFishAudio {
+                            Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the shared Fish Audio key on your computer.")
                         } else {
                             Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the shared ElevenLabs key on your computer.")
                         }
@@ -320,8 +381,13 @@ struct AgentProfileView: View {
                 async let status = session.configStatus()
                 async let options = session.voiceOptions()
                 async let catalog = loadModelCatalog()
+                async let environment = session.serverEnvironment()
                 let (loadedConfig, loadedVoices, loadedInstances) = await (status, options, catalog)
                 config = loadedConfig
+                engine = loadedConfig?.voiceProvider ?? .elevenlabs
+                chatterboxURL = loadedConfig?.tts?.baseUrl ?? ""
+                chatterboxModel = loadedConfig?.tts?.model ?? ""
+                hostIsMac = (await environment)?.platform == "darwin"
                 voices = loadedVoices
                 instances = loadedInstances
                 modelsLoaded = true
@@ -329,10 +395,61 @@ struct AgentProfileView: View {
                     speakReplies = false
                 }
             }
-            .onChange(of: photo) { _, item in
+            .onValueChange(of: photo) { item in
                 guard let item else { return }
                 Task { await upload(item) }
             }
+            .onValueChange(of: engine) { selected in
+                Task { await switchEngine(to: selected) }
+            }
+        }
+    }
+
+    /// Switch the workspace's voice engine. The engine is a setting, not a
+    /// secret, so it rides the ordinary config write; the voice list reloads
+    /// because every engine offers different voices. A failed switch snaps
+    /// the picker back to whatever the server still reports.
+    private func switchEngine(to selected: VoiceProvider) async {
+        guard selected != (config?.voiceProvider ?? .elevenlabs) else { return }
+        switchingEngine = true
+        defer { switchingEngine = false }
+        if let status = await session.setVoiceProvider(selected) {
+            let reset = AgentProfileVoiceState(
+                voice: voice,
+                speakReplies: speakReplies,
+                baselineVoice: baseline.voice
+            ).afterProviderSwitch(to: status)
+            voice = reset.voice
+            speakReplies = reset.speakReplies
+            baseline.voice = reset.baselineVoice
+            config = status
+            engine = status.voiceProvider
+            // Do not render the previous provider's catalog while the new
+            // one loads. Its identifiers are invalid under this provider.
+            voices = []
+            voices = await session.voiceOptions()
+        } else {
+            engine = config?.voiceProvider ?? .elevenlabs
+        }
+    }
+
+    private func saveChatterboxServer() async {
+        let address = chatterboxURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard address.hasPrefix("http://") || address.hasPrefix("https://") else {
+            serverProblem = String(localized: "The server address must start with http:// or https://.")
+            return
+        }
+        serverProblem = nil
+        savingServer = true
+        defer { savingServer = false }
+        // Both fields commit together: an address without its model id (or
+        // the reverse) is half a setting, exactly as on the desktop.
+        if let status = await session.saveChatterboxServer(
+            baseURL: address,
+            model: chatterboxModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        ) {
+            config = status
+            voices = await session.voiceOptions()
         }
     }
 

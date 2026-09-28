@@ -90,7 +90,7 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
     const messageLines: string[] = [];
 
     // Main text content
-    const userContent = isUser ? splitTranscriptAttachments(message.text ?? "", false) : null;
+    const userContent = isUser ? splitTranscriptAttachments(message.text ?? "", false, false) : null;
     const text = userContent?.display ?? message.text;
     if (text?.trim()) {
       messageLines.push(text);
@@ -103,7 +103,7 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
     }
     if (message.attachments && message.attachments.length > 0) {
       for (const att of message.attachments) {
-        messageLines.push(`📎 _Attachment:_ ${inlineCode(att.path)}`);
+        messageLines.push(`📎 _Attachment:_ ${inlineCode(att.kind === "file" ? att.name : att.path)}`);
       }
     }
 

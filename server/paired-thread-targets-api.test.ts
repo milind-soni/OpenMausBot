@@ -69,7 +69,7 @@ describe("paired thread targets through an isolated HTTP fixture", () => {
     for (const [method, suffix, body] of actions) {
       const result = await paired(method, `/api/bots/${bot.id}${suffix}`, body);
       expect(result.status, `${method} ${suffix}`).toBe(409);
-      expect(result.body.error).toMatch(/Update this client.*choose a thread/);
+      expect(result.body.error).toMatch(/Update the OpenMausBot app on this device.*choose a thread/);
     }
     // The native sidecar's existing marker only narrows local behavior.
     const legacyPhone = await api("POST", `/api/bots/${bot.id}/read`, undefined, { "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "fixture-phone" });

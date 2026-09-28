@@ -28,11 +28,11 @@ struct PairingScannerSheet: View {
                 if !permissionResolved {
                     ProgressView("Requesting camera access…")
                 } else if !cameraAuthorized {
-                    ContentUnavailableView {
-                        Label("Camera access needed", systemImage: "camera.fill")
-                    } description: {
-                        Text("Allow camera access to scan the pairing QR code shown by OpenMausBot.")
-                    } actions: {
+                    EmptyStateView(
+                        title: String(localized: "Camera access needed"),
+                        systemImage: "camera.fill",
+                        description: Text("Allow camera access to scan the pairing QR code shown by OpenMausBot.")
+                    ) {
                         Button("Open Settings") {
                             guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
                             UIApplication.shared.open(url)
@@ -40,11 +40,11 @@ struct PairingScannerSheet: View {
                         .buttonStyle(.borderedProminent)
                     }
                 } else if !DataScannerViewController.isSupported || !DataScannerViewController.isAvailable {
-                    ContentUnavailableView {
-                        Label("Scanner unavailable", systemImage: "qrcode.viewfinder")
-                    } description: {
-                        Text("Use the Camera app to scan the QR code, or enter the address and code manually.")
-                    }
+                    EmptyStateView(
+                        String(localized: "Scanner unavailable"),
+                        systemImage: "qrcode.viewfinder",
+                        description: Text("Use the Camera app to scan the QR code, or enter the address and code manually.")
+                    )
                 } else {
                     ZStack(alignment: .bottom) {
                         PairingQRScanner { payload in
@@ -78,7 +78,7 @@ struct PairingScannerSheet: View {
                 }
             }
             .task { await resolveCameraPermission() }
-            .onChange(of: scenePhase) { _, phase in
+            .onValueChange(of: scenePhase) { phase in
                 // If access was granted in Settings, recover immediately when
                 // the user returns instead of requiring the sheet to reopen.
                 if phase == .active {

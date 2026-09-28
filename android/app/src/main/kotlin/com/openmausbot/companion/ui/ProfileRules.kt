@@ -3,6 +3,8 @@ package com.openmausbot.companion.ui
 import com.openmausbot.companion.core.AvatarCrop
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotProfilePatch
+import com.openmausbot.companion.core.BotOverviewGrant
+import com.openmausbot.companion.core.BotOverviewGrantLevel
 import com.openmausbot.companion.core.ConfigStatus
 import com.openmausbot.companion.core.Voice
 import com.openmausbot.companion.core.VoiceProvider
@@ -47,6 +49,12 @@ data class VoiceChoice(
     val enabled: Boolean,
 )
 
+/** One read-only row of the profile sheet's Connected apps section. */
+data class ConnectorGrantRow(
+    val service: String,
+    val summary: String,
+)
+
 object ProfileRules {
     /** `String(prompt.trimming….prefix(400))` in `generateImage`. */
     const val GENERATE_PROMPT_LIMIT: Int = 400
@@ -61,6 +69,21 @@ object ProfileRules {
     const val AVATAR_FOOTER: String =
         "PNG, JPEG, GIF, or WebP, up to 10 MB. Images are stored on your paired computer " +
             "and loaded with this phone's pairing token."
+
+    // Grants are assigned per bot on the computer (the web grant editor);
+    // the phone only reads the overview's summary back. The footer says so,
+    // the way the closed voice states explain a repair this form cannot offer.
+    const val CONNECTED_APPS: String = "Connected apps"
+
+    const val CONNECTED_APPS_FOOTER: String =
+        "Tool grants are assigned in OpenMausBot on your computer. This phone shows them read-only."
+
+    private const val GRANTS_ALL: String = "All tools"
+
+    private const val GRANTS_NONE: String = "No tools"
+
+    /** The record exists but grants nothing — stronger than "no apps connected". */
+    const val GRANTS_NONE_ANY: String = "No tools granted on any connected app."
 
     private const val GENERATE_READY_FOOTER: String =
         "Generation uses the shared image provider configured on your computer. No provider " +
@@ -107,10 +130,33 @@ object ProfileRules {
         "No workspace default voice is selected. Choose an agent-specific voice above; " +
             "synthesis still uses the shared ElevenLabs key on your computer."
 
+    private const val FISH_TTS_UNCONFIGURED: String = "Fish Audio is not configured"
+
+    private const val FISH_VOICE_UNCONFIGURED_FOOTER: String =
+        "Add the shared Fish Audio API key in OpenMausBot on the computer. The key is " +
+            "never returned to this phone."
+
+    private const val FISH_VOICE_NO_DEFAULT_FOOTER: String =
+        "No workspace default voice is selected. Choose an agent-specific voice above; " +
+            "synthesis still uses Fish Audio on your computer."
+
     /** The same sentence with the clause that would be a lie replaced. */
     private const val SYSTEM_VOICE_NO_DEFAULT_FOOTER: String =
         "No workspace default voice is selected. Choose an agent-specific voice above; " +
             "synthesis still uses your computer's built-in voices."
+
+    // Chatterbox's credential is a local server address, which is a setting
+    // this form deliberately leaves on the computer: the picker can choose the
+    // engine, but only the computer can point it at a server.
+    private const val CHATTERBOX_TTS_UNCONFIGURED: String = "The Chatterbox server is not connected"
+
+    private const val CHATTERBOX_VOICE_UNCONFIGURED_FOOTER: String =
+        "Add the address of your Chatterbox server in OpenMausBot on the computer to turn " +
+            "speech back on."
+
+    private const val CHATTERBOX_VOICE_NO_DEFAULT_FOOTER: String =
+        "No workspace default voice is selected. Choose an agent-specific voice above; " +
+            "synthesis still uses your Chatterbox server."
 
     // The two below name no engine and no credential. They are true word for
     // word under both providers, so they have no twin to choose between — and
@@ -211,17 +257,23 @@ object ProfileRules {
 
     private fun ttsUnconfiguredLabel(config: ConfigStatus?): String = when (provider(config)) {
         VoiceProvider.ELEVENLABS -> TTS_UNCONFIGURED
+        VoiceProvider.FISH -> FISH_TTS_UNCONFIGURED
         VoiceProvider.SYSTEM -> SYSTEM_TTS_UNCONFIGURED
+        VoiceProvider.CHATTERBOX -> CHATTERBOX_TTS_UNCONFIGURED
     }
 
     private fun voiceFooter(config: ConfigStatus?): String = when {
         !voiceConfigured(config) -> when (provider(config)) {
             VoiceProvider.ELEVENLABS -> VOICE_UNCONFIGURED_FOOTER
+            VoiceProvider.FISH -> FISH_VOICE_UNCONFIGURED_FOOTER
             VoiceProvider.SYSTEM -> SYSTEM_VOICE_UNCONFIGURED_FOOTER
+            VoiceProvider.CHATTERBOX -> CHATTERBOX_VOICE_UNCONFIGURED_FOOTER
         }
         config?.hasWorkspaceDefaultVoice != true -> when (provider(config)) {
             VoiceProvider.ELEVENLABS -> VOICE_NO_DEFAULT_FOOTER
+            VoiceProvider.FISH -> FISH_VOICE_NO_DEFAULT_FOOTER
             VoiceProvider.SYSTEM -> SYSTEM_VOICE_NO_DEFAULT_FOOTER
+            VoiceProvider.CHATTERBOX -> CHATTERBOX_VOICE_NO_DEFAULT_FOOTER
         }
         else -> VOICE_READY_FOOTER
     }
@@ -288,16 +340,74 @@ object ProfileRules {
     }
 
     /**
+     * The engine picker's rows, in the desktop's order. Every engine stays
+     * selectable: whether the computer can actually speak with one is the
+     * server's answer, reported as `configured` — the phone cannot know the
+     * host's platform, so it offers every engine the API defines and lets the
+     * status explain one that cannot run there.
+     */
+    fun providerChoices(): List<VoiceChoice> = listOf(
+        VoiceChoice(VoiceProvider.ELEVENLABS.wire, "ElevenLabs", null, enabled = true),
+        VoiceChoice(VoiceProvider.FISH.wire, "Fish Audio", null, enabled = true),
+        VoiceChoice(VoiceProvider.SYSTEM.wire, "Built-in Mac voices", null, enabled = true),
+        VoiceChoice(VoiceProvider.CHATTERBOX.wire, "Chatterbox (local)", null, enabled = true),
+    )
+
+    /**
      * What the loaded status does to the form: a stored `speakReplies` that
      * nothing can speak is turned off before the user ever sees the toggle.
      */
     fun applyLoadedConfig(form: ProfileForm, config: ConfigStatus?): ProfileForm =
         if (config != null && !config.canSpeak(form.voice)) form.copy(speakReplies = false) else form
 
+    /**
+     * Voice ids belong to one provider. The server clears every bot voice on
+     * a successful switch, so an open sheet must clear both its draft and its
+     * dirty-comparison baseline before the new catalog is rendered.
+     */
+    fun afterVoiceProviderSwitch(
+        form: ProfileForm,
+        baseline: ProfileForm,
+        config: ConfigStatus,
+    ): Pair<ProfileForm, ProfileForm> {
+        val cleared = applyLoadedConfig(form.copy(voice = ""), config)
+        return cleared to baseline.copy(voice = "")
+    }
+
     fun cropLabel(crop: AvatarCrop): String = when (crop) {
         AvatarCrop.MASCOT -> "Mascot"
         AvatarCrop.CIRCLE -> "Circle"
         AvatarCrop.ROUNDED -> "Rounded"
         AvatarCrop.SQUARE -> "Square"
+    }
+
+    /**
+     * The Connected apps section's rows, in the server's order. An unknown
+     * level decodes as partial, so every entry that survives decode has a
+     * row; an empty list is the explicit no-tools record, and the sheet
+     * gives it [GRANTS_NONE_ANY] rather than drawing nothing.
+     */
+    fun connectorGrantRows(grants: List<BotOverviewGrant>?): List<ConnectorGrantRow> =
+        grants?.map { grant ->
+            ConnectorGrantRow(
+                service = serviceLabel(grant.slug),
+                summary = when (grant.level) {
+                    BotOverviewGrantLevel.All -> GRANTS_ALL
+                    BotOverviewGrantLevel.None -> GRANTS_NONE
+                    BotOverviewGrantLevel.Partial ->
+                        grant.toolCount.toString() + " tool" + if (grant.toolCount == 1) "" else "s"
+                },
+            )
+        } ?: emptyList()
+
+    /**
+     * The summary names services by slug ("gmail", "google_calendar"); the
+     * row shows the same name with separators spaced and the first letter
+     * raised, and nothing stronger: the catalog's display labels stay on the
+     * computer, and this section must not invent its own.
+     */
+    private fun serviceLabel(slug: String): String {
+        val spaced = slug.replace('_', ' ').replace('-', ' ').trim()
+        return if (spaced.isEmpty()) slug else spaced.replaceFirstChar { it.uppercase() }
     }
 }

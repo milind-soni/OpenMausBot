@@ -10,6 +10,7 @@ import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
+import { isConnectorToolGrantShape } from "@/lib/connector-grants";
 import { McpServersPanel } from "./McpServersPanel";
 
 export interface ToolkitCard {
@@ -102,6 +103,24 @@ export function botsMissingConnectedApps(bots: Bot[], instances: InstanceInfo[])
     bot.composio === false &&
     instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)
       ?.capabilities?.composioMcp === true);
+}
+
+/** Bots whose connector tool grants limit this service below every tool —
+ * a partial list, no entry at all inside an explicit record, or a grant
+ * shape this build cannot read. Legacy bots (no grants record) have every
+ * tool and never appear. Engines that cannot mount the tools and hidden
+ * bots are left out: their editors are dead ends from here. */
+export function botsWithLimitedServiceTools(bots: Bot[], instances: InstanceInfo[], slug: string): Bot[] {
+  return bots.filter((bot) => {
+    if (bot.hidden || bot.composio === false) return false;
+    if (!instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)
+      ?.capabilities?.composioMcp) return false;
+    const record: unknown = bot.connectorTools;
+    if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+    const grant = (record as Record<string, unknown>)[slug];
+    if (grant === undefined) return true;
+    return !isConnectorToolGrantShape(grant) || grant.tools !== "*";
+  });
 }
 
 export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInventoryPhase, stale: boolean, status: Record<string, ConnectorStatus>): boolean {
@@ -229,6 +248,17 @@ export function ServiceIcon({ card, className = "size-11" }: { card: Pick<Toolki
   );
 }
 
+/** Catalog completeness, as reported by /api/connectors/catalog. Absent
+ * totalItems means upstream never stated a total, so there is nothing to
+ * compare the served cards against. */
+export interface CatalogPagination {
+  items: number;
+  totalItems?: number;
+  stalled: boolean;
+  /** Server-side stop reason, present only when the walk stalled (#1838). */
+  reason?: string;
+}
+
 export function PluginsPanel() {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
@@ -236,6 +266,7 @@ export function PluginsPanel() {
   const surface = state.pluginsSurface;
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
   const [source, setSource] = useState<"api" | "curated">("curated");
+  const [pagination, setPagination] = useState<CatalogPagination | null>(null);
   const [configured, setConfigured] = useState(false);
   const [mode, setMode] = useState<"managed" | "self-hosted" | "unavailable">("unavailable");
   // Paint what we last knew before any request goes out: the module cache if
@@ -365,6 +396,7 @@ export function PluginsPanel() {
         if (!alive) return;
         setCards(r.cards ?? []);
         setSource(r.source ?? "curated");
+        setPagination(r.pagination ?? null);
         setConfigured(Boolean(r.configured));
         setMode(r.mode ?? "unavailable");
       })
@@ -690,6 +722,20 @@ export function PluginsPanel() {
                   : search
                     ? t("connectors.section.results")
                     : t("connectors.section.available")}
+                {tab === "marketplace" && !search && pagination
+                  && (pagination.stalled || (pagination.totalItems !== undefined && pagination.items < pagination.totalItems)) && (
+                  <span className="ml-2 font-normal">
+                    {pagination.totalItems !== undefined && pagination.items < pagination.totalItems
+                      ? t("connectors.marketplace.partialCount", {
+                        shown: pagination.items.toLocaleString(),
+                        total: pagination.totalItems.toLocaleString(),
+                      })
+                      : t("connectors.marketplace.partialStalled")}
+                    {pagination.reason
+                      ? ` — ${t("connectors.marketplace.partialReason", { reason: pagination.reason })}`
+                      : null}
+                  </span>
+                )}
               </div>
               <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2">
               {visible.map((card) => {
@@ -804,6 +850,32 @@ export function PluginsPanel() {
                       })}
                     </div>
                   )}
+                  {(serviceStatus?.connected || included) && (() => {
+                    const limited = botsWithLimitedServiceTools(state.bots, state.instances, card.slug);
+                    if (!limited.length) return null;
+                    const names = limited.slice(0, 4).map((candidate, index) => (
+                      <span key={candidate.id}>
+                        {index > 0 && ", "}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            close();
+                            dispatch({ type: "toggleSettings", open: true, botId: candidate.id, section: "access" });
+                          }}
+                          className="font-medium text-ink underline underline-offset-2 hover:text-accent-text"
+                        >
+                          {candidate.name}
+                        </button>
+                      </span>
+                    ));
+                    return (
+                      <div className="ml-14 mt-2 text-[11px] leading-relaxed text-ink-secondary">
+                        <span>{t("connectors.grants.limited", { count: limited.length })}</span>{" "}
+                        {names}
+                        {limited.length > 4 && <span>{t("connectors.grants.more", { count: limited.length - 4 })}</span>}
+                      </div>
+                    );
+                  })()}
                   {addingAccount && (
                     <form
                       className="ml-14 mt-3 flex items-center gap-2"

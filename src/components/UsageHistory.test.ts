@@ -8,6 +8,19 @@ const group = (key: string, label: string, over: Partial<UsageSummary["groups"][
 });
 
 describe("usage history table", () => {
+  it("shows cached and full token totals for the selected history period", () => {
+    const total = group("total", "total", { input: 499_000_000, output: 600_000, cachedInput: 497_500_000 });
+    const summary: UsageSummary = { from: "2026-09-01", to: "2026-09-30", groupBy: "bot", groups: [total], total };
+    const html = renderToStaticMarkup(createElement(UsageHistoryTable, { summary }));
+    expect(html).toContain("New tokens");
+    expect(html).toContain("2.1M");
+    expect(html).toContain("leave out 498M");
+    expect(html).toContain("500M went through the model");
+
+    total.cachedInput = 0;
+    expect(renderToStaticMarkup(createElement(UsageHistoryTable, { summary }))).not.toContain("went through the model");
+  });
+
   it("renders groups with localized names for the non-person triggers and flags unpriced turns", () => {
     const summary: UsageSummary = {
       from: "2026-09-01T00:00:00.000Z", to: "2026-09-30T23:59:59.999Z", groupBy: "user",
@@ -25,8 +38,21 @@ describe("usage history table", () => {
     expect(html).toContain("Routine: Morning digest");
     expect(html).toContain("Bot to bot");
     expect(html).toContain("Person");
-    expect(html).toContain("3 turn(s) came from engines that report no price");
+    expect(html).toContain("3 turn(s) used a model with no known price");
     expect(html).toContain("$1.26");
+    expect(html).not.toContain("~");
+  });
+
+  it("marks costs that include an estimate and says how much of the period is estimated", () => {
+    const summary: UsageSummary = {
+      from: "2026-09-01T00:00:00.000Z", to: "2026-09-30T23:59:59.999Z", groupBy: "engine",
+      groups: [group("engine:codex", "codex", { costUsd: 0.8, estimatedUsd: 0.8 }), group("engine:claudeAgent", "claudeAgent", { estimatedUsd: null })],
+      total: group("total", "total", { turns: 6, costUsd: 1.22, estimatedUsd: 0.8 }),
+    };
+    const html = renderToStaticMarkup(createElement(UsageHistoryTable, { summary }));
+    expect(html).toContain("$0.80 of this is estimated");
+    expect(html.match(/>~</g)).toHaveLength(2); // the codex row and the total, not the claude row
+    expect(html).toContain("$0.80 in this period is priced from list prices");
   });
 
   it("says so when the period is empty", () => {

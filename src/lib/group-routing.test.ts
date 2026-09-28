@@ -22,12 +22,33 @@ describe("roomRespondersForComposer", () => {
     ).toEqual([members[1]]);
   });
 
+  it("uses the shared Markdown, punctuation, and Unicode mention boundaries", () => {
+    const mentionsOnly = { defaultResponder: { kind: "mentions" } } as const;
+    expect(roomRespondersForComposer("**@Milind**", members, mentionsOnly)).toEqual([members[1]]);
+    expect(roomRespondersForComposer("(@Milind)", members, mentionsOnly)).toEqual([members[1]]);
+    expect(roomRespondersForComposer("【@Milind】", members, mentionsOnly)).toEqual([members[1]]);
+    expect(roomRespondersForComposer("user@Milind /@Milind", members, mentionsOnly)).toEqual([]);
+    expect(roomRespondersForComposer("@Milindo", members, mentionsOnly)).toEqual([]);
+    expect(roomRespondersForComposer("@Milind𐐀", members, mentionsOnly)).toEqual([]);
+    expect(roomRespondersForComposer("İ @Milind", members, mentionsOnly)).toEqual([members[1]]);
+  });
+
   it("supports everyone and mentions-only room policies", () => {
     expect(roomRespondersForComposer("hello", members, { defaultResponder: { kind: "everyone" } })).toEqual(members);
     expect(roomRespondersForComposer("hello", members, { defaultResponder: { kind: "mentions" } })).toEqual([]);
     expect(roomRespondersForComposer("@everyone hello", members, { defaultResponder: { kind: "mentions" } })).toEqual(
       members,
     );
+  });
+
+  it("applies the shared mention boundaries to everyone", () => {
+    const mentionsOnly = { defaultResponder: { kind: "mentions" } } as const;
+    expect(roomRespondersForComposer("**@EVERYONE** hello", members, mentionsOnly)).toEqual(members);
+    expect(roomRespondersForComposer("【@everyone】 hello", members, mentionsOnly)).toEqual(members);
+    expect(roomRespondersForComposer("@everyone調査 hello", members, mentionsOnly)).toEqual([]);
+    expect(roomRespondersForComposer("@everyone𐐀 hello", members, mentionsOnly)).toEqual([]);
+    expect(roomRespondersForComposer("user@everyone /@everyone", members, mentionsOnly)).toEqual([]);
+    expect(roomRespondersForComposer("İ @everyone", members, mentionsOnly)).toEqual(members);
   });
 });
 
@@ -41,6 +62,14 @@ describe("goalCoordinatorForComposer", () => {
   it("uses an explicit mention before the configured lead", () => {
     expect(goalCoordinatorForComposer(
       "@Writer finish this",
+      members,
+      { defaultResponder: { kind: "member", botId: "first" } },
+    )?.id).toBe("writer");
+  });
+
+  it("uses wrapped explicit mentions before the configured lead", () => {
+    expect(goalCoordinatorForComposer(
+      "**@Writer** finish this",
       members,
       { defaultResponder: { kind: "member", botId: "first" } },
     )?.id).toBe("writer");

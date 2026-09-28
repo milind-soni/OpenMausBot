@@ -188,10 +188,12 @@ final class MarkdownTests: XCTestCase {
         case let .paragraph(text): return text
         case let .bullet(_, text): return text
         case let .ordered(_, number, text): return "\(number)" + text
+        case let .task(_, number, _, text): return (number.map { "\($0)" } ?? "") + text
         case let .heading(_, text): return text
         case let .code(language, text): return (language ?? "") + text
         case let .quote(text): return text
         case .rule: return ""
+        case let .table(table): return (table.headers + table.rows.flatMap { $0 }).joined()
         }
     }
 }

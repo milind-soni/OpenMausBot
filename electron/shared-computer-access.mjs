@@ -56,7 +56,17 @@ async function assertOutsideProtected(identities, target) {
 }
 
 const text = value => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
-export const sharedComputerError = error => ({ ...text(error?.message ?? "Computer action failed"), isError: true });
+
+/** Job error text crosses to a remote workspace, so absolute paths collapse
+ * to their basename. The original is warned first so debugging information is
+ * preserved on this machine. */
+const basenameMessage = message => {
+  const original = String(message);
+  if (!original.match(/(?:\/[^/\s]+)+/g)) return original;
+  console.warn("Shared computer error before path sanitization:", original);
+  return original.replace(/(?:\/[^/\s]+)+/g, matched => matched.slice(matched.lastIndexOf("/") + 1));
+};
+export const sharedComputerError = error => ({ ...text(basenameMessage(error?.message ?? "Computer action failed")), isError: true });
 
 export async function sharedPath(folder, relative = "") {
   if (typeof relative !== "string" || relative.length > 2048 || /[\\:\0]/.test(relative) || path.isAbsolute(relative) || relative.split("/").some(part => part === "..")) throw new Error("Use a relative path inside the shared folder");
@@ -166,16 +176,16 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
   signal.throwIfAborted();
   if (grant.enabled !== true) throw new Error("Computer sharing is off");
   if (operation.action === "run_command") {
-    if (grant.terminal !== true) throw new Error("Terminal access is not enabled for this workspace");
+    if (grant.terminal !== true) throw new Error("Terminal access is not enabled for this server");
     return sharedCommand(operation.command, grant.folders[0]?.path ?? process.env.HOME ?? process.env.USERPROFILE, signal);
   }
   if (["computer_tools", "computer_call"].includes(operation.action)) {
-    if (grant.computer !== true) throw new Error("Computer control is not enabled for this workspace");
+    if (grant.computer !== true) throw new Error("Computer control is not enabled for this server");
     return (await cua()).call(operation, signal);
   }
   if (!["list_files", "read_file", "write_file"].includes(operation.action)) throw new Error("Unsupported shared-computer operation");
   const folder = grant.folders.find(entry => entry.id === operation.folder_id);
-  if (!folder) throw new Error("This folder has not been shared with this workspace");
+  if (!folder) throw new Error("This folder has not been shared with this server");
   const target = await sharedPath(folder, operation.path);
   const protectedRoots = await protectedIdentities(grant.protectedPaths);
   await assertOutsideProtected(protectedRoots, target);

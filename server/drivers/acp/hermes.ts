@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { harnessHome } from "../../env-path.ts";
 import { resolveCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
@@ -31,10 +32,6 @@ export function bindHermesScreenshotCompat(
   if (!inject) return;
   env[HERMES_OPENMAUS_SCREENSHOT_COMPAT] = "1";
   env[HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL] = inject.model;
-}
-
-function hermesHome(env: Record<string, string | undefined>): string {
-  return env.HERMES_HOME || join(env.HOME || env.USERPROFILE || homedir(), ".hermes");
 }
 
 function quoteYaml(value: string): string {
@@ -80,7 +77,7 @@ export function ensureHermesInjectProvider(
   const host = localHost(inject.host);
   if (!host) return modelId;
 
-  const dir = hermesHome(env);
+  const dir = env.HERMES_HOME || harnessHome("hermes", env);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "config.yaml");
   let text = "";
@@ -207,7 +204,7 @@ function hermesConfigDefault(text: string): { model: string; provider: string } 
 export function hermesConfiguredModel(
   env: Record<string, string | undefined> = process.env,
 ): { id: string; label: string; custom: true } | null {
-  const dir = hermesHome(env);
+  const dir = env.HERMES_HOME || harnessHome("hermes", env);
   let secrets = "";
   try {
     secrets = readFileSync(join(dir, ".env"), "utf8");

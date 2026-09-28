@@ -1,4 +1,5 @@
 import { killCliTree, spawnCli } from "./procs.ts";
+import { DEFAULT_BROWSER_RESULT_BUDGET, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments } from "./browser-tool-shape.ts";
 
 export interface BrowserSpawnSpec {
   command: string;
@@ -9,6 +10,9 @@ export interface BrowserSpawnSpec {
 export const BROWSER_CONTROL_REFUSAL = "Browser tools are paused while a person controls this browser. Wait for them to hand control back; do not try another browser or execution tool.";
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 16_777_216;
+/** Startup, not per-request work: a cold engine spawn can exceed a tight
+ * per-request budget before anything has been accepted to guard. */
+const HANDSHAKE_TIMEOUT_MS = 1_000;
 const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Path", "TMPDIR", "TMP", "TEMP", "SystemRoot", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"];
 
 /** MCP, viewer commands, and cleanup must resolve the same HOME/socket paths.
@@ -18,7 +22,7 @@ export function browserRuntimeEnv(overrides: Record<string, string | undefined>)
   return { ...env, ...overrides };
 }
 
-class TransportError extends Error {}
+export class TransportError extends Error {}
 type Pending = { resolve: (result: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 
 /** A server-owned JSONL client. Neither child stderr nor its environment is
@@ -36,6 +40,7 @@ class BrowserClient {
   private idleMs: number;
   private maxPending: number;
   private onClose: () => void;
+  private onRequestTimeout: () => void;
 
   constructor(
     spec: BrowserSpawnSpec,
@@ -43,11 +48,13 @@ class BrowserClient {
     idleMs: number,
     maxPending: number,
     onClose: () => void,
+    onRequestTimeout: () => void,
   ) {
     this.requestTimeoutMs = requestTimeoutMs;
     this.idleMs = idleMs;
     this.maxPending = maxPending;
     this.onClose = onClose;
+    this.onRequestTimeout = onRequestTimeout;
     this.child = spawnCli(spec.command, spec.args, {
       env: browserRuntimeEnv(spec.env), stdio: ["pipe", "pipe", "pipe"], shell: false,
     });
@@ -59,7 +66,7 @@ class BrowserClient {
     this.ready = this.rpc("initialize", {
       protocolVersion: "2024-11-05", capabilities: {},
       clientInfo: { name: "openmausbot-browser", version: "1" },
-    }).then((result) => {
+    }, Math.max(this.requestTimeoutMs, HANDSHAKE_TIMEOUT_MS)).then((result) => {
       if (!result || typeof result !== "object" || !("protocolVersion" in result)) {
         throw new TransportError("Browser engine returned an invalid handshake.");
       }
@@ -111,7 +118,7 @@ class BrowserClient {
     });
   }
 
-  rpc(method: string, params: unknown): Promise<unknown> {
+  rpc(method: string, params: unknown, timeoutMs: number = this.requestTimeoutMs): Promise<unknown> {
     if (this.stopped) return Promise.reject(new TransportError("Browser connection closed."));
     if (this.pending.size >= this.maxPending) return Promise.reject(new Error("Too many pending browser requests. Try again when the current action finishes."));
     const id = this.nextId++;
@@ -119,7 +126,13 @@ class BrowserClient {
     if (Buffer.byteLength(JSON.stringify(message)) > MAX_REQUEST_BYTES) return Promise.reject(new Error("Browser request exceeded the size limit."));
     if (this.idleTimer) clearTimeout(this.idleTimer);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { void this.stop(new TransportError("Browser request timed out; restart the browser before taking control.")); }, this.requestTimeoutMs);
+      const timer = setTimeout(() => {
+        // Seal the gate synchronously with the timer, before stop() teardown:
+        // the rejection can surface through the ready handshake, which sits
+        // outside agentRpc's uncertainty classifier.
+        this.onRequestTimeout();
+        void this.stop(new TransportError("Browser request timed out; restart the browser before taking control."));
+      }, timeoutMs);
       timer.unref();
       this.pending.set(id, { resolve, reject, timer });
       try { this.write(message); }
@@ -132,12 +145,32 @@ class BrowserClient {
     if (!this.stopped && this.pending.size === 0) {
       // Only the stateless MCP transport expires; saved browser state and the
       // browser daemon itself belong to the profile, not this client.
-      this.idleTimer = setTimeout(() => { void this.stop(); }, this.idleMs);
+      this.idleTimer = setTimeout(() => { void this.stop(undefined, "transport"); }, this.idleMs);
       this.idleTimer.unref();
     }
   }
 
-  stop(error = new TransportError("Browser connection closed.")): Promise<void> {
+  /** Upstream's MCP loop exits on stdin EOF without closing the daemon.
+   * In particular, Windows taskkill /T would also kill that profile's Chrome,
+   * even when the daemon created a new process group. Idle is not shutdown. */
+  private retireTransport(): Promise<void> {
+    return new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        this.child.off("exit", finish);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        try { this.child.kill("SIGKILL"); } catch { /* transport already exited */ }
+        finish();
+      }, 1_000);
+      this.child.once("exit", finish);
+      if (this.child.exitCode !== null || this.child.signalCode !== null) finish();
+      else this.child.stdin.end();
+    });
+  }
+
+  stop(error = new TransportError("Browser connection closed."), scope: "transport" | "tree" = "tree"): Promise<void> {
     if (this.stoppedPromise) return this.stoppedPromise;
     this.stopped = true;
     if (this.idleTimer) clearTimeout(this.idleTimer);
@@ -148,7 +181,7 @@ class BrowserClient {
     }
     this.pending.clear();
     this.onClose();
-    this.stoppedPromise = killCliTree(this.child, 1_000).then((stopped) => {
+    this.stoppedPromise = scope === "transport" ? this.retireTransport() : killCliTree(this.child, 1_000).then((stopped) => {
       if (stopped) return;
       try {
         if (process.platform !== "win32" && this.child.pid) process.kill(-this.child.pid, "SIGKILL");
@@ -173,10 +206,11 @@ interface Gate {
 export class BrowserRuntime {
   private gates = new Map<string, Gate>();
   private clients = new Map<string, { key: string; client: BrowserClient }>();
-  private options: { requestTimeoutMs: number; takeoverTimeoutMs: number; idleMs: number; maxPending: number };
+  private options: { requestTimeoutMs: number; takeoverTimeoutMs: number; idleMs: number; maxPending: number; resultBudget: number };
 
   constructor(options: Partial<BrowserRuntime["options"]> = {}) {
-    this.options = { requestTimeoutMs: 120_000, takeoverTimeoutMs: 15_000, idleMs: 60_000, maxPending: 16, ...options };
+    const budget = Number(process.env.OMB_BROWSER_RESULT_BUDGET);
+    this.options = { requestTimeoutMs: 120_000, takeoverTimeoutMs: 15_000, idleMs: 60_000, maxPending: 16, resultBudget: Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_BROWSER_RESULT_BUDGET, ...options };
   }
 
   private gate(session: string): Gate {
@@ -216,6 +250,12 @@ export class BrowserRuntime {
 
   async agentRpc(session: string, spec: BrowserSpawnSpec, method: "tools/list" | "tools/call", params: unknown, beforeDispatch?: () => void): Promise<unknown> {
     if (method !== "tools/list" && method !== "tools/call") throw new Error("Unsupported browser method.");
+    // tools/list bypasses withAgentAction (a human may hold control), so it
+    // must refuse the closing window itself or its client outlives restart().
+    if (method !== "tools/call" && this.gate(session).closing) throw new Error("The browser is closing. Try again shortly.");
+    // Uncertainty survives client replacement and never self-resolves: refuse
+    // every new browser request until an explicit restart clears it.
+    if (this.gate(session).uncertain) throw new Error("A browser action was interrupted. Restart this browser before continuing.");
     const invoke = async () => {
       const key = JSON.stringify([spec.command, spec.args, Object.entries(spec.env).sort(([a], [b]) => a.localeCompare(b))]);
       let entry = this.clients.get(session);
@@ -223,6 +263,9 @@ export class BrowserRuntime {
       if (!entry) {
         const client = new BrowserClient(spec, this.options.requestTimeoutMs, this.options.idleMs, this.options.maxPending, () => {
           if (this.clients.get(session)?.client === client) this.clients.delete(session);
+        }, () => {
+          const gate = this.gate(session);
+          if (!gate.closing) gate.uncertain = true;
         });
         entry = { key, client };
         this.clients.set(session, entry);
@@ -231,14 +274,57 @@ export class BrowserRuntime {
       beforeDispatch?.();
       if (method === "tools/call" && this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
       try {
-        const result = await entry.client.rpc(method, params);
+        // The model sees slimmed schemas and text-only, bounded results; the
+        // launch/session parameters OMB owns never reach the engine from a call.
+        const request = method === "tools/call" ? stripHarnessOwnedArguments(params) : params;
+        let result = await entry.client.rpc(method, request);
         beforeDispatch?.(); // A turn revoked while the tool ran receives no result.
-        return result;
+        if (method === "tools/list") return slimBrowserToolList(result);
+        const toolName = request && typeof request === "object" && typeof (request as { name?: unknown }).name === "string" ? (request as { name: string }).name : undefined;
+        if (toolName === "agent_browser_open" && result && typeof result === "object" &&
+            (result as { isError?: boolean }).isError !== true) {
+          // Navigation alone does not prove that the requested page loaded.
+          // Observe in the same scoped session, without replaying the action.
+          beforeDispatch?.();
+          if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+          let observation: unknown;
+          try {
+            observation = await entry.client.rpc("tools/call", {
+              name: "agent_browser_snapshot", arguments: { compact: true },
+            });
+          } catch (error) {
+            // A tool-level refusal does not undo the completed navigation.
+            // Transport failures still engage the uncertainty/recovery gate.
+            if (error instanceof TransportError) throw error;
+            observation = { isError: true, content: [] };
+          }
+          beforeDispatch?.();
+          const navigation = result as { content?: unknown[] };
+          const page = observation as { content?: unknown[]; isError?: boolean } | null;
+          const observed = page?.isError !== true && Array.isArray(page?.content) && page.content.some((item) =>
+            item && typeof item === "object" && (item as { type?: unknown }).type === "text" &&
+            typeof (item as { text?: unknown }).text === "string" && (item as { text: string }).text.trim().length > 0);
+          result = {
+            content: [
+              ...(Array.isArray(navigation.content) ? navigation.content : []),
+              { type: "text", text: !observed
+                ? "Navigation returned, but page verification failed. Do not claim the requested page loaded and do not blindly repeat navigation."
+                : "Page observed after navigation. Check this result for redirects, sign-in requirements or page errors before reporting task success:" },
+              ...(Array.isArray(page?.content) ? page.content : []),
+            ],
+            ...(!observed ? { isError: true } : {}),
+          };
+        }
+        return shapeBrowserToolResult(result, { toolName, budget: this.options.resultBudget });
       }
       catch (error) {
         // An MCP timeout cannot prove the independent daemon stopped an
         // accepted action. Recovery must close the browser, not just its pipe.
-        if (method === "tools/call" && error instanceof TransportError) this.gate(session).uncertain = true;
+        // A stop from close()/restart() is intentional, not uncertainty.
+        if (method === "tools/call" && error instanceof TransportError && !this.gate(session).closing) {
+          const gate = this.gate(session);
+          gate.uncertain = true;
+        }
         throw error;
       }
     };
@@ -325,6 +411,10 @@ export class BrowserRuntime {
     try {
       await closeBrowser();
       await this.clients.get(session)?.client.stop();
+      // A tools/list admitted before closing set in can register a client
+      // while that stop awaits; registration is synchronous, so one re-check
+      // is deterministic and no stray transport survives to idle expiry.
+      await this.clients.get(session)?.client.stop();
       gate.uncertain = false;
       gate.owner = null;
       gate.releasing = false;
@@ -344,10 +434,11 @@ export class BrowserRuntime {
     const gate = this.gate(session);
     gate.closing = true;
     gate.ready = false;
+    // Clear before the awaited stop: any uncertain latch after this point must win.
+    gate.uncertain = false;
     this.changed(gate);
     await this.clients.get(session)?.client.stop();
     gate.closing = false;
-    gate.uncertain = false;
     this.changed(gate);
     if (!gate.owner && !gate.agents && !gate.humans) this.gates.delete(session);
   }

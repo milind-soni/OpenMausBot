@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// scripts/mcp-server.ts snapshots process.env at import time — scrub ambient
+// OMB_* / OPENMAUSBOT_* values before it is evaluated (#1676).
+import "./testing/scrub-ambient-omb-env.ts";
+
 import {
   handleToolCall,
   probeBaseUrls,
@@ -667,6 +671,25 @@ describe("MCP tool execution", () => {
     expect(interrupted).toEqual({
       success: true, targetType: "channel", targetId: "channel-1", taskId: "task-1",
     });
+  });
+
+  it("keeps waiting for teammates without describing the Chief as busy", async () => {
+    let reads = 0;
+    const fetcher = vi.fn(async (path: string) => {
+      if (path === "/api/bots?messages=0") {
+        reads++;
+        return { bots: [{ id: "chief", threadId: "task", busy: false, activity: "idle",
+          tasks: [{ threadId: "task", busy: false, activity: "idle", waitingForTeammates: reads < 3 }] }], groups: [] };
+      }
+      if (path.startsWith("/api/threads/task/messages")) return { messages: [] };
+      throw new Error(path);
+    });
+    const result: any = await handleToolCall("wait_for_conversation", {
+      target_type: "bot", target_id: "chief", task_id: "task", timeout_seconds: 3,
+    }, fetcher);
+    expect(reads).toBeGreaterThanOrEqual(3);
+    expect(result.status).toBe("settled");
+    expect(result.target.busy).toBe(false);
   });
 
   it("keeps waiting while a channel operation is between responders", async () => {

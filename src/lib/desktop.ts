@@ -30,7 +30,7 @@ let cached: DesktopCapabilities | null = null;
 let cacheRevision = 0;
 
 export function initialDesktopCapabilities(): DesktopCapabilities {
-  const platform = window.ogb?.platform;
+  const platform = typeof window === "undefined" ? undefined : window.ogb?.platform;
   if (!platform) return browserCapabilities;
   const isMac = platform === "darwin";
   const dictation: DesktopCapabilities["dictation"] = {

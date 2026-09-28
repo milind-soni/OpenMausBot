@@ -27,6 +27,7 @@ let sidecarPort = 0;
 let cloudDesktopAccess = true;
 let companionMarker = "";
 let companionDevice = "";
+let companionRange = "";
 let endpointCandidates: CompanionEndpoint[] = [];
 /** What the stub harness answers with next. Set per test. */
 let respond: (res: ServerResponse) => void = (res) => res.end();
@@ -58,6 +59,7 @@ beforeAll(async () => {
   harness = createServer((req, res) => {
     companionMarker = String(req.headers["x-openmausbot-companion"] ?? "");
     companionDevice = String(req.headers["x-openmausbot-companion-device"] ?? "");
+    companionRange = String(req.headers.range ?? "");
     respond(res);
   });
   const harnessPort = await listen(harness);
@@ -290,5 +292,39 @@ describe("preparing a harness response for a device", () => {
     expect(response.headers.get("content-type")).toBe("audio/mpeg");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(audio);
+  });
+
+  it("forwards a single Range to a voice-note attachment and relays the 206 window", async () => {
+    const clip = Uint8Array.from([0x10, 0x20, 0x30, 0x40, 0x50, 0x60]);
+    respond = (res) => {
+      res.writeHead(206, {
+        "content-type": "audio/mpeg",
+        "content-length": String(2),
+        "content-range": "bytes 2-3/6",
+      });
+      res.end(clip.subarray(2, 4));
+    };
+
+    const response = await fetch(`http://127.0.0.1:${sidecarPort}/api/attachments/voice-note-1.mp3`, {
+      headers: { authorization: `Bearer ${TOKEN}`, range: "bytes=2-3" },
+    });
+    expect(companionRange).toBe("bytes=2-3");
+    expect(response.status).toBe(206);
+    expect(response.headers.get("content-type")).toBe("audio/mpeg");
+    expect(response.headers.get("content-range")).toBe("bytes 2-3/6");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(clip.subarray(2, 4));
+  });
+
+  it("does not forward a non-canonical Range header", async () => {
+    respond = (res) => {
+      res.writeHead(200, { "content-type": "audio/mpeg", "content-length": String(6) });
+      res.end(Uint8Array.from([1, 2, 3, 4, 5, 6]));
+    };
+
+    const response = await fetch(`http://127.0.0.1:${sidecarPort}/api/attachments/voice-note-1.mp3`, {
+      headers: { authorization: `Bearer ${TOKEN}`, range: "bytes=0-1,3-4" },
+    });
+    expect(companionRange).toBe("");
+    expect(response.status).toBe(200);
   });
 });

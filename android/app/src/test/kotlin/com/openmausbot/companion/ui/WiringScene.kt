@@ -3,6 +3,7 @@ package com.openmausbot.companion.ui
 import android.app.Application
 import android.content.Context
 import com.openmausbot.companion.audio.VoicePreviewPlayer
+import com.openmausbot.companion.audio.VoiceNotePlayer
 import com.openmausbot.companion.avatar.AvatarImageStore
 import com.openmausbot.companion.core.APIError
 import com.openmausbot.companion.core.Connection
@@ -57,6 +58,8 @@ internal class WiringScene(
     token: String? = "device-token",
     /** An isolated fleet for conversation fixtures; older wiring scenes stay empty. */
     fleet: Fleet = Fleet(emptyList(), emptyList()),
+    /** The transcript voice-note player; null builds a real one, tests inject a fake. */
+    voiceNotes: VoiceNotePlayer? = null,
     /** The body of the nth stream (1-based). Hangs by default, like a live SSE. */
     private val events: (Int) -> Flow<StreamFrame> = { flow { awaitCancellation() } },
 ) {
@@ -105,6 +108,7 @@ internal class WiringScene(
         ),
         avatars = AvatarImageStore(fetch = { null }),
         voicePreview = VoicePreviewPlayer(context),
+        voiceNotes = voiceNotes ?: VoiceNotePlayer(context),
         dictation = SpeechDictation(
             context = context,
             hasRecordAudio = { false },

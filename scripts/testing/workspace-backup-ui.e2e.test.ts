@@ -110,11 +110,11 @@ describe("full backup Settings in the real renderer", () => {
     await type("Password for this backup", "wrong password");
     await click("Validate backup");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Fixture password rejected");
-    expect(await evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent === 'Replace workspace')")).toBe(false);
+    expect(await evaluate("Array.from(document.querySelectorAll('button')).some(button => button.textContent === 'Replace installation')")).toBe(false);
     await type("Password for this backup", "fixture password 123");
     await click("Validate backup");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Validated backup");
-    const replaceDisabled = () => evaluate("Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Replace workspace')?.disabled");
+    const replaceDisabled = () => evaluate("Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Replace installation')?.disabled");
     expect(await replaceDisabled()).toBe(true);
     expect(await snapshot()).toContain("Only restore backups you trust");
     await type("Type REPLACE to confirm", "replace");
@@ -123,7 +123,7 @@ describe("full backup Settings in the real renderer", () => {
     expect(await replaceDisabled()).toBe(false);
     const evidence = join(ROOT, ".omb-scratch", "verify-evidence", "workspace-backup-preview.png");
     await ui("screenshot", "--out", evidence);
-    await click("Replace workspace");
+    await click("Replace installation");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Fully quit OpenMausBot");
     expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/restore')).body")).toEqual({ id: "validated-stage", confirmation: "REPLACE" });
     expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/upload')).rawFile")).toBe(true);

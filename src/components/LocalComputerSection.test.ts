@@ -13,6 +13,7 @@ import {
   computerInventoryRequest,
   confirmComputerAction,
   localVmInventoryState,
+  reconcileCloudInventoryPayload,
   perBotLocalVmDeletePlan,
   reconcileCloudInventorySnapshot,
   vpsComputerRemovePlan,
@@ -74,11 +75,11 @@ describe("computer inventory request wiring", () => {
     expect(request).toBeNull();
     expect(confirm).toHaveBeenCalledOnce();
     expect(confirm).toHaveBeenCalledWith(
-      "Delete Research's Local VM? Its durable workspace files will remain.",
+      "Delete Research's Local VM? Files in its durable folder will remain.",
     );
   });
 
-  it("builds the exact confirmed Local VM, Box, and VPS lifecycle requests", () => {
+  it("builds the exact confirmed Local VM, Boat, and VPS lifecycle requests", () => {
     const confirm = vi.fn(() => true);
     const local = confirmComputerAction(perBotLocalVmDeletePlan(cloudVm), confirm);
     const cloudDelete = confirmComputerAction(cloudComputerActionPlan("delete", ownedCloudComputer), confirm);
@@ -288,16 +289,16 @@ describe("cloud computer inventory UI", () => {
 
   it("keeps disconnected, unavailable, and empty states distinct", () => {
     const disconnected = renderCard({ configured: false });
-    expect(disconnected).toContain("Box is not connected");
+    expect(disconnected).toContain("Boat is not connected");
     expect(disconnected).not.toContain("No OpenMaus-managed cloud computers found");
 
-    const unavailable = renderCard({ unavailableReason: "ascii.dev is unavailable" });
-    expect(unavailable).toContain("ascii.dev is unavailable");
+    const unavailable = renderCard({ unavailableReason: "boat.dev is unavailable" });
+    expect(unavailable).toContain("boat.dev is unavailable");
     expect(unavailable).not.toContain("No OpenMaus-managed cloud computers found");
 
     const endpointFailure = renderCard({ configured: null, unavailableReason: "Computer inventory could not load" });
     expect(endpointFailure).toContain("Computer inventory could not load");
-    expect(endpointFailure).not.toContain("Box is not connected");
+    expect(endpointFailure).not.toContain("Boat is not connected");
 
     const empty = renderCard();
     expect(empty).toContain("No OpenMaus-managed cloud computers found");
@@ -307,9 +308,53 @@ describe("cloud computer inventory UI", () => {
     expect(cloudComputerInventoryState(ownedCloudComputer)).toBe("Running");
     expect(cloudComputerInventoryState({ ...ownedCloudComputer, state: "archived" })).toBe("Sleeping");
     expect(cloudComputerInventoryState({ ...ownedCloudComputer, state: "archiving" })).toBe("Going to sleep");
+    expect(cloudComputerInventoryState({ ...ownedCloudComputer, state: "removing" })).toBe("Removing");
     expect(cloudComputerInventoryState({ ...ownedCloudComputer, state: "provisioning" })).toBe("Starting");
     expect(cloudComputerInventoryState({ ...ownedCloudComputer, state: "unknown" })).toBe("Needs attention");
     expect(cloudComputerInventoryState({ ...ownedCloudComputer, inUse: true })).toBe("In use");
+  });
+
+  it("keeps a provider-accepted deletion visible while it is still pending", () => {
+    const pending = reconcileCloudInventorySnapshot(
+      [ownedCloudComputer],
+      [ownedCloudComputer],
+      { [ownedCloudComputer.boxId]: "deleting" },
+    );
+
+    expect(pending.instances).toEqual([{ ...ownedCloudComputer, state: "removing" }]);
+    expect(pending.overrides).toEqual({ [ownedCloudComputer.boxId]: "deleting" });
+    const markup = renderCard({ instances: pending.instances });
+    expect(markup).toContain("Removing");
+    // Sleep and Delete stay unavailable until the bounded confirmation pass
+    // either observes absence or restores the provider's actual row.
+    expect(markup.match(/disabled=""/g)).toHaveLength(2);
+  });
+
+  it("clears a pending deletion only after inventory confirms absence", () => {
+    const settled = reconcileCloudInventorySnapshot(
+      [],
+      [{ ...ownedCloudComputer, state: "removing" }],
+      { [ownedCloudComputer.boxId]: "deleting" },
+    );
+
+    expect(settled.instances).toEqual([]);
+    expect(settled.overrides).toEqual({});
+  });
+
+  it("does not treat an unavailable or unconfigured empty inventory as proof of deletion", () => {
+    for (const payload of [
+      { configured: true, available: false, problem: "Boat is unavailable", instances: [] },
+      { configured: false, available: false, problem: null, instances: [] },
+    ]) {
+      const result = reconcileCloudInventoryPayload(
+        payload,
+        [{ ...ownedCloudComputer, state: "removing" }],
+        { [ownedCloudComputer.boxId]: "deleting" },
+      );
+
+      expect(result.instances).toEqual([{ ...ownedCloudComputer, state: "removing" }]);
+      expect(result.overrides).toEqual({ [ownedCloudComputer.boxId]: "deleting" });
+    }
   });
 
   it("keeps cloud badge meaning and delete requests stable when the language changes", () => {
@@ -345,6 +390,14 @@ describe("cloud computer inventory UI", () => {
       first.overrides,
     );
     expect(later.instances).toEqual([]);
+
+    const confirmedAbsent = reconcileCloudInventorySnapshot(
+      [],
+      later.instances,
+      later.overrides,
+    );
+    expect(confirmedAbsent.instances).toEqual([]);
+    expect(confirmedAbsent.overrides).toEqual({});
   });
 
   it("keeps a successful sleep visible until LIST reaches a sleeping state", () => {

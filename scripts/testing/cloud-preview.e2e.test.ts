@@ -58,6 +58,63 @@ describe("cloud preview recovery in the real renderer", () => {
     await evaluate(`location.href = ${JSON.stringify(preview.previewUrl)}; true`);
     await expect.poll(frameVisible, { timeout: 20_000 }).toBe(true);
 
+    // A selected thread's surface and model win over its profile defaults.
+    // Auto uses the server's existing VM, never an inferred host desktop.
+    for (const scenario of ["vm-pin", "auto-vm"]) {
+      await select("Conversation surface", scenario);
+      await expect.poll(currentFrame, { timeout: 6000 }).toBe(await stat("vmScreenshot"));
+      expect((await stat("paths") as string[]).some((path) => path.endsWith(`/local-computer/screenshot?threadId=fixture-${scenario}`))).toBe(true);
+      expect(await snapshot()).not.toContain("The selected model engine cannot use a Local VM");
+    }
+    await select("Conversation surface", "off");
+    await expect.poll(currentFrame, { timeout: 5000 }).toBe(null);
+    await select("Screenshot response", "held");
+    await select("Conversation surface", "vm-pin");
+    await expect.poll(() => stat("vmPending"), { timeout: 6000 }).toBe(true);
+    const beforeCloudPin = await stat("paths") as string[];
+    const provisions = beforeCloudPin.filter((path) => path.endsWith("/computer/provision")).length;
+    await select("Screenshot response", "connected");
+    await select("Conversation surface", "cloud-pin");
+    await expect.poll(frameVisible, { timeout: 6000 }).toBe(true);
+    await click("Release VM capture");
+    await pause(200);
+    expect(await currentFrame()).toBe(await stat("screenshot"));
+    expect((await stat("paths") as string[]).filter((path) => path.endsWith("/computer/provision"))).toHaveLength(provisions);
+    expect((await stat("paths") as string[]).some((path) => path.endsWith("/computer/screenshot?threadId=fixture-cloud-pin"))).toBe(true);
+    await evaluate(`document.querySelector('button[aria-label$="live desktop"]')?.click(); true`);
+    await expect.poll(() => stat("joining"), { timeout: 3000 }).toBe(true);
+    await select("Conversation surface", "vm-pin");
+    await expect.poll(() => stat("abortedJoins"), { timeout: 3000 }).toBe(1);
+    await expect.poll(currentFrame, { timeout: 6000 }).toBe(await stat("vmScreenshot"));
+    await click("Release desktop join");
+    expect(await stat("opened")).toBe(0);
+    await select("Conversation surface", "browser-pin");
+    await expect.poll(() => evaluate('document.querySelector("[data-tour=computer-browser]")?.getAttribute("aria-pressed")'), { timeout: 5000 }).toBe("true");
+    await click("Browser"); // Save it manually, as a real person can.
+    await select("Conversation surface", "vm-pin");
+    await expect.poll(currentFrame, { timeout: 6000 }).toBe(await stat("vmScreenshot"));
+    expect(await evaluate('document.querySelector("[data-tour=computer-tabs] button")?.getAttribute("aria-pressed")')).toBe("true");
+    await select("Conversation surface", "browser-pin");
+    await expect.poll(() => evaluate('document.querySelector("[data-tour=computer-browser]")?.getAttribute("aria-pressed")'), { timeout: 5000 }).toBe("true");
+    await click("Routines");
+    await pause(200);
+    expect(await evaluate('document.querySelector("[data-tour=computer-browser]")?.getAttribute("aria-pressed")')).toBe("false");
+    await select("Conversation surface", "default");
+    await evaluate('document.querySelector("[data-tour=computer-tabs] button")?.click(); true');
+    await expect.poll(frameVisible, { timeout: 6000 }).toBe(true);
+    const beforeBusy = await stat("paths") as string[];
+    const busyProvisions = beforeBusy.filter((path) => path.endsWith("/computer/provision")).length;
+    await click("Busy: false");
+    await pause(200);
+    expect(await frameVisible()).toBe(true);
+    expect((await stat("paths") as string[]).filter((path) => path.endsWith("/computer/provision"))).toHaveLength(busyProvisions);
+    await click("Routines");
+    await click("Busy: true");
+    await pause(200);
+    expect(await evaluate('Array.from(document.querySelectorAll("[data-tour=computer-tabs] button")).find(button => button.textContent.includes("Routines"))?.getAttribute("aria-pressed")')).toBe("true");
+    await evaluate('document.querySelector("[data-tour=computer-tabs] button")?.click(); true');
+    await expect.poll(frameVisible, { timeout: 6000 }).toBe(true);
+
     // Busy changes must not cancel an expensive capture. A real abort does
     // not terminate its simulated host work; the next generation sees409.
     await select("Screenshot response", "held");

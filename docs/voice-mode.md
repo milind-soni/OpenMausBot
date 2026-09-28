@@ -1,7 +1,8 @@
 # Voice in OpenMausBot
 
-Decision doc, 2026-08-14. How bots speak, and how you hold a conversation with
-one.
+Historical decision doc, 2026-08-14. It records the original ElevenLabs-only
+shape; the current product also supports Fish Audio, built-in Mac voices, and
+local Chatterbox. See the current [voice guide](../apps/docs/content/docs/features/voice-and-memory.mdx).
 
 ## Shape
 

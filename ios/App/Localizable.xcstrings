@@ -1,6 +1,66 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Play voice note": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reproduzir nota de voz"
+          }
+        }
+      }
+    },
+    "Pause voice note": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausar nota de voz"
+          }
+        }
+      }
+    },
+    "Voice note position": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Posição da nota de voz"
+          }
+        }
+      }
+    },
+    "Couldn’t load the voice note.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível carregar a nota de voz."
+          }
+        }
+      }
+    },
+    "completed": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "concluído"
+          }
+        }
+      }
+    },
+    "not completed": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "não concluído"
+          }
+        }
+      }
+    },
     "%lld saved": {
       "localizations": {
         "pt-BR": {
@@ -134,6 +194,16 @@
         }
       }
     },
+    "Add the shared Fish Audio key in OpenMausBot on your computer. The key is never returned to iOS.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adicione a chave compartilhada do Fish Audio no OpenMausBot no computador. A chave nunca é devolvida ao iOS."
+          }
+        }
+      }
+    },
     "Add to section": {
       "localizations": {
         "pt-BR": {
@@ -200,6 +270,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tarefas do agente"
+          }
+        }
+      }
+    },
+    "Agents with an ElevenLabs voice picked on your computer use it when this is on. Everyone else uses the voice above.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agentes com uma voz do ElevenLabs escolhida no seu computador a usam quando esta opção está ativada. Todos os outros usam a voz acima."
           }
         }
       }
@@ -1366,6 +1446,26 @@
         }
       }
     },
+    "Fish Audio": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fish Audio"
+          }
+        }
+      }
+    },
+    "Fish Audio is not configured": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Fish Audio não está configurado"
+          }
+        }
+      }
+    },
     "Enable notifications": {
       "localizations": {
         "pt-BR": {
@@ -2115,6 +2215,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nenhuma voz padrão do espaço de trabalho está selecionada. Escolha acima uma voz específica do agente; a síntese continua usando a chave compartilhada do ElevenLabs no seu computador."
+          }
+        }
+      }
+    },
+    "No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the shared Fish Audio key on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma voz padrão do espaço de trabalho está selecionada. Escolha acima uma voz específica do agente; a síntese continua usando a chave compartilhada do Fish Audio no seu computador."
           }
         }
       }
@@ -3105,12 +3215,12 @@
         }
       }
     },
-    "Runs the agent and its tools inside its Box virtual machine. The VM wakes automatically for each run; keep OpenMausBot running so its scheduler can launch the job.": {
+    "Runs the agent and its tools inside its Boat virtual machine. The VM wakes automatically for each run; keep OpenMausBot running so its scheduler can launch the job.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Roda o agente e as ferramentas dele dentro da máquina virtual Box. A VM acorda automaticamente a cada execução; mantenha o OpenMausBot rodando para que o agendador consiga iniciar o trabalho."
+            "value": "Roda o agente e as ferramentas dele dentro da máquina virtual Boat. A VM acorda automaticamente a cada execução; mantenha o OpenMausBot rodando para que o agendador consiga iniciar o trabalho."
           }
         }
       }
@@ -3925,12 +4035,12 @@
         }
       }
     },
-    "This existing Cloud VM choice is preserved, but it cannot run until the paired computer has a configured Box API key and an available Box agent.": {
+    "This existing Cloud VM choice is preserved, but it cannot run until the paired computer has a configured Boat API key and an available Boat agent.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esta escolha de Cloud VM é mantida, mas não pode rodar enquanto o computador pareado não tiver uma chave de API do Box configurada e um agente Box disponível."
+            "value": "Esta escolha de Cloud VM é mantida, mas não pode rodar enquanto o computador pareado não tiver uma chave de API do Boat configurada e um agente Boat disponível."
           }
         }
       }

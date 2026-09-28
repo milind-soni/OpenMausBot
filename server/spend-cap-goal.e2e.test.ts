@@ -98,6 +98,9 @@ describe("spend cap inside a team goal run", () => {
     // refusal is deterministic, not a blip.
     expect(page.messages.some((m: any) => /retrying once/i.test(m.tool?.name ?? ""))).toBe(false);
 
+    // Turn settlement precedes the ledger's asynchronous disk append.
+    await expect.poll(async () => (await (await api("/api/usage")).json() as any).total.turns,
+      { timeout: 10_000 }).toBe(1);
     const usage = (await (await api("/api/usage")).json()) as any;
     expect(usage.budget).toMatchObject({ monthlyUsd: 0.01, exceeded: true, warn: true });
     // Only the coordinator's turn was priced — no worker dispatch, no retry.

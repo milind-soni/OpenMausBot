@@ -18,6 +18,7 @@ function harness() {
   const queued: Array<Record<string, unknown>> = [];
   const cancelled: Array<{ id: string; message: string }> = [];
   const emitted: unknown[] = [];
+  const posted: Array<{ botId: string; text: string }> = [];
   const options: WebhookManagerOptions = {
     file,
     now: () => now,
@@ -29,6 +30,7 @@ function harness() {
     },
     cancelQueued: (id, message) => cancelled.push({ id, message }),
     pendingRuns: () => pending,
+    post: (botId, text) => posted.push({ botId, text }),
   };
   const manager = new WebhookManager(options);
   return {
@@ -38,6 +40,7 @@ function harness() {
     queued,
     cancelled,
     emitted,
+    posted,
     setNow: (value: number) => (now = value),
     setBot: (value: typeof bot) => (bot = value),
     setPending: (value: number) => (pending = value),
@@ -124,6 +127,34 @@ describe("WebhookManager", () => {
     expect(h.manager.list()[0]).toMatchObject({ lastRunId: "run-1", deliveryCount: 1 });
   });
 
+  it("posts the payload text to the bot's chat instead of queuing a task when delivery is \"post\"", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({ name: "Brief", prompt: "", botId: "maus-1", delivery: "post" });
+    const result = h.manager.receive(webhook.endpointId, secret, {
+      payload: { text: "Morning brief: two calls today." },
+      contentType: "application/json",
+      deliveryId: "evt-post-1",
+    });
+
+    expect(result).toEqual({ deliveryId: "evt-post-1", duplicate: false });
+    expect(h.queued).toHaveLength(0);
+    expect(h.posted).toEqual([{ botId: "maus-1", text: "Morning brief: two calls today." }]);
+    expect(h.manager.list()[0]).toMatchObject({ delivery: "post", deliveryCount: 1 });
+    // a repeat of the same delivery id is deduplicated like any other webhook
+    expect(h.manager.receive(webhook.endpointId, secret, { payload: { text: "again" }, deliveryId: "evt-post-1" })).toMatchObject({ duplicate: true });
+    expect(h.posted).toHaveLength(1);
+  });
+
+  it("rejects a post delivery instead of running a task when the server has no post sink", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({ name: "Brief", prompt: "", botId: "maus-1", delivery: "post" });
+    const without = new WebhookManager({ ...h.options, post: undefined });
+    expect(() => without.receive(webhook.endpointId, secret, { payload: { text: "hello" }, deliveryId: "evt-post-2" }))
+      .toThrow("cannot post");
+    expect(h.queued).toHaveLength(0);
+    expect(h.posted).toHaveLength(0);
+  });
+
   it("uses an authenticated task from the payload when default instructions are empty", () => {
     const h = harness();
     const { webhook, secret } = h.manager.create({ name: "Direct tasks", prompt: "", botId: "maus-1" });
@@ -180,6 +211,50 @@ describe("WebhookManager", () => {
 
     expect(h.manager.remove(webhook.id)).toBe(true);
     expect(h.manager.list()).toHaveLength(0);
+  });
+
+  // MOCA-93: three was a code constant; a webhook fanning out a project
+  // manager's events got 429 from the fourth unfinished task on.
+  it("lets a webhook set how many unfinished tasks it may hold", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({ name: "PM events", prompt: "Handle it", botId: "maus-1", maxPendingRuns: 5 });
+    expect(webhook.maxPendingRuns).toBe(5);
+    h.setPending(4);
+    expect(h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "fifth" })).toMatchObject({ duplicate: false });
+    h.setPending(5);
+    expect(() => h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "sixth" }))
+      .toThrow(/already has 5 unfinished tasks \(its limit is 5\).*"Unfinished tasks at once"/);
+    try { h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "sixth" }); } catch (error) {
+      expect((error as { status?: number }).status).toBe(429);
+    }
+
+    // Editing other settings keeps it; null goes back to the default of 3.
+    expect(h.manager.update(webhook.id, { name: "Renamed" })?.maxPendingRuns).toBe(5);
+    const reset = h.manager.update(webhook.id, { maxPendingRuns: null });
+    expect(reset).not.toHaveProperty("maxPendingRuns");
+    // Lowered below what is already unfinished: say both numbers.
+    expect(() => h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "default" })).toThrow("already has 5 unfinished tasks (its limit is 3)");
+    h.setPending(3);
+    expect(() => h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "default" })).toThrow("already has 3 unfinished tasks (its limit is 3)");
+    expect(h.manager.update(webhook.id, { maxPendingRuns: 1 })?.maxPendingRuns).toBe(1);
+    h.setPending(1);
+    expect(() => h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "one" })).toThrow("already has 1 unfinished task (its limit is 1)");
+
+    // Survives a restart.
+    expect(new WebhookManager(h.options).list().find((candidate) => candidate.id === webhook.id)?.maxPendingRuns).toBe(1);
+  });
+
+  it("refuses an out-of-range limit, and reads a hand-edited one as the default", () => {
+    const h = harness();
+    for (const maxPendingRuns of [0, 51, 2.5, "10"]) {
+      expect(() => h.manager.create({ name: "Bad", prompt: "x", botId: "maus-1", maxPendingRuns } as never)).toThrow();
+    }
+    const { webhook } = h.manager.create({ name: "Good", prompt: "x", botId: "maus-1", maxPendingRuns: 7 });
+    const saved = JSON.parse(readFileSync(h.file, "utf8"));
+    saved.webhooks.find((candidate: { id: string }) => candidate.id === webhook.id).maxPendingRuns = 9_999;
+    writeFileSync(h.file, JSON.stringify(saved));
+    const reloaded = new WebhookManager(h.options).list();
+    expect(reloaded.find((candidate) => candidate.id === webhook.id)?.maxPendingRuns).toBeUndefined();
   });
 
   it("filters event types, caps unfinished work, and rate-limits a noisy endpoint", () => {

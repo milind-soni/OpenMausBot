@@ -8,13 +8,13 @@ type DesktopState = {
 
 const DesktopContext = createContext<DesktopState>({
   capabilities: initialDesktopCapabilities(),
-  ready: !window.ogb,
+  ready: typeof window === "undefined" || !window.ogb,
 });
 
 export function DesktopCapabilitiesProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DesktopState>(() => ({
     capabilities: initialDesktopCapabilities(),
-    ready: !window.ogb,
+    ready: typeof window === "undefined" || !window.ogb,
   }));
 
   useEffect(() => {

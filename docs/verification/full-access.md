@@ -5,6 +5,7 @@ Run the isolated integration recipe:
 ```sh
 pnpm exec vitest run server/full-access-workflows.e2e.test.ts
 pnpm exec vitest run server/team-setup-requests.test.ts server/profile-requests.test.ts server/routine-requests.test.ts
+pnpm exec electron scripts/smoke-approval-modes.cjs --all-threads-only
 pnpm typecheck
 pnpm lint
 ```
@@ -41,13 +42,22 @@ of a real provider's planning quality or authentication.
 
 ## Evidence and limits
 
+The desktop smoke uses a disposable Electron utility-process server and the
+real private approval bridge. It covers one confirmed Full Access grant for
+all existing, archived and future threads, including mixed Claude, Codex,
+Grok and Antigravity providers. Other bots and per-thread model choices stay
+unchanged. The real settings confirmation is driven in a hidden fixture
+window, including Cancel, the all-threads checkbox and the committed result.
+Screenshots are saved under `.omb-scratch/verify-evidence/provider-fixes/`.
+Provider processes are fake; this does not test live account access.
+
 The fixture retains `<server-log>.full-access.json` beside its server log.
 It contains safe request/results, persisted-state snapshots, and bounded MCP
 call evidence with thread IDs and provider permission modes. It excludes
 the injected bearer token and provider environment. Temporary app data is
 removed after the run.
 
-This verifies the server and MCP behavior, not the rendered review UI,
+The first recipe verifies server and MCP behavior, not the rendered review UI,
 desktop permission-grant gesture, or real-model instruction following. The
 test starts from fixture-only saved grants; it does not test granting Full
 Access through the desktop.

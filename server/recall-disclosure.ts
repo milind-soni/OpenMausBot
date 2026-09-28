@@ -48,3 +48,8 @@ export function forgetRecallCrossings(roomThreadId?: string): void {
   if (roomThreadId === undefined) announced.clear();
   else announced.delete(roomThreadId);
 }
+
+/** The chip for a recent-work brief that named private chats in a room. */
+export function briefCrossingLabel(botName: string, count: number): string {
+  return `${botName}'s recent-work brief covers ${count} private chat${count === 1 ? "" : "s"} with you`;
+}

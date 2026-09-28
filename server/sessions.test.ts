@@ -8,6 +8,8 @@ import {
   EXCHANGE_REPLAY_MS,
   formatPairingCode,
   generatePairingCode,
+  generatePairingCredential,
+  isPairingCredential,
   LOCKOUT,
   normalizePairingCode,
   PAIRING_CODE_ALPHABET,
@@ -31,6 +33,70 @@ beforeEach(() => {
   registry = new SessionRegistry({ file: file(), now: () => clock });
 });
 afterEach(() => { vi.restoreAllMocks(); rmSync(dir, { recursive: true, force: true }); });
+
+describe("the native-app encoding of a pairing window", () => {
+  it("redeems the same window as the typed code, and consumes it", () => {
+    const { code, credential } = registry.openPairing({ label: "Pixel" });
+    // The shape the Android companion's parser demands: the 9-character
+    // prefix plus exactly 43 base64url characters (Connection.kt).
+    expect(credential.startsWith("omb_pair_")).toBe(true);
+    expect(credential.length).toBe(52);
+    expect(credential.slice("omb_pair_".length)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+    const paired = registry.exchange({ code: credential, label: "Pixel", source: "10.0.0.9" });
+    expect(paired.ok).toBe(true);
+    // One window, not two: the code cannot redeem it a second time.
+    expect(registry.exchange({ code, label: "again", source: "10.0.0.9" }).ok).toBe(false);
+    expect(registry.openPairings()).toEqual([]);
+  });
+
+  it("never normalizes a credential", () => {
+    // normalizePairingCode folds 0 to O and 1 to I and strips underscores
+    // and dashes. Running it over a base64url secret would both destroy the
+    // secret and map distinct secrets onto one digest, so a credential must
+    // be hashed exactly as presented. This is the trap the fix exists to
+    // avoid, so pin it with a credential that contains every folded symbol.
+    const trap = "omb_pair_0123456789-_abcdefghijklmnopqrstuvwxyzABCDE";
+    expect(trap.length).toBe(52);
+    expect(normalizePairingCode(trap)).not.toBe(trap);
+    expect(isPairingCredential(trap)).toBe(true);
+
+    const { credential } = registry.openPairing();
+    // A different credential that normalizes to the same thing must not open
+    // someone else's window.
+    expect(registry.exchange({ code: trap, label: "", source: "attacker" }).ok).toBe(false);
+    expect(registry.exchange({ code: credential, label: "", source: "friend" }).ok).toBe(true);
+  });
+
+  it("keeps two live windows apart", () => {
+    const first = registry.openPairing({ label: "one" });
+    const second = registry.openPairing({ label: "two" });
+    const paired = registry.exchange({ code: second.credential, label: "", source: "10.0.0.4" });
+    if (!paired.ok) throw new Error(paired.error);
+    expect(paired.session.label).toBe("two");
+    // The first window is untouched and still redeemable by its own code.
+    expect(registry.exchange({ code: first.code, label: "", source: "10.0.0.4" }).ok).toBe(true);
+  });
+
+  it("expires with its window and is counted by the same lockout", () => {
+    const { credential } = registry.openPairing();
+    clock += PAIRING_CODE_TTL_MS + 1;
+    expect(registry.exchange({ code: credential, label: "", source: "b" }).ok).toBe(false);
+
+    for (let attempt = 0; attempt < LOCKOUT.failures; attempt += 1) {
+      registry.exchange({ code: generatePairingCredential(), label: "", source: "attacker" });
+    }
+    const locked = registry.exchange({ code: registry.openPairing().credential, label: "", source: "attacker" });
+    expect(locked.ok).toBe(false);
+    if (locked.ok) throw new Error("expected a lockout");
+    expect(locked.status).toBe(429);
+  });
+
+  it("mints a fresh credential for every window", () => {
+    const seen = new Set([...Array(20)].map(() => registry.openPairing().credential));
+    expect(seen.size).toBe(20);
+  });
+});
 
 function pair(label = "MacBook", source = "10.0.0.2") {
   const { code } = registry.openPairing();

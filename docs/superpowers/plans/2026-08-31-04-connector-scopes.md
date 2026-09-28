@@ -1,5 +1,13 @@
 # Connector Scopes (Connections Center, part 2) Implementation Plan
 
+> **Superseded.** The per-bot grants this plan sketched shipped as exact tool
+> names rather than verb classes, tracked in umbrella issue [#1734](https://github.com/milind-soni/OpenMausBot/issues/1734)
+> (data model #1756, harness verdict #1761, web grant editors #1814, mobile
+> surfacing + docs #1739). Everything below is kept for history; the P4
+> constraints it named still hold and were carried forward: imports land with
+> no grants, refusals never enumerate adjacent grants, every allow/deny
+> writes a decision-log row, exports never carry grants.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the single `bot.composio` boolean with per-bot connector grants — which service, which connected account, and which verb class (read, draft, send, modify, delete) — enforced on the Composio bridge rather than trusted to the model.

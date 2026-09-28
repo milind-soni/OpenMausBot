@@ -367,7 +367,7 @@ class PortP104IntegratedTest {
             try {
                 invalidSession.session.awaitRestored()
                 invalidSession.session.connect()
-                eventually(timeoutMillis = 3_500) {
+                eventually(timeoutMillis = FAILOVER_TIMEOUT_MS) {
                     val protectedRouteIsLive = invalidSession.session.status.value == Session.Status.Live &&
                         sidecar.requests(TAILNET, "/api/events").isNotEmpty()
                     val retriedInvalidAuthority = sidecar.tlsAttempts(INVALID_TLS) >= 2 &&
@@ -403,7 +403,7 @@ class PortP104IntegratedTest {
                 try {
                     running.session.awaitRestored()
                     running.session.connect()
-                    eventually(timeoutMillis = 3_500) {
+                    eventually(timeoutMillis = FAILOVER_TIMEOUT_MS) {
                         running.session.status.value == Session.Status.Live &&
                             sidecar.requests(TAILNET, "/api/events").isNotEmpty()
                     }
@@ -572,6 +572,18 @@ class PortP104IntegratedTest {
     )
 
     companion object {
+        /**
+         * A hang detector, not a latency budget. Reaching the protected route after a refused
+         * authority costs a reconnect backoff — Session doubles it 1s → 15s — plus real TLS
+         * handshakes against three MockWebServers on a shared CI runner. A window sized for a
+         * quiet laptop fails the run for being slow rather than for being wrong, which is what
+         * happened: one timeout in ~31 runs, on a tree whose android/ was byte-identical to a
+         * green main. eventually() returns the moment its condition holds, so a generous
+         * ceiling costs a passing run nothing — it only bounds how long we wait before calling
+         * it hung. The assertions after each wait are what still judge the routing.
+         */
+        const val FAILOVER_TIMEOUT_MS = 15_000L
+
         const val CONNECTION_ID = "p1-04-connection"
         const val DEVICE_ID = "p1-04-device"
         const val DEVICE_TOKEN = "omb_device_p1_04_secret"

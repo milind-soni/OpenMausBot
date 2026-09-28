@@ -2,7 +2,7 @@ package com.openmausbot.companion.core
 
 import java.io.IOException
 import java.net.ConnectException
-import java.util.Collections
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
@@ -428,9 +428,9 @@ private sealed interface StubAction {
 }
 
 private class PairingStub(private val action: (Request) -> StubAction) : Interceptor {
-    val requests: MutableList<Request> = Collections.synchronizedList(mutableListOf())
+    val requests: MutableList<Request> = CopyOnWriteArrayList()
     private val timeoutSeconds: MutableList<Pair<String, Long>> =
-        Collections.synchronizedList(mutableListOf())
+        CopyOnWriteArrayList()
     val client: OkHttpClient = OkHttpClient.Builder().addInterceptor(this).build()
 
     val healthRequests: List<Request> get() = requests.filter { it.url.encodedPath == "/api/health" }

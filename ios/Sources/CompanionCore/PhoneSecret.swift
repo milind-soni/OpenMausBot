@@ -3,6 +3,8 @@ import Foundation
 
 public enum PhoneSecretError: Error, LocalizedError, Equatable, Sendable {
     case unavailable
+    /// The encryption this uses (HPKE) is iOS 17 and up.
+    case requiresNewerOS
     case insecureTransport
     case invalidRequest
     case invalidPublicKey
@@ -11,6 +13,8 @@ public enum PhoneSecretError: Error, LocalizedError, Equatable, Sendable {
 
     public var errorDescription: String? {
         switch self {
+        case .requiresNewerOS:
+            return "Sending a credential needs iOS 17 or later. Enter it on your computer instead."
         case .unavailable:
             return "Pair this phone again by QR code to enable secure credential entry."
         case .insecureTransport:

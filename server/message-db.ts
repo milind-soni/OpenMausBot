@@ -16,12 +16,19 @@ import { DatabaseSync } from "node:sqlite";
 
 import { DATA_DIR } from "./config.ts";
 import { peerProvenanceAuthor } from "./peer-provenance.ts";
+import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
+import type { UsageTrigger } from "./usage-ledger.ts";
+import { MessageSearchWorker } from "./message-search-worker.ts";
+import { searchMessagesInDatabase, type SearchHit } from "./message-search-query.ts";
+export type { SearchHit } from "./message-search-query.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
 
 let handle: DatabaseSync | null = null;
 let handlePath: string | null = null;
+let searchWorker: MessageSearchWorker | null = null;
+let closingSearch: Promise<void> = Promise.resolve();
 
 function open(): DatabaseSync {
   mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -62,6 +69,13 @@ function open(): DatabaseSync {
       payload TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS chat_followups_receipt ON chat_followups(kind, owner_id, thread_id, send_id);
+    CREATE TABLE IF NOT EXISTS command_receipts (
+      kind TEXT NOT NULL,
+      key TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      result TEXT NOT NULL,
+      PRIMARY KEY (kind, key)
+    );
   `);
   ensureRecallIndex(db);
   ensureMemoryIndex(db);
@@ -172,21 +186,74 @@ function db(): DatabaseSync {
   return handle;
 }
 
+/** Nested writes use savepoints: even a caught inner error must not commit
+ * half of an inner command. The outer transaction still owns durability. */
+let transactionDepth = 0;
+function transaction<T>(fn: (database: DatabaseSync) => T): T {
+  const database = db();
+  if (transactionDepth > 0) {
+    const savepoint = `command_${transactionDepth}`;
+    database.exec(`SAVEPOINT ${savepoint}`);
+    transactionDepth += 1;
+    try {
+      const result = fn(database);
+      database.exec(`RELEASE ${savepoint}`);
+      return result;
+    } catch (error) {
+      database.exec(`ROLLBACK TO ${savepoint}`);
+      database.exec(`RELEASE ${savepoint}`);
+      throw error;
+    } finally { transactionDepth -= 1; }
+  }
+  database.exec("BEGIN IMMEDIATE");
+  transactionDepth = 1;
+  try {
+    const result = fn(database);
+    database.exec("COMMIT");
+    return result;
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  } finally {
+    transactionDepth = 0;
+  }
+}
+
 export interface FollowupPayload {
   text: string;
   prompt?: string;
   replyToId?: string;
   sendId?: string;
-  reason?: "capacity";
+  reason?: SteerQueueReason;
   unattended?: boolean;
   peerAsk?: Message["peerAsk"];
   mode?: "chat" | "goal";
   via?: "api";
+  /** Who queued these words. Absent on the owner's own sends and on every
+   * row written before this existed; both read as the profile name. */
+  sender?: ResolvedSender;
+  /** Who the usage ledger books the turn these words start to. Absent on
+   * rows written before this existed. */
+  trigger?: UsageTrigger;
+  /** When the words were queued (epoch ms), so drain-time coalescing can
+   * tell a contiguous burst from hours-apart texts. Rows written before
+   * this existed read as queued at restore time. */
+  queuedAt?: number;
+  /** Aside-lane rows (kind "aside"): the peer whose words these are. The
+   * prompt carries the non-steering envelope; text stays the raw words. */
+  aside?: {
+    fromBotId: string;
+    fromBotName: string;
+    unattended?: boolean;
+    /** Comms depth captured when the aside was queued, so a degraded
+     * follow-up turn inherits the same one-hop chain limit. */
+    commsDepth: number;
+  };
 }
 export type FollowupStatus = "pending" | "dispatching" | "interrupted" | "cancelled";
 export interface ChatFollowup {
   id: string;
-  kind: "bot" | "channel";
+  kind: "bot" | "channel" | "aside";
   ownerId: string;
   threadId: string;
   status: FollowupStatus;
@@ -204,6 +271,45 @@ function writeFollowups(write: (connection: DatabaseSync) => void): void {
     try { write(connection); connection.exec("COMMIT"); }
     catch (error) { connection.exec("ROLLBACK"); throw error; }
   } finally { connection.exec("PRAGMA synchronous = NORMAL"); }
+}
+
+export interface StoredCommandReceipt {
+  kind: string;
+  key: string;
+  at: number;
+  /** JSON text of the command's result, exactly as first produced. */
+  result: string;
+}
+
+export function readCommandReceipt(kind: string, key: string): StoredCommandReceipt | null {
+  const row = db()
+    .prepare("SELECT kind, key, at, result FROM command_receipts WHERE kind = ? AND key = ?")
+    .get(kind, key) as StoredCommandReceipt | undefined;
+  return row ?? null;
+}
+
+/** Run `apply` and record its receipt in ONE transaction on the transcript
+ * DB, so a command's rows and the proof that it ran land together or not
+ * at all. A receipt already present short-circuits: the stored result is
+ * returned and `apply` never runs. Everything `apply` writes through this
+ * module (insertMessage, setActiveLeaf, ...) joins the same transaction. */
+export function withCommandReceipt(
+  kind: string,
+  key: string,
+  apply: () => string,
+  at: number,
+): { result: string; replayed: boolean } {
+  return transaction((database) => {
+    const existing = database
+      .prepare("SELECT result FROM command_receipts WHERE kind = ? AND key = ?")
+      .get(kind, key) as { result: string } | undefined;
+    if (existing) return { result: existing.result, replayed: true };
+    const result = apply();
+    database
+      .prepare("INSERT INTO command_receipts(kind, key, at, result) VALUES (?, ?, ?, ?)")
+      .run(kind, key, at, result);
+    return { result, replayed: false };
+  });
 }
 
 export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
@@ -339,34 +445,22 @@ export function insertMessage(threadId: string, message: Message): void {
 
 /** A backup may only populate a fresh thread, never replace a transcript. */
 export function importThread(threadId: string, messages: Message[], activeLeafId: string | null): void {
-  const database = db();
-  database.exec("BEGIN IMMEDIATE");
-  try {
+  transaction((database) => {
     if (database.prepare("SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1").get(threadId) ||
         database.prepare("SELECT 1 FROM thread_state WHERE thread_id = ?").get(threadId)) {
       throw new Error("Cannot import over an existing conversation");
     }
     for (const message of messages) insertMessage(threadId, message);
     setActiveLeaf(threadId, activeLeafId);
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
-  }
+  });
 }
 
 /** Persist a new message and the branch head as one crash-safe mutation. */
 export function appendMessage(threadId: string, message: Message): void {
-  const database = db();
-  database.exec("BEGIN IMMEDIATE");
-  try {
+  transaction(() => {
     insertMessage(threadId, message);
     setActiveLeaf(threadId, message.id);
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
-  }
+  });
 }
 
 export function updateMessage(threadId: string, message: Message): void {
@@ -397,6 +491,25 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
     .run(threadId, leafId);
 }
 
+/** Newest message timestamp per thread. One grouped read, chunked under
+ * SQLite's variable limit. Threads with no rows are absent. */
+export function latestMessageAts(threadIds: readonly string[]): Map<string, number> {
+  const ids = [...new Set(threadIds.filter((id) => id.length > 0))];
+  const out = new Map<string, number>();
+  const chunk = 400;
+  for (let i = 0; i < ids.length; i += chunk) {
+    const slice = ids.slice(i, i + chunk);
+    const placeholders = slice.map(() => "?").join(", ");
+    const rows = db()
+      .prepare(`SELECT thread_id, MAX(at) AS at FROM messages WHERE thread_id IN (${placeholders}) GROUP BY thread_id`)
+      .all(...slice) as Array<{ thread_id: string; at: number }>;
+    for (const row of rows) {
+      if (typeof row.at === "number" && Number.isFinite(row.at)) out.set(row.thread_id, row.at);
+    }
+  }
+  return out;
+}
+
 export function deleteThread(threadId: string): void {
   writeFollowups((connection) => {
     connection.prepare("DELETE FROM chat_followups WHERE thread_id = ?").run(threadId);
@@ -405,75 +518,26 @@ export function deleteThread(threadId: string): void {
   });
 }
 
-export interface SearchHit {
-  threadId: string;
-  messageId: string;
-  at: number;
-  role: string;
-  kind: string;
-  /** the matched text, trimmed to a window around the first hit */
-  snippet: string;
-  /** where the match sits inside `snippet`, for highlighting */
-  matchStart: number;
-  matchLength: number;
-  /** room messages: which member said it */
-  from?: string;
+/** Every thread whose stored messages mention `fragment` anywhere (an
+ * attachment's file name, say). A scan, like search; used only to decide
+ * whether a member on a workspace with a restricted bot may fetch a file. */
+export function threadsReferencing(fragment: string): string[] {
+  if (!fragment) return [];
+  const rows = db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>;
+  return rows.map((row) => row.thread_id);
 }
 
 /** Case-insensitive substring search over text messages, newest first.
- * A LIKE scan, deliberately: local transcripts are megabytes at most, a
- * scan is milliseconds, and it needs no FTS extension to exist. */
+ * Keep literal substring semantics; HTTP callers run the scan off-thread. */
 export function searchMessages(query: string, limit = 40, threadId?: string): SearchHit[] {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return [];
-  // escape LIKE wildcards so a literal % or _ in the query stays literal
-  const pattern = `%${needle.replace(/([\\%_])/g, "\\$1")}%`;
-  // text messages by their text; activity chips by the tool name — "which
-  // bot ran that migration" is a tool-name question. The chip's name lives
-  // in the row's json; a JSON1 extract keeps this one query.
-  const scope = threadId ? "thread_id = ? AND " : "";
-  const statement = db().prepare(
-    "SELECT thread_id, id, at, role, kind, text, json_extract(json, '$.tool.name') AS tool_name, json_extract(json, '$.from.name') AS from_name FROM messages " +
-      `WHERE ${scope}((kind = 'text' AND text IS NOT NULL AND lower(text) LIKE ? ESCAPE '\\') ` +
-      "   OR (kind = 'activity' AND tool_name IS NOT NULL AND lower(tool_name) LIKE ? ESCAPE '\\')) " +
-      "ORDER BY at DESC LIMIT ?",
-  );
-  const rows = (threadId
-    ? statement.all(threadId, pattern, pattern, limit)
-    : statement.all(pattern, pattern, limit)) as Array<{
-    thread_id: string;
-    id: string;
-    at: number;
-    role: string;
-    kind: string;
-    text: string | null;
-    tool_name: string | null;
-    from_name: string | null;
-  }>;
-  return rows.map((row) => {
-    const haystack = row.kind === "activity" ? (row.tool_name ?? "") : (row.text ?? "");
-    const hitAt = Math.max(0, haystack.toLowerCase().indexOf(needle));
-    const start = Math.max(0, hitAt - 60);
-    const end = Math.min(haystack.length, hitAt + needle.length + 90);
-    const head = start > 0 ? "…" : "";
-    const body = haystack.slice(start, end).replace(/\s+/g, " ").trim();
-    const snippet = head + body + (end < haystack.length ? "…" : "");
-    // whitespace folding can shift the offset; find the match again inside
-    const folded = needle.replace(/\s+/g, " ");
-    const matchStart = snippet.toLowerCase().indexOf(folded);
-    return {
-      threadId: row.thread_id,
-      messageId: row.id,
-      at: row.at,
-      role: row.role,
-      kind: row.kind,
-      snippet,
-      matchStart: matchStart < 0 ? head.length : matchStart,
-      // A defensive fallback must not mark arbitrary snippet text as the hit.
-      matchLength: matchStart < 0 ? 0 : folded.length,
-      ...(row.from_name ? { from: row.from_name } : {}),
-    };
-  });
+  return searchMessagesInDatabase(db(), query, limit, threadId);
+}
+
+export function searchMessagesAsync(query: string, limit = 40, threadId?: string): Promise<SearchHit[]> {
+  if (!query.trim()) return Promise.resolve([]);
+  db(); // The owner initializes/migrates the schema before any read-only scan.
+  searchWorker ??= new MessageSearchWorker(DB_FILE());
+  return searchWorker.search(query, limit, threadId);
 }
 
 export interface RecallHit {
@@ -481,6 +545,8 @@ export interface RecallHit {
   messageId: string;
   at: number;
   role: string;
+  /** "digest" for a work-digest row; absent for ordinary text. */
+  kind?: "digest";
   /** the matched text, with each matched term wrapped in [brackets] */
   snippet: string;
   /** room messages: which member said it */
@@ -512,14 +578,57 @@ const STOP_WORDS = new Set(
  * whitespace-separated token becomes a quoted string, so `AND`, `NOT`,
  * `*`, `:`, and stray quotes are searched for rather than interpreted.
  * Tokens are ANDed — FTS5's default — so a hit contains all of them. */
-function ftsQuery(query: string): string | null {
+function ftsQuery(query: string, mode: SearchMode = "all"): string | null {
   const tokens = query
     .split(/\s+/)
     .map((token) => token.replace(/"/g, "").trim())
     .filter(Boolean);
   if (!tokens.length) return null;
   const content = tokens.filter((token) => !STOP_WORDS.has(token.toLowerCase()));
+  if (mode === "any") {
+    // Automatic recall searches with a whole message: any content word may
+    // match, ranked by bm25. Punctuation-only tokens are dropped, since a
+    // lone "?" or "—" would match nothing useful. No content word, no query.
+    const terms = recallTerms(query).map(recallMatchTerm).filter(Boolean);
+    return terms.length ? terms.join(" OR ") : null;
+  }
   return (content.length ? content : tokens).map((token) => `"${token}"`).join(" ");
+}
+
+/** One recall term as FTS5 syntax. The index does no stemming, so a word
+ * of four or more letters matches as a prefix, with a plural -s taken off
+ * first: "restaurant" and "restaurants" find each other. Skip punctuation
+ * terms: unicode61 cannot distinguish "-10" from "10" or "c++" from "c",
+ * even in a quoted FTS phrase. Explicit all-term search stays unchanged. */
+export function recallMatchTerm(term: string): string | null {
+  if (!/^[\p{L}\p{N}]+$/u.test(term)) return null;
+  if (!/^\p{L}{4,}$/u.test(term)) return `"${term}"`;
+  const stem = term.length > 4 && term.endsWith("s") && !term.endsWith("ss") ? term.slice(0, -1) : term;
+  return `"${stem}"*`;
+}
+
+/** "all": every word must match (session_search). "any": one is enough (automatic recall). */
+export type SearchMode = "all" | "any";
+
+/** Words that go at the end of a question and say nothing about its topic. */
+const RECALL_FILLER = new Set(
+  "about again also any anything can could does don't know me my please remember remind should tell there they us would hi hello hey thanks thank ok okay yes yeah no i'm im i've i'll i'd you're quick just".split(" "),
+);
+
+/** The content words of a message, for an any-term recall: lower-cased,
+ * de-duplicated, stop words and filler dropped. Ordinary separators between
+ * letters split words; signs, language symbols and versions (`-10`, `c++`,
+ * `v2.1`) survive as written rather than matching a different fact. */
+export function recallTerms(query: string): string[] {
+  const out: string[] = [];
+  for (const raw of query.split(/\s+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
+    const token = raw.replace(/"/g, "").replace(/^[\s.,;:!?()[\]{}'`“”‘’]+|[\s.,;:!?()[\]{}'`“”‘’]+$/g, "").toLowerCase();
+    if (token.length < 2 && !/\d/.test(token)) continue;
+    if (!/[\p{L}\p{N}]/u.test(token)) continue;
+    if (STOP_WORDS.has(token) || RECALL_FILLER.has(token)) continue;
+    if (!out.includes(token)) out.push(token);
+  }
+  return out.slice(0, 16);
 }
 
 /** How much of a matched message rides back in a hit. Wide enough that a
@@ -560,24 +669,48 @@ export function readMessageText(
  * bm25 rank from FTS5; the snippet is FTS5's own, windowed around the
  * matched terms. Scoping happens in SQL before LIMIT, so a busy thread
  * cannot crowd out a quieter one. */
-export function recallMessages(query: string, threadIds: readonly string[], limit = 12): RecallHit[] {
-  const match = ftsQuery(query);
+/** An optional time window on a recall: milliseconds since the epoch. */
+export interface RecallRange {
+  since?: number;
+  until?: number;
+}
+
+function rangeClause(range: RecallRange | undefined, column: string): { sql: string; params: number[] } {
+  const parts: string[] = [];
+  const params: number[] = [];
+  if (range?.since !== undefined) {
+    parts.push(`${column} >= ?`);
+    params.push(range.since);
+  }
+  if (range?.until !== undefined) {
+    parts.push(`${column} <= ?`);
+    params.push(range.until);
+  }
+  return { sql: parts.map((part) => ` AND ${part}`).join(""), params };
+}
+
+export function recallMessages(query: string, threadIds: readonly string[], limit = 12, range?: RecallRange, mode: SearchMode = "all"): RecallHit[] {
+  const match = ftsQuery(query, mode);
   if (!match || !threadIds.length) return [];
   const placeholders = threadIds.map(() => "?").join(", ");
+  const window = rangeClause(range, "m.at");
   const rows = db()
     .prepare(
-      "SELECT m.thread_id, m.id, m.at, m.role, json_extract(m.json, '$.from.name') AS from_name, " +
+      "SELECT m.thread_id, m.id, m.at, m.role, m.kind, json_extract(m.json, '$.from.name') AS from_name, " +
         `json_extract(m.json, '$.peerAsk.name') AS peer_name, substr(m.text, 1, ${PEER_NOTE_HEAD_CHARS}) AS head, ` +
         `snippet(messages_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
         "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid " +
-        `WHERE messages_fts MATCH ? AND m.kind = 'text' AND m.thread_id IN (${placeholders}) ` +
-        "ORDER BY bm25(messages_fts), m.at DESC LIMIT ?",
+        `WHERE messages_fts MATCH ? AND m.kind IN ('text', 'digest') AND m.thread_id IN (${placeholders})${window.sql} ` +
+        // a digest is a record of work, not something anyone said: it ranks
+        // after every text hit so recall reads like a conversation first
+        "ORDER BY (m.kind = 'digest'), bm25(messages_fts), m.at DESC LIMIT ?",
     )
-    .all(match, ...threadIds, limit) as Array<{
+    .all(match, ...threadIds, ...window.params, limit) as Array<{
     thread_id: string;
     id: string;
     at: number;
     role: string;
+    kind: string;
     from_name: string | null;
     peer_name: string | null;
     head: string;
@@ -590,11 +723,91 @@ export function recallMessages(query: string, threadIds: readonly string[], limi
       messageId: row.id,
       at: row.at,
       role: row.role,
+      ...(row.kind === "digest" ? { kind: "digest" as const } : {}),
       snippet: row.snippet.replace(/\s+/g, " ").trim(),
       ...(row.from_name ? { from: row.from_name } : {}),
       ...(peer ? { peer } : {}),
     };
   });
+}
+
+/** Characters of a message shown when a recall is by time, not by words:
+ * enough to know what was said, never the whole message. */
+const RECENT_HEAD_CHARS = 240;
+
+/** The text messages of the given threads inside a time window, newest
+ * first — "what happened since yesterday" needs no words to match. Same
+ * shape as a ranked hit, with the head of the message standing in for the
+ * FTS snippet. */
+export function recentMessages(threadIds: readonly string[], range: RecallRange, limit = 12): RecallHit[] {
+  if (!threadIds.length) return [];
+  const placeholders = threadIds.map(() => "?").join(", ");
+  const window = rangeClause(range, "m.at");
+  const rows = db()
+    .prepare(
+      "SELECT m.thread_id, m.id, m.at, m.role, json_extract(m.json, '$.from.name') AS from_name, " +
+        `json_extract(m.json, '$.peerAsk.name') AS peer_name, substr(m.text, 1, ${Math.max(PEER_NOTE_HEAD_CHARS, RECENT_HEAD_CHARS)}) AS head ` +
+        `FROM messages m WHERE m.kind = 'text' AND m.text IS NOT NULL AND m.thread_id IN (${placeholders})${window.sql} ` +
+        "ORDER BY m.at DESC LIMIT ?",
+    )
+    .all(...threadIds, ...window.params, limit) as Array<{
+    thread_id: string;
+    id: string;
+    at: number;
+    role: string;
+    from_name: string | null;
+    peer_name: string | null;
+    head: string;
+  }>;
+  return rows.map((row) => {
+    const peer = peerAuthor(row.peer_name, row.head);
+    const folded = row.head.replace(/\s+/g, " ").trim();
+    return {
+      threadId: row.thread_id,
+      messageId: row.id,
+      at: row.at,
+      role: row.role,
+      snippet: folded.length > RECENT_HEAD_CHARS ? `${folded.slice(0, RECENT_HEAD_CHARS)}…` : folded,
+      ...(row.from_name ? { from: row.from_name } : {}),
+      ...(peer ? { peer } : {}),
+    };
+  });
+}
+
+/** The newest thing one bot said in a thread. */
+export interface ThreadLatest {
+  threadId: string;
+  messageId: string;
+  at: number;
+  /** the head of that message, whitespace folded */
+  head: string;
+}
+
+/** For each of the given threads, the newest text message the bot itself
+ * said there since `since` — one row per thread, newest thread first. A
+ * room line carries from.botId; a 1:1 line carries none and is the bot's
+ * by construction. What a bot last said in a conversation is the shortest
+ * honest answer to "what have you been doing there". */
+export function latestSaidByBot(threadIds: readonly string[], botId: string, since: number, limit = 20): ThreadLatest[] {
+  if (!threadIds.length) return [];
+  const placeholders = threadIds.map(() => "?").join(", ");
+  const rows = db()
+    .prepare(
+      "SELECT thread_id, id, at, head FROM (" +
+        "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head, " +
+        "ROW_NUMBER() OVER (PARTITION BY m.thread_id ORDER BY m.at DESC) AS rn " +
+        "FROM messages m " +
+        `WHERE m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (${placeholders}) ` +
+        "AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)" +
+        ") WHERE rn = 1 ORDER BY at DESC LIMIT ?",
+    )
+    .all(since, ...threadIds, botId, limit) as Array<{ thread_id: string; id: string; at: number; head: string }>;
+  return rows.map((row) => ({
+    threadId: row.thread_id,
+    messageId: row.id,
+    at: row.at,
+    head: row.head.replace(/\s+/g, " ").trim(),
+  }));
 }
 
 export interface MemoryFileStat {
@@ -639,8 +852,8 @@ export interface MemoryHit {
 /** Relevance-ranked recall over ONE bot's memory files. Scoped by bot id
  * in SQL, the same way recallMessages scopes by thread: another bot's
  * memory is not a lower-ranked result, it is not a result. */
-export function recallMemory(query: string, botId: string, limit = 12): MemoryHit[] {
-  const match = ftsQuery(query);
+export function recallMemory(query: string, botId: string, limit = 12, mode: SearchMode = "all"): MemoryHit[] {
+  const match = ftsQuery(query, mode);
   if (!match) return [];
   const rows = db()
     .prepare(
@@ -648,6 +861,9 @@ export function recallMemory(query: string, botId: string, limit = 12): MemoryHi
         `snippet(memory_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
         "FROM memory_fts JOIN memory_files f ON f.rowid = memory_fts.rowid " +
         "WHERE memory_fts MATCH ? AND f.bot_id = ? " +
+        // Automatic recall must filter before LIMIT; historical logs can
+        // otherwise crowd all current topic files out of the result set.
+        (mode === "any" ? "AND f.path NOT IN ('MEMORY.md', 'memory/archive.md') AND f.path NOT LIKE 'memory/log/%' " : "") +
         "ORDER BY bm25(memory_fts), f.mtime_ms DESC LIMIT ?",
     )
     // SAFETY: the SELECT names exactly these three columns; snippet() is never null
@@ -655,8 +871,17 @@ export function recallMemory(query: string, botId: string, limit = 12): MemoryHi
   return rows.map((row) => ({ file: row.path, at: row.mtime_ms, snippet: row.snippet.replace(/\s+/g, " ").trim() }));
 }
 
+/** Await before maintenance replaces the database or shutdown releases its lease. */
+export async function closeMessageSearch(): Promise<void> {
+  const worker = searchWorker;
+  searchWorker = null;
+  if (worker) closingSearch = Promise.all([closingSearch, worker.close()]).then(() => {});
+  await closingSearch;
+}
+
 /** Test/shutdown hook — closes the handle so a wiped DATA_DIR starts clean. */
 export function closeMessageDb(): void {
+  void closeMessageSearch();
   try {
     handle?.close();
   } catch {}

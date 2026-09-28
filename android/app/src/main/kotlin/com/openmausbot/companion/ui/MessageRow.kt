@@ -33,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -44,6 +45,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -61,6 +63,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -79,17 +83,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.AttachedMessageContent
+import com.openmausbot.companion.core.generatedImages
+import com.openmausbot.companion.core.voiceNotes
 import com.openmausbot.companion.core.DisplayedMessageAttachment
 import com.openmausbot.companion.core.DownloadedFile
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.ThreadRef
 import com.openmausbot.companion.core.ToolActivity
+import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.TranscriptCard
 import com.openmausbot.companion.core.TranscriptCards
+import com.openmausbot.companion.core.webhookContent
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -128,6 +137,10 @@ fun MessageRow(
     val bot = (chat as? Chat.BotChat)?.bot
     val versions = remember(state, message.id) { state.versions(message, chat.threadId) }
     val versionIndex = versions.indexOfFirst { it.id == message.id }
+    // The stand-in for an edit the computer has not answered yet. It has no
+    // server identity, so nothing may react to it or edit it again.
+    val editPending = state.pendingEdits[chat.threadId]
+    val isPendingEdit = editPending?.placeholderId == message.id
     val mine = message.role == Message.Role.USER
 
     Box(
@@ -241,7 +254,7 @@ fun MessageRow(
         }
 
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+            if (!isPendingEdit) Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                 Reactions.CHOICES.forEach { emoji ->
                     Text(
                         text = emoji,
@@ -280,11 +293,11 @@ fun MessageRow(
             // Attachment messages cannot be reconstructed by a text-only edit.
             // The policy also keeps their private transport paths out of the UI.
             val editableText = MessageActions.editableText(message)
-            if (editableText != null && bot != null) {
+            if (editableText != null && bot != null && !isPendingEdit) {
                 HorizontalDivider()
                 DropdownMenuItem(
                     text = { Text("Edit and retry") },
-                    enabled = bot.busy != true,
+                    enabled = bot.busy != true && editPending == null,
                     onClick = {
                         menuOpen = false
                         editText = editableText
@@ -405,8 +418,25 @@ private fun MessageContent(
         } else {
             CardView(chat, message, haptics)
         }
-        Message.Kind.ACTIVITY -> ActivityChip(message.tool, message.threadRef, openThread)
+        Message.Kind.ACTIVITY -> {
+            ActivityChip(message.tool, message.threadRef, openThread)
+            // Claude Code too old for the model: offer the update on the
+            // engine this bot's thread runs on. Rooms have no single engine.
+            val claudeInstance = (chat as? Chat.BotChat)?.bot
+                ?.let { it.forTask(chat.threadId) ?: it }
+                ?.modelSelection?.instanceId
+            if (message.tool?.claudeUpdate == true && claudeInstance != null) {
+                ClaudeUpdateCard(messageId = message.id, instanceId = claudeInstance)
+            }
+        }
+        Message.Kind.COMPACTION -> ReceiptChip(
+            label = message.compaction?.chipText ?: message.text.orEmpty(),
+            detail = message.compaction?.summary ?: message.text.orEmpty(),
+        )
         Message.Kind.SCREEN -> ScreenShot(chat.threadId, message)
+        // Turn-audit chip (tool list + reply preview). Desktop shows it only
+        // behind a "show tool calls" setting Android doesn't have; hide it.
+        Message.Kind.DIGEST -> {}
         // A message kind from a newer computer. Almost everything the harness
         // sends carries `text`, so showing it is usually the whole message and
         // always better than a gap in the transcript. When there is nothing to
@@ -435,6 +465,7 @@ private fun TextBubble(
     // Shared attachments are protocol tags in stored user text. They are not
     // prose, and a server-controlled path must never be presented as a link.
     val attached = remember(message.id, message.text) { AttachedMessageContent.parse(message.text.orEmpty()) }
+    val webhook = remember(message) { message.webhookContent }
     // A card brings its own surface, so it drops the bubble — and with it the
     // tail, which is a bubble's chin and not a card's.
     val bubble = card == null
@@ -480,6 +511,14 @@ private fun TextBubble(
                     )
                 }
             }
+            // Voice notes sit above the attachment gallery, as they do on the
+            // desktop transcript: the note is the message, not an appendix to it.
+            message.voiceNotes.forEach { note ->
+                VoiceNoteAttachmentView(threadId, message, note)
+            }
+            message.generatedImages.forEach { attachment ->
+                SharedAttachmentView(threadId, message, attachment, openAttachment)
+            }
             // Bots get markdown, you do not — the same split the desktop makes.
             // Markdown you did not intend is worse than markdown you did: a
             // message about `**` should show the asterisks.
@@ -489,7 +528,9 @@ private fun TextBubble(
             when (card) {
                 is TranscriptCard.Diff -> DiffCard(card)
                 is TranscriptCard.Table -> DataTableCard(card)
-                null -> if (mine) {
+                null -> if (webhook != null) {
+                    WebhookMessageBody(webhook)
+                } else if (mine) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         attached.attachments.forEach { attachment ->
                             SharedAttachmentView(
@@ -575,6 +616,7 @@ private fun SharedImageAttachment(
     attachment: DisplayedMessageAttachment,
     onOpen: ((DisplayedMessageAttachment, Message, DownloadedFile?) -> Unit)?,
 ) {
+    val foreground = if (message.role == Message.Role.USER) BubbleColor.mineText else MaterialTheme.colorScheme.onSurface
     val session = LocalCompanion.current.session
     var attempt by remember(message.id, attachment.path) { mutableStateOf(0) }
     var state by remember(message.id, attachment.path) {
@@ -607,7 +649,7 @@ private fun SharedImageAttachment(
         modifier = Modifier
             .widthIn(max = 360.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(BubbleColor.mineText.copy(alpha = 0.10f))
+            .background(foreground.copy(alpha = 0.10f))
             .clickable(enabled = ready != null && onOpen != null, role = Role.Button) {
                 ready?.let { onOpen?.invoke(attachment, message, it.file) }
             }
@@ -624,6 +666,7 @@ private fun SharedImageAttachment(
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 AttachmentThumbnailState.Failed -> AttachmentLoadFailure(
                     label = "Image unavailable",
+                    foreground = foreground,
                     onRetry = { attempt += 1 },
                 )
                 is AttachmentThumbnailState.Ready -> Image(
@@ -638,7 +681,7 @@ private fun SharedImageAttachment(
             attachment.name,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
-            color = BubbleColor.mineText,
+            color = foreground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
@@ -647,16 +690,202 @@ private fun SharedImageAttachment(
 }
 
 @Composable
-private fun AttachmentLoadFailure(label: String, onRetry: () -> Unit) {
+private fun AttachmentLoadFailure(label: String, foreground: Color = BubbleColor.mineText, onRetry: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Icon(
             imageVector = Icons.Filled.Warning,
             contentDescription = null,
-            tint = BubbleColor.mineText.copy(alpha = 0.70f),
+            tint = foreground.copy(alpha = 0.70f),
             modifier = Modifier.size(20.dp),
         )
-        Text(label, fontSize = 13.sp, color = BubbleColor.mineText.copy(alpha = 0.80f))
+        Text(label, fontSize = 13.sp, color = foreground.copy(alpha = 0.80f))
         TextButton(onClick = onRetry) { Text("Retry") }
+    }
+}
+
+/** Where the bubble's clip bytes are: fetched on first play, then kept for replay. */
+private sealed interface VoiceNoteClipState {
+    data object NotLoaded : VoiceNoteClipState
+    data object Loading : VoiceNoteClipState
+    data class Ready(val data: ByteArray) : VoiceNoteClipState
+    data object Failed : VoiceNoteClipState
+}
+
+/** The desktop bubble's clock: m:ss, and 0:00 for anything not yet audible. */
+private fun voiceNoteClock(ms: Long): String {
+    if (ms <= 0) return "0:00"
+    val wholeSeconds = ms / 1000
+    return (wholeSeconds / 60).toString() + ":" + (wholeSeconds % 60).toString().padStart(2, '0')
+}
+
+/**
+ * One voice note in the transcript, matching the desktop VoiceNoteBubble:
+ * a play button, a scrub bar, and the clip's length. Playback is app-scoped
+ * (CompanionEnvironment.voiceNotes), so a note keeps playing while its row
+ * scrolls away, and the one-voice rule rides the same audio-focus gate the
+ * TTS preview uses: starting a note (or a preview) pauses any other voice
+ * rather than talking over it. The clip's bytes are fetched through the same
+ * authenticated file route as image thumbnails, but only on first play — a
+ * note nobody opens costs no request, and a replay never refetches.
+ */
+@Composable
+private fun VoiceNoteAttachmentView(
+    threadId: String,
+    message: Message,
+    note: DisplayedMessageAttachment,
+) {
+    val foreground = if (message.role == Message.Role.USER) BubbleColor.mineText else MaterialTheme.colorScheme.onSurface
+    val session = LocalCompanion.current.session
+    val player = LocalCompanion.current.voiceNotes
+    val scope = rememberCoroutineScope()
+    val key = remember(message.id, note.path) { message.id + ":" + note.path }
+    var clip by remember(message.id, note.path) { mutableStateOf<VoiceNoteClipState>(VoiceNoteClipState.NotLoaded) }
+    // The scrub position while the slider is held; null when it tracks playback.
+    var scrub by remember(key) { mutableStateOf<Float?>(null) }
+
+    fun startPlayback(data: ByteArray) {
+        if (player.play(key, data) != null) clip = VoiceNoteClipState.Failed
+    }
+
+    fun loadAndPlay() {
+        clip = VoiceNoteClipState.Loading
+        scope.launch {
+            val downloaded = session.downloadFile(
+                threadId,
+                message.id,
+                note.path,
+                reportError = false,
+                cacheResult = true,
+            )
+            if (downloaded == null) {
+                clip = VoiceNoteClipState.Failed
+            } else {
+                clip = VoiceNoteClipState.Ready(downloaded.data)
+                startPlayback(downloaded.data)
+            }
+        }
+    }
+
+    val active = player.playback.collectAsState().value?.takeIf { it.key == key }
+    val playing = active?.playing == true
+
+    // Late engine failures park the clip; the bubble's retry row is its UI.
+    LaunchedEffect(key) {
+        player.playbackErrors.collectLatest {
+            if (it.key == key) clip = VoiceNoteClipState.Failed
+        }
+    }
+    // Pull the engine's position while it plays; the clock reads it back.
+    LaunchedEffect(key, playing) {
+        while (playing) {
+            player.refresh()
+            delay(200)
+        }
+    }
+
+    if (clip is VoiceNoteClipState.Failed) {
+        AttachmentLoadFailure(
+            label = "Voice note unavailable",
+            foreground = foreground,
+            onRetry = { clip = VoiceNoteClipState.NotLoaded },
+        )
+        return
+    }
+
+    // The wire's estimate until the engine loads metadata, then the real length.
+    val durationMs = active?.durationMs ?: note.durationMs?.toLong()?.takeIf { it > 0 }
+    val durationSeconds = durationMs?.let { it / 1000f } ?: 0f
+    val positionMs = scrub?.toLong() ?: (active?.positionMs ?: 0L)
+
+    Row(
+        modifier = Modifier
+            .widthIn(max = 360.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(foreground.copy(alpha = 0.10f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary)
+                .clickable(role = Role.Button) {
+                    when {
+                        playing -> player.pause()
+                        clip is VoiceNoteClipState.Loading -> Unit
+                        active != null && player.resumable(key) ->
+                            if (player.resume() != null) clip = VoiceNoteClipState.Failed
+                        clip is VoiceNoteClipState.Ready ->
+                            startPlayback((clip as VoiceNoteClipState.Ready).data)
+                        else -> loadAndPlay()
+                    }
+                }
+                .semantics {
+                    contentDescription = if (playing) "Pause voice note" else "Play voice note"
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                clip is VoiceNoteClipState.Loading && active == null ->
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White,
+                    )
+                playing -> VoiceNotePauseGlyph(Color.White)
+                else -> Icon(
+                    imageVector = Icons.Filled.PlayArrow,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        Slider(
+            // The slider works in seconds; without an explicit range Compose clamps
+            // it to 0f..1f and scrubs can only land inside the first second.
+            value = if (durationSeconds > 0f) (positionMs / 1000f).coerceIn(0f, durationSeconds) else 0f,
+            valueRange = if (durationSeconds > 0f) 0f..durationSeconds else 0f..1f,
+            onValueChange = { scrub = it * 1000f },
+            onValueChangeFinished = {
+                val target = scrub
+                scrub = null
+                if (target != null && active != null) player.seek(key, target.toLong())
+            },
+            // Like the desktop range input: no scrubbing until the length is known.
+            enabled = active != null && durationMs != null,
+            modifier = Modifier
+                .weight(1f)
+                .semantics { contentDescription = "Seek voice note" },
+        )
+        Text(
+            voiceNoteClock(positionMs) + " / " + (durationMs?.let(::voiceNoteClock) ?: "--:--"),
+            fontSize = 11.sp,
+            color = foreground.copy(alpha = 0.80f),
+        )
+    }
+}
+
+/** The pause glyph the core icon set does not carry, drawn at the button's scale. */
+@Composable
+private fun VoiceNotePauseGlyph(color: Color) {
+    Canvas(modifier = Modifier.size(14.dp)) {
+        val bar = size.width / 5f
+        val gap = size.width / 5f
+        drawRoundRect(
+            color = color,
+            topLeft = Offset.Zero,
+            size = Size(bar, size.height),
+            cornerRadius = CornerRadius(bar / 2f),
+        )
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(bar + gap, 0f),
+            size = Size(bar, size.height),
+            cornerRadius = CornerRadius(bar / 2f),
+        )
     }
 }
 
@@ -739,6 +968,44 @@ private fun ActivityChip(
                 maxLines = 1,
                 color = tint,
             )
+        }
+    }
+}
+
+/**
+ * A quiet chip under a reply for the harness's receipts (the work digest, a
+ * compaction record): one line, and the full text on tap. Port of
+ * `ReceiptChip` in `ios/App/ChatView.swift`.
+ */
+@Composable
+private fun ReceiptChip(label: String, detail: String) {
+    if (label.isEmpty()) return
+    var expanded by remember(label) { mutableStateOf(false) }
+    val haptics = rememberHaptics()
+    Column(
+        modifier = Modifier
+            .padding(start = 4.dp)
+            .heightIn(min = MIN_TOUCH_TARGET)
+            .clickable(role = Role.Button) {
+                haptics.play(TactileAction.TOGGLE_ACTIVITY_RUN)
+                expanded = !expanded
+            }
+            .semantics(mergeDescendants = true) { contentDescription = label },
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(ACTIVITY_DOT)
+                    .background(secondaryTint, CircleShape),
+            )
+            Text(text = label, fontSize = 13.sp, maxLines = 1, color = secondaryTint)
+        }
+        if (expanded && detail.isNotEmpty() && detail != label) {
+            Text(text = detail, fontSize = 12.sp, color = secondaryTint)
         }
     }
 }

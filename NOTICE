@@ -11,3 +11,7 @@ under the MIT License.
 
 The secure phone credential transport uses @hpke/core and @hpke/common from
 hpke-js, Copyright 2023-2024 Ajitomi Daisuke, used under the MIT License.
+
+Selected provider icon paths are from Simple Icons, used under CC0 1.0.
+The Cohere provider icon path is from Lobe Icons, Copyright 2023 LobeHub,
+used under the MIT License.

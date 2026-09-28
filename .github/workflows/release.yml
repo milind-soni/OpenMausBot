@@ -519,18 +519,35 @@ jobs:
           SHA: ${{ needs.prepare.outputs.sha }}
         run: |
           tag="v$VERSION"
-          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$SHA" \
-              --draft --title "OpenMausBot $VERSION" \
-              --generate-notes
-          else
-            target=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)
-            target_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$target" --jq .sha)
-            test "$target_sha" = "$SHA" || {
-              echo "::error::$tag draft targets $target_sha, not pinned release commit $SHA"
-              exit 1
-            }
-          fi
+          ensure_draft() {
+            local repo=$1
+            shift
+            local attempt delay
+            for attempt in 1 2 3 4 5; do
+              gh release view "$tag" --repo "$repo" > /dev/null 2>&1 && return 0
+              if gh release create "$tag" --repo "$repo" "$@"; then
+                return 0
+              fi
+              # The API can create the release before a transient response
+              # failure reaches gh. Recover that success before retrying.
+              gh release view "$tag" --repo "$repo" > /dev/null 2>&1 && return 0
+              test "$attempt" -lt 5 || {
+                echo "::error::could not create $tag in $repo after $attempt attempts"
+                return 1
+              }
+              delay=$((5 << (attempt - 1)))
+              echo "::warning::release creation failed for $repo; retrying in ${delay}s ($attempt/5)"
+              sleep "$delay"
+            done
+          }
+          ensure_draft "$GITHUB_REPOSITORY" --target "$SHA" \
+            --draft --title "OpenMausBot $VERSION" --generate-notes
+          target=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)
+          target_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$target" --jq .sha)
+          test "$target_sha" = "$SHA" || {
+            echo "::error::$tag draft targets $target_sha, not pinned release commit $SHA"
+            exit 1
+          }
           for file in assets/*; do
             gh release upload "$tag" "$file" --repo "$GITHUB_REPOSITORY" --clobber
           done
@@ -545,10 +562,27 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           tag="v$VERSION"
-          if ! gh release view "$tag" --repo milind-soni/openmausbot-releases > /dev/null 2>&1; then
-            gh release create "$tag" --repo milind-soni/openmausbot-releases \
-              --draft --title "OpenMausBot $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
-          fi
+          ensure_draft() {
+            local repo=$1
+            shift
+            local attempt delay
+            for attempt in 1 2 3 4 5; do
+              gh release view "$tag" --repo "$repo" > /dev/null 2>&1 && return 0
+              if gh release create "$tag" --repo "$repo" "$@"; then
+                return 0
+              fi
+              gh release view "$tag" --repo "$repo" > /dev/null 2>&1 && return 0
+              test "$attempt" -lt 5 || {
+                echo "::error::could not create $tag in $repo after $attempt attempts"
+                return 1
+              }
+              delay=$((5 << (attempt - 1)))
+              echo "::warning::release creation failed for $repo; retrying in ${delay}s ($attempt/5)"
+              sleep "$delay"
+            done
+          }
+          ensure_draft milind-soni/openmausbot-releases \
+            --draft --title "OpenMausBot $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
           gh release edit "$tag" --repo milind-soni/openmausbot-releases \
             --title "OpenMausBot $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
           for file in assets/*; do

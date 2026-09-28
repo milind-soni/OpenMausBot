@@ -11,7 +11,7 @@ name: OpenMausCompanion
 options:
   bundleIdPrefix: com.openmausbot
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "16.0"
   createIntermediateGroups: true
 
 packages:
@@ -62,10 +62,12 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        # What appears under the icon. Distinct from the desktop app on
-        # purpose: someone may well have both, and two identical labels on
-        # one person's devices is a small cruelty.
-        CFBundleDisplayName: OpenMausMobile
+        # What appears under the icon. This MUST stay close to the App Store
+        # listing name ("MausBot") or review rejects the build under
+        # guideline 2.3.8: a person who installs "MausBot" has to be able to
+        # find it on the home screen. The desktop app is "OpenMausBot", which
+        # is near enough to read as the same family and still tell them apart.
+        CFBundleDisplayName: MausBot
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
@@ -179,7 +181,7 @@ targets:
     info:
       path: ShareExtension/Info.plist
       properties:
-        CFBundleDisplayName: OpenMausBot
+        CFBundleDisplayName: MausBot
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         OpenMausKeychainAccessGroup: $(AppIdentifierPrefix)group.com.openmausbot.shared
@@ -204,16 +206,28 @@ targets:
               NSExtensionActivationSupportsFileWithMaxCount: 4
               NSExtensionActivationSupportsAttachmentsWithMaxCount: 4
 
-  # The Live Activity lives in a widget extension. It shares the mascot's
-  # drawing and data with the app, and the activity contract in Shared/.
+  # The Live Activity lives in a widget extension, alongside the home-screen
+  # widgets. It shares the mascot's drawing and data with the app, and the
+  # activity contract in Shared/.
   OpenMausCompanionWidgets:
     type: app-extension
     platform: iOS
+    # Live Activities and the Dynamic Island arrived in 16.1, so this
+    # extension cannot go as low as the app itself. iPhones on 16.0 simply
+    # install the app without the widget extension.
+    deploymentTarget: "16.1"
     sources:
       - path: Widgets
       - path: Shared
+      # Home-screen widgets read their snapshot from the App Group, and the
+      # answer intent resolves tokens through the same shared connection
+      # store the Share extension uses.
+      - path: AppShared
       - path: App/MausAvatar.swift
       - path: App/MausFaceData.swift
+      # MascotState resolves the face for the post-answer refresh a widget
+      # performs; it is self-contained above Core, so it rides along.
+      - path: App/MascotState.swift
     dependencies:
       # MausAvatar draws whichever body a bot wears, and the body catalog and
       # its path parser live in CompanionCore. The extension shares the
@@ -227,12 +241,25 @@ targets:
         CURRENT_PROJECT_VERSION: "6"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
+        APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: true
+    # The widget extension joins the trusted-extension family the Share
+    # extension set up: the App Group carries its snapshot, and the shared
+    # keychain access group carries the tokens its answer intent will ask
+    # for.
+    entitlements:
+      path: Widgets/OpenMausCompanionWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.openmausbot.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)group.com.openmausbot.shared
     info:
       path: Widgets/Info.plist
       properties:
-        CFBundleDisplayName: OpenMausMobile
+        CFBundleDisplayName: MausBot
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        OpenMausKeychainAccessGroup: $(AppIdentifierPrefix)group.com.openmausbot.shared
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

@@ -331,7 +331,7 @@ describe("ensureGrokInjectSlug", () => {
     const instance = await GrokAgentDriver.create({
       instanceId: "grok-omlx-argv",
       displayName: "Grok",
-      environment: { HOME: home, FAKE_ACP_DUMP: dump },
+      environment: { HOME: home, USERPROFILE: home, FAKE_ACP_DUMP: dump },
       enabled: true,
       config: { cli: FAKE_ACP, fullAuto: false },
     });

@@ -1,4 +1,4 @@
-// Reviewed vendor assets, downloaded and hashed on 2026-09-07. Update all
+// Reviewed vendor assets, downloaded and hashed on 2026-09-16. Update all
 // pins together and run each platform's packaged, offline browser smoke test.
 // This is Chromium's headless shell, not full Chrome (which includes Widevine).
 import { join } from "node:path";
@@ -8,15 +8,16 @@ import {
   resolveAgentBrowserReleaseAsset,
 } from "./browser-engine-release.ts";
 
-export const CHROME_VERSION = "152.0.7977.82";
-export const SUPPORTED_BROWSER_TARGETS = ["darwin-arm64", "darwin-x64", "linux-x64", "win32-x64"] as const;
+export const CHROME_VERSION = "153.0.8010.47";
+export const SUPPORTED_BROWSER_TARGETS = ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"] as const;
 export type BrowserBundleTarget = typeof SUPPORTED_BROWSER_TARGETS[number];
 
 const CHROME_ASSETS = {
-  "darwin-arm64": { platform: "mac-arm64", bytes: 97760996, sha256: "1615f063c894aa824fd55c89f8f05e9904f63cce0c95d0cbce7394d77884fba5", executableSha256: "ac18537fb2bc2b72b0440893b6ea5d4ef3bacc6220b1e9a1693c73f8b1045fbe" },
-  "darwin-x64": { platform: "mac-x64", bytes: 102895824, sha256: "c903707292c6aaed7c6e572c0bb5e6645454e45d9e0e6db27e876b18e9165f31", executableSha256: "2faefd55d4e47764956e31e338d362a1e794037fa772a426ffd510f122f33f19" },
-  "linux-x64": { platform: "linux64", bytes: 119454769, sha256: "0ca12ea26b502a83e32db334a17883c315348845efc071d908de7a6d94a97eff", executableSha256: "1301a5024fef1d58c4cfbde5d44794cb18c5b2cbbe4f3c64f81cc4eaa683c45f" },
-  "win32-x64": { platform: "win64", bytes: 119768220, sha256: "86fb1fa7fbbda65f6f1572062c358803e61a6e6d9489e6619b37a61d609fa845", executableSha256: "ec0744f041cb6c35c439c85a5ac42d77b507838cd59cac005e25114025336c98" },
+  "darwin-arm64": { platform: "mac-arm64", bytes: 98668949, sha256: "6d28839675b6f22dbd7ba8775dbdabcae7a5be37b482380b27b12f05b748b955", executableSha256: "111ee425ea5b0a01dcb19fda16452a9be0319749cba374b1c987d2437d8dcedb" },
+  "darwin-x64": { platform: "mac-x64", bytes: 103712919, sha256: "aa178547f9751fbcf413e0f57915ddb72e83064d4d1c4a29dc1719b169f9cc2f", executableSha256: "33452695b1b6f18db2f796a422eca69b69ca8aacce36d1ff8c6f5d69eac1a635" },
+  "linux-arm64": { platform: "linux-arm64", bytes: 120245582, sha256: "af0931a58d6bab688112d5ca1f7abd6d95c0b8a296ef34637f272795787774d7", executableSha256: "b6a9f0483c976fddc72c34ce1c983a1275163cdfb95576874bfed5ff07c53807" },
+  "linux-x64": { platform: "linux64", bytes: 119695587, sha256: "7728775cf4a35464cd81c8eea2d44d6d32ccc0bd1edfa75aea7f32d146963d63", executableSha256: "ea90dee9cbd7b17f197eb6c386bd9f1ff636734ee99753cd2408658c45358bf2" },
+  "win32-x64": { platform: "win64", bytes: 120466147, sha256: "9f405cfaf7bc08bf9e046e653cd3086c0faa1d4e25907de857f7e7f093a20122", executableSha256: "01176f6928faeb37ff018bc8884bbca8a0197f51b659d467f2501ab2c64f9fcf" },
 } as const;
 
 export function browserBundleSpec(target: string) {

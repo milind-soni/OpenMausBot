@@ -18,6 +18,21 @@ describe("readClaudeModelCatalog", () => {
       { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
       { id: "claude-fable-5", label: "Claude Fable 5" },
     ]);
+    const ids = STATIC_CLAUDE_MODELS.options.map((option) => option.id);
+    expect(STATIC_CLAUDE_MODELS.options[ids.indexOf("claude-opus-5-5")]).toEqual({
+      id: "claude-opus-5-5",
+      label: "Claude Opus 5.5",
+      contextWindow: 1_000_000,
+    });
+    expect(ids.indexOf("claude-opus-5-5")).toBe(ids.indexOf("claude-opus-5") - 1);
+    expect(STATIC_CLAUDE_MODELS.default).toBe("claude-sonnet-5");
+  });
+
+  it("lists ANTHROPIC_MODEL from the instance environment when settings are missing", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-claude-missing-home-"));
+    scratchDirs.push(home);
+    const catalog = readClaudeModelCatalog({ HOME: join(home, "missing"), ANTHROPIC_MODEL: "MiniMax-M3" });
+    expect(catalog.options).toEqual([...STATIC_CLAUDE_MODELS.options, { id: "MiniMax-M3", label: "MiniMax-M3", custom: true }]);
   });
 
   it("tags extra settings models as custom and leaves official rows untagged", () => {

@@ -11,7 +11,9 @@ import { closeMessageDb,
   indexMemoryFile,
   indexedMemoryFiles,
   insertMessage,
+  latestSaidByBot,
   readMessageText,
+  recentMessages,
   recallMemory,
   removeMemoryFile,
   readThread,
@@ -152,6 +154,52 @@ describe("message-db", () => {
     expect(recallMessages("broken links", ["own-a"])).toHaveLength(1);
     deleteThread("own-a");
     expect(recallMessages("audit", ["own-a", "own-b"])).toEqual([]);
+  });
+
+  it("recall by time: a window on ranked hits, a newest-first listing without words", () => {
+    const day = 86_400_000;
+    const now = Date.UTC(2026, 8, 16, 12);
+    insertMessage("own-a", msg("old", "audit of the old pricing page", { role: "bot", at: now - 5 * day }));
+    insertMessage("own-a", msg("mid", "audit of the new pricing page", { role: "bot", at: now - day }));
+    insertMessage("own-b", msg("new", "lunch plans, no audit", { role: "user", at: now - 3_600_000 }));
+    insertMessage("other", msg("theirs", "audit in another bot's thread", { role: "bot", at: now }));
+    insertMessage("own-a", { ...msg("chip", "audit", { at: now }), kind: "activity" });
+
+    // the window narrows a ranked recall
+    expect(recallMessages("audit pricing", ["own-a", "own-b"]).map((hit) => hit.messageId).sort()).toEqual(["mid", "old"]);
+    expect(recallMessages("audit pricing", ["own-a", "own-b"], 12, { since: now - 2 * day }).map((hit) => hit.messageId)).toEqual(["mid"]);
+    expect(recallMessages("audit pricing", ["own-a", "own-b"], 12, { until: now - 2 * day }).map((hit) => hit.messageId)).toEqual(["old"]);
+
+    // no words: everything said in the window, newest first, text only, own threads only
+    const recent = recentMessages(["own-a", "own-b"], { since: now - 2 * day });
+    expect(recent.map((hit) => hit.messageId)).toEqual(["new", "mid"]);
+    expect(recent[0]).toMatchObject({ threadId: "own-b", role: "user", snippet: "lunch plans, no audit" });
+    expect(recentMessages(["own-a", "own-b"], { since: now - 2 * day }, 1).map((hit) => hit.messageId)).toEqual(["new"]);
+    expect(recentMessages([], { since: 0 })).toEqual([]);
+  });
+
+  it("latestSaidByBot: one line per thread, the bot's own words only, inside the window", () => {
+    const now = Date.UTC(2026, 8, 16, 12);
+    const hour = 3_600_000;
+    // a 1:1 thread: the bot's lines carry no `from`
+    insertMessage("dm", msg("d1", "I started the invoice run", { role: "bot", at: now - 3 * hour }));
+    insertMessage("dm", msg("d2", "Sent the three flagged invoices.\n\nAnything else?", { role: "bot", at: now - hour }));
+    insertMessage("dm", msg("d3", "thanks", { role: "user", at: now - hour + 1 }));
+    // a room thread: lines from two bots; only this bot's count
+    insertMessage("room", msg("r1", "I can take the deploy", { role: "bot", at: now - 2 * hour, from: { botId: "me", name: "Me", color: "#000" } }));
+    insertMessage("room", msg("r2", "and I'll review it", { role: "bot", at: now - 30 * 60_000, from: { botId: "them", name: "Them", color: "#111" } }));
+    // an old thread, outside the window
+    insertMessage("stale", msg("s1", "last week's summary", { role: "bot", at: now - 72 * hour }));
+    // a chip is not something the bot said
+    insertMessage("dm", { ...msg("chip", "ran tests", { at: now }), role: "bot", kind: "activity" });
+
+    const latest = latestSaidByBot(["dm", "room", "stale", "not-mine"], "me", now - 48 * hour);
+    expect(latest).toEqual([
+      { threadId: "dm", messageId: "d2", at: now - hour, head: "Sent the three flagged invoices. Anything else?" },
+      { threadId: "room", messageId: "r1", at: now - 2 * hour, head: "I can take the deploy" },
+    ]);
+    expect(latestSaidByBot(["dm", "room"], "me", now - 48 * hour, 1).map((row) => row.threadId)).toEqual(["dm"]);
+    expect(latestSaidByBot([], "me", 0)).toEqual([]);
   });
 
   it("recall names the bot behind a line another bot delivered with ask_bot", () => {
@@ -334,5 +382,22 @@ describe("describeMissingFts5", () => {
   it("leaves every other error alone", () => {
     expect(describeMissingFts5(new Error("database is locked"))).toBeNull();
     expect(describeMissingFts5("disk I/O error")).toBeNull();
+  });
+});
+
+describe("recall of digest rows", () => {
+  beforeEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    mkdirSync(DATA_DIR, { recursive: true });
+  });
+
+  it("finds a digest by its text but ranks it after an ordinary text hit", () => {
+    insertMessage("t1", msg("m1", "we raised the retry limit to five", { role: "bot" }));
+    insertMessage("t1", { ...msg("d1", "[digest] tools: Edit ×1 · files: changed src/retry.ts · reply: retry limit raised"), kind: "digest", role: "bot" });
+    insertMessage("t1", msg("m2", "unrelated chatter about lunch"));
+    const hits = recallMessages("retry limit", ["t1"]);
+    expect(hits.map((h) => h.messageId)).toEqual(["m1", "d1"]);
+    expect(hits[1]?.kind).toBe("digest");
   });
 });

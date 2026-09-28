@@ -1,6 +1,5 @@
 package com.openmausbot.companion.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -16,19 +15,41 @@ import androidx.compose.ui.text.style.TextDirection
  * `Color.secondary`, and the one branded colour is the mascot green the desktop
  * uses for the profile avatar.
  */
-private val Green = Color(MausPalette.argb("green"))
+/** CSS's eight-digit form is RRGGBBAA; Compose expects the alpha first. */
+internal fun cssHexToArgb(hex: String): Long {
+    require(hex.length == 6 || hex.length == 8) { "Expected RRGGBB or RRGGBBAA: $hex" }
+    return if (hex.length == 6) {
+        "FF$hex".toLong(16)
+    } else {
+        (hex.takeLast(2) + hex.dropLast(2)).toLong(16)
+    }
+}
 
-private val LightColors = lightColorScheme(
-    primary = Green,
-    onPrimary = Color.White,
-    secondary = Green,
-)
+private fun String.color(): Color = Color(cssHexToArgb(this))
 
-private val DarkColors = darkColorScheme(
-    primary = Green,
-    onPrimary = Color.White,
-    secondary = Green,
-)
+private fun AppearanceSkin.colorScheme() = colors.let { palette ->
+    if (isDark) {
+        darkColorScheme(
+            primary = palette.accent.color(), onPrimary = palette.accentInk.color(),
+            secondary = palette.accent.color(), onSecondary = palette.accentInk.color(),
+            background = palette.app.color(), onBackground = palette.ink.color(),
+            surface = palette.card.color(), onSurface = palette.ink.color(),
+            surfaceVariant = palette.panel.color(), onSurfaceVariant = palette.secondaryInk.color(),
+            outline = palette.outline.color(), error = palette.error.color(), onError = Color.White,
+            tertiary = palette.success.color(), onTertiary = Color.White,
+        )
+    } else {
+        lightColorScheme(
+            primary = palette.accent.color(), onPrimary = palette.accentInk.color(),
+            secondary = palette.accent.color(), onSecondary = palette.accentInk.color(),
+            background = palette.app.color(), onBackground = palette.ink.color(),
+            surface = palette.card.color(), onSurface = palette.ink.color(),
+            surfaceVariant = palette.panel.color(), onSurfaceVariant = palette.secondaryInk.color(),
+            outline = palette.outline.color(), error = palette.error.color(), onError = Color.White,
+            tertiary = palette.success.color(), onTertiary = Color.White,
+        )
+    }
+}
 
 /**
  * Reading direction comes from the words, not from the locale's layout.
@@ -109,11 +130,17 @@ private val ContentDirectedTypography: Typography = Typography().run {
 
 @Composable
 fun CompanionTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    skin: AppearanceSkin = AppearanceSkin.DEFAULT,
+    /** Kept for existing preview and UI-test call sites during the skin migration. */
+    darkTheme: Boolean? = null,
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = when (darkTheme) {
+            true -> AppearanceSkin.MIDNIGHT.colorScheme()
+            false -> AppearanceSkin.LINEN.colorScheme()
+            null -> skin.colorScheme()
+        },
         typography = ContentDirectedTypography,
         content = content,
     )

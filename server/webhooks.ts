@@ -67,6 +67,8 @@ export interface WebhookManagerOptions {
   }) => { id: string };
   cancelQueued?: (webhookId: string, message: string) => void;
   pendingRuns?: (webhookId: string) => number;
+  /** Sink for delivery:"post" webhooks: the payload text lands in the bot's chat. */
+  post?: (botId: string, text: string) => void;
   /** The execution store commits this identity together with the queued run. */
   findRun?: (webhookId: string, deliveryId: string) => { id: string } | null;
 }
@@ -81,18 +83,27 @@ const MAX_ATTEMPTS = 2_000;
 const MAX_EVENT_CHARS = 48_000;
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 10;
-const MAX_PENDING_RUNS = 3;
+/** Unfinished (queued, running or waiting) runs one webhook may hold before
+ * new deliveries are refused with 429. A webhook can set its own limit; one
+ * fanning out a project manager's events needs more than a CI hook does. */
+export const DEFAULT_MAX_PENDING_RUNS = 3;
+export const MAX_PENDING_RUNS_LIMIT = 50;
+const maxPendingRunsSchema = z.number().int().min(1).max(MAX_PENDING_RUNS_LIMIT);
 
 const runOnSchema = z.enum(["maus", "cloud"]);
+const deliverySchema = z.enum(["run", "post"]);
 const eventTypesSchema = z.array(z.string()).max(20).optional();
 const triggerInputSchema = z.object({
   name: z.string(),
   prompt: z.string(),
   botId: z.string(),
   runOn: runOnSchema.optional(),
+  delivery: deliverySchema.optional(),
   enabled: z.boolean().optional(),
   verificationPending: z.boolean().optional(),
   eventTypes: eventTypesSchema,
+  /** `null` goes back to the default. */
+  maxPendingRuns: maxPendingRunsSchema.nullable().optional(),
 });
 const triggerPatchSchema = triggerInputSchema.partial();
 const verificationSampleSchema = z.object({
@@ -108,6 +119,7 @@ const storedWebhookSchema = z.object({
   prompt: z.string(),
   botId: z.string().min(1),
   runOn: runOnSchema,
+  delivery: deliverySchema.optional(),
   enabled: z.boolean(),
   createdAt: z.number().finite().nonnegative(),
   updatedAt: z.number().finite().nonnegative(),
@@ -118,6 +130,9 @@ const storedWebhookSchema = z.object({
   verifiedAt: z.number().finite().nonnegative().optional(),
   verificationSample: verificationSampleSchema.optional(),
   eventTypes: eventTypesSchema,
+  // A hand-edited value out of range falls back to the default instead of
+  // making the whole webhooks file unreadable.
+  maxPendingRuns: maxPendingRunsSchema.optional().catch(undefined),
   secretHash: z.string().regex(/^[a-f0-9]{64}$/),
 });
 const deliveryReceiptSchema = z.object({
@@ -196,6 +211,8 @@ function cleanInput(input: WebhookTriggerInput): CleanWebhookInput {
     verificationPending: enabled ? false : input.verificationPending === true,
   };
   if (eventTypes.length) clean.eventTypes = eventTypes;
+  if (input.delivery) clean.delivery = input.delivery;
+  if (typeof input.maxPendingRuns === "number") clean.maxPendingRuns = input.maxPendingRuns;
   return clean;
 }
 
@@ -335,13 +352,17 @@ export class WebhookManager {
       prompt: patch.prompt ?? trigger.prompt,
       botId: patch.botId ?? trigger.botId,
       runOn: patch.runOn ?? trigger.runOn,
+
+      delivery: patch.delivery ?? trigger.delivery,
       enabled: patch.enabled ?? trigger.enabled,
       verificationPending: patch.verificationPending ?? trigger.verificationPending,
       eventTypes: patch.eventTypes ?? trigger.eventTypes,
+      maxPendingRuns: patch.maxPendingRuns === undefined ? trigger.maxPendingRuns : patch.maxPendingRuns,
     });
     if (this.options.botState(clean.botId) === "missing") fail(400, "That MAUS no longer exists");
     Object.assign(trigger, clean, { updatedAt: this.now() });
     if (!clean.eventTypes?.length) delete trigger.eventTypes;
+    if (clean.maxPendingRuns === undefined) delete trigger.maxPendingRuns;
     if (patch.enabled === false) {
       this.options.cancelQueued?.(trigger.id, "The webhook was paused before this delivery started");
     }
@@ -465,8 +486,11 @@ export class WebhookManager {
 
     // A sender retrying an already-accepted delivery must remain idempotent
     // even while this webhook's queue is full. Only new work consumes a slot.
-    if ((this.options.pendingRuns?.(trigger.id) ?? 0) >= MAX_PENDING_RUNS) {
-      fail(429, "This webhook already has too many unfinished tasks");
+    const maxPendingRuns = trigger.maxPendingRuns ?? DEFAULT_MAX_PENDING_RUNS;
+    const pendingRuns = this.options.pendingRuns?.(trigger.id) ?? 0;
+    if (pendingRuns >= maxPendingRuns) {
+      fail(429, `This webhook already has ${pendingRuns} unfinished ${pendingRuns === 1 ? "task" : "tasks"} (its limit is ${maxPendingRuns}). `
+        + "Retry after one finishes, or raise \"Unfinished tasks at once\" in the webhook's settings.");
     }
 
     const recent = (this.rate.get(trigger.endpointId) ?? []).filter((at) => now - at < RATE_WINDOW_MS);
@@ -475,6 +499,27 @@ export class WebhookManager {
     this.rate.set(trigger.endpointId, recent);
 
     const deliveryId = requestedDeliveryId || randomUUID();
+    // delivery:"post": the payload text becomes the bot's own chat message — no task,
+    // no model turn. For notification-style webhooks (a scheduled brief, an alert)
+    // that should read like the bot said it. Dedup/rate/attempt bookkeeping is shared.
+    if (trigger.delivery === "post") {
+      // Never fall through to a task run: a stored post webhook on a server
+      // without a post sink is a configuration error, not a run request.
+      if (!this.options.post) fail(503, "This server cannot post webhook messages to chat");
+      const raw = event.payload as { text?: unknown } | null;
+      const text =
+        raw && typeof raw === "object" && typeof raw.text === "string" && raw.text.trim() ? raw.text : serializePayload(event.payload);
+      this.options.post(trigger.botId, text.slice(0, 20000));
+      this.deliveries.push({ key: `${trigger.endpointId}:${deliveryId}`, runId: "post", at: now });
+      if (this.deliveries.length > MAX_DELIVERIES) this.deliveries.splice(0, this.deliveries.length - MAX_DELIVERIES);
+      trigger.lastReceivedAt = now;
+      trigger.deliveryCount += 1;
+      trigger.updatedAt = now;
+      this.appendAttempt(trigger, event, { outcome: "accepted", statusCode: 202, deliveryId, reason: "Posted to chat (no task run)" });
+      this.save();
+      this.emit(trigger);
+      return { deliveryId, duplicate: false };
+    }
     const run = this.options.enqueue({
       webhookId: trigger.id,
       webhookName: trigger.name,

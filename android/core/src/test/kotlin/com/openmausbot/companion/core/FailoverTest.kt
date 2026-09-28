@@ -29,6 +29,16 @@ class FailoverTest {
     )
 
     @Test
+    fun earlyStreamEofUsesOnlyProtectedFallbacks() {
+        val error = MissingStreamHelloException()
+        val rotation = CandidateRotation(listOf(hosted, tailnet, lan))
+        assertEquals(tailnet, rotation.advanceEndpoint(error))
+        assertEquals(hosted, rotation.advanceEndpoint(APIError.Transport("Truncated stream", error)))
+        assertEquals(listOf(hosted, tailnet), rotation.endpoints)
+        assertNull(CandidateRotation(listOf(hosted, lan)).advanceEndpoint(error))
+    }
+
+    @Test
     fun walksProtectedCandidatesInOrderAndWraps() {
         val rotation = CandidateRotation(listOf(hosted, tailnet))
         assertEquals(hosted, rotation.currentEndpoint)

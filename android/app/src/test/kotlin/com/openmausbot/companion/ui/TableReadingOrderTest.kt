@@ -31,8 +31,7 @@ import org.robolectric.annotation.Config
  * The order the table card offers a screen reader, read off the merged tree.
  *
  * This is the one thing about [DataTableCard] no pure function can answer. The
- * card was once a `Row` of `Column`s, which is the transpose of
- * `SQLResultTableView.swift`, and TalkBack on an API 34 emulator read it out as
+ * card was once a `Row` of `Column`s, and TalkBack on an API 34 emulator read it out as
  * *"LANGUAGE, Python, Java, Rust, YEAR, 1991, 1995, 2010"* — the whole of the
  * first column before the second, so no row survived the reading. A test that
  * asserted over `card.rows` would have been green through all of that; the

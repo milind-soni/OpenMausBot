@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  api,
+  ApiError,
   configStatusFromFrame,
   createStreamDeltaBuffer,
   currentTaskBot,
   initialState,
   loadSnapshotBoundary,
+  messageVersions,
   openNotificationTarget,
   openThread,
   persistBotUpdate,
@@ -13,7 +16,9 @@ import {
   pinBotThreadAction,
   reducer,
   requestConfirmedBotDeletion,
+  visibleMessages,
   visibleNotificationThread,
+  type AppState,
   type Bot,
   type BotAnnouncement,
   type ConfigStatusFrame,
@@ -22,7 +27,43 @@ import {
   type Action,
 } from "./store";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
+import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
+import type { ConnectorToolGrant } from "../../shared/wire";
 import type { RoutineRun } from "../lib/routines";
+
+describe("api refusals", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("keep the refusal's body for callers that read more than the sentence", async () => {
+    const refusal = { error: "Morgan has more than 30 skills. Choose fewer skills and try again.", choices: { skills: ["a", "b"] } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(refusal), { status: 400 })));
+    const error = await api("/api/teams/export", { method: "POST", body: "{}" }).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ message: refusal.error, status: 400, body: refusal });
+  });
+});
+
+describe("partial profile save responses", () => {
+  it.each([true, false])("preserves independently saved fields with about-me response first: %s", aboutFirst => {
+    const config = { ...initialState.config, profile: { name: "Old", email: "old@example.invalid", aboutMe: "Old biography" } } as NonNullable<AppState["config"]>;
+    const about: Action = { type: "profileSaved", profile: { aboutMe: "New biography" } };
+    const identity: Action = { type: "profileSaved", profile: { name: "New", email: "new@example.invalid" } };
+    const first = reducer({ ...initialState, config }, aboutFirst ? about : identity);
+    const last = reducer(first, aboutFirst ? identity : about);
+    expect(last.config?.profile).toEqual({ name: "New", email: "new@example.invalid", aboutMe: "New biography" });
+    expect(reducer(last, { type: "profileSaved", profile: { aboutMe: "" } }).config?.profile)
+      .toEqual({ name: "New", email: "new@example.invalid", aboutMe: "" });
+  });
+});
+
+describe("screen frame ownership", () => {
+  it("retains the source thread so a sibling's frame cannot masquerade as the selected screen", () => {
+    const first = reducer(initialState, { type: "screenFrame", botId: "bot", threadId: "vm-thread", png: "vm", mime: "image/png" });
+    const second = reducer(first, { type: "screenFrame", botId: "bot", threadId: "browser-thread", png: "browser", mime: "image/jpeg" });
+    expect(first.screens.bot).toMatchObject({ threadId: "vm-thread", png: "vm" });
+    expect(second.screens.bot).toMatchObject({ threadId: "browser-thread", png: "browser" });
+  });
+});
 
 describe("composer thread approval persistence", () => {
   it.each(["ask", "edits", "auto", "full", "custom"] as const)("saves %s through the scoped bridge and returns its committed state", async mode => {
@@ -109,7 +150,7 @@ describe("independent bot threads", () => {
       { threadId: "first", title: "First", createdAt: 1, activity: "idle", busy: false, unread: false,
         modelSelection: { instanceId: "codex", model: "thread-model", effort: "high" }, approvalMode: "auto", alwaysAllow: ["Read"] },
       { threadId: "second", title: "Second", createdAt: 2, activity: "waiting-on-you", busy: true, unread: true,
-        modelSelection: { instanceId: "claude", model: "other-model" }, approvalMode: "ask" },
+        modelSelection: { instanceId: "claude", model: "other-model" }, approvalMode: "ask", turnStartedAt: 5_000 },
     ],
   };
   const start = () => ({ ...initialState, bots: [bot], selectedId: bot.id });
@@ -119,7 +160,9 @@ describe("independent bot threads", () => {
     expect(current).toMatchObject({ busy: false, activity: "idle", unread: false, approvalMode: "auto", alwaysAllow: ["Read"] });
     expect(current.modelSelection).toEqual(bot.tasks?.[0]?.modelSelection);
     expect(bot.busy).toBe(true);
-    expect(currentTaskBot(bot, "second")).toMatchObject({ busy: true, activity: "waiting-on-you", approvalMode: "ask" });
+    expect(currentTaskBot(bot, "second")).toMatchObject({ busy: true, activity: "waiting-on-you", approvalMode: "ask", turnStartedAt: 5_000 });
+    expect(currentTaskBot(bot).turnStartedAt).toBeNull();
+    expect(currentTaskBot({ ...bot, tasks: [{ threadId: "first", title: "Legacy", createdAt: 1 }] }).turnStartedAt).toBeNull();
     expect(currentTaskBot({ ...bot, tasks: [{ threadId: "first", title: "Legacy", createdAt: 1 }] }).modelSelection).toEqual(bot.modelSelection);
   });
 
@@ -311,6 +354,39 @@ describe("keyboard shortcuts dialog state", () => {
   });
 });
 
+describe("connector grants persistence", () => {
+  const announcement = () => ({
+    id: "bot-1",
+    threadId: "thread-1",
+    name: "Maus",
+    title: "Helper",
+    description: "",
+    notifications: true,
+    color: "green" as const,
+    unread: false,
+    modelSelection: { instanceId: "codex", model: "gpt-5.6-sol" },
+    approvalMode: "ask" as const,
+  });
+
+  it("PATCHes the exact explicit tool set the editor saved", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement() }));
+    const grants: Record<string, ConnectorToolGrant> = {
+      gmail: { tools: ["GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL"] },
+      slack: { tools: "*" },
+    };
+    await persistBotUpdate("bot-1", { connectorTools: grants }, new AbortController().signal, request);
+    // Exact-set semantics: the wire body is the record verbatim, so a
+    // reload of what the server stored equals what the person picked.
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ connectorTools: grants });
+  });
+
+  it("sends null to drop the record and return to the legacy boolean", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement() }));
+    await persistBotUpdate("bot-1", { connectorTools: null }, new AbortController().signal, request);
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ connectorTools: null });
+  });
+});
+
 describe("trusted approval-mode persistence", () => {
   const announcement = (approvalMode: Bot["approvalMode"] = "ask") => ({
     id: "bot-1",
@@ -349,11 +425,20 @@ describe("trusted approval-mode persistence", () => {
     expect(setMode).toHaveBeenCalledWith("bot-1", "full", { acknowledgeLocalAuto: false });
   });
 
+  it("passes all-threads scope only through the private grant", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
+    const setMode = vi.fn(async () => announcement("full"));
+    await persistBotUpdate("bot-1", { approvalMode: "full", confirmFullAccess: true, applyToAllThreads: true, title: "Chief" },
+      new AbortController().signal, request, { setMode });
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ title: "Chief" });
+    expect(setMode).toHaveBeenCalledWith("bot-1", "full", { acknowledgeLocalAuto: false, allThreads: true });
+  });
+
   it("never sends a Full confirmation over HTTP after a rapid switch back to Ask", async () => {
     const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
     await persistBotUpdate(
       "bot-1",
-      { approvalMode: "ask", confirmFullAccess: true },
+      { approvalMode: "ask", confirmFullAccess: true, applyToAllThreads: true },
       new AbortController().signal,
       request,
     );
@@ -1041,6 +1126,51 @@ describe("optimistic sent messages", () => {
     expect(removed.bots[0]?.activeLeafId).toBe(root.id);
   });
 
+  describe("edits", () => {
+    const question: Message = { id: "q1", role: "user", kind: "text", text: "first try", at: 2, parentId: root.id };
+    const answer: Message = { id: "a1", role: "bot", kind: "text", text: "old answer", at: 3, parentId: question.id };
+    const conversation = (): AppState => ({
+      ...initialState,
+      bots: [{ ...bot, messages: [root, question, answer], activeLeafId: answer.id }],
+    });
+
+    it("swaps the edited question in immediately and hides the old answer", () => {
+      const edited = reducer(conversation(), {
+        type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: question.id, text: " second try ", sendId: "edit-1",
+      });
+      const visible = visibleMessages(edited.bots[0]!);
+      expect(visible.map((message) => message.text)).toEqual(["Ready", "second try"]);
+      expect(edited.bots[0]?.activeLeafId).toBe("optimistic-edit-1");
+      expect(messageVersions(edited.bots[0]!, question).map((message) => message.id)).toEqual([question.id, "optimistic-edit-1"]);
+    });
+
+    it("hands the swap to the server fork and keeps its reply visible", () => {
+      const edited = reducer(conversation(), {
+        type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: question.id, text: "second try", sendId: "edit-2",
+      });
+      const fork: Message = { id: "q2", role: "user", kind: "text", text: "second try", at: 4, parentId: root.id, sendId: "edit-2" };
+      const reconciled = reducer(edited, { type: "messageAdded", threadId: bot.threadId, message: fork });
+      const confirmed = reducer(reconciled, { type: "threadActive", threadId: bot.threadId, activeLeafId: fork.id });
+      const reply: Message = { id: "a2", role: "bot", kind: "text", text: "new answer", at: 5, parentId: fork.id };
+      const answered = reducer(confirmed, { type: "messageAdded", threadId: bot.threadId, message: reply });
+      // the POST response for the same fork arrives last and must not rewind
+      const late = reducer(answered, { type: "messageAdded", threadId: bot.threadId, message: fork });
+      expect(visibleMessages(late.bots[0]!).map((message) => message.text)).toEqual(["Ready", "second try", "new answer"]);
+      expect(late.bots[0]?.messages.some((message) => message.id.startsWith("optimistic-"))).toBe(false);
+    });
+
+    it("puts the old question and answer back when the edit fails", () => {
+      const edited = reducer(conversation(), {
+        type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: question.id, text: "second try", sendId: "edit-3",
+      });
+      const restored = reducer(edited, {
+        type: "optimisticMessageRemoved", threadId: bot.threadId, sendId: "edit-3", restoreLeafId: answer.id,
+      });
+      expect(visibleMessages(restored.bots[0]!).map((message) => message.text)).toEqual(["Ready", "first try", "old answer"]);
+      expect(restored.bots[0]?.messages).toEqual([root, question, answer]);
+    });
+  });
+
   it("uses the same immediate reconciliation for a channel", () => {
     const group: Group = {
       id: "preview-room",
@@ -1129,6 +1259,17 @@ describe("routine receipt retention", () => {
     expect(all.routinesFocus).toEqual({ section: undefined, view: undefined, botId: undefined, routineId: undefined, nonce: 2 });
     const failures = reducer(focused, { type: "showRoutines", section: "logs" });
     expect(failures.routinesFocus).toEqual({ section: "logs", view: undefined, botId: undefined, routineId: undefined, nonce: 2 });
+  });
+
+  it("carries the problems filter from the errors pill and drops it on a plain visit", () => {
+    const focused = reducer(initialState, { type: "showRoutines", section: "logs", runStatus: "problems" });
+    expect(focused.routinesFocus).toEqual({ section: "logs", view: undefined, botId: undefined, routineId: undefined, runStatus: "problems", nonce: 1 });
+    const plain = reducer(focused, { type: "showRoutines", section: "logs" });
+    expect(plain.routinesFocus).toEqual({ section: "logs", view: undefined, botId: undefined, routineId: undefined, runStatus: undefined, nonce: 2 });
+  });
+
+  it("leaves the bulk-seen sweep to the server's emitted receipts", () => {
+    expect(reducer(initialState, { type: "markAllRoutineRunsSeen" })).toBe(initialState);
   });
 
   it("distinguishes a failed load from an empty schedule and recovers on hydration", () => {
@@ -1229,6 +1370,57 @@ describe("canonical message races", () => {
   });
 });
 
+describe("computer destination announcements", () => {
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the old target on Auto via %s", (kind) => {
+    const bot: Bot = {
+      id: "computer-bot", threadId: "computer-thread", name: "Ziggy", title: "", description: "",
+      notifications: true, color: "green", unread: false,
+      modelSelection: { instanceId: "codex", model: "default" }, computer: "browser",
+      messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+    };
+    const { computer: _oldComputer, ...announcement } = bot;
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "replacement-thread" : bot.threadId },
+    });
+    expect(next.bots[0]?.computer).toBeUndefined();
+    expect(next.bots[0]?.messages).toEqual(bot.messages);
+  });
+});
+
+describe("teammate wait announcements", () => {
+  const waiting: Bot = {
+    id: "wait-bot", threadId: "wait-thread", name: "Scooter", title: "", description: "",
+    notifications: true, color: "green", unread: false,
+    modelSelection: { instanceId: "codex", model: "default" }, busy: true, activity: "working", waitingForTeammates: true,
+    messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+  };
+  // The existing wire explicitly clears the coordination wait on settlement.
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the wait when a working frame reports settlement via %s", (kind) => {
+    const announcement = { ...waiting, waitingForTeammates: false };
+    const next = reducer({ ...initialState, bots: [waiting] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "replacement-thread" : waiting.threadId },
+    });
+    expect(next.bots[0]?.waitingForTeammates).toBe(false);
+    expect(next.bots[0]?.messages).toEqual(waiting.messages);
+  });
+
+  it("clears the wait on an idle frame too, not only a working one", () => {
+    const announcement = { ...waiting, waitingForTeammates: false };
+    const next = reducer({ ...initialState, bots: [waiting] }, { type: "botPatched", bot: { ...announcement, busy: false, activity: "idle" } });
+    expect(next.bots[0]?.waitingForTeammates).toBe(false);
+    expect(next.bots[0]?.busy).toBe(false);
+  });
+
+  it("keeps the wait painted while the frame still carries it", () => {
+    const { messages, ...rest } = waiting;
+    const next = reducer({ ...initialState, bots: [waiting] }, { type: "botPatched", bot: rest });
+    expect(next.bots[0]?.waitingForTeammates).toBe(true);
+    expect(next.bots[0]?.messages).toBe(messages);
+  });
+});
+
 describe("browser profile announcements", () => {
   it.each([undefined, null, "guest", "another-profile"])("replaces an old shared profile with %s without losing chat", (profile) => {
     const bot: Bot = {
@@ -1259,6 +1451,19 @@ describe("section Chiefs", () => {
     modelSelection: { instanceId: "codex", model: "default" },
     section,
     chiefOfStaff,
+  });
+
+  it("atomically removes a deleted team and its assignments before SSE arrives", () => {
+    const member = { ...bot("member", "Delivery"), messages: [] };
+    const other = { ...bot("other", "Personal"), messages: [] };
+    const group = { id: "group", threadId: "thread", section: "Delivery", name: "Review", memberIds: [], defaultResponder: { kind: "mentions" }, createdAt: 1, bulletin: "", messages: [], unread: false } satisfies Group;
+    const next = reducer({ ...initialState, bots: [member, other], groups: [group], sections: ["Delivery", "Personal"] },
+      { type: "sectionDeleted", section: "Delivery", sections: ["Personal"] });
+    expect(next.sections).toEqual(["Personal"]);
+    expect(next.bots[0].section).toBeUndefined();
+    expect(next.groups[0].section).toBeUndefined();
+    expect(next.bots[0].messages).toBe(member.messages);
+    expect(next.bots[1]).toBe(other);
   });
 
   it("clears previous membership when a complete bot frame moves it to General", () => {
@@ -1611,6 +1816,104 @@ describe("pending queued chip", () => {
   });
 });
 
+describe("scrollback pages", () => {
+  const message = (id: string, at: number) =>
+    ({ id, at, role: "user", kind: "text", text: id }) as never as Message;
+  const bot = {
+    id: "bot-1",
+    threadId: "thread-1",
+    messages: [message("m3", 3), message("m4", 4)],
+    hasMore: true,
+  } as never as Bot;
+  const state = { ...initialState, bots: [bot] };
+
+  it("marks the thread loading so one click cannot ask twice", () => {
+    const loading = reducer(state, { type: "loadOlderMessages", threadId: "thread-1" });
+    expect(loading.loadingOlder["thread-1"]).toBe(true);
+    expect(reducer(loading, { type: "loadOlderMessages", threadId: "thread-1" })).toBe(loading);
+  });
+
+  it("prepends a page, keeps held copies, and clears the flag", () => {
+    const loading = reducer(state, { type: "loadOlderMessages", threadId: "thread-1" });
+    const next = reducer(loading, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation: loading.transcriptGeneration["thread-1"] ?? 0,
+      // m3 overlaps the page this client already holds
+      messages: [message("m1", 1), message("m2", 2), message("m3", 3)],
+      hasMore: false,
+    });
+    expect(next.bots[0].messages.map((m) => m.id)).toEqual(["m1", "m2", "m3", "m4"]);
+    expect(next.bots[0].hasMore).toBe(false);
+    expect(next.loadingOlder).toEqual({});
+  });
+
+  it("drops a page that was in flight across a rewind, and stops the spinner", () => {
+    const withLeaf = { ...bot, activeLeafId: "m4" } as never as Bot;
+    const loading = reducer({ ...initialState, bots: [withLeaf] }, { type: "loadOlderMessages", threadId: "thread-1" });
+    const generation = loading.transcriptGeneration["thread-1"] ?? 0;
+
+    // an edit rewinds the visible branch while the page is on the wire
+    const rewound = reducer(loading, { type: "threadActive", threadId: "thread-1", activeLeafId: "m3" });
+    expect(rewound.transcriptGeneration["thread-1"]).not.toBe(generation);
+
+    const landed = reducer(rewound, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation,
+      messages: [message("abandoned", 1)],
+      hasMore: false,
+    });
+    expect(landed.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    expect(landed.bots[0].hasMore).toBe(true);
+    expect(landed.loadingOlder).toEqual({});
+  });
+
+  it("still lands a page over messages that arrived while it was on the wire", () => {
+    const loading = reducer({ ...initialState, bots: [bot] }, { type: "loadOlderMessages", threadId: "thread-1" });
+    const generation = loading.transcriptGeneration["thread-1"] ?? 0;
+    const appended = reducer(loading, {
+      type: "messageAdded",
+      threadId: "thread-1",
+      message: message("m5", 5) as never as Message,
+    });
+    const landed = reducer(appended, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation,
+      messages: [message("m2", 2)],
+      hasMore: true,
+    });
+    expect(landed.bots[0].messages.map((m) => m.id)).toEqual(["m2", "m3", "m4", "m5"]);
+    expect(landed.loadingOlder).toEqual({});
+  });
+
+  it("answers the scrollback question from a payload that carries a transcript", () => {
+    const group = {
+      id: "room",
+      threadId: "room-thread",
+      name: "Room",
+      memberIds: [],
+      defaultResponder: { kind: "mentions" },
+      createdAt: 1,
+      bulletin: "",
+      unread: false,
+      messages: [message("m9", 9)],
+      hasMore: true,
+    } as never as Group;
+    const withRoom = { ...initialState, groups: [group] };
+    // a frame that carries the whole thread and no page marker IS the thread
+    const complete = reducer(withRoom, {
+      type: "groupPatched",
+      group: { id: "room", threadId: "room-thread", messages: [message("m8", 8), message("m9", 9)] } as never as Group,
+    });
+    expect(complete.groups[0].hasMore).toBe(false);
+    // a patch with no transcript leaves the answer alone
+    const renamed = reducer(withRoom, { type: "groupPatched", group: { id: "room", name: "Renamed" } });
+    expect(renamed.groups[0].hasMore).toBe(true);
+  });
+});
+
 describe("messageAdded leaf adoption", () => {
   const baseBot = {
     id: "bot-1",
@@ -1838,6 +2141,12 @@ describe("live config frames", () => {
     localVm: { mode: "shared", maxInstances: 1 },
   };
 
+  it("keeps automatic recovery and its backup through live config refreshes", () => {
+    const automaticRecovery = { enabled: true, backup: { instanceId: "backup", model: "fixture-model" } };
+    expect(configStatusFromFrame({ ...baseFrame, automaticRecovery }).automaticRecovery).toEqual(automaticRecovery);
+    expect(configStatusFromFrame({ ...baseFrame, automaticRecovery: { enabled: false } }).automaticRecovery).toEqual({ enabled: false });
+  });
+
   it("preserves edition, budgets and billing through configStatusFromFrame", () => {
     const frame: ConfigStatusFrame = {
       ...baseFrame,
@@ -1849,6 +2158,34 @@ describe("live config frames", () => {
     expect(status.edition).toEqual(frame.edition);
     expect(status.budgets).toEqual(frame.budgets);
     expect(status.billing).toEqual(frame.billing);
+  });
+
+  it("keeps saved provider keys and the fleet flag after a config SSE frame lands after a save's own response", () => {
+    const saved = reducer(initialState, {
+      type: "configStatus",
+      config: configStatusFromFrame({ ...baseFrame, openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" } }),
+    });
+    const frame: ConfigStatusFrame = {
+      ...baseFrame,
+      anthropic: { configured: true },
+      mistral: { configured: true },
+      openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" },
+      fleet: { available: true },
+    };
+    const state = reducer(saved, { type: "configStatus", config: configStatusFromFrame(frame) });
+    expect(state.config).toMatchObject({
+      anthropic: { configured: true },
+      mistral: { configured: true },
+      openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" },
+      fleet: { available: true },
+    });
+  });
+
+  it("carries the organisation's read-only desktop policy through a config frame", () => {
+    const managedPolicy = { organizationName: "Fixture Agency", version: 2, companyModelsOnly: true, allowedEngines: ["codex"],
+      mcp: { allowCustom: false, allowlist: ["github"] }, computers: { thisComputer: false, localVm: true, box: true, vps: true }, remoteAccess: false };
+    expect(configStatusFromFrame({ ...baseFrame, managedPolicy }).managedPolicy).toEqual(managedPolicy);
+    expect(configStatusFromFrame({ ...baseFrame, managedPolicy: null }).managedPolicy).toBeNull();
   });
 
   it("keeps edition, budgets and billing in state.config after a config SSE frame lands", () => {
@@ -1864,5 +2201,86 @@ describe("live config frames", () => {
       budgets: { monthlyUsd: 10, warnAtPercent: 80 },
       billing: { currency: "USD" },
     });
+  });
+});
+
+
+describe("conversation model variant discoveries", () => {
+  const selection = { instanceId: "opencode", model: "provider/model", variant: "minimal" };
+  const owner: Bot = { id: "owner", threadId: "first", name: "Owner", title: "", description: "", notifications: true,
+    color: "green", unread: false, modelSelection: selection, messages: [],
+    tasks: ["first", "second"].map((threadId) => ({ threadId, title: threadId, createdAt: 1, modelSelection: selection })) };
+  const start = () => ({ ...initialState, bots: [owner], instances: [{ instanceId: "opencode", driverKind: "opencodeGo", displayName: "OpenCode",
+    snapshot: { state: "available" as const }, capabilities: { modelVariants: true }, models: { default: selection.model, options: [] } }] });
+  const base = (threadId = "first", turnId = "turn-1") => ({ eventId: `${threadId}-${turnId}`, provider: "opencodeGo" as const,
+    providerInstanceId: "opencode", threadId, turnId, createdAt: "2026-09-15T12:00:00Z" });
+  const run = (state: AppState, event: RuntimeEvent) => reducer(state, { type: "modelVariantRuntime", event });
+  const discovery = (variants: ModelVariantState = { options: [{ id: "minimal", label: "Minimal" }], currentValue: "minimal" }, threadId = "first", turnId = "turn-1"): RuntimeEvent =>
+    ({ ...base(threadId, turnId), type: "session.model-variants", model: selection.model, variants });
+
+  it("keeps capabilities on their thread, separate from catalog and persisted choices", () => {
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = run(state, discovery());
+    const first = state.modelVariantSessions.first;
+    state = run(state, { ...base("second"), type: "turn.started" });
+    state = run(state, discovery({ options: [], currentValue: "default" }, "second"));
+    expect(state.modelVariantSessions.first).toEqual(first);
+    expect(state.modelVariantSessions.second.variants).toEqual({ options: [], currentValue: "default" });
+    expect(state.instances[0].models.options).toEqual([]);
+    expect(state.bots).toEqual([owner]);
+  });
+
+  it("requires the current turn, account, and model, rejecting stale discoveries and start events", () => {
+    expect(run(start(), discovery()).modelVariantSessions).toEqual({});
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = run(state, { ...base("first", "turn-2"), createdAt: "2026-09-15T12:00:01Z", type: "turn.started" });
+    expect(run(state, { ...base(), type: "turn.started" })).toBe(state);
+    expect(run(state, discovery())).toBe(state);
+    const valid = discovery(undefined, "first", "turn-2");
+    expect(run(state, { ...valid, providerInstanceId: "other" })).toBe(state);
+    expect(run(state, { ...valid, type: "session.model-variants", model: "other-model", variants: { options: [] } })).toBe(state);
+    expect(run(state, { ...valid, threadId: "missing" })).toBe(state);
+    expect(run(state, { ...valid, turnId: undefined })).toBe(state);
+    state = run(state, valid);
+    expect(state.modelVariantSessions.first.variants?.currentValue).toBe("minimal");
+  });
+
+  it("retains the last session choices on completion but refuses late updates", () => {
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = run(state, discovery());
+    state = run(state, { ...base(), type: "turn.completed", ok: true });
+    expect(state.modelVariantSessions.first.variants?.options).toEqual([{ id: "minimal", label: "Minimal" }]);
+    expect(run(state, discovery({ options: [] }))).toBe(state);
+    state = run(state, { ...base("first", "turn-2"), type: "turn.started", createdAt: "2026-09-15T12:00:01Z" });
+    expect(state.modelVariantSessions.first.variants).toBeUndefined();
+  });
+
+  it("drops discoveries when a thread changes model, but preserves sibling choices", () => {
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = run(state, discovery());
+    state = run(state, { ...base("second"), type: "turn.started" });
+    state = run(state, discovery(undefined, "second"));
+    state = reducer(state, { type: "setModel", botId: owner.id, threadId: "first", selection: { ...selection, model: "other-model", variant: undefined } });
+    expect(state.modelVariantSessions.first).toBeUndefined();
+    expect(state.modelVariantSessions.second.variants?.currentValue).toBe("minimal");
+    expect(state.bots[0].tasks![1].modelSelection).toEqual(selection);
+    expect(run(state, discovery())).toBe(state);
+  });
+
+  it("accepts capabilities for a background thread while keeping them out of another selected conversation", () => {
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = reducer(state, { type: "taskSwitched", bot: { ...owner, threadId: "second" } });
+    state = run(state, discovery());
+    expect(state.bots[0].threadId).toBe("second");
+    expect(state.modelVariantSessions.first.variants?.currentValue).toBe("minimal");
+    expect(state.modelVariantSessions.second).toBeUndefined();
+  });
+
+  it("clears runtime capabilities on reload while preserving the saved variant", () => {
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = run(state, discovery());
+    state = reducer(state, { type: "hydrate", bots: [owner], groups: [], computerControl: {} });
+    expect(state.modelVariantSessions).toEqual({});
+    expect(state.bots[0].tasks![0].modelSelection?.variant).toBe("minimal");
   });
 });

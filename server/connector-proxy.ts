@@ -4,10 +4,20 @@
 // to the configured Composio Session, but connection requests are converted
 // into first-class OpenMausBot chat cards. The agent never authors an auth
 // URL and credentials never pass through its transcript.
+// tools/list responses are trimmed to this bot's granted tools as a
+// prompt-time hint; every call is still judged harness-side by the grants
+// relay.
 //
 // stdout is the MCP transport. Never log there.
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
+import {
+  CONNECTOR_ALLOWED_TOOLS_ENV,
+  CONNECTOR_SERVICE_SLUGS_ENV,
+  filterToolsListFrame,
+  parseConnectorAllowedToolsEnv,
+  parseConnectorServiceSlugsEnv,
+} from "./connector-advertisement.ts";
 
 type Json = Record<string, unknown>;
 
@@ -16,6 +26,11 @@ const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
 const TOKEN = process.env.OMB_CONNECTOR_TOKEN ?? process.env.OMB_COMMS_TOKEN ?? "";
+// The bot's effective tool grants, or null when the harness sent none —
+// legacy bots, oversized allowlists, anything unreadable. null means the
+// upstream list is relayed verbatim; the harness still judges every call.
+const ALLOWED_TOOLS = parseConnectorAllowedToolsEnv(process.env[CONNECTOR_ALLOWED_TOOLS_ENV]);
+const SERVICE_SLUGS = parseConnectorServiceSlugsEnv(process.env[CONNECTOR_SERVICE_SLUGS_ENV]);
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
@@ -215,7 +230,11 @@ async function handle(message: Json): Promise<void> {
   }
   try {
     const response = await relay(message);
-    if (response && id !== undefined) send(response);
+    if (response && id !== undefined) {
+      send(method === "tools/list" && ALLOWED_TOOLS
+        ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS)
+        : response);
+    }
   } catch (error) {
     if (id === undefined) return;
     const messageText = error instanceof Error ? error.message : String(error);

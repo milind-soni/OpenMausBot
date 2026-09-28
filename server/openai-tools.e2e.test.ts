@@ -31,6 +31,30 @@ type ChatRequest = {
   tools?: Array<{ function: { name: string; description?: string } }>;
 };
 
+// The chat drivers keep the system message to the stable half of the
+// prompt, so the provider's cached prefix survives a memory write. Memory is
+// volatile: it rides the newest user message, under this label, on every
+// request (server/drivers/prompt-split.ts, openai-chat.ts).
+const CONTEXT_NOTE = "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:";
+const MEMORY = "Your memory (MEMORY.md):\n# Memory\n- Fixture prefers concise replies.";
+/** What the model was actually given: the system message and the newest
+ * user message, which carries the volatile context note. */
+function delivered(request: ChatRequest) {
+  const system = request.messages.find((message) => message.role === "system")?.content ?? "";
+  const turn = request.messages.findLast((message) => message.role === "user")?.content ?? "";
+  return { system, turn, all: `${system}\n${turn}` };
+}
+/** Memory reaches the model inside the turn that carries `text`, and not
+ * through the cacheable system prefix. */
+function expectMemoryInTurn(request: ChatRequest, text: string) {
+  const { system, turn } = delivered(request);
+  expect(system).not.toContain("Fixture prefers concise replies.");
+  expect(turn.slice(0, CONTEXT_NOTE.length + 2)).toBe(`${CONTEXT_NOTE}\n\n`);
+  expect(turn).toContain(MEMORY);
+  expect(turn.indexOf(MEMORY)).toBeLessThan(turn.lastIndexOf(text));
+  expect(turn.slice(-text.length)).toBe(text);
+}
+
 it("runs structured MCP calls through real harness approval and continuation, preserving text and cancellation", async () => {
   const requests: ChatRequest[] = [];
   let scenario = "allow";
@@ -128,14 +152,17 @@ it("runs structured MCP calls through real harness approval and continuation, pr
         settled = await wait();
       }
       const messages = await control(["messages", "--bot", bot.id, "--task", bot.activeTaskId, "--limit", "20"]);
-      const system = requests[before]!.messages.find((message) => message.role === "system")?.content ?? "";
-      expect(system).toContain("Fixture prefers concise replies.");
-      expect(system).not.toContain("update it with your file tools");
-      expect(system).not.toContain("File locations for this bot");
-      expect(system).not.toContain("read its exact SKILL.md path above with your file tools");
+      const first = delivered(requests[before]!);
+      expectMemoryInTurn(requests[before]!, "Write the verification artifact if a structured tool is requested.");
+      expect(first.all).not.toContain("update it with your file tools");
+      expect(first.all).not.toContain("File locations for this bot");
+      expect(first.all).not.toContain("read its exact SKILL.md path above with your file tools");
       if (mode === "allow" || mode === "deny") {
         expect(requests).toHaveLength(before + 2);
         const continued = requests[before + 1]!;
+        // The tool continuation resends the same prefix byte for byte, and
+        // its newest user message still carries the memory note.
+        expect(delivered(continued)).toEqual(first);
         const result = continued.messages.find((message) => message.role === "tool");
         expect(result?.tool_call_id).toBe("fixture-call");
         expect(continued.messages.some((message) => message.role === "assistant" && message.tool_calls?.some((call) => call.id === result?.tool_call_id))).toBe(true);
@@ -161,9 +188,9 @@ it("runs structured MCP calls through real harness approval and continuation, pr
       if (mode === "tools-off") {
         expect(requests[before]).not.toHaveProperty("tools");
         expect(existsSync(startupMarker)).toBe(false);
-        expect(system).not.toContain("Use memory_update");
-        expect(system).not.toContain("session_search tool");
-        expect(system).not.toContain("The user also added an MCP server");
+        expect(first.all).not.toContain("Use memory_update");
+        expect(first.all).not.toContain("session_search tool");
+        expect(first.all).not.toContain("The user also added an MCP server");
         expect(messages.messages.some((message: any) => message.tool || message.card)).toBe(false);
       }
       evidence.push({ scenario: mode, status: settled.status, artifactExists: existsSync(artifact), completionRequests: requests.length - before, mcpStarted: existsSync(startupMarker) });
@@ -178,15 +205,15 @@ it("runs structured MCP calls through real harness approval and continuation, pr
         });
         await control(["send-channel", "--channel", group.id, "--text", "Greet this room."]);
         expect((await control(["wait", "--channel", group.id, "--timeout", "20"])).status).toBe("settled");
-        const roomSystem = requests.at(-1)!.messages.find((message) => message.role === "system")?.content ?? "";
-        expect(roomSystem).toContain("Fixture prefers concise replies.");
-        expect(roomSystem).not.toContain("File locations for this bot");
-        expect(roomSystem).not.toContain("update it with your file tools");
+        const room = delivered(requests.at(-1)!);
+        expectMemoryInTurn(requests.at(-1)!, `Greet this room.\n\n(Reply to the conversation above as API tool ${mode}.)`);
+        expect(room.all).not.toContain("File locations for this bot");
+        expect(room.all).not.toContain("update it with your file tools");
         await control(["messages", "--channel", group.id, "--limit", "10"]);
         if (mode === "tools-off") {
           expect(requests.at(-1)).not.toHaveProperty("tools");
           expect(existsSync(startupMarker)).toBe(false);
-          expect(roomSystem).not.toContain("Use memory_update");
+          expect(room.all).not.toContain("Use memory_update");
           expect(previewText).not.toContain("Use memory_update");
         }
       }

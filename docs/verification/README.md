@@ -38,10 +38,17 @@ recipe from sending messages to the user's running app by accident.
 Use only mapped, tested commands:
 
 - [Chat turns](chat-turns.md)
+- [Conversation context compaction](context-compaction.md)
+- [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
+- [OpenCode model variants through ACP](opencode-variants.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
+- [Profile proposal and credential-card lifecycle](proposal-cards.md)
 - [Full Access without duplicate approvals](full-access.md)
+- [Exact command allowlist UI and saved rules](command-allowlist.md)
+- [Peer approval denial, expiry, and cancellation](peer-approvals.md)
+- [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
@@ -50,16 +57,27 @@ Use only mapped, tested commands:
 - [Engines and Doctor](engines.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
 - [Codex bot instructions](codex-instructions.md)
+- [Codex browser routing and native search](codex-browser-routing.md)
 - [Codex helper event isolation](codex-helpers.md)
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
+- [Sharing a whole team](team-sharing.md)
+- [The organization library](org-library.md)
+- [Preset bots](presets.md)
 - [Teams and shared instructions](teams.md)
 - [Full workspace backups](workspace-backups.md)
+- [Optional company cloud backups](company-backups.md)
+- [Organization library: the desktop channel](desktop-library.md)
 - [Fleet: many workspaces on one server](fleet.md)
 - [Workspaces screen and the fleet agent](workspaces.md)
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
+- [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
+- [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)
 - [Usage ledger](usage-ledger.md)
+- [Bounded built-in tool results](tool-results.md)
+- [Memory: recall, upkeep and the tidy-up](memory-layer.md)
 - [Spend cap and sell prices](spend-cap.md)
+- [Enterprise layer loading and license expiry](enterprise-license.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
 renderer in a headless Chrome by accessible name, so composer sends, transcript
@@ -72,6 +90,16 @@ entry only after the shared control surface can really drive it.
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.
 
+The [loading screen and tray smoke](startup-tray.md) checks the startup close
+button, hidden handoff, tray restore, and Quit in a disposable Electron profile.
+
+The [optional organization connection smoke](organization-settings.md) checks
+the real Settings panel and production desktop client against a synthetic
+Admin server, including cancellation, revocation and unchanged normal startup.
+
+The [personal Cloud account smoke](cloud-account.md) checks optional browser
+sign-in, server-verified Pro status and sign-out in a disposable Electron profile.
+
 The [embedded server recovery smoke](desktop-server-recovery.md) crashes real
 Electron-owned fixture servers, verifies bounded recovery and private access,
 and proves quit cancels recovery without replaying an interrupted fixture turn.
@@ -79,8 +107,15 @@ and proves quit cancels recovery without replaying an interrupted fixture turn.
 The [Tailscale discovery fixture](tailscale.md) checks standalone macOS CLI mode
 and HTTP tailnet endpoint refresh without touching a real Tailscale installation.
 
+The [external runtimes recipe](external-runtime.md) proves a bot's standing
+comms capability from `external-runtimes.json` against a disposable server and
+the fake engine: scope, on-demand token reads, and immediate delegation drain.
+
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
+
+The [VPS recovery fixtures](vps-recovery.md) reproduce preview/startup contention
+and Docker-over-SSH timeout cleanup without contacting a real server.
 
 The [live browser fixture](browser-live.md) mounts the real Browser panel with
 an explicitly selected native engine and Chrome in a disposable home, covering
@@ -93,6 +128,10 @@ desktop app or controlling the user's computer.
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
 
+The [hosted Slack management fixture](hosted-slack-management.md) checks the
+agent settings link to Admin: hosted-only availability, the member-readable
+route module, and stale-response isolation.
+
 The [chat and settings polish fixture](chat-polish.md) exercises attachment
 galleries, opt-in video playback, persisted tool details, and responsive settings
 through the real renderer in an isolated fake-engine workspace.
@@ -104,17 +143,43 @@ service. It does not drive the People settings UI through `control-omb`.
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
 default focus, keyboard wrapping and focus return against two disposable bots.
 
+The [sidebar attention geometry fixture](sidebar-attention.md) measures the
+Active Threads popover's width and inset at each expanded sidebar density in a
+headless Electron window, including the compact-density case where the menu
+used to cross the window's left edge and lose its title.
+
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.
 
 The [independent threads fixture](threads.md) checks nested sidebar navigation,
 per-thread models, simultaneous direct conversations and thread-scoped Stop.
 
+The [mobile generated-image checks](mobile-generated-images.md) cover native image
+attachments and message-scoped download authorization using isolated fixtures.
+
+The [guarded external messages fixture](guarded-messages.md) checks atomic
+branch and approval preconditions, retry receipts, and refusal to queue or
+steer messages from external interfaces. It also verifies bounded request
+lineage snapshots, Chief continuations and exact-execution Stop without
+interrupting a newer request.
+
 The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
 search and draft isolation using disposable simulators and an offline fixture.
 
+The [Android stream recovery checks](android-stream-recovery.md) exercise early
+stream closure and fallback through disposable HTTP endpoints.
+
+The [iOS transcript checks](ios-transcript.md) cover completed-turn folds,
+Hidden activity, and compact webhook messages using bundled offline data.
+
 The [Android thread checks](android-threads.md) cover the Compose thread tree,
 local selection, draft isolation and installable preview APK.
+
+The [Android server pairing checks](android-server-pairing.md) cover server QR
+confirmation, manual codes, retries and saved-server identity validation.
+
+The [Android transcript checks](android-transcript.md) cover completed-turn
+folds, Hidden reasoning, and compact webhook messages through real Compose UI.
 
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.
@@ -139,6 +204,10 @@ The [provider recovery recipe](provider-recovery.md) verifies real Grok image
 transport and Claude authentication against loopback APIs, plus scoped thread
 approvals and provider safety errors in an isolated desktop UI.
 
+The [automatic recovery fixture](automatic-recovery.md) checks opt-in, one-shot
+backup model dispatch after proven pre-prompt ACP failures, preserving the
+conversation, approval level and Stop/new-message precedence.
+
 The [skill approval lifecycle recipe](skill-approval-lifecycle.md) checks Deny,
 missing staged records and active-thread deletion in two isolated app windows,
 including the surviving conversation and sending again without deleting the bot.
@@ -153,6 +222,13 @@ The [Group and Goal Local VM recipe](group-local-vm.md) checks per-speaker
 desktop routing, cancellation, and computer authority cleanup.
 
 ## Evidence
+
+The [persistence responsiveness benchmark](persistence-performance.md) measures
+synthetic message/log bursts and history scans, with isolated chat, visibility
+and packaged-worker checks. It is not a production capacity qualification.
+
+The [backup responsiveness benchmark](backup-responsiveness.md) compares in-process
+and worker exports using synthetic data, with isolated backup workflow checks.
 
 The [Japanese desktop font recipe](japanese-desktop.md) checks real Firefox and
 XFCE glyph rendering in disposable managed desktops, including fresh recreation.

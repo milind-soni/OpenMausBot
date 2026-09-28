@@ -3,6 +3,8 @@ import { X } from "lucide-react";
 import { useStore, visibleMessages, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { parseChoices } from "../../shared/ask-question";
+import { ExpandableText } from "./ExpandableText";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
@@ -44,7 +46,9 @@ export function OptionCard({
 
   const title = card.title;
   const subtitle = card.subtitle;
-  const options = card.options;
+  // Cards saved before the server flattened `ask_user` choices can still hold
+  // `{ label }` rows; a label is drawable, an object as a React child is not.
+  const options = parseChoices(card.options, LETTERS.length) ?? [];
 
   const answer = (text: string) => {
     if (!text.trim()) return;
@@ -56,9 +60,9 @@ export function OptionCard({
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[16px] font-semibold text-ink">{title}</div>
-          <div className="mt-0.5 text-[14px] text-ink-secondary">
-            {subtitle}
-          </div>
+          {subtitle && (
+            <ExpandableText text={subtitle} className="mt-0.5 text-[14px] text-ink-secondary" />
+          )}
         </div>
         <button
           onClick={() =>

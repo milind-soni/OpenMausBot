@@ -1,3 +1,4 @@
+import { cloudRunner } from "@/lib/remote-desktop";
 import {
   useCallback,
   useEffect,
@@ -12,6 +13,7 @@ import {
 import {
   ArrowLeft,
   CalendarDays,
+  CheckCheck,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -39,6 +41,7 @@ import {
 } from "lucide-react";
 
 import { BotAvatar } from "@/components/Avatar";
+import { useBotEditor } from "./bot-settings/BotEditorContext";
 import { pathForFile } from "@/components/ComposerAttachments";
 import { CalendarSidebar } from "@/components/routines/CalendarSidebar";
 import { RoutineList } from "@/components/routines/RoutineList";
@@ -78,16 +81,19 @@ import {
   type RoutineCalendarItem,
 } from "@/lib/routine-calendar";
 import { DAY_NAMES, durationLabel, intervalLabel, niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
-import type {
-  Routine,
-  RoutineContextAttachment,
-  RoutineInput,
-  RoutineRunOn,
-  RoutineRun,
-  RoutineRunStatus,
-  RoutineSchedule,
-  RoutineScheduleInput,
-  RoutineTarget,
+import { Switch } from "./SettingsPrimitives";
+import {
+  isRoutineProblemRun,
+  type Routine,
+  type RoutineContextAttachment,
+  type RoutineInput,
+  type RoutineRunOn,
+  type RoutineRun,
+  type RoutineRunStatus,
+  type RoutineRunStatusFilter,
+  type RoutineSchedule,
+  type RoutineScheduleInput,
+  type RoutineTarget,
 } from "@/lib/routines";
 import { api, openNotificationTarget, useStore, type Bot, type Group } from "@/state/store";
 
@@ -341,6 +347,7 @@ function EventEditor({
 }) {
   const { state, dispatch } = useStore();
   const existingRoutine = seed.routine;
+  const { request: editorRequest } = useBotEditor();
   const existingCall = seed.call;
   const [kind, setKind] = useState<EventKind>(routinesOnly ? "routine" : seed.kind);
   const [editorOpenedAt] = useState(() => Date.now());
@@ -365,6 +372,7 @@ function EventEditor({
     existingRoutine?.timeoutMinutes ?? null,
   );
   const [intervalTimeoutDefaultApplied, setIntervalTimeoutDefaultApplied] = useState(Boolean(existingRoutine));
+  const [overlap, setOverlap] = useState<"skip" | "queue">(existingRoutine?.overlap ?? "skip");
   const [recurrence, setRecurrence] = useState<RecurrenceChoice>(recurrenceFor(schedule, initialAt));
   const [cronDraft, setCronDraft] = useState(() => cronDraftFor(schedule.type === "cron" ? schedule : undefined, initialAt));
   const [cronChanged, setCronChanged] = useState(false);
@@ -399,8 +407,7 @@ function EventEditor({
   const [attachmentPendingCount, setAttachmentPendingCount] = useState(0);
   const attachmentPending = attachmentPendingCount > 0;
   const fileInput = useRef<HTMLInputElement>(null);
-  const cloudInstance = state.instances.find((instance) => instance.driverKind === "boxAgent");
-  const cloudReady = Boolean(state.config?.box.configured && cloudInstance?.snapshot.state === "available");
+  const cloudReady = Boolean(state.config?.box.configured && botIds.length > 0 && botIds.every(id => cloudRunner(state.instances, bots.find(bot => bot.id === id)?.modelSelection.instanceId)?.snapshot.state === "available"));
   const rooms = state.groups.filter(roomCanRunGoal);
   const selectedRoom = rooms.find((group) => group.id === groupId);
   const roomMembers = activeRoomMembers(selectedRoom, state.bots);
@@ -537,10 +544,11 @@ function EventEditor({
           schedule: nextSchedule,
           durationMinutes,
           timeoutMinutes,
+          overlap,
           attachments: routineTarget === "room-goal" ? [] : attachments as RoutineContextAttachment[],
           ...(routineTarget === "bot" ? { resultsThreadId } : {}),
         };
-        const response = await api(existingRoutine ? `/api/routines/${existingRoutine.id}` : "/api/routines", {
+        const response = await editorRequest(existingRoutine ? `/api/routines/${existingRoutine.id}` : "/api/routines", {
           method: existingRoutine ? "PATCH" : "POST",
           body: JSON.stringify(input),
         });
@@ -696,6 +704,11 @@ function EventEditor({
                   {kind === "routine" && <><option value="monthly">Monthly</option><option value="yearly">Yearly</option><option value="cron">Custom cron (advanced)</option></>}
                 </select>
               </div>
+              {kind === "routine" && (
+                <p className="text-[11px] leading-relaxed text-ink-secondary">
+                  Runs while OpenMausBot is open on this computer — it cannot wake a sleeping Mac. A run missed by less than 12 hours still happens when the app is back; for 24/7, run OpenMausBot on a VPS.
+                </p>
+              )}
               {isCronChoice(recurrence) && kind === "routine" && cron && <CronScheduleFields choice={recurrence} value={cronDraft} onChange={(draft) => { setCronDraft(draft); setCronChanged(true); }} runs={cron.runs} error={cron.error} />}
               {recurrence === "custom" && (
                 <div className="flex flex-wrap gap-1.5">
@@ -837,7 +850,7 @@ function EventEditor({
                   {intervalEndInvalid && (
                     <div id="routine-interval-end-error" className="text-[11px] text-danger">Choose an end date after the first run.</div>
                   )}
-                  <div id="routine-interval-help" className="text-[11px] leading-relaxed text-ink-secondary">If a run is still active, the next occurrence is skipped instead of queued.</div>
+                  <div id="routine-interval-help" className="text-[11px] leading-relaxed text-ink-secondary">{t(overlap === "queue" ? "routines.overlapQueueHelp" : "routines.overlapSkipHelp")}</div>
                 </div>
               )}
               {kind === "routine" && (
@@ -854,6 +867,16 @@ function EventEditor({
                       </select>
                     </label>
                     <div className="mt-1.5 text-[10.5px] leading-relaxed text-ink-secondary">Optional. The clock starts when work actually begins and does not control how often the routine starts.</div>
+                    {recurrence !== "none" && <div className="mt-3">
+                      <label className="flex flex-wrap items-center gap-2 text-[12px] text-ink">
+                        <span>{t("routines.overlapLabel")}</span>
+                        <select aria-label={t("routines.overlapLabel")} value={overlap} onChange={event => setOverlap(event.target.value === "queue" ? "queue" : "skip")} className="rounded-lg border border-hairline/50 bg-panel px-3 py-2 text-[12px] text-ink outline-none focus:border-accent">
+                          <option value="skip">{t("routines.overlapSkip")}</option>
+                          <option value="queue">{t("routines.overlapQueue")}</option>
+                        </select>
+                      </label>
+                      <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-secondary">{t(overlap === "queue" ? "routines.overlapQueueHelp" : "routines.overlapSkipHelp")}</p>
+                    </div>}
                   </div>
                 </details>
               )}
@@ -949,8 +972,8 @@ function EventEditor({
                     <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">OpenMausBot keeps the group and its member hand-offs together for the full goal.</div>
                   </div>
                 ) : <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setRunOn("maus")} className={cn("rounded-xl border p-3 text-left", runOn === "maus" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">This computer</div><div className="mt-1 text-[11px] text-ink-secondary">Uses the bot’s current model and tools.</div></button>
-                  <button type="button" disabled={!cloudReady || attachments.length > 0} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">Cloud VM</div><div className="mt-1 text-[11px] text-ink-secondary">Uses your connected cloud VM; OpenMausBot must stay running to launch it.</div></button>
+                  <button type="button" onClick={() => setRunOn("maus")} className={cn("rounded-xl border p-3 text-left", runOn === "maus" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">Bot’s current setup</div><div className="mt-1 text-[11px] text-ink-secondary">Keeps its model and configured computer, including a self-hosted VPS.</div></button>
+                  <button type="button" disabled={!cloudReady || attachments.length > 0} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">Boat-hosted agent</div><div className="mt-1 text-[11px] text-ink-secondary">Switches to the Boat runner, not your VPS. OpenMausBot must stay running to launch it.</div></button>
                 </div>}
               </div>
             </div>
@@ -1352,10 +1375,15 @@ export function EventDetails({
   const { state, dispatch } = useStore();
   const [working, setWorking] = useState(false);
   const runNowPending = useRef(false);
+  const [starting, setStarting] = useState(false);
+  // undefined preserves the selected historical run; null clears it for a new attempt.
+  const [submittedRun, setSubmittedRun] = useState<RoutineRun | null | undefined>(undefined);
   const [error, setError] = useState("");
   const isCall = item.kind === "call";
   const routine = item.kind === "routine" ? item.routine : null;
-  const run = item.kind === "routine" ? item.run : null;
+  const run = submittedRun === undefined
+    ? item.kind === "routine" ? item.run : null
+    : submittedRun && (state.routineRuns.find((candidate) => candidate.id === submittedRun.id) ?? submittedRun);
   const call = item.kind === "call" ? item.call : null;
   const isRoomGoal = !isCall && (run?.target ?? routine?.target) === "room-goal";
   const goalGroupId = isRoomGoal ? run?.groupId ?? routine?.groupId : undefined;
@@ -1404,6 +1432,8 @@ export function EventDetails({
   const runRoutineNow = () => {
     if (!routine || working || runNowPending.current) return;
     runNowPending.current = true;
+    setStarting(true);
+    setSubmittedRun(null);
     setWorking(true);
     setError("");
     // The store flushes pending model and approval-level changes before it
@@ -1412,8 +1442,12 @@ export function EventDetails({
     dispatch({
       type: "runRoutine",
       routineId: routine.id,
+      // Prefer subsequent SSE records over this response, which may already be stale.
+      onStarted: setSubmittedRun,
+      onError: (cause) => setError(cause instanceof Error ? cause.message : String(cause)),
       onSettled: () => {
         runNowPending.current = false;
+        setStarting(false);
         setWorking(false);
       },
     });
@@ -1483,17 +1517,17 @@ export function EventDetails({
           {description && <div className="flex items-start gap-3"><FileText size={17} className="mt-1 shrink-0 text-ink-secondary" /><div className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink">{description}</div></div>}
           {attachments.length > 0 && <div className="flex items-start gap-3"><Paperclip size={17} className="mt-1 shrink-0 text-ink-secondary" /><div className="min-w-0 flex-1 space-y-2"><AttachmentChips attachments={attachments} />{call && <div className="text-[11px] leading-relaxed text-ink-secondary">{call.botIds.length > 1 ? "These references will be shared in the group when the event starts." : "These references stay with the event and are available when you join the group."}</div>}</div></div>}
           {!isCall && <div className="flex items-start gap-3"><Clock3 size={17} className="mt-1 shrink-0 text-ink-secondary" /><div><div className="text-[11px] font-medium uppercase tracking-wider text-ink-secondary">Run limit</div><div className="mt-1 text-[12.5px] text-ink">{safetyLimit == null ? "No time limit" : `Stops if still running after ${durationLabel(safetyLimit)}`}</div></div></div>}
-          {run && <div className="rounded-xl border border-hairline/40 bg-inset p-3"><div className="flex items-center gap-2 text-[12px] font-medium text-ink">{run.status === "running" && <Loader2 size={13} className="animate-spin text-accent" />}{routineRunLabel(run)}</div>{run.output && <div className="mt-2 whitespace-pre-wrap text-[11.5px] leading-relaxed text-ink-secondary">{run.output}</div>}{run.error && <div className="mt-2 text-[11.5px] text-danger">{run.error}</div>}</div>}
+          {run && <div role="status" aria-live="polite" className="rounded-xl border border-hairline/40 bg-inset p-3"><div className="flex items-center gap-2 text-[12px] font-medium text-ink">{run.status === "running" && <Loader2 size={13} className="animate-spin text-accent" />}{routineRunLabel(run)}</div>{run.output && <div className="mt-2 whitespace-pre-wrap text-[11.5px] leading-relaxed text-ink-secondary">{run.output}</div>}{run.error && <div className="mt-2 text-[11.5px] text-danger">{run.error}</div>}</div>}
           {run?.attention && <div className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2.5 text-warning"><CircleAlert size={15} className="mt-0.5 shrink-0" /><div className="min-w-0 whitespace-pre-wrap text-[11.5px] leading-relaxed">{run.attention}</div></div>}
           {run?.status === "waiting" && !run.attention && <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2.5 text-[11.5px] text-warning">This run is waiting. Open its execution thread for more context.</div>}
-          {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-[11.5px] text-danger">{error}</div>}
+          {error && <div role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-[11.5px] text-danger">{error}</div>}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-hairline/40 px-4 py-3">
           {roomId && <button onClick={() => onOpenRoom(roomId)} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110"><ExternalLink size={13} />Join group</button>}
           {call && call.botIds.length > 1 && <button onClick={joinRoom} disabled={working} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50"><ExternalLink size={13} />Join group</button>}
           {isRoomGoal && goalGroup && !executionThreadId && <button onClick={() => { onOpenRoom(goalGroup.id); onClose(); }} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110"><ExternalLink size={13} />Open group</button>}
-          {routine && <button onClick={runRoutineNow} disabled={working} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50"><Play size={13} />Run now</button>}
+          {routine && <button onClick={runRoutineNow} disabled={working} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50">{starting ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}{starting ? "Starting…" : "Run now"}</button>}
           {canOpenExecution && <button onClick={openRunTask} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />{isRoomGoal ? "Open group thread" : "Open thread"}</button>}
           {canOpenResults && resultsThreadId && <button type="button" onClick={() => { openNotificationTarget(dispatch, { botId: botIds[0], threadId: resultsThreadId }, state); onClose(); }} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />{t("routines.results.open")}</button>}
           {routine && <button type="button" onClick={() => { dispatch({ type: "showRoutines", section: "logs", routineId: routine.id, botId: routine.botId }); onClose(); }} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><FileText size={13} />{t("routines.logs")}</button>}
@@ -1591,6 +1625,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const [anchor, setAnchor] = useState(() => startOfDay(Date.now()));
   const [botFilter, setBotFilter] = useState(state.routinesFocus?.botId ?? "all");
   const [routineFilter, setRoutineFilter] = useState<string | undefined>(state.routinesFocus?.routineId);
+  const [statusFilter, setStatusFilter] = useState<RoutineRunStatusFilter>(state.routinesFocus?.runStatus ?? "all");
   const [calls, setCalls] = useState<CalendarCall[]>([]);
   const [quick, setQuick] = useState<EventSeed | null>(null);
   const [editor, setEditor] = useState<EventSeed | null>(null);
@@ -1608,6 +1643,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
     setScheduleView(focus?.view ?? "calendar");
     setBotFilter(focus?.botId ?? "all");
     setRoutineFilter(focus?.routineId);
+    setStatusFilter(focus?.runStatus ?? "all");
   }, [state.routinesFocus]);
 
   const loadCalls = useCallback(async () => {
@@ -1650,7 +1686,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
       : null;
   const paused = state.routines.filter((routine) => !routine.enabled && (routine.schedule.type !== "once" || routine.schedule.at > Date.now()));
   const running = state.routineRuns.filter((run) => ["queued", "running", "waiting"].includes(run.status)).length;
-  const unseenFailures = state.routineRuns.filter((run) => ["failed", "missed"].includes(run.status) && !run.seenAt).length;
+  const unseenFailures = state.routineRuns.filter((run) => isRoutineProblemRun(run) && !run.seenAt).length;
   const filteredRoutines = state.routines.filter((routine) => botFilter === "all" || routine.botId === botFilter);
   const filteredRuns = state.routineRuns.filter((run) => botFilter === "all" || run.botId === botFilter);
   const openRoutine = (routine: Routine) => setSelected({ kind: "routine", id: routine.id, at: routine.nextRunAt ?? (routine.schedule.type === "once" ? routine.schedule.at : routine.schedule.type === "interval" ? routine.schedule.anchorAt : routine.schedule.type === "cron" ? nextHour() : atLocalTime(Date.now(), routine.schedule.time)), durationMinutes: routine.durationMinutes, routine, run: null });
@@ -1754,6 +1790,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
             <button type="button" aria-pressed={section === "logs"} onClick={() => { setSection("logs"); setRoutineFilter(undefined); }} className={cn("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11.5px] font-medium", section === "logs" ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink")}><FileText size={12} />{t("routines.logs")}{unseenFailures > 0 && <span className="rounded-full bg-danger/10 px-1.5 text-[9px] text-danger">{unseenFailures}</span>}</button>
             {!routinesOnly && <button type="button" aria-pressed={section === "webhooks"} onClick={() => setSection("webhooks")} className={cn("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11.5px] font-medium", section === "webhooks" ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink")}><Webhook size={12} />Webhooks{state.webhooks.length > 0 && <span className="rounded-full bg-accent/15 px-1.5 text-[9px] text-accent">{state.webhooks.length}</span>}</button>}
           </div>
+          {unseenFailures > 0 && <button type="button" onClick={() => dispatch({ type: "markAllRoutineRunsSeen" })} className="flex items-center gap-1.5 rounded-lg border border-hairline/50 bg-panel px-2.5 py-2 text-[11.5px] text-ink-secondary hover:bg-raised hover:text-ink" title={t("routines.markAllSeen")} aria-label={t("routines.markAllSeen")}><CheckCheck size={12} />{t("routines.markAllSeen")}</button>}
           <details ref={newMenuRef} className="group relative ml-auto" style={windowNoDragStyle}>
             <summary role="button" aria-label="Create an automation" className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[12px] font-semibold text-white hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
               <Plus size={15} aria-hidden="true" />New
@@ -1787,7 +1824,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           <div className="min-w-[220px] px-2 text-[15px] font-medium text-ink">{calendarRangeLabel(rangeStart, viewDays)}</div></>}
           <div className="ml-auto flex items-center gap-2">
             {running > 0 && <span className="hidden items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1.5 text-[10.5px] text-accent sm:flex"><Loader2 size={11} className="animate-spin" />{running} active</span>}
-            {unseenFailures > 0 && <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "logs" })} className="hidden items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1.5 text-[10.5px] text-danger sm:flex" title="Open failed run logs" aria-label="Open failed run logs"><CircleAlert size={11} />{unseenFailures}</button>}
+            {unseenFailures > 0 && <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "logs", runStatus: "problems" })} className="hidden items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1.5 text-[10.5px] text-danger sm:flex" title="Open problem run logs" aria-label="Open problem run logs"><CircleAlert size={11} />{unseenFailures}</button>}
             {paused.length > 0 && <button onClick={() => setPausedOpen(true)} aria-label="View paused routines" className="hidden items-center gap-1.5 rounded-full border border-hairline/50 px-2.5 py-1.5 text-[10.5px] text-ink-secondary hover:bg-raised sm:flex"><Pause size={11} />{paused.length}</button>}
             <select aria-label="Filter schedule by bot" value={botFilter} onChange={(event) => { setBotFilter(event.target.value); setRoutineFilter(undefined); }} className="max-w-[180px] rounded-lg border border-hairline/50 bg-panel px-2.5 py-2 text-[11.5px] text-ink outline-none focus:border-accent"><option value="all">All bots</option>{visibleBots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}</select>
             {section === "calendar" && scheduleView === "calendar" && <select aria-label="Schedule range" value={viewDays} onChange={(event) => setView(Number(event.target.value) as 1 | 3 | 7)} className="rounded-lg border border-hairline/50 bg-panel px-2.5 py-2 text-[11.5px] text-ink outline-none focus:border-accent"><option value={1}>Day</option><option value={3}>3 days</option><option value={7}>Week</option></select>}
@@ -1797,9 +1834,10 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           {section === "calendar" && scheduleView === "calendar" && state.routinesLoadState === "loading" && state.routines.length === 0 && <p role="status" className="w-full text-[11.5px] text-ink-secondary">{t("routines.loading")}</p>}
         </div>}
       </header>
+      <RoutineWakeBar />
 
       {section === "webhooks" ? <WebhooksPanel bots={visibleBots} createRequest={webhookCreateRequest} onCreateHandled={handleWebhookCreateHandled} /> : section === "logs" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto"><RoutineLogs runs={filteredRuns} bots={state.bots} loading={state.routinesLoadState === "loading" && filteredRuns.length === 0} error={state.routinesLoadState === "error"} routineId={routineFilter} onClearRoutine={() => setRoutineFilter(undefined)} onOpen={openRun} /></div>
+        <div className="min-h-0 flex-1 overflow-y-auto"><RoutineLogs runs={filteredRuns} bots={state.bots} loading={state.routinesLoadState === "loading" && filteredRuns.length === 0} error={state.routinesLoadState === "error"} routineId={routineFilter} status={statusFilter} onStatusChange={setStatusFilter} onClearRoutine={() => setRoutineFilter(undefined)} onOpen={openRun} /></div>
       ) : scheduleView === "list" ? (
         <div className="min-h-0 flex-1 overflow-y-auto"><div className="mx-auto w-full max-w-4xl space-y-5 p-4 sm:p-6">
           <div><h2 className="text-[17px] font-semibold text-ink">Routines</h2><p className="mt-1 text-[12px] text-ink-secondary">All schedules, including paused and finished routines.</p></div>
@@ -1815,8 +1853,51 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
 
       {quick && <><div className="fixed inset-0 z-40 bg-black/25" onMouseDown={() => setQuick(null)} /><QuickComposer seed={quick} bots={visibleBots} routinesOnly={routinesOnly} onClose={() => setQuick(null)} onMore={(seed) => { setQuick(null); setEditor(seed); }} onSavedRoutine={(routine) => dispatch({ type: "routinePatched", routine })} onSavedCall={upsertCall} /></>}
       {editor && <EventEditor seed={editor} bots={visibleBots} routinesOnly={routinesOnly} onClose={() => setEditor(null)} onSavedCall={upsertCall} />}
-      {liveSelected && <EventDetails item={liveSelected} bots={state.bots} onClose={() => setSelected(null)} onEdit={() => { const seed: EventSeed = liveSelected.kind === "call" ? { kind: "call", at: liveSelected.at, durationMinutes: liveSelected.call.durationMinutes, botIds: liveSelected.call.botIds, call: liveSelected.call } : { kind: "routine", at: liveSelected.at, durationMinutes: liveSelected.routine?.durationMinutes ?? liveSelected.run?.durationMinutes ?? 30, botIds: [liveSelected.routine?.botId ?? liveSelected.run?.botId ?? ""].filter(Boolean), routine: liveSelected.routine ?? undefined }; setSelected(null); setEditor(seed); }} onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} onOpenRoom={onOpenRoom} />}
+      {liveSelected && <EventDetails key={`${liveSelected.kind}:${liveSelected.id}`} item={liveSelected} bots={state.bots} onClose={() => setSelected(null)} onEdit={() => { const seed: EventSeed = liveSelected.kind === "call" ? { kind: "call", at: liveSelected.at, durationMinutes: liveSelected.call.durationMinutes, botIds: liveSelected.call.botIds, call: liveSelected.call } : { kind: "routine", at: liveSelected.at, durationMinutes: liveSelected.routine?.durationMinutes ?? liveSelected.run?.durationMinutes ?? 30, botIds: [liveSelected.routine?.botId ?? liveSelected.run?.botId ?? ""].filter(Boolean), routine: liveSelected.routine ?? undefined }; setSelected(null); setEditor(seed); }} onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} onOpenRoom={onOpenRoom} />}
       {pausedOpen && <PausedList routines={paused} bots={state.bots} groups={state.groups} onClose={() => setPausedOpen(false)} onEdit={(routine) => { setPausedOpen(false); const at = routine.schedule.type === "once" ? routine.schedule.at : routine.schedule.type === "interval" ? routine.schedule.anchorAt : routine.schedule.type === "cron" ? routine.nextRunAt ?? nextHour() : atLocalTime(Date.now(), routine.schedule.time); setEditor({ kind: "routine", at, durationMinutes: routine.durationMinutes, botIds: [routine.botId], routine }); }} onOpenRoom={onOpenRoom} />}
     </main>
+  );
+}
+
+/** Desktop only: the one lever the app has against a sleeping computer.
+ * The scheduler runs inside the local server, so while the Mac sleeps no
+ * routine fires; the shell holds a power assertion for the hour before a
+ * due routine and while one runs, plugged in only, and this row shows it. */
+function RoutineWakeBar() {
+  const bridge = typeof window !== "undefined" ? window.ogb?.routines : undefined;
+  const [state, setState] = useState<DesktopRoutineWake | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!bridge) return;
+    let cancelled = false;
+    const load = () => bridge.wakeState().then((next) => { if (!cancelled) setState(next); }).catch(() => {});
+    void load();
+    const timer = window.setInterval(load, 30_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [bridge]);
+  if (!bridge || !state) return null;
+  const status = !state.keepAwake
+    ? "Off — this computer may sleep through a scheduled routine."
+    : state.onBattery
+      ? "On battery, so not holding; plug in to keep it awake."
+      : state.hold
+        ? state.reason === "running" ? "Holding it awake now: a routine is running." : `Holding it awake now: a routine is due at ${state.at ? niceTime(state.at) : "the top of the hour"}.`
+        : "Holds it awake for the hour before a routine and while one runs, while plugged in. A closed lid still sleeps.";
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-hairline/35 bg-panel/60 px-4 py-2.5">
+      <div className="min-w-0 text-[12px] leading-relaxed text-ink-secondary">
+        <span className="font-medium text-ink">Keep this computer awake for routines.</span> {status}
+      </div>
+      <Switch
+        checked={state.keepAwake}
+        disabled={busy}
+        aria-label="Keep this computer awake for scheduled routines"
+        onClick={() => {
+          setBusy(true);
+          bridge.keepAwake(!state.keepAwake).then(setState).catch(() => {}).finally(() => setBusy(false));
+        }}
+        className="shrink-0 disabled:cursor-wait disabled:opacity-50"
+      />
+    </div>
   );
 }

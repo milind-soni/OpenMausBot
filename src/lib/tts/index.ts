@@ -6,8 +6,8 @@
 // calls stop().
 //
 // Audio comes from the harness (POST /api/tts/speak), which holds the
-// ElevenLabs key. The renderer never sees it, and never talks to
-// ElevenLabs directly.
+// cloud voice keys. The renderer never sees them, and never talks to a
+// hosted voice provider directly.
 //
 // Text is split into utterances by the harness too, next to the transform
 // that produced it — it is the piece most likely to be tuned against real
@@ -50,6 +50,12 @@ export class Speaker {
   private request: AbortController | null = null;
   private localUtterance: SpeechSynthesisUtterance | null = null;
   private settleLocalSpeech: ((finished: boolean) => void) | null = null;
+  /** The non-TTS audio source currently holding the voice (a voice-note
+   * bubble). Identity is the claim object, not the pause callback, so a
+   * caller reusing one callback cannot let an older release clear a newer
+   * claim. Cleared by stop() before it runs, and by the holder's own
+   * release, so a stale element is never paused twice. */
+  private externalClaim: { pause: () => void } | null = null;
 
   subscribe(fn: (s: SpeechSnapshot) => void): () => void {
     this.watchers.add(fn);
@@ -74,6 +80,9 @@ export class Speaker {
 
   stop() {
     this.token += 1;
+    const external = this.externalClaim;
+    this.externalClaim = null;
+    external?.pause();
     this.request?.abort();
     this.request = null;
     this.settleLocalSpeech?.(false);
@@ -86,6 +95,23 @@ export class Speaker {
     if (this.settlePlayback) this.settlePlayback(false);
     else this.teardownAudio();
     if (this.snapshot.status !== "idle" || this.snapshot.error) this.set(IDLE);
+  }
+
+  /** Take the window's single voice for non-TTS playback — a voice-note
+   * bubble pressing play. Stops any utterance and pauses the previous
+   * external holder, the same one-voice rule speak() enforces on itself;
+   * starting TTS later pauses this holder through stop(). Returns a release
+   * function the holder calls when it stops or unmounts for its own reasons. */
+  claimExternalVoice(pause: () => void): () => void {
+    this.stop();
+    const claim = { pause };
+    this.externalClaim = claim;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (this.externalClaim === claim) this.externalClaim = null;
+    };
   }
 
   private teardownAudio() {
@@ -235,7 +261,7 @@ export class Speaker {
     const body: TtsPrepareBody = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error ?? `the voice service returned ${res.status}`);
     if (!body.ready) {
-      throw new Error("Add the shared ElevenLabs key in an agent profile on this computer, then pick a voice for the agent.");
+      throw new Error("Set up a voice provider in an agent profile on this computer, then pick a voice for the agent.");
     }
     return body.utterances ?? [];
   }

@@ -1,10 +1,12 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
-import { readSessionState, takePairingCodeFromLocation, takeInvitedEmailFromLocation } from "./lib/session";
+import { readSessionState, SERVICE_TRUST_REASON, takePairingCodeFromLocation, takeInvitedEmailFromLocation } from "./lib/session";
 import { bootstrapBrand } from "./lib/brand";
 import { applySkin, readSkin } from "./lib/skins";
+import { applyFont, readFont } from "./lib/fonts";
 import { PairPage } from "./pair/PairPage";
+import "katex/dist/katex.min.css";
 import "./styles.css";
 
 // Before the first paint, not inside a component: stamping the skin during
@@ -12,6 +14,7 @@ import "./styles.css";
 // title, accent) is fetched the same way so a white-labelled deployment never
 // flashes the default name; it waits at most a moment and falls back silently.
 applySkin(readSkin());
+applyFont(readFont());
 
 /** A pairing link lands on /pair. A remote browser without a session lands
  * there too, because every API call would otherwise fail with "pair this
@@ -21,6 +24,9 @@ async function chooseRoot(): Promise<React.ReactNode> {
   if (location.pathname === "/pair") return <PairPage initialCode={takePairingCodeFromLocation()} initialEmail={takeInvitedEmailFromLocation()} />;
   const session = await readSessionState();
   if (session.kind === "unauthenticated") return <PairPage initialCode={null} reason={session.error} />;
+  // A service-trust server answers this machine's requests without a session
+  // but refuses to let it manage anything: sign in first, as a remote browser would.
+  if (session.kind === "loopback" && session.trust === "service") return <PairPage initialCode={null} reason={SERVICE_TRUST_REASON} />;
   return <App />;
 }
 

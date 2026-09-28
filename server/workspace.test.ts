@@ -425,7 +425,7 @@ describe("workspace", () => {
   });
 
   it("accepts plain single-segment topic names and nothing else", () => {
-    for (const good of ["deploys.md", "a.md", "my notes.md", "v1.2-rc.md", "under_score.md"]) {
+    for (const good of ["deploys.md", "a.md", "my notes.md", "v1.2-rc.md", "under_score.md", "café.md", "旅行.md"]) {
       expect(isMemoryTopicName(good), good).toBe(true);
     }
     for (const bad of [
@@ -492,7 +492,8 @@ describe("workspace", () => {
       expect(prompt).toContain("Write each one as a plain statement of fact, never as an instruction to yourself — an imperative is read back as a directive next session.");
       expect(prompt).toContain("A procedure for one kind of task belongs in a memory/<topic>.md file or a skill, not here.");
       expect(prompt).toContain("Anything that will be stale within a week belongs in the conversation, not in memory.");
-      expect(prompt).toContain("When a fact applies only from a date, or stops applying on one, say so in the entry.");
+      expect(prompt).toContain("When a fact applies only from a date, or stops applying on one, say so in the entry");
+      expect(prompt).toContain("gets that day as its until date");
       // the topic folder is the bot's own, not a placeholder
       expect(prompt).toContain(`pointers to files in ${JSON.stringify(join(workspaceDir(BOT), "memory"))}`);
       expect(prompt).not.toContain("<topicDir>");

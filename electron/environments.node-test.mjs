@@ -133,9 +133,18 @@ test("native workspace choices use saved IDs and connect opens settings without 
   const calls = [];
   const items = env.workspaceMenuTemplate(state, { onSwitch: (id) => calls.push(["switch", id]), onConnect: () => calls.push(["settings"]), onForget: (id) => calls.push(["forget", id]) });
   assert.equal(items.find((item) => item.id === "workspace-cloud").checked, true);
+  // The menu id stays "workspace-connect"; the label uses the product word.
+  assert.equal(items.find((item) => item.id === "workspace-connect").label, "Connect to a server…");
   items.find((item) => item.id === "workspace-local").click();
   items.find((item) => item.id === "workspace-connect").click();
   items.find((item) => item.id === "workspace-forget").click();
   assert.deepEqual(calls, [["switch", "local"], ["settings"], ["forget", "cloud"]]);
   assert.equal(state.activeId, "cloud");
+});
+
+test("native window identity distinguishes hosted HTML, companion data, and the local workspace", () => {
+  const state = { environments: [{ id: "old", name: "Old team", origin: "https://old.example" }], activeId: "old" };
+  assert.equal(env.workspaceWindowTitle(state), "OpenMausBot — Hosted: Old team (old.example)");
+  assert.equal(env.workspaceWindowTitle(state, { serverName: "Office", endpoint: "https://c-office.openmausbot.com" }), "OpenMausBot — Connected to: Office (c-office.openmausbot.com)");
+  assert.equal(env.workspaceWindowTitle(env.withActive(state, "local")), "OpenMausBot");
 });

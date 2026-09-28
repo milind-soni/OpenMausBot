@@ -47,3 +47,22 @@ customer's running app to create test bots, approve requests, or rotate tools.
 These fixture checks do not prove that a customer's real provider account or
 network is healthy. Ask for their app version, Claude CLI version, and a
 redacted diagnostic export if failures remain; do not request credentials.
+
+## Rebuilt conversations
+
+Editing a message or rebuilding context must start a new Claude session,
+even when its old process is still idle. Ordinary follow-ups keep reusing or
+resuming the current session. A transient retry after a reset resumes the
+replacement session, not the abandoned one.
+
+```sh
+pnpm exec vitest run server/drivers/claude.test.ts server/turn-context.test.ts server/resume-recovery.test.ts
+pnpm exec vitest run server/delta-context.e2e.test.ts -t "resets Claude's native context"
+```
+
+The second command launches a disposable server and fake CLI through the
+shared verification launcher. It creates a conversation, edits the last user
+message with `control-omb edit`, and checks the native launch, reset log,
+active-branch replay and subsequent resume. Abandoned request/reply markers
+must not reach the replacement prompt. It does not exercise a live Claude
+account or claim automatic context compaction is implemented.

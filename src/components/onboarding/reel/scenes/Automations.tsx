@@ -13,7 +13,7 @@ import { CheckCircle2, Loader2, MousePointer2, Zap } from "lucide-react";
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { reducedMotion } from "@/lib/onboarding";
-import type { SceneProps } from "./OrbitingApps";
+import type { SceneProps } from "./types";
 
 const AUTOMATIONS_MS = 6200;
 

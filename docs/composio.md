@@ -74,3 +74,19 @@ GET /api/connectors/connected
 This operation cursor-paginates both the Session toolkit state and the user's connected accounts directly. It merges no-auth toolkits and the Session-selected account with the full multi-account inventory, without deriving service slugs from marketplace cards, so account visibility is independent of catalog ordering and pagination. If a scoped project key can read the Session but cannot list raw connected accounts, the response safely falls back to the Session-selected and no-auth toolkit inventory rather than making those services appear disconnected. The managed broker provides the same behavior and response at `GET /v1/connectors/connected`; the local server adds the normal `configured: false` empty response when no connection service is configured. Responses expose only connected-account IDs, user-supplied aliases, and lifecycle status—never project keys, broker tokens, provider tokens, or write-only authorization fields.
 
 The existing scoped `GET /api/connectors?services=gmail,slack` operation remains available for lightweight post-OAuth polling and backward compatibility.
+
+## Per-bot tool grants
+
+The workspace-level connections above say which accounts exist. A second, per-bot layer says which of an app's **tools** each bot may actually call. Open a bot's settings on the desktop, and under **Connected apps** each service can be set to:
+
+- **All tools** — every tool the service offers (the wildcard grant).
+- **An exact list** — only the named tools, such as GMAIL_SEND_EMAIL, shown as the granted count.
+- **No tools** — the service is listed but grants nothing.
+
+A bot with no grant record at all keeps the legacy behavior: every tool on every connected app it can see. Assigning the first grant switches the bot to exact-tool mode — a service not on the list grants nothing, even when the workspace is connected to it.
+
+**Nothing changes until you assign.** Upgrading OpenMausBot does not alter any bot's access: existing bots keep the all-tools default until someone edits their grants. An emptied grant list is deliberate and means "no tools on any connected app."
+
+**Imported bots land with no grants.** Shareable packages and team imports never carry grants — an imported bot starts with connected apps off, and any grants it later gets are chosen by the importing workspace. Grants also never appear in exports; only the workspace's own private team backup keeps them.
+
+Grants are enforced on the real tool names at call time (including batches inside the MULTI_EXECUTE meta-tool), the tool list offered to the model is filtered to the granted set, and every allow/deny writes a decision-log row. Refusals do not enumerate what else is granted. Paired phones see each bot's grants read-only in its profile (What this bot does → App tools); grants are assigned on the computer, never from a phone.

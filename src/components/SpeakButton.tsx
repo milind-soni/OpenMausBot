@@ -36,7 +36,7 @@ export function SpeakButton({
   const preparing = mine && speech.status === "preparing";
 
   const label = !configured
-    ? t("chat.speak.needsKey")
+    ? t((tts?.provider ?? "elevenlabs") === "elevenlabs" ? "chat.speak.needsKey" : "chat.speak.needsSetup")
     : !ready
       ? t("chat.speak.needsVoice")
     : mine

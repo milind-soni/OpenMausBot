@@ -60,7 +60,7 @@
           "unread": false
         }
       ],
-      "activeLeafId": "preview-gmail-reply",
+      "activeLeafId": "preview-gmail-voice",
       "messages": [
         {
           "id": "preview-gmail-user",
@@ -70,15 +70,60 @@
           "text": "Help me triage Gmail while keeping iCloud in a separate thread."
         },
         {
-          "id": "preview-gmail-reply",
+          "id": "preview-gmail-grid",
           "parentId": "preview-gmail-user",
+          "role": "bot",
+          "kind": "text",
+          "at": 1789088420000,
+          "text": "| Alpha | Beta |\n| --- | --- |\n| one | WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW |"
+        },
+        {
+          "id": "preview-gmail-tasks",
+          "parentId": "preview-gmail-grid",
+          "role": "bot",
+          "kind": "text",
+          "at": 1789088421000,
+          "text": "| Name | Status |\n| :--- | ---: |\n| **Quant** baskets | shipped\n\n- [x] Ship the notes\n1. [ ] waiting"
+        },
+        {
+          "id": "preview-gmail-user-md",
+          "parentId": "preview-gmail-tasks",
+          "role": "user",
+          "kind": "text",
+          "at": 1789088422000,
+          "text": "| A | B |\n| --- | --- |\n| 1 | 2 |\n- [x] done"
+        },
+        {
+          "id": "preview-gmail-reply",
+          "parentId": "preview-gmail-user-md",
           "role": "bot",
           "kind": "text",
           "at": 1789088430000,
           "text": "I’m reviewing Gmail here. Your iCloud conversation has its own context."
+        },
+        {
+          "id": "preview-gmail-voice",
+          "parentId": "preview-gmail-reply",
+          "role": "bot",
+          "kind": "text",
+          "at": 1789088440000,
+          "text": "Here’s this morning’s triage as a voice note.",
+          "attachments": [
+            {
+              "kind": "audio",
+              "path": "preview-voice-note.mp3",
+              "mime": "audio/mpeg",
+              "durationMs": 6000
+            }
+          ]
         }
       ]
     }
   ],
-  "groups": []
+  "groups": [],
+  "botQueuedMessages": {
+    "preview-weekend": [
+      { "queueId": "preview-weekend-queued", "text": "Draft the weekend plan", "reason": "capacity" }
+    ]
+  }
 }

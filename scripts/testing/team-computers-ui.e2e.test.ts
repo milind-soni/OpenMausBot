@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
@@ -14,7 +14,7 @@ const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.e
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(binary);
 if (!enabled) console.info("skipping team computers UI e2e: set OMB_UI_E2E=1 to install the pinned browser");
 
-type Info = { ui: string; url: string; botId: string; dataDir: string; logPath: string; boxFixtureApi: string };
+type Info = { ui: string; url: string; botId: string; dataDir: string; logPath: string; boatFixtureApi: string };
 type Computer = { id: string; name: string; section: string | null; state: string; problem?: string; held?: boolean };
 
 (enabled ? it : it.skip)("creates and assigns a shared computer only after explicit UI actions", async () => {
@@ -35,7 +35,7 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     }, { timeout: binary ? 180_000 : 600_000, interval: 250 }).toBe(true);
     const fixture = info!;
     const api = fixtureApi(fixture.url);
-    const provider = fixtureApi(fixture.boxFixtureApi);
+    const provider = fixtureApi(fixture.boatFixtureApi);
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", fixture.ui, ...args]) as Promise<Record<string, any>>;
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const snapshot = async () => (await ui("snapshot")).snapshot as string;
@@ -68,13 +68,13 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     // Native <summary> appears in AX but agent-browser does not assign a ref.
     await evaluate("document.querySelector('summary[aria-label=\"Add to team map\"]').focus(); true");
     await ui("press", "--keys", "Enter");
-    await click("Box computer");
+    await click("Boat computer");
     await expect.poll(() => evaluate("document.activeElement?.id")).toBe("canvas-computer-name");
-    expect(await snapshot()).toContain("Your Box plan and usage charges apply");
-    expect(await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Create Box')?.disabled")).toBe(true);
-    await ui("type", "--ref", await ref("New Box computer", "textbox"), "--text", "Engineering desktop");
+    expect(await snapshot()).toContain("Your Boat plan and usage charges apply");
+    expect(await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Create Boat')?.disabled")).toBe(true);
+    await ui("type", "--ref", await ref("New Boat computer", "textbox"), "--text", "Engineering desktop");
     expect((await receipts()).calls.every((call: { method: string }) => call.method === "GET")).toBe(true);
-    await click("Create Box");
+    await click("Create Boat");
     await expect.poll(async () => (await computers()).length, { timeout: 30_000 }).toBe(1);
     const machine = (await computers())[0];
     await expect.poll(async () => (await record(machine.id))?.state).toBe("idle");
@@ -146,10 +146,14 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     expect((await api("GET", "/api/bots?messages=10")).bots).toEqual(before);
     expect(JSON.parse(readFileSync(join(fixture.dataDir, "team-computers.json"), "utf8")).computers)
       .toContainEqual(expect.objectContaining({ id: machine.id, section: "Research", name: machine.name }));
+    // Wait for each destination before operating controls from the next view.
     await click("Close computers");
+    await expect.poll(snapshot, { timeout: 10_000 }).not.toContain('complementary "Team computers"');
     await click("Open chat with Ben");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain('log "Conversation with Ben"');
     await click("Bot's computer");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Team default");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Ben's screen");
+    await expect.poll(snapshot, { timeout: 20_000, interval: 250 }).toContain("Team default");
     expect(await snapshot()).toContain("Engineering desktop");
     expect(await snapshot()).not.toContain("Choose Cloud");
     await click("Open Team map");
@@ -169,30 +173,34 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     await click("Sleep");
     await expect.poll(async () => (await record(machine.id))?.state).toBe("archived");
     await provider("POST", "/__fixture", { refuseCreate: true });
-    await click("New Box computer");
-    await ui("type", "--ref", await ref("New Box computer", "textbox"), "--text", "Retry desktop");
-    await click("Create Box");
+    await click("New Boat computer");
+    await ui("type", "--ref", await ref("New Boat computer", "textbox"), "--text", "Retry desktop");
+    await click("Create Boat");
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("Fixture account is rate-limited");
     const retry = (await computers()).find(computer => computer.name === "Retry desktop")!;
     expect(retry).toBeDefined();
     expect(retry.section).toBeNull();
     await provider("POST", "/__fixture", { refuseCreate: false });
     // Reusing the still-open creation form retries the durable request ID.
-    await click("Create Box");
+    await click("Create Boat");
     await expect.poll(async () => (await record(retry.id))?.state, { timeout: 30_000 }).toBe("idle");
     expect(await computers()).toHaveLength(2);
     const providerResult = await receipts();
-    expect(providerResult.boxes).toHaveLength(2);
+    expect(providerResult.boats).toHaveLength(2);
     expect(providerResult.calls.some((call: { method: string }) => call.method === "DELETE")).toBe(false);
     Object.assign(evidence, { computers: await computers(), provider: providerResult, finalSnapshot: await snapshot() });
     await ui("screenshot", "--out", `${fixture.logPath}.team-computers.png`);
   } finally {
-    if (info) {
-      try { evidence.finalUi = await runControlOmb(["ui", "snapshot", "--ui", info.ui]); } catch { /* keep original failure */ }
-      const path = `${info.logPath}.team-computers.json`;
-      writeFileSync(path, JSON.stringify({ fixture: info, ...evidence }, null, 2));
-      console.info(JSON.stringify({ evidence: path }));
+    try {
+      if (info) {
+        try { evidence.finalUi = await runControlOmb(["ui", "snapshot", "--ui", info.ui]); } catch { /* keep original failure */ }
+        const path = `${info.logPath}.team-computers.json`;
+        writeFileSync(path, JSON.stringify({ fixture: info, ...evidence }, null, 2), { mode: 0o600 });
+        console.info(JSON.stringify({ evidence: path }));
+      }
+    } finally {
+      await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+      if (info) expect(existsSync(info.dataDir)).toBe(false);
     }
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
   }
 }, binary ? 300_000 : 720_000);

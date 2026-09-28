@@ -8,13 +8,14 @@ import type { ModelPicker } from "./ModelPicker";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { dispatch: vi.fn(), model: null as ComponentProps<typeof ModelPicker> | null,
+  return { dispatch: vi.fn(), showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
-    state: { ...original.initialState, instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test" } as InstanceInfo] },
+    state: { ...original.initialState, config: fixture.showToolCalls ? { features: { showToolCalls: true } } : null,
+      instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test" } as InstanceInfo] },
     dispatch: fixture.dispatch,
   }) };
 });
@@ -22,7 +23,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 // window chrome, and these tests render the desktop-neutral layout.
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
-  useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true } }, ready: true }),
+  useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: fixture.platform }, localComputer: { available: false, reasonCode: fixture.localReasonCode, message: fixture.localMessage } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./ModelPicker", () => ({ ModelPicker: (props: ComponentProps<typeof ModelPicker>) => {
@@ -34,7 +35,7 @@ vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (props: Compone
   return createElement("span", { "data-test-approval-control": true });
 } }));
 
-const { ChatView, ErrorRow } = await import("./ChatView");
+const { ChatView, ErrorRow, claudeUpdateTarget } = await import("./ChatView");
 afterAll(() => vi.unstubAllGlobals());
 
 const bot: Bot = {
@@ -68,6 +69,85 @@ describe("thread control placement", () => {
     expect(markup).toContain("Full access controls tool approvals, not provider safety checks");
     expect(markup).not.toContain("<button");
     expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout", onRetry: () => {} }))).toContain("<button");
+  });
+  it("offers to update Claude Code for a too-old install, or hands over the command", () => {
+    const claude = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", snapshot: { state: "available", authenticated: true } } as InstanceInfo;
+    const markup = renderToStaticMarkup(createElement(ErrorRow, {
+      message: "API Error: 400 Claude Code 2.1.268 does not support this model; version 2.1.280 or newer is required.",
+      onRetry: () => {},
+      setupInstance: claude,
+      claudeUpdateInstance: claude,
+    }));
+    expect(markup).toContain("Update Claude for me");
+    expect(markup).toContain("I&#x27;ll do it myself");
+    // the offer replaces the plain Retry until they pick a path
+    expect(markup).not.toContain(">Retry<");
+  });
+  it("updates only a local Claude Code engine from chat", () => {
+    const claude = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude" } as InstanceInfo;
+    expect(claudeUpdateTarget(claude)).toBe(claude);
+    expect(claudeUpdateTarget({ ...claude, readOnly: true })).toBeUndefined();
+    expect(claudeUpdateTarget({ ...claude, driverKind: "codex" })).toBeUndefined();
+    expect(claudeUpdateTarget(undefined)).toBeUndefined();
+  });
+  it("keeps Retry on the last failed turn after its digest, but never on an older turn", () => {
+    const messages: Bot["messages"] = [
+      { id: "ask", role: "user", kind: "text", at: 1, text: "Try the new model" },
+      { id: "error", role: "bot", kind: "activity", at: 2, tool: { name: "error: outdated engine", ok: false } },
+      { id: "digest", role: "bot", kind: "digest", at: 3, text: "no tool activity" },
+    ];
+    const render = () => renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false, messages } }));
+    expect(render()).toContain("Retry</button>");
+    messages.push({ id: "next", role: "user", kind: "text", at: 4, text: "A different request" });
+    expect(render()).not.toContain("Retry</button>");
+  });
+  it.each([false, true])("keeps recovery visible and outside tool folds when tool calls are %s", (showToolCalls) => {
+    fixture.showToolCalls = showToolCalls;
+    const explanation = "Automatic recovery: Qwen could not start. Trying Backup · fixture-model once in this thread.";
+    const messages: Bot["messages"] = [
+      { id: "read", role: "bot", kind: "activity", at: 1, tool: { name: "Read", ok: true } },
+      { id: "edit", role: "bot", kind: "activity", at: 2, tool: { name: "Edit", ok: true } },
+      { id: "recovery", role: "bot", kind: "activity", at: 3, tool: { name: `recovery: ${explanation}`, ok: true } },
+      { id: "bash", role: "bot", kind: "activity", at: 4, tool: { name: "Bash", ok: true } },
+      { id: "write", role: "bot", kind: "activity", at: 5, tool: { name: "Write", ok: true } },
+    ];
+    try {
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false, messages } }));
+      expect(markup).toContain('data-mid="recovery"><div role="status"');
+      expect(markup).toContain(explanation);
+      expect(markup).not.toContain(`recovery: ${explanation}`);
+      expect(markup.match(/Automatic recovery:/g)).toHaveLength(1);
+      if (!showToolCalls) expect(markup).not.toContain('data-testid="tool-activity"');
+    } finally {
+      fixture.showToolCalls = false;
+    }
+  });
+  it("offers the matching macOS Settings and relaunch actions only for a named CUA permission failure", () => {
+    fixture.platform = "darwin";
+    fixture.localMessage = "Screen Recording required";
+    window.ogb = { platform: "darwin", permOpenSettings: vi.fn(), relaunch: vi.fn() } as unknown as NonNullable<Window["ogb"]>;
+    const screen = renderToStaticMarkup(createElement(ErrorRow, {
+      message: "CUA Driver is not ready for this computer — embedded host failed: Screen Recording required. Relaunch OpenMausBot after granting any missing macOS permission.",
+    }));
+    expect(screen).toContain("Open Screen Recording Settings");
+    expect(screen).toContain("Relaunch OpenMausBot");
+    expect(screen).not.toContain("Open Accessibility Settings");
+    fixture.localMessage = "Accessibility required";
+    const accessibility = renderToStaticMarkup(createElement(ErrorRow, {
+      message: "CUA Driver is not ready for this computer — Accessibility required",
+    }));
+    expect(accessibility).toContain("Open Accessibility Settings");
+    expect(accessibility).not.toContain("Open Screen Recording Settings");
+    expect(renderToStaticMarkup(createElement(ErrorRow, {
+      message: "CUA Driver is not ready for this computer — Screen Recording required",
+    }))).not.toContain("Open Screen Recording Settings");
+    expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout" }))).not.toContain("Open Screen Recording Settings");
+    fixture.localReasonCode = "remote-server";
+    expect(renderToStaticMarkup(createElement(ErrorRow, { message: "CUA Driver is not ready for this computer — Screen Recording required" }))).not.toContain("Open Screen Recording Settings");
+    fixture.localReasonCode = "cua-driver-unavailable";
+    fixture.platform = "other";
+    fixture.localMessage = "";
+    delete window.ogb;
   });
   it.each([
     "شغّل الاختبارات\nThen run typecheck\nوبعدها ارفع الفرع",

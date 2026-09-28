@@ -12,6 +12,10 @@ struct BotThreadTree: View {
     let open: (Chat) -> Void
     let manage: (Chat) -> Void
     @EnvironmentObject private var session: Session
+    /// A timed snooze ends on the wall clock, not on a server ping: bump
+    /// this when the nearest expiry passes so its row folds back in without
+    /// waiting for the next snapshot. Mirrors the desktop's useSnoozeExpiry.
+    @State private var snoozeTick = 0
 
     private var searching: Bool {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -19,9 +23,15 @@ struct BotThreadTree: View {
 
     var body: some View {
         if let bot = session.state.bot(botID) {
+            let _ = snoozeTick
             let isExpanded = searching || expanded
-            let groups = bot.threadGroups(matching: bot.name.localizedCaseInsensitiveContains(query) ? "" : query)
-            let count = bot.threadGroups().reduce(0) { $0 + $1.tasks.count }
+            let queued = session.state.queuedThreadIds
+            let groups = bot.threadGroups(
+                matching: bot.name.localizedCaseInsensitiveContains(query) ? "" : query,
+                queuedThreadIds: queued
+            )
+            let count = bot.threadGroups(queuedThreadIds: queued).reduce(0) { $0 + $1.tasks.count }
+            let nextSnoozeExpiry = bot.visibleTasks.nextSnoozeExpiry()
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 8) {
                     Button {
@@ -90,6 +100,15 @@ struct BotThreadTree: View {
             .padding(.leading, 88)
             .padding(.trailing, 18)
             .padding(.bottom, isExpanded ? 12 : 0)
+            .task(id: "\(nextSnoozeExpiry ?? 0):\(snoozeTick)") {
+                guard let nextSnoozeExpiry else { return }
+                let seconds = max(0, (nextSnoozeExpiry - Date().timeIntervalSince1970 * 1_000) / 1_000) + 0.05
+                // Remote deadlines can be arbitrarily distant. Bound the
+                // duration conversion and re-arm with the tick until due.
+                try? await Task.sleep(for: .seconds(min(86_400, seconds)))
+                guard !Task.isCancelled else { return }
+                snoozeTick += 1
+            }
         }
     }
 
@@ -97,12 +116,20 @@ struct BotThreadTree: View {
         ForEach(tasks, id: \.threadId) { task in
             if let projected = bot.projected(forThread: task.threadId) {
                 NavigationLink(value: Chat.bot(projected)) {
-                    BotThreadRow(task: task)
+                    BotThreadRow(task: task, queued: session.state.pendingQueued[task.threadId]?.isEmpty == false)
                         .padding(.vertical, 8)
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        let pinned = task.pinned != true
+                        Task { await session.setTaskPinned(task, pinned: pinned, in: .bot(bot)) }
+                    } label: {
+                        Label(task.pinned == true ? "Unpin" : "Pin", systemImage: task.pinned == true ? "pin.slash" : "pin")
+                    }
+                }
                 .accessibilityIdentifier("thread.\(task.threadId)")
             }
         }

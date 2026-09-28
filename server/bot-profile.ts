@@ -1,25 +1,20 @@
 import { z } from "zod";
 
-import { BOT_AVATAR_CROPS, botAvatarCropSchema, botAvatarUrlSchema } from "../shared/bot-avatar.ts";
-import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import {
+  AVATAR_ZOOM_MAX,
+  AVATAR_ZOOM_MIN,
+  BOT_AVATAR_CROPS,
+  botAvatarCropSchema,
+  botAvatarUrlSchema,
+} from "../shared/bot-avatar.ts";
+import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "../shared/bot-profile.ts";
 import { MASCOT_BODY_IDS, mascotBodySchema } from "../shared/mascot-bodies.ts";
 
 import type { BotRecord } from "./store.ts";
 
-/** A name or title is quoted inside prompts and cards as one line — a
- * roster entry, a "Name: …" speaker line, the bracketed provenance note.
- * Text that can break out of that line (a newline, a control byte, the
- * Unicode separators) is refused at the door rather than flattened later,
- * so what the person sees in the sidebar is what every prompt sees too.
- * Written as a scan because a control-character class is the kind of
- * literal the linter (rightly) refuses. */
-export function fitsOnOneLine(value: string): boolean {
-  for (let i = 0; i < value.length; i += 1) {
-    const code = value.charCodeAt(i);
-    if (code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029) return false;
-  }
-  return true;
-}
+// Shared with the package format, which checks the same rule on names it
+// carries; re-exported under its historical path.
+export { fitsOnOneLine } from "../shared/bot-profile.ts";
 
 export const BOT_PROFILE_PATCH_FIELDS = [
   "name",
@@ -29,12 +24,15 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "notifications",
   "avatarUrl",
   "avatarCrop",
+  "avatarZoom",
+  "avatarFocusX",
+  "avatarFocusY",
   "mascotBody",
   "voice",
   "speakReplies",
 ] as const;
 
-const profilePatchSchema = z.object({
+export const profilePatchSchema = z.object({
   name: z
     .string({ error: "name must be a string" })
     .max(BOT_PROFILE_LIMITS.name, { error: "name must be at most 100 characters" })
@@ -63,6 +61,9 @@ const profilePatchSchema = z.object({
     })
     .optional(),
   avatarCrop: botAvatarCropSchema.optional(),
+  avatarZoom: z.number({ error: "avatarZoom must be a number from 1 to 3" }).finite().min(AVATAR_ZOOM_MIN).max(AVATAR_ZOOM_MAX).optional(),
+  avatarFocusX: z.number({ error: "avatarFocusX must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
+  avatarFocusY: z.number({ error: "avatarFocusY must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
   mascotBody: mascotBodySchema.optional(),
   voice: z
     .string({ error: "voice must be a string" })
@@ -83,6 +84,9 @@ export type BotProfilePatch = Partial<
     | "notifications"
     | "avatarUrl"
     | "avatarCrop"
+    | "avatarZoom"
+    | "avatarFocusX"
+    | "avatarFocusY"
     | "mascotBody"
     | "voice"
     | "speakReplies"

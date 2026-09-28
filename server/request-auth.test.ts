@@ -17,6 +17,7 @@ import {
   requestOrigin,
   requestSource,
   requiredScope,
+  resolveLoopbackTrust,
   resolveRequestAuth,
   sanitizeSource,
   serializeSessionCookie,
@@ -95,12 +96,15 @@ describe("scopes", () => {
   it("is default deny: chat, approvals, rooms, attachments, routines and own session are client; everything else admin", () => {
     for (const [method, path] of [
       ["POST", "/api/bots/x/messages"], ["POST", "/api/bots/x/respond"], ["POST", "/api/threads/t/respond"],
+      ["POST", "/api/bots/x/compact"],
       ["PATCH", "/api/bots/x/cards/m"], ["POST", "/api/groups/g/messages"], ["PATCH", "/api/groups/g"],
       ["PATCH", "/api/bots/x"], ["PATCH", "/api/bots/x/profile"], ["POST", "/api/attachments"],
       ["GET", "/api/attachments/a.png"], ["POST", "/api/routines"], ["POST", "/api/routines/r/run"],
+      ["POST", "/api/routine-runs/seen-all"],
       ["GET", "/api/bots"], ["GET", "/api/threads/t/messages"], ["GET", "/api/search"], ["GET", "/api/events"],
       ["GET", "/api/config"], ["GET", "/api/webhooks"], ["POST", "/api/tts/speak"],
       ["GET", "/api/auth/session"], ["POST", "/api/auth/stream-ticket"], ["POST", "/api/auth/logout"],
+      ["GET", "/api/bots/x/slack-management"], // a link to Admin, read-only
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
     for (const [method, path] of [
       ["POST", "/api/cli-test"], ["GET", "/api/cli-candidates"], ["GET", "/api/instances"], ["PATCH", "/api/instances/claude"],
@@ -110,6 +114,7 @@ describe("scopes", () => {
       ["PATCH", "/api/bots/x/model"], ["PATCH", "/api/groups/g/setup"], ["POST", "/api/teams/import"], ["GET", "/api/teams/scout"],
       ["GET", "/api/bots/x/memory"], ["PUT", "/api/bots/x/memory"], ["PUT", "/api/section-context"], ["GET", "/api/threads/t/events"],
       ["POST", "/api/bots/x/checkpoints/restore"], ["GET", "/api/mcp/servers"], ["POST", "/api/mcp/servers"], ["POST", "/api/connectors/slack/authorize"],
+      ["POST", "/api/bots/x/slack-management"], ["GET", "/api/bots/x/slack-management/extra"],
       ["PUT", "/api/config"], ["POST", "/api/auth/pairing"], ["GET", "/api/auth/sessions"], ["DELETE", "/api/auth/sessions/abc"],
       ["POST", "/api/auth/pair"], // handled before the gate; the gate itself never grants it
       ["GET", "/api/something-new"], // anything unlisted is admin until listed
@@ -420,5 +425,130 @@ describe("an IPC listener (openmausbot serve --tunnel) is remote by construction
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("loopback trust: owner on one person's machine, service on a shared workspace", () => {
+  let dir: string;
+  let sessions: SessionRegistry;
+  const cookieName = "omb_session_8799_env";
+  const local = { host: "127.0.0.1:8799" };
+  const check = (method: string, path: string, options: { trust?: "owner" | "service"; headers?: Record<string, string>; desktopToken?: string } = {}) =>
+    resolveRequestAuth(request({ ...local, ...options.headers }, method), {
+      sessions, cookieName, streamPath: "/api/events", url: new URL(path, "http://x"),
+      ...(options.trust ? { loopbackTrust: options.trust } : {}),
+      ...(options.desktopToken !== undefined ? { loopbackMutationToken: options.desktopToken } : {}),
+    });
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "omb-auth-trust-"));
+    sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  // Every call the deployed cloud Slack worker makes to the runtime
+  // (openmaus-cloud server/slack-worker.ts, every released version), plus
+  // the bot capability routes and liveness. None of these may break.
+  const SERVICE_CALLS: Array<[string, string]> = [
+    ["GET", "/api/health"],
+    ["GET", "/api/bots?messages=0"],
+    ["GET", "/api/threads/thread-1/messages?limit=0"],
+    ["GET", "/api/threads/thread-1/messages?limit=200&before=m-1"],
+    ["GET", "/api/attachments/0b3c9f2e-1a2b-4c5d-8e9f-0a1b2c3d4e5f.png"],
+    ["POST", "/api/bots/bot-1/tasks"],
+    ["POST", "/api/bots/bot-1/messages/guarded"],
+    ["GET", "/api/bots/bot-1/requests/job_0123456789abcdef?threadId=thread-1"],
+    ["POST", "/api/bots/bot-1/requests/job_0123456789abcdef/interrupt"],
+    ["DELETE", "/api/bots/bot-1/queue/queue-1"],
+    ["POST", "/api/threads/thread-1/respond"],
+    ["GET", "/api/auth/session"],
+    ["POST", "/api/internal/ask-bot"],
+    ["GET", "/api/internal/agents"],
+    ["POST", "/api/internal/hook"],
+    ["POST", "/api/testing/internal-capability"],
+  ];
+  // Admin changes a bot's shell must not make as the owner.
+  const ADMIN_CALLS: Array<[string, string]> = [
+    ["PUT", "/api/config"], ["PATCH", "/api/config"], ["GET", "/api/config"],
+    ["POST", "/api/webhooks"], ["GET", "/api/webhooks"],
+    ["GET", "/api/auth/sessions"], ["DELETE", "/api/auth/sessions/sess-admin"], ["POST", "/api/auth/pairing"],
+    ["POST", "/api/bots"], ["PATCH", "/api/bots/bot-1"], ["DELETE", "/api/bots/bot-1"],
+    ["POST", "/api/instances"], ["GET", "/api/instances"], ["POST", "/api/mcp-servers"],
+    ["POST", "/api/keys/test"], ["GET", "/api/usage"], ["GET", "/api/decisions"], ["GET", "/api/decisions.csv"],
+    ["POST", "/api/fleet/workspaces"], ["POST", "/api/settings/custom-domain"], ["POST", "/api/workspace-backup/export"],
+    // ordinary sends and answers go through a person's session, not loopback
+    ["POST", "/api/bots/bot-1/messages"], ["POST", "/api/bots/bot-1/respond"], ["POST", "/api/bots/bot-1/always-allow"],
+    ["POST", "/api/groups/room-1/messages"], ["POST", "/api/routines"], ["GET", "/api/events"],
+  ];
+
+  it("keeps the owner exactly as before when no trust is given or trust is owner", () => {
+    for (const trust of [undefined, "owner"] as const) {
+      for (const [method, path] of [...SERVICE_CALLS, ...ADMIN_CALLS]) {
+        expect(check(method, path, { trust }).auth, `${method} ${path}`).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+      }
+    }
+  });
+
+  it("lets a service reach only its routes, as a client without admin", () => {
+    for (const [method, path] of SERVICE_CALLS) {
+      expect(check(method, path, { trust: "service" }).auth, `${method} ${path}`).toEqual({ kind: "loopback", scopes: ["client"], trust: "service" });
+    }
+    for (const [method, path] of ADMIN_CALLS) {
+      const denied = check(method, path, { trust: "service" });
+      expect(denied.auth, `${method} ${path}`).toBeNull();
+      expect(denied.status).toBe(403);
+      expect(denied.error).toMatch(/shared server.*sign in/);
+    }
+  });
+
+  it("still admits a real session with its own scopes on a service-trust server", () => {
+    const admin = sessions.issue({ label: "Laptop", scopes: ["admin", "client"] });
+    const member = sessions.issue({ label: "Phone", scopes: ["client"] });
+    expect(check("PUT", "/api/config", { trust: "service", headers: { authorization: `Bearer ${admin.token}` } }).auth?.kind).toBe("session");
+    expect(check("POST", "/api/bots/bot-1/messages", { trust: "service", headers: { authorization: `Bearer ${member.token}` } }).auth?.kind).toBe("session");
+    expect(check("PUT", "/api/config", { trust: "service", headers: { authorization: `Bearer ${member.token}` } }).status).toBe(403);
+  });
+
+  it("ignores service trust while the desktop capability is in force", () => {
+    expect(check("PUT", "/api/config", { trust: "service", desktopToken: "owner-token", headers: { "x-openmausbot-desktop-owner": "owner-token" } }).auth)
+      .toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+  });
+
+  it("defaults to service on a hosted workspace, owner elsewhere, and lets the operator choose", () => {
+    const pick = (env: NodeJS.ProcessEnv, flags: { desktopManaged?: boolean; hostedWorkspace?: boolean } = {}) =>
+      resolveLoopbackTrust({ env, desktopManaged: false, hostedWorkspace: false, ...flags });
+    expect(pick({})).toEqual({ trust: "owner", reason: "self-hosted default" });
+    expect(pick({}, { hostedWorkspace: true })).toEqual({ trust: "service", reason: "hosted workspace" });
+    expect(pick({ OMB_LOOPBACK_TRUST: "service" })).toEqual({ trust: "service", reason: "OMB_LOOPBACK_TRUST" });
+    expect(pick({ OMB_LOOPBACK_TRUST: " Service " }).trust).toBe("service");
+    const forced = pick({ OMB_LOOPBACK_TRUST: "owner" }, { hostedWorkspace: true });
+    expect(forced.trust).toBe("owner");
+    expect(forced.warning).toMatch(/shared workspace/);
+    const typo = pick({ OMB_LOOPBACK_TRUST: "own3r\n" });
+    expect(typo.trust).toBe("service");
+    expect(typo.warning).toMatch(/not owner or service/);
+    expect(typo.warning).not.toContain("\n");
+    expect(pick({ OMB_LOOPBACK_TRUST: "" }).trust).toBe("owner");
+    const desktop = pick({ OMB_LOOPBACK_TRUST: "service" }, { desktopManaged: true, hostedWorkspace: true });
+    expect(desktop.trust).toBe("owner");
+    expect(desktop.warning).toMatch(/ignored in the desktop app/);
+  });
+
+  it("lets only the CLI that started the server, holding its secret, mint a pairing code under service trust", () => {
+    const secret = "c".repeat(43);
+    const as = (method: string, path: string, header?: string, token: string | null = secret) =>
+      resolveRequestAuth(request({ ...local, ...(header ? { "x-openmausbot-cli-owner": header } : {}) }, method), {
+        sessions, cookieName, streamPath: "/api/events", url: new URL(path, "http://x"), loopbackTrust: "service", cliOwnerToken: token ?? undefined,
+      });
+    expect(as("POST", "/api/auth/pairing", secret).auth).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    expect(as("GET", "/api/auth/pairing", secret).auth?.kind).toBe("loopback");
+    // nothing else opens with it, and nothing opens without it
+    for (const [method, path] of [["PUT", "/api/config"], ["GET", "/api/auth/sessions"], ["DELETE", "/api/auth/pairing"], ["POST", "/api/bots"]] as const) {
+      expect(as(method, path, secret).auth, `${method} ${path}`).toBeNull();
+    }
+    expect(as("POST", "/api/auth/pairing").auth).toBeNull();
+    expect(as("POST", "/api/auth/pairing", "d".repeat(43)).auth).toBeNull();
+    expect(as("POST", "/api/auth/pairing", "", null).auth).toBeNull();
+    expect(as("POST", "/api/auth/pairing", secret, null).auth).toBeNull();
   });
 });

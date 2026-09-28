@@ -28,7 +28,7 @@ describe("custom domain setup guidance", () => {
     expect(html).toContain("A record");
     expect(html).toContain("AAAA");
     expect(html).toContain("administrator must configure HTTPS");
-    expect(html).toContain("exact workspace before saving");
+    expect(html).toContain("exact installation before saving");
     expect(html).toContain("Never publish the app");
     expect(html).toContain("bots.example.com");
     expect(html).not.toContain(status.publicUrl!);

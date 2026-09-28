@@ -35,11 +35,15 @@ import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.threadGroups
 
 /** Local search includes desktop folder names and every visible conversation title. */
-internal fun rosterThreadRows(summaries: List<ChatSummary>, query: String): List<ChatSummary> {
+internal fun rosterThreadRows(
+    summaries: List<ChatSummary>,
+    query: String,
+    queuedThreadIds: Set<String> = emptySet(),
+): List<ChatSummary> {
     val matching = RosterLayout.rows(summaries, query).mapTo(mutableSetOf()) { it.id }
     return summaries.filter { summary ->
         summary.id in matching || (summary.chat as? Chat.BotChat)?.bot
-            ?.threadGroups(matching = query)?.isNotEmpty() == true
+            ?.threadGroups(matching = query, queuedThreadIds = queuedThreadIds)?.isNotEmpty() == true
     }
 }
 
@@ -55,11 +59,17 @@ internal fun BotThreadTree(
     onCreate: () -> Unit,
     onManage: () -> Unit,
     onOpen: (Chat) -> Unit,
+    queuedThreadIds: Set<String> = emptySet(),
 ) {
     val searching = query.isNotBlank()
     val isExpanded = searching || expanded
-    val groups = bot.threadGroups(matching = if (bot.name.contains(query, ignoreCase = true)) "" else query)
-    val count = bot.threadGroups().sumOf { it.tasks.size }
+    val now = rememberSnoozeNow(bot.tasks.orEmpty())
+    val groups = bot.threadGroups(
+        matching = if (bot.name.contains(query, ignoreCase = true)) "" else query,
+        now = now,
+        queuedThreadIds = queuedThreadIds,
+    )
+    val count = bot.threadGroups(queuedThreadIds = queuedThreadIds).sumOf { it.tasks.size }
 
     Column(
         modifier = Modifier
@@ -106,7 +116,7 @@ internal fun BotThreadTree(
             groups.forEach { group ->
                 val folder = group.project
                 if (folder == null) {
-                    ThreadLinks(group.tasks, bot, onOpen)
+                    ThreadLinks(group.tasks, bot, now, queuedThreadIds, onOpen)
                 } else {
                     val key = "${bot.id}:${folder.id}"
                     val folderExpanded = searching || key !in collapsedFolders
@@ -135,7 +145,7 @@ internal fun BotThreadTree(
                         )
                     }
                     if (folderExpanded) {
-                        Column(Modifier.padding(start = 8.dp)) { ThreadLinks(group.tasks, bot, onOpen) }
+                        Column(Modifier.padding(start = 8.dp)) { ThreadLinks(group.tasks, bot, now, queuedThreadIds, onOpen) }
                     }
                 }
             }
@@ -144,12 +154,20 @@ internal fun BotThreadTree(
 }
 
 @Composable
-private fun ThreadLinks(tasks: List<BotTask>, bot: Bot, onOpen: (Chat) -> Unit) {
+private fun ThreadLinks(
+    tasks: List<BotTask>,
+    bot: Bot,
+    now: Long,
+    queuedThreadIds: Set<String>,
+    onOpen: (Chat) -> Unit,
+) {
     tasks.forEach { task ->
         val projected = bot.forTask(task.threadId)
         if (projected != null) {
             BotThreadRow(
                 task,
+                now = now,
+                queued = task.threadId in queuedThreadIds,
                 modifier = Modifier
                     .testTag("thread.${task.threadId}")
                     .clickable(role = Role.Button) { onOpen(Chat.BotChat(projected)) }

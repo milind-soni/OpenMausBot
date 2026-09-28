@@ -191,6 +191,10 @@ android {
             // handful of tests that mount a composition ask for it; the rest of
             // the suite never loads Robolectric at all.
             isIncludeAndroidResources = true
+            // Composition tests render real frames, and the conversation screen
+            // in particular drives enough of them that the Gradle default heap
+            // runs out before the swipe being tested can land.
+            all { test -> test.maxHeapSize = "2g" }
         }
     }
 }

@@ -1,0 +1,111 @@
+{
+  "assertions": [
+    {
+      "bots": [
+        "bot1",
+        "bot2",
+        "bot1"
+      ],
+      "kind": "turnOrder"
+    },
+    {
+      "bot": "bot1",
+      "equals": [
+        "coordinate_bots"
+      ],
+      "kind": "toolNames"
+    },
+    {
+      "bot": "bot1",
+      "kind": "transcriptIncludes",
+      "text": "<reply 2>",
+      "thread": "active"
+    },
+    {
+      "equals": [
+        {
+          "bot": "bot1",
+          "status": "completed"
+        },
+        {
+          "bot": "bot2",
+          "hasParent": true,
+          "status": "completed"
+        }
+      ],
+      "kind": "handoffTree"
+    }
+  ],
+  "behavior": "A real coordination thread, redacted to placeholders, still replays its recorded delegation trace: one coordinate_bots dispatch, one specialist completion, and the owner's final report, with the handoff tree landing exactly as exported.",
+  "bots": [
+    {
+      "key": "bot1",
+      "name": "Golden one",
+      "turns": [
+        {
+          "reply": "<reply 1>",
+          "steps": [
+            {
+              "arguments": {
+                "bot_ids": [
+                  "@bot2"
+                ],
+                "message": "<redacted>",
+                "request_key": "redacted-request"
+              },
+              "tool": "coordinate_bots"
+            }
+          ]
+        },
+        {
+          "reply": "<reply 2>"
+        },
+        {
+          "reply": "<settled reply>"
+        }
+      ]
+    },
+    {
+      "key": "bot2",
+      "name": "Golden two",
+      "turns": [
+        {
+          "reply": "<synthesized reply bot2>"
+        }
+      ]
+    }
+  ],
+  "gates": [],
+  "golden": {
+    "from": "redacted-thread",
+    "redactor": 1
+  },
+  "id": "golden-handoff",
+  "steps": [
+    {
+      "bot": "bot1",
+      "kind": "send",
+      "text": "<user message 1>"
+    },
+    {
+      "bot": "bot1",
+      "busy": false,
+      "kind": "waitForBusy",
+      "timeoutMs": 20000
+    },
+    {
+      "bot": "bot2",
+      "kind": "waitForNodeStatus",
+      "status": "completed",
+      "timeoutMs": 20000
+    },
+    {
+      "bot": "bot1",
+      "kind": "waitForNodeStatus",
+      "status": "completed",
+      "timeoutMs": 20000
+    }
+  ],
+  "title": "Golden thread: a chief delegates a research task and reports the settled result",
+  "world": "coordination"
+}

@@ -19,8 +19,8 @@ describe("workspace credential migration", () => {
   it("moves every plaintext secret into the store and deletes the field", () => {
     const config = {
       xai: { key: "xai-secret", url: "https://api.example.test/v1" },
-      box: { token: "box-secret" },
-      tts: { key: "tts-secret", voice: "narrator" },
+      box: { token: "boat-secret" },
+      tts: { key: "tts-secret", fishKey: "fish-secret", voice: "narrator" },
       imageGen: { key: "image-secret" },
       opencodeGo: { apiKey: "ocg-secret" },
       profile: { name: "Ada" },
@@ -30,8 +30,9 @@ describe("workspace credential migration", () => {
     expect(result.credentialsChanged).toBe(true);
     expect(result.credentials).toEqual({
       xaiApiKey: "xai-secret",
-      boxToken: "box-secret",
+      boxToken: "boat-secret",
       ttsKey: "tts-secret",
+      fishAudioKey: "fish-secret",
       opencodeGoApiKey: "ocg-secret",
       openaiImageApiKey: "image-secret",
     });
@@ -123,16 +124,18 @@ describe("workspace credential env", () => {
     expect(
       workspaceCredentialEnv({
         xaiApiKey: "xai-secret",
-        boxToken: "box-secret",
+        boxToken: "boat-secret",
         ttsKey: "tts-secret",
+        fishAudioKey: "fish-secret",
         opencodeGoApiKey: "ocg-secret",
         openaiImageApiKey: "image-secret",
         composioApiKey: "ak_handled-separately",
       }),
     ).toEqual({
       XAI_API_KEY: "xai-secret",
-      BOX_TOKEN: "box-secret",
+      BOX_TOKEN: "boat-secret",
       OMB_TTS_KEY: "tts-secret",
+      OMB_FISH_AUDIO_API_KEY: "fish-secret",
       OPENCODE_API_KEY: "ocg-secret",
       OMB_OPENAI_IMAGE_KEY: "image-secret",
     });

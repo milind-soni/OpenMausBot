@@ -12109,7 +12109,7 @@ var require_ElectronAppAdapter = __commonJS({
         this.app.quit();
       }
       relaunch() {
-        this.app.relaunch();
+        this.app.relaunch({ args: process.argv.slice(1).filter((arg) => arg !== "openmausbot://organization") });
       }
       onQuit(handler) {
         this.app.once("quit", (_, exitCode) => handler(exitCode));

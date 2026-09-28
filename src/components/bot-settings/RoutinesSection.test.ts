@@ -15,6 +15,7 @@ vi.mock("@/components/DesktopCapabilities", () => ({
 }));
 
 vi.mock("@/state/store", () => ({
+  api: vi.fn(),
   useStore: () => ({ state: { routinesLoadState: "ready" }, dispatch: vi.fn() }),
 }));
 

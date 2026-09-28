@@ -69,8 +69,8 @@ struct PairingView: View {
                 choiceGeneration += 1
                 discovery.stop()
             }
-            .onChange(of: session.pairingInvite) { _, invite in accept(invite) }
-            .onChange(of: showingOtherWays) { _, isShowing in
+            .onValueChange(of: session.pairingInvite) { invite in accept(invite) }
+            .onValueChange(of: showingOtherWays) { isShowing in
                 if isShowing {
                     discovery.start()
                 } else {
@@ -331,7 +331,7 @@ struct PairingView: View {
                         .padding(.vertical, 12)
                         .background(Color(uiColor: .tertiarySystemGroupedBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .onChange(of: code) { _, value in
+                        .onValueChange(of: code) { value in
                             // six digits for a computer, ABCD-EFGH-JKLM for a server
                             code = String(value.uppercased().filter { $0.isASCII && ($0.isNumber || $0.isLetter || $0 == "-") }.prefix(14))
                         }

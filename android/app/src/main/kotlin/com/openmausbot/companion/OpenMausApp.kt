@@ -3,6 +3,7 @@ package com.openmausbot.companion
 import android.app.Application
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.openmausbot.companion.audio.VoicePreviewPlayer
+import com.openmausbot.companion.audio.VoiceNotePlayer
 import com.openmausbot.companion.avatar.AvatarImageStore
 import com.openmausbot.companion.core.Session
 import com.openmausbot.companion.discovery.NsdDiscovery
@@ -54,6 +55,8 @@ class OpenMausApp : Application() {
         private set
     lateinit var voicePreview: VoicePreviewPlayer
         private set
+    lateinit var voiceNotes: VoiceNotePlayer
+        private set
     lateinit var linger: SessionLingerController
         private set
     lateinit var shareInbox: ShareInbox
@@ -87,6 +90,7 @@ class OpenMausApp : Application() {
         )
         avatars = AvatarImageStore(fetch = session::avatarData)
         voicePreview = VoicePreviewPlayer(this)
+        voiceNotes = VoiceNotePlayer(this)
 
         // iOS resets the avatar cache inside signOut. Observe Unpaired here so
         // the platform cache cannot outlive the pairing that minted its URLs.

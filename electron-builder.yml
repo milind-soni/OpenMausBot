@@ -141,6 +141,8 @@ win:
     # CUA driver and SDK for Windows — must live outside ASAR for native modules
     - from: dist-native/cua-win32-x64/cua-driver.exe
       to: cua-driver.exe
+    - from: dist-native/cua-win32-x64/cua-driver-background.exe
+      to: cua-driver-background.exe
     - from: dist-native/cua-win32-x64/cua-sdk
       to: cua-sdk
   # No signing config yet (would go under win.signtoolOptions or

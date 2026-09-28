@@ -10,12 +10,13 @@ import { isAbsolute, join, parse, posix, relative, resolve, win32 } from "node:p
 import { homedir } from "node:os";
 import { backup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
+import { Worker } from "node:worker_threads";
 import * as tar from "tar";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { writeFileAtomic } from "./atomic.ts";
 import { escapeAttribute, splitTranscriptAttachments } from "../src/lib/composer-attachments.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
-import { excludedWorkspaceAuthPath, portableWorkspaceConfig, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary } from "../shared/workspace-backup.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
@@ -58,6 +59,7 @@ export interface CreateWorkspaceBackupOptions {
   clientState?: WorkspaceBackupClientState;
   appVersion?: string;
 }
+type CreatedWorkspaceBackup = { id: string; path: string; summary: WorkspaceBackupSummary };
 export interface WorkspaceRestoreResult {
   restored: boolean;
   rolledBack?: boolean;
@@ -106,8 +108,7 @@ function jobPath(dataDir: string, id: string): string {
   }
   return path;
 }
-function newJob(dataDir: string): { id: string; directory: string } {
-  const id = randomUUID();
+function newJob(dataDir: string, id: string = randomUUID()): { id: string; directory: string } {
   const directory = jobPath(dataDir, id);
   mkdirSync(directory, { mode: 0o700 });
   return { id, directory };
@@ -254,12 +255,45 @@ function databaseCounts(path: string): { threads: number; messages: number } {
   } finally { db.close(); }
 }
 
-export async function createWorkspaceBackup(dataDir: string, options: CreateWorkspaceBackupOptions) {
+/** The existing maintenance gate owns exclusivity until this worker has exited.
+ * Keep synchronous file validation/fsync intact, but off the request thread. */
+export async function createWorkspaceBackup(dataDir: string, options: CreateWorkspaceBackupOptions): Promise<CreatedWorkspaceBackup> {
+  const source = new URL("./workspace-backup.worker.ts", import.meta.url);
+  // Assign ownership before the worker can create staging, including crashes
+  // too early to send a job-created message back to this process.
+  const jobId = randomUUID();
+  let worker: Worker | undefined;
+  let completed = false;
+  try {
+    worker = new Worker(existsSync(source) ? source : new URL("./workspace-backup.worker.js", import.meta.url), {
+      workerData: { dataDir, options, jobId }, execArgv: [],
+    });
+    const result = await new Promise<CreatedWorkspaceBackup>((resolveBackup, reject) => {
+      const failed = () => reject(new Error("The backup worker stopped before completing. Try again."));
+      worker!.once("message", (reply: { result?: CreatedWorkspaceBackup; error?: string }) => {
+        if (reply.result) resolveBackup(reply.result);
+        else if (reply.error) reject(new Error(reply.error));
+        else failed();
+      });
+      worker!.once("error", failed);
+      worker!.once("exit", failed);
+    });
+    completed = true;
+    return result;
+  } finally {
+    await worker?.terminate();
+    // Reuse the guarded deletion path: never sweep other jobs or recovery.
+    if (!completed && entryExists(join(dataDir, ".backups", jobId))) removeWorkspaceBackupJob(dataDir, jobId);
+  }
+}
+
+/** Worker implementation; application callers use createWorkspaceBackup. */
+export async function createWorkspaceBackupSnapshot(dataDir: string, options: CreateWorkspaceBackupOptions, jobId?: string): Promise<CreatedWorkspaceBackup> {
   if (Object.hasOwn(options, "credentials")) throw new Error("Workspace backups do not transfer credentials.");
   assertLocalAuthOutsideSnapshot(dataDir);
   const salt = randomBytes(16);
   const key = await passwordKey(options.password, salt);
-  const job = newJob(dataDir);
+  const job = newJob(dataDir, jobId);
   const snapshot = join(job.directory, "snapshot");
   folder(join(snapshot, "data"));
   const entries: Entry[] = [];
@@ -287,7 +321,7 @@ export async function createWorkspaceBackup(dataDir: string, options: CreateWork
       for (const name of readdirSync(directory).sort()) {
         if (!prefix && excluded(name)) continue;
         const path = prefix ? `${prefix}/${name}` : name;
-        if (excludedWorkspaceAuthPath(path)) continue;
+        if (excludedWorkspaceAuthPath(path) || ephemeralWorkspaceTokenPath(path) || redownloadedOrgLibraryPath(path)) continue;
         // Do not silently skip noncanonical source spellings: reject them so
         // a case-sensitive host cannot export auth paths active on Windows/Mac.
         if (forbiddenArchivePath(path)) throw new Error("A workspace filename conflicts with a protected authentication or runtime path.");
@@ -666,8 +700,11 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
   folder(prepared);
   // Keep the authenticated original staging tree intact for reinspection and
   // recovery. Only this installation copy has paths/scheduling adapted.
-  for (const entry of manifest.entries.filter((entry) => entry.type === "directory")) folder(join(prepared, entry.path));
-  for (const entry of manifest.entries) {
+  // An archive from a release that exported per-turn hook tokens still
+  // restores; the dead tokens themselves are never installed.
+  const installed = manifest.entries.filter((entry) => !ephemeralWorkspaceTokenPath(entry.path));
+  for (const entry of installed.filter((entry) => entry.type === "directory")) folder(join(prepared, entry.path));
+  for (const entry of installed) {
     const destination = join(prepared, entry.path);
     if (entry.type === "file") copyRegular(join(job, "staged", "data", entry.path), destination);
   }
@@ -681,6 +718,14 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
   for (const name of ["bots.json", "groups.json", "config.json", "routines.json", "calendar-calls.json"]) {
     changeJson(name, (value) => rebaseFields(value, manifest.sourceDataDir, resolve(dataDir)));
   }
+  // Voice provider configuration and credentials deliberately stay with the
+  // destination installation. Imported per-agent ids belong to the source
+  // provider's catalog, so retaining them could send an incompatible id to
+  // the destination provider.
+  changeJson("bots.json", (value) => {
+    if (!Array.isArray(value)) throw new Error("Invalid bot definitions in workspace backup.");
+    for (const bot of value) if (record(bot)) delete bot.voice;
+  });
   // Never install source connection settings. Destination keys, endpoints,
   // driver environments and MCP configuration remain paired and unchanged.
   const oldConfig = join(dataDir, "config.json");

@@ -61,3 +61,87 @@ stale list/stream events, native key routing, bounded input/backpressure,
 revoked capabilities, and exact saved-state cleanup. Native workflow testing
 is still required: a green mocked
 frame test alone does not prove browser input or restoration works.
+
+## One-minute idle and reconnect regression
+
+With an installed Playwright module, the same isolated launcher can run an
+automatic native acceptance pass, close its browsers and exit:
+
+```sh
+OMB_VERIFY_BROWSER_BINARY=/absolute/path/to/agent-browser \
+OMB_VERIFY_BROWSER_CHROME=/absolute/path/to/chrome-headless-shell \
+OMB_VERIFY_PLAYWRIGHT=/absolute/path/to/playwright/index.mjs \
+node --experimental-strip-types scripts/verify-browser-live.ts --recovery
+```
+
+This leaves a native document and unsaved form idle for 65 seconds using the
+production runtime timeout, verifies the document identity did not change,
+then submits the form through the next agent tool call. In parallel it mounts
+the real Browser panel against the isolated server, interrupts its live
+EventSource, and verifies automatic reconnect, retained navigation, no replayed
+commands, and watch-only control. The interruption is injected; Chrome and the
+replacement server stream are real. Narrow/desktop overflow is checked and a
+preview screenshot is retained beside the fixture log.
+
+The runtime regression also models a browser descendant that must outlive its
+MCP parent, including an MCP parent that ignores EOF. Run those tests on Windows
+as well: native macOS acceptance alone does not prove Windows process behavior.
+
+### Lifecycle references
+
+- [agent-browser's MCP loop](https://github.com/vercel-labs/agent-browser/blob/v0.37.0/cli/src/mcp.rs)
+  exits on stdin EOF; idle transport retirement must not kill the profile's daemon.
+- [agent-browser daemon startup](https://github.com/vercel-labs/agent-browser/blob/v0.37.0/cli/src/connection.rs)
+  detaches the daemon. Losing the MCP transport does not prove an accepted
+  browser action stopped; interruption still requires an explicit restart.
+- [Pi author's browser tools](https://github.com/badlogic/agent-tools/blob/main/browser-tools/browser-nav.js)
+  disconnect the automation client instead of closing Chrome after navigation.
+- [OpenClaw's CDP connection](https://github.com/openclaw/openclaw/blob/main/extensions/browser/src/browser/cdp-websocket.ts)
+  bounds connection retries before commands have side effects. OMB similarly
+  retries observation only, never clicks, text, navigation or submissions.
+
+No upstream implementation was copied; OMB already ships agent-browser and
+keeps its existing license notices and profile/control boundaries.
+
+Verified 2026-09-19 on macOS arm64 with agent-browser 0.37.0 and the packaged
+Chrome Headless Shell: 214 focused checks, typecheck and scoped lint passed.
+Two isolated native acceptance runs preserved document identity and the unsaved
+form across 65 seconds of idle time, then completed the next tool action. The
+real preview recovered its injected stream failure without replaying actions
+or restoring a human lease. Windows native acceptance remains outstanding.
+Final fixture evidence: `server-1789811974163-38144.log` and
+`server-1789811974163-38144-browser.png` in the launcher's printed
+`openmausbot-verification-evidence` directory.
+
+## Real Codex chat-to-action acceptance (opt-in)
+
+This uses real model quota. Supply the installed CLI, sign-in file and model
+explicitly; the recipe copies only that sign-in into a disposable home. It
+does not import personal chats, provider settings, skills or browser profiles.
+Never point its requests at the user's running app.
+
+```sh
+OMB_VERIFY_CODEX_CLI=/absolute/path/to/codex \
+OMB_VERIFY_CODEX_AUTH=/absolute/path/to/auth.json \
+OMB_VERIFY_CODEX_MODEL=your-supported-model \
+node --experimental-strip-types scripts/verify-codex-surface-live.ts
+```
+
+Open the printed preview, select Ziggy, and send ordinary requests without tool
+names: open the printed test page, fill the name, click Say hello and verify
+the greeting. Confirm the actual screenshot, not just the model's answer.
+Use the composer to select **Approve for me**, then ask it to change the name
+and open/read the dialog. Routine tool actions should not produce repeated
+approval cards; provider review may still ask about other actions.
+
+Ask for Chrome on an unconfigured cloud computer. It must inspect real choices
+and report the blocker, not act on a host and claim that it is a VM. The
+composer and panel must keep the real destination highlighted during sends.
+
+Ctrl-C closes the exact fixture and removes the copied sign-in and browser
+data. VM/cloud transport and turn-bound switching are separately covered by
+`server/group-local-vm.e2e.test.ts`, `server/vps-routing.test.ts` and
+`server/index.test.ts` with
+isolated providers. These are not evidence of real cloud provisioning. Native
+Boat currently does not expose the agents selector tool, so switching away
+from an active native Boat destination still requires the composer selector.

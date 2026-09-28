@@ -1,8 +1,8 @@
 // The proxy-side half of computer control. The harness keeps the record of
 // who is driving (server/computer-control.ts); the per-turn computer
 // processes consult it through this client before acting, because the
-// action paths themselves never traverse the harness — a box click goes
-// straight to the box's REST API, and a Local VM / VPS click rides a
+// action paths themselves never traverse the harness — a boat click goes
+// straight to the boat's REST API, and a Local VM / VPS click rides a
 // transparent stdio bridge into Cua Driver.
 //
 // Failure posture: CLOSED once configured. A missing/expired turn capability

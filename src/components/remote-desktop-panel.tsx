@@ -1,3 +1,4 @@
+import { cloudRunner } from "@/lib/remote-desktop";
 import { useEffect, useRef, useState } from "react";
 import { CalendarClock, CalendarDays, ImageOff, Loader2, Monitor, Plus, X } from "lucide-react";
 
@@ -78,9 +79,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   );
   const cloudRoutineReady = Boolean(
     state.config?.box.configured &&
-      state.instances.some(
-        (instance) => instance.driverKind === "boxAgent" && instance.snapshot.state === "available",
-      ),
+      cloudRunner(state.instances, bot.modelSelection.instanceId)?.snapshot.state === "available",
   );
 
   useEffect(() => {

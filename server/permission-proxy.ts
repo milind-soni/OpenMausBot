@@ -14,7 +14,7 @@
 // CLI's own AskUserQuestion. It is the tool the model actually reaches for
 // when it wants a person to choose, and acceptEdits will not run it unasked,
 // so it lands here looking like "may I run a tool?" — which is how a question
-// ended up on screen as an Allow/Deny box over a JSON blob. It is intercepted
+// ended up on screen as an Allow/Deny dialog over a JSON blob. It is intercepted
 // below and asked as what it is: one card carrying every question it posed,
 // answered through the tool's own `answers` field.
 //
@@ -101,8 +101,8 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
  *
  * There is deliberately no "fall through to the permission path" here. That
  * path cannot answer this tool — allowing it throws the click away, as
- * above — so the fallback offered a person an Allow/Deny box over raw JSON.
- * That box is the bug this file exists to remove.
+ * above — so the fallback offered a person an Allow/Deny dialog over raw JSON.
+ * That dialog is the bug this file exists to remove.
  */
 async function answerNativeQuestions(input: unknown): Promise<string> {
   // Unanswerable entries are SKIPPED by the parser, not fatal: one bad entry

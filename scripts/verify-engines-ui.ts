@@ -1,10 +1,23 @@
 // Real engine screens with synthetic statuses and a disposable app server.
 // No install/auth request can reach a provider or the user's configuration.
 import { fileURLToPath } from "node:url";
-import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpServer, type IncomingMessage } from "node:http";
 import { createServer } from "vite";
 import type { InstanceInfo } from "../src/state/store.tsx";
 import { launchVerificationServer } from "./control-omb.ts";
+import { providerIconError, type ProviderIcon } from "../shared/provider-icon.ts";
+
+async function requestJson(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of req) {
+    const value = Buffer.from(chunk);
+    bytes += value.length;
+    if (bytes > 192 * 1024) throw new Error("Preview request is too large.");
+    chunks.push(value);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
 
 const instances: InstanceInfo[] = [
   ["claude", "claudeAgent", "Claude", true, "2.1.8"],
@@ -54,6 +67,25 @@ try {
         const path = req.url?.split("?")[0];
         const json = (value: unknown, status = 200) => { res.statusCode = status; res.setHeader("content-type", "application/json"); res.end(JSON.stringify(value)); };
         if (path === "/api/instances" && req.method === "GET") return json({ instances });
+        const iconPatch = /^\/api\/instances\/([\w.-]+)\/icon$/.exec(path ?? "");
+        if (iconPatch && req.method === "PATCH") {
+          void requestJson(req).then((value) => {
+            const icon = (value as { icon?: unknown } | null)?.icon;
+            const validShape = icon === null || (typeof icon === "object" && icon !== null &&
+              ((icon as ProviderIcon).kind === "preset" || (icon as ProviderIcon).kind === "custom"));
+            if (!validShape) return json({ error: "Invalid provider icon." }, 400);
+            if (icon) {
+              const error = providerIconError(icon as ProviderIcon);
+              if (error) return json({ error }, 400);
+            }
+            const instance = instances.find((candidate) => candidate.instanceId === iconPatch[1]);
+            if (!instance) return json({ error: "Unknown preview instance." }, 404);
+            if (icon) instance.icon = icon as ProviderIcon;
+            else delete instance.icon;
+            return json({ instances });
+          }).catch((error) => json({ error: error instanceof Error ? error.message : String(error) }, 400));
+          return;
+        }
         if (path === "/__fixture/connect" && req.method === "POST") {
           instances[4].snapshot.authenticated = !instances[4].snapshot.authenticated;
           return json({ ok: true });

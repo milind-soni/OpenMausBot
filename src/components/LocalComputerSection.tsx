@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Card, CommandLine } from "./SettingsPrimitives";
+import { MacLocalControl } from "./MacLocalControl";
 import { cn } from "@/lib/cn";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
@@ -44,7 +45,7 @@ interface Status {
   workspace_guest_path: string;
   viewer_url: string;
   idle_timeout_ms: number;
-  mode: "shared" | "per-bot";
+  mode: "shared" | "per-bot" | "pool";
   max_instances: number;
   commands: {
     install: string | null;
@@ -86,7 +87,7 @@ export interface CloudComputerInventoryInstance {
   inUse: boolean;
 }
 
-interface CloudComputerInventoryPayload {
+export interface CloudComputerInventoryPayload {
   configured: boolean;
   available: boolean;
   problem: string | null;
@@ -95,8 +96,14 @@ interface CloudComputerInventoryPayload {
 
 type CloudAction = "sleep" | "delete";
 type PendingCloudAction = { boxId: string; action: CloudAction } | null;
-export type CloudPostActionOverride = "deleted" | "sleeping";
+export type CloudPostActionOverride = "deleted" | "deleting" | "sleeping";
 export type CloudPostActionOverrides = Record<string, CloudPostActionOverride>;
+
+const PENDING_CLOUD_DELETE_REFRESH_DELAYS_MS = [1_000, 2_000, 4_000] as const;
+
+function waitForCloudDeleteRefresh(delayMs: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, delayMs));
+}
 
 export interface VpsComputerInventoryInstance {
   name: string;
@@ -173,6 +180,7 @@ export function cloudComputerInventoryStateKind(
   instance: CloudComputerInventoryInstance,
 ): ComputerStateKind {
   if (instance.inUse) return "in-use";
+  if (instance.state === "removing") return "removing";
   if (["archived", "stopped"].includes(instance.state)) return "sleeping";
   if (["archiving", "stopping"].includes(instance.state)) return "going-to-sleep";
   if (["idle", "ready", "running"].includes(instance.state)) return "running";
@@ -184,9 +192,10 @@ export function cloudComputerInventoryState(instance: CloudComputerInventoryInst
   return computerStateLabel(cloudComputerInventoryStateKind(instance));
 }
 
-/** Box's account LIST is eventually consistent. Preserve the result of an
- * action the person just completed instead of letting an older provider
- * snapshot make a deleted computer reappear or a sleeping one look awake. */
+/** Boat's account LIST is eventually consistent. Preserve the result of an
+ * action the provider accepted instead of letting an older snapshot make a
+ * confirmed deletion reappear, a pending deletion disappear, or a sleeping
+ * computer look awake. */
 export function reconcileCloudInventorySnapshot(
   incoming: CloudComputerInventoryInstance[],
   previous: CloudComputerInventoryInstance[],
@@ -197,6 +206,7 @@ export function reconcileCloudInventorySnapshot(
   const instances = incoming.flatMap((instance) => {
     const override = overrides[instance.boxId];
     if (override === "deleted") return [];
+    if (override === "deleting") return [{ ...instance, state: "removing" }];
     if (override !== "sleeping") return [instance];
     if (["archived", "stopped"].includes(instance.state)) {
       delete nextOverrides[instance.boxId];
@@ -205,13 +215,36 @@ export function reconcileCloudInventorySnapshot(
     return [{ ...instance, state: "archived" }];
   });
 
-  // A transitioning Box can briefly disappear from LIST. Keep the last safe
+  // A transitioning Boat can briefly disappear from LIST. Keep the last safe
   // row until LIST returns the terminal sleeping state.
   for (const instance of previous) {
     if (overrides[instance.boxId] !== "sleeping" || incomingIds.has(instance.boxId)) continue;
     instances.push({ ...instance, state: "archived" });
   }
+  for (const [boxId, override] of Object.entries(overrides)) {
+    if ((override === "deleted" || override === "deleting") && !incomingIds.has(boxId)) {
+      delete nextOverrides[boxId];
+    }
+  }
   return { instances, overrides: nextOverrides };
+}
+
+/** An empty list proves deletion only when Boat says the inventory read was
+ * authoritative. Provider outages and disconnected accounts must not erase
+ * the last known row or settle a pending deletion as successful. */
+export function reconcileCloudInventoryPayload(
+  payload: CloudComputerInventoryPayload,
+  previous: CloudComputerInventoryInstance[],
+  overrides: CloudPostActionOverrides,
+): { instances: CloudComputerInventoryInstance[]; overrides: CloudPostActionOverrides } {
+  if (payload.configured !== true || payload.available !== true) {
+    return { instances: previous, overrides: { ...overrides } };
+  }
+  return reconcileCloudInventorySnapshot(
+    Array.isArray(payload.instances) ? payload.instances : [],
+    previous,
+    overrides,
+  );
 }
 
 function cloudComputerCanSleep(instance: CloudComputerInventoryInstance): boolean {
@@ -534,6 +567,7 @@ export function CloudComputersCard({
           const state = computerStateLabel(kind);
           const isPending = pending?.boxId === instance.boxId;
           const canSleep = cloudComputerCanSleep(instance);
+          const isRemoving = kind === "removing";
           return (
             <div
               key={instance.boxId}
@@ -582,7 +616,7 @@ export function CloudComputersCard({
                 <button
                   type="button"
                   onClick={() => onDelete(instance)}
-                  disabled={loading || instance.inUse || pending !== null}
+                  disabled={loading || instance.inUse || pending !== null || isRemoving}
                   aria-busy={isPending && pending?.action === "delete" ? true : undefined}
                   title={t("vm.cloud.deleteTitle")}
                   className="flex items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
@@ -819,6 +853,9 @@ export function LocalComputerSection() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch(...computerInventoryRequest("status", signal));
     const body = await response.json().catch(() => ({}));
+    // The poll loop can be cleaned up mid-flight; a resolved-but-stale read
+    // must never overwrite the state of whoever unmounted us.
+    if (signal?.aborted) return;
     if (!response.ok) throw new Error(body.error ?? t("vm.err.status", { code: response.status }));
     setStatus(body as Status);
     setError(null);
@@ -840,8 +877,8 @@ export function LocalComputerSection() {
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? t("vm.err.cloudInventory", { code: response.status }));
     const payload = body as CloudComputerInventoryPayload;
-    const reconciled = reconcileCloudInventorySnapshot(
-      Array.isArray(payload.instances) ? payload.instances : [],
+    const reconciled = reconcileCloudInventoryPayload(
+      payload,
       cloudInventoryRef.current,
       cloudOverridesRef.current,
     );
@@ -923,7 +960,7 @@ export function LocalComputerSection() {
     return () => controller.abort();
   }, [inventoryRefreshKey, refreshInventory, status?.mode]);
 
-  // Box account listing is deliberately not polled. It can be expensive and
+  // Boat account listing is deliberately not polled. It can be expensive and
   // Settings must remain an observation-only surface until the person clicks
   // Sleep or Delete.
   useEffect(() => {
@@ -976,18 +1013,15 @@ export function LocalComputerSection() {
     setStatus(body as Status);
   };
 
+  const confirmAction = (message: string) => window.ogb?.confirm ? window.ogb.confirm(message) : window.confirm(message);
+
   const act = async (action: Action) => {
-    if (
-      action === "remove" &&
-      !window.confirm(t("vm.confirm.deleteShared"))
-    ) return;
-    if (
-      action === "recreate" &&
-      !window.confirm(t("vm.confirm.recreate"))
-    ) return;
+    if (pending !== null) return;
     setPending(action);
     setError(null);
     try {
+      if (action === "remove" && !(await confirmAction(t("vm.confirm.deleteShared")))) return;
+      if (action === "recreate" && !(await confirmAction(t("vm.confirm.recreate")))) return;
       if (action === "recreate") {
         await post("remove");
         await post("run");
@@ -1069,9 +1103,12 @@ export function LocalComputerSection() {
       const response = await fetch(...request);
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? t(action === "delete" ? "vm.cloud.deleteError" : "vm.cloud.sleepError"));
+      const deletionPending = action === "delete" && body?.pending === true;
       cloudOverridesRef.current = {
         ...cloudOverridesRef.current,
-        [instance.boxId]: action === "delete" ? "deleted" : "sleeping",
+        [instance.boxId]: action === "delete"
+          ? deletionPending ? "deleting" : "deleted"
+          : "sleeping",
       };
       const reconciled = reconcileCloudInventorySnapshot(
         cloudInventoryRef.current,
@@ -1084,7 +1121,50 @@ export function LocalComputerSection() {
       const subject = instance.orphaned
         ? t("vm.announce.orphanCloud")
         : t("vm.confirm.ownedCloud", { name: instance.ownerName ?? "" });
-      setAnnouncement(t(action === "delete" ? "vm.announce.cloudDeleted" : "vm.announce.cloudSleeping", { subject }));
+      setAnnouncement(
+        deletionPending
+          ? `${subject}: ${t("vm.state.removing")}.`
+          : t(action === "delete" ? "vm.announce.cloudDeleted" : "vm.announce.cloudSleeping", { subject }),
+      );
+
+      if (deletionPending) {
+        // Boat may accept a background operation before the computer is gone.
+        // Keep the row visible as Removing while we check, then drop the
+        // optimistic state if the provider still lists it so the person can
+        // refresh or retry instead of being shown a false success forever.
+        for (const delayMs of PENDING_CLOUD_DELETE_REFRESH_DELAYS_MS) {
+          await waitForCloudDeleteRefresh(delayMs);
+          try {
+            await refreshCloudInventory();
+          } catch {
+            // A later bounded attempt can still establish the final state.
+          }
+          if (cloudOverridesRef.current[instance.boxId] !== "deleting") {
+            setAnnouncement(t("vm.announce.cloudDeleted", { subject }));
+            return;
+          }
+        }
+
+        const nextOverrides = { ...cloudOverridesRef.current };
+        delete nextOverrides[instance.boxId];
+        cloudOverridesRef.current = nextOverrides;
+        const restored = cloudInventoryRef.current.map((current) =>
+          current.boxId === instance.boxId ? { ...current, state: instance.state } : current
+        );
+        cloudInventoryRef.current = restored;
+        setCloudInventory(restored);
+        try {
+          await refreshCloudInventory();
+          if (!cloudInventoryRef.current.some((current) => current.boxId === instance.boxId)) {
+            setAnnouncement(t("vm.announce.cloudDeleted", { subject }));
+          }
+        } catch (refreshError) {
+          const detail = refreshError instanceof Error ? refreshError.message : String(refreshError);
+          setCloudError(`${subject}: ${t("vm.state.removing")}. ${detail}`);
+        }
+        return;
+      }
+
       try {
         await refreshCloudInventory();
       } catch (refreshError) {
@@ -1171,6 +1251,8 @@ export function LocalComputerSection() {
         onRemove={(instance) => void removeVpsComputer(instance)}
       />
 
+      <MacLocalControl />
+
       <Card
         title={t("vm.main.title")}
         subtitle={perBot
@@ -1244,21 +1326,24 @@ export function LocalComputerSection() {
             </button>
           ))}
         </div>
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[13px] text-ink">{t("vm.isolation.max")}</div>
-            <div className="text-[11.5px] text-ink-secondary">{t("vm.isolation.maxDetail")}</div>
+        {/* The cap only applies to per-bot VMs; shared mode runs exactly one. */}
+        {perBot && (
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[13px] text-ink">{t("vm.isolation.max")}</div>
+              <div className="text-[11.5px] text-ink-secondary">{t("vm.isolation.maxDetail")}</div>
+            </div>
+            <select
+              aria-label={t("vm.isolation.maxAria")}
+              value={status?.max_instances ?? 2}
+              disabled={!status || policyPending}
+              onChange={(event) => void savePolicy(status?.mode ?? "shared", Number(event.target.value))}
+              className="rounded-lg border border-hairline/40 bg-control px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
           </div>
-          <select
-            aria-label={t("vm.isolation.maxAria")}
-            value={status?.max_instances ?? 2}
-            disabled={!status || policyPending}
-            onChange={(event) => void savePolicy(status?.mode ?? "shared", Number(event.target.value))}
-            className="rounded-lg border border-hairline/40 bg-control px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
-          >
-            {[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value}</option>)}
-          </select>
-        </div>
+        )}
         {policyPending && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-secondary"><Loader2 size={12} className="animate-spin" /> {t("vm.saving")}</div>}
       </Card>
 
@@ -1336,7 +1421,10 @@ export function LocalComputerSection() {
             ) : status?.container === "running" ? (
               <div className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={13} className="animate-spin" /> {t("vm.setup.waiting")}</div>
             ) : status?.image ? (
-              <ActionButton action="run" pending={pending} onClick={() => void act("run")}>{t("vm.setup.create")}</ActionButton>
+              <>
+                <ActionButton action="run" pending={pending} onClick={() => void act("run")}>{t("vm.setup.start")}</ActionButton>
+                <p className="text-[13px] leading-relaxed text-ink-secondary">{t("vm.setup.idleHint")}</p>
+              </>
             ) : null}
             {c?.run && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("vm.setup.showCommand")}</summary><div className="mt-2"><CommandLine command={c.run} /></div></details>}
           </Step>

@@ -530,7 +530,13 @@ type TranscriptFence = {
 
 type TranscriptBlock =
   | { kind: "untilBlank" }
-  | { kind: "untilToken"; closingToken: string };
+  | { kind: "untilToken"; closingToken: string; hiddenWrapper?: boolean };
+
+/** The exact wrapper lines composeMessage writes around a pasted block. The
+ * bot needs them to tell pasted from typed text; a person reading their own
+ * message does not. Anything else on the line keeps the tag visible. */
+const PASTED_TEXT_OPEN = /^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$/i;
+const PASTED_TEXT_CLOSE = /^[\t ]*<\/pasted-text>[\t ]*$/i;
 
 /** Recognise CommonMark-style fenced code without pulling a Markdown parser
  * into the composer bundle. An unterminated fence deliberately protects the
@@ -627,8 +633,14 @@ const TRANSCRIPT_ATTACHMENT_TAG =
   /^<attached-(image|file)[\t ]+path="([^"\r\n]*)"(?:[\t ]+name="([^"\r\n]*)")?[\t ]*\/>[\t ]*$/;
 
 /** Split a stored user message into its display text and attachments for
- * transcript rendering. Markdown exports preserve whitespace; bubbles trim it. */
-export function splitTranscriptAttachments(text: string, trimDisplay = true): TranscriptAttachments {
+ * transcript rendering. Markdown exports preserve whitespace; bubbles trim it.
+ * Bubbles also hide the `<pasted-text>` wrapper lines and show only what was
+ * pasted; exports keep the message exactly as the bot received it. */
+export function splitTranscriptAttachments(
+  text: string,
+  trimDisplay = true,
+  hidePasteWrappers = true,
+): TranscriptAttachments {
   const images: TranscriptImageAttachment[] = [];
   const files: TranscriptFileAttachment[] = [];
   let display = "";
@@ -658,6 +670,7 @@ export function splitTranscriptAttachments(text: string, trimDisplay = true): Tr
       if (block.kind === "untilBlank") {
         if (/^[\t ]*$/.test(line)) block = null;
       } else if (line.toLowerCase().includes(block.closingToken)) {
+        if (block.hiddenWrapper && PASTED_TEXT_CLOSE.test(line)) consumed = true;
         block = null;
       }
     } else if (marker) {
@@ -678,7 +691,13 @@ export function splitTranscriptAttachments(text: string, trimDisplay = true): Tr
           consumed = true;
         }
       }
-      if (!consumed) block = transcriptBlockStarting(line);
+      if (!consumed) {
+        block = transcriptBlockStarting(line);
+        if (hidePasteWrappers && block?.kind === "untilToken" && block.closingToken === "</pasted-text>" && PASTED_TEXT_OPEN.test(line)) {
+          block = { ...block, hiddenWrapper: true };
+          consumed = true;
+        }
+      }
     }
 
     if (!consumed) display += text.slice(cursor, wholeLineEnd);
@@ -750,6 +769,14 @@ export function attachmentImageUrl(path: string): string | null {
   return `/api/attachments/${encodeURIComponent(name)}`;
 }
 
+/** Voice notes park as bare generated .mp3 filenames; anything else stays
+ * out of an <audio> src rather than 404ing on a private path. */
+export function attachmentAudioUrl(path: string): string | null {
+  const name = attachmentBasename(path);
+  if (!/^[A-Za-z0-9-]+\.mp3$/.test(name)) return null;
+  return `/api/attachments/${encodeURIComponent(name)}`;
+}
+
 /** One intake path for files arriving by drop OR by the composer's attach
  * button, so a picked file and a dropped one can never behave differently.
  * Uploaders are injected for deterministic tests: callers own the network,
@@ -814,4 +841,57 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     attachments,
     notice: pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed),
   };
+}
+
+/**
+ * Whether the composer may pull keyboard focus back into its textarea after an
+ * attachment lands. The draft was the writer's place when focus is still there,
+ * has fallen to the page (a disabled element drops it), or sits on a control
+ * inside the composer such as the paperclip button after the file dialog. A
+ * focused control elsewhere — a dialog, the thread list — is left alone.
+ */
+export function composerShouldRefocus(active: FocusNode | null, input: ComposerInputNode): boolean {
+  if (!active || active === input) return true;
+  const root = input.ownerDocument;
+  if (active === root.body || active === root.documentElement) return true;
+  const composer = input.closest("[data-tour=composer]");
+  return Boolean(composer?.contains(active));
+}
+
+/**
+ * Whether a freshly opened thread's composer should take keyboard focus.
+ * Opening a thread from the sidebar leaves focus on the row or the New thread
+ * button, so the composer takes it from any plain control. It never takes it
+ * from another text field (the sidebar search, a rename) or from an open
+ * dialog, where the person is typing or deciding something else.
+ */
+export function composerTakesFocusOnOpen(active: OpenFocusNode | null, input: ComposerInputNode): boolean {
+  if (composerShouldRefocus(active, input)) return true;
+  if (!active) return true;
+  const tag = active.tagName?.toUpperCase();
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || active.isContentEditable) return false;
+  return !active.closest?.("[role=dialog], [role=alertdialog], [aria-modal=true]");
+}
+
+/**
+ * Whether a change of reply target should put the caret in the composer.
+ * Choosing a message to reply to means the next thing is typing the reply,
+ * so a newly chosen target takes focus (MOCA-263). Clearing the reply, or the
+ * same target arriving again as the draft re-renders, does not.
+ */
+export function replyTargetTakesFocus(previousId: string | null | undefined, nextId: string | null | undefined): boolean {
+  return Boolean(nextId) && nextId !== previousId;
+}
+
+// This file is also compiled for the server, which has no DOM types; the rule
+// only needs these members of the real elements.
+type FocusNode = object;
+interface OpenFocusNode {
+  tagName?: string;
+  isContentEditable?: boolean;
+  closest?(selector: string): object | null;
+}
+interface ComposerInputNode {
+  ownerDocument: { body: FocusNode | null; documentElement: FocusNode | null };
+  closest(selector: string): { contains(node: FocusNode | null): boolean } | null;
 }

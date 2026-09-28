@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Check, FilePen, Hand, Settings, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Check, FilePen, Hand, ListChecks, Settings, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { approvalModeFor, hasNativeAutoReview, supportsApprovalMode, type ApprovalMode } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
@@ -76,6 +76,11 @@ export function approvalModeSelectionRequiresLocalDesktop(
   return currentMode === "custom" && !trustedModesAvailable;
 }
 
+/** How much this bot may do on its own, shown beside the composer with the
+ * current mode as its icon. Opens a menu that lists every available mode with
+ * its label and description and returns the chosen mode to the caller. Compact
+ * (icon-only) by default; `wide` renders the labeled variant used on bot
+ * settings. */
 export function ApprovalModeSelector({
   approvalMode,
   autoApprove,
@@ -88,6 +93,7 @@ export function ApprovalModeSelector({
   disabled = false,
   trustedModesAvailable = true,
   trustedModesNotice,
+  onManageCommandAllowlist,
 }: {
   approvalMode?: ApprovalMode;
   autoApprove?: boolean;
@@ -100,9 +106,11 @@ export function ApprovalModeSelector({
   disabled?: boolean;
   trustedModesAvailable?: boolean;
   trustedModesNotice?: string;
+  onManageCommandAllowlist?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const savedMode = approvalModeFor({ approvalMode, autoApprove });
   // Old Antigravity Auto settings still ask. Do not display or silently grant
   // the new Auto/full-access behavior until the user explicitly selects it.
@@ -135,26 +143,49 @@ export function ApprovalModeSelector({
   }, [open]);
 
   const CurrentIcon = current.Icon;
+  const triggerDisabled = disabled && !onManageCommandAllowlist;
+  const modesDisabled = disabled || requiresLocalDesktop;
+  const allowlistAction = onManageCommandAllowlist && (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={() => {
+        setOpen(false);
+        triggerRef.current?.focus();
+        onManageCommandAllowlist();
+      }}
+      className="flex items-center gap-3 border-t border-hairline/20 px-4 py-3 text-left text-[14px] text-ink hover:bg-raised-hover"
+    >
+      <ListChecks size={18} className="shrink-0 opacity-80" />
+      {t("commandAllowlist.title")}
+    </button>
+  );
   return (
     <div className={cn("relative flex items-center", wide && "w-full")} ref={wrapperRef}>
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t("approvalMode.triggerAria", { mode: current.label, provider: providerName })}
-        disabled={disabled}
-        title={disabled ? t("approvalMode.busy") : undefined}
+        disabled={triggerDisabled}
+        title={disabled ? t("approvalMode.busy") : wide ? undefined : current.chip}
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          "flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border border-hairline/20 bg-transparent px-3 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
-          wide && "h-10 w-full justify-between rounded-lg border-hairline/40 bg-inset px-3.5 text-ink",
-          disabled && "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-ink-secondary",
+          wide
+            ? "flex h-10 w-full items-center justify-between rounded-lg border border-hairline/40 bg-inset px-3.5 text-[13px] text-ink hover:bg-raised"
+            : "flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink",
+          triggerDisabled && "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-ink-secondary",
         )}
       >
-        <span className="flex min-w-0 items-center gap-2">
-          <CurrentIcon size={14} className="shrink-0 opacity-70" />
-          <span className="truncate">{wide ? current.label : current.chip}</span>
-        </span>
+        {wide ? (
+          <span className="flex min-w-0 items-center gap-2">
+            <CurrentIcon size={14} className="shrink-0 opacity-70" />
+            <span className="truncate">{current.label}</span>
+          </span>
+        ) : (
+          <CurrentIcon size={16} className="shrink-0 opacity-80" />
+        )}
         {wide && <span aria-hidden className="text-[11px] text-ink-secondary">⌄</span>}
       </button>
 
@@ -186,37 +217,41 @@ export function ApprovalModeSelector({
               const selected = option.mode === mode;
               const Icon = option.Icon;
               return (
-                <button
-                  key={option.mode}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={selected}
-                  disabled={requiresLocalDesktop}
-                  title={
-                    requiresLocalDesktop ? t("approvalMode.customLocalOnly") : undefined
-                  }
-                  onClick={() => {
-                    onSelect(option.mode);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "flex items-start gap-3 px-4 py-3 text-left hover:bg-raised-hover",
-                    requiresLocalDesktop && "cursor-not-allowed opacity-45 hover:bg-transparent",
-                  )}
-                >
-                  <Icon size={18} className="mt-0.5 shrink-0 opacity-80" />
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="flex items-center justify-between gap-3 text-[14px] text-ink">
-                      {option.label}
-                      {selected && <Check size={15} className="shrink-0" />}
+                <Fragment key={option.mode}>
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    disabled={modesDisabled}
+                    title={
+                      disabled ? t("approvalMode.busy") : requiresLocalDesktop ? t("approvalMode.customLocalOnly") : undefined
+                    }
+                    onClick={() => {
+                      if (modesDisabled) return;
+                      onSelect(option.mode);
+                      setOpen(false);
+                    }}
+                    className={cn(
+                      "flex items-start gap-3 px-4 py-3 text-left hover:bg-raised-hover",
+                      modesDisabled && "cursor-not-allowed opacity-45 hover:bg-transparent",
+                    )}
+                  >
+                    <Icon size={18} className="mt-0.5 shrink-0 opacity-80" />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="flex items-center justify-between gap-3 text-[14px] text-ink">
+                        {option.label}
+                        {selected && <Check size={15} className="shrink-0" />}
+                      </span>
+                      <span className="text-[12.5px] leading-snug text-ink-secondary">
+                        {option.description}
+                      </span>
                     </span>
-                    <span className="text-[12.5px] leading-snug text-ink-secondary">
-                      {option.description}
-                    </span>
-                  </span>
-                </button>
+                  </button>
+                  {option.mode === "full" && allowlistAction}
+                </Fragment>
               );
             })}
+            {!visibleOptions.some((option) => option.mode === "full") && allowlistAction}
             {!trustedModesAvailable && (trustedModesNotice || driverKind === "codex" || driverKind === "antigravityAgent" || requiresLocalDesktop) && (
               <div className="border-t border-hairline/20 px-4 py-2.5 text-[11.5px] leading-snug text-ink-secondary">
                 {trustedModesNotice ?? (requiresLocalDesktop

@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useStore } from "@/state/store";
 import { EngineGroupLabel } from "@/components/EngineGroupLabel";
 import { EngineSetup, installCommandFor } from "@/components/EngineSetup";
-import { ProviderMark } from "@/components/ProviderIcons";
+import { InstanceProviderMark } from "@/components/ProviderIcons";
 import { splitEngineRail } from "@/lib/engine-rail";
 import { t } from "@/lib/i18n";
 import { brand } from "../lib/brand";
@@ -44,7 +44,7 @@ export function NoEngines() {
   }
 
   // Only things you actually install belong on a "get started" screen. The
-  // Box cloud runner also reports unavailable here, but it's configured with
+  // Boat cloud runner also reports unavailable here, but it's configured with
   // a token in settings rather than installed, so listing it would just be a
   // dead end alongside the real options.
   const engines = state.instances
@@ -72,7 +72,7 @@ export function NoEngines() {
             const card = (instance: (typeof engines)[number]) => (
               <div key={instance.instanceId} className="rounded-xl border border-hairline/40 bg-card p-3.5">
                 <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
-                  <ProviderMark driverKind={instance.driverKind} size={16} />
+                  <InstanceProviderMark instance={instance} size={16} />
                   {instance.displayName}
                 </div>
                 <EngineSetup

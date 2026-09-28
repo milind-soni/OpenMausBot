@@ -80,6 +80,7 @@ fun SettingsScreen(
     val status by session.status.collectAsState()
     val notifications by environment.notifications.access.collectAsState()
     val activityDetail by environment.chatPreferences.activityDetail.collectAsState()
+    val appearanceSkin by environment.chatPreferences.appearanceSkin.collectAsState()
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
     val haptics = rememberHaptics()
@@ -93,6 +94,7 @@ fun SettingsScreen(
     var confirmingUnpair by remember { mutableStateOf(false) }
     var pendingComputerRemoval by remember { mutableStateOf<Connection?>(null) }
     var choosingActivity by remember { mutableStateOf(false) }
+    var choosingAppearance by remember { mutableStateOf(false) }
     var editingQuickReplies by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -233,6 +235,11 @@ fun SettingsScreen(
                 SettingsButton("Change activity detail") { choosingActivity = true }
                 SettingsButton("Quick replies") { editingQuickReplies = true }
                 Footnote(activityDetail.caption)
+            }
+
+            SettingsSection("Appearance") {
+                SettingsRow("Skin", appearanceSkin.label)
+                SettingsButton("Choose skin") { choosingAppearance = true }
             }
 
             // Routine schedules live on the computer this phone is bound to.
@@ -408,6 +415,40 @@ fun SettingsScreen(
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { choosingActivity = false }) { Text("Cancel") } },
+        )
+    }
+
+    if (choosingAppearance) {
+        AlertDialog(
+            onDismissRequest = { choosingAppearance = false },
+            title = { Text("Choose skin") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    AppearanceSkin.entries.forEach { skin ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = MIN_TOUCH_TARGET)
+                                .selectable(
+                                    selected = skin == appearanceSkin,
+                                    role = Role.RadioButton,
+                                    onClick = {
+                                        environment.chatPreferences.setAppearanceSkin(skin)
+                                        choosingAppearance = false
+                                    },
+                                )
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = skin == appearanceSkin, onClick = null)
+                            Text(skin.label, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { choosingAppearance = false }) { Text("Cancel") } },
         )
     }
 

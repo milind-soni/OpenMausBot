@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isWorkspaceRunning, runOnboardingCommand, runServe, type CliOptions } from "./cli.ts";
+import { isWorkspaceRunning, qrToString, runOnboardingCommand, runServe, type CliOptions } from "./cli.ts";
 
 const mocks = vi.hoisted(() => ({
   // the fleet path is off in these tests: no credential in the environment
@@ -234,6 +234,10 @@ describe("CLI startup lifecycle", () => {
     const code = "ABCD-EFGH-JKLM";
     const expiresAt = Date.now() + 300_000;
     const pairingUrl = `${origin}/pair#code=${code}`;
+    // A real server mints both encodings of one window; Android can only scan
+    // the openmausbot:// one (android/core Connection.kt).
+    const credential = `omb_pair_${"a".repeat(43)}`;
+    const inviteUrl = `openmausbot://pair?address=${encodeURIComponent(origin)}&token=${credential}&name=fixture`;
     let healthRequests = 0;
     const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       const address = String(url);
@@ -243,7 +247,10 @@ describe("CLI startup lifecycle", () => {
       if (address === `http://127.0.0.1:${options.port}/api/auth/pairing`) {
         expect(init?.method).toBe("POST");
         expect(JSON.parse(String(init?.body))).toEqual({ label: "Android", scopes: ["client"] });
-        return Response.json({ code, url: pairingUrl, expiresAt });
+        // A server started without OMB_PUBLIC_URL: it mints the credential but
+        // cannot name itself, so it returns no links at all. The CLI was told
+        // the public address with --public-url and must build both from that.
+        return Response.json({ code, url: null, expiresAt, credential, serverName: "fixture", hint: "set OMB_PUBLIC_URL" });
       }
       expect(address).toMatch(/\/\.well-known\/openmausbot\/environment$/);
       expect(init?.method).not.toBe("POST");
@@ -262,11 +269,14 @@ describe("CLI startup lifecycle", () => {
     const output = log.mock.calls.map(([line]) => line).join("\n");
     expect(output).toContain(`pairing code:  ${code}`);
     expect(output).toContain(`expires:       ${new Date(expiresAt).toLocaleTimeString()} (single use)`);
-    expect(output).toContain(`open or scan:  ${pairingUrl}`);
+    expect(output).toContain(`web browser:   ${pairingUrl}`);
     expect(output).toMatch(/[▀▄█]/);
     expect(output).toContain(`Or open ${origin}/pair on your phone and enter the code.`);
-    expect(output).toContain("On Android, scan the QR with Camera and open it in your web browser.");
-    expect(output).toContain("not the Android native pairing scanner");
+    expect(output).toContain("On Android, open the OpenMausBot app and scan the QR with its pairing scanner.");
+    // The QR rendered for an Android phone must be the app-scheme invite, not
+    // the https link its scanner rejects.
+    expect(output).toContain(qrToString(inviteUrl));
+    expect(output).not.toContain(qrToString(pairingUrl));
     expect(output).toContain("client access: chat and approvals, not settings or pairing administration");
     expect(output).toContain("Scanning a QR does not mean the phone is paired.");
     expect(output).toContain("Waiting for you to connect on the phone.");

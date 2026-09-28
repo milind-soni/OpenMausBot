@@ -51,7 +51,7 @@ export function VerifyCard({
   return (
     <section
       aria-label={t("chat.verify.aria")}
-      className="w-[22rem] max-w-full rounded-2xl border border-hairline/40 bg-raised/95 text-ink shadow-lg backdrop-blur-sm"
+      className="pointer-events-auto w-[22rem] max-w-full rounded-2xl border border-hairline/40 bg-raised/95 text-ink shadow-lg backdrop-blur-sm"
     >
       <div className="flex items-center gap-2 px-3 py-2">
         <ListChecks size={14} className="shrink-0 text-accent" aria-hidden="true" />

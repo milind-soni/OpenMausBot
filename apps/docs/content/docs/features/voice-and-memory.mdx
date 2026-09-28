@@ -6,13 +6,46 @@ icon: AudioLines
 
 ## Spoken replies
 
-Add an ElevenLabs key in App Settings, choose a voice, and use the speaker control on a response. Auto-speak can read new replies as they arrive.
+Pick a voice engine in App Settings, choose a voice, and use the speaker control on a response. Auto-speak can read new replies as they arrive. Four engines are available:
+
+- **ElevenLabs** — cloud voices, needs an API key.
+- **Fish Audio** — cloud voices from the Fish Audio library, needs its own API key.
+- **Built-in Mac voices** — the voices already installed on macOS, no key.
+- **Chatterbox (local)** — an open-source, MIT-licensed engine reached through an OpenAI-compatible server you configure. With a server on your own machine there is no cloud call; the address can also point at any HTTP(S) server you choose.
 
 The harness rewrites code-heavy Markdown into speech-friendly text before synthesis. Keys remain on the harness and never reach the renderer.
 
+### Fish Audio
+
+1. Create a key in [Fish Audio API Keys](https://fish.audio/app/api-keys/).
+2. In an agent profile, choose **Fish Audio**, paste the key, and save it.
+3. Pick one of the voices returned by your Fish Audio account, then use **Try** before enabling spoken replies.
+
+Fish Audio and ElevenLabs keys are stored separately, so switching engines does not replace the other provider's credential. The picker combines popular public voices with voices owned by your Fish Audio account. Only use a voice when you have permission to do so.
+
+### Chatterbox (local)
+
+OpenMausBot speaks through any OpenAI-compatible server that runs [Chatterbox](https://github.com/resemble-ai/chatterbox) behind `POST /v1/audio/speech` — for example LocalAI with a Chatterbox model installed, or a small wrapper service around `pip install chatterbox-tts`.
+
+1. Start your Chatterbox server locally and note its address, for example `http://127.0.0.1:4123`.
+2. In App Settings, pick **Chatterbox (local)** as the voice engine, paste the server address, and set the model id your server expects (the default is `chatterbox-turbo`).
+3. Pick a voice. Voice ids come from the server's `/v1/models` listing when it has one, or `/v1/audio/voices` when it doesn't; otherwise a **Default** entry uses the server's built-in voice.
+
+There is no API key. OpenMausBot sends the text to the configured server address, so synthesis stays on your machine only when that server is local. Per-agent voice overrides work the same as with the other engines, and a dead or unreachable server is reported as a clear error instead of a hang.
+
+## Voice notes
+
+An agent can send a voice note: a short spoken message it writes itself, synthesized with the configured voice engine and attached to its reply when the turn ends. The same text becomes the note's visible caption and transcript, so the conversation stays readable — and searchable — without playing anything. Notes are limited to 1000 characters, and the same limit is enforced again at synthesis.
+
+A note posted to a shared room works the same way: the agent records the note, then attaches it to its room post, where the room members can play it inline.
+
+Voice notes can be turned off per agent. The switch sits with the voice settings in the agent profile; while it is off, the agent is not offered the voice-note tool at all, even with a voice configured.
+
+The audio itself is an mp3 file in the attachments directory on your computer, with a generated name and owner-only permissions. It counts against the same 512 MiB attachment quota as images and documents.
+
 ## Call mode
 
-On macOS, call mode combines native on-device speech recognition with the configured ElevenLabs voice. It is deliberately half-duplex: the microphone pauses while the bot speaks to prevent the app from transcribing its own audio.
+On macOS, call mode combines native on-device speech recognition with the configured voice. It is deliberately half-duplex: the microphone pauses while the bot speaks to prevent the app from transcribing its own audio.
 
 Tool progress and approval requests can be narrated during a call so long-running work does not sound disconnected.
 

@@ -64,16 +64,22 @@ public struct AskQuestion: Codable, Hashable, Sendable {
 public struct QuestionRequestCardData: Codable, Hashable, Sendable {
     public var version: Int
     public var questions: [AskQuestion]
+    /// Where the ask came from: a tool call (nil) or a block the harness
+    /// parsed out of model-authored output ("output"). Badge data only —
+    /// it never changes how a card is answered.
+    public var origin: String?
 
-    public init(version: Int = 1, questions: [AskQuestion]) {
+    public init(version: Int = 1, questions: [AskQuestion], origin: String? = nil) {
         self.version = version
         self.questions = questions
+        self.origin = origin
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
         questions = try container.decodeIfPresent([AskQuestion].self, forKey: .questions) ?? []
+        origin = try container.decodeIfPresent(String.self, forKey: .origin)
     }
 }
 

@@ -99,6 +99,9 @@ export interface PublicSession {
 export interface PairingCode {
   id: string;
   codeHash: string;
+  /** The same window, in the shape a native app scans. One window, two
+   * encodings: whichever arrives first consumes it. */
+  credentialHash: string;
   scopes: Scope[];
   label: string;
   createdAt: number;
@@ -137,6 +140,21 @@ export function generatePairingCode(): string {
     }
   }
   return code;
+}
+
+/** The prefix that tells the two encodings apart on the wire. A credential is
+ * matched byte for byte; only a typed code is normalized. */
+export const PAIRING_CREDENTIAL_PREFIX = "omb_pair_";
+
+/** The same pairing window as a 256-bit secret, for a QR a native app scans
+ * rather than a code a person reads out. 9 + 43 characters: the Android
+ * companion checks that length exactly (android/core Connection.kt). */
+export function generatePairingCredential(): string {
+  return `${PAIRING_CREDENTIAL_PREFIX}${randomBytes(32).toString("base64url")}`;
+}
+
+export function isPairingCredential(value: string): boolean {
+  return value.startsWith(PAIRING_CREDENTIAL_PREFIX);
 }
 
 /** Accept what a human typed: dashes, spaces, lowercase, lookalikes. */
@@ -287,21 +305,23 @@ export class SessionRegistry {
 
   // ── pairing ────────────────────────────────────────────────────────────
 
-  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number } = {}): { id: string; code: string; expiresAt: number } {
+  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number } = {}): { id: string; code: string; credential: string; expiresAt: number } {
     this.prune();
     const now = this.now();
     const code = generatePairingCode();
+    const credential = generatePairingCredential();
     const scopes = input.scopes?.length ? [...new Set(input.scopes)] : [...SCOPES];
     const pairing: PairingCode = {
       id: randomUUID(),
       codeHash: sha256(code),
+      credentialHash: sha256(credential),
       scopes,
       label: (input.label ?? "").trim().slice(0, 80),
       createdAt: now,
       expiresAt: now + (input.ttlMs ?? PAIRING_CODE_TTL_MS),
     };
     this.pairings.push(pairing);
-    return { id: pairing.id, code, expiresAt: pairing.expiresAt };
+    return { id: pairing.id, code, credential, expiresAt: pairing.expiresAt };
   }
 
   openPairings(): PublicPairing[] {
@@ -353,7 +373,12 @@ export class SessionRegistry {
   exchange(input: { code: string; label: string; source: string; fallbackLabel?: string; attemptId?: string }): ExchangeResult {
     this.prune();
     const now = this.now();
-    const presented = sha256(normalizePairingCode(input.code));
+    // A credential is hashed as presented. Normalizing it would be actively
+    // unsafe: normalizePairingCode folds 0 to O and 1 to I, which both
+    // destroys a base64url secret and maps distinct secrets onto one digest.
+    const presented = isPairingCredential(input.code)
+      ? sha256(input.code)
+      : sha256(normalizePairingCode(input.code));
     const attemptId = typeof input.attemptId === "string" && /^[\w-]{8,64}$/.test(input.attemptId) ? input.attemptId : null;
     const replay = attemptId ? this.replays.find((r) => r.attemptId === attemptId && sameDigest(r.codeHash, presented)) : undefined;
     if (replay) return replay.result;
@@ -362,7 +387,8 @@ export class SessionRegistry {
       const seconds = Math.ceil(lock.retryAfterMs / 1000);
       return { ok: false, status: 429, error: `too many failed pairing attempts from your address; try again in ${seconds}s` };
     }
-    const index = this.pairings.findIndex((p) => sameDigest(p.codeHash, presented));
+    const index = this.pairings.findIndex((p) =>
+      sameDigest(p.codeHash, presented) || sameDigest(p.credentialHash, presented));
     if (index < 0) {
       this.recordFailure(input.source);
       return { ok: false, status: 401, error: "pairing code is wrong or has expired; create a new one on the server" };

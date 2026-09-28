@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import { EVENTS_DIR } from "../config.ts";
 import { redactSecrets } from "../redact.ts";
+import { capThreadLog, currentThreadLogCap } from "../thread-log-rotation.ts";
 import { newId, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "../contracts.ts";
 
 const INCOMPLETE_LOG_MESSAGE =
@@ -53,6 +54,9 @@ export class EventBus {
         { mode: 0o600 },
       );
       if (pendingWarning) this.pendingLogWarnings.delete(event.threadId);
+      // Best-effort size cap (#1280): an open thread's canonical log
+      // otherwise grows without bound for as long as the thread stays open.
+      capThreadLog(join(EVENTS_DIR, `${event.threadId}.ndjson`), currentThreadLogCap());
     } catch (error) {
       // Never feed this warning back through publish(): that would retry the
       // same failed write and recurse. Deliver it once for this outage, then

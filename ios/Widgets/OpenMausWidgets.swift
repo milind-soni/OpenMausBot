@@ -1,7 +1,8 @@
-// The widget extension: the bot's Live Activity, in the Dynamic Island and
-// on the lock screen. The face is the mascot engine's resting face for the
-// state — the system renders a snapshot, so it cannot move here, but it
-// changes with every update.
+// The widget extension: the bot's Live Activity in the Dynamic Island and
+// on the lock screen, and the home-screen widgets that render the updates
+// snapshot. The face is the mascot engine's resting face for the state —
+// the system renders a snapshot, so it cannot move here, but it changes
+// with every update.
 import ActivityKit
 import SwiftUI
 import WidgetKit
@@ -10,6 +11,12 @@ import WidgetKit
 struct OpenMausWidgets: WidgetBundle {
     var body: some Widget {
         BotActivityWidget()
+        NeedsYouWidget()
+        UpdatesDigestWidget()
+        WorkingMonitorWidget()
+        if #available(iOS 17.0, *) {
+            BotWidget()
+        }
     }
 }
 
@@ -114,6 +121,20 @@ private struct AnswerButtons: View {
     let requestId: String
 
     var body: some View {
+        // Answering from the activity itself is an interactive-widget feature,
+        // and those arrived in iOS 17. Below that the buttons would be dead
+        // pills, so say where the answer lives instead of pretending.
+        if #available(iOS 17.0, *) {
+            buttons
+        } else {
+            Text("Open MausBot to answer")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.7))
+        }
+    }
+
+    @available(iOS 17.0, *)
+    private var buttons: some View {
         HStack(spacing: 8) {
             ForEach(context.state.options, id: \.self) { option in
                 Button(intent: AnswerApprovalIntent(

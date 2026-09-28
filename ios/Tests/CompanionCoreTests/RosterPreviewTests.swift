@@ -20,6 +20,15 @@ final class RosterPreviewTests: XCTestCase {
         return message
     }
 
+    /// What the harness appends after every settled turn: a work receipt,
+    /// decoded from the wire exactly as it arrives.
+    private func digest(_ id: String, at: Double = 1) -> Message {
+        let json = """
+        {"id":"\(id)","role":"bot","kind":"digest","at":\(at),"text":"[digest] · tools: /bin/bash -lc 'composio search' ×1 · reply: Done."}
+        """
+        return try! JSONDecoder().decode(Message.self, from: Data(json.utf8))
+    }
+
     /// `pending` needs a requestId — that is what makes a card answerable
     /// rather than transcript, and it decides subtitle vs title.
     private func card(_ id: String, title: String, subtitle: String, at: Double = 1, pending: Bool = true) -> Message {
@@ -106,6 +115,15 @@ final class RosterPreviewTests: XCTestCase {
     func testEmptyThreadPreviewsAsEmptyAtEveryLevel() {
         for detail in ActivityDetail.allCases {
             XCTAssertEqual(rosterPreview([], detail: detail), "")
+        }
+    }
+
+    // MARK: - Digests
+
+    func testPreviewReadsTheReplyNotTheDigestAfterIt() {
+        let messages = [text("a", "Your PR is #212"), digest("b")]
+        for detail in [ActivityDetail.full, .reduced, .hidden] {
+            XCTAssertEqual(rosterPreview(messages, detail: detail), "Your PR is #212")
         }
     }
 }

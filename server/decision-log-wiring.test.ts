@@ -125,6 +125,11 @@ posixOnly("authorization decisions are logged", () => {
             environment: { FAKE_ACP_MODE: "permission" },
             config: { cli: FAKE_CLI, fullAuto: false },
           },
+          grokq: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "question" },
+            config: { cli: FAKE_CLI, fullAuto: false },
+          },
         },
       }),
     );
@@ -231,6 +236,45 @@ posixOnly("authorization decisions are logged", () => {
   );
 
   it(
+    "a question card carries its questions and logs the row without an origin",
+    async () => {
+      // the same fake ACP CLI in question mode: the request is an ask, not a
+      // permission, so the card must arrive structured and the row must say
+      // a person owes the answer. A tool-call ask has no origin to record —
+      // only the BoatAgent transport ever sets one.
+      const created = await api("POST", "/api/bots");
+      expect(created.status).toBe(201);
+      const patched = await api("PATCH", `/api/bots/${created.body.bot.id}`, {
+        name: "Queried",
+        modelSelection: { instanceId: "grokq", model: "fake-model" },
+      });
+      expect(patched.status).toBe(200);
+      const bot = patched.body.bot ?? created.body.bot;
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "ask me" })).status).toBe(202);
+
+      const card = await waitForBotCard(bot.id);
+      expect(card, "no question card ever appeared").not.toBeNull();
+      // a question, not a permission: no tool on the card, the choices as
+      // options. (The structured questionRequest payload itself arrives with
+      // the ACP normalization change, which stacks independently of this one.)
+      expect(card.card.tool).toBeUndefined();
+      expect(card.card.options).toContain("Blue");
+      expect(card.card.questionRequest?.origin).toBeUndefined();
+
+      const row = await waitForDecision((r) => r.decision === "card-shown" && r.botId === bot.id);
+      expect(row, "the question card never reached the decision log").not.toBeNull();
+      expect(row!.source).toBe("question");
+      expect(row!.origin).toBeUndefined();
+
+      const requestId = card.card.requestId as string;
+      const answered = await api("POST", `/api/bots/${bot.id}/respond`, { requestId, behavior: "answer", message: "Blue" });
+      expect(answered.status).toBe(200);
+      expect(answered.body.outcome).toBe("answered");
+    },
+    90_000,
+  );
+
+  it(
     "a webhook turn's card is logged as unattended, in the bot's own mode",
     async () => {
       // A webhook turn runs in the mode the bot has, like any other; the
@@ -274,5 +318,21 @@ posixOnly("authorization decisions are logged", () => {
     expect(one[0]).toEqual(all.at(-1));
     expect((await api("GET", "/api/decisions?limit=0")).status).toBe(400);
     expect((await api("GET", "/api/decisions?limit=nope")).status).toBe(400);
+  });
+
+  it("GET /api/decisions.csv exports a date range, one line per row, from the month files", async () => {
+    const all = (await api("GET", "/api/decisions")).body.decisions as DecisionRow[];
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await fetch(`${BASE}/api/decisions.csv?from=${today}&to=${today}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/^text\/csv/);
+    expect(res.headers.get("content-disposition")).toBe(`attachment; filename="decisions-${today}-${today}.csv"`);
+    const lines = (await res.text()).trim().split("\n");
+    expect(lines[0]).toBe("time,decision,source,bot,tool,summary,rule,unattended,answered_by,thread,request");
+    expect(lines).toHaveLength(all.length + 1);
+    // the owner answered the cards above from loopback
+    expect(lines.some((line) => line.includes(",user-approved,user,") && line.includes(",This computer,"))).toBe(true);
+    expect((await fetch(`${BASE}/api/decisions.csv?from=2026-13-01`)).status).toBe(400);
+    expect((await fetch(`${BASE}/api/decisions.csv?from=2025-01-01&to=2026-09-01`)).status).toBe(400);
   });
 });

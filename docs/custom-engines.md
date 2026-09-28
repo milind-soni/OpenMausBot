@@ -4,6 +4,20 @@ Two zero-code ways to run OpenMausBot bots on an engine the app doesn't ship.
 Both live in `~/.openmausbot/config.json` under `"instances"`; restart the app
 after editing (instance entries are read at boot).
 
+## Provider icons
+
+In **Settings → Engines**, expand an instance and choose its **Provider icon**.
+The built-in choices include OpenAI, Anthropic, Google Gemini, Microsoft Azure,
+Amazon Bedrock (AWS), xAI, DeepSeek, Meta, Mistral AI, Qwen, Moonshot AI,
+Cohere, and OpenRouter. You can also upload a PNG, JPEG, or WebP image up to
+128 KB and 1024 × 1024 pixels. **Reset** restores the default icon.
+
+Each instance has its own icon, independent of its driver or API protocol.
+Changes made in Settings apply immediately without restarting the engine.
+For file-based configuration, add `"icon": { "kind": "preset", "preset": "azure" }`
+alongside `driver` and `displayName`. Custom uploads are stored as embedded image
+data; the app does not fetch remote icon URLs.
+
 ## Any ACP agent (a CLI you spawn)
 
 If an agent CLI speaks [ACP](https://agentclientprotocol.com) over stdio —
@@ -65,9 +79,15 @@ entry:
   instances can hold different keys without colliding.
 - The driver lists the endpoint's `/models` when it can and keeps your
   `model` as a custom option either way.
-- Honest limits: chat text + reasoning streams only — **no tool calls**, so
-  bots on these instances answer and write, but don't operate computers or
-  connected apps.
+- OpenAI-compatible instances support structured tools and image input. With a
+  model that accepts both, the harness can mount the approved host, Local VM,
+  VPS, Boat cloud or built-in browser tools and return their screenshots to the model.
+  The existing platform, computer-selection and approval checks still apply.
+  Boat turns retain the selected API model in direct chats, rooms and cloud
+  routines. Other drivers continue to use the native Boat runner.
+- Set `config.tools` to `false` for a model without tool support. Image support
+  also depends on the chosen model; the driver cannot add vision to a text-only
+  model. See [tool verification](verification/openai-tools.md) for scope and tests.
 
 ## Notes
 

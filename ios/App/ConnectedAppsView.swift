@@ -62,7 +62,7 @@ struct ConnectedAppsView: View {
             // the computer applies — `!configured && !stale`.
             if catalog?.configured == false, !credentialStoreUnreadable {
                 Section {
-                    ContentUnavailableView(
+                    EmptyStateView(
                         "Connected apps need setup",
                         systemImage: "link.badge.plus",
                         description: Text("Configure Composio on your computer first. Provider credentials are never returned to this device.")
@@ -87,7 +87,7 @@ struct ConnectedAppsView: View {
         .overlay { if loading { ProgressView() } }
         .task { await load() }
         .refreshable { await refreshStatuses() }
-        .onChange(of: scenePhase) { _, phase in
+        .onValueChange(of: scenePhase) { phase in
             if phase == .active { Task { await refreshStatuses() } }
         }
         .alert("Account alias", isPresented: Binding(

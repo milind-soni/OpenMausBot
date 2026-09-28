@@ -71,7 +71,11 @@ export function RoutineRunCard({
     ) : null;
   }
 
-  const copy = run.goalStatus ? GOAL_COPY[run.goalStatus] : COPY[run.status];
+  const copy = run.goalStatus
+    ? GOAL_COPY[run.goalStatus]
+    : run.status === "queued" && run.deferredAt != null
+      ? { label: "Deferred: target busy", tone: "text-warning" }
+      : COPY[run.status];
   const detail = compactDetail(
     run.status === "failed" || run.status === "missed"
       ? (run.error ?? run.summary)

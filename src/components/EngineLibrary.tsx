@@ -3,7 +3,7 @@ import { ArrowUpRight, Check, ChevronDown, RefreshCw } from "lucide-react";
 import { useStore, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { ProviderMark } from "./ProviderIcons";
+import { InstanceProviderMark } from "./ProviderIcons";
 
 export function engineReady(instance: InstanceInfo): boolean {
   return instance.snapshot.state === "available" &&
@@ -14,7 +14,7 @@ const providers: Record<string, string> = {
   claudeAgent: "Anthropic", codex: "OpenAI", grok: "xAI", grokAgent: "xAI",
   kimiAgent: "Moonshot AI", droidAgent: "Factory", cursorAgent: "Cursor",
   antigravityAgent: "Google", opencodeGo: "OpenCode", qwenAgent: "Qwen",
-  hermesAgent: "Nous Research", piAgent: "pi.dev",
+  hermesAgent: "Nous Research", piAgent: "pi.dev", mistral: "Mistral AI",
 };
 
 /** One disclosure, not a second settings dialog. Keep its children mounted so
@@ -33,7 +33,7 @@ export function EngineCard({ instance, children }: { instance: InstanceInfo; chi
       <summary className="cursor-pointer list-none rounded-2xl p-4 outline-none focus-visible:ring-2 focus-visible:ring-accent [&::-webkit-details-marker]:hidden">
         <div className="flex min-w-0 items-center gap-3">
           <span aria-hidden="true" className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-hairline/30 bg-panel">
-            <ProviderMark driverKind={instance.driverKind} size={28} />
+            <InstanceProviderMark instance={instance} size={28} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="truncate text-[15px] font-semibold tracking-[-0.015em] text-ink" title={instance.displayName}>{instance.displayName}</div>

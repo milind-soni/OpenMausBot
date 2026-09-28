@@ -40,6 +40,17 @@ class QueuedSendTest {
         busy = busy,
     )
 
+    private fun room() = Room(
+        id = "g1",
+        threadId = "gt1",
+        name = "War Room",
+        memberIds = listOf("b1"),
+        defaultResponder = GroupResponder("mentions"),
+        bulletin = "",
+        unread = false,
+        createdAt = 1.0,
+    )
+
     // MARK: - The receipt
 
     @Test
@@ -49,6 +60,20 @@ class QueuedSendTest {
             SendReceipt.Queued("q1", "t1"),
             json.decodeFromString<SendReceiptBody>(body).receipt(),
         )
+    }
+
+    @Test
+    fun `queued thread ids are the rows the surfaces read`() {
+        var state = CompanionState()
+            .rememberQueued(QueuedSend("q1", "first"), "t1")
+            .rememberQueued(QueuedSend("q2", "second"), "t2")
+        assertEquals(setOf("t1", "t2"), state.queuedThreadIds)
+
+        state = state.forgetQueued("q1", "t1")
+        assertEquals(setOf("t2"), state.queuedThreadIds)
+
+        state = state.forgetQueued("q2", "t2")
+        assertEquals(emptySet(), state.queuedThreadIds)
     }
 
     @Test
@@ -80,6 +105,59 @@ class QueuedSendTest {
             SendReceipt.Sent("t1", steered = false),
             json.decodeFromString<SendReceiptBody>(body).receipt(),
         )
+    }
+
+    // MARK: - The server's own queues
+
+    @Test
+    fun `a bot queued frame replaces bot queues wholesale and tombstones vanished ids`() {
+        val frame = json.decodeFromString<StreamFrame>(
+            """{"kind":"bot.queued","queues":{"t1":[{"queueId":"q2","text":"queued elsewhere"}]}}""",
+        ).frame
+        var state = CompanionState()
+            .apply(Frame.Bot(echo(busy = true)))
+            .apply(Frame.Room(room()))
+            .rememberQueued(QueuedSend("q1", "mine"), "t1")
+            .rememberQueued(QueuedSend("r1", "held for the room"), "gt1")
+        state = state.apply(frame)
+
+        assertEquals(listOf("queued elsewhere"), state.pendingQueued["t1"]?.map { it.text })
+        // The frame says nothing about room queues, so their rows survive it.
+        assertEquals(listOf("held for the room"), state.pendingQueued["gt1"]?.map { it.text })
+
+        // The vanished id is tombstoned, not merely absent: a slow POST
+        // response for it must not resurrect the row.
+        state = state.rememberQueued(QueuedSend("q1", "mine"), "t1")
+        assertEquals(listOf("queued elsewhere"), state.pendingQueued["t1"]?.map { it.text })
+    }
+
+    @Test
+    fun `a fleet snapshot re-seeds queues this window never queued`() {
+        val fleet = json.decodeFromString<Fleet>(
+            """{"bots":[
+              {"id":"b1","threadId":"t1","name":"Echo","title":"","description":"","notifications":true,"color":"blue","unread":false,"modelSelection":{"instanceId":"i1","model":"m1"},"createdAt":1}
+            ],"groups":[],"botQueuedMessages":{"t1":[{"queueId":"q9","text":"queued elsewhere"}]}}""",
+        )
+        val state = CompanionState().hydrate(fleet)
+        assertEquals(setOf("t1"), state.queuedThreadIds)
+        assertEquals(listOf("queued elsewhere"), state.pendingQueued["t1"]?.map { it.text })
+    }
+
+    @Test
+    fun `a queue drained while this window was away is forgotten on reconnect`() {
+        val away = CompanionState()
+            .apply(Frame.Bot(echo(busy = true)))
+            .rememberQueued(QueuedSend("q1", "held before the drop"), "t1")
+
+        val reconnected = away.hydrate(
+            Fleet(bots = listOf(echo()), groups = emptyList(), botQueuedMessages = emptyMap()),
+        )
+        assertNull(reconnected.pendingQueued["t1"])
+
+        // The reconnect tombstoned the drained id: the receipt for a send
+        // this window queued before the drop cannot resurrect it.
+        val late = reconnected.rememberQueued(QueuedSend("q1", "held before the drop"), "t1")
+        assertEquals(emptySet(), late.queuedThreadIds)
     }
 
     // MARK: - The fold
@@ -194,5 +272,16 @@ class QueuedSendTest {
     fun `an engine that can take words into a turn says so`() {
         val body = """{"images":true,"queueing":true}"""
         assertEquals(true, json.decodeFromString<InstanceCapabilities>(body).queueing)
+    }
+
+    @Test
+    fun `editing a held send leads with its words and keeps the typed draft`() {
+        val send = QueuedSend("q1", "actually stop at 10")
+        assertEquals("actually stop at 10", send.editDraft(keeping = ""))
+        assertEquals("actually stop at 10", send.editDraft(keeping = "  \n"))
+        assertEquals(
+            "actually stop at 10\n\nand use the smaller model",
+            send.editDraft(keeping = "and use the smaller model"),
+        )
     }
 }

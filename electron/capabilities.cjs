@@ -3,6 +3,7 @@
 // is deterministic and unit-testable.
 
 const DESKTOP_PLATFORMS = new Set(["darwin", "linux", "win32"]);
+const UNAVAILABLE_LOCAL_STATUSES = new Set(["disabled", "checking", "starting", "error", "stopped", "unavailable"]);
 
 function normalizedPlatform(platform) {
   return DESKTOP_PLATFORMS.has(platform) ? platform : "other";
@@ -57,12 +58,20 @@ function linuxLocalControlSupport(platform, env) {
 }
 
 function localComputerReady(platform, connection) {
+  const validLegacyConnection = connection &&
+    (!Object.hasOwn(connection, "status") || connection.status === "ready") &&
+    typeof connection.socketPath === "string" && connection.socketPath.length > 0 &&
+    typeof connection.mcpCommand === "string" && connection.mcpCommand.trim().length > 0 &&
+    Array.isArray(connection.mcpArgs) && connection.mcpArgs[0] === "mcp" &&
+    connection.mcpArgs.every((arg) => typeof arg === "string") &&
+    connection.mcpEnv && typeof connection.mcpEnv === "object" && !Array.isArray(connection.mcpEnv) &&
+    Object.values(connection.mcpEnv).every((value) => typeof value === "string");
   if (platform === "darwin") {
-    return connection?.mode === "embedded" || connection?.mode === "standalone";
+    return Boolean(validLegacyConnection && (connection.mode === "embedded" || connection.mode === "standalone"));
   }
   // Windows only exposes the host-owned embedded connection.
   if (platform === "win32") {
-    return connection?.mode === "embedded";
+    return Boolean(validLegacyConnection && connection.mode === "embedded");
   }
   if (
     platform !== "linux" ||
@@ -94,6 +103,8 @@ function desktopCapabilities({
   const hostSession = linuxSession(hostPlatform, env);
   const linuxPreview = hostPlatform === "linux" && hostSession !== "headless";
   const localAvailable = localComputerReady(hostPlatform, localConnection);
+  const localStatus = localAvailable ? "ready" :
+    UNAVAILABLE_LOCAL_STATUSES.has(localConnection?.status) ? localConnection.status : "unavailable";
   const screenPreview = {
     available: isMac || linuxPreview,
     interaction:
@@ -122,25 +133,34 @@ function desktopCapabilities({
           ? "supported"
           : "unsupported",
     enabled: connectionEnabled(hostPlatform, localConnection),
-    status: localAvailable ? "ready" : localConnection?.status ?? "unavailable",
+    status: localStatus,
   };
-  if (typeof localConnection?.message === "string") {
-    localComputer.message = localConnection.message;
-  }
-  if (typeof localConnection?.driver?.path === "string") {
-    localComputer.driverPath = localConnection.driver.path;
-  }
-  if (typeof localConnection?.driver?.version === "string") {
-    localComputer.driverVersion = localConnection.driver.version;
-  }
-  if (typeof localConnection?.driver?.source === "string") {
-    localComputer.driverSource = localConnection.driver.source;
-  }
-  if (typeof localConnection?.session === "string") {
-    localComputer.session = localConnection.session;
-  }
-  if (typeof localConnection?.compositor === "string") {
-    localComputer.compositor = localConnection.compositor;
+  // These fields expose local-machine detail (installed driver, seat,
+  // diagnostics), so populate them only when no remote override replaces
+  // localComputer below; a remote page must never receive local values.
+  if (!remote) {
+    if (localConnection?.mode === "unavailable" && typeof localConnection.reason === "string" &&
+        localConnection.reason.trim() && localConnection.reason.length <= 2_000) {
+      localComputer.message = localConnection.reason.trim();
+    }
+    if (typeof localConnection?.message === "string") {
+      localComputer.message = localConnection.message;
+    }
+    if (typeof localConnection?.driver?.path === "string") {
+      localComputer.driverPath = localConnection.driver.path;
+    }
+    if (typeof localConnection?.driver?.version === "string") {
+      localComputer.driverVersion = localConnection.driver.version;
+    }
+    if (typeof localConnection?.driver?.source === "string") {
+      localComputer.driverSource = localConnection.driver.source;
+    }
+    if (typeof localConnection?.session === "string") {
+      localComputer.session = localConnection.session;
+    }
+    if (typeof localConnection?.compositor === "string") {
+      localComputer.compositor = localConnection.compositor;
+    }
   }
   if (!localAvailable) {
     localComputer.reasonCode =
@@ -152,7 +172,18 @@ function desktopCapabilities({
     const unavailable = { reasonCode: "remote-server" };
     Object.assign(screenPreview, { available: false, interaction: "none" }, unavailable);
     Object.assign(dictation, { available: false, engine: "none", onDevice: false }, unavailable);
-    Object.assign(localComputer, { available: false, support: "unsupported", enabled: false, status: "unavailable" }, unavailable);
+    Object.assign(localComputer, {
+      available: false,
+      support: "unsupported",
+      enabled: false,
+      status: "unavailable",
+      driverPath: "",
+      driverVersion: "",
+      driverSource: "",
+      session: "",
+      compositor: "",
+      message: "",
+    }, unavailable);
   }
 
   return {

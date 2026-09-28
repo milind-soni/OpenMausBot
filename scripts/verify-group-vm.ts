@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
 
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const podman = process.env.OMB_VERIFY_PODMAN;
 const machine = process.env.OMB_VERIFY_MACHINE;
 if (!podman || !isAbsolute(podman) || !machine) {
@@ -20,7 +22,7 @@ const cancel = () => controller.abort();
 process.once("SIGINT", cancel);
 process.once("SIGTERM", cancel);
 const fixture = await launchVerificationServer(process.env, controller.signal, {
-  binDir: dirname(podman), host: connection.URI, sshKey: connection.Identity, staticDir: resolve("dist"),
+  binDir: dirname(podman), host: connection.URI, sshKey: connection.Identity, staticDir: join(ROOT, "dist"),
 });
 async function api(path: string, body?: unknown, method = body === undefined ? "GET" : "POST", cleanup = false): Promise<any> {
   if (!cleanup) controller.signal.throwIfAborted();
@@ -98,7 +100,7 @@ try {
   process.removeListener("SIGTERM", cancel);
 }
 if (errors.length) throw new AggregateError(errors, "Fixture verification or cleanup failed; inspect the exact fixture IDs above");
-const evidenceDir = resolve(".omb-scratch/verification-logs");
+const evidenceDir = join(ROOT, ".omb-scratch/verification-logs");
 mkdirSync(evidenceDir, { recursive: true });
 writeFileSync(join(evidenceDir, "group-vm-routing.json"), JSON.stringify(receipt, null, 2));
 console.log(JSON.stringify(receipt));

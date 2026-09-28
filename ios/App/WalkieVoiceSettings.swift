@@ -123,7 +123,7 @@ struct WalkieVoiceSheet: View {
                     } header: {
                         Text("Who speaks")
                     } footer: {
-                        Text("Agents with a voice picked on your computer use it when this is on. Everyone else uses the voice above.")
+                        Text("Agents with an ElevenLabs voice picked on your computer use it when this is on. Everyone else uses the voice above.")
                     }
                 }
             }

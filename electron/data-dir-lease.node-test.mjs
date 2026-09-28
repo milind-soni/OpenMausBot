@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir, uptime as osUptime } from "node:os";
@@ -57,6 +57,16 @@ async function exitedPid() {
     child.once("close", resolve);
   });
   return pid;
+}
+
+function wmicAvailable() {
+  if (process.platform !== "win32") return false;
+  try {
+    execFileSync("wmic", ["/?"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 test.afterEach(() => {
@@ -559,4 +569,37 @@ test("boot identity does not weaken exclusion: only one of many live racers wins
   // And the directory is left usable rather than wedged by the contention.
   const after = acquireDataDirLease(dataDir);
   assert.equal(after.release(), true);
+});
+
+test("a live but unrelated Windows pid reused within the same boot is treated as stale", async (t) => {
+  if (process.platform !== "win32") return t.skip("Windows-only: wmic process-identity check");
+  if (!wmicAvailable()) return t.skip("wmic is not available; the Windows process-identity check cannot be exercised");
+  const { dataDir } = temporaryDirectory();
+  const sibling = spawn(process.execPath, ["--eval", "setInterval(()=>{}, 1_000);"], { stdio: "ignore" });
+  const siblingPid = sibling.pid;
+  assert.ok(siblingPid);
+  t.after(() => sibling.kill());
+  // Give the sibling enough time to start so its CreationDate is unambiguously
+  // later than the synthetic lease's createdAt, reproducing the same-boot
+  // PID-reuse case from the issue.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  const stale = {
+    version: 1,
+    pid: siblingPid,
+    host: hostname(),
+    token: randomUUID(),
+    createdAt: Date.now() - 60_000,
+    boot: null,
+    uptime: 0,
+  };
+  writeFileSync(leasePath, `${JSON.stringify(stale)}\n`, { mode: 0o600 });
+
+  const lease = acquireDataDirLease(dataDir);
+  try {
+    assert.equal(lease.ownerPid, process.pid);
+  } finally {
+    lease.release();
+  }
 });

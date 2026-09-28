@@ -572,6 +572,7 @@ function projectTask(task: Record<string, any>, activeThreadId: unknown) {
     title: task.title,
     createdAt: task.createdAt,
     ...(typeof task.busy === "boolean" ? { busy: task.busy } : {}),
+    ...(typeof task.waitingForTeammates === "boolean" ? { waitingForTeammates: task.waitingForTeammates } : {}),
     ...(task.activity ? { activity: task.activity } : {}),
     ...(task.modelSelection ? { modelSelection: task.modelSelection } : {}),
     ...(typeof activeThreadId === "string" ? { active: task.threadId === activeThreadId } : {}),
@@ -596,6 +597,7 @@ function projectBot(bot: Record<string, any>) {
     chiefOfStaff: Boolean(bot.chiefOfStaff),
     modelSelection: bot.modelSelection,
     busy: Boolean(bot.busy),
+    waitingForTeammates: Boolean(bot.waitingForTeammates),
     activity: bot.activity,
     unread: Boolean(bot.unread),
     activeTaskId: bot.threadId,
@@ -627,6 +629,7 @@ function projectMessage(message: Record<string, any>) {
         options: message.card.options,
         answered: message.card.answered,
         dismissed: message.card.dismissed,
+        expired: message.card.expired,
       }
     : undefined;
   const tool = isRecord(message.tool)
@@ -653,6 +656,7 @@ function projectMessage(message: Record<string, any>) {
         helpUrl: message.secret.helpUrl,
         provided: message.secret.provided,
         dismissed: message.secret.dismissed,
+        superseded: message.secret.superseded,
         resumed: message.secret.resumed,
       }
     : undefined;
@@ -684,12 +688,12 @@ function taskBelongsTo(owner: Record<string, any>, taskId: string): boolean {
 }
 
 function messageNeedsInput(message: Record<string, any>): boolean {
-  const card = isRecord(message.card) && message.card.requestId && !message.card.answered && !message.card.dismissed;
+  const card = isRecord(message.card) && message.card.requestId && !message.card.answered && !message.card.dismissed && !message.card.expired;
   const connector = isRecord(message.connector) &&
     !message.connector.dismissed &&
     !message.connector.resumed &&
     message.connector.status !== "connected";
-  const secret = isRecord(message.secret) && !message.secret.provided && !message.secret.dismissed;
+  const secret = isRecord(message.secret) && !message.secret.provided && !message.secret.dismissed && !message.secret.superseded;
   return Boolean(card || connector || secret);
 }
 
@@ -1093,7 +1097,7 @@ export async function handleToolCall(
           if (task.activity === "waiting-on-you") return terminal("needs-user");
           if (task.activity === "dead") return terminal("failed");
           if (task.activity === "no-signal") return terminal("stalled");
-          if (!task.busy) return terminal("settled");
+          if (!task.busy && !task.waitingForTeammates) return terminal("settled");
           sawBusy = true;
         } else {
           if (target.threadId !== taskId) return terminal("settled");

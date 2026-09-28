@@ -12,6 +12,7 @@ import {
   approvalModeForOrigin,
   autoVerdict,
   deliverFullAccessApproval,
+  delegationInheritsFullAccess,
 } from "./auto-approve.ts";
 
 describe("Full access delivery", () => {
@@ -35,6 +36,15 @@ describe("Full access delivery", () => {
 });
 
 describe("autoVerdict", () => {
+  it("applies an explicit exact command grant without changing Full or answering questions/elevations", () => {
+    for (const mode of ["ask", "edits", "auto", "custom"] as const) {
+      expect(autoVerdict(mode, "Bash", { commandAllowed: true }).source).toBe("command-allowlist");
+      expect(autoVerdict(mode, "Bash", { commandAllowed: true }).approve).toBeTruthy();
+      expect(autoVerdict(mode, "Bash", { commandAllowed: true, requiresExplicitApproval: true }).approve).toBeNull();
+      expect(autoVerdict(mode, "AskUserQuestion", { commandAllowed: true }).approve).toBeNull();
+    }
+    expect(autoVerdict("full", "Bash", { commandAllowed: true, requiresExplicitApproval: true }).source).toBe("full-access");
+  });
   it("answers only for Full access, and then answers everything", () => {
     expect(autoVerdict("full", "Bash")).toEqual({ approve: "approved Bash (full access)", source: "full-access" });
     expect(autoVerdict("full", "Bash", { requiresExplicitApproval: true })).toEqual({
@@ -110,10 +120,30 @@ describe("tools that ask a person", () => {
     for (const mode of modes) {
       expect(autoVerdict(mode, "ask_user").approve, mode).toBeNull();
       expect(autoVerdict(mode, "mcp__ogb__ask_user").approve, mode).toBeNull();
+      expect(autoVerdict(mode, "omb-ask").approve, mode).toBeNull();
     }
   });
 
   it("still answers an ordinary tool under Full access", () => {
     expect(autoVerdict("full", "Read").approve).toBeTruthy();
+  });
+});
+
+describe("delegationInheritsFullAccess", () => {
+  const base = { senderIsChief: true, senderHasFullAccess: true, sameBot: false, recipientDriverKind: "claudeAgent" };
+  it("passes a Full-access Chief's access to the teammate it delegates to", () => {
+    expect(delegationInheritsFullAccess(base)).toBe(true);
+    for (const recipientDriverKind of ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo"]) {
+      expect(delegationInheritsFullAccess({ ...base, recipientDriverKind })).toBe(true);
+    }
+  });
+  it("passes nothing on from an ordinary bot, a Chief without Full access, or a bot to itself", () => {
+    expect(delegationInheritsFullAccess({ ...base, senderIsChief: false })).toBe(false);
+    expect(delegationInheritsFullAccess({ ...base, senderHasFullAccess: false })).toBe(false);
+    expect(delegationInheritsFullAccess({ ...base, sameBot: true })).toBe(false);
+  });
+  it("leaves a teammate whose engine has no Full mode on its own level", () => {
+    expect(delegationInheritsFullAccess({ ...base, recipientDriverKind: "hermes" })).toBe(false);
+    expect(delegationInheritsFullAccess({ ...base, recipientDriverKind: undefined })).toBe(false);
   });
 });

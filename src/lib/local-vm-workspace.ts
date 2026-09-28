@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { JsonValue } from "../../server/schema.ts";
+import type { JsonValue } from "../../shared/json";
 
 export interface LocalVmWorkspaceBot {
   id: string;
@@ -10,7 +10,7 @@ export interface LocalVmWorkspaceBot {
 export type LocalVmWorkspaceSlots = [string | null, string | null];
 
 export interface LocalVmWorkspaceStatus {
-  mode: "shared" | "per-bot" | "unknown";
+  mode: "shared" | "per-bot" | "pool" | "unknown";
   maxInstances: number;
   container: "running" | "stopped" | "missing" | "unknown";
   network: "loopback" | "unsafe" | "unknown";
@@ -196,7 +196,7 @@ export function reconcileLocalVmWorkspaceSlots(
 }
 
 const localVmStatusPayloadSchema = z.object({
-  mode: z.enum(["shared", "per-bot"]).optional(),
+  mode: z.enum(["shared", "per-bot", "pool"]).optional(),
   max_instances: z.number().int().positive().optional(),
   container: z.enum(["running", "stopped", "missing"]).optional(),
   network: z.enum(["loopback", "unsafe", "unknown"]).optional(),

@@ -57,15 +57,34 @@ final class ProfileRoutinePolicyTests: XCTestCase {
         XCTAssertTrue(withDefault.canSpeak(agentVoice: nil))
     }
 
+    func testProviderSwitchClearsTheOpenProfilesProviderSpecificVoice() throws {
+        let fishWithoutDefault = try decodeConfig(
+            #"{"tts":{"configured":true,"ready":false,"provider":"fish","voice":""}}"#
+        )
+        let stale = AgentProfileVoiceState(
+            voice: "elevenlabs-voice",
+            speakReplies: true,
+            baselineVoice: "elevenlabs-voice"
+        )
+
+        let reset = stale.afterProviderSwitch(to: fishWithoutDefault)
+
+        XCTAssertEqual(reset.voice, "")
+        XCTAssertEqual(reset.baselineVoice, "")
+        XCTAssertFalse(reset.speakReplies, "speech cannot stay enabled with no valid voice")
+    }
+
     func testOnlyTheEngineTheServerNamesGetsItsOwnExplanation() throws {
         // The built-in engine is the reason "configured" stopped meaning "a
         // key is on file" — so the copy that explains a false has to know
         // which engine it is talking about.
         XCTAssertEqual(try decodeConfig(#"{"tts":{"configured":false,"provider":"system"}}"#).voiceProvider, .system)
+        XCTAssertEqual(try decodeConfig(#"{"tts":{"configured":true,"provider":"chatterbox"}}"#).voiceProvider, .chatterbox)
+        XCTAssertEqual(try decodeConfig(#"{"tts":{"configured":true,"provider":"fish"}}"#).voiceProvider, .fish)
 
-        // Everything else is ElevenLabs: `voiceProvider(cfg)` in
-        // `server/tts/index.ts` matches that one exact string and falls back
-        // for the rest. Each case is asserted on its own, because a rule that
+        // Every known engine uses an exact wire value; everything else falls
+        // back to ElevenLabs, matching `voiceProvider(cfg)` in
+        // `server/tts/index.ts`. Each case is asserted on its own, because a rule that
         // merely matched "system" loosely would still pass the assertion
         // above while explaining someone's ElevenLabs setup as a Mac voice.
         XCTAssertEqual(
@@ -84,6 +103,10 @@ final class ProfileRoutinePolicyTests: XCTestCase {
             "an engine this build has never heard of must not borrow another engine's copy"
         )
         XCTAssertEqual(
+            try decodeConfig(#"{"tts":{"configured":false,"provider":"Chatterbox"}}"#).voiceProvider, .elevenlabs,
+            "capitalisation is not the server's spelling; the address fields stay hidden for it"
+        )
+        XCTAssertEqual(
             try decodeConfig(#"{"tts":{"configured":false,"provider":"system-voices"}}"#).voiceProvider, .elevenlabs,
             "a future engine whose name merely contains the old one is still unknown: matching loosely would explain it with Mac-voice copy and a Mac-voice remedy"
         )
@@ -96,6 +119,21 @@ final class ProfileRoutinePolicyTests: XCTestCase {
         // not its shape, and nothing above may quietly change who can speak.
         XCTAssertTrue(try decodeConfig(#"{"tts":{"configured":true,"provider":"system","voice":"Albert"}}"#).canSpeak(agentVoice: nil))
         XCTAssertFalse(try decodeConfig(#"{"tts":{"configured":false,"provider":"system","voice":"Albert"}}"#).canSpeak(agentVoice: nil))
+    }
+
+    func testChatterboxAddressArrivesOnlyWithTheEngineThatNeedsIt() throws {
+        // Chatterbox's credential is an address, not a key, so the status
+        // carries it — and only it — for the picker to prefill.
+        let chatterbox = try decodeConfig(
+            #"{"tts":{"configured":true,"provider":"chatterbox","baseUrl":"http://127.0.0.1:4123","model":"chatterbox-turbo"}}"#
+        )
+        XCTAssertEqual(chatterbox.tts?.baseUrl, "http://127.0.0.1:4123")
+        XCTAssertEqual(chatterbox.tts?.model, "chatterbox-turbo")
+
+        // Every other engine — and an older computer — sends nothing to read.
+        let elevenlabs = try decodeConfig(#"{"tts":{"configured":true,"provider":"elevenlabs"}}"#)
+        XCTAssertNil(elevenlabs.tts?.baseUrl)
+        XCTAssertNil(elevenlabs.tts?.model)
     }
 
     private func routine(schedule: RoutineSchedule) -> Routine {

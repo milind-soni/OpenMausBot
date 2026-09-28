@@ -4,14 +4,21 @@
 // they are right for this platform. A summary line says the whole story in
 // a glance and offers Check again, because the user often installs from a
 // terminal and comes back. The guide reacts to the result.
+//
+// On the packaged desktop, a first row offers organisation sign-in for
+// people who use the app at work; a signed-in Company engine then counts as
+// ready, so an employee with only company models is not told to set up
+// personal engines. Without that bridge the beat is exactly as before.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, RefreshCw } from "lucide-react";
 import { EngineSetup } from "@/components/EngineSetup";
 import { engineReady } from "@/components/EngineLibrary";
-import { ProviderMark } from "@/components/ProviderIcons";
+import { InstanceProviderMark } from "@/components/ProviderIcons";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { engineSummary, organisationSignIn } from "@/lib/onboarding";
 import { api, useStore, type InstanceInfo } from "@/state/store";
+import { OrganisationRow } from "./OrganisationRow";
 import { PrimaryButton, staggerIndex, type BeatProps } from "./shared";
 
 function version(instance: InstanceInfo): string | null {
@@ -42,8 +49,19 @@ function SkeletonRow({ index }: { index: number }) {
   );
 }
 
-export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
+export function EnginesBeat({
+  onNext,
+  setMascot,
+  bump,
+  hosted = false,
+  onOpenOrganisation,
+}: BeatProps & {
+  hosted?: boolean;
+  /** Settings → Organisation; the flow resumes here when it closes. */
+  onOpenOrganisation?: () => void;
+}) {
   const { state, dispatch } = useStore();
+  const organisation = organisationSignIn(window.ogb, { hosted });
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const latestRequest = useRef(0);
@@ -78,10 +96,9 @@ export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
     };
   }, [refresh]);
 
-  const engines = (instances ?? []).filter((instance) => instance.install);
-  const ready = engines.filter(engineReady);
-  const setup = engines.filter((e) => !engineReady(e));
-  const allReady = instances !== null && ready.length > 0 && setup.length === 0;
+  const summary = engineSummary(instances ?? [], engineReady, { company: Boolean(organisation) });
+  const { ready, setup } = summary;
+  const allReady = instances !== null && summary.allReady;
   const expanded = open;
 
   // The guide searches while the harness answers, then looks proud or
@@ -103,6 +120,14 @@ export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
   return (
     <div className="flex min-h-0 flex-col">
       <p className="animate-rise mt-1 text-[13.5px] text-ink-secondary">{t("onboarding.engines.intro")}</p>
+
+      {organisation && (
+        <OrganisationRow
+          bridge={organisation}
+          onOpenSettings={() => (onOpenOrganisation ? onOpenOrganisation() : dispatch({ type: "toggleAppSettings", open: true, section: "organization" }))}
+          onConnected={() => void refresh()}
+        />
+      )}
 
       {/* the whole story in one line, and the way back after a terminal trip */}
       <div className="animate-rise mt-4 flex items-center justify-between gap-3" style={staggerIndex(1)}>
@@ -133,6 +158,9 @@ export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
         </button>
       </div>
       {failed && instances !== null && <p role="alert" className="mt-2 text-[13px] text-danger">{t("onboarding.engines.error")}</p>}
+      {summary.company > 0 && ready.length + setup.length > 0 && (
+        <p className="mt-2 text-[12px] text-ink-secondary">{t("onboarding.org.personalOptional")}</p>
+      )}
 
       <div
         className="animate-rise mt-2.5 min-h-0 divide-y divide-hairline/40 overflow-y-auto rounded-xl border border-hairline/40 bg-card [scrollbar-width:thin]"
@@ -148,7 +176,7 @@ export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
                   {ok ? (
                     <div className="flex items-center gap-3 px-3.5 py-3">
                       <span className="flex size-[18px] shrink-0 items-center justify-center">
-                        <ProviderMark driverKind={instance.driverKind} size={18} />
+                        <InstanceProviderMark instance={instance} size={18} />
                       </span>
                       <div className="flex min-w-0 flex-1 items-baseline gap-2">
                         <span className="truncate text-[13.5px] font-medium text-ink">{instance.displayName}</span>
@@ -164,7 +192,7 @@ export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
                       className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-raised/40"
                     >
                       <span className="flex size-[18px] shrink-0 items-center justify-center">
-                        <ProviderMark driverKind={instance.driverKind} size={18} />
+                        <InstanceProviderMark instance={instance} size={18} />
                       </span>
                       <div className="flex min-w-0 flex-1 items-baseline gap-2">
                         <span className="truncate text-[13.5px] font-medium text-ink">{instance.displayName}</span>

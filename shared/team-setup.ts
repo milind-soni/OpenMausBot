@@ -1,12 +1,15 @@
-import type { ModelSelection } from "../server/contracts.ts";
+import type { ModelSelection } from "./wire.ts";
 
 export interface TeamSetupFields {
   name?: string;
   title?: string;
   description?: string;
   soul?: string;
+  /** Create only: the folder the new bot's tools work in. "" = private workspace. */
+  cwd?: string;
   section?: string;
   modelSelection?: ModelSelection;
+  chiefOfStaff?: boolean;
 }
 
 export interface TeamSetupOperation {
@@ -19,7 +22,7 @@ export interface TeamSetupOperation {
 
 export interface TeamSetupResult {
   state: "applied" | "denied" | "cancelled" | "failed";
-  bots: Array<{ id: string; name: string; action: "created" | "updated" | "deleted"; section?: string; modelSelection?: ModelSelection }>;
+  bots: Array<{ id: string; name: string; action: "created" | "updated" | "deleted"; section?: string; modelSelection?: ModelSelection; chiefOfStaff?: boolean }>;
   newTeams: string[];
   error?: string;
 }

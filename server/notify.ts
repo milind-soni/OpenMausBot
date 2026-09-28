@@ -10,28 +10,19 @@
 // bot is not working, and the fix is usually a setting only a person can
 // change, so a retry cannot clear it. A routine failure already buzzed;
 // this makes an interactive turn behave the same way.
+// A routine parked behind a busy target earns one notice after half an
+// hour: from outside the schedule looks broken, and only a person can
+// decide whether the busy work or the routine matters more.
 //
 // Delivery is a separate concern. The harness emits a frame; whoever is
 // listening decides what to do with it — desktop and paired-phone local
 // notifications today, and closed-app APNs delivery once a relay exists.
 
-export type NotifyKind = "approval" | "question" | "done" | "routine-failed" | "turn-failed" | "takeover";
+import type { Notification, NotifyKind } from "../shared/notification.ts";
 
-export interface Notification {
-  kind: NotifyKind;
-  botId: string;
-  botName: string;
-  threadId: string;
-  title: string;
-  body: string;
-  /** The bot's stored profile image, when it has one; clients show it as
-   * the OS notification's icon so every banner carries its bot's face. */
-  avatarUrl?: string;
-  /** The room this came out of, when the bot was speaking in one. Routing
-   * already works off `threadId` alone; this is what lets a client say which
-   * room, and stack a room's banners together instead of under the bot. */
-  groupId?: string;
-}
+// The notification wire shape lives in shared/notification.ts now (part of
+// the wire model); re-exported here so existing importers keep working.
+export type { Notification, NotifyKind } from "../shared/notification.ts";
 
 /** One line, short enough for a lock screen, with the newlines and code
  * fences of a model's answer flattened out of it. */
@@ -68,6 +59,18 @@ export function blockedTarget(
   return { threadId: room.threadId, group: { id: room.id, name: room.name } };
 }
 
+/** A workspace spend notice (server/spend.ts decides when). It opens the
+ * thread whose turn crossed the line, so clicking it lands somewhere real,
+ * but it is the workspace's news, not that bot's: the bot's notification
+ * toggle does not silence it. */
+export function buildSpendNotification(
+  bot: Pick<NotifyBot, "id" | "name">,
+  threadId: string,
+  text: { title: string; body: string },
+): Notification {
+  return { kind: "spend", botId: bot.id, botName: bot.name, threadId, title: text.title, body: summarize(text.body, 200) };
+}
+
 /** Build the frame for one event, or null when it should stay quiet.
  *
  * Kept pure and separate from the event fold so the policy — which is the
@@ -98,9 +101,15 @@ export function buildNotification(
           ? `${who} needs your hands`
           : kind === "routine-failed"
             ? `${who}'s routine failed`
+            : kind === "routine-deferred"
+              ? `${who}'s routine is waiting`
             : kind === "turn-failed"
               ? `${who} couldn't start`
-              : `${who} finished`;
+              : kind === "incident"
+                ? `${who} hit a problem`
+                : kind === "delegation-settled"
+                  ? `${who} resumed with results`
+                  : `${who} finished`;
 
   // A "finished" with nothing to say is not worth a notification — the
   // badge in the sidebar already carries that much.

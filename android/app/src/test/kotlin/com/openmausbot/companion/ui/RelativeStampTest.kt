@@ -27,6 +27,20 @@ class RelativeStampTest {
             .toDouble()
 
     @Test
+    fun `an update stamp is the local date and time, and a missing one is blank`() {
+        val stamp = at(2026, 8, 20, 9, 30)
+        assertEquals("", RelativeStamp.updated(0.0, zone, locale))
+        assertEquals("", RelativeStamp.updated(-1.0, zone, locale))
+        val tokyo = ZoneId.of("Asia/Tokyo")
+        val newYork = ZoneId.of("America/New_York")
+        assertTrue(RelativeStamp.updated(stamp, tokyo, locale) != RelativeStamp.updated(stamp, newYork, locale))
+        assertEquals(
+            RelativeStamp.updated(stamp, ZoneId.systemDefault(), Locale.getDefault()),
+            RelativeStamp.updated(stamp),
+        )
+    }
+
+    @Test
     fun `a thread that never moved has no stamp`() {
         assertEquals("", RelativeStamp.list(0.0, now, zone, locale))
         assertEquals("", RelativeStamp.list(-1.0, now, zone, locale))

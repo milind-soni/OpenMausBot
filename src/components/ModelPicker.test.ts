@@ -1,9 +1,9 @@
 import { Children, createElement, type ChangeEvent, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Bot, InstanceInfo } from "@/state/store";
-import type { EffortLevel } from "../../server/contracts.ts";
+import type { AppState, Bot, InstanceInfo } from "@/state/store";
+import type { EffortLevel } from "../../shared/wire";
 
 // The picker reads the engine catalog off the store, and the store module
 // touches window/localStorage at import time — the same shape
@@ -12,19 +12,19 @@ import type { EffortLevel } from "../../server/contracts.ts";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { instances: [] as InstanceInfo[], dispatch: vi.fn() };
+  return { instances: [] as InstanceInfo[], modelVariantSessions: {} as AppState["modelVariantSessions"], dispatch: vi.fn() };
 });
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
-    state: { instances: fixture.instances },
+    state: { instances: fixture.instances, modelVariantSessions: fixture.modelVariantSessions },
     dispatch: fixture.dispatch,
     refreshInstances: vi.fn(),
     refreshModels: vi.fn(),
   }),
 }));
 
-const { ClaudeAccountSelect, EffortRow, ModelEngineRail, ModelPicker } = await import("./ModelPicker");
+const { ClaudeAccountSelect, EffortRow, ModelEngineRail, ModelPicker, ModelVariantRow, modelSelectionForPick } = await import("./ModelPicker");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -120,6 +120,112 @@ describe("EffortRow", () => {
   });
 });
 
+
+describe("OpenCode model variants", () => {
+  const variants = [
+    { id: "none", label: "None" }, { id: "minimal", label: "Minimal" },
+    { id: "default", label: "Default" }, { id: "deep/custom", label: "Deep custom" },
+  ];
+  const opencode = (): InstanceInfo => ({ ...engine(), instanceId: "opencode", driverKind: "opencodeGo",
+    capabilities: { modelVariants: true }, models: { default: "provider/model", options: [{ id: "provider/model", label: "Model", variants }] } });
+  const selected = (variant?: string): Bot => ({ ...bot(), modelSelection: { instanceId: "opencode", model: "provider/model", ...(variant !== undefined ? { variant } : {}) } });
+  beforeEach(() => { fixture.instances = [opencode()]; fixture.modelVariantSessions = {}; fixture.dispatch.mockClear(); });
+  const render = (variant?: string) => renderToStaticMarkup(createElement(ModelVariantRow, { bot: selected(variant), threadId: "thread-atlas" }));
+
+  it("offers exact advertised ids without assuming that omission means none or default", () => {
+    const markup = render();
+    expect(levelButtons(markup)).toEqual([
+      { label: "None", pressed: false }, { label: "Minimal", pressed: false },
+      { label: "OpenCode default", pressed: false }, { label: "Deep custom", pressed: false },
+    ]);
+    expect(markup).toContain("No variant selected.");
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(levelButtons(render("none")).find((button) => button.pressed)?.label).toBe("None");
+  });
+
+  it.each(variants)("persists $id only to the pinned conversation and clears legacy effort", (option) => {
+    const configured = selected();
+    configured.modelSelection.effort = "high";
+    const row = ModelVariantRow({ bot: configured, threadId: "independent-thread" })!;
+    const group = Children.toArray(row.props.children).at(-1) as ReactElement<{ children: ReactNode }>;
+    const button = Children.toArray(group.props.children)[variants.findIndex((candidate) => candidate.id === option.id)] as ReactElement<{ onClick: () => void }>;
+    button.props.onClick();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "setModel", botId: "atlas", threadId: "independent-thread",
+      selection: { instanceId: "opencode", model: "provider/model", variant: option.id } });
+  });
+
+  it.each(["none", "default", "minimal", "removed"])("can clear %s to omission without asking for a default or none", (variant) => {
+    const row = ModelVariantRow({ bot: selected(variant), threadId: "thread-atlas" })!;
+    const clear = Children.toArray(row.props.children).find((child) =>
+      typeof child === "object" && "type" in child && child.type === "button") as ReactElement<{ onClick: () => void; title: string }>;
+    expect(clear.props.title).toContain("keeps its session or configured setting");
+    clear.props.onClick();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "setModel", botId: "atlas", threadId: "thread-atlas",
+      selection: { instanceId: "opencode", model: "provider/model" } });
+  });
+
+  it("uses matching session choices, including an empty list, without changing the instance catalog", () => {
+    fixture.modelVariantSessions["thread-atlas"] = { instanceId: "opencode", model: "provider/model", turnId: "turn", startedAt: "2026-09-15T00:00:00Z", acceptingUpdates: false,
+      variants: { options: [{ id: "minimal", label: "Session minimal" }], currentValue: "minimal" } };
+    expect(levelButtons(render()).map((button) => button.label)).toEqual(["Session minimal"]);
+    expect(render()).toContain("No variant selected. Session: Session minimal.");
+    expect(levelButtons(render()).some((button) => button.pressed)).toBe(false);
+    expect(fixture.instances[0].models.options[0].variants).toEqual(variants);
+    fixture.modelVariantSessions["thread-atlas"].variants = { options: [] };
+    expect(render()).toBe("");
+    expect(render("none")).toContain("is unavailable");
+    expect(render("none")).not.toContain('aria-label="Reasoning variant"');
+  });
+
+  it("ignores another conversation, account, or model's session choices and preserves unavailable saved ids", () => {
+    const session = { instanceId: "opencode", model: "provider/model", turnId: "turn", startedAt: "2026-09-15T00:00:00Z", acceptingUpdates: false, variants: { options: [] } };
+    fixture.modelVariantSessions["other-thread"] = session;
+    expect(levelButtons(render())).toHaveLength(4);
+    fixture.modelVariantSessions["thread-atlas"] = { ...session, instanceId: "other-account" };
+    expect(levelButtons(render())).toHaveLength(4);
+    fixture.modelVariantSessions["thread-atlas"] = { ...session, model: "other-model" };
+    expect(levelButtons(render())).toHaveLength(4);
+    expect(render("removed")).toContain("Saved variant “removed” has not been checked in this session.");
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("does not invent default or expose a control on a model without variants", () => {
+    fixture.instances[0].models.options[0].variants = [{ id: "minimal", label: "Minimal" }];
+    expect(levelButtons(render()).map((button) => button.label)).toEqual(["Minimal"]);
+    fixture.instances[0].models.options[0].variants = [];
+    expect(render()).toBe("");
+    fixture.instances[0].capabilities = {};
+    expect(render("none")).toBe("");
+  });
+
+  it("does not declare a saved default invalid on reload before ACP announces its choices", () => {
+    fixture.instances[0].models.options[0].variants = [{ id: "minimal", label: "Minimal" }];
+    const markup = render("default");
+    expect(markup).toContain("has not been checked in this session");
+    expect(markup).not.toContain("is unavailable");
+    expect(levelButtons(markup).map((button) => button.label)).toEqual(["Minimal"]);
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the saved choice after reload while allowing profile choices to update the profile", () => {
+    expect(levelButtons(render("minimal")).find((button) => button.pressed)?.label).toBe("Minimal");
+    const row = ModelVariantRow({ bot: selected(), updateBotDefault: true })!;
+    const group = Children.toArray(row.props.children).at(-1) as ReactElement<{ children: ReactNode }>;
+    (Children.toArray(group.props.children)[1] as ReactElement<{ onClick: () => void }>).props.onClick();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "setModel", botId: "atlas", threadId: undefined, updateBotDefault: true,
+      selection: { instanceId: "opencode", model: "provider/model", variant: "minimal" } });
+  });
+
+  it("drops an opaque variant when switching models/accounts but keeps it when reselecting the same model", () => {
+    const selection = selected("minimal").modelSelection;
+    expect(modelSelectionForPick(selection, opencode(), "provider/other")).toEqual({ instanceId: "opencode", model: "provider/other" });
+    expect(modelSelectionForPick(selection, { ...opencode(), instanceId: "other" }, "provider/model")).toEqual({ instanceId: "other", model: "provider/model" });
+    expect(modelSelectionForPick(selection, opencode(), "provider/model")).toEqual(selection);
+    expect(modelSelectionForPick({ ...selection, effort: "high" }, opencode(), "provider/other")).not.toHaveProperty("effort");
+    expect(modelSelectionForPick(bot("high").modelSelection, engine(["high"]), "other")).toEqual({ instanceId: "codex", model: "other", effort: "high" });
+  });
+});
+
 describe("ModelPicker trigger", () => {
   const renderTrigger = (effort?: EffortLevel) => {
     fixture.instances = [engine(["low", "high"])];
@@ -201,6 +307,18 @@ describe("Claude provider and account selection", () => {
     }
   });
 
+  it("shows the icon of the concrete Claude account the rail selects", () => {
+    const personalIcon: InstanceInfo = { ...personal, icon: { kind: "preset", preset: "anthropic" } };
+    const workIcon: InstanceInfo = { ...work, icon: { kind: "preset", preset: "azure" } };
+    for (const claudeInstance of [workIcon, undefined]) {
+      const target = claudeInstance ?? personalIcon;
+      const rail = ModelEngineRail({ instances: [personalIcon, workIcon], claudeInstance, onSelect: () => {} });
+      const button = Children.toArray(rail.props.children).find((child) => (child as ReactElement).type === "button") as ReactElement<{ children: ReactNode }>;
+      const mark = Children.toArray(button.props.children)[0] as ReactElement<{ instance: InstanceInfo }>;
+      expect(mark.props.instance).toBe(target);
+    }
+  });
+
   it("maps named native options to concrete instances without committing a model", () => {
     const onSelect = vi.fn();
     const dropdown = ClaudeAccountSelect({ accounts: [personal, work], selectedId: work.instanceId, onSelect });
@@ -211,5 +329,16 @@ describe("Claude provider and account selection", () => {
     const select = Children.toArray(dropdown.props.children)[1] as ReactElement<{ onChange: (event: ChangeEvent<HTMLSelectElement>) => void }>;
     select.props.onChange({ target: { value: personal.instanceId } } as ChangeEvent<HTMLSelectElement>);
     expect(onSelect).toHaveBeenCalledExactlyOnceWith(personal);
+  });
+});
+
+describe("organisation policy", () => {
+  it("shows an engine the organisation disallows as managed and dimmed, not hidden", () => {
+    const blocked: InstanceInfo = { ...engine(), policy: { organizationName: "Fixture Agency", reason: "Fixture Agency allows only company models on this computer. Choose a Company model for this bot." } };
+    const markup = renderToStaticMarkup(createElement(ModelEngineRail, { instances: [blocked], onSelect: () => {} }));
+    expect(markup).toContain('aria-label="Codex · Managed by Fixture Agency"');
+    expect(markup).toContain("opacity-40");
+    const allowed = renderToStaticMarkup(createElement(ModelEngineRail, { instances: [engine()], onSelect: () => {} }));
+    expect(allowed).not.toContain("Managed by");
   });
 });

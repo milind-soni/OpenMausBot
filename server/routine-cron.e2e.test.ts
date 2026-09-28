@@ -32,7 +32,7 @@ it("takes cron through the real routine tools and confirmation, preserving its z
     const proposal = async (tool: string, args: unknown, text: string, expectError = false) => {
       const previousTurns = providerEvidence().length;
       writeFileSync(planPath, JSON.stringify({ [bot.id]: {
-        expectSystemIncludes: ["five-field cron expression", "Never replace a calendar rule with daily AI date checking"],
+        expectSystemIncludes: ["five-field cron expression", "Never replace a calendar rule with daily AI date checking", "including its VPS"],
         steps: [{ tool: "list_routines", arguments: {} }, { tool, arguments: args, expectError }],
         reply: expectError ? "That invalid schedule was refused." : "Please review the routine confirmation.",
       } }));
@@ -55,7 +55,7 @@ it("takes cron through the real routine tools and confirmation, preserving its z
     };
     const schedule = { type: "cron" as const, expression: "0 9 1 * *", timeZone: "America/New_York" };
     const create = await proposal("propose_routine", {
-      name: "Monthly report", instructions: "Summarize last month's fixture activity; no external services.", schedule,
+      name: "Monthly report", instructions: "Summarize last month's fixture activity; no external services.", schedule, overlap: "queue",
     }, "Schedule a report at 9am New York time on the first of each month.");
     expect((await api("GET", "/api/routines")).routines).toHaveLength(0);
     expect(create.routineRequest).toMatchObject({ version: 1, operation: { action: "create", routine: { schedule } } });
@@ -63,19 +63,33 @@ it("takes cron through the real routine tools and confirmation, preserving its z
     expect(create.subtitle).toContain("Cron: 0 9 1 * *");
     const { resultId: routineId } = await confirm(create);
     const current = async () => (await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === routineId);
-    expect(await current()).toMatchObject({ schedule, enabled: true });
+    expect(await current()).toMatchObject({ schedule, enabled: true, runOn: "maus", overlap: "queue" });
+    expect(create.subtitle).toContain("Queue one scheduled run");
     expect((await current()).nextRunAt).toBe(nextCronRuns(schedule, create.routineRequest.createdAt, 1)[0]);
+
+    const cardCount = (await messages()).filter(message => message.card?.routineRequest).length;
+    await proposal("propose_routine", {
+      name: "Renamed monthly report", instructions: "Summarize last month's fixture activity; no external services.", schedule, overlap: "queue",
+    }, "Try scheduling the same work again under a different name.", true);
+    const duplicateResponse = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "propose_routine").response;
+    expect(duplicateResponse.result.content[0].text).toContain(routineId);
+    expect(duplicateResponse.result.content[0].text).toContain("already exists");
+    expect((await messages()).filter(message => message.card?.routineRequest)).toHaveLength(cardCount);
+    expect((await api("GET", "/api/routines")).routines).toHaveLength(1);
 
     const lastDay = { ...schedule, expression: "0 9 L * *" };
     const update = await proposal("propose_routine_action", {
-      action: "update", routine_id: routineId, changes: { schedule: lastDay },
+      action: "update", routine_id: routineId, changes: { schedule: lastDay, overlap: "skip" },
     }, "Change that report to the last day of each month at the same time and zone.");
     const listed = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "list_routines").response.result.content[0].text;
     expect(listed).toContain('"type": "cron"');
     expect(listed).toContain('"timeZone": "America/New_York"');
+    expect(listed).toContain('"overlap": "queue"');
+    expect(listed).toContain('"failureStreak": 0');
     expect((await current()).schedule).toEqual(schedule);
     await confirm(update);
     expect((await current()).schedule).toEqual(lastDay);
+    expect((await current()).overlap).toBeUndefined();
     const pause = await proposal("propose_routine_action", { action: "pause", routine_id: routineId }, "Pause the monthly report.");
     expect((await current()).enabled).toBe(true);
     await confirm(pause);
@@ -86,6 +100,12 @@ it("takes cron through the real routine tools and confirmation, preserving its z
     expect(await current()).toMatchObject({ enabled: true, schedule: lastDay });
 
     await proposal("propose_routine", { name: "Impossible date", instructions: "Must not run.", schedule: { ...schedule, expression: "0 9 31 2 *" } }, "Try an invalid calendar rule.", true);
+    await proposal("propose_routine", {
+      name: "Explicit Boat", instructions: "Run on the Boat-hosted agent.", schedule, run_on: "box",
+    }, "Try the separate Boat runner without a Boat account.", true);
+    const boatResponse = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "propose_routine").response;
+    expect(boatResponse.result.content[0].text).toContain('run_on="maus"');
+    expect(boatResponse.result.content[0].text).toContain("self-hosted VPS");
     const before = await current();
     for (const invalid of [
       { type: "cron", expression: "0 9 1 * *" },

@@ -17,7 +17,7 @@ import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { formatTime, toRows, type InspectorEntry, type InspectorPage, type InspectorRow } from "@/lib/inspector";
 import { openLiveEvents } from "@/lib/live-events";
-import type { RuntimeEvent } from "../../server/contracts.ts";
+import type { RuntimeEvent } from "../../shared/runtime-events";
 import { RunLog } from "./RunLog";
 import { timelineEvents } from "@/lib/taskTimeline";
 import { t } from "@/lib/i18n";

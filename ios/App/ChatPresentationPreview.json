@@ -1,0 +1,120 @@
+{
+  "bots": [
+    {
+      "id": "preview-pepper",
+      "threadId": "preview-gmail",
+      "name": "Pepper",
+      "title": "Personal assistant",
+      "description": "Helps with email and everyday plans.",
+      "notifications": false,
+      "color": "purple",
+      "unread": true,
+      "busy": true,
+      "modelSelection": {
+        "instanceId": "preview",
+        "model": "preview"
+      },
+      "createdAt": 1789088400000,
+      "projects": [
+        {
+          "id": "email",
+          "name": "Email",
+          "emoji": "\u2709\ufe0f"
+        }
+      ],
+      "tasks": [
+        {
+          "threadId": "preview-gmail",
+          "title": "Triage Gmail",
+          "createdAt": 1789088400000,
+          "projectId": "email",
+          "modelSelection": {
+            "instanceId": "preview",
+            "model": "preview"
+          },
+          "busy": true,
+          "activity": "working",
+          "unread": false
+        },
+        {
+          "threadId": "preview-icloud",
+          "title": "Triage iCloud",
+          "createdAt": 1789088460000,
+          "projectId": "email",
+          "modelSelection": {
+            "instanceId": "preview",
+            "model": "preview"
+          },
+          "busy": false,
+          "activity": "idle",
+          "unread": true
+        },
+        {
+          "threadId": "preview-weekend",
+          "title": "Plan weekend",
+          "createdAt": 1789088520000,
+          "modelSelection": {
+            "instanceId": "preview",
+            "model": "preview"
+          },
+          "busy": false,
+          "activity": "queued",
+          "unread": false,
+          "openedBy": {
+            "botId": "preview-pepper",
+            "name": "Pepper",
+            "at": 1789088520000
+          }
+        },
+        {
+          "threadId": "preview-routine",
+          "title": "Internal routine execution",
+          "createdAt": 1789088580000,
+          "projectId": "email",
+          "routineRunId": "preview-routine-run",
+          "busy": false,
+          "unread": false
+        }
+      ],
+      "activeLeafId": "answer",
+      "messages": [
+        {
+          "id": "webhook",
+          "role": "user",
+          "kind": "text",
+          "at": 1789088400000,
+          "text": "[AUTHENTICATED WEBHOOK TASK]\nTriage the build failure.\n[/AUTHENTICATED WEBHOOK TASK]\n\n[UNTRUSTED WEBHOOK EVENT DATA]\nReceived: 2026-09-11\nDelivery ID: build-418\nEvent: build.failed\n\n{\"service\":\"checkout\"}\n[/UNTRUSTED WEBHOOK EVENT DATA]"
+        },
+        {
+          "id": "progress",
+          "parentId": "webhook",
+          "role": "bot",
+          "kind": "text",
+          "at": 1789088401000,
+          "text": "Let me inspect the build logs.",
+          "turnId": "preview-turn"
+        },
+        {
+          "id": "progress2",
+          "parentId": "progress",
+          "role": "bot",
+          "kind": "text",
+          "at": 1789088402000,
+          "text": "I found the failing check.",
+          "turnId": "preview-turn"
+        },
+        {
+          "id": "answer",
+          "parentId": "progress2",
+          "role": "bot",
+          "kind": "text",
+          "at": 1789088404000,
+          "text": "The build failed because a dependency is missing.",
+          "turnId": "preview-turn",
+          "turnTerminal": true
+        }
+      ]
+    }
+  ],
+  "groups": []
+}

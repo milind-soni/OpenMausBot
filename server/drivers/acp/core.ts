@@ -5,6 +5,17 @@
 // argv, auth method, model catalog, sign-in check) live in a small support
 // object. Adding a harness = write server/drivers/acp/<name>.ts.
 //
+// One live agent process per (thread, spawn contract): the ACP handshake
+// (initialize, authenticate) and the native session are established once,
+// and later turns prompt the live session directly instead of paying the
+// full handshake per message. The pool mirrors the Claude driver: a session
+// closes after OMB_ACP_SESSION_IDLE_MS of quiet (default 10 minutes, floored
+// by OMB_ACP_SESSION_IDLE_MIN_MS default 10s), when the spawn contract
+// changes, when the child crashes, when an interrupt's cancel goes
+// unanswered, and on stopAll/dispose. A resume cursor left by an earlier
+// session resumes through session/load|resume when the process had to
+// respawn.
+//
 // ACP has no `turn/completed` notification: the `session/prompt` RPC *result*
 // is the completion signal (it carries stopReason + usage). Permission
 // requests arrive as server→client `session/request_permission` and surface
@@ -12,13 +23,17 @@
 // unless the agent explicitly offered an `allow`-kind option — option ORDER
 // is never a security contract). session/load REPLAYS history as ordinary
 // session/update notifications, so updates are double-gated: nothing emits
-// before the prompt is sent, and `_meta.isReplay` updates are dropped.
+// before the prompt is sent, and `_meta.isReplay` updates are dropped. Session
+// configuration is the exception: its live updates apply before prompting too.
 import { homedir } from "node:os";
 import { lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { createHash } from "node:crypto";
 
-import { PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
+import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
 import { decodeInjectId } from "../local-inject.ts";
+import { promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
+import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
 
 /**
@@ -37,30 +52,146 @@ import type {
   ProviderInstance,
   ProviderSnapshot,
   ModelCatalog,
+  ModelVariantOption,
   RuntimeEvent,
   RuntimeEventListener,
   SendTurnInput,
   ProviderErrorCode,
+  RequestOutcome,
   TurnImageInput,
 } from "../../contracts.ts";
-import { newEventId, newId } from "../../contracts.ts";
-import { computerProxyEnv } from "../../container-computer.ts";
+import { newEventId, newId, TurnNotStartedError } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
+import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
-// Resolved from the server root, never relative to this file: bundling inlines
-// this module two directories up, so the `".."` pair here would climb past the
-// packaged server dir entirely. See server/proxy-paths.ts.
-const COMPUTER_PROXY_PATH = SPAWNED_PROXIES.computer;
 import { appendNative } from "../native.ts";
+import { acpPermissionCommand, permissionLaunchCwd } from "../permission-command.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
-import { SPAWNED_PROXIES } from "../../proxy-paths.ts";
+import { extractMcpImages } from "../../mcp-tool-images.ts";
+import { redactSecretsInText } from "../../redact.ts";
+import { recoveryPromptFor } from "../../resume-recovery.ts";
+import { sessionIdlePolicy } from "../session-idle.ts";
+import { classifyError } from "../retry.ts";
+
+/** ACP vendors put the actionable cause in error.data while keeping the
+ * JSON-RPC message generic. Only surface known text fields, never a response
+ * body/config dump, and redact before bounding the displayed diagnostic. */
+function acpRpcError(value: any, method: string): Error {
+  const message = typeof value?.message === "string" ? value.message : "ACP request failed";
+  const data = value?.data;
+  const detail = typeof data === "string" ? data
+    : typeof data?.details === "string" ? data.details
+    : typeof data?.message === "string" ? data.message
+    : typeof data?.error?.message === "string" ? data.error.message
+    : "";
+  const context = [
+    method,
+    typeof data?.service === "string" ? `service: ${data.service}` : "",
+    typeof data?.errorName === "string" ? data.errorName : "",
+  ].filter(Boolean).join(", ");
+  const diagnostic = `${detail && detail !== message ? `${message}: ${detail}` : message} (${context})`;
+  const error = new Error(redactSecretsInText(diagnostic).slice(0, 1500));
+  return Object.assign(error, { code: value?.code, data,
+    // -32603 is JSON-RPC's internal error. Invalid params, unsupported
+    // methods and auth refusals are user/configuration issues, not evidence
+    // of a broken process. Preserve their session instead of retrying them.
+    acpSessionFailure: value?.code === -32603,
+  });
+}
 
 export interface AcpConfig {
   cli: string;
   fullAuto: boolean;
   /** Optional home for this instance's sessions. */
   workspace?: string;
+}
+
+/** A pending request.opened answer: the callback stored in the running
+ *  turn's asks map (shared shape with the runtime Turn record). */
+type AcpAskFinish = (
+  behavior: string,
+  source?: "user" | "timeout" | "system",
+  message?: string,
+  always?: boolean,
+) => RequestOutcome;
+
+/** The running turn a pooled session is servicing — the per-turn half of
+ *  the bookkeeping (Claude's Session.turn, split the same way). Server
+ *  requests and updates that arrive between turns see `current: null`. */
+interface AcpTurn {
+  turnId: string;
+  /** the model-resolved turn (see resolveTurnModel) */
+  turn: SendTurnInput;
+  turnConfig: AcpConfig;
+  controlsHost: boolean;
+  state: { settled: boolean; promptSent: boolean; text: string; producedItem: boolean; startupActivity: boolean; stopped: boolean };
+  acknowledge: () => void;
+  asks: Map<string, AcpAskFinish>;
+  /** Tool calls the agent started and has not yet reported finished. A tool
+   * such as `sleep` or a quiet build sends nothing while it runs, so the
+   * prompt's silence watchdog waits for these as it does for asks. */
+  runningTools: Set<string>;
+  interruptTimer: ReturnType<typeof setTimeout> | null;
+  flushAssistantText: () => void;
+  /** fold a session config snapshot into sessionConfigResult + the picker */
+  receiveModelVariants: (result: any) => void;
+}
+
+/** A live JSON-RPC-2.0 connection over one agent child's stdio: pending
+ *  request bookkeeping, UTF-8-safe line framing, and native logging. */
+interface AcpConnection {
+  send(obj: unknown): void;
+  /** `timeoutMs` is a hard deadline from the request; `idleMs` is the prompt
+   *  only (the one request that legitimately streams for minutes) and restarts
+   *  on every inbound line, so it trips solely on total silence. `idleMessage`
+   *  becomes the rejection error. */
+  request(
+    method: string,
+    params: unknown,
+    timeoutMs?: number,
+    receive?: (result: any) => void,
+    idleMs?: number,
+    idleMessage?: string,
+  ): Promise<any>;
+  failAll(error: Error): void;
+  /** stop dispatching child output — pending RPCs reject, nothing parses */
+  close(): void;
+}
+
+/** One live ACP agent process per thread, kept across turns. The spawn
+ *  handshake (initialize/authenticate) and the native session are paid once;
+ *  later turns prompt the live session. The pool shape is the Claude
+ *  driver's: spawn contract in, quiet-timeout out, crash drops the record. */
+interface AcpSession {
+  child: ReturnType<typeof spawnCli>;
+  acp: AcpConnection;
+  launch: { command: string; args?: string[] };
+  cwd: string;
+  /** the spawn contract — a different one means a fresh process */
+  contractKey: string;
+  /** the establishment inputs (mcpServers) the live native session was built
+   *  with. They ride session/new and session/load, not the process argv, and
+   *  the harness rotates integration bearer tokens every turn — so a change
+   *  here re-establishes the session on the same child instead of respawning. */
+  sessionKey: string | null;
+  /** the live native session id, or null until one is established */
+  sessionId: string | null;
+  /** the agent's last config-option snapshot; persists across turns so an
+   *  unchanged model skips the session/set_config_option RPC */
+  sessionConfigResult: any;
+  /** initialize's result — requested once per process */
+  initResult: any;
+  /** authenticate answered on this process; a turn that skips subscription
+   *  auth neither checks nor marks it */
+  authenticated: boolean;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+  closing: boolean;
+  /** the child exited — the record is dropped and the next turn respawns */
+  dead: boolean;
+  stderr: string;
+  /** the running turn, or null between turns */
+  current: AcpTurn | null;
 }
 
 /** Per-harness specifics — everything that differs between Grok, Gemini, … */
@@ -76,6 +207,8 @@ export interface AcpSupport {
    * describe() runs before any session exists, so there is no _meta to read
    * — eventually both should come from initialize's _meta.modelState. */
   effortLevels?: readonly EffortLevel[];
+  /** Discover and select opaque model variants through ACP config options. */
+  modelVariants?: boolean;
   /** Default CLI binary name if the instance config doesn't override it. */
   defaultCli: string;
   /** Optional live model catalog. A failed lookup keeps the last usable catalog.
@@ -127,6 +260,8 @@ export interface AcpSupport {
   ): Promise<ProviderSnapshot>;
   /** Google Antigravity resumes through session/resume, not session/load. */
   resumeMethod?: "load" | "resume";
+  /** Some agents acknowledge a live load without applying new MCP credentials. */
+  restartOnMcpChange?: boolean;
   /** Route workspace file access through ACP so edits retain approval cards. */
   clientFileSystem?: boolean;
   /** Do not retain stderr from providers that may place OAuth material there. */
@@ -137,7 +272,7 @@ export interface AcpSupport {
    *  snapshot share `transformEnv` and must not see a per-turn overlay. */
   applyTurnEnv?(
     env: Record<string, string | undefined>,
-    ctx: { model?: string; requestedModel?: string },
+    ctx: { model?: string; requestedModel?: string; fullAuto: boolean },
   ): void;
   /** Pick the ACP authenticate methodId from initialize's advertised
    * authMethods; return null to skip the authenticate step. */
@@ -189,7 +324,59 @@ const INIT_TIMEOUT = envOr("OPENMAUS_ACP_INIT_TIMEOUT_MS", 300_000);
 const SESSION_CONFIG_TIMEOUT = envOr("OPENMAUS_ACP_SESSION_CONFIG_TIMEOUT_MS", 300_000); // configureSession's per-request default
 const NEW_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_NEW_SESSION_TIMEOUT_MS", 300_000);
 const LOAD_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_LOAD_SESSION_TIMEOUT_MS", 120_000); // history replay on a long thread is slow
+/** ACP agents may compact their own history without telling the client;
+ * re-send the full prompt after this many bare turns as a backstop. */
+const ACP_PROMPT_RE_ANCHOR_TURNS = 8;
+// Read lazily (not at import) so a test can shorten the window. Unlike the
+// setup calls above, session/prompt legitimately streams for minutes, so a
+// wall-clock deadline would false-positive: this guard only trips when the
+// child sends nothing at all for the whole window (a wedged OpenCode turn
+// streams thought chunks, then goes silent forever and never resolves). 0
+// disables the guard, restoring the pre-fix "hang until the user cancels"
+// behavior.
+const promptIdleTimeoutMs = (): number => {
+  const raw = process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+  if (raw === undefined) return 180_000;
+  const ms = Number(raw);
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+};
+/** Keep a turn's set of running tool calls in step with the agent's
+ * `tool_call` / `tool_call_update` notifications: a call is running from
+ * the first update that is not terminal until one that is. A `tool_call`
+ * without a status is pending (ACP's default); a `tool_call_update` without
+ * one leaves the call as it was. */
+function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknown; status?: unknown }, defaultStatus?: "pending"): void {
+  if (typeof update.toolCallId !== "string" || !update.toolCallId) return;
+  const status = update.status ?? defaultStatus;
+  if (status === "completed" || status === "failed") current.runningTools.delete(update.toolCallId);
+  else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
+}
 const CLIENT_FILE_MAX_BYTES = 8 * 1024 * 1024;
+
+function acpVariantOption(result: any): { configId: string; options: ModelVariantOption[]; currentValue?: string } | undefined {
+  const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
+    (entry: any) => entry?.type === "select" && typeof entry.id === "string"
+      && (entry.id === "effort" || entry.category === "thought_level"),
+  );
+  if (!option) return;
+  const options: ModelVariantOption[] = [];
+  const seen = new Set<string>();
+  const collect = (entries: unknown) => {
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      if (typeof entry?.value === "string" && !seen.has(entry.value)) {
+        seen.add(entry.value);
+        options.push({ id: entry.value, label: typeof entry.name === "string" ? entry.name : entry.value });
+      } else if (Array.isArray(entry?.options)) collect(entry.options);
+    }
+  };
+  collect(option.options);
+  return {
+    configId: option.id,
+    options,
+    ...(typeof option.currentValue === "string" ? { currentValue: option.currentValue } : {}),
+  };
+}
 const TOOL_LOG_TEXT_LIMIT = 64_000;
 
 async function readAcpImageBlocks(images: readonly TurnImageInput[]) {
@@ -271,6 +458,39 @@ function sessionOperationKey(toolCall: any): string | null {
   }));
 }
 
+/** The banner an ACP CLI prints for `--version`. Hermes writes its whole banner
+ *  to stderr with an empty stdout, so an stdout-only read reports a perfectly
+ *  good install as "CLI not found". Prefer stdout; fall back to the first
+ *  stderr line; null when both are empty. */
+export function versionFromProbe(stdout: string | undefined, stderr: string | undefined): string | null {
+  const out = (stdout ?? "").trim();
+  if (out) return out;
+  const err = (stderr ?? "").trim().split(/\r\n|\n|\r/, 1)[0]?.trim() ?? "";
+  return err || null;
+}
+
+/** A parsed dotted version triple — the shape every harness's version gate
+ * compares, whatever its banner looks like. */
+export type VersionTriple = readonly [number, number, number];
+
+/** The first dotted numeric triple in a version banner, or null when there is
+ * none. A wrapper that prints its own banner first still parses: the triple
+ * is the version wherever it appears. */
+export function parseVersionTriple(value: string): VersionTriple | null {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(value);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** Whether `installed` compares at or above `floor`, componentwise. Every
+ * version floor in the tree is a dotted triple. */
+export function versionAtLeast(installed: VersionTriple, floor: VersionTriple): boolean {
+  for (let i = 0; i < 3; i += 1) {
+    if (installed[i] !== floor[i]) return installed[i] > floor[i];
+  }
+  return true;
+}
+
 export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> {
   const DRIVER_KIND = support.driverKind;
   const SOURCE = support.nativeSource;
@@ -300,13 +520,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         };
         const allowedCredentials = new Set(support.credentialEnv ?? []);
         // two lists, one rule: foreign PROVIDER keys must not flip a CLI's
-        // billing off its own login, and WORKSPACE credentials (box token,
+        // billing off its own login, and WORKSPACE credentials (boat token,
         // voice key, …) are the harness's secrets — riding along in
         // `...process.env` is not a grant. A driver keeps only what its
         // credentialEnv allowlist names.
         for (const key of [...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV]) {
           if (!allowedCredentials.has(key)) delete env[key];
         }
+        // The operator's own secrets are outside any driver's allowlist.
+        stripControlPlaneEnv(env);
         support.transformEnv?.(env, activeConfig, instanceId);
         return env;
       };
@@ -326,9 +548,61 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         stop: () => void;
         interrupt: () => void;
         turnId: string;
-        asks: Map<string, (behavior: string, source?: "user" | "timeout" | "system", message?: string, always?: boolean) => void>;
+        asks: Map<string, AcpAskFinish>;
       }
       const active = new Map<string, Turn>();
+      // One live agent process per thread, kept across turns — the Claude
+      // driver's pool. The ACP handshake (initialize, authenticate) and the
+      // native session are established once; a later turn on the same spawn
+      // contract prompts the live session instead of paying the handshake
+      // again. An idle session closes after SESSION_IDLE_MS of quiet.
+      const sessions = new Map<string, AcpSession>();
+      // Closing removes a session from the pool, not its native writer lease.
+      // Retain every closing Qwen child until its process tree is gone, even
+      // when Stop or a failed turn lets another turn start during cleanup.
+      const retiring = new Map<string, Set<ReturnType<typeof spawnCli>>>();
+      const retireChild = async (threadId: string, child: ReturnType<typeof spawnCli>): Promise<boolean> => {
+        let children = retiring.get(threadId);
+        if (!children) retiring.set(threadId, children = new Set());
+        children.add(child);
+        const stopped = await killCliTree(child);
+        if (stopped) {
+          children.delete(child);
+          if (!children.size && retiring.get(threadId) === children) retiring.delete(threadId);
+        }
+        return stopped;
+      };
+      const { idleMs: SESSION_IDLE_MS } = sessionIdlePolicy("ACP");
+
+      const closeSession = (threadId: string, why: string) => {
+        const session = sessions.get(threadId);
+        if (!session || session.closing) return;
+        session.closing = true;
+        if (session.idleTimer) clearTimeout(session.idleTimer);
+        appendNative(threadId, { dir: "out", source: SOURCE, msg: { close: why } });
+        // a new turn must never adopt a closing session
+        sessions.delete(threadId);
+        session.acp.close();
+        // EOF is not a guaranteed exit signal. Qwen must be tracked before
+        // another turn can resume its history; other agents keep their grace.
+        try {
+          session.child.stdin.end();
+        } catch {}
+        if (support.restartOnMcpChange) void retireChild(threadId, session.child);
+        else {
+          const kill = setTimeout(() => {
+            void killCliTree(session.child);
+          }, 5_000);
+          kill.unref?.();
+        }
+      };
+      const armIdle = (threadId: string) => {
+        const session = sessions.get(threadId);
+        if (!session) return;
+        if (session.idleTimer) clearTimeout(session.idleTimer);
+        session.idleTimer = setTimeout(() => closeSession(threadId, "idle"), SESSION_IDLE_MS);
+        session.idleTimer.unref?.();
+      };
       // "Always allow this session", remembered by the driver when the agent
       // offered no `allow_always` of its own: the exact operations (kind,
       // title, command, input, locations) a person allowed for the session,
@@ -390,9 +664,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // ACP session mcpServers: stdio is the baseline every ACP agent
       // supports (mcpCapabilities.http/.sse only add EXTRA transports), so
       // an injected stdio proxy — e.g. the peer-agent comms tool — attaches
-      // fine here. env is the ACP {name,value}[] shape.
+      // fine here. A url server is listed in ACP's http/sse shape and kept
+      // for the session only when the agent advertised that transport.
+      // env and headers are the ACP {name,value}[] shape.
+      type AcpMcpServer =
+        | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
+        | { type: "http" | "sse"; name: string; url: string; headers: Array<{ name: string; value: string }> };
       const acpMcpServers = (turn: SendTurnInput) => {
-        const servers: Array<{ name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }> = [];
+        const servers: AcpMcpServer[] = [];
         const acpEnv = (env: Record<string, string>) =>
           Object.entries(env).map(([name, value]) => ({ name, value: String(value) }));
         const agents = turn.integrations?.agents;
@@ -412,18 +691,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (browser) {
           servers.push({ name: "browser", command: browser.command, args: browser.args, env: acpEnv(browser.env) });
         }
-        // The bot's computer, mounted exactly like the Claude driver does.
-        // Cloud boxes use the REST adapter; host and sandbox Cua connections
-        // expose Cua Driver's official MCP server directly.
-        const computer = turn.integrations?.computer;
-        if (computer) {
-          servers.push({
-            name: "computer",
-            command: process.execPath,
-            args: [COMPUTER_PROXY_PATH],
-            env: acpEnv({ ELECTRON_RUN_AS_NODE: "1", ...computerProxyEnv(computer) }),
-          });
-        } else if (turn.integrations?.localComputer) {
+        // The bot's computer, mounted exactly like the Claude driver does:
+        // host and sandbox Cua connections expose Cua Driver's own MCP server.
+        // (A cloud boat is not mounted here at all: a cloud turn runs ON the boat.)
+        if (turn.integrations?.localComputer) {
           const local = turn.integrations.localComputer;
           servers.push({
             name: "computer",
@@ -437,103 +708,168 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // config boundary; this is defense in depth).
         for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
           if (servers.some((existing) => existing.name === name)) continue;
+          if ("url" in server) {
+            servers.push({ type: server.type, name, url: server.url, headers: acpEnv(server.headers) });
+            continue;
+          }
           servers.push({ name, command: server.command, args: server.args, env: acpEnv(server.env) });
         }
         return servers;
       };
 
-      const sendTurn = async (turn: SendTurnInput) => {
-        const { threadId } = turn;
-        if (active.has(threadId)) throw new Error("a turn is already running on this thread");
-        // Provider-instance `fullAuto` predates per-bot approval levels. Every
-        // harness turn now carries the bot's mode, so Ask/Auto must explicitly
-        // put the native agent back into its interactive mode. Otherwise a
-        // legacy Grok bypassPermissions / Cursor --force / Droid auto-high /
-        // Antigravity yolo setting would silently outrank the selector. Calls
-        // that omit approvalMode retain the old adapter-level behavior for
-        // embedders and tests outside the harness.
-        const turnConfig = turn.approvalMode === undefined
-          ? config
-          : { ...config, fullAuto: turn.approvalMode === "full" && supportsApprovalMode(DRIVER_KIND, "full") };
-        const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
-        if (controlsHost && turnConfig.fullAuto && turn.approvalMode !== "full") {
-          throw new Error("local computer control requires interactive provider approvals");
-        }
-        const turnId = newId();
-        const cwd = turn.cwd ?? turnConfig.workspace ?? homedir();
-        const env = childEnv(turnConfig);
-        if (
-          support.requireAuthenticationBeforeSpawn
-          && !skipSubscriptionAuthForLocalInject(turn.model)
-          && !(await support.isAuthenticated(env, turnConfig, instanceId))
-        ) {
-          emit({ ...base(threadId, turnId), type: "turn.started" });
-          emit({ ...base(threadId, turnId), type: "runtime.error", message: support.loginNote, setup: true });
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
-          return { turnId };
-        }
-        const resolvedModel = support.resolveTurnModel?.(turn.model, env);
-        support.applyTurnEnv?.(env, { model: resolvedModel, requestedModel: turn.model });
-        const cliTurn =
-          resolvedModel !== undefined && resolvedModel !== turn.model
-            ? { ...turn, model: resolvedModel }
-            : turn;
-        const mcpServers = acpMcpServers(turn);
-        let launch: { command: string; args?: string[]; env?: Record<string, string | undefined> };
-        try {
-          launch = support.resolveCommand
-            ? await support.resolveCommand(env, turnConfig, instanceId)
-            : { command: turnConfig.cli };
-        } catch (error) {
-          emit({ ...base(threadId, turnId), type: "turn.started" });
+      /** The one completion path for a turn: the prompt result, a crashed
+       *  child, an unanswered cancel, or an rpc error the turn body throws.
+       *  The child is NOT killed here — a clean settle leaves it pooled for
+       *  the next turn on this contract. */
+      const settle = (threadId: string, session: AcpSession, ok: boolean, stopReason: string | null) => {
+        const current = session.current;
+        if (!current || current.state.settled) return;
+        current.state.settled = true;
+        current.acknowledge();
+        if (current.interruptTimer) clearTimeout(current.interruptTimer);
+        for (const finish of current.asks.values()) finish("cancel", "system");
+        session.acp.failAll(new Error("turn settled"));
+        // detach before the final events: a listener that starts the next
+        // turn synchronously must find this session free
+        session.current = null;
+        active.delete(threadId);
+        current.flushAssistantText();
+        // `end_turn` with nothing to show for it — no reply, no image, no
+        // tool result — is a lost turn, not a success. An engine can report
+        // exactly that (a provider may cut a reasoning-only stream and
+        // still answer end_turn), and ok:true would end the thread quietly
+        // while the person's message went unanswered. Keep the completion,
+        // but report it as a failure so terminal chips, incidents and
+        // follow-ups see what happened.
+        let finalOk = ok;
+        let finalStopReason = stopReason;
+        if (finalOk && finalStopReason === null && !current.state.producedItem) {
+          finalOk = false;
+          finalStopReason = "empty_turn";
           emit({
-            ...base(threadId, turnId),
+            ...base(threadId, current.turnId),
             type: "runtime.error",
-            message: error instanceof Error ? error.message : String(error),
-            setup: true,
+            message: `${DRIVER_KIND} ended the turn with no reply, image, or tool result`,
           });
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "setup_required", cost: null });
-          return { turnId };
         }
+        emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: finalOk, stopReason: finalStopReason, cost: null });
+        if (session.child.exitCode === null && !session.closing && !session.dead) {
+          armIdle(threadId);
+        } else if (session.dead && sessions.get(threadId) === session) {
+          // a dead session is never pooled; the next turn respawns
+          sessions.delete(threadId);
+        }
+      };
 
-        const child = spawnCli(launch.command, [...(launch.args ?? []), ...support.spawnArgs(turnConfig, cliTurn)], {
+      /** Spawn the agent process and everything that lives for its whole
+       *  lifetime: the wire connection, native logging, stderr tailing, and
+       *  the server-request/update dispatch. Per-turn state arrives through
+       *  session.current, so a request that lands between turns is answered
+       *  (never brokered) instead of left hanging. */
+      const openSession = (
+        threadId: string,
+        launch: { command: string; args?: string[] },
+        argv: string[],
+        env: Record<string, string | undefined>,
+        cwd: string,
+        contractKey: string,
+      ): AcpSession => {
+        const commandCwd = permissionLaunchCwd(cwd);
+        const child = spawnCli(launch.command, argv, {
           cwd,
-          env: launch.env ?? env,
+          env,
           stdio: ["pipe", "pipe", "pipe"],
         });
-
-        const state = { settled: false, promptSent: false, text: "" };
-        const asks = new Map<string, (behavior: string, source?: "user" | "timeout" | "system", message?: string, always?: boolean) => void>();
         let nextId = 1;
-        let sessionId: string | null = null;
-        let interruptTimer: ReturnType<typeof setTimeout> | null = null;
         const rpcPending = new Map<
           number,
-          { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null }
+          {
+            method: string;
+            resolve: (v: any) => void;
+            reject: (e: Error) => void;
+            timer: ReturnType<typeof setTimeout> | null;
+            idleTimer: ReturnType<typeof setTimeout> | null;
+            armIdle: () => void;
+          }
         >();
 
         const send = (obj: unknown) => {
+          // A permission/file response resumes an agent that was waiting on us.
+          const message = obj as { id?: unknown; result?: unknown; error?: unknown };
+          if (message.id !== undefined && (message.result !== undefined || message.error !== undefined)) {
+            for (const pending of rpcPending.values()) pending.armIdle();
+          }
           try {
             child.stdin.write(JSON.stringify(obj) + "\n");
           } catch {}
           appendNative(threadId, { dir: "out", source: SOURCE, msg: nativeLogMessage(obj) });
         };
-        const request = (method: string, params: unknown, timeoutMs?: number) =>
+        const request = (
+          method: string,
+          params: unknown,
+          timeoutMs?: number,
+          receive?: (result: any) => void,
+          idleMs?: number,
+          idleMessage?: string,
+        ) =>
           new Promise<any>((resolve, reject) => {
             const id = nextId++;
             let timer: ReturnType<typeof setTimeout> | null = null;
             if (timeoutMs) {
               timer = setTimeout(() => {
                 rpcPending.delete(id);
-                reject(new Error(`${method} timed out`));
+                reject(Object.assign(new Error(`${method} timed out`), { acpSessionFailure: true }));
               }, timeoutMs);
               timer.unref?.();
             }
-            rpcPending.set(id, { resolve, reject, timer });
+            // Idle watchdog: unlike a wall-clock timeout, the deadline restarts
+            // on every inbound line (see the stdout handler), so a long-lived
+            // streaming agent is never cut off — only one that has gone fully
+            // silent trips it.
+            let idleTimer: ReturnType<typeof setTimeout> | null = null;
+            const armIdle = () => {
+              if (!(idleMs && idleMs > 0)) return;
+              if (idleTimer) clearTimeout(idleTimer);
+              idleTimer = setTimeout(() => {
+                // Waiting for a person, or for a tool the agent is running,
+                // is not an unresponsive agent.
+                if (session.current?.asks.size || session.current?.runningTools.size) { armIdle(); return; }
+                rpcPending.delete(id);
+                const error = new Error(idleMessage ?? `${method} stopped responding`);
+                Object.assign(error, { acpPromptStall: true });
+                reject(error);
+              }, idleMs);
+              idleTimer.unref?.();
+            };
+            armIdle();
+            rpcPending.set(id, {
+              method,
+              // Consume configuration in wire order: an update following this
+              // response may arrive before the awaiting continuation resumes.
+              resolve: (result) => { receive?.(result); resolve(result); },
+              reject,
+              timer,
+              get idleTimer() { return idleTimer; },
+              armIdle,
+            });
             send({ jsonrpc: "2.0", id, method, params });
           });
-
-        const stop = () => killCliTree(child);
+        const acp: AcpConnection = {
+          send,
+          request,
+          failAll: (error: Error) => {
+            for (const p of rpcPending.values()) {
+              if (p.timer) clearTimeout(p.timer);
+              if (p.idleTimer) clearTimeout(p.idleTimer);
+              p.reject(error);
+            }
+            rpcPending.clear();
+          },
+          close: () => {
+            acp.failAll(new Error("session closed"));
+            child.stdout.removeAllListeners("data");
+          },
+        };
 
         const resolveClientPath = async (requestPath: unknown): Promise<string> => {
           if (typeof requestPath !== "string" || !isAbsolute(requestPath)) {
@@ -583,8 +919,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 send({ jsonrpc: "2.0", id: msg.id, result: { content } });
                 return;
               }
-              const line = Number.isInteger(params.line) && params.line > 0 ? params.line : 1;
-              const limit = Number.isInteger(params.limit) && params.limit >= 0 ? params.limit : undefined;
+              const line = typeof params.line === "number" && Number.isInteger(params.line) && params.line > 0 ? params.line : 1;
+              const limit = typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 0 ? params.limit : undefined;
               const lines = content.split("\n");
               const start = line - 1;
               send({
@@ -605,32 +941,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
         };
 
-        /** Emit buffered assistant text as its own item, then clear it. */
-        const flushAssistantText = () => {
-          const text = state.text;
-          state.text = "";
-          if (!text.trim()) return;
-          emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
-        };
-
-        const settle = (ok: boolean, stopReason: string | null) => {
-          if (state.settled) return;
-          state.settled = true;
-          if (interruptTimer) clearTimeout(interruptTimer);
-          for (const finish of asks.values()) finish("cancel", "system");
-          for (const p of rpcPending.values()) {
-            if (p.timer) clearTimeout(p.timer);
-            p.reject(new Error("turn settled"));
-          }
-          rpcPending.clear();
-          active.delete(threadId);
-          flushAssistantText();
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost: null });
-          stop(); // the agent process does not exit on its own
-        };
-
-        // server→client permission request → canonical request.opened
-        const handleServerRequest = (msg: any) => {
+        // server→client permission request → canonical request.opened,
+        // answered fail-closed for the running turn
+        const handleServerRequest = (msg: any, current: AcpTurn) => {
+          current.state.startupActivity = true;
           if (msg.method === "fs/read_text_file" || msg.method === "fs/write_text_file") {
             void handleClientFileRequest(msg);
             return;
@@ -640,7 +954,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             return send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
           }
           const params = msg.params ?? {};
-          flushAssistantText();
+          current.flushAssistantText();
           const options: Array<{ optionId?: string; kind?: string; name?: string }> = Array.isArray(params.options) ? params.options : [];
           const optionFor = (want: "allow" | "reject") =>
             options.find((o) => o.kind === `${want}_once` && typeof o.optionId === "string")?.optionId
@@ -650,14 +964,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const cancelled = { outcome: { outcome: "cancelled" } };
           const missing = (want: string) =>
             emit({
-              ...base(threadId, turnId),
+              ...base(threadId, current.turnId),
               type: "runtime.error",
               message: `${DRIVER_KIND} offered no "${want}" permission option — cancelling the request instead of guessing`,
             });
 
           const toolCall = params.toolCall ?? {};
           const isQuestion = String(toolCall.toolCallId ?? "").startsWith("interaction_");
-          if (turnConfig.fullAuto && turn.approvalMode === undefined && !isQuestion) {
+          if (current.turnConfig.fullAuto && current.turn.approvalMode === undefined && !isQuestion) {
             const allow = optionFor("allow");
             if (!allow) missing("allow");
             return send({
@@ -668,7 +982,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           const kind = String(toolCall.kind ?? "");
           // an earlier "Always allow this session" on this exact operation
-          const operationKey = isQuestion || controlsHost ? null : sessionOperationKey(toolCall);
+          const operationKey = isQuestion || current.controlsHost ? null : sessionOperationKey(toolCall);
           if (operationKey && sessionAllows.get(threadId)?.has(operationKey)) {
             const allow = optionFor("allow");
             if (allow) {
@@ -676,20 +990,39 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
           }
           const tool = kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool";
-          const summary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool).slice(0, 200);
+          const isShellCommand = !isQuestion && kind === "execute" && !/^mcp(?:__|[.:])/i.test(String(toolCall.title ?? ""));
+          const rawSummary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool);
+          const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200);
+          // One structured question beside the flat choices: the richer card
+          // renders from it while older clients keep answering through
+          // `choices`. Built once here so the emit and the answer path can
+          // never disagree. parseAskQuestions enforces the shared caps.
+          const questionChoices = isQuestion
+            ? options.flatMap((option) => typeof option.name === "string" && option.name.trim() ? [option.name.trim()] : [])
+            : [];
+          const askQuestions = isQuestion && questionChoices.length
+            ? parseAskQuestions({ questions: [{ question: summary, options: questionChoices }] }) ?? undefined
+            : undefined;
           const requestId = newId();
           const finish = (
             behavior: string,
             source: "user" | "timeout" | "system" = "user",
             message?: string,
             always?: boolean,
-          ) => {
-            if (!asks.delete(requestId)) return;
+          ): RequestOutcome => {
+            if (!current.asks.delete(requestId)) return "unavailable";
             clearTimeout(timer);
             const want = behavior === "allow" ? "allow" : "reject";
-            const forSession = want === "allow" && always === true && !isQuestion && !controlsHost;
+            const forSession = want === "allow" && always === true && !isQuestion && !current.controlsHost;
+            // A structured card replies in the Q:/A: block format; recover the
+            // picked label from it so exact-match keeps working. Flat clients
+            // send the bare label, which the single-question fallback inside
+            // questionAnswersByQuestion already returns unchanged.
+            const picked = askQuestions
+              ? questionAnswersByQuestion(message ?? "", askQuestions)[askQuestions[0]!.question] ?? message
+              : message;
             const named = isQuestion && behavior === "answer"
-              ? options.filter((option) => option.optionId === message || option.name?.trim() === message)
+              ? options.filter((option) => option.optionId === picked || parseChoices([option.name], 1)?.[0] === picked)
               : [];
             const optionId = behavior === "cancel"
               ? null
@@ -712,33 +1045,37 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               result: optionId ? { outcome: { outcome: "selected", optionId } } : cancelled,
             });
             emit({
-              ...base(threadId, turnId),
+              ...base(threadId, current.turnId),
               type: "request.resolved",
               requestId,
               behavior: optionId && isQuestion ? "answer" : optionId && behavior === "allow" ? "allow" : "deny",
               source: optionId ? source : "system",
-              approvalScope: controlsHost ? "local-computer" : undefined,
+              approvalScope: current.controlsHost ? "local-computer" : undefined,
             });
+            return !optionId ? "rejected" : isQuestion ? "answered" : behavior === "allow" ? "allowed-once" : "rejected";
           };
           const timer = setTimeout(() => {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: DENY_TIMEOUT_NOTE });
+            emit({ ...base(threadId, current.turnId), type: "runtime.error", message: DENY_TIMEOUT_NOTE });
             finish("deny", "timeout");
           }, 15 * 60_000);
           timer.unref?.();
-          asks.set(requestId, finish);
+          current.asks.set(requestId, finish);
           emit({
-            ...base(threadId, turnId),
+            ...base(threadId, current.turnId),
             type: "request.opened",
             requestId,
             requestType: isQuestion ? "question" : "permission",
             tool,
             summary,
-            choices: isQuestion
-              ? options.flatMap((option) => typeof option.name === "string" && option.name.trim() ? [option.name.trim()] : [])
-              : undefined,
-            approvalScope: controlsHost ? "local-computer" : undefined,
+            command: isShellCommand ? acpPermissionCommand(toolCall.rawInput, commandCwd) : undefined,
+            requiresExplicitApproval: isShellCommand && (
+              toolCall.rawInput?.dangerouslyDisableSandbox === true || toolCall.rawInput?.sandbox_permissions === "require_escalated"
+            ) || undefined,
+            choices: askQuestions?.[0]?.options.map(option => option.label) ?? (isQuestion ? questionChoices : undefined),
+            ...(askQuestions ? { questions: askQuestions } : {}),
+            approvalScope: current.controlsHost ? "local-computer" : undefined,
             // the driver can honor a session-wide allow either way
-            allowSession: !isQuestion && !controlsHost ? true : undefined,
+            allowSession: !isQuestion && !current.controlsHost ? true : undefined,
           });
         };
 
@@ -747,38 +1084,49 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           // native log but never normalized: the prompt result is the settle.
           if (msg.method !== "session/update") return;
           const p = msg.params ?? {};
-          if (!state.promptSent || p._meta?.isReplay === true) return;
+          if (p._meta?.isReplay === true) return;
+          const current = session.current;
+          if (support.modelVariants && p.update?.sessionUpdate === "config_option_update") {
+            if (current && !current.state.settled && session.sessionId && p.sessionId === session.sessionId) current.receiveModelVariants(p.update);
+            return;
+          }
+          if (current && ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update"].includes(p.update?.sessionUpdate)) {
+            current.state.startupActivity = true;
+          }
+          if (!current || !current.state.promptSent) return;
           const u = p.update ?? {};
           switch (u.sessionUpdate) {
             case "agent_message_chunk": {
               const content = u.content;
               const delta = content?.text;
               if (content?.type === "image" && typeof content.data === "string" && content.data) {
-                flushAssistantText();
+                current.flushAssistantText();
+                current.state.producedItem = true;
                 emit({
-                  ...base(threadId, turnId),
+                  ...base(threadId, current.turnId),
                   type: "item.completed",
                   itemType: "assistant_image",
                   data: content.data,
                   alt: "Generated image",
                 });
               } else if (typeof delta === "string" && delta) {
-                state.text += delta;
-                emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta });
+                current.state.text += delta;
+                emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta });
               }
               break;
             }
             case "agent_thought_chunk": {
               const delta = u.content?.text;
               if (typeof delta === "string" && delta) {
-                emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta });
+                emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "reasoning_text", delta });
               }
               break;
             }
             case "tool_call": {
-              flushAssistantText();
+              current.flushAssistantText();
+              trackRunningTool(current, u, "pending");
               emit({
-                ...base(threadId, turnId),
+                ...base(threadId, current.turnId),
                 type: "item.started",
                 itemType: "tool",
                 itemId: u.toolCallId,
@@ -789,21 +1137,43 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               break;
             }
             case "tool_call_update": {
+              trackRunningTool(current, u);
               if (u.status === "completed" || u.status === "failed") {
+                current.state.producedItem = true;
                 emit({
-                  ...base(threadId, turnId),
+                  ...base(threadId, current.turnId),
                   type: "item.completed",
                   itemType: "tool",
                   itemId: u.toolCallId,
                   ok: u.status !== "failed",
                   output: toolDetailPreview(u.rawOutput ?? u.content),
                 });
+                for (const img of extractMcpImages(u.content ?? u.rawOutput)) {
+                  emit({ ...base(threadId, current.turnId), type: "item.completed", itemType: "assistant_image", data: img.data });
+                }
               }
               break;
             }
           }
         };
 
+        const session: AcpSession = {
+          child,
+          acp,
+          launch,
+          cwd,
+          contractKey,
+          sessionKey: null,
+          sessionId: null,
+          sessionConfigResult: null,
+          initResult: null,
+          authenticated: false,
+          idleTimer: null,
+          closing: false,
+          dead: false,
+          stderr: "",
+          current: null,
+        };
         let buf = "";
         // decode as UTF-8 across chunk boundaries — a raw `buf += chunk` splits
         // multibyte characters that straddle two reads and corrupts the text
@@ -822,119 +1192,419 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               continue;
             }
             appendNative(threadId, { dir: "in", source: SOURCE, msg: nativeLogMessage(msg) });
+            // Inbound traffic proves the child is alive and making progress,
+            // so every idle deadline restarts; only total silence trips it.
+            for (const p of rpcPending.values()) p.armIdle();
             if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
               const pend = rpcPending.get(msg.id);
               if (pend) {
                 rpcPending.delete(msg.id);
                 if (pend.timer) clearTimeout(pend.timer);
+                if (pend.idleTimer) clearTimeout(pend.idleTimer);
                 if (msg.error) {
-                  const error = new Error(msg.error.message ?? JSON.stringify(msg.error));
-                  Object.assign(error, { code: msg.error.code, data: msg.error.data });
-                  pend.reject(error);
+                  pend.reject(acpRpcError(msg.error, pend.method));
                 } else {
                   pend.resolve(msg.result);
                 }
               }
             } else if (msg.id !== undefined && msg.method) {
-              handleServerRequest(msg);
+              const current = session.current;
+              if (!current) {
+                // between turns nothing is brokered: cancel a permission
+                // request and refuse anything else — the agent must never
+                // block on an unanswered request
+                send(msg.method === "session/request_permission"
+                  ? { jsonrpc: "2.0", id: msg.id, result: { outcome: { outcome: "cancelled" } } }
+                  : { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
+              } else {
+                handleServerRequest(msg, current);
+              }
             } else if (msg.method) {
               handleNotification(msg);
             }
           }
         });
 
-        let stderr = "";
         child.stderr.on("data", (c) => {
-          if (!support.redactStderr) stderr += c;
-          if (stderr.length > 8192) stderr = stderr.slice(-8192);
+          if (!support.redactStderr) session.stderr += c;
+          if (session.stderr.length > 8192) session.stderr = session.stderr.slice(-8192);
         });
         child.on("error", (e) => {
-          emit({ ...base(threadId, turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command) });
-          settle(false, "spawn_error");
+          session.dead = true;
+          const current = session.current;
+          if (!current) return;
+          emit({ ...base(threadId, current.turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command) });
+          settle(threadId, session, false, "spawn_error");
         });
         child.on("close", (code) => {
-          if (!state.settled) {
+          session.dead = true;
+          const current = session.current;
+          if (current) {
             emit({
-              ...base(threadId, turnId),
+              ...base(threadId, current.turnId),
               type: "runtime.error",
-              message: `${DRIVER_KIND} exited ${code} before the prompt result${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
+              message: `${DRIVER_KIND} exited ${code} before the prompt result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`,
             });
-            settle(false, "exit_before_result");
+            settle(threadId, session, false, "exit_before_result");
+          } else if (sessions.get(threadId) === session) {
+            // drop the record between turns; a later turn respawns. The
+            // identity check keeps an old child's exit from unlinking a
+            // session that already replaced this one.
+            sessions.delete(threadId);
           }
         });
+        return session;
+      };
+
+      const sendTurn = async (turn: SendTurnInput) => {
+        const { threadId } = turn;
+        if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+        // Provider-instance `fullAuto` predates per-bot approval levels. Every
+        // harness turn now carries the bot's mode, so Ask/Auto must explicitly
+        // put the native agent back into its interactive mode. Otherwise a
+        // legacy Grok bypassPermissions / Cursor --force / Droid auto-high /
+        // Antigravity yolo setting would silently outrank the selector. Calls
+        // that omit approvalMode retain the old adapter-level behavior for
+        // embedders and tests outside the harness.
+        const turnConfig = turn.approvalMode === undefined
+          ? config
+          : { ...config, fullAuto: turn.approvalMode === "full" && supportsApprovalMode(DRIVER_KIND, "full") };
+        const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
+        if (controlsHost && turnConfig.fullAuto && turn.approvalMode !== "full") {
+          throw new Error("local computer control requires interactive provider approvals");
+        }
+        const turnId = newId();
+        const cwd = turn.cwd ?? turnConfig.workspace ?? homedir();
+        const env = childEnv(turnConfig);
+        if (
+          support.requireAuthenticationBeforeSpawn
+          && !skipSubscriptionAuthForLocalInject(turn.model)
+          && !(await support.isAuthenticated(env, turnConfig, instanceId))
+        ) {
+          emit({ ...base(threadId, turnId), type: "turn.started" });
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: support.loginNote, setup: true });
+          emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
+          return { turnId };
+        }
+        const resolvedModel = support.resolveTurnModel?.(turn.model, env);
+        support.applyTurnEnv?.(env, { model: resolvedModel, requestedModel: turn.model, fullAuto: turnConfig.fullAuto === true });
+        const cliTurn =
+          resolvedModel !== undefined && resolvedModel !== turn.model
+            ? { ...turn, model: resolvedModel }
+            : turn;
+        const mcpServers = acpMcpServers(turn);
+        let launch: { command: string; args?: string[]; env?: Record<string, string | undefined> };
+        try {
+          launch = support.resolveCommand
+            ? await support.resolveCommand(env, turnConfig, instanceId)
+            : { command: turnConfig.cli };
+        } catch (error) {
+          emit({ ...base(threadId, turnId), type: "turn.started" });
+          emit({
+            ...base(threadId, turnId),
+            type: "runtime.error",
+            message: error instanceof Error ? error.message : String(error),
+            setup: true,
+          });
+          emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "setup_required", cost: null });
+          return { turnId };
+        }
+
+        // The spawn contract: everything that changes what process a turn
+        // gets. The model rides argv where a support passes -m, and a
+        // selectModel support re-applies it over the wire on the live
+        // session, so the model is not a separate axis; fullAuto covers the
+        // transformEnv-policy supports (opencode). mcpServers are session
+        // establishment inputs — they ride session/new and session/load over
+        // the wire — and the harness mints fresh integration bearer tokens
+        // every turn. Most agents apply changes on live load; those that cache
+        // the old MCP clients must resume on a fresh process (see sessionKey).
+        // The env the spawned child actually receives is part of the
+        // contract too, and arrives hashed as envFingerprint for the same
+        // reason.
+        const spawnArgs = support.spawnArgs(turnConfig, cliTurn);
+        const spawnEnv = launch.env ?? env;
+        // Env is part of the spawn contract: a turn that changes auth env
+        // (FACTORY_API_KEY placeholder, a fresh login file) must not keep
+        // riding a child spawned under the old env. Hash it so secrets
+        // never sit in the key itself.
+        const envFingerprint = createHash("sha256").update(JSON.stringify(spawnEnv)).digest("hex").slice(0, 16);
+        const contractKey = JSON.stringify([launch.command, launch.args ?? [], spawnArgs, cwd, turnConfig.fullAuto === true, envFingerprint]);
+        const sessionKey = JSON.stringify(mcpServers);
+
+        if (turn.sessionReset) {
+          closeSession(threadId, "reset");
+          sessionAllows.delete(threadId);
+        }
+        const pooled = sessions.get(threadId);
+        let session: AcpSession;
+        if (pooled && !pooled.dead && !pooled.closing && pooled.contractKey === contractKey
+            && (!support.restartOnMcpChange || pooled.sessionKey === sessionKey)) {
+          // adoption cancels the idle countdown — a running turn is not quiet
+          if (pooled.idleTimer) clearTimeout(pooled.idleTimer);
+          pooled.idleTimer = null;
+          session = pooled;
+        } else {
+          if (pooled) {
+            // a dead child already exited — just drop the record; a live one
+            // gets the full close (contract changed)
+            if (pooled.dead) sessions.delete(threadId);
+            else closeSession(threadId, "contract");
+          }
+          session = openSession(threadId, launch, [...(launch.args ?? []), ...spawnArgs], spawnEnv, cwd, contractKey);
+          sessions.set(threadId, session);
+        }
+        // `session` rebinds mid-turn: when the establishment retry below
+        // respawns the child, every wire call must reach the live record, so
+        // nothing captures the connection off it.
+        const request = (
+          method: string,
+          params: unknown,
+          timeoutMs?: number,
+          receive?: (result: any) => void,
+          idleMs?: number,
+          idleMessage?: string,
+        ): Promise<any> =>
+          session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
+
+        const state = { settled: false, promptSent: false, text: "", producedItem: false, startupActivity: false, stopped: false };
+        let acknowledge = () => {};
+        let rejectStartup = (_error: TurnNotStartedError) => {};
+        const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {
+          acknowledge = () => resolve({ turnId });
+          rejectStartup = reject;
+        }) : null;
+        const asks = new Map<string, AcpAskFinish>();
+        const modelOf = (result: any): string | null => {
+          const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
+            (entry: any) => entry?.id === (support.selectModel?.configId ?? "model"),
+          );
+          return typeof option?.currentValue === "string" ? option.currentValue : null;
+        };
+        const receiveModelVariants = (result: any) => {
+          session.sessionConfigResult = result;
+          if (!support.modelVariants) return;
+          const nativeModel = modelOf(result) ?? cliTurn.model;
+          if (!nativeModel) return;
+          const option = acpVariantOption(result);
+          emit({
+            ...base(threadId, turnId),
+            type: "session.model-variants",
+            model: nativeModel === cliTurn.model ? (turn.model ?? nativeModel) : nativeModel,
+            variants: {
+              options: option?.options ?? [],
+              ...(option?.currentValue !== undefined ? { currentValue: option.currentValue } : {}),
+            },
+          });
+        };
+        const requestedVariantOption = () => {
+          if (!support.modelVariants) throw new Error(`${support.displayName} does not support model variants`);
+          const option = acpVariantOption(session.sessionConfigResult);
+          if (!option || !option.options.some((entry) => entry.id === turn.variant)) {
+            throw new Error(`${support.displayName} does not advertise variant ${turn.variant} for this model`);
+          }
+          return option;
+        };
+
+        /** Emit buffered assistant text as its own item, then clear it. */
+        const flushAssistantText = () => {
+          const text = state.text;
+          state.text = "";
+          if (!text.trim()) return;
+          state.producedItem = true;
+          emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+        };
+        const current: AcpTurn = {
+          turnId,
+          turn: cliTurn,
+          turnConfig,
+          controlsHost,
+          state,
+          acknowledge,
+          asks,
+          runningTools: new Set(),
+          interruptTimer: null,
+          flushAssistantText,
+          receiveModelVariants,
+        };
 
         const interrupt = () => {
-          if (sessionId) send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId } });
-          else stop();
-          if (interruptTimer) clearTimeout(interruptTimer);
-          interruptTimer = setTimeout(() => settle(true, "cancelled"), 5_000);
-          interruptTimer.unref?.();
+          state.stopped = true;
+          if (session.sessionId) {
+            session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.sessionId } });
+            if (current.interruptTimer) clearTimeout(current.interruptTimer);
+            current.interruptTimer = setTimeout(() => {
+              // an agent that ignores session/cancel must not stay pooled
+              closeSession(threadId, "cancel-timeout");
+              settle(threadId, session, true, "cancelled");
+            }, 5_000);
+            current.interruptTimer.unref?.();
+          } else {
+            // no native session to cancel — the close handler settles
+            closeSession(threadId, "stop");
+          }
         };
-        active.set(threadId, { stop, interrupt, turnId, asks });
+        active.set(threadId, { stop: () => { state.stopped = true; closeSession(threadId, "stop"); }, interrupt, turnId, asks });
         emit({ ...base(threadId, turnId), type: "turn.started" });
+        session.current = current;
 
         (async () => {
           try {
-            const init = await request(
-              "initialize",
-              {
-                protocolVersion: 1,
-                clientInfo: { name: "openmausbot", version: "0.0.0" },
-                clientCapabilities: {
-                  fs: {
-                    readTextFile: support.clientFileSystem === true,
-                    writeTextFile: support.clientFileSystem === true,
-                  },
-                  terminal: false,
-                },
-              },
-              INIT_TIMEOUT,
-            );
-            const methods: Array<{ id?: string }> = Array.isArray(init?.authMethods) ? init.authMethods : [];
-            const methodId = support.pickAuthMethod(methods);
-            if (!skipSubscriptionAuthForLocalInject(turn.model)) {
-              if (methodId) {
-                try {
-                  await request("authenticate", { methodId }, INIT_TIMEOUT);
-                } catch {
-                  if (support.authFailure === "fail") throw new Error(support.loginNote);
-                  // else: proceed on an ambient login
+            // The handshake is paid once per process, not once per turn. It
+            // is a function so the establishment retry below can pay it
+            // again on a replacement child.
+            // Returns whether this runtime accepts image prompts, for the
+            // prompt phase below.
+            const handshake = async (): Promise<boolean> => {
+              // Also covers timeout/reset/re-establishment, not just rotated
+              // MCP credentials. Stop remains wired while cleanup is pending.
+              for (const child of retiring.get(threadId) ?? []) {
+                const stopped = await retireChild(threadId, child);
+                if (state.settled || session.closing) throw new Error("session closed");
+                if (!stopped) {
+                  closeSession(threadId, "replace-failed");
+                  throw new Error(`${support.displayName} could not close its previous tool session. Try again.`);
                 }
-              } else if (support.authFailure === "fail") {
-                throw new Error(support.loginNote);
               }
-            }
-
-            const images = turn.images ?? [];
-            const runtimeAcceptsImages = init?.agentCapabilities?.promptCapabilities?.image === true ||
-              support.acceptsUnadvertisedImages?.(init) === true;
-            if (images.length && support.images === true && !runtimeAcceptsImages) {
-              throw new Error(
-                `${support.displayName} is configured for image attachments, but this installed runtime does not advertise ACP image input. Update the ${support.displayName} CLI or send the message without an image.`,
-              );
-            }
-
-            const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
-            // a fresh native session forgets what the previous one allowed
-            if (!cursor) sessionAllows.delete(threadId);
-            let sessionResult: any = null;
-            if (cursor) {
-              try {
-                sessionResult = await request(
-                  support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                  { sessionId: cursor, cwd, mcpServers },
-                  LOAD_SESSION_TIMEOUT,
+              if (state.settled || session.closing) throw new Error("session closed");
+              if (!session.initResult) {
+                session.initResult = await request(
+                  "initialize",
+                  {
+                    protocolVersion: 1,
+                    clientInfo: { name: "openmausbot", version: "0.0.0" },
+                    clientCapabilities: {
+                      fs: {
+                        readTextFile: support.clientFileSystem === true,
+                        writeTextFile: support.clientFileSystem === true,
+                      },
+                      terminal: false,
+                    },
+                  },
+                  INIT_TIMEOUT,
                 );
-                if (sessionResult) sessionId = cursor;
-              } catch {
-                /* session gone, load unsupported, or too slow — start fresh */
               }
+              // authenticate is once per process; a turn that skips
+              // subscription auth neither checks nor marks the flag
+              if (!skipSubscriptionAuthForLocalInject(turn.model) && !session.authenticated) {
+                const methods: Array<{ id?: string }> = Array.isArray(session.initResult?.authMethods)
+                  ? session.initResult.authMethods
+                  : [];
+                const methodId = support.pickAuthMethod(methods);
+                if (methodId) {
+                  try {
+                    await request("authenticate", { methodId }, INIT_TIMEOUT);
+                    session.authenticated = true;
+                  } catch {
+                    if (support.authFailure === "fail") throw new Error(support.loginNote);
+                    // else: proceed on an ambient login
+                  }
+                } else if (support.authFailure === "fail") {
+                  throw new Error(support.loginNote);
+                }
+              }
+              const images = turn.images ?? [];
+              const accepts = session.initResult?.agentCapabilities?.promptCapabilities?.image === true ||
+                support.acceptsUnadvertisedImages?.(session.initResult) === true;
+              if (images.length && support.images === true && !accepts) {
+                throw new Error(
+                  `${support.displayName} is configured for image attachments, but this installed runtime does not advertise ACP image input. Update the ${support.displayName} CLI or send the message without an image.`,
+                );
+              }
+              return accepts;
+            };
+            let runtimeAcceptsImages = await handshake();
+            let init = session.initResult;
+
+            const cursor = !turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+            let sessionResult: any = null;
+            let promptTurn = turn;
+            let rebuiltFromReplay = false;
+            for (;;) {
+              const liveSessionId = session.sessionId;
+              if (liveSessionId !== null && session.sessionKey === sessionKey && (cursor === null || cursor === liveSessionId)) {
+                // the pooled session still answers the cursor (or the cursor's
+                // absence) and was established with these exact session inputs:
+                // prompt it directly — no session/load replay, no session/new,
+                // no fresh session bookkeeping
+                break;
+              }
+              // stdio is every agent's baseline; a url server rides only with
+              // an agent that advertised its transport, so an agent without
+              // http/sse never sees an entry it would refuse the session over
+              const sessionServers = mcpServers.filter((server) =>
+                !("type" in server) || init?.agentCapabilities?.mcpCapabilities?.[server.type] === true);
+              let loaded = false;
+              if (cursor) {
+                try {
+                  await request(
+                    support.resumeMethod === "resume" ? "session/resume" : "session/load",
+                    { sessionId: cursor, cwd, mcpServers: sessionServers },
+                    LOAD_SESSION_TIMEOUT,
+                    (result) => {
+                      if (result) {
+                        loaded = true;
+                        session.sessionId = cursor;
+                        session.sessionKey = sessionKey;
+                        receiveModelVariants(result);
+                      }
+                    },
+                  );
+                } catch (error) {
+                  const classification = support.classifyError?.(error);
+                  // OpenCode encodes ACPSessionNotFoundError as invalidParams
+                  // with just the rejected sessionId. Other invalidParams
+                  // responses (model/config errors) must not erase history.
+                  const data = (error as any)?.data;
+                  const missingSession = data && typeof data === "object" && !Array.isArray(data)
+                    && data.sessionId === cursor && Object.keys(data).length === 1;
+                  if (classification === "invalid_credentials" || classification === "inactive_subscription"
+                      || ((error as any)?.code === -32602 && !missingSession)) throw error;
+                  /* session gone, load unsupported, or too slow — the
+                   * fallbacks below choose between one fresh process and a
+                   * genuinely new session */
+                }
+              }
+              if (loaded) break;
+              if (cursor && liveSessionId === cursor) {
+                // The agent refused (or never answered) re-establishing its
+                // own live session on this process. Continuity outranks the
+                // saved handshake: close the pooled child and resume the
+                // recorded session on a fresh one — the pre-pool path every
+                // agent already supports. A load that fails there too means
+                // the session is genuinely gone; the loop falls through to
+                // session/new on the replacement child.
+                session.current = null;
+                closeSession(threadId, "reestablish");
+                session = openSession(threadId, launch, [...(launch.args ?? []), ...spawnArgs], spawnEnv, cwd, contractKey);
+                sessions.set(threadId, session);
+                session.current = current;
+                runtimeAcceptsImages = await handshake();
+                init = session.initResult;
+                continue;
+              }
+              // a genuinely fresh native session forgets what the previous
+              // one allowed
+              sessionAllows.delete(threadId);
+              if (cursor) {
+                const recovery = recoveryPromptFor({
+                  recoveryText: turn.recoveryText,
+                  currentText: turn.text,
+                  failure: "before-accept",
+                });
+                promptTurn = { ...turn, text: recovery.text };
+                rebuiltFromReplay = recovery.replayed;
+              }
+              sessionResult = await request("session/new", { cwd, mcpServers: sessionServers }, NEW_SESSION_TIMEOUT, (result) => {
+                session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
+                session.sessionKey = sessionKey;
+                receiveModelVariants(result);
+              });
+              break;
             }
-            if (!sessionId) {
-              sessionResult = await request("session/new", { cwd, mcpServers }, NEW_SESSION_TIMEOUT);
-              sessionId = typeof sessionResult?.sessionId === "string" ? sessionResult.sessionId : null;
-              if (!sessionId) throw new Error("session/new returned no sessionId");
-            }
+            // every establishment path leaves a native session id behind
+            const sessionId = session.sessionId;
+            if (sessionId === null) throw new Error("session/new returned no sessionId");
             let selectedModel: string | null = null;
             let sessionStarted = false;
             const emitSessionStarted = () => {
@@ -945,24 +1615,22 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 type: "session.started",
                 sessionId,
                 model: selectedModel ?? init?._meta?.modelState?.currentModelId ?? cliTurn.model ?? null,
+                ...(rebuiltFromReplay ? { rebuilt: true } : {}),
               });
             };
 
             try {
               if (support.selectModel) {
                 const { configId } = support.selectModel;
-                const currentOf = (r: any) =>
-                  (Array.isArray(r?.configOptions) ? r.configOptions : []).find((o: any) => o?.id === configId)
-                    ?.currentValue ?? null;
-                selectedModel = currentOf(sessionResult);
+                selectedModel = modelOf(session.sessionConfigResult);
                 if (cliTurn.model && cliTurn.model !== selectedModel) {
-                  selectedModel = currentOf(
-                    await request(
-                      "session/set_config_option",
-                      { sessionId, configId, value: cliTurn.model },
-                      INIT_TIMEOUT,
-                    ),
+                  sessionResult = await request(
+                    "session/set_config_option",
+                    { sessionId, configId, value: cliTurn.model },
+                    INIT_TIMEOUT,
+                    receiveModelVariants,
                   );
+                  selectedModel = modelOf(session.sessionConfigResult);
                   // an agent that answers OK but keeps its old model is worse than
                   // one that errors: it burns a paid turn on the wrong thing
                   if (selectedModel !== cliTurn.model) {
@@ -984,10 +1652,22 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     ? sessionResult.models.availableModels
                     : [],
                 });
-                // initialize's currentModelId is the CLI default (grok-4.6),
+                // initialize's currentModelId is the CLI default,
                 // not the model this turn asked for. After a successful pin,
                 // report the slug we set so the UI does not claim otherwise.
                 if (!selectedModel && cliTurn.model) selectedModel = cliTurn.model;
+              }
+              if (turn.variant !== undefined) {
+                const option = requestedVariantOption();
+                await request(
+                  "session/set_config_option",
+                  { sessionId, configId: option.configId, value: turn.variant },
+                  SESSION_CONFIG_TIMEOUT,
+                  receiveModelVariants,
+                );
+                if (requestedVariantOption().currentValue !== turn.variant) {
+                  throw new Error(`${support.displayName} did not apply variant ${turn.variant}`);
+                }
               }
             } catch (error) {
               // session.started is the only place the resume cursor is recorded,
@@ -996,19 +1676,64 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw error;
             }
             emitSessionStarted();
-            state.promptSent = true;
+            // The stable/volatile split: the full prompt rides only the turn
+            // that establishes - or re-instructs, after a soul edit - this
+            // native session. Later turns go through bare unless the volatile
+            // half changed, so a memory edit neither appends a second copy of
+            // the prompt to the agent's session history nor re-prices the
+            // prefix its provider cached. Receipts are durable because the
+            // native session outlives this process; an un-split turn (a direct
+            // adapter call) keeps the legacy full-prompt shape.
+            const halves = promptHalves(turn);
+            let promptInput = promptTurn;
+            let pendingSplitReceipt: { key: string; receipt: PromptSplitReceipt } | null = null;
+            if (halves.stable !== null) {
+              const receiptKey = JSON.stringify([threadId, sessionId]);
+              const composed = splitSessionPrompt(
+                halves.stable,
+                halves.volatile,
+                readPromptSplitReceipt(DRIVER_KIND, receiptKey),
+                promptTurn.system,
+                promptTurn.text,
+                Boolean(turn.mentionTurn),
+                ACP_PROMPT_RE_ANCHOR_TURNS,
+              );
+              promptInput = { ...promptTurn, system: "", text: composed.text };
+              pendingSplitReceipt = { key: receiptKey, receipt: composed.receipt };
+            }
             const text = support.buildPromptText
-              ? support.buildPromptText(turn)
-              : turn.system
-                ? `${turn.system}\n\n${turn.text}`
-                : turn.text;
+              ? support.buildPromptText(promptInput)
+              : promptInput.system
+                ? `${promptInput.system}\n\n${promptInput.text}`
+                : promptInput.text;
             const imageBlocks = support.images === true && runtimeAcceptsImages
-              ? await readAcpImageBlocks(images)
+              ? await readAcpImageBlocks(turn.images ?? [])
               : [];
-            const result = await request("session/prompt", {
-              sessionId,
-              prompt: [{ type: "text", text }, ...imageBlocks],
-            });
+            if (support.modelVariants && cliTurn.model && modelOf(session.sessionConfigResult) !== cliTurn.model) {
+              throw new Error(`${support.displayName} changed model before the prompt`);
+            }
+            if (turn.variant !== undefined && requestedVariantOption().currentValue !== turn.variant) {
+              throw new Error(`${support.displayName} changed variant before the prompt`);
+            }
+            if (state.settled || state.stopped || session.closing) throw new Error("turn stopped");
+            state.promptSent = true;
+            acknowledge();
+            const promptIdleMs = promptIdleTimeoutMs();
+            const result = await request(
+              "session/prompt",
+              { sessionId, prompt: [{ type: "text", text }, ...imageBlocks] },
+              undefined,
+              undefined,
+              promptIdleMs,
+              `${DRIVER_KIND} sent nothing for ${Math.round(promptIdleMs / 1000)} s with no tool running, so the turn was stopped as stuck. ` +
+                "Send the message again to retry. On a self-hosted server, OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS sets this limit (0 turns it off).",
+              );
+            if (pendingSplitReceipt) {
+              // session/prompt resolving is the acceptance boundary: a
+              // rejected prompt leaves the receipt unwritten, so the next
+              // turn redelivers what this one never received.
+              writePromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt.key, pendingSplitReceipt.receipt);
+            }
             // opencode 1.18.18 reports usage at the result root; grok and
             // gemini put it under _meta. Read both rather than lose the count.
             const usage = result?.usage ?? result?._meta ?? {};
@@ -1021,8 +1746,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               });
             }
             const reason = result?.stopReason;
-            if (reason === "end_turn") settle(true, null);
-            else if (reason === "cancelled") settle(true, "cancelled");
+            if (reason === "end_turn") settle(threadId, session, true, null);
+            else if (reason === "cancelled") settle(threadId, session, true, "cancelled");
             else {
               const errorMessage = typeof result?.error === "string" && result.error
                 ? result.error
@@ -1034,7 +1759,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 type: "runtime.error",
                 message: errorMessage,
               });
-              settle(false, reason ?? "failed");
+              settle(threadId, session, false, reason ?? "failed");
             }
           } catch (e) {
             if (!state.settled) {
@@ -1045,26 +1770,61 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               // fallback for existing ACP supports.
               const needsAuth = code === "invalid_credentials" || code === "inactive_subscription"
                 || message === support.loginNote;
+              const failure = classifyError({ text: message });
+              const transientStartup = failure.transient || (failure.reason === "unknown" && code === "upstream_outage");
+              const denied = /\b(?:(?:permission|access) denied|(?:approval|permission) (?:required|denied|rejected)|requires? (?:approval|permission)|policy (?:restriction|violation)|(?:blocked|denied|restricted) by (?:the )?policy)\b/i.test(message);
+              if (turn.startupRecovery && transientStartup && !needsAuth && !denied && (!code || code === "upstream_outage")
+                  && ![-32700, -32600, -32601, -32602].includes((e as any)?.code)
+                  && !state.promptSent && !state.startupActivity && !state.producedItem && !state.text
+                  && !state.stopped && !session.closing && !asks.size && !current.runningTools.size) {
+                // Quiesce before killing: the child's close event must not
+                // publish a terminal completion before the harness can recover.
+                state.settled = true;
+                session.current = null;
+                if (current.interruptTimer) clearTimeout(current.interruptTimer);
+                closeSession(threadId, "startup-recovery");
+                const stopped = await killCliTree(session.child).catch(() => false);
+                if (current.interruptTimer) clearTimeout(current.interruptTimer);
+                active.delete(threadId);
+                if (stopped && !state.stopped) {
+                  rejectStartup(new TurnNotStartedError(turnId, message));
+                  return;
+                }
+                acknowledge();
+                if (!state.stopped) emit({ ...base(threadId, turnId), type: "runtime.error", message });
+                emit({ ...base(threadId, turnId), type: "turn.completed", ok: state.stopped,
+                  stopReason: state.stopped ? "cancelled" : "rpc_error", cost: null });
+                return;
+              }
               emit({
                 ...base(threadId, turnId),
                 type: "runtime.error",
                 message,
                 ...(needsAuth ? { setup: true } : {}),
               });
-              settle(false, needsAuth ? "auth_required" : "rpc_error");
+              // Internal RPC failures can leave a live child poisoned just
+              // like a silent prompt. Evict before completion listeners can
+              // start the next turn. Never replay this accepted prompt: it
+              // may already have executed tools. The next explicit turn can
+              // resume the recorded session on a fresh process.
+              if (!needsAuth && ((e as any)?.acpPromptStall === true || (e as any)?.acpSessionFailure === true
+                  || code === "upstream_outage") && session.child.exitCode === null && !session.closing) {
+                closeSession(threadId, (e as any)?.acpPromptStall === true ? "prompt-stall" : "rpc-failure");
+              }
+              settle(threadId, session, false, needsAuth ? "auth_required" : "rpc_error");
             }
           }
         })();
 
-        return { turnId };
+        return startupAck ?? { turnId };
       };
 
       const snapshot = async (): Promise<ProviderSnapshot> => {
         const env = childEnv();
         if (support.snapshot) return support.snapshot(env, config, instanceId);
         const version = await new Promise<string | null>((resolve) => {
-          execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) =>
-            resolve(err ? null : stdout.trim()),
+          execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout, stderr) =>
+            resolve(err ? null : versionFromProbe(stdout, stderr)),
           );
         });
         if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
@@ -1093,6 +1853,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             images: support.images !== false,
             nativeImageInput: support.images === true,
             effortLevels: support.effortLevels,
+            modelVariants: support.modelVariants === true,
             // OpenMausBot supplies a per-bot approvalMode on every harness
             // turn, which safely overrides a legacy instance fullAuto value.
             // Direct adapter calls that omit it still fail closed in sendTurn.
@@ -1104,16 +1865,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const turn = active.get(threadId);
             const finish = turn?.asks.get(requestId);
             if (!finish) return "unavailable"; // settled, timed out, or turn gone
-            finish(decision.behavior, "user", decision.message, decision.always === true);
-            return decision.behavior === "allow"
-              ? "allowed-once"
-              : decision.behavior === "answer"
-                ? "answered"
-                : "rejected";
+            return finish(decision.behavior, "user", decision.message, decision.always === true);
           },
           hasSession: (threadId) => active.has(threadId),
           stopAll: async () => {
             for (const { stop } of active.values()) stop();
+            // idle pooled sessions have no running turn — close them too
+            for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "stopAll");
+            for (const [threadId, children] of retiring) {
+              for (const child of children) void retireChild(threadId, child);
+            }
           },
           onEvent: (listener) => {
             listeners.add(listener);
@@ -1122,6 +1883,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         },
         dispose: async () => {
           for (const { stop } of active.values()) stop();
+          for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "dispose");
+          for (const [threadId, children] of retiring) {
+            for (const child of children) void retireChild(threadId, child);
+          }
           listeners.clear();
         },
       };

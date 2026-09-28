@@ -211,7 +211,7 @@ describe("a fleet's credential in the environment", () => {
       const env = { ...process.env, OMB_CONTROL_PLANE_URL: stub.url };
       expect(fleetCredential({})).toBeNull();
       expect(fleetCredential({ OMB_INSTALLATION_CREDENTIAL: "   " })).toBeNull();
-      const credential = stub.seedInstallation("box-1");
+      const credential = stub.seedInstallation("boat-1");
       expect(fleetCredential({ OMB_INSTALLATION_CREDENTIAL: ` ${credential} ` })).toBe(credential);
       const access = await fleetAccess({ credential, env });
       expect(access).toEqual({ endpoint: stub.endpointUrl, token: stub.connectorToken });

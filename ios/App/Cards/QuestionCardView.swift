@@ -57,6 +57,11 @@ struct QuestionCardView: View {
         if let card, !questions.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 header(card)
+                if card.questionRequest?.origin == "output" {
+                    Text("Agent-composed question")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.secondary)
+                }
                 if questions.count > 1 { tabs }
                 if let current {
                     Text(current.question)

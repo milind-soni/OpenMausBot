@@ -24,7 +24,7 @@ The first version includes:
   state.
 - Approvals and questions, including narrow “always allow” grants.
 - Resumable SSE, streamed reply text, reconnect hydration, and an opt-in live
-  Box computer view. The loopback-only VPS SSH viewer remains desktop-only.
+  Boat computer view. The loopback-only VPS SSH viewer remains desktop-only.
 - Markdown rendering and Keychain storage for the phone's pairing trust.
 - Secure completion of supported credential-request cards using iOS Password
   AutoFill and QR-pinned HPKE encryption. Apple Passwords/iCloud Keychain is
@@ -43,6 +43,22 @@ switch that prevents system sleep while device access is on; the display may
 still turn off. A sleeping or powered-off computer cannot receive phone
 requests or run its local routines, including through the optional hosted
 transport.
+
+## Markdown
+
+Bot and room replies are rendered. Messages the person typed stay literal.
+
+Rendered blocks are paragraphs, headings, lists, task lists, quotes, thematic
+rules, fenced code, and top-level tables indented by at most three spaces. A
+table inside a list item, a blockquote, or a fence stays text or code, as
+does a row indented by four spaces or a tab. Inline emphasis, code,
+strikethrough, and links use Foundation attributed text. A table scrolls
+horizontally inside the bubble. A task item shows a checkbox, and an ordered
+task keeps its number beside that checkbox.
+
+The in-app spoken form reads each table row and each task's words. It skips a
+delimiter-only paragraph and the checkbox token. Closed-app voice is not part
+of this version.
 
 ## Runtime architecture
 

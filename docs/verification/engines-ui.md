@@ -13,6 +13,8 @@ welcome flow directly at the engines beat. Provider install, sign-in, path-save,
 account-management requests are rejected by fixture-only middleware; no real
 provider login or user configuration is involved. A rejected setup request is
 useful for checking error presentation, not evidence that provider auth works.
+Icon updates are the exception: fixture middleware stores them only in the
+synthetic instances for the lifetime of the preview process.
 Vite's generated source cache stays in the checkout's ignored
 `.omb-scratch/engine-preview-vite` directory; fixture accounts, home, and app data
 remain disposable. Keeping these separate prevents late cache writes from
@@ -44,6 +46,13 @@ recreating a removed fixture directory.
    **Update OpenCode on this server**. Click each and confirm the fixture error
    appears with its button usable again. Terminal commands remain under
    **Prefer a terminal?**. These clicks never perform a real installation.
+7. Expand Codex, choose **Google Gemini** under **Provider icon**, and reload.
+   The selected icon should persist while sibling instances keep their icons.
+   Upload a small PNG, JPEG, or WebP and check that it renders in the card and
+   picker. Reject unsupported or invalid images with a visible error. **Reset**
+   restores the default icon. Check the controls in both themes at desktop and
+   narrow widths. The server API test separately verifies on-disk persistence;
+   this preview's synthetic state does not survive process restart.
 
 Automated coverage:
 

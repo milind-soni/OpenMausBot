@@ -11,6 +11,7 @@ import {
   markdownImageName,
   markdownImageOpenUrl,
   localFilePath,
+  normalizeMathDelimiters,
   textDirection,
 } from "./ChatMarkdown";
 import { StoreProvider } from "@/state/store";
@@ -54,6 +55,71 @@ describe("mention highlighting", () => {
     }));
     expect(html).not.toContain("<img");
     expect(html).not.toContain('<script');
+  });
+});
+
+describe("math rendering", () => {
+  it("renders inline, display, and TeX-style delimiters with KaTeX", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "Inline $s'(t)=2t$.\n\n$$\\int_0^3 2t\\,dt=9$$\n\n\\(x^2\\)\n\n\\[y^2\\]",
+    }));
+    expect(html.match(/class="katex"/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(html).toContain("katex-display");
+  });
+
+  it("keeps code dollar signs and malformed TeX delimiters literal", () => {
+    const text = "`const price = '$5'`\n\n```tex\n\\(not rendered\\)\n```\n\nUnclosed \\(x";
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text, streaming: true }));
+    expect(html).not.toContain('class="katex"');
+    expect(normalizeMathDelimiters(text)).toBe(text);
+  });
+
+  it("protects consecutive inline code spans without swallowing the math between them", () => {
+    const text = "`\\(a\\)` text \\(x\\) `\\[b\\]` then \\(y\\) `$$c$$`";
+    expect(normalizeMathDelimiters(text)).toBe(
+      "`\\(a\\)` text $x$ `\\[b\\]` then $y$ `$$c$$`",
+    );
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(html.match(/<code\b/g)).toHaveLength(3);
+    expect(html.match(/class="katex"/g)).toHaveLength(2);
+    expect(html).toContain("\\(a\\)");
+    expect(html).toContain("\\[b\\]");
+    expect(html).toContain("$$c$$");
+  });
+
+  it("protects fenced code when the closer has different indentation or is longer", () => {
+    const text = "  ~~~tex\n\\(not rendered\\)\n ~~~~\n\nAfter \\(rendered\\).";
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(normalizeMathDelimiters(text)).toBe(
+      "  ~~~tex\n\\(not rendered\\)\n ~~~~\n\nAfter $rendered$.",
+    );
+    expect(html.match(/class="katex"/g)).toHaveLength(1);
+    expect(html).toContain("not rendered");
+  });
+
+  it("rejects backticks in a backtick-fence info string", () => {
+    const text = "```js `invalid`\n\\(rendered\\)\n```";
+    expect(normalizeMathDelimiters(text)).toBe("```js `invalid`\n$rendered$\n```");
+  });
+
+  it("protects block-quoted and CRLF fenced code", () => {
+    const quoted = "> ```tex\n> \\(not rendered\\)\n> ```\n\nAfter \\(rendered\\).";
+    expect(normalizeMathDelimiters(quoted)).toBe(
+      "> ```tex\n> \\(not rendered\\)\n> ```\n\nAfter $rendered$.",
+    );
+
+    const crlf = "```tex\r\n\\(not rendered\\)\r\n```\r\n\r\nAfter \\(rendered\\).";
+    expect(normalizeMathDelimiters(crlf)).toBe(
+      "```tex\r\n\\(not rendered\\)\r\n```\r\n\r\nAfter $rendered$.",
+    );
+  });
+
+  it("normalizes math in messages that also contain an image", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "![diagram](https://example.test/diagram.png)\n\n\\(x^2\\)",
+    }));
+    expect(html).toContain('class="katex"');
+    expect(html).toContain("diagram.png");
   });
 });
 
@@ -162,6 +228,21 @@ describe("#Title thread links in markdown", () => {
     expect(markup).not.toContain("data-thread-link");
     expect(markup).toContain("#QA PR 245");
   });
+
+  it("renders a sent canonical link as a chip that opens the thread", () => {
+    const markup = render("done in [QA PR 245](openmausbot://thread/qa-245?bot=scout) today");
+    expect(markup).toContain('<button type="button" data-thread-link="qa-245"');
+    expect(markup).toContain(">QA PR 245</button>");
+    expect(markup).not.toContain('href="openmausbot://');
+  });
+
+  it("keeps a dead thread link as plain text, never an external anchor", () => {
+    const markup = render("see [Gone](openmausbot://thread/dead?bot=scout)");
+    expect(markup).toContain(">Gone<");
+    expect(markup).not.toContain("data-thread-link");
+    expect(markup).not.toContain('href="openmausbot://');
+    expect(markup).not.toContain('target="_blank"');
+  });
 });
 
 describe("Markdown image metadata", () => {
@@ -169,6 +250,7 @@ describe("Markdown image metadata", () => {
     expect(markdownImageName("https://example.test/random.png", "Final render")).toBe("Final render");
     expect(markdownImageName("https://example.test/output/Launch%20art.webp")).toBe("Launch art.webp");
     expect(markdownImageName("")).toBe("Image");
+    expect(markdownImageName("C:\\Users\\Maus\\chart.png")).toBe("chart.png");
   });
 
   it("only offers an external action for HTTP sources", () => {
@@ -202,6 +284,8 @@ describe("message-scoped file targets", () => {
     expect(chatUrlTransform("file:///Users/milind/report.md")).toBe("file:///Users/milind/report.md");
     expect(chatUrlTransform("C:/Users/Maus/report.md")).toBe("C:/Users/Maus/report.md");
     expect(chatUrlTransform("\\\\server\\share\\report.md")).toBe("\\\\server\\share\\report.md");
+    // What rendering hands over for C:\Users\Maus\release notes.md.
+    expect(chatUrlTransform("C:%5CUsers%5CMaus%5Crelease%20notes.md")).toBe("C:\\Users\\Maus\\release%20notes.md");
     expect(chatUrlTransform("javascript:alert(1)")).toBe("");
     expect(chatUrlTransform("https://example.test/report.md")).toBe("https://example.test/report.md");
   });
@@ -236,6 +320,25 @@ describe("ChatMarkdown attachments", () => {
     expect(html).toContain('title="Save a copy"');
     expect(html).not.toContain("/Users/milind/report.md");
     expect(html).not.toContain("C:/Users/Maus/report.md");
+  });
+
+  it("routes a backslash Windows path through the scoped file handlers, every backslash intact", () => {
+    const save = vi.spyOn(AttachmentPreview, "useLocalFileSave");
+    const preview = vi.spyOn(AttachmentPreview, "MarkdownImagePreview");
+    try {
+      const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+        text: "[Report](C:\\Users\\Maus\\.openmausbot\\report.md)\n\n![Chart](C:\\Users\\Maus\\.openmausbot\\chart.png)",
+        message: { threadId: "thread-1", messageId: "message-1" },
+      }));
+      expect(html).toContain('title="Save a copy"');
+      expect(html).not.toContain('href=""');
+      expect(html).not.toContain("Image unavailable");
+      expect(save.mock.calls[0]?.[0]).toBe("C:\\Users\\Maus\\.openmausbot\\report.md");
+      expect(preview.mock.calls[0]?.[0].filePath).toBe("C:\\Users\\Maus\\.openmausbot\\chart.png");
+    } finally {
+      save.mockRestore();
+      preview.mockRestore();
+    }
   });
 
   it("keeps an unscoped legacy file link inert", () => {
@@ -518,4 +621,62 @@ describe("mention roster comparison", () => {
     expect(samePeers(roster, [...roster, { name: "Kim" }])).toBe(false);
     expect(samePeers(roster, [roster[0]!])).toBe(false);
   });
+});
+describe("mermaid diagrams", () => {
+  it("routes mermaid fences to the diagram frame instead of the code chrome", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```mermaid\nflowchart LR\n  Ship-->Sea\n```",
+    }));
+    expect(html).toContain('title="Mermaid diagram"');
+    expect(html).toContain("flowchart LR");
+    expect(html).not.toContain('aria-label="Wrap long lines"');
+  });
+
+  it("matches the fence tag case-insensitively", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```Mermaid\nflowchart LR\n  Ship-->Sea\n```",
+    }));
+    expect(html).toContain('title="Mermaid diagram"');
+  });
+
+  it("keeps ordinary fenced code on the highlighter path", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```ts\nconst sea = true;\n```",
+    }));
+    expect(html).not.toContain("Mermaid diagram");
+    expect(html).toContain('aria-label="Copy code to clipboard"');
+  });
+});
+
+it("renders mermaid strictly and serves repeat views from cache", async () => {
+  const originalUseEffect = (await vi.importActual<typeof React>("react")).useEffect;
+  const effects: React.EffectCallback[] = [];
+  const effect = vi.mocked(React.useEffect).mockImplementation((callback) => { effects.push(callback); });
+  const initialize = vi.fn();
+  const render = vi.fn().mockResolvedValue({ svg: "<svg>sea lanes</svg>" });
+  vi.doMock("mermaid", () => ({ default: { initialize, render } }));
+  const cleanup: ReturnType<React.EffectCallback>[] = [];
+  const fence = "```mermaid\nflowchart LR\n  Ship-->Sea\n```";
+  try {
+    renderToStaticMarkup(createElement(ChatMarkdown, { text: fence }));
+    for (const callback of effects.splice(0)) cleanup.push(callback());
+    await vi.waitFor(() => expect(render).toHaveBeenCalledTimes(1));
+    expect(initialize).toHaveBeenCalledWith(expect.objectContaining({
+      startOnLoad: false,
+      securityLevel: "strict",
+      suppressErrorRendering: true,
+    }));
+    expect(render).toHaveBeenCalledWith(expect.any(String), "flowchart LR\n  Ship-->Sea");
+
+    // a settled remount (revisiting the thread, a skin flip) re-renders from
+    // cache: still exactly one real mermaid render for this source
+    renderToStaticMarkup(createElement(ChatMarkdown, { text: fence }));
+    for (const callback of effects.splice(0)) cleanup.push(callback());
+    await Promise.resolve();
+    expect(render).toHaveBeenCalledTimes(1);
+  } finally {
+    for (const close of cleanup) if (typeof close === "function") close();
+    effect.mockImplementation(originalUseEffect);
+    vi.doUnmock("mermaid");
+  }
 });

@@ -6,8 +6,10 @@ data class DisplayedMessageAttachment(
     val name: String,
     /** The computer-local path carried by the exact standalone transport tag. */
     val path: String,
+    /** `kind == AUDIO`: the server's duration estimate, shown until the player loads metadata. */
+    val durationMs: Double? = null,
 ) {
-    enum class Kind { IMAGE, FILE }
+    enum class Kind { IMAGE, FILE, AUDIO }
 }
 
 data class AttachedMessageContent(
@@ -21,6 +23,9 @@ data class AttachedMessageContent(
             val visible = StringBuilder()
             var fence: Fence? = null
             var htmlBlock: HtmlBlock? = null
+            // Inside a paste whose opening wrapper line was hidden, so its
+            // exact closing line is hidden too.
+            var hidingPasteWrapper = false
             var cursor = 0
             while (cursor < source.length) {
                 val newline = source.indexOf('\n', cursor)
@@ -45,7 +50,9 @@ data class AttachedMessageContent(
                         ?.let { it in line.lowercase() }
                         ?: line.all { it == ' ' || it == '\t' }
                     if (shouldEnd) {
+                        if (hidingPasteWrapper && PASTED_TEXT_CLOSE.matches(line)) consumedTransportTag = true
                         htmlBlock = null
+                        hidingPasteWrapper = false
                     }
                 } else if (marker != null) {
                     fence = Fence(marker.character, marker.length)
@@ -67,6 +74,12 @@ data class AttachedMessageContent(
                         consumedTransportTag = true
                     } else {
                         htmlBlock = htmlBlockStarting(line)
+                        // The bot needs the <pasted-text> wrapper to tell pasted
+                        // from typed text; the person reading it does not.
+                        if (htmlBlock?.closingToken == "</pasted-text>" && PASTED_TEXT_OPEN.matches(line)) {
+                            hidingPasteWrapper = true
+                            consumedTransportTag = true
+                        }
                     }
                 }
 
@@ -153,6 +166,9 @@ data class AttachedMessageContent(
             "param", "search", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "title",
             "tr", "track", "ul",
         ).joinToString("|")
+        /** The exact wrapper lines the desktop composer writes around a paste. */
+        private val PASTED_TEXT_OPEN = Regex("""^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$""", RegexOption.IGNORE_CASE)
+        private val PASTED_TEXT_CLOSE = Regex("""^[\t ]*</pasted-text>[\t ]*$""", RegexOption.IGNORE_CASE)
         private val PASTED_TEXT_START = Regex("""^ {0,3}<pasted-text(?:[\t >]|$)""", RegexOption.IGNORE_CASE)
         private val TYPE_ONE = Regex(
             """^ {0,3}<(script|pre|style|textarea)(?:[\t ]|>|$)""",
@@ -175,9 +191,9 @@ data class AttachedMessageContent(
             .replace("&gt;", ">")
             .replace("&amp;", "&")
 
-        private fun displayName(
+        internal fun displayName(
             providedName: String?,
-            path: String,
+            path: String?,
             kind: DisplayedMessageAttachment.Kind,
         ): String {
             fun basename(source: String?): String? {
@@ -189,8 +205,50 @@ data class AttachedMessageContent(
             val generic = when (kind) {
                 DisplayedMessageAttachment.Kind.IMAGE -> "Image"
                 DisplayedMessageAttachment.Kind.FILE -> "File"
+                DisplayedMessageAttachment.Kind.AUDIO -> "Voice note"
             }
             return sanitisePortableFilename(providedBasename ?: fallback ?: generic, generic)
         }
     }
 }
+
+/** Preserve the server path exactly for the originating message's authenticated file route. */
+val Message.generatedImages: List<DisplayedMessageAttachment>
+    get() = attachments.orEmpty()
+        .filter { it.kind == "image" && !it.path.isNullOrBlank() }
+        .distinctBy { it.path }
+        .map {
+            val path = requireNotNull(it.path)
+            DisplayedMessageAttachment(
+                kind = DisplayedMessageAttachment.Kind.IMAGE,
+                path = path,
+                name = AttachedMessageContent.displayName(null, path, DisplayedMessageAttachment.Kind.IMAGE),
+            )
+        }
+
+/**
+ * Voice notes the server parked as generated mp3s (`kind: "audio"` plus the
+ * wire's duration estimate). The gate is the desktop bubble's
+ * `attachmentAudioUrl`: only a bare generated `.mp3` basename renders, so any
+ * other path stays out of the transcript rather than failing on fetch.
+ */
+val Message.voiceNotes: List<DisplayedMessageAttachment>
+    get() = attachments.orEmpty()
+        .filter { it.kind == "audio" && !it.path.isNullOrBlank() }
+        .distinctBy { it.path }
+        .mapNotNull { attachment ->
+            val path = requireNotNull(attachment.path)
+            val name = path.substringAfterLast('/').substringAfterLast('\\')
+            if (PARKED_VOICE_NOTE_NAME.matchEntire(name) == null) {
+                return@mapNotNull null
+            }
+            DisplayedMessageAttachment(
+                kind = DisplayedMessageAttachment.Kind.AUDIO,
+                path = path,
+                name = AttachedMessageContent.displayName(null, null, DisplayedMessageAttachment.Kind.AUDIO),
+                durationMs = attachment.durationMs?.takeIf { it > 0.0 },
+            )
+        }
+
+/** The desktop's parked-clip rule: the basename is a bare generated mp3 name. */
+private val PARKED_VOICE_NOTE_NAME = Regex("^[A-Za-z0-9-]+\\.mp3$")

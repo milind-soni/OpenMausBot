@@ -1,0 +1,143 @@
+{
+  "id": "lazy-computer-claim",
+  "title": "An Auto turn's first screen call claims the VM lazily and waits out an existing holder",
+  "behavior": "An Auto-resolved VM attach mounts the computer tools without claiming; the first screen call fires the claim, is honestly refused while another turn holds the VM, waits with the existing activity, and proceeds once the holder releases.",
+  "issue": 1361,
+  "world": "localVm",
+  "gates": [
+    "autoTurn",
+    "holderTurn"
+  ],
+  "bots": [
+    {
+      "key": "auto",
+      "name": "Screen-less Auto",
+      "browser": false,
+      "turns": [
+        {
+          "gate": "autoTurn",
+          "reply": "Screenshot taken and reviewed"
+        }
+      ]
+    },
+    {
+      "key": "holder",
+      "name": "VM holder",
+      "computer": "vm",
+      "turns": [
+        {
+          "gate": "holderTurn",
+          "reply": "Held the VM"
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "kind": "send",
+      "bot": "auto",
+      "text": "Take a screenshot when the VM is free."
+    },
+    {
+      "kind": "waitForBusy",
+      "bot": "auto",
+      "busy": true,
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "captureComputer",
+      "bot": "auto"
+    },
+    {
+      "kind": "send",
+      "bot": "holder",
+      "text": "Hold the VM for this fixture."
+    },
+    {
+      "kind": "waitForBusy",
+      "bot": "holder",
+      "busy": true,
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "consumeDump"
+    },
+    {
+      "kind": "pollComputerGate",
+      "bot": "auto",
+      "saveAs": "firstScreenCall"
+    },
+    {
+      "kind": "waitForActivity",
+      "bot": "auto",
+      "namePrefix": "Waiting for its turn on this computer",
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "writeGate",
+      "gate": "holderTurn"
+    },
+    {
+      "kind": "waitForBusy",
+      "bot": "holder",
+      "busy": false,
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "waitForActivity",
+      "bot": "auto",
+      "namePrefix": "Computer free",
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "pollComputerGate",
+      "bot": "auto",
+      "saveAs": "afterRelease"
+    },
+    {
+      "kind": "writeGate",
+      "gate": "autoTurn"
+    },
+    {
+      "kind": "waitForBusy",
+      "bot": "auto",
+      "busy": false,
+      "timeoutMs": 20000
+    }
+  ],
+  "assertions": [
+    {
+      "kind": "gateAnswer",
+      "of": "firstScreenCall",
+      "held": true,
+      "blockedReasonIncludes": "Another thread is using this computer"
+    },
+    {
+      "kind": "gateAnswer",
+      "of": "afterRelease",
+      "held": false
+    },
+    {
+      "kind": "activitySeen",
+      "bot": "auto",
+      "namePrefix": "Waiting for its turn on this computer"
+    },
+    {
+      "kind": "activitySeen",
+      "bot": "auto",
+      "namePrefix": "Computer free"
+    },
+    {
+      "kind": "toolCalls",
+      "bot": "auto",
+      "equals": []
+    },
+    {
+      "kind": "turnOrder",
+      "bots": [
+        "holder",
+        "auto"
+      ]
+    }
+  ]
+}

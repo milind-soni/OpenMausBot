@@ -81,14 +81,14 @@ await textVisible("What your bots can do");
 assert.equal((await config()).profile.email, "onboarding@example.test");
 console.log("PASS profile failure preserves input; retry persists before advancing");
 
-// Reduced motion must hold every scene, particularly the previously timed
-// apps scene. Scene navigation is driven by the real Next button.
+// Reduced motion must hold every scene, particularly the timed /setup
+// scene. Scene navigation is driven by the real Next button.
 await click("Next");
 await click("Next");
-await textVisible("Sign in once and every bot can use them as tools");
+await textVisible("Start a message with /setup and describe the job");
 await screenshot("reel");
 await delay(5500);
-await textVisible("Sign in once and every bot can use them as tools");
+await textVisible("Start a message with /setup and describe the job");
 await click("Next");
 await click("Next");
 await click("Next");

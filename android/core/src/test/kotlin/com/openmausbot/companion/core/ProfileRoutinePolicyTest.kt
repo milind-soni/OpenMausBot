@@ -74,6 +74,10 @@ class ProfileRoutinePolicyTest {
             decodeConfig("""{"tts":{"configured":true,"provider":"elevenlabs"}}""").voiceProvider,
         )
         assertEquals(
+            VoiceProvider.FISH,
+            decodeConfig("""{"tts":{"configured":true,"provider":"fish"}}""").voiceProvider,
+        )
+        assertEquals(
             VoiceProvider.ELEVENLABS,
             decodeConfig("""{"tts":{"configured":true}}""").voiceProvider,
             "a desktop too old to send the field keeps the engine it always had",

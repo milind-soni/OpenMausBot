@@ -112,11 +112,64 @@ describe("parseMcpServersImport", () => {
       .toMatchObject({ ok: false });
   });
 
-  it("refuses remote servers, reserved names, and junk", () => {
-    expect(parseMcpServersImport('{"mcpServers": {"web": {"url": "https://x.example/mcp"}}}')).toMatchObject({ ok: false, error: expect.stringMatching(/remote|url/i) });
+  it("accepts remote servers in their own shape, refuses reserved names and junk", () => {
+    expect(parseMcpServersImport('{"mcpServers": {"web": {"type": "http", "url": "https://x.example/mcp", "headers": {"Authorization": "Bearer t"}, "enabled": true}}}')).toEqual({
+      ok: true,
+      // enabled from the paste is dropped: nothing is reached before it was tested
+      servers: { web: { type: "http", url: "https://x.example/mcp", headers: { Authorization: "Bearer t" }, enabled: false } },
+    });
+    expect(parseMcpServersImport('{"name": "docs", "url": "https://x.example/sse", "type": "sse"}')).toEqual({
+      ok: true,
+      servers: { docs: { type: "sse", url: "https://x.example/sse", headers: {}, enabled: false } },
+    });
+    expect(parseMcpServersImport('{"mcpServers": {"web": {"url": "x.example/mcp"}}}')).toMatchObject({ ok: false, error: expect.stringMatching(/full address/) });
     expect(parseMcpServersImport('{"mcpServers": {"computer": {"command": "x"}}}')).toMatchObject({ ok: false, error: expect.stringMatching(/reserved/i) });
     expect(parseMcpServersImport('{"mcpServers": {"ok": {"command": "x", "env": {"OMB_TOKEN": "1"}}}}')).toMatchObject({ ok: false });
     expect(parseMcpServersImport("not json")).toMatchObject({ ok: false, error: expect.stringMatching(/JSON/i) });
     expect(parseMcpServersImport("[]")).toMatchObject({ ok: false });
+  });
+});
+
+describe("remote (url) MCP servers", () => {
+  it("parses a url entry, defaulting to streamable HTTP; a new one starts off", () => {
+    expect(parseMcpServerMutation("docs", { url: "https://docs.example/mcp", headers: { Authorization: "Bearer t" } })).toEqual({
+      ok: true,
+      server: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer t" }, enabled: false },
+    });
+    expect(parseStoredMcpServer("docs", { type: "sse", url: "http://127.0.0.1:8123/sse" })).toEqual({
+      ok: true,
+      server: { type: "sse", url: "http://127.0.0.1:8123/sse", headers: {}, enabled: true },
+    });
+  });
+
+  it("refuses bad addresses, header names and mixed shapes", () => {
+    expect(parseStoredMcpServer("docs", { url: "docs.example/mcp" })).toEqual({ ok: false, error: "Use a full address, like https://example.com/mcp." });
+    expect(parseStoredMcpServer("docs", { url: "ftp://docs.example/mcp" })).toEqual({ ok: false, error: "The address must start with http:// or https://." });
+    expect(parseStoredMcpServer("docs", { url: "https://user:pw@docs.example/mcp" })).toEqual({ ok: false, error: "Put credentials in a header, not in the address." });
+    expect(parseStoredMcpServer("docs", { url: "https://docs.example/mcp", headers: { "Bad Header": "v" } })).toEqual({ ok: false, error: "Header “Bad Header” is not a valid header name." });
+    expect(parseStoredMcpServer("docs", { url: "https://docs.example/mcp", headers: { "X-A": "a\nb" } })).toEqual({ ok: false, error: "Header “X-A” must be a single line." });
+    expect(parseStoredMcpServer("docs", { url: "https://docs.example/mcp", command: "npx" })).toMatchObject({ ok: false });
+    expect(parseStoredMcpServer("docs", { type: "http" })).toMatchObject({ ok: false });
+  });
+
+  it("lists a url server by address and header names only", () => {
+    const listings = listMcpServers({ docs: { url: "https://docs.example/mcp", headers: { Authorization: "Bearer real", "X-Org": "acme" } } });
+    expect(listings).toEqual([{ name: "docs", type: "http", url: "https://docs.example/mcp", headerKeys: ["Authorization", "X-Org"], enabled: true }]);
+    expect(JSON.stringify(listings)).not.toContain("real");
+    expect(JSON.stringify(listings)).not.toContain("acme");
+  });
+
+  it("keeps saved header values behind write-only placeholders", () => {
+    const existing = { type: "http" as const, url: "https://docs.example/mcp", headers: { Authorization: "Bearer old" }, enabled: true };
+    expect(parseMcpServerMutation("docs", { url: "https://docs.example/mcp", headers: { Authorization: true, "X-Org": "acme" } }, existing)).toEqual({
+      ok: true,
+      server: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer old", "X-Org": "acme" }, enabled: true },
+    });
+    // a placeholder cannot borrow from a server of the other shape
+    expect(parseMcpServerMutation(
+      "docs",
+      { url: "https://docs.example/mcp", headers: { Authorization: true } },
+      { command: "old", args: [], env: { Authorization: "x" }, enabled: true },
+    )).toEqual({ ok: false, error: "No saved value exists for Authorization." });
   });
 });

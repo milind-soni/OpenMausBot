@@ -3,11 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ showThreads: true, queued: {} as Record<string, unknown[]>, dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ showThreads: true, queued: {} as Record<string, unknown[]>, bots: [] as Bot[], dispatch: vi.fn() }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
-  useStore: () => ({ state: { pendingQueued: fixture.queued }, dispatch: fixture.dispatch }),
+  useStore: () => ({ state: { bots: fixture.bots, pendingQueued: fixture.queued }, dispatch: fixture.dispatch }),
 }));
 
 const { TaskPicker, BotActivityPicker, GroupTaskPicker } = await import("./TaskPicker");
@@ -23,7 +23,7 @@ const bot: Bot = {
     { threadId: "unread", title: "Finished reply", createdAt: 6, unread: true },
   ],
 };
-beforeEach(() => { fixture.showThreads = true; fixture.queued = {}; fixture.dispatch.mockClear(); });
+beforeEach(() => { fixture.showThreads = true; fixture.queued = {}; fixture.bots = []; fixture.dispatch.mockClear(); });
 
 describe("optional bot thread picker", () => {
   it("keeps the usual picker when threads are shown", () => {

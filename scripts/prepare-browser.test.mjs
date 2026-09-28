@@ -13,18 +13,19 @@ afterEach(() => { vi.unstubAllGlobals(); for (const root of fixtures.splice(0)) 
 
 describe("pinned desktop browser preparation", () => {
   it("pins the exact headless vendor archives for only shipped targets", () => {
-    expect(CHROME_VERSION).toBe("152.0.7977.82");
-    expect(SUPPORTED_BROWSER_TARGETS).toEqual(["darwin-arm64", "darwin-x64", "linux-x64", "win32-x64"]);
+    expect(CHROME_VERSION).toBe("153.0.8010.47");
+    expect(SUPPORTED_BROWSER_TARGETS).toEqual(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"]);
     const pins = {
-      "darwin-arm64": [97760996, "1615f063c894aa824fd55c89f8f05e9904f63cce0c95d0cbce7394d77884fba5"],
-      "darwin-x64": [102895824, "c903707292c6aaed7c6e572c0bb5e6645454e45d9e0e6db27e876b18e9165f31"],
-      "linux-x64": [119454769, "0ca12ea26b502a83e32db334a17883c315348845efc071d908de7a6d94a97eff"],
-      "win32-x64": [119768220, "86fb1fa7fbbda65f6f1572062c358803e61a6e6d9489e6619b37a61d609fa845"],
+      "darwin-arm64": [98668949, "6d28839675b6f22dbd7ba8775dbdabcae7a5be37b482380b27b12f05b748b955"],
+      "darwin-x64": [103712919, "aa178547f9751fbcf413e0f57915ddb72e83064d4d1c4a29dc1719b169f9cc2f"],
+      "linux-arm64": [120245582, "af0931a58d6bab688112d5ca1f7abd6d95c0b8a296ef34637f272795787774d7"],
+      "linux-x64": [119695587, "7728775cf4a35464cd81c8eea2d44d6d32ccc0bd1edfa75aea7f32d146963d63"],
+      "win32-x64": [120466147, "9f405cfaf7bc08bf9e046e653cd3086c0faa1d4e25907de857f7e7f093a20122"],
     };
     for (const target of SUPPORTED_BROWSER_TARGETS) {
       const spec = browserBundleSpec(target);
       expect([spec.chrome.bytes, spec.chrome.sha256]).toEqual(pins[target]);
-      expect(spec.chrome.url).toMatch(/^https:\/\/storage.googleapis.com\/chrome-for-testing-public\/152\.0\.7977\.82\/[^/]+\/chrome-headless-shell-[^/]+\.zip$/);
+      expect(spec.chrome.url).toMatch(/^https:\/\/storage.googleapis.com\/chrome-for-testing-public\/153\.0\.8010\.47\/[^/]+\/chrome-headless-shell-[^/]+\.zip$/);
       const [platform, arch] = target.split("-");
       const engine = resolveAgentBrowserReleaseAsset(platform, arch);
       expect(spec.engine).toMatchObject({ bytes: engine.bytes, sha256: engine.sha256, asset: engine.asset });
@@ -37,8 +38,9 @@ describe("pinned desktop browser preparation", () => {
     expect(targetsForPreparation({ platform: "darwin", arch: "arm64", current: true })).toEqual(["darwin-arm64"]);
     expect(targetsForPreparation({ platform: "win32", arch: "x64" })).toEqual(["win32-x64"]);
     expect(targetsForPreparation({ target: "linux-x64" })).toEqual(["linux-x64"]);
-    for (const target of ["linux-arm64", "win32-arm64", "../darwin-arm64", "freebsd-x64"]) expect(() => browserBundleSpec(target)).toThrow(/Unsupported/);
-    expect(() => targetsForPreparation({ platform: "linux", arch: "arm64" })).toThrow(/Unsupported/);
+    expect(targetsForPreparation({ platform: "linux", arch: "arm64" })).toEqual(["linux-arm64"]);
+    for (const target of ["win32-arm64", "../darwin-arm64", "freebsd-x64"]) expect(() => browserBundleSpec(target)).toThrow(/Unsupported/);
+    expect(() => targetsForPreparation({ platform: "win32", arch: "arm64" })).toThrow(/Unsupported/);
   });
 
   it("has stable resource-relative paths on every platform", () => {
@@ -53,9 +55,10 @@ describe("pinned desktop browser preparation", () => {
   });
 
   it("accepts only explicit and unambiguous CLI modes", () => {
-    expect(parsePrepareBrowserArgs(["--current"])).toEqual({ current: true });
-    expect(parsePrepareBrowserArgs(["--target", "linux-x64"])).toEqual({ current: false, target: "linux-x64" });
-    for (const args of [["--all"], ["--current", "--current"], ["--current", "--target", "linux-x64"], ["--target"], ["--target", "../../tmp"]]) expect(() => parsePrepareBrowserArgs(args)).toThrow();
+    const host = { platform: "linux", arch: "x64" };
+    expect(parsePrepareBrowserArgs(["--current"], host)).toEqual({ current: true });
+    expect(parsePrepareBrowserArgs(["--target", "linux-x64"], host)).toEqual({ current: false, target: "linux-x64" });
+    for (const args of [["--all"], ["--current", "--current"], ["--current", "--target", "linux-x64"], ["--target"], ["--target", "../../tmp"]]) expect(() => parsePrepareBrowserArgs(args, host)).toThrow();
   });
 
   it("uses Windows' ZIP-capable system tar instead of Git Bash's GNU tar", () => {
@@ -63,16 +66,23 @@ describe("pinned desktop browser preparation", () => {
     expect(browserExtractionCommand("a.zip", "out", { platform: "darwin" })).toEqual({ file: "unzip", args: ["-q", "a.zip", "-d", "out"] });
   });
 
-  it("rechecks cached bytes and fails closed on same-size tampering", async () => {
+  it("repairs a tampered cache by re-downloading and fails closed on a bad download", async () => {
     const root = fixture();
     const bytes = Buffer.from("reviewed fixture");
     const asset = { asset: "fixture.zip", url: "https://invalid.example/fixture", bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
     writeFileSync(join(root, asset.asset), bytes);
-    const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+    const fetch = vi.fn(async () => new Response(bytes)); vi.stubGlobal("fetch", fetch);
     await expect(releaseBytes(asset, root)).resolves.toEqual(bytes);
-    writeFileSync(join(root, asset.asset), Buffer.alloc(bytes.length));
-    await expect(releaseBytes(asset, root)).rejects.toThrow(/SHA-256/);
     expect(fetch).not.toHaveBeenCalled();
+    writeFileSync(join(root, asset.asset), Buffer.alloc(bytes.length));
+    // Same-size tampering is a cache miss, never a dead end: the pinned
+    // download repairs the entry.
+    await expect(releaseBytes(asset, root)).resolves.toEqual(bytes);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(readFileSync(join(root, asset.asset))).toEqual(bytes);
+    writeFileSync(join(root, asset.asset), Buffer.alloc(bytes.length));
+    fetch.mockResolvedValueOnce(new Response(Buffer.alloc(bytes.length)));
+    await expect(releaseBytes(asset, root)).rejects.toThrow(/SHA-256/);
     expect(() => verifyAssetBytes(bytes.subarray(1), asset)).toThrow(/size/);
   });
 
@@ -117,6 +127,9 @@ describe("pinned desktop browser preparation", () => {
     const spec = browserBundleSpec("linux-x64");
     writeFileSync(join(cache, spec.engine.asset), "bad");
     writeFileSync(join(cache, spec.chrome.asset), "bad");
+    // Invalid cache entries are deleted and re-downloaded; a download that
+    // also fails verification keeps the failure local to this run.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad")));
     await expect(stageBrowserTarget(root, "linux-x64", { cacheDirectory: cache })).rejects.toThrow(/verification/);
     expect(readFileSync(join(destination, "existing"), "utf8")).toBe("previous complete bundle");
   });

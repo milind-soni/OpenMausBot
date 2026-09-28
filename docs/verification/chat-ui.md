@@ -89,6 +89,11 @@ What the screenshot looks like when the recipe passes (`evidence/chat-ui/chat-ui
 
 The permanent form of this recipe is `scripts/testing/control-omb-ui.e2e.test.ts`:
 
+The fixture also hit-tests the rendered empty band beside **This run**. It
+must target the conversation rather than the transparent dock, while points
+inside the card and composer still target those controls. This checks browser
+pointer targeting, not native OS wheel delivery.
+
 ```sh
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts
 ```
@@ -131,6 +136,37 @@ It runs when an agent-browser binary resolves and is skipped with a printed
 reason otherwise; `OMB_UI_E2E=1` forces the verified download. The `ui-smoke`
 job in `.github/workflows/ci.yml` runs it on Ubuntu 24.04 and uploads the
 screenshot; it is not one of the required checks.
+
+## Thinking timer across thread switches
+
+`scripts/testing/thinking-timer-ui.e2e.test.ts` holds the working row's
+elapsed readout to the server's `turnStartedAt` stamp. It launches the full
+app with the fake engine in `hang` mode, so a sent turn stays officially in
+flight and the bot stays busy with no reply arriving. A second thread is
+created through the same `POST /api/bots/:id/tasks` the sidebar's
+**New thread** dispatches, the bot's thread list is expanded through its
+chevron, and the test switches to the idle thread and back mid-turn. The
+readout before the switch, the readout after the return, and the stamp on
+the wire are compared: the count must resume from the stamp (13+ seconds
+in), never from the moment of re-selection, and the stamp itself must not
+move while the turn runs. A screenshot of the anchored readout is kept as
+evidence.
+
+Groups never showed the readout at all — their turns run on the group's
+busy slot, not on a member's task, so there was no stamp to count from.
+The second test in the same file gives groups their own: a one-member
+group is created through the same `POST /api/groups` the sidebar's group
+creation dispatches (with setup completed, so the composer is live at
+once), a message routes to the default responder, and the group's claim
+of its speaker — the `busyBotId` transition the server stamps as
+`turnStartedAt` on the group, cleared again when the group goes idle —
+must appear in the readout. The test switches to the member's 1:1 thread
+and back mid-turn and holds the resumed readout to the same claim stamp,
+keeping a second screenshot.
+
+```sh
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/thinking-timer-ui.e2e.test.ts
+```
 
 ## Paused-frame stream buffering
 
@@ -176,6 +212,34 @@ until agent-browser no longer lists it), then the preview, then the fixture,
 and removes only its data directory; the server log stays at the printed path
 and the tools directory keeps the downloads. Every verb refuses a handle whose
 launch has stopped.
+
+## Queued edits and Claude update recovery
+
+The queued-message Edit action must remove the server's held send before
+returning its text to the same thread's draft, ahead of any existing text.
+A phone's `404 no such queued message` response retires a stale queue row,
+but must return **false** for editing: those words may already be running.
+The client regressions cover that distinction and successful cancellation:
+
+```sh
+cd ios && swift test --filter QueuedSendClientTests
+# From android/ with JDK 17 and the Android SDK configured:
+./gradlew :core:test --tests '*SessionP1Test*'
+```
+
+To exercise the desktop Claude update card without an actual provider,
+launch an isolated UI with `FAKE_CLAUDE_MODE=api-error` and
+`FAKE_CLAUDE_API_ERROR="API Error: 400 Claude Code 2.1.268 does not support this model; version 2.1.280 or newer is required."`.
+Send one short message, then click **Update Claude for me**. The fake updater
+must report its synthetic version and the card must offer **Retry**, even
+when a digest follows the error. This proves the update request and recovery
+UI, not a real Claude installation or a successful provider retry.
+
+The native transcript suites also exercise wrapper-free pasted text and the
+update card with offline data. Android drives a failed update and a successful
+retry against loopback responses; iOS checks the manual command path in a
+disposable simulator. See [iOS](ios-transcript.md) and
+[Android](android-transcript.md).
 
 ## What this proves, and what it does not
 

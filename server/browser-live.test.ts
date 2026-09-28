@@ -96,7 +96,9 @@ describe("browser viewer protocol boundary", () => {
   });
   it("projects frames and tab/status fields, never engine extras or raw error messages", () => {
     expect(normalizeBrowserLiveMessage({ ...frame, password: "secret" })).toEqual({ type: "frame", seq: 1, data: "/9j/AAAA", format: "jpeg", metadata: { ...frame.metadata, scrollOffsetX: 0, scrollOffsetY: 0 } });
-    expect(normalizeBrowserLiveMessage({ type: "error", message: "secret arguments" })).not.toHaveProperty("message", "secret arguments");
+    expect(normalizeBrowserLiveMessage({ type: "error", message: "secret arguments" })).toEqual({
+      type: "error", retryable: true, message: "The browser stream was interrupted.",
+    });
     expect(normalizeBrowserLiveMessage({ type: "tabs", tabs: [{ tabId: "t1", title: "Page", url: "https://user:secret@example.com/", active: true, targetId: "private" }] })).toEqual({ type: "tabs", tabs: [{ tabId: "t1", title: "Page", url: "https://example.com/", active: true }] });
     expect(normalizeBrowserLiveMessage({ type: "status", connected: true, engine: "private" })).not.toHaveProperty("engine");
   });

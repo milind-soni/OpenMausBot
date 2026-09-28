@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN } from "./wire.ts";
+
 export const MAX_TEAM_BACKUP_BYTES = 50 * 1024 * 1024;
 export const TEAM_BACKUP_CONTENTS = "Bot profiles, instructions, sections, rooms, playbooks, routines, each bot's memory (MEMORY.md, topic notes and daily logs) and conversation text (all tasks and branches).";
 export const TEAM_BACKUP_EXCLUSIONS = "Files, images, custom avatars, account connections, model settings and permissions are not included. Action cards are saved as text. Memory is saved with secrets removed. Imported routines start paused.";
@@ -22,8 +24,13 @@ const task = z.object({
   key,
   title: z.string().max(2_000),
   createdAt: timestamp,
+  // Travels only when the first message already named this task, so a
+  // restore cannot re-arm one generated title on a row that used it.
+  titleFromFirstMessage: z.literal(true).optional(),
   openedBy: z.object({ botId: key, name, at: timestamp, kind: z.enum(["pair", "work"]).optional() }).optional(),
   closedBy: z.object({ botId: key, name, at: timestamp }).optional(),
+  /** Only true travels. Absence is unpinned, including backups from before pins. */
+  pinned: z.literal(true).optional(),
   activeLeafId: key.nullable(),
   messages: z.array(message).max(100_000),
 });
@@ -55,6 +62,15 @@ const memory = z.object({
   logs: z.array(z.object({ name: z.string().regex(/^\d{4}-\d{2}-\d{2}\.md$/), text: memoryText })).max(10_000),
 });
 
+/** The private backup is the one portable format grants travel in, so the
+ * shape is checked with the same patterns the store validates patches
+ * against. Shareable exports never carry grants at all, and an import
+ * always lands bots grant-less whatever the file says. */
+const connectorTools = z.record(
+  z.string().regex(CONNECTOR_SLUG_PATTERN),
+  z.object({ tools: z.union([z.literal("*"), z.array(z.string().regex(CONNECTOR_TOOL_NAME_PATTERN)).min(1).max(500)]) }),
+);
+
 const backupSchema = z.object({
   format: z.literal("openmaus.backup"),
   version: z.literal(1),
@@ -75,6 +91,7 @@ const backupSchema = z.object({
     chiefOfStaff: z.boolean(),
     hidden: z.boolean(),
     playbooks: z.array(playbook).max(200),
+    connectorTools: connectorTools.optional(),
     memory: memory.optional(),
   })).min(1).max(200),
   groups: z.array(z.object({

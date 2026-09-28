@@ -89,16 +89,17 @@ the public endpoint and possible connector download. The pairing page and
 basic server identity are public; chat and settings require pairing.
 Tailscale must already be installed and signed in on both devices.
 
-After the HTTPS connection is checked, scan the QR with your phone's
-Camera: use Safari on iPhone/iPad or a web browser on Android. An installed
-OpenMausBot iOS app can also scan or accept the full link. This CLI link
-does not work with the current Android native pairing scanner. Choose
-Connect on the phone; scanning alone is not a completed pairing. Codes
+After the HTTPS connection is checked, scan the QR with your phone. When
+you pair an Android phone the QR is an app link, so scan it inside the
+OpenMausBot app; the web address is printed beside it if you would rather
+use a browser. On iPhone or iPad, scan with Camera for Safari, or use the
+app's own scanner. Choose Connect on the phone; scanning alone is not a
+completed pairing. Codes
 are private, single-use, and expire after five minutes. Guided phone
 access permits chat and approvals, not settings or pairing administration.
 Localhost and a bare LAN address cannot connect your phone to this server.
 
-Later launches reuse your saved choices and open the local workspace.
+Later launches reuse your saved choices and open OpenMausBot on this computer.
 Keep the terminal open: this is a foreground server, not a background
 service. Ctrl-C stops the server without deleting saved work. Automatic
 browser opening uses only the local address; it is skipped for SSH and
@@ -109,7 +110,7 @@ openmausbot setup          # reconfigure AI and optional phone access; not a res
 openmausbot --no-open      # do not open a browser
 openmausbot --local        # ignore saved remote access for this launch
 openmausbot --no-pair      # suppress phone prompts and invitations
-openmausbot pair           # another phone while the HTTPS workspace is running
+openmausbot pair           # another phone while the HTTPS server is running
 openmausbot sessions       # list devices; sessions revoke ID signs one out
 openmausbot serve          # no onboarding prompts; explicit remote flags for services
 \`\`\`
@@ -120,7 +121,8 @@ turn off saved remote access; use \`--local\` for that on a new launch.
 With a custom \`--data-dir\` or \`--port\`, keep using those options when
 starting and pairing.
 
-API services include OpenAI, OpenRouter, Groq, and compatible endpoints.
+API services include OpenAI, OpenRouter, Groq, and compatible
+endpoints.
 API connections currently support chat only. Setup asks before a short,
 potentially billable API test; native setup confirms sign-in, with model
 access checked when you send a message. API billing is separate from

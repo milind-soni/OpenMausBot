@@ -7,6 +7,7 @@
 // typing, screenshots, accessibility, or window discovery.
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { lstatSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -93,6 +94,29 @@ export function perBotLocalVmTarget(botId: string): LocalVmTarget {
     viewerPort: null,
     label: digest,
   };
+}
+
+/** A pool-mode seat (issue #1654): one of N desktops shared by every
+ * conversation, addressed by seat index. Identities stay disjoint from the
+ * shared singleton and from per-bot digests, so discovery, labels, and lease
+ * lanes never confuse the three modes. */
+export function poolLocalVmTarget(seat: number): LocalVmTarget {
+  return {
+    key: `pool:${seat}`,
+    containerName: `${CONTAINER}-p${seat}`,
+    workspaceDir: join(DATA_DIR, "vm-homes", `pool-${seat}`),
+    viewerPort: null,
+    label: `pool-${seat}`,
+  };
+}
+
+/** Only provisioning creates this durable directory; idle removal keeps it. */
+export function localVmWorkspaceExists(target: LocalVmTarget): boolean {
+  try {
+    return lstatSync(target.workspaceDir, { throwIfNoEntry: false })?.isDirectory() === true;
+  } catch {
+    return false;
+  }
 }
 
 const LINUX_WHEELS = {
@@ -364,6 +388,14 @@ export function localVmRecreatableOnDemand(
     && status.create_supported;
 }
 
+/** Whether Auto may attach this Local VM without a person choosing it: the
+ * desktop is ready, or its image is prepared and the container can simply be
+ * recreated after idling away. Anything else — no runtime, daemon down, image
+ * never prepared, an unmanaged or unsafe container — stays the person's call. */
+export function autoLocalVmAttachable(status: ContainerComputerStatus): boolean {
+  return status.ready === true || localVmRecreatableOnDemand(status);
+}
+
 function statusProblem(status: ContainerComputerStatus): string | null {
   if (!status.runtime) return "Install a supported container runtime first";
   if (!status.daemonUp) return `Start ${status.runtime} first`;
@@ -376,7 +408,7 @@ function statusProblem(status: ContainerComputerStatus): string | null {
   if (!status.managed) return "The existing container was not created by OpenMausBot; recreate it";
   if (status.network === "unsafe") return "The existing Local VM exposes its viewer publicly; recreate it";
   if (status.security === "unsafe") return "The existing Local VM is missing safety limits; recreate it";
-  if (status.persistence === "unsafe") return "The existing Local VM is missing its durable workspace; recreate it";
+  if (status.persistence === "unsafe") return "The existing Local VM is missing its durable folder; recreate it";
   if (status.container === "stopped") return "This desktop image cannot safely resume; recreate the Local VM";
   if (status.desktop_error) return `The Local VM desktop failed to start: ${status.desktop_error}`;
   if (!status.desktopReady) return "The Local VM started, but Cua Driver is not ready yet";
@@ -1120,6 +1152,86 @@ const screenshotStatusCache = new Map<
 
 const containerMcpPath = SPAWNED_PROXIES.containerMcp;
 
+export interface ContainerExecResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+type ContainerExecRunner = (
+  command: string,
+  args: string[],
+  options: { timeout: number },
+) => Promise<{ stdout: string; stderr: string; code: number }>;
+
+const EXEC_DEFAULT_SECONDS = 60;
+const EXEC_MAX_SECONDS = 300;
+const EXEC_OUTPUT_LIMIT = 20_000;
+
+/** Keep the start and the end: a failure message is nearly always at the end. */
+export function clipExecOutput(text: string, limit = EXEC_OUTPUT_LIMIT): string {
+  if (text.length <= limit) return text;
+  const head = Math.floor(limit / 5);
+  return `${text.slice(0, head)}\n… ${text.length - limit} characters omitted …\n${text.slice(text.length - (limit - head))}`;
+}
+
+const defaultExecRunner: ContainerExecRunner = async (command, args, options) => {
+  const resolved = resolveCliSpawn(command, args);
+  try {
+    const { stdout, stderr } = await run(resolved.command, resolved.args, {
+      timeout: options.timeout,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      env: { ...process.env, PATH: augmentedPath() },
+    });
+    return { stdout, stderr, code: 0 };
+  } catch (error) {
+    const failure = error as { stdout?: string; stderr?: string; code?: unknown; killed?: boolean; message?: string };
+    // A non-zero exit still carries the output; anything else (runtime missing,
+    // client killed) is a real failure to run at all.
+    if (typeof failure.code === "number") {
+      return { stdout: failure.stdout ?? "", stderr: failure.stderr ?? "", code: failure.code };
+    }
+    throw Object.assign(new Error(failure.killed ? "the command client timed out" : failure.message ?? "could not run the command"), { status: 502 });
+  }
+};
+
+/** Run one shell command inside a Local VM as the desktop user, in its durable
+ * workspace, and return the exit code and text output. Bots use this instead of
+ * typing into a terminal window and reading screenshots. The limit is enforced
+ * inside the container so a runaway process is really stopped. */
+export async function containerExec(
+  target: LocalVmTarget,
+  command: string,
+  options: { timeoutSeconds?: number; runtime?: Runtime; exec?: ContainerExecRunner } = {},
+): Promise<ContainerExecResult> {
+  if (!command.trim()) throw Object.assign(new Error("command is required"), { status: 400 });
+  if (command.length > 20_000) throw Object.assign(new Error("command is too long"), { status: 400 });
+  if (options.timeoutSeconds !== undefined && !Number.isFinite(options.timeoutSeconds)) {
+    throw Object.assign(new Error("timeout_seconds must be finite"), { status: 400 });
+  }
+  const runtime = options.runtime ?? (await containerRuntimeStatus()).runtime;
+  if (!runtime) throw Object.assign(new Error("No container runtime is available for the Local VM"), { status: 409 });
+  const seconds = Math.min(Math.max(Math.floor(options.timeoutSeconds ?? EXEC_DEFAULT_SECONDS), 1), EXEC_MAX_SECONDS);
+  const result = await (options.exec ?? defaultExecRunner)(
+    runtime,
+    [
+      "exec",
+      "-u", "cua",
+      "-w", VM_WORKSPACE_GUEST,
+      "-e", "HOME=/home/cua",
+      "-e", `DISPLAY=${DISPLAY}`,
+      target.containerName,
+      "timeout", "-k", "5", String(seconds),
+      "sh", "-lc", command,
+    ],
+    { timeout: (seconds + 20) * 1000 },
+  );
+  const timedOut = result.code === 124 || result.code === 137;
+  return { exitCode: result.code, stdout: clipExecOutput(result.stdout), stderr: clipExecOutput(result.stderr), timedOut };
+}
+
 /** Spawn contract handed directly to agent runtimes. The tiny host wrapper
  * only preserves stdio through the container CLI; Cua Driver owns the MCP
  * protocol and every computer tool. */
@@ -1197,20 +1309,5 @@ export function setupCommands(
     stop: command(["stop", target.containerName]),
     remove: command(["rm", runtime === "container" ? "--force" : "-f", target.containerName]),
     view: target.viewerPort ? `http://127.0.0.1:${target.viewerPort}/vnc.html` : "",
-  };
-}
-
-/** Cloud boxes still use OpenMausBot's high-latency REST adapter. Local VMs
- * bypass it and mount Cua Driver's official MCP server through
- * containerComputerMcp(). */
-export function computerProxyEnv(
-  computer: { boxId?: string; token?: string; control?: { url: string; token: string } },
-): NodeJS.ProcessEnv {
-  return {
-    OGB_BOX_ID: computer.boxId ?? "",
-    OGB_BOX_TOKEN: computer.token ?? "",
-    ...(computer.control
-      ? { OMB_CONTROL_URL: computer.control.url, OMB_CONTROL_TOKEN: computer.control.token }
-      : {}),
   };
 }

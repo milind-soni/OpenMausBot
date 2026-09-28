@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeRun, groupActivityRuns, groupTranscript } from "./activity-runs";
+import { describeRun, groupActivityRuns, groupTranscript, isRecoveryActivity } from "./activity-runs";
 import type { Message } from "@/state/store";
 
 let seq = 0;
@@ -46,6 +46,18 @@ describe("groupActivityRuns", () => {
   it("never folds a failed turn, which renders as an error not a tool run", () => {
     const items = groupActivityRuns([tool("Edit"), tool("error: the CLI exited")]);
     expect(items.map((i) => i.kind)).toEqual(["message", "message"]);
+  });
+
+  it("keeps recovery visible between successful tool runs", () => {
+    const recovery = tool("recovery: Automatic recovery: trying a backup once.");
+    const messages = [tool("Read"), tool("Edit"), recovery, tool("Bash"), tool("Write")];
+    expect(isRecoveryActivity(recovery)).toBe(true);
+    expect(isRecoveryActivity(text("recovery: ordinary text"))).toBe(false);
+    for (const group of [groupActivityRuns, groupTranscript]) {
+      const items = group(messages);
+      expect(items.map(item => item.kind)).toEqual(["run", "message", "run"]);
+      expect(items[1]).toEqual({ kind: "message", message: recovery });
+    }
   });
 
   it("keeps ordinary failed tools visible between successful runs", () => {

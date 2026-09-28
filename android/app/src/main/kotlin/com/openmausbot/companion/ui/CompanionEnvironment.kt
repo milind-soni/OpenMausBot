@@ -3,6 +3,7 @@ package com.openmausbot.companion.ui
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.openmausbot.companion.audio.VoicePreviewPlayer
+import com.openmausbot.companion.audio.VoiceNotePlayer
 import com.openmausbot.companion.avatar.AvatarImageStore
 import com.openmausbot.companion.core.ExportedTranscript
 import com.openmausbot.companion.core.Session
@@ -113,6 +114,8 @@ class CompanionEnvironment(
     val avatars: AvatarImageStore,
     /** One-at-a-time TTS preview; bind to the profile screen lifecycle. */
     val voicePreview: VoicePreviewPlayer,
+    /** One-at-a-time transcript voice notes; app-scoped, pauses in place. */
+    val voiceNotes: VoiceNotePlayer,
     /** Composer dictation; bind to the chat screen lifecycle. */
     val dictation: SpeechDictation,
     /**

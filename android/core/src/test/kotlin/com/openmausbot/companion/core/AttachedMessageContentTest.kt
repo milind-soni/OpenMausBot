@@ -198,4 +198,18 @@ ${'\t'}<attached-file path="/tmp/tab.md" />
 
         assertEquals("Project.pdf", parsed.attachments.single().name)
     }
+
+    @Test
+    fun `hides the pasted-text wrapper but keeps what was pasted`() {
+        val source = "this is for 31/08/26\n\n<pasted-text index=\"1\">\nWe, personally, been using it\n\nsecond paragraph\n</pasted-text>"
+        val parsed = AttachedMessageContent.parse(source)
+        assertEquals("this is for 31/08/26\n\nWe, personally, been using it\n\nsecond paragraph", parsed.text)
+        assertTrue(parsed.attachments.isEmpty())
+    }
+
+    @Test
+    fun `keeps a literal closing tag that is part of the paste`() {
+        val source = "<pasted-text index=\"2\">\na literal </pasted-text> mention\n</pasted-text>"
+        assertEquals("a literal </pasted-text> mention\n</pasted-text>", AttachedMessageContent.parse(source).text)
+    }
 }

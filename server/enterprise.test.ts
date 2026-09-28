@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createWorkspaceAccess, describeEdition, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, loadEnterpriseLayer } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionForMembers, editionStatus, enterpriseLayerDirs, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer } from "./enterprise.ts";
 import { SessionRegistry } from "./sessions.ts";
 
 const dirs: string[] = [];
@@ -23,6 +23,17 @@ afterEach(async () => {
 });
 
 describe("enterprise hook point", () => {
+  it("requires an explicit operator policy on a complete portal-managed non-desktop workspace", () => {
+    const env = { OMB_ADMIN_URL: "https://admin.example.test", OMB_ADMIN_WORKSPACE: "acme", OMB_PUBLIC_URL: "https://acme.example.test",
+      OMB_ADMIN_MEMBERSHIP: "portal", OMB_SHARED_WORKSPACE_FULL_ACCESS: "1" };
+    expect(sharedWorkspaceFullAccessConfigured(env)).toBe(true);
+    for (const patch of [
+      { OMB_SHARED_WORKSPACE_FULL_ACCESS: undefined }, { OMB_SHARED_WORKSPACE_FULL_ACCESS: "true" },
+      { OMB_DESKTOP_PARENT: "1" }, { OMB_ADMIN_MEMBERSHIP: "local" }, { OMB_ADMIN_MEMBERSHIP: undefined },
+      { OMB_ADMIN_URL: "http://admin.example.test" }, { OMB_PUBLIC_URL: "" }, { OMB_ADMIN_WORKSPACE: "" },
+    ]) expect(sharedWorkspaceFullAccessConfigured({ ...env, ...patch })).toBe(false);
+    expect(sharedWorkspaceFullAccessConfigured({ OMB_SHARED_WORKSPACE_FULL_ACCESS: "1" })).toBe(false);
+  });
   it("does not create a hosted bridge unless opted in, and marks partial configuration as hosted", () => {
     expect(hostedWorkspaceConfigured({})).toBe(false);
     expect(hostedWorkspaceConfigured({ OMB_PUBLIC_URL: "https://legacy.example.test" })).toBe(false);
@@ -79,7 +90,7 @@ describe("enterprise hook point", () => {
     }`);
     const status = await loadEnterpriseLayer({ dir, licenseKey: "good" });
     expect(status).toEqual({ edition: "enterprise", customer: "Acme", features: ["sso", "whitelabel"], expiresAt: "2027-01-01" });
-    expect(editionStatus()).toEqual(status);
+    expect(editionStatus(new Date("2026-09-23T12:00:00Z").getTime())).toEqual({ ...status, expiresInDays: 100 });
     expect(entitled("whitelabel")).toBe(true);
     expect(entitled("budgets")).toBe(false);
     expect(describeEdition(status)).toBe("openmausbot enterprise edition for Acme until 2027-01-01: sso, whitelabel");
@@ -92,17 +103,78 @@ describe("enterprise hook point", () => {
     expect(describeEdition(status)).toBe("openmausbot enterprise edition for Built: admin");
   });
 
-  it("stops granting features the moment the license expires, without a restart", async () => {
-    const dir = fakeLayer(`export function register() { return { customer: "Acme", features: ["sso"], expiresAt: "2027-01-01" }; }`);
+  it("warns for 30 days, keeps working for a 7-day grace, then stops granting features without a restart", async () => {
+    const dir = fakeLayer(`export function register({ graceDays }) {
+      if (graceDays !== 7) throw new Error("core must ask for its grace period");
+      return { customer: "Acme", features: ["sso"], expiresAt: "2027-01-01" };
+    }`);
     await loadEnterpriseLayer({ dir, licenseKey: "k" });
-    const before = new Date("2026-12-31T23:59:59Z").getTime();
-    const after = new Date("2027-01-01T00:00:00Z").getTime();
-    expect(entitled("sso", before)).toBe(true);
+    const at = (iso: string) => new Date(iso).getTime();
+    // far from expiry: the day count is there, the warning is not
+    const quiet = editionStatus(at("2026-11-01T00:00:00Z"));
+    expect(quiet).toMatchObject({ edition: "enterprise", expiresInDays: 61 });
+    expect(quiet.notice).toBeUndefined();
+    expect(licenseWarning(quiet)).toBeNull();
+    // inside the warning window
+    const soon = editionStatus(at("2026-12-02T00:00:00Z"));
+    expect(soon).toMatchObject({ edition: "enterprise", expiresInDays: 30 });
+    expect(licenseWarning(soon)).toBe("OMB_LICENSE_KEY expires on 2027-01-01 (in 30 days); renew it before then to keep enterprise features");
+    expect(licenseWarning(editionStatus(at("2026-12-31T12:00:00Z")))).toContain("(in 1 day)");
+    expect(entitled("sso", at("2026-12-31T23:59:59Z"))).toBe(true);
+    // expired, in grace: still enterprise, still entitled, and it says so
+    const grace = editionStatus(at("2027-01-03T00:00:00Z"));
+    expect(grace).toMatchObject({ edition: "enterprise", features: ["sso"], expiresInDays: -2, graceEndsAt: "2027-01-08" });
+    expect(grace.notice).toBe("OMB_LICENSE_KEY expired on 2027-01-01; enterprise features keep working until 2027-01-08 while it is renewed");
+    expect(licenseWarning(grace)).toContain("keep working until 2027-01-08");
+    expect(entitled("sso", at("2027-01-01T00:00:00Z"))).toBe(true);
+    expect(entitled("sso", at("2027-01-07T23:59:59Z"))).toBe(true);
+    // grace over
+    const after = at("2027-01-08T00:00:00Z");
     expect(entitled("sso", after)).toBe(false);
-    expect(editionStatus(before).edition).toBe("enterprise");
     const lapsed = editionStatus(after);
     expect(lapsed.edition).toBe("oss");
+    expect(lapsed.expiresInDays).toBeUndefined();
     expect(lapsed.notice).toMatch(/expired on 2027-01-01; renew it/);
+    expect(licenseWarning(lapsed)).toBeNull();
+    // members see what is entitled, not the countdown, grace date or notice
+    expect(editionForMembers(grace)).toEqual({ edition: "enterprise", customer: "Acme", features: ["sso"], expiresAt: "2027-01-01" });
+    expect(editionForMembers(lapsed)).toEqual({ edition: "oss", features: [] });
+  });
+
+  it("never warns about a perpetual key or the open-source edition", async () => {
+    const dir = fakeLayer(`export function register() { return { customer: "Acme", features: ["sso"], expiresAt: null }; }`);
+    await loadEnterpriseLayer({ dir, licenseKey: "k" });
+    const perpetual = editionStatus(new Date("2099-01-01").getTime());
+    expect(perpetual.expiresInDays).toBeUndefined();
+    expect(licenseWarning(perpetual)).toBeNull();
+    expect(licenseWarning({ edition: "oss", features: [] })).toBeNull();
+  });
+
+  it("finds the layer beside the server root, then inside it (the Docker and desktop layout), unless OMB_ENTERPRISE_DIR says where", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-layout-"));
+    dirs.push(root);
+    const serverRoot = join(root, "dist-server");
+    const layer = (dir: string, customer: string) => {
+      mkdirSync(join(dir, "server"), { recursive: true });
+      writeFileSync(join(dir, "server", "index.js"), `export function register() { return { customer: "${customer}", features: ["admin"], expiresAt: null }; }`);
+    };
+    expect(enterpriseLayerDirs({}, serverRoot)).toEqual([join(root, "enterprise"), join(serverRoot, "enterprise")]);
+    expect(enterpriseLayerDirs({ OMB_ENTERPRISE_DIR: "/opt/layer" }, serverRoot)).toEqual(["/opt/layer"]);
+    // nothing anywhere: the notice names every place it looked
+    const none = await loadEnterpriseLayer({ env: {}, serverRoot, licenseKey: "k" });
+    expect(none.notice).toBe(`OMB_LICENSE_KEY is set but no enterprise layer exists at ${join(root, "enterprise")} or ${join(serverRoot, "enterprise")}`);
+    // the image: only dist-server/enterprise exists
+    layer(join(serverRoot, "enterprise"), "Inside");
+    expect(await loadEnterpriseLayer({ env: {}, serverRoot, licenseKey: "k" })).toMatchObject({ edition: "enterprise", customer: "Inside" });
+    // a checkout or the npm package: the sibling wins
+    layer(join(root, "enterprise"), "Sibling");
+    expect(await loadEnterpriseLayer({ env: {}, serverRoot, licenseKey: "k" })).toMatchObject({ customer: "Sibling" });
+    // an explicit directory is the only place looked at
+    const explicit = join(root, "elsewhere");
+    expect((await loadEnterpriseLayer({ env: { OMB_ENTERPRISE_DIR: explicit }, serverRoot, licenseKey: "k" })).notice)
+      .toBe(`OMB_LICENSE_KEY is set but no enterprise layer exists at ${explicit}`);
+    layer(explicit, "Explicit");
+    expect(await loadEnterpriseLayer({ env: { OMB_ENTERPRISE_DIR: explicit }, serverRoot, licenseKey: "k" })).toMatchObject({ customer: "Explicit" });
   });
 
   it("degrades to open-source with the layer's own message when the key is refused", async () => {

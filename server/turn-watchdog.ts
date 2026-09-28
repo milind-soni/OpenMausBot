@@ -1,6 +1,6 @@
-// Stall watchdog for dispatched turns.
+// Stall watchdog for admitted turns, including setup.
 //
-// ask_bot has a 4-minute ceiling, while room turns have a separately
+// ask_bot has a short inline wait budget, while room turns have a separately
 // configurable absolute ceiling. The main 1:1 path had none: a wedged CLI
 // (hung network call, dead MCP child,
 // a provider that stops streaming without exiting) left its bot busy
@@ -15,6 +15,7 @@ export interface WatchedTurn {
   startedAt: number;
   lastEventAt: number;
   waitingOnHuman: boolean;
+  waitingOnComputer: boolean;
 }
 
 export interface TurnWatchdogOptions {
@@ -53,10 +54,10 @@ export class TurnWatchdog {
     this.turns.clear();
   }
 
-  /** A turn was dispatched on this thread. */
+  /** A turn was admitted on this thread. */
   watch(threadId: string, botId: string): void {
     const at = this.now();
-    this.turns.set(threadId, { threadId, botId, startedAt: at, lastEventAt: at, waitingOnHuman: false });
+    this.turns.set(threadId, { threadId, botId, startedAt: at, lastEventAt: at, waitingOnHuman: false, waitingOnComputer: false });
   }
 
   /** Any provider event for the thread proves the turn is alive. */
@@ -74,6 +75,15 @@ export class TurnWatchdog {
     turn.lastEventAt = this.now();
   }
 
+  /** Shared-computer waits have their own bounded deadline. Waiting for
+   * another turn to release the computer is not a silent provider stall. */
+  setWaitingOnComputer(threadId: string, waiting: boolean): void {
+    const turn = this.turns.get(threadId);
+    if (!turn) return;
+    turn.waitingOnComputer = waiting;
+    turn.lastEventAt = this.now();
+  }
+
   /** The turn settled normally — stop watching it. */
   settle(threadId: string): void {
     this.turns.delete(threadId);
@@ -87,7 +97,7 @@ export class TurnWatchdog {
   sweep(): void {
     const at = this.now();
     for (const turn of this.turns.values()) {
-      if (turn.waitingOnHuman) continue;
+      if (turn.waitingOnHuman || turn.waitingOnComputer) continue;
       if (at - turn.lastEventAt < this.opts.stallMs) continue;
       this.turns.delete(turn.threadId);
       this.opts.onStall(turn);

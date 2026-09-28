@@ -302,6 +302,21 @@ export function appendComposerDraft(id: string, text: string): void {
   });
 }
 
+/** Hands a queued message's words back to a thread's composer for editing.
+ * They lead — they were written first — and anything already typed stays
+ * below them after a blank line. Same restore path as appendComposerDraft,
+ * so it lands correctly even if the person switched threads meanwhile. */
+export function prependComposerDraft(id: string, text: string): void {
+  const store = getStore();
+  const current = getDraft(store, id);
+  markDraftEdited(id);
+  restoreComposerDraft(id, {
+    text: current.trim() ? `${text}\n\n${current}` : text,
+    attachments: getDraftAttachments(store, id),
+    channelMode: getDraftChannelMode(store, id),
+  });
+}
+
 /** Append completed uploads directly to the keyed durable draft. This is
  * safe after the Composer that started the upload has unmounted. */
 export function appendDraftAttachments(id: string, additions: Attachment[]): void {

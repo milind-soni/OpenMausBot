@@ -87,6 +87,15 @@ describe("parseBotProfilePatch (both modes)", () => {
     expect(nulled).toEqual({ ok: true, patch: { avatarUrl: undefined } });
   });
 
+  it("accepts a zoom and focus inside the frame and rejects a zoom past 3", () => {
+    expect(parseBotProfilePatch({ avatarZoom: 1.5, avatarFocusX: 0.2, avatarFocusY: 0.8 }, true)).toEqual({
+      ok: true,
+      patch: { avatarZoom: 1.5, avatarFocusX: 0.2, avatarFocusY: 0.8 },
+    });
+    expect(parseBotProfilePatch({ avatarZoom: 4 }, true).ok).toBe(false);
+    expect(parseBotProfilePatch({ avatarFocusX: -0.1 }, true).ok).toBe(false);
+  });
+
   it("maps an avatarCrop issue to the readable message", () => {
     expect(parseBotProfilePatch({ avatarCrop: "hexagon" } as never, true)).toEqual({
       ok: false,

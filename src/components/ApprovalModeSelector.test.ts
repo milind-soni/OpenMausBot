@@ -112,6 +112,19 @@ describe("approval mode selector", () => {
     ]);
   });
 
+  it("keeps the composer trigger icon-only and the settings trigger labeled", () => {
+    const compact = renderToStaticMarkup(createElement(ApprovalModeSelector, {
+      approvalMode: "full", providerName: "Grok", driverKind: "grokAgent", onSelect: () => {},
+    }));
+    expect(compact).toContain('aria-label="Full access for Grok"');
+    expect(compact).toContain('title="Full access"');
+    expect(compact).not.toMatch(/<span class="truncate">Full access<\/span>/);
+    const settings = renderToStaticMarkup(createElement(ApprovalModeSelector, {
+      approvalMode: "full", providerName: "Grok", driverKind: "grokAgent", onSelect: () => {}, wide: true,
+    }));
+    expect(settings).toMatch(/<span class="truncate">Full access<\/span>/);
+  });
+
   it("locks an existing Custom bot to the local packaged desktop", () => {
     expect(approvalModeSelectionRequiresLocalDesktop("custom", false)).toBe(true);
     expect(approvalModeSelectionRequiresLocalDesktop("ask", false)).toBe(false);

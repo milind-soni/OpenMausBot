@@ -6,7 +6,7 @@
 
 **Your own team of AI bots, in a chat app.**
 
-<sub>An open-source version of **Grok Bot** — bring-your-own-agent, local-first, on the models you already have.</sub>
+<sub>An independent, open-source project inspired by **Grok Bot** — bring-your-own-agent, local-first, on the models you already have. Not affiliated with xAI.</sub>
 
 Every bot in the sidebar is a real agent — Claude or Codex running locally under the hood — with its own
 personality, its own model, its own cloud computer, and its own connected apps.
@@ -41,8 +41,8 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 <br>
 
-<a href="https://buy.polar.sh/polar_cl_bbnfWFUrWONIF4HnUpZf1p0if0eUYg3HeXct73b48Yg">
-  <img src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F%20%20Support%20OpenMausBot-any%20amount%20%C2%B7%20or%20monthly-38d591?style=for-the-badge&labelColor=070707" alt="Support OpenMausBot — one-time any amount or monthly, via Polar" height="40">
+<a href="https://github.com/sponsors/milind-soni">
+  <img src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F%20%20Support%20OpenMausBot-GitHub%20Sponsors-38d591?style=for-the-badge&labelColor=070707" alt="Support OpenMausBot via GitHub Sponsors" height="40">
 </a>
 
 <br>
@@ -56,7 +56,7 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 ## Why
 
-One assistant in one box is the wrong shape for agents. OpenMausBot is an open-source take on **Grok Bot** —
+One assistant in one box is the wrong shape for agents. OpenMausBot is an independent, open-source project inspired by **Grok Bot** —
 it keeps the idea (AI as a *messaging app*: a roster of bots you chat with, each with its own personality,
 memory of its thread, model, computer, and apps) and rebuilds it open, local-first, and on the agents you
 already have:
@@ -162,18 +162,68 @@ conversations, permissions, memory, or computer access. Browse the
 [open-source playbook repository](https://github.com/milind-soni/openmausbot-teams) or read its
 [portable format](https://github.com/milind-soni/openmausbot-teams/blob/main/FORMAT.md).
 
+### 🤝 Share a whole team
+
+Right-click a team and choose **Share team…** (or use **Templates → Share**) to save the whole team as one
+file: its bots with their instructions, pictures and skills, group chats, routines, shared instructions,
+Chief of Staff, connection slots and each bot's starter notes (untick them to leave them out). The dialog
+shows exactly what the file holds before you save it. Chat history, keys and passwords, model choices and
+computers never go in, and anything that looks like a secret is removed from the text. Whoever imports it
+gets new bots on Ask, skills switched off and routines paused. See [docs/team-sharing.md](docs/team-sharing.md).
+Desktops connected to an organization also get **Templates → From {Organization}**: the packages its Admin shares,
+added with one click, skills switched on. See [docs/org-library.md](docs/org-library.md).
+Your New bot defaults can travel too, as a **preset bot** that appears in New bot (in a team file, or on
+their own with **Share as preset…**). See [docs/presets.md](docs/presets.md).
+
 ### 🎧 Bots that talk back
 
 Press the speaker on any reply, or switch a bot to read its answers out as they land — so you can listen
 to what ran overnight while you make breakfast. Hit **call** and it's a conversation: it hears you, tells
 you what it's doing while it works, and asks for approvals out loud.
 
-Bring your own ElevenLabs key — paste it once in App Settings, pick a voice, and every bot can talk.
+Choose ElevenLabs, Fish Audio, Grok (xAI), built-in Mac voices, or a local Chatterbox server in an agent profile. Paste a
+cloud key once when needed, pick a voice, and every bot can talk.
 Give a bot its own voice and a channel stops sounding like one person.
+
+For Grok, save your xAI API key in **Settings → Connections**, then choose **Grok (xAI)**
+and a voice under the bot’s **Voice & alerts**. It reuses that host-side key and returns MP3
+audio for spoken replies and calls. Language is detected automatically from the reply text;
+quality varies outside xAI’s [officially supported languages](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech).
+This adds speech synthesis to the existing call flow; microphone transcription remains unchanged.
 
 **Also in the box:** streaming replies with tool-run activity chips · native macOS dictation from the
 composer mic (on-device Apple speech recognition — desktop app) · SupaMaus cursor mascots with role-aware
 expressions · screenshots of the bot's work folded into the transcript.
+
+## Powered By
+
+<div align="center">
+
+![Claude](https://img.shields.io/badge/Claude-d97757?logo=claude&logoColor=white)
+![Codex](https://img.shields.io/badge/Codex-000000)
+![Grok](https://img.shields.io/badge/Grok%20CLI-000000?logo=x&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-2B2E3A?logo=electron&logoColor=9FEAF9)
+![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
+![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-0F172A?logo=tailwindcss&logoColor=38BDF8)
+![Composio](https://img.shields.io/badge/Composio-e6493a)
+![Cua](https://img.shields.io/badge/Cua%20Driver-1f2937)
+![ElevenLabs](https://img.shields.io/badge/ElevenLabs-000000?logo=elevenlabs&logoColor=white)
+![Fish Audio](https://img.shields.io/badge/Fish%20Audio-2563eb)
+![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-ea4aaa)
+
+</div>
+
+| Service | Purpose |
+|---|---|
+| **Claude · Codex · Grok** | The agents behind every bot, run through their local CLIs |
+| **Electron** | Desktop shells for macOS, Windows, and Ubuntu |
+| **React + Vite + Tailwind CSS** | The chat app UI and its build |
+| **Boat** ([boat.dev](https://boat.dev)) | Each bot's cloud computer |
+| **Composio** | Connected apps — Gmail, Slack, GitHub, and more |
+| **Cua Driver** | Native computer use on your own machine |
+| **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
+| **GitHub Sponsors** | One-time and monthly project support |
 
 ## How it works
 
@@ -199,7 +249,7 @@ flowchart LR
     BUS -- "one SSE stream" --> UI
     REG --> CL & CX & GR
     CL & CX & GR -- "permission requests" --> BROKER
-    server -- "Box API" --> BOX[("Cloud computer<br/>box.ascii.dev")]
+    server -- "Boat API" --> BOAT[("Cloud computer<br/>boat.dev")]
     server -- "Composio Session" --> APPS[("Gmail · Slack · GitHub · …")]
 ```
 
@@ -208,7 +258,7 @@ flowchart LR
 | Drivers | `server/drivers/` | One per provider: Claude, Codex, and Grok Build over their local CLIs (stream-JSON / JSON-RPC / ACP), plus a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
 | Harness | `server/harness/` | Registry (configs → live instances) and the fan-in event bus every client folds. |
 | API | `server/index.ts` | Bots, turns, approvals, model catalog, computer lifecycle, connectors, config — HTTP + SSE. |
-| Voice | `server/tts/` | ElevenLabs, bring your own key. Runs on the harness so the key never reaches the UI; markdown is rewritten into something worth hearing before it is spoken. |
+| Voice | `server/tts/` | ElevenLabs, Fish Audio, Grok (xAI), built-in Mac voices, or local Chatterbox. Cloud keys stay on the harness; markdown is rewritten into something worth hearing before it is spoken. |
 | App | `src/` | The chat shell. Server-backed store, one reducer, zero client-side transports. |
 | Desktop | `electron/` | macOS, Windows, and Ubuntu shells with an embedded harness and platform capabilities; Apple speech stays macOS-only, Ubuntu Xorg has opt-in local control, and Wayland remains fail-closed. |
 
@@ -264,7 +314,7 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage + verified CUA runtime
 | Capability | macOS | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
 |---|---|---|---|
 | Packaged app, embedded harness, local agent CLIs | Supported | Beta | Beta |
-| Composio and Box/cloud computers | Supported | Beta | Beta |
+| Composio and Boat/cloud computers | Supported | Beta | Beta |
 | Explicit preview-only local screen capture | Supported | Beta | Beta |
 | Bot control of this computer | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate |
 | Native on-device dictation | Supported | Planned | Planned |
@@ -289,10 +339,11 @@ in the sidebar footer) when you want to enable its integration:
 | Credential | What it enables | Where to get it |
 |---|---|---|
 | Composio project key (`ak_…`) | Connect Gmail, GitHub, Slack, Notion, and other apps to your bots | [OpenMausBot Composio setup](docs/composio.md) |
-| Box API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Box API key guide](https://docs.ascii.dev/box/api-keys) |
+| Boat API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Boat API key guide](https://docs.boat.dev/api-keys) |
 | ElevenLabs key | Read replies aloud, and call your bots | [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys) |
+| Fish Audio key | Read replies aloud with Fish Audio voices, and call your bots | [Fish Audio API keys](https://fish.audio/app/api-keys/) |
 
-Composio and Box are third-party services with their own accounts and terms. Box is a paid service after
+Composio and Boat are third-party services with their own accounts and terms. Boat is a paid service after
 its trial, and using a cloud computer may incur charges.
 
 ```sh
@@ -328,7 +379,7 @@ Early but real — the loop works end to end: message → agent → streamed rep
 computer use. macOS, Windows, and Ubuntu 24.04 x64 have released builds; Ubuntu remains a beta with the
 capability limits above. Rough edges to expect: hosted/mobile connectivity is still being built, and webhook
 triggers currently use the local receiver rather than an always-on hosted relay.
-Voice needs an ElevenLabs key, and calls are macOS-only for now (they ride the same on-device dictation as
+Hosted voice needs an ElevenLabs, Fish Audio, or xAI key; built-in Mac and local Chatterbox voices need no cloud key. Calls are macOS-only for now (they ride the same on-device dictation as
 the composer mic) — see [`docs/voice-mode.md`](docs/voice-mode.md) for the design and the known gaps.
 
 Contributions welcome — the driver SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately
@@ -340,9 +391,9 @@ Users can add their own MCP tool servers with zero code via [`docs/custom-mcp-se
 ## Support the project
 
 OpenMausBot is free and open source. If it does real work for you, you can
-[buy the project a coffee or become a monthly supporter](https://buy.polar.sh/polar_cl_bbnfWFUrWONIF4HnUpZf1p0if0eUYg3HeXct73b48Yg) —
-one-time any amount, or monthly. Payments are handled by [Polar](https://polar.sh/supamaus),
-which takes care of receipts and taxes; nothing about the app ever sits behind a paywall.
+[support its development through GitHub Sponsors](https://github.com/sponsors/milind-soni)
+with a one-time contribution or a monthly sponsorship. Your support helps fund ongoing development
+and maintenance; OpenMausBot remains free and open source.
 
 ## Run from a terminal or on a server
 
@@ -356,13 +407,14 @@ openmausbot
 Or use `npx openmausbot` without a global install. First launch guides you with
 arrow-key choices: choose AI access, sign in or paste a hidden API key, choose
 a model, and optionally connect a phone. Next time, the same command reuses your
-saved setup and opens the local workspace. Keep the terminal open; Ctrl-C stops
+saved setup and opens OpenMausBot on this computer. Keep the terminal open; Ctrl-C stops
 the server, not your saved work. Use `--no-open` to skip opening the browser.
 
 Phone access is optional and defaults to skipping. Choose an explicitly
 approved managed public HTTPS endpoint protected by pairing, an existing
-Tailscale connection, or your own HTTPS reverse proxy. Use Safari or an installed
-iOS app on iPhone/iPad; Android uses the web browser for this CLI flow. A phone
+Tailscale connection, or your own HTTPS reverse proxy. Both native apps pair from
+this flow: the QR is an app link when you are connecting an Android phone, and the
+iOS app takes either that or the web link. A browser works on either phone. A phone
 cannot use a localhost link. `--local` ignores saved remote access for one launch;
 `--no-pair` suppresses phone prompts and invitations but does not disable a saved
 remote connection.

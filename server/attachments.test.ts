@@ -24,15 +24,17 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
-  return { ...fs, unlinkSync: vi.fn(fs.unlinkSync) };
+  return { ...fs, unlinkSync: vi.fn(fs.unlinkSync), writeFileSync: vi.fn(fs.writeFileSync) };
 });
 const realUnlink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).unlink;
 const realLink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).link;
 const realUnlinkSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).unlinkSync;
+const realWriteFileSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).writeFileSync;
 afterEach(() => {
   vi.mocked(unlink).mockReset().mockImplementation(realUnlink);
   vi.mocked(link).mockReset().mockImplementation(realLink);
   vi.mocked(unlinkSync).mockReset().mockImplementation(realUnlinkSync);
+  vi.mocked(writeFileSync).mockReset().mockImplementation(realWriteFileSync);
 });
 
 // The module reads DATA_DIR at import time, so the env var must be set
@@ -51,8 +53,10 @@ const {
   deleteAttachment,
   extensionForFileMime,
   extensionForMime,
+  parseAudioRange,
   readAttachment,
   sanitizeSharedFileName,
+  saveAudio,
   saveFile,
   saveImage,
   saveImageUpload,
@@ -144,6 +148,75 @@ describe("saveImage", () => {
     for (const value of ["", "short", "../../escape", `${UPLOAD_A}.png`, "00000000-0000-0000-0000-000000000000"]) {
       expect(() => validateAttachmentUploadId(value)).toThrow(/UUID/);
     }
+  });
+});
+
+describe("saveAudio", () => {
+  beforeEach(() => {
+    resetDir();
+  });
+  afterEach(() => {
+    resetDir();
+  });
+
+  it("persists an mp3 under the attachments dir with a generated name", () => {
+    const saved = saveAudio(Buffer.from("mp3-bytes"), "audio/mpeg");
+    expect(saved.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
+    expect(saved.path.endsWith(".mp3")).toBe(true);
+    expect(saved.bytes).toBe(9);
+    expect(saved.mime).toBe("audio/mpeg");
+    if (process.platform !== "win32") expect(statSync(saved.path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(saved.path).toString()).toBe("mp3-bytes");
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([saved.path.split(/[\\/]/).pop()!]);
+  });
+
+  it("serves a saved note back through readAttachment as audio/mpeg", () => {
+    const saved = saveAudio(Buffer.from("mp3-note!"), "audio/mpeg");
+    const name = saved.path.split(/[\\/]/).pop()!;
+    const back = readAttachment(name);
+    expect(back?.bytes.toString()).toBe("mp3-note!");
+    expect(back?.mime).toBe("audio/mpeg");
+  });
+
+  it("normalizes mime parameters and casing", () => {
+    const saved = saveAudio(Buffer.from("x"), "Audio/MPEG; charset=binary");
+    expect(saved.mime).toBe("audio/mpeg");
+    expect(saved.path.endsWith(".mp3")).toBe(true);
+  });
+
+  it("rejects other audio mimes, empty bodies, and oversize bodies", () => {
+    expect(() => saveAudio(Buffer.from("x"), "audio/wav")).toThrow(/unsupported audio type/);
+    expect(() => saveAudio(Buffer.alloc(0), "audio/mpeg")).toThrow(/empty/);
+    expect(() => saveAudio(Buffer.alloc(FILE_MAX_BYTES + 1), "audio/mpeg")).toThrow(/exceeds/);
+  });
+
+  it("rejects at the aggregate ceiling without leaving partials and releases its reservation", () => {
+    const referenced = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(referenced.path, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
+
+    try {
+      saveAudio(Buffer.from("y"), "audio/mpeg");
+      throw new Error("expected quota rejection");
+    } catch (error) {
+      expect(error).toMatchObject({ status: 507 });
+      expect(error).toHaveProperty("message", expect.stringMatching(/storage is full/));
+    }
+    expect(readdirSync(ATTACHMENTS_DIR).every((name) => !name.endsWith(".partial"))).toBe(true);
+
+    truncateSync(referenced.path, 4);
+    __resetAttachmentAccountingForTests();
+    const note = saveAudio(Buffer.from("note"), "audio/mpeg");
+    expect(statSync(note.path).size).toBe(4);
+  });
+
+  it("cleans up its partial and reservation when the write fails", () => {
+    vi.mocked(writeFileSync).mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+    expect(() => saveAudio(Buffer.from("note"), "audio/mpeg")).toThrow(/disk full/);
+    expect(readdirSync(ATTACHMENTS_DIR).every((name) => !name.endsWith(".partial"))).toBe(true);
+    expect(() => saveAudio(Buffer.from("note"), "audio/mpeg")).not.toThrow();
   });
 });
 
@@ -377,6 +450,51 @@ describe("readAttachment name lock", () => {
     expect(readAttachment("a/b.png")).toBeNull();
     expect(readAttachment("no-extension")).toBeNull();
     expect(readAttachment("uuid.jpeg")).toBeNull(); // saved as .jpg
+    expect(readAttachment("note.wav")).toBeNull(); // only .mp3 audio is written
+  });
+});
+
+describe("parseAudioRange", () => {
+  const SIZE = 1000;
+
+  it("parses bounded, open-ended, and suffix ranges", () => {
+    expect(parseAudioRange("bytes=0-499", SIZE)).toEqual({ kind: "range", start: 0, end: 499 });
+    expect(parseAudioRange("bytes=500-999", SIZE)).toEqual({ kind: "range", start: 500, end: 999 });
+    expect(parseAudioRange("bytes=400-", SIZE)).toEqual({ kind: "range", start: 400, end: 999 });
+    expect(parseAudioRange("bytes=-100", SIZE)).toEqual({ kind: "range", start: 900, end: 999 });
+    // a suffix longer than the file is the whole file
+    expect(parseAudioRange("bytes=-9999", SIZE)).toEqual({ kind: "range", start: 0, end: 999 });
+  });
+
+  it("clamps an end past EOF to the last byte", () => {
+    expect(parseAudioRange("bytes=990-5000", SIZE)).toEqual({ kind: "range", start: 990, end: 999 });
+  });
+
+  it("answers unsatisfiable for a start at or past EOF and a zero suffix", () => {
+    expect(parseAudioRange("bytes=1000-", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseAudioRange("bytes=1000-1200", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseAudioRange("bytes=-0", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseAudioRange("bytes=0-", 0)).toEqual({ kind: "unsatisfiable" });
+  });
+
+  it("ignores absent, malformed, multi-range, and non-bytes headers", () => {
+    expect(parseAudioRange(undefined, SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=-", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=0-99,200-299", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=a-b", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=99-0", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=0 - 99", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("chunks=0-99", SIZE)).toEqual({ kind: "none" });
+    // surrounding OWS is legal per RFC 9110 and common from proxies
+    expect(parseAudioRange("  bytes=0-99  ", SIZE)).toEqual({ kind: "range", start: 0, end: 99 });
+  });
+
+  it("distinguishes an empty suffix from a zero suffix", () => {
+    // no bounds at all is malformed input: answer with the full 200 body
+    expect(parseAudioRange("bytes=-", SIZE)).toEqual({ kind: "none" });
+    // a real zero-length suffix is valid but unsatisfiable, per RFC 9110
+    expect(parseAudioRange("bytes=-0", SIZE)).toEqual({ kind: "unsatisfiable" });
   });
 });
 

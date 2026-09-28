@@ -3,29 +3,18 @@
 // Custom and are written into ~/.qwen/settings.json modelProviders.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { qualifiedModelLabel } from "../../contracts.ts";
+import { harnessHome } from "../../env-path.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
-function qwenHome(env: Record<string, string | undefined>): string {
-  const home = process.platform === "win32"
-    ? env.USERPROFILE || env.HOME || homedir()
-    : env.HOME || env.USERPROFILE || homedir();
-  return join(home, ".qwen");
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function qwenModelLabel(id: string, name: string): string {
-  if (!name || name.toLocaleLowerCase().endsWith(id.toLocaleLowerCase())) return id;
-  return `${id} — ${name}`;
 }
 
 type QwenRoute = { id: string; model: string; label: string; provider: string; protocol: string; baseUrl?: string; envKey?: string };
@@ -34,7 +23,7 @@ const PROTOCOLS = new Set(["openai", "anthropic", "gemini", "vertex-ai"]);
 function readQwenRoutes(env: Record<string, string | undefined>): QwenRoute[] {
   let settings: unknown;
   try {
-    settings = JSON.parse(readFileSync(join(qwenHome(env), "settings.json"), "utf8")) as unknown;
+    settings = JSON.parse(readFileSync(join(harnessHome("qwen", env), "settings.json"), "utf8")) as unknown;
   } catch {
     return [];
   }
@@ -92,7 +81,11 @@ function readQwenRoutes(env: Record<string, string | undefined>): QwenRoute[] {
 /** Public metadata only. Use Qwen's provider-qualified ACP selectors, not raw model IDs. */
 export function readQwenModelCatalog(env: Record<string, string | undefined> = process.env): ModelCatalog {
   const options = readQwenRoutes(env).map(({ id, model, label, provider }) => ({
-    id, label: qwenModelLabel(model, label), custom: true as const, provider,
+    id,
+    label: qualifiedModelLabel(model, label, {
+      redundantWhen: (id, name) => name.toLocaleLowerCase().endsWith(id.toLocaleLowerCase()),
+    }),
+    custom: true as const, provider,
   }));
   return { default: options[0]?.id ?? "", options };
 }
@@ -111,7 +104,7 @@ export function ensureQwenInjectModel(
   const host = localHost(inject.host);
   if (!host) return modelId;
 
-  const dir = qwenHome(env);
+  const dir = harnessHome("qwen", env);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "settings.json");
   let settings: Record<string, unknown> = {};
@@ -199,6 +192,19 @@ export function resolveQwenTurnModel(model: string | undefined, env: Record<stri
   return matches[0].id;
 }
 
+/** Qwen Code's own approval ladder, passed through (qwen --help, 0.24):
+ * `--approval-mode default` asks, `auto-edit` approves file edits, `auto`
+ * runs Qwen's LLM classifier that approves safe actions and blocks risky
+ * ones, and `--yolo` approves everything. Ask sends nothing, so an older
+ * CLI without the flag keeps working at the level it always had; the ACP
+ * client still answers residual permission asks itself under Full. */
+export function qwenApprovalArgs(fullAuto: boolean, approvalMode: string | undefined): string[] {
+  if (fullAuto) return ["--yolo"];
+  if (approvalMode === "auto") return ["--approval-mode", "auto"];
+  if (approvalMode === "edits") return ["--approval-mode", "auto-edit"];
+  return [];
+}
+
 const support: AcpSupport = {
   driverKind: "qwenAgent",
   displayName: "Qwen",
@@ -219,7 +225,10 @@ const support: AcpSupport = {
   },
   // A raw -m only changes the model within the saved provider. ACP switches
   // the complete route and confirms it before any prompt leaves OMB.
-  spawnArgs: () => ["--acp"],
+  spawnArgs: (config, turn) => ["--acp", ...qwenApprovalArgs(config.fullAuto, turn.approvalMode)],
+  // Qwen's live session/load returns its cached MCP clients, ignoring fresh
+  // credentials. Cold-load the same conversation when those inputs change.
+  restartOnMcpChange: true,
   selectModel: { configId: "model" },
   pickAuthMethod: () => null,
   authFailure: "continue",

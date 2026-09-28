@@ -75,6 +75,60 @@ final class DecodingTests: XCTestCase {
         XCTAssertFalse(overview.does.isEmpty)
         XCTAssertFalse(overview.wont.isEmpty)
         XCTAssertFalse(overview.recent.isEmpty)
+        // The captured bot predates connector grants: a computer that never
+        // assigns them must keep decoding on a phone that knows about them.
+        XCTAssertNil(overview.grants)
+    }
+
+    func testDecodesConnectorGrantsInABotOverview() throws {
+        let json = """
+        {"who":{"name":"Kiwi","title":"","blurb":"","soulLead":""},
+         "does":[],"reaches":[],"wont":[],"recent":[],
+         "grants":[
+           {"slug":"gmail","level":"all","toolCount":0},
+           {"slug":"slack","level":"partial","toolCount":2},
+           {"slug":"notion","level":"none","toolCount":0}
+         ]}
+        """
+        let overview = try JSONDecoder().decode(BotOverview.self, from: Data(json.utf8))
+        let grants = try XCTUnwrap(overview.grants)
+        XCTAssertEqual(grants.count, 3)
+        XCTAssertEqual(grants[0], BotOverviewGrant(slug: "gmail", level: .all, toolCount: 0))
+        XCTAssertEqual(grants[1].slug, "slack")
+        XCTAssertEqual(grants[1].level, .partial)
+        XCTAssertEqual(grants[1].toolCount, 2)
+        XCTAssertEqual(grants[2], BotOverviewGrant(slug: "notion", level: .none, toolCount: 0))
+        XCTAssertEqual(try JSONDecoder().decode(BotOverview.self, from: JSONEncoder().encode(overview)).grants, grants)
+    }
+
+    func testAnExplicitNoToolsRecordIsAnEmptyGrantList() throws {
+        let json = #"{"who":{"name":"Kiwi","title":"","blurb":"","soulLead":""},"does":[],"reaches":[],"wont":[],"recent":[],"grants":[]}"#
+        let overview = try JSONDecoder().decode(BotOverview.self, from: Data(json.utf8))
+        XCTAssertEqual(overview.grants, [])
+    }
+
+    func testAnEntirelyUnreadableGrantsRecordDecodesAsAbsent() throws {
+        let json = #"{"who":{"name":"Kiwi","title":"","blurb":"","soulLead":""},"does":[],"reaches":[],"wont":[],"recent":[],"grants":[{"level":"all","toolCount":0},{"slug":"gmail","toolCount":0}]}"#
+        let overview = try JSONDecoder().decode(BotOverview.self, from: Data(json.utf8))
+        XCTAssertNil(overview.grants)
+    }
+
+    func testUnknownGrantShapesDoNotCostTheOverview() throws {
+        // A level this build does not know still renders (as "some tools"),
+        // and one entry the decoder cannot read is dropped rather than
+        // taking the whole overview with it.
+        let unknownLevel = #"{"who":{"name":"Kiwi","title":"","blurb":"","soulLead":""},"does":[],"reaches":[],"wont":[],"recent":[],"grants":[{"slug":"gmail","level":"scoped","toolCount":7}]}"#
+        let overview = try JSONDecoder().decode(BotOverview.self, from: Data(unknownLevel.utf8))
+        XCTAssertEqual(overview.who.name, "Kiwi")
+        XCTAssertEqual(overview.grants, [BotOverviewGrant(slug: "gmail", level: .partial, toolCount: 7)])
+
+        let malformedEntry = #"{"who":{"name":"Kiwi","title":"","blurb":"","soulLead":""},"does":[],"reaches":[],"wont":[],"recent":[],"grants":[{"slug":"gmail","level":3},{"slug":"slack","level":"all","toolCount":0}]}"#
+        let surviving = try JSONDecoder().decode(BotOverview.self, from: Data(malformedEntry.utf8))
+        XCTAssertEqual(surviving.grants?.map(\.slug), ["slack"])
+
+        let malformedField = #"{"who":{"name":"Kiwi","title":"","blurb":"","soulLead":""},"does":[],"reaches":[],"wont":[],"recent":[],"grants":5}"#
+        let tolerated = try JSONDecoder().decode(BotOverview.self, from: Data(malformedField.utf8))
+        XCTAssertNil(tolerated.grants)
     }
 
     func testStorePreviewRemainsADecodableFleet() throws {
@@ -738,6 +792,28 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(message.kind, .unknown)
         // and keeps what it can show
         XCTAssertEqual(message.text, "Stripe fired")
+    }
+
+    // A digest is known, not new: it must not take the unknown-kind path,
+    // which draws any text it carries as a message bubble.
+    func testADigestIsNotAnUnknownKind() throws {
+        let json = """
+        {"id":"m1","role":"bot","kind":"digest","at":1,"text":"[digest] · tools: shell ×1"}
+        """
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        XCTAssertNotEqual(message.kind, .unknown)
+    }
+
+    func testACompactionMessageDecodesItsRecord() throws {
+        let json = """
+        {"id":"c1","role":"bot","kind":"compaction","at":1,"text":"[compaction] Earlier: …",
+         "compaction":{"summary":"Earlier: the user asked for X.","firstKeptId":"c1","tokensBefore":12345,"by":"person"}}
+        """
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        XCTAssertEqual(message.kind, .compaction)
+        XCTAssertEqual(message.compaction?.summary, "Earlier: the user asked for X.")
+        XCTAssertTrue(message.compaction?.chipText.hasPrefix("Context compacted · ") == true)
+        XCTAssertTrue(message.compaction?.chipText.hasSuffix("345 tokens summarised") == true)
     }
 
     func testAnUnknownRoleIsNotAttributedToYou() throws {

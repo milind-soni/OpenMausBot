@@ -80,7 +80,11 @@ describe("Codex server-owned device authentication", () => {
   const create = (mode = "success", overrides: Partial<ConstructorParameters<typeof CodexDeviceAuthController>[0]> = {}) => {
     const controller = new CodexDeviceAuthController({
       cli, environment: () => ({ ...process.env, HOME: home, CODEX_HOME: join(home, ".codex"), INSTANCE_MARKER: "own-instance", FAKE_AUTH_MODE: mode }),
-      startupTimeoutMs: 1000, lifetimeMs: 3000, terminateTimeoutMs: 50,
+      // The code is surfaced the moment the CLI writes it; these windows only
+      // bound a CLI that never does. Fake-CLI spawns can take seconds on a
+      // loaded machine, so a tight window reports a slow machine as a missing
+      // sign-in code.
+      startupTimeoutMs: 10_000, lifetimeMs: 15_000, terminateTimeoutMs: 50,
       ...overrides,
     });
     controllers.push(controller);
@@ -107,8 +111,8 @@ describe("Codex server-owned device authentication", () => {
     const start = await controller.start();
     expect(start).toMatchObject({ phase: "waiting", userCode: "0CSG-0IXIM", authorizationUrl: "https://auth.openai.com/codex/device" });
     expect(start.flowId).toMatch(/^[0-9a-f-]{36}$/);
-    await expect.poll(async () => (await controller.get(start.flowId!)).phase).toBe("succeeded");
-    expect(await controller.get(start.flowId!)).toEqual({ phase: "succeeded", flowId: start.flowId, authorizationUrl: null, expiresAt: null });
+    await expect.poll(() => controller.get(start.flowId!), { timeout: 5_000 })
+      .toEqual({ phase: "succeeded", flowId: start.flowId, authorizationUrl: null, expiresAt: null });
     expect(refreshed).toBe(1);
     expect(calls().map((call) => call.args)).toEqual([["login", "status"], ["login", "--device-auth"], ["login", "status"]]);
     expect(calls().every((call) => call.home === home && call.codexHome === join(home, ".codex") && call.marker === "own-instance")).toBe(true);
@@ -255,13 +259,17 @@ describe("Codex server-owned device authentication", () => {
   });
 
   it("can cancel while the initial account check is still starting", async () => {
-    const controller = create("status-hang");
+    const controller = create("status-hang", { startupTimeoutMs: 1000 });
     const starting = controller.start();
     const rejection = expect(starting).rejects.toThrow("cancelled");
-    await expect.poll(() => existsSync(join(home, "calls.jsonl"))).toBe(true);
+    // Wait out a slow first spawn exactly as long as the controller's own
+    // startup window does, so this poll cannot expire before cancel matters.
+    await expect.poll(() => existsSync(join(home, "calls.jsonl")), { timeout: 10_000 }).toBe(true);
     await controller.cancel();
     await rejection;
-    await expect(controller.start()).rejects.toThrow("did not provide");
+    // The default windows tolerate slow spawns; keep one deliberately short
+    // here so the missing-code deadline is still exercised quickly.
+    await expect(create("status-hang", { startupTimeoutMs: 250 }).start()).rejects.toThrow("did not provide");
   });
 
   it("does not start a process after the provider is disposed during startup", async () => {

@@ -95,4 +95,17 @@ describe("LocalVmLeasePool", () => {
     expect(pool.forTarget("shared").claim("thread-a", "bot-a", busy, 1_000)).toBe(true);
     expect(pool.forTarget("shared").claim("thread-b", "bot-b", busy, 1_001)).toBe(false);
   });
+
+  it("forgets a deleted bot's target lane", () => {
+    const pool = new LocalVmLeasePool(100);
+    const busy = () => true;
+    const original = pool.forTarget("bot:deleted");
+    expect(original.claim("thread-a", "bot-a", busy, 1_000)).toBe(true);
+
+    pool.forget("bot:deleted");
+
+    const replacement = pool.forTarget("bot:deleted");
+    expect(replacement).not.toBe(original);
+    expect(replacement.current(busy, 1_001)).toBeNull();
+  });
 });

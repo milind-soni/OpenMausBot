@@ -25,7 +25,9 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /** The one JSON configuration used for every sidecar payload. */
@@ -139,7 +141,26 @@ data class ToolActivity(
     val ok: Boolean? = null,
     val spoken: String? = null,
     val setup: Boolean? = null,
+    /**
+     * The failed turn's Claude Code CLI is too old for the chosen model.
+     * The phone offers to run Claude's updater on the computer, or shows
+     * the command to run by hand. Older computers omit it.
+     */
+    val claudeUpdate: Boolean? = null,
 )
+
+/**
+ * A compaction record: from this message on, rebuilds of the thread's
+ * context carry [summary] instead of the earlier messages.
+ */
+@Serializable
+data class Compaction(
+    val summary: String,
+    val tokensBefore: Int,
+) {
+    val chipText: String
+        get() = "Context compacted · ${"%,d".format(tokensBefore)} tokens summarised"
+}
 
 /**
  * The thread an activity chip opened — "Opened thread #Title on Scout" — so
@@ -181,6 +202,8 @@ data class Message(
     val card: OptionCard? = null,
     val tool: ToolActivity? = null,
     val threadRef: ThreadRef? = null,
+    /** `kind == COMPACTION`: the record itself. */
+    val compaction: Compaction? = null,
     val parentId: String? = null,
     val from: Sender? = null,
     val reactions: List<Reaction>? = null,
@@ -188,6 +211,8 @@ data class Message(
     val hasImage: Boolean? = null,
     val png: String? = null,
     val mime: String? = null,
+    /** Agent-generated images on text replies, including late message patches. */
+    val attachments: List<MessageImageAttachment>? = null,
     /**
      * A user line the engine took INTO the turn that was already running,
      * rather than one that started a turn of its own.
@@ -199,9 +224,12 @@ data class Message(
      * finally lands.
      */
     val queueId: String? = null,
+    /** Completed provider turns can fold narration without guessing which reply is final. */
+    val turnId: String? = null,
+    val turnTerminal: Boolean? = null,
 ) {
     @Serializable(with = MessageKindSerializer::class)
-    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, UNKNOWN }
+    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, DIGEST, COMPACTION, UNKNOWN }
 
     @Serializable(with = MessageRoleSerializer::class)
     enum class Role { BOT, USER }
@@ -215,6 +243,8 @@ object MessageKindSerializer : KSerializer<Message.Kind> {
         "options" -> Message.Kind.OPTIONS
         "activity" -> Message.Kind.ACTIVITY
         "screen" -> Message.Kind.SCREEN
+        "digest" -> Message.Kind.DIGEST
+        "compaction" -> Message.Kind.COMPACTION
         else -> Message.Kind.UNKNOWN
     }
 
@@ -285,6 +315,9 @@ data class BotTask(
     val modelSelection: ModelSelection? = null,
     val activity: String? = null,
     val busy: Boolean? = null,
+    /** This thread's own turn is done and a dispatched teammate has not
+     * settled yet (#1223): a wait, never work. Newer harnesses only. */
+    val waitingOnTeammate: Boolean? = null,
     val unread: Boolean? = null,
     val approvalMode: String? = null,
     val autoApprove: Boolean? = null,
@@ -292,9 +325,27 @@ data class BotTask(
     val projectId: String? = null,
     val openedBy: ThreadOpener? = null,
     val closedBy: ThreadCloser? = null,
+    /** The person put this thread away. Present means archived — a stamp of
+     * 0 is still archived, because the task API accepts any epoch number. */
+    val archivedAt: Double? = null,
     /** Bot-only internal execution. Keep it addressable, but out of thread pickers. */
     val routineRunId: String? = null,
+    /** The person pinned this thread above the update-ordered list. */
+    val pinned: Boolean? = null,
+    /** Newest message time. Absent on older computers; the list uses createdAt. */
+    val updatedAt: Double? = null,
+    /**
+     * Asleep until: 0 is the "until new activity" sentinel and never ticks,
+     * while a future epoch-milliseconds timestamp sleeps only until it
+     * passes. The server drops expired snoozes from snapshots; the phone
+     * still checks the clock, because a live stream never refreshes one.
+     */
+    val snoozedUntil: Double? = null,
 )
+
+/** The time the thread list sorts and stamps by. */
+val BotTask.listStamp: Double
+    get() = updatedAt ?: createdAt
 
 /** The thread list's quiet second line, worded as the desktop words it. */
 val BotTask.openedByLabel: String?
@@ -304,13 +355,32 @@ val BotTask.openedByLabel: String?
 val BotTask.isClosed: Boolean
     get() = closedBy != null
 
+/** Archived is the presence of the stamp, not its value: archivedAt 0 counts. */
+val BotTask.isArchived: Boolean
+    get() = archivedAt != null
+
 /**
- * The one line under a title: who closed it once a bot has, otherwise who
- * opened it, otherwise nothing. Closed wins because it is the newer fact and
- * the reason the row is dimmed.
+ * Snoozed means asleep right now: 0 is the "until new activity" sentinel and
+ * sleeps until woken, while a timestamp sleeps only until it passes
+ * (`isSnoozed` in `SidebarThreadRow.tsx`).
  */
-val BotTask.bylineLabel: String?
-    get() = closedBy?.let { "closed by ${it.name}" } ?: openedByLabel
+fun BotTask.isSnoozed(now: Long = System.currentTimeMillis()): Boolean =
+    snoozedUntil != null && (snoozedUntil == 0.0 || snoozedUntil > now)
+
+/**
+ * The one line under a title: who closed it once a bot has, "Archived" while
+ * it stays filed away, "Snoozed" while it sleeps, otherwise who opened it,
+ * otherwise nothing. Closed wins because it is the newer fact; archived and
+ * snoozed win over the opener because they explain why the row sits where
+ * it does.
+ */
+fun BotTask.bylineLabel(now: Long = System.currentTimeMillis()): String? =
+    when {
+        closedBy != null -> "closed by ${closedBy.name}"
+        isArchived -> "Archived"
+        isSnoozed(now) -> "Snoozed"
+        else -> openedByLabel
+    }
 
 @Serializable
 data class Bot(
@@ -328,6 +398,8 @@ data class Bot(
     val avatarCrop: AvatarCrop? = null,
     val busy: Boolean? = null,
     val activity: String? = null,
+    /** A dispatched teammate has not settled; the bot waits, it does not work. */
+    val waitingOnTeammate: Boolean? = null,
     val pinned: Boolean? = null,
     val hidden: Boolean? = null,
     /** Desktop sidebar section. Missing or blank means the built-in Bots area. */
@@ -364,6 +436,7 @@ fun Bot.forTask(requestedThreadId: String): Bot? {
         modelSelection = task.modelSelection ?: modelSelection,
         busy = task.busy ?: if (selected) busy else false,
         activity = task.activity ?: if (selected) activity else null,
+        waitingOnTeammate = task.waitingOnTeammate ?: if (selected) waitingOnTeammate else null,
         unread = task.unread ?: if (selected) unread else false,
         approvalMode = task.approvalMode ?: task.autoApprove?.let { if (it) "auto" else "ask" } ?: approvalMode,
         autoApprove = task.autoApprove ?: autoApprove,
@@ -415,7 +488,16 @@ data class Room(
 )
 
 @Serializable(with = FleetSerializer::class)
-data class Fleet(val bots: List<Bot>, val groups: List<Room>)
+data class Fleet(
+    val bots: List<Bot>,
+    val groups: List<Room>,
+    /**
+     * Held sends for every bot thread, the same snapshot the bot.queued
+     * frames carry. Older computers omit it; a missing or unreadable field
+     * reads as absent, never as an empty queue.
+     */
+    val botQueuedMessages: Map<String, List<QueuedSend>>? = null,
+)
 
 object FleetSerializer : KSerializer<Fleet> {
     override val descriptor: SerialDescriptor = buildClassSerialDescriptor("Fleet")
@@ -436,6 +518,15 @@ object FleetSerializer : KSerializer<Fleet> {
         return Fleet(
             bots = lossyArray("bots") { input.json.decodeFromJsonElement(Bot.serializer(), it) },
             groups = lossyArray("groups") { input.json.decodeFromJsonElement(Room.serializer(), it) },
+            // One malformed entry must not cost the whole fleet: the roster
+            // is worth more than the queue note beside it.
+            botQueuedMessages = runCatching {
+                objectValue["botQueuedMessages"]?.jsonObject?.mapValues { (_, entries) ->
+                    entries.jsonArray.mapNotNull { element ->
+                        runCatching { element.jsonObject.queuedSendOrNull() }.getOrNull()
+                    }
+                }
+            }.getOrNull(),
         )
     }
 
@@ -445,6 +536,13 @@ object FleetSerializer : KSerializer<Fleet> {
         output.encodeJsonElement(buildJsonObject {
             put("bots", JsonArray(value.bots.map { output.json.encodeToJsonElement(Bot.serializer(), it) }))
             put("groups", JsonArray(value.groups.map { output.json.encodeToJsonElement(Room.serializer(), it) }))
+            value.botQueuedMessages?.let { queues ->
+                put("botQueuedMessages", buildJsonObject {
+                    queues.forEach { (threadId, sends) ->
+                        put(threadId, JsonArray(sends.map { it.toJsonObject() }))
+                    }
+                })
+            }
         })
     }
 }
@@ -672,8 +770,24 @@ data class InstanceCapabilities(
 @Serializable
 data class InstanceList(val instances: List<Instance>)
 
-/** Which engine actually speaks. `VoiceProvider` in `server/tts/index.ts`. */
-enum class VoiceProvider { ELEVENLABS, SYSTEM }
+/**
+ * Which engine actually speaks. `VoiceProvider` in `server/tts/index.ts`;
+ * [wire] is the exact string the config write carries, and [fromWire] applies
+ * the server's own fallback: a missing field — an older desktop that predates
+ * the choice — and a provider this build has never heard of both mean
+ * ElevenLabs, keeping an unrecognised engine from being explained with copy
+ * written for a different one.
+ */
+enum class VoiceProvider(val wire: String) {
+    ELEVENLABS("elevenlabs"),
+    FISH("fish"),
+    SYSTEM("system"),
+    CHATTERBOX("chatterbox");
+
+    companion object {
+        fun fromWire(value: String?): VoiceProvider = entries.firstOrNull { it.wire == value } ?: ELEVENLABS
+    }
+}
 
 @Serializable
 data class ConfigFlag(
@@ -716,15 +830,12 @@ data class ConfigStatus(
         isTTSConfigured && (!agentVoice.isNullOrBlank() || hasWorkspaceDefaultVoice)
 
     /**
-     * `voiceProvider(cfg)` in `server/tts/index.ts`: only the exact string
-     * "system" selects the built-in engine. A missing field — an older
-     * desktop that predates the choice — and a provider this build has never
-     * heard of both fall back to ElevenLabs, which is the server's own rule
-     * and keeps an unrecognised engine from being explained with copy
-     * written for a different one.
+     * `voiceProvider(cfg)` in `server/tts/index.ts`: only a known, exact wire
+     * value selects its engine. Everything else falls back to ElevenLabs
+     * through [VoiceProvider.fromWire], which is the server's own rule.
      */
     val voiceProvider: VoiceProvider
-        get() = if (tts?.provider == "system") VoiceProvider.SYSTEM else VoiceProvider.ELEVENLABS
+        get() = VoiceProvider.fromWire(tts?.provider)
 }
 
 object ConnectedAppsRules {
@@ -1090,6 +1201,9 @@ internal data class SearchResponse(val hits: List<SearchHit>)
 internal data class MessageResponse(val message: Message)
 
 @Serializable
+internal data class EditResponse(val message: Message? = null)
+
+@Serializable
 internal data class ActiveBranchResponse(val activeLeafId: String)
 
 @Serializable
@@ -1115,6 +1229,9 @@ internal data class FileUploadResponse(val path: String, val name: String, val m
 internal data class GeneratedAvatarResponse(val avatarUrl: String, val bot: Bot)
 
 @Serializable
+internal data class ClaudeUpdateResponse(val version: String)
+
+@Serializable
 data class RoutinesResponse(val routines: List<Routine>, val runs: List<RoutineRun>)
 
 @Serializable
@@ -1132,11 +1249,164 @@ data class BotOverviewWho(val name: String, val title: String, val blurb: String
 @Serializable
 data class BotOverviewRecent(val at: Double, val summary: String)
 
+/**
+ * One service's grant level, the same three the web grant editor and both
+ * phones render. A level string this build does not know falls back to
+ * [Partial] — the row stays honest ("some tools") without costing the
+ * reader the whole overview, matching the iOS decode.
+ */
+@Serializable(with = BotOverviewGrantLevelSerializer::class)
+sealed interface BotOverviewGrantLevel {
+    /** `tools: "*"` on the computer: the whole service is granted. */
+    data object All : BotOverviewGrantLevel
+
+    /** An exact tool allowlist; the overview carries only its size. */
+    data object Partial : BotOverviewGrantLevel
+
+    /** The service is granted nothing. */
+    data object None : BotOverviewGrantLevel
+}
+
+object BotOverviewGrantLevelSerializer : KSerializer<BotOverviewGrantLevel> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("BotOverviewGrantLevel", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): BotOverviewGrantLevel {
+        val input = decoder as? JsonDecoder
+            ?: throw SerializationException("BotOverviewGrantLevel can only be decoded from JSON")
+        val level = (input.decodeJsonElement() as? JsonPrimitive)?.takeIf { it.isString }
+            ?: throw SerializationException("BotOverviewGrantLevel must be a string")
+        return when (level.content) {
+            "all" -> BotOverviewGrantLevel.All
+            "none" -> BotOverviewGrantLevel.None
+            // "partial", plus any level a newer computer adds.
+            else -> BotOverviewGrantLevel.Partial
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: BotOverviewGrantLevel) {
+        val output = encoder as? JsonEncoder
+            ?: throw SerializationException("BotOverviewGrantLevel can only be encoded as JSON")
+        output.encodeString(
+            when (value) {
+                BotOverviewGrantLevel.All -> "all"
+                BotOverviewGrantLevel.Partial -> "partial"
+                BotOverviewGrantLevel.None -> "none"
+            },
+        )
+    }
+}
+
+/** One connected-app service's tool grants, as the overview summarizes them. */
 @Serializable
+data class BotOverviewGrant(
+    val slug: String,
+    val level: BotOverviewGrantLevel,
+    /** Granted tool count; 0 unless the level is [BotOverviewGrantLevel.Partial]. */
+    val toolCount: Int,
+)
+
+/**
+ * Grants ride the overview lossily: one malformed entry — or a whole
+ * malformed container — is dropped rather than costing the overview, the
+ * same policy pairing endpoints already follow.
+ */
+@Serializable(with = BotOverviewSerializer::class)
 data class BotOverview(
     val who: BotOverviewWho,
     val does: List<String> = emptyList(),
     val reaches: List<String> = emptyList(),
     val wont: List<String> = emptyList(),
     val recent: List<BotOverviewRecent> = emptyList(),
+    /**
+     * Per-service connector tool grants, sorted by slug. Absent on
+     * computers older than per-bot grants — the legacy all-or-nothing
+     * `composio` behavior stands and nothing new is drawn. An empty list
+     * is an explicit no-tools record and does draw.
+     */
+    val grants: List<BotOverviewGrant>? = null,
+)
+
+object BotOverviewSerializer : KSerializer<BotOverview> {
+    override val descriptor: SerialDescriptor = JsonObject.serializer().descriptor
+
+    override fun deserialize(decoder: Decoder): BotOverview {
+        val input = decoder as? JsonDecoder
+            ?: throw SerializationException("BotOverview can only be decoded from JSON")
+        val value = input.decodeJsonElement() as? JsonObject
+            ?: throw SerializationException("BotOverview must be a JSON object")
+        val json = input.json
+
+        fun strings(name: String): List<String> =
+            runCatching { value[name]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList() }
+                .getOrDefault(emptyList())
+
+        return BotOverview(
+            who = json.decodeFromJsonElement(
+                value["who"] ?: throw SerializationException("BotOverview.who is required"),
+            ),
+            does = strings("does"),
+            reaches = strings("reaches"),
+            wont = strings("wont"),
+            recent = runCatching {
+                value["recent"]?.jsonArray?.mapNotNull { entry ->
+                    runCatching { json.decodeFromJsonElement<BotOverviewRecent>(entry) }.getOrNull()
+                } ?: emptyList()
+            }.getOrDefault(emptyList()),
+            grants = when (val element = value["grants"]) {
+                null, is JsonNull -> null
+                is JsonArray -> element.mapNotNull { entry ->
+                    runCatching { json.decodeFromJsonElement<BotOverviewGrant>(entry) }.getOrNull()
+                }
+                // A malformed container reads as absent — an explicit
+                // no-tools record is an empty array, never this.
+                else -> null
+            },
+        )
+    }
+
+    override fun serialize(encoder: Encoder, value: BotOverview) {
+        val output = encoder as? JsonEncoder
+            ?: throw SerializationException("BotOverview can only be encoded as JSON")
+        output.encodeJsonElement(buildJsonObject {
+            put("who", output.json.encodeToJsonElement(BotOverviewWho.serializer(), value.who))
+            put("does", JsonArray(value.does.map(::JsonPrimitive)))
+            put("reaches", JsonArray(value.reaches.map(::JsonPrimitive)))
+            put("wont", JsonArray(value.wont.map(::JsonPrimitive)))
+            put(
+                "recent",
+                JsonArray(value.recent.map { output.json.encodeToJsonElement(BotOverviewRecent.serializer(), it) }),
+            )
+            value.grants?.let { grants ->
+                put(
+                    "grants",
+                    JsonArray(grants.map { output.json.encodeToJsonElement(BotOverviewGrant.serializer(), it) }),
+                )
+            }
+        })
+    }
+}
+
+/** Native server sessions returned by POST /api/auth/pair. */
+@Serializable
+data class ServerPairResponse(
+    val token: String,
+    val session: ServerSession,
+    val environment: ServerEnvironment,
+)
+
+@Serializable
+data class ServerSession(val id: String, val label: String, val scopes: List<String>)
+
+@Serializable
+data class ServerEnvironment(val environmentId: String, val label: String)
+
+/** Unknown attachment kinds remain decodable and are not rendered. */
+@Serializable
+data class MessageImageAttachment(
+    val kind: String,
+    val path: String? = null,
+    val mime: String? = null,
+    /** `kind == "audio"`: the server's duration estimate, used until the player loads metadata. */
+    val durationMs: Double? = null,
 )

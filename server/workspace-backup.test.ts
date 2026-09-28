@@ -13,6 +13,7 @@ import {
 } from "./workspace-backup.ts";
 
 const PASSWORD = "correct horse battery staple";
+const AVATAR_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 const scratch: string[] = [];
 function directory(): string {
   const path = mkdtempSync(join(tmpdir(), "omb-workspace-backup-"));
@@ -24,10 +25,11 @@ function readJson(path: string): any { return JSON.parse(readFileSync(path, "utf
 function fixture(root: string): DatabaseSync {
   mkdirSync(join(root, "attachments"));
   writeFileSync(join(root, "attachments", "image.png"), Buffer.from([0, 1, 2, 255, 0, 128]));
+  writeFileSync(join(root, "attachments", "avatar.png"), AVATAR_BYTES);
   mkdirSync(join(root, "task-workspaces", "bot", "thread"), { recursive: true });
   writeFileSync(join(root, "task-workspaces", "bot", "thread", "binary.bin"), Buffer.alloc(2 * 1024 * 1024, 0xa5));
   json(join(root, "config.json"), { language: "ja", instances: { custom: { driver: "claudeAgent", config: { configDir: join(root, "providers", "account") } } }, apiKey: "private-key-in-config" });
-  json(join(root, "bots.json"), [{ id: "bot", threadId: "thread", cwd: join(root, "task-workspaces", "bot", "thread"), soul: `Do not rewrite this prose mentioning ${root}.`, tasks: [{ threadId: "thread", cwd: join(root, "task-workspaces", "bot", "thread") }] }]);
+  json(join(root, "bots.json"), [{ id: "bot", threadId: "thread", cwd: join(root, "task-workspaces", "bot", "thread"), soul: `Do not rewrite this prose mentioning ${root}.`, avatarUrl: "/api/attachments/avatar.png", avatarCrop: "circle", voice: "source-provider-voice", tasks: [{ threadId: "thread", cwd: join(root, "task-workspaces", "bot", "thread") }] }]);
   json(join(root, "groups.json"), [{ id: "room", memberIds: ["bot"], cwd: "/external/project" }]);
   json(join(root, "routines.json"), { version: 1, routines: [{ id: "routine", enabled: true }], runs: [{ id: "waiting", status: "queued" }, { id: "historical", status: "completed" }] });
   json(join(root, "webhooks.json"), { version: 1, webhooks: [{ id: "hook", endpointId: "endpoint", enabled: true, secretHash: "a".repeat(64) }], deliveries: [{ id: "delivery" }] });
@@ -116,7 +118,10 @@ describe("encrypted full workspace backups", () => {
       expect(readPendingWorkspaceRestoreMetadata(target)?.id).toBe(staged.id);
       const result = applyPendingWorkspaceRestore(target);
       expect(result).toMatchObject({ restored: true, id: staged.id });
-      expect(readJson(join(target, "bots.json"))[0]).toMatchObject({ id: "bot", cwd: join(target, "task-workspaces", "bot", "thread"), soul: `Do not rewrite this prose mentioning ${source}.` });
+      const restoredBot = readJson(join(target, "bots.json"))[0];
+      expect(restoredBot).toMatchObject({ id: "bot", cwd: join(target, "task-workspaces", "bot", "thread"), soul: `Do not rewrite this prose mentioning ${source}.`, avatarUrl: "/api/attachments/avatar.png", avatarCrop: "circle" });
+      expect(restoredBot).not.toHaveProperty("voice");
+      expect(readFileSync(join(target, restoredBot.avatarUrl.slice("/api/".length)))).toEqual(AVATAR_BYTES);
       expect(readJson(join(target, "groups.json"))[0].cwd).toBe("/external/project");
       expect(readJson(join(target, "config.json"))).toEqual({ ...connections, language: "ja" });
       expect(readFileSync(join(target, "task-workspaces", "bot", "thread", "binary.bin"))).toEqual(Buffer.alloc(2 * 1024 * 1024, 0xa5));
@@ -201,6 +206,7 @@ describe("encrypted full workspace backups", () => {
     const target = directory();
     const authPaths = [
       "workspace-credentials.json", "browser-engine-key", "config.json.123.tmp",
+      "external-runtimes.json", "external-runtimes.json.123.tmp",
       "providers/account/auth.json", "providers/antigravity/account/acp_token.json",
       "caddy/data/private.key", "chrome-profile/Cookies", ".agent-browser/auth.json",
       "vm-home/.browser-profiles/chrome/Cookies", "vm-homes/abc/.browser-profiles/chromium/Cookies",
@@ -239,6 +245,68 @@ describe("encrypted full workspace backups", () => {
     expect(readJson(join(source, "webhooks.json")).webhooks[0].secretHash).toBe("a".repeat(64));
   });
 
+  it("never lists a per-turn hook token directory in a backup manifest", async () => {
+    const source = directory();
+    mkdirSync(join(source, "hook-tokens"), { mode: 0o700 });
+    writeFileSync(join(source, "hook-tokens", `${"a".repeat(24)}.token`), "SOURCE_TURN_BEARER", { mode: 0o600 });
+    mkdirSync(join(source, "attachments"));
+    writeFileSync(join(source, "attachments", "note.txt"), "ordinary user file");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const staged = await stageWorkspaceBackup(source, exported.path, { password: PASSWORD });
+    const staging = join(source, ".backups", staged.id, "staged");
+    const paths: string[] = readJson(join(staging, "manifest.json")).entries.map((entry: { path: string }) => entry.path);
+    expect(paths).toContain("attachments/note.txt");
+    expect(paths.filter((path) => /token/i.test(path))).toEqual([]);
+    expect(existsSync(join(staging, "data", "hook-tokens"))).toBe(false);
+    for (const path of paths) {
+      if (statSync(join(staging, "data", path)).isFile()) expect(readFileSync(join(staging, "data", path), "utf8")).not.toContain("SOURCE_TURN_BEARER");
+    }
+  });
+
+  it("leaves the Organization library's downloaded catalog and release files out, and keeps what the runtime added", async () => {
+    const source = directory(), library = join(source, "org-library"), sha = "b".repeat(64);
+    mkdirSync(join(library, "blobs"), { recursive: true, mode: 0o700 });
+    json(join(library, "state.json"), { version: 1, source: null, appliedDigest: null, installs: {} });
+    json(join(library, "presets.json"), { version: 1, presets: [] });
+    writeFileSync(join(library, "catalog.json"), "ORGANIZATION_CATALOG_BYTES", { mode: 0o600 });
+    writeFileSync(join(library, `catalog.json.${"0".repeat(8)}-0000-4000-8000-${"0".repeat(12)}.tmp`), "ORGANIZATION_CATALOG_BYTES", { mode: 0o600 });
+    writeFileSync(join(library, "blobs", `${sha}.json`), "ORGANIZATION_RELEASE_BYTES", { mode: 0o600 });
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const staged = await stageWorkspaceBackup(source, exported.path, { password: PASSWORD });
+    const staging = join(source, ".backups", staged.id, "staged");
+    const paths: string[] = readJson(join(staging, "manifest.json")).entries.map((entry: { path: string }) => entry.path);
+    expect(paths.filter((path) => path.startsWith("org-library"))).toEqual(["org-library", "org-library/presets.json", "org-library/state.json"]);
+    expect(existsSync(join(staging, "data", "org-library", "blobs"))).toBe(false);
+    for (const path of paths) {
+      if (statSync(join(staging, "data", path)).isFile()) expect(readFileSync(join(staging, "data", path), "utf8")).not.toMatch(/ORGANIZATION_(?:CATALOG|RELEASE)_BYTES/);
+    }
+  });
+
+  it("still restores an archive from a release that exported hook tokens, without installing them", async () => {
+    const source = directory();
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const probe = await stageWorkspaceBackup(source, exported.path, { password: PASSWORD });
+    const base = readJson(join(source, ".backups", probe.id, "staged", "manifest.json"));
+    const token = "STALE_TURN_BEARER";
+    const note = "kept";
+    const file = (path: string, content: string) => ({ path, type: "file", size: Buffer.byteLength(content), mode: 0o600, sha256: createHash("sha256").update(content).digest("hex") });
+    const manifest = {
+      ...base,
+      entries: [{ path: "hook-tokens", type: "directory", size: 0, mode: 0o700 }, file("hook-tokens/old.token", token), file("note.txt", note)],
+      summary: { ...base.summary, directories: 1, files: 2, bytes: Buffer.byteLength(token) + Buffer.byteLength(note) },
+    };
+    const archive = encryptedPayload(source, Buffer.concat([
+      tarEntry("manifest.json", "File", JSON.stringify(manifest)), tarEntry("data", "Directory"), tarEntry("data/hook-tokens", "Directory"),
+      tarEntry("data/hook-tokens/old.token", "File", token), tarEntry("data/note.txt", "File", note), Buffer.alloc(1024),
+    ]));
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, archive, { password: PASSWORD });
+    commitPendingWorkspaceRestore(target, staged.id);
+    expect(applyPendingWorkspaceRestore(target)).toMatchObject({ restored: true });
+    expect(readFileSync(join(target, "note.txt"), "utf8")).toBe(note);
+    expect(existsSync(join(target, "hook-tokens"))).toBe(false);
+  });
+
   it("rejects authenticated credential metadata, saved auth paths, and connection-bearing config", async () => {
     const source = directory();
     const exported = await createWorkspaceBackup(source, { password: PASSWORD });
@@ -254,6 +322,8 @@ describe("encrypted full workspace backups", () => {
     for (const [name, content] of [
       ["team-computers.json", '{"computers":[{"id":"foreign-computer","section":"Design"}]}'],
       ["workspace-credentials.json", '{"xaiApiKey":"secret"}'],
+      ["external-runtimes.json", '{"bot-id":"external-runtime-secret"}'],
+      ["External-Runtimes.json", "external-runtime-secret"],
       ["Sessions.json", "secret"],
       ["Providers", "secret"],
       ["Caddy", "secret"],

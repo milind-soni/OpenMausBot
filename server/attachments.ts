@@ -80,6 +80,9 @@ const IMAGE_MIMES: Record<string, string> = {
  * despite using ZIP internally. The claimed mime determines the extension;
  * an attacker-controlled filename never does. */
 const FILE_MIMES: Readonly<Record<string, string>> = {
+  "video/mp4": ".mp4",
+  "video/webm": ".webm",
+  "video/quicktime": ".mov",
   "audio/opus": ".opus",
   "audio/ogg": ".ogg",
   "audio/mpeg": ".mp3",
@@ -571,6 +574,55 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
   }
 }
 
+/** Persist one synthesized audio note. Providers return audio/mpeg buffers;
+ * the same atomic-write and quota discipline as saveImage applies, with a
+ * fixed .mp3 extension because the accepted mime determines it exactly. */
+export function saveAudio(bytes: Buffer, mime: string): SavedAttachment {
+  const normalized = mime.split(";")[0]!.trim().toLowerCase();
+  if (normalized !== "audio/mpeg") {
+    throw Object.assign(new Error("unsupported audio type"), { status: 400 });
+  }
+  if (bytes.byteLength === 0) throw Object.assign(new Error("empty audio"), { status: 400 });
+  if (bytes.byteLength > FILE_MAX_BYTES) {
+    throw Object.assign(new Error(`audio exceeds ${FILE_MAX_BYTES} bytes`), { status: 413 });
+  }
+  ensureAttachmentsDir();
+  const reservation = new AttachmentReservation();
+  reservation.reserve(bytes.byteLength);
+  const id = randomUUID();
+  const name = `${id}.mp3`;
+  const path = join(ATTACHMENTS_DIR, name);
+  const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${id}-${randomUUID()}.partial`);
+  activePartials.add(partialPath);
+  let partialCleanupFailed = false;
+  try {
+    writeFileSync(partialPath, bytes, { mode: 0o600, flag: "wx" });
+    try {
+      linkSync(partialPath, path);
+      addCommittedBytes(bytes.byteLength);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const saved = readFileSync(path);
+      if (!saved.equals(bytes)) {
+        throw Object.assign(new Error("audio destination already exists with different bytes"), { status: 409 });
+      }
+    }
+    unlinkSync(partialPath);
+    return { path, mime: normalized, bytes: bytes.byteLength };
+  } catch (error) {
+    try {
+      unlinkSync(partialPath);
+    } catch {
+      partialCleanupFailed = true;
+    }
+    throw error;
+  } finally {
+    activePartials.delete(partialPath);
+    if (partialCleanupFailed) invalidateAttachmentAccounting();
+    reservation.release();
+  }
+}
+
 /** HTTP uploads take the same per-ID lock as streamed files. saveImage stays
  * synchronous for generated avatars, while this wrapper prevents an image
  * and a document using the same caller-supplied UUID from committing with
@@ -602,7 +654,7 @@ export function attachmentExists(name: string): boolean {
  * filename (no separators, no dotfiles) inside ATTACHMENTS_DIR resolve —
  * the route must never become a general file server for the data dir. */
 export function readAttachment(name: string): { bytes: Buffer; mime: string } | null {
-  if (!/^[A-Za-z0-9-]+\.(png|jpg|jpeg|gif|webp)$/.test(name)) return null;
+  if (!/^[A-Za-z0-9-]+\.(png|jpg|jpeg|gif|webp|mp3)$/.test(name)) return null;
   const path = join(ATTACHMENTS_DIR, name);
   if (extname(path) === ".jpeg") return null; // saved as .jpg; .jpeg is not a name we write
   try {
@@ -622,7 +674,51 @@ function mimeForExt(ext: string): string {
       return "image/gif";
     case ".webp":
       return "image/webp";
+    case ".mp3":
+      return "audio/mpeg";
     default:
       return "application/octet-stream";
   }
+}
+
+/** Verdict on a `Range` header for audio serving (#1745). `none` means
+ * "answer as if the header was absent" — the pre-Range full 200 that
+ * images and documents keep forever — and covers absent, malformed,
+ * non-bytes, and multi-range headers alike. `unsatisfiable` is the one
+ * malformed-but-meaningful case (a start at or past EOF) that must answer
+ * 416 rather than silently degrade, so players learn the truth about the
+ * file they are seeking inside. */
+export type AudioRange =
+  | { kind: "none" }
+  | { kind: "unsatisfiable" }
+  | { kind: "range"; start: number; end: number };
+
+/** Parse a single `bytes=` range against a stored audio file. Only the
+ * canonical shapes a player sends are honored: `a-b`, `a-`, and `-n`
+ * (the last-n-bytes suffix). Anything else — commas, letters, reversed
+ * bounds, internal spaces — reads as "not understood" and the caller sends
+ * the whole file, which is always a correct answer to a GET. */
+export function parseAudioRange(header: string | undefined, size: number): AudioRange {
+  const raw = header?.trim();
+  if (!raw) return { kind: "none" };
+  const m = raw.match(/^bytes=(\d*)-(\d*)$/);
+  if (!m) return { kind: "none" };
+  const [, rawStart, rawEnd] = m;
+  if (rawStart === "") {
+    // `bytes=-` carries no bounds at all: malformed input, not a suffix
+    // range, so the caller answers with the whole file. A real zero-length
+    // suffix (`bytes=-0`) stays unsatisfiable below, per RFC 9110.
+    if (rawEnd === "") return { kind: "none" };
+    // suffix range: the final n bytes; zero is unsatisfiable by definition
+    const suffix = Number(rawEnd);
+    if (!suffix) return { kind: "unsatisfiable" };
+    if (size === 0) return { kind: "unsatisfiable" };
+    return { kind: "range", start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(rawStart);
+  if (start >= size) return { kind: "unsatisfiable" };
+  if (rawEnd === "") return { kind: "range", start, end: size - 1 };
+  const end = Number(rawEnd);
+  if (end < start) return { kind: "none" };
+  return { kind: "range", start, end: Math.min(end, size - 1) };
 }

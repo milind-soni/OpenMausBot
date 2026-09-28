@@ -217,6 +217,17 @@ describe("Clack setup adapter", () => {
     expect(stripVTControlCharacters(fixture.text())).toContain("Untrusted label");
   });
 
+  it("strips OSC 8 hyperlink sequences without leaking their URIs", () => {
+    const fixture = terminal();
+    fixture.io.log("Open \u001b]8;;https://example.com/(v2)+guide?q=1\u0007the guide\u001b]8;;\u0007 now");
+    expect(fixture.text()).toBe("Open the guide now\n");
+    fixture.io.log("Alt \u001b]8;;https://example.com/(x)\u001b\\label\u001b]8;;\u001b\\ end");
+    expect(fixture.text()).toContain("Alt label end\n");
+    fixture.io.log("C1 \u009d8;;https://example.com/(c1)+uri\u0007label\u009d8;;\u0007 end");
+    expect(fixture.text()).toContain("C1 label end\n");
+    expect(fixture.text()).not.toContain("example.com");
+  });
+
   it("refuses hidden input without a terminal before printing or changing raw mode", () => {
     const fixture = terminal();
     fixture.input.isTTY = false;

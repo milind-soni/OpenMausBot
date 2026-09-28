@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { applyStartupPreferences, formatSessions, pairingBlock, parseArgs, qrToString, runAccess, runLogin, runOnboardingCommand, serverEntry, type CliOptions, verifyPhoneEndpoint } from "./cli.ts";
+import { readAdminActivityRange } from "./admin-activity.ts";
 import { SetupCancelled } from "./cli-prompts.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startControlPlaneStub } from "./testing/control-plane-stub.ts";
@@ -63,6 +64,14 @@ describe("openmausbot command line", () => {
     expect(parseArgs(["serve", "--domain", "maus.example.com", "--tunnel"], {})).toEqual({ error: expect.stringContaining("--domain already gives") });
   });
 
+  it("takes the phone kind non-interactively, because a scripted pair never sees the chooser", () => {
+    // `docker compose exec … pair` and any piped run skip the interactive
+    // chooser, and an Android phone is the one that needs a different QR.
+    expect(parseArgs(["pair", "--phone", "android"], {})).toMatchObject({ command: "pair", phone: "android" });
+    expect(parseArgs(["pair", "--phone", "iOS"], {})).toMatchObject({ phone: "ios" });
+    expect(parseArgs(["pair", "--phone", "blackberry"], {})).toEqual({ error: expect.stringContaining("ios or android") });
+  });
+
   it("prints a scannable block with the link, or says where to type the code", () => {
     const block = pairingBlock({ code: "ABCD-EFGH-JKLM", url: "https://mini.example/pair#code=ABCD-EFGH-JKLM", expiresAt: Date.now() + 60_000 });
     expect(block).toContain("pairing code:  ABCD-EFGH-JKLM");
@@ -72,6 +81,42 @@ describe("openmausbot command line", () => {
     expect(noUrl).toContain("/pair on the address you use");
     expect(noUrl).toContain("set OMB_PUBLIC_URL");
     expect(qrToString("https://example.com").length).toBeGreaterThan(200);
+  });
+
+  describe("the two links one pairing window has", () => {
+    const url = "https://mini.example/pair#code=ABCD-EFGH-JKLM";
+    const invite = `openmausbot://pair?address=https%3A%2F%2Fmini.example&token=omb_pair_${"a".repeat(43)}&name=mini`;
+    const block = (over: Record<string, unknown> = {}) =>
+      pairingBlock({ code: "ABCD-EFGH-JKLM", url, inviteUrl: invite, expiresAt: Date.now() + 60_000, ...over });
+
+    it("gives an Android phone the app-scheme QR, because its scanner rejects https", () => {
+      const out = block({ phone: "android" });
+      expect(out).toContain(qrToString(invite));
+      expect(out).not.toContain(qrToString(url));
+      expect(out).toContain("Scan that in the OpenMausBot app");
+      // The web link is still offered, but not as the thing to scan.
+      expect(out).toContain(`web browser:   ${url}`);
+      expect(out).not.toContain("open or scan:");
+    });
+
+    it("gives everyone else the web QR, and still prints the app link rather than only naming it", () => {
+      const out = block({ phone: "ios" });
+      expect(out).toContain(qrToString(url));
+      expect(out).not.toContain(qrToString(invite));
+      // Naming a link the block never prints leaves the iOS app, which takes a
+      // pasted invite, with nothing to paste.
+      expect(out).toContain(`phone app:     ${invite}`);
+      expect(out).toContain(`open or scan:  ${url}`);
+    });
+
+    it("says plainly when an Android phone asked for an app link this server cannot build", () => {
+      const out = block({ phone: "android", inviteUrl: null });
+      expect(out).toContain(qrToString(url));
+      expect(out).toContain("The Android app needs the phone-app link");
+      expect(out).toContain("OMB_PUBLIC_URL");
+      // It must not claim the QR is scannable in the app when it is not.
+      expect(out).not.toContain("Scan that in the OpenMausBot app");
+    });
   });
 
   it("lists sessions as a table with relative last-seen times", () => {
@@ -536,6 +581,15 @@ describe("openmausbot access", () => {
       expect(await runAccess({ ...base, accessAction: "remove", email: "her@example.test" }, io)).toBe(0);
       expect(await runAccess({ ...base, accessAction: "remove", email: "her@example.test" }, io)).toBe(1);
       expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).signIn).toEqual({ admins: [], members: ["@agentada.test"] });
+      // Each change once more than one person signs in is in the admin
+      // activity log, named for the command line; the first, a lone admin, is not.
+      const rows = readAdminActivityRange(dataDir, { from: new Date(Date.now() - 600_000), to: new Date(Date.now() + 600_000) });
+      expect(rows.map((row) => [row.action, row.actor.kind, row.changed])).toEqual([
+        ["people.update", "cli", ["signIn.members"]],
+        ["people.update", "cli", ["signIn.admins", "signIn.members"]],
+        ["people.update", "cli", ["signIn.members"]],
+      ]);
+      expect(rows[0]!.after).toEqual({ "signIn.members": ["@agentada.test"] });
     } finally {
       await removeTempDir(home);
     }
@@ -571,7 +625,10 @@ describe.skipIf(process.platform === "win32")("serve --domain", () => {
       expect(caddyfile).toContain(`reverse_proxy 127.0.0.1:${port}`);
       expect(caddyfile).toContain(`reverse_proxy 127.0.0.1:${port + 1}`);
     } finally {
-      const caddyPid = Number(readFileSync(join(home, "caddy.pid"), "utf8").trim() || "0");
+      // Cleanup must not mask the real failure: a server that never reached
+      // the Caddy step has no pid file, and the assertions above already
+      // named what actually went wrong.
+      const caddyPid = existsSync(join(home, "caddy.pid")) ? Number(readFileSync(join(home, "caddy.pid"), "utf8").trim() || "0") : 0;
       child.kill("SIGTERM");
       await exited(child);
       await new Promise((r) => setTimeout(r, 300));

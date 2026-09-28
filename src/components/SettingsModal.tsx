@@ -3,10 +3,10 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Archive, Coins, FlaskConical, KeyRound, Monitor, Palette, Search, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
+import { Archive, Coins, FlaskConical, KeyRound, Monitor, Palette, ScrollText, Search, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
-import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
+import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, routinesInConversationEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
 import { withTourReset } from "@/lib/guided-tour";
@@ -18,20 +18,35 @@ import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { ServerPairingCard } from "./ServerPairingCard";
 import { PeopleSection } from "./PeopleSection";
+import { ActivitySection } from "./ActivitySection";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { CustomDomainSettings } from "./CustomDomainSettings";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
+import { OrganizationSettings } from "./OrganizationSettings";
+import { CloudAccountSettings } from "./CloudAccountSettings";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
+import { effortLabel } from "./ModelPicker";
+import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
 import { shortcutLabel } from "./ShortcutHint";
 import { UsageSection } from "./UsageSection";
+import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
+import { FONT_IDS, applyFont, readFont, type FontId } from "@/lib/fonts";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
+import { AboutMeSettings } from "./AboutMeSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
+import { AutomaticRecoverySettings } from "./AutomaticRecoverySettings";
+import { ThreadCleanupSettings } from "./ThreadCleanupSettings";
+import { DefaultBotSettings } from "./NewBotDialog";
 import { WorkspaceBackupSettings } from "./WorkspaceBackupSettings";
+import { CompanyBackupSettings } from "./CompanyBackupSettings";
 import { cn } from "@/lib/cn";
+import { setNotificationSounds, useNotificationSounds } from "@/lib/notification-preferences";
 import { setShowThreads, useShowThreads } from "@/lib/thread-preferences";
+import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 
 // `labelKey`, not a label: t() reads the active pack when it is called, so a
 // label resolved here at module scope would freeze the language the app booted
@@ -43,18 +58,21 @@ const SECTIONS: Array<{
   icon: typeof User;
   keywords: string[];
 }> = [
-  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "analytics", "updates", "threads", "parallel", "concurrency"] },
-  { id: "desktopWorkspaces", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "connect", "pair", "switch", "local"] },
-  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display"] },
+  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "about me", "about", "suggestions", "suggested", "memory", "analytics", "updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule"] },
+  { id: "desktopWorkspaces", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
+  { id: "organization", labelKey: "settings.section.organization", icon: Building2, keywords: ["company", "organization", "organisation", "sign in", "enroll", "managed", "models", "disconnect"] },
+  { id: "cloudAccount", labelKey: "settings.section.cloudAccount", icon: User, keywords: ["cloud", "account", "personal", "sign in", "pro", "subscription", "billing"] },
+  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display", "notifications", "sound", "sounds", "mute", "silent", "chime"] },
   { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "learn", "skill", "authoring", "browser", "profiles"] },
-  { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
+  { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "mistral", "vps"] },
   { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
   { id: "companion", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "computer", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
   { id: "usage", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
   { id: "people", labelKey: "settings.section.people", icon: Users, keywords: ["people", "users", "invite", "sign in", "members", "admins", "access"] },
+  { id: "activity", labelKey: "settings.section.activity", icon: ScrollText, keywords: ["activity", "audit", "log", "history", "who changed", "approvals", "decisions", "admin"] },
   { id: "backups", labelKey: "settings.section.backups", icon: Archive, keywords: ["export", "import", "restore", "full backup", "password", "recovery"] },
-  { id: "workspaces", labelKey: "settings.section.workspaces", icon: Building2, keywords: ["clients", "tenants", "fleet", "workspaces"] },
+  { id: "workspaces", labelKey: "settings.section.workspaces", icon: Building2, keywords: ["clients", "tenants", "fleet", "workspaces", "installation", "installations"] },
 ];
 
 function sectionMatches(section: (typeof SECTIONS)[number], query: string): boolean {
@@ -62,7 +80,7 @@ function sectionMatches(section: (typeof SECTIONS)[number], query: string): bool
   return [t(section.labelKey), ...section.keywords].some((part) => part.toLowerCase().includes(query));
 }
 
-/** Name + email, persisted to /api/config {profile} on blur. */
+/** Name and email save on blur; shared context has its own autosave. */
 function ProfileFields() {
   const { state, dispatch } = useStore();
   const [name, setName] = useState(state.config?.profile?.name ?? "");
@@ -78,8 +96,10 @@ function ProfileFields() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }),
     })
-      .then((r) => r.json())
-      .then((config) => dispatch({ type: "configStatus", config }))
+      .then((r) => { if (!r.ok) throw new Error("Profile save failed"); return r.json(); })
+      .then((config: ConfigStatus) => {
+        if (config.profile) dispatch({ type: "profileSaved", profile: { name: config.profile.name, email: config.profile.email } });
+      })
       .catch(() => {});
   };
 
@@ -97,6 +117,7 @@ function ProfileFields() {
         placeholder="you@example.com"
         className={inputClass}
       />
+      <AboutMeSettings />
     </div>
   );
 }
@@ -168,6 +189,55 @@ function UpdatesRow() {
  * matters more than the switch: people who cannot see the scope assume the
  * worst, and the worst — conversation text — is exactly what this never
  * sends (autocapture is off; see lib/analytics.ts). */
+/** The effort every new bot starts with. The server skips a level the new
+ * bot's engine does not offer, and a bot's own choice always wins. */
+function NewBotEffortRow() {
+  const { state, dispatch } = useStore();
+  const current = state.config?.newBots?.effort ?? "";
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async (value: string) => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ newBots: { effort: isEffortLevel(value) ? value : null } }),
+      });
+      dispatch({ type: "configStatus", config });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("settings.newBotEffort.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SettingRow
+      title={t("settings.newBotEffort.title")}
+      subtitle={t("settings.newBotEffort.subtitle")}
+      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+    >
+      <select
+        value={current}
+        disabled={saving}
+        aria-label={t("settings.newBotEffort.aria")}
+        onChange={(event) => void save(event.target.value)}
+        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
+      >
+        <option value="">{t("settings.newBotEffort.default")}</option>
+        {EFFORT_LEVELS.map((level) => (
+          <option key={level} value={level}>
+            {effortLabel(level)}
+          </option>
+        ))}
+      </select>
+    </SettingRow>
+  );
+}
+
 function AnalyticsRow() {
   const [on, setOn] = useState(analyticsEnabled);
   return (
@@ -240,39 +310,21 @@ function ReplayTourRow() {
 }
 
 function LanguageRow() {
-  const { state, dispatch } = useStore();
-  const current = state.config?.language ?? "";
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const save = async (language: string) => {
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ language }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.language.error"));
-    } finally {
-      setSaving(false);
-    }
-  };
+  const { state } = useStore();
+  // Saved on this device only: anyone can switch, including a chat-only
+  // teammate, and nobody changes another person's screen. The server's
+  // language is the default until this device picks one.
+  const current = effectiveLanguage(useLanguageChoice(), state.config?.language);
 
   return (
     <SettingRow
       title={t("settings.language.title")}
       subtitle={t("settings.language.subtitle")}
-      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
       <select
         value={current}
-        disabled={saving}
         aria-label={t("settings.language.aria")}
-        onChange={(event) => void save(event.target.value)}
+        onChange={(event) => setLanguageChoice(event.target.value)}
         className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.language.system")}</option>
@@ -280,6 +332,42 @@ function LanguageRow() {
           <option key={code} value={code}>
             {label}
           </option>
+        ))}
+      </select>
+    </SettingRow>
+  );
+}
+
+function NotificationSoundsRow() {
+  const enabled = useNotificationSounds();
+  return (
+    <SettingRow title={t("settings.notificationSounds.title")} subtitle={t("settings.notificationSounds.subtitle")}>
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.notificationSounds.play")}
+        onClick={() => setNotificationSounds(!enabled)}
+      />
+    </SettingRow>
+  );
+}
+
+function FontRow() {
+  const [current, setCurrent] = useState<FontId>(readFont);
+  return (
+    <SettingRow title={t("settings.font.title")} subtitle={t("settings.font.subtitle")}>
+      <select
+        value={current}
+        aria-label={t("settings.font.aria")}
+        onChange={(event) => {
+          // SAFETY: the options are rendered from FONT_IDS, so the value is always a member.
+          const id = event.target.value as FontId;
+          applyFont(id);
+          setCurrent(id);
+        }}
+        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+      >
+        {FONT_IDS.map((id) => (
+          <option key={id} value={id}>{t(`settings.font.${id}`)}</option>
         ))}
       </select>
     </SettingRow>
@@ -294,6 +382,46 @@ function ShowThreadsRow() {
         checked={enabled}
         aria-label={t("settings.threadDisplay.show")}
         onClick={() => setShowThreads(!enabled)}
+      />
+    </SettingRow>
+  );
+}
+
+function RoutinesInConversationRow() {
+  const { state, dispatch } = useStore();
+  const enabled = routinesInConversationEnabled(state.config);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const toggle = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ features: { routinesInConversation: !enabled } }),
+      });
+      dispatch({ type: "configStatus", config });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("settings.routinesInConversation.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SettingRow
+      title={t("settings.routinesInConversation.title")}
+      subtitle={t("settings.routinesInConversation.subtitle")}
+      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+    >
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.routinesInConversation.aria")}
+        disabled={saving}
+        onClick={() => void toggle()}
+        className="disabled:cursor-wait disabled:opacity-50"
       />
     </SettingRow>
   );
@@ -473,13 +601,19 @@ export function SettingsModal() {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   useEffect(() => window.ogb?.environments?.onOpenSettings?.(() => setQuery("")), []);
+  useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
   const q = query.trim().toLowerCase();
+  const ownerOrAdmin = useOwnerOrAdmin();
   const availableSections = SECTIONS.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance" || entry.id === "desktopWorkspaces")
     .filter((entry) => entry.id !== "desktopWorkspaces" || Boolean(window.ogb?.environments))
+    .filter((entry) => entry.id !== "organization" || Boolean(window.ogb?.organization))
+    .filter((entry) => entry.id !== "cloudAccount" || Boolean(window.ogb?.cloudAccount))
     // the operator's screen for other workspaces exists only where a fleet agent does
     .filter((entry) => entry.id !== "workspaces" || workspacesAvailable(state.config))
     // sign-in by email is a hosted server's; the desktop app pairs devices under Remote access
-    .filter((entry) => entry.id !== "people" || !window.ogb);
+    .filter((entry) => entry.id !== "people" || !window.ogb)
+    // the activity log belongs to a workspace served to a browser, and to its admins
+    .filter((entry) => entry.id !== "activity" || (!window.ogb && ownerOrAdmin === true));
   const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
   const sectionLabelKey = SECTIONS.find((entry) => entry.id === section)?.labelKey;
   const nextVisibleSection = visibleSections.some((entry) => entry.id === section) ? undefined : visibleSections[0]?.id;
@@ -498,6 +632,9 @@ export function SettingsModal() {
     else dialog?.focus();
 
     const onKey = (event: KeyboardEvent) => {
+      // A child editor owns Escape and its focus trap, including while saving.
+      if (event.defaultPrevented || (dialog && [...dialog.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')]
+        .some(child => child.getClientRects().length))) return;
       if (event.key === "Escape") {
         event.preventDefault();
         dispatch({ type: "toggleAppSettings", open: false });
@@ -621,20 +758,28 @@ export function SettingsModal() {
           </div>
 
           <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-5 sm:pb-5">
+            <LicenseExpiryBanner config={state.config} />
             {section === "desktopWorkspaces" && <ConnectedWorkspacesSettings />}
+            {section === "organization" && window.ogb?.organization && !remoteActive && <OrganizationSettings />}
+            {section === "cloudAccount" && window.ogb?.cloudAccount && !remoteActive && <CloudAccountSettings />}
             {section === "general" && (
               <>
-                <Card title={t("settings.profile.title")} subtitle={t("settings.profile.subtitle")}>
+                <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
                   <ProfileFields />
                 </Card>
                 <div>
                   <LanguageRow />
+                  <NewBotEffortRow />
                   <AnalyticsRow />
+                  <DefaultBotSettings />
                 </div>
                 <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
                   <RoomTurnTimeoutSettings />
                 </Card>
                 <ThreadConcurrencySettings />
+                {!remoteActive && <RoutinesInConversationRow />}
+                <AutomaticRecoverySettings />
+                <ThreadCleanupSettings />
                 <div>
                   {!remoteActive && <ReplayTourRow />}
                   <UpdatesRow />
@@ -649,7 +794,9 @@ export function SettingsModal() {
                   <SkinPicker />
                 </Card>
                 <div>
+                  <FontRow />
                   <ShowThreadsRow />
+                  <NotificationSoundsRow />
                   {!remoteActive && <ToolCallsRow />}
                 </div>
               </>
@@ -679,6 +826,7 @@ export function SettingsModal() {
                   <ApiKeyRow section="openaiCompat" testProvider="openaiCompat" />
                   <OpenAiCompatUrl />
                   <ApiKeyRow section="xai" testProvider="xai" />
+                  <ApiKeyRow section="mistral" testProvider="mistral" />
                   <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
                   <ApiKeyRow section="box" />
                   <VpsConnection />
@@ -697,14 +845,19 @@ export function SettingsModal() {
               <EnginesSettings />
             )}
 
-            {section === "backups" && <WorkspaceBackupSettings />}
+            {section === "backups" && <><WorkspaceBackupSettings /><CompanyBackupSettings /></>}
 
             {section === "companion" && (
               <>
                 <RemoteComputerSection />
                 {!remoteActive && <CustomDomainSettings />}
-                {/* a hosted server reached from a browser: pair phones and see devices here; the desktop app has its own companion flow */}
-                {!window.ogb && <ServerPairingCard />}
+                {/* mints an admin/client session token for anything that isn't the phone companion
+                    flow (MCP clients, `openmausbot pair`, a second desktop app), and pairs phones to a
+                    hosted server. Shown for the desktop app's own server (#950) AND when this desktop is
+                    a remote client of a hosted workspace: its requests carry that server's session, and
+                    Settings there is the only place that server's phones can be paired from (MOCA-84).
+                    The server decides who may act — an owner or an admin session — not this gate. */}
+                <ServerPairingCard />
                 {!remoteActive && <CompanionSection profileEmail={state.config?.profile?.email} />}
               </>
             )}
@@ -713,6 +866,7 @@ export function SettingsModal() {
 
             {section === "usage" && <UsageSection />}
             {section === "people" && <PeopleSection />}
+            {section === "activity" && <ActivitySection />}
             {section === "workspaces" && <WorkspacesSection />}
           </div>
         </div>

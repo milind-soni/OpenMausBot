@@ -1593,6 +1593,77 @@ class SessionTest {
     }
 
     @Test
+    fun streamEndingBeforeHelloTriesTheNextProtectedRoute() = runTest {
+        val primary = assertNotNull(CompanionEndpoint.create("https://primary.example", CompanionEndpointKind.HOSTED, 0))
+        val backup = assertNotNull(CompanionEndpoint.create("https://backup.example", CompanionEndpointKind.HOSTED, 1))
+        val saved = Connection(id = "c1", name = "Mac", host = primary.host, port = primary.port,
+            activeEndpoint = primary, endpoints = listOf(primary, backup))
+        val dialed = mutableListOf<String>()
+        val session = session(
+            connectionStore = FakeConnectionStore(saved),
+            tokenStore = FakeTokenStore().apply { this.saved["c1"] = "tok" },
+            clientFactory = { connection, token ->
+                dialed += connection.baseUrl.toString()
+                CompanionClient(connection, token)
+            },
+            events = { _, _ ->
+                if (dialed.last() == primary.url) emptyFlow() else flow {
+                    emit(StreamFrame(Frame.Hello(cursor = "s:4", resumed = true), seq = 4))
+                    awaitCancellation()
+                }
+            },
+        )
+        session.awaitRestored()
+        session.connect()
+        runCurrent()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf(primary.url, backup.url), dialed)
+        assertEquals(Session.Status.Live, session.status.value)
+    }
+
+    @Test
+    fun streamEndingAfterHelloReconnectsOnTheWorkingRouteWithItsCursor() = runTest {
+        assertWorkingRouteReconnect()
+    }
+
+    @Test
+    fun truncatedStreamAfterHelloReconnectsOnTheWorkingRouteWithItsCursor() = runTest {
+        assertWorkingRouteReconnect(APIError.Transport("Truncated chunk", java.io.EOFException()))
+    }
+
+    private suspend fun kotlinx.coroutines.test.TestScope.assertWorkingRouteReconnect(streamFailure: Throwable? = null) {
+        val primary = assertNotNull(CompanionEndpoint.create("https://primary.example", CompanionEndpointKind.HOSTED, 0))
+        val backup = assertNotNull(CompanionEndpoint.create("https://backup.example", CompanionEndpointKind.HOSTED, 1))
+        val saved = Connection(id = "c1", name = "Mac", host = primary.host, port = primary.port,
+            activeEndpoint = primary, endpoints = listOf(primary, backup))
+        val dialed = mutableListOf<String>()
+        val cursors = mutableListOf<String?>()
+        val session = session(
+            connectionStore = FakeConnectionStore(saved),
+            tokenStore = FakeTokenStore().apply { this.saved["c1"] = "tok" },
+            clientFactory = { connection, token ->
+                dialed += connection.baseUrl.toString()
+                CompanionClient(connection, token)
+            },
+            events = { since, _ -> flow {
+                cursors += since
+                emit(StreamFrame(Frame.Hello(cursor = "s:4", resumed = false), seq = 4))
+                if (cursors.size > 1) awaitCancellation()
+                streamFailure?.let { throw it }
+            } },
+        )
+        session.awaitRestored()
+        session.connect()
+        runCurrent()
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf(primary.url), dialed)
+        assertEquals(listOf(null, "s:4"), cursors)
+        assertEquals(Session.Status.Live, session.status.value)
+    }
+
+    @Test
     fun cleanStreamEndBacksOffOneTwoFourCappedAtFifteen() = runTest {
         var opens = 0
         val session = session(

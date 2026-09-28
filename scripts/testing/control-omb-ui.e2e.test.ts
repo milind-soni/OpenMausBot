@@ -160,10 +160,13 @@ describe("control-omb ui drives the real renderer", () => {
     await click("Connections");
     await type("fixture-saved-key");
     await save();
-    await expect.poll(() => evaluate(`${input}.value`)).toBe("");
+    // The Connections panel re-renders after navigation and keystrokes, so a
+    // loaded runner can briefly detach the key field or its Test button; poll
+    // for the settled state with a budget that outlasts a re-render.
+    await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe("");
     await click("Appearance");
     await click("Connections");
-    await expect.poll(() => evaluate(`${testButton}?.disabled`)).toBe(false);
+    await expect.poll(() => evaluate(`${testButton}?.disabled ?? null`), { timeout: 10_000 }).toBe(false);
     await click("Test");
     await expect.poll(() => evaluate("window.keyTests")).toEqual([{ provider: "openaiCompat" }]);
     await expect.poll(verdict).toBe("Saved key: Model catalog reachable: fixture-model. Authentication and chat not verified.");
@@ -175,8 +178,8 @@ describe("control-omb ui drives the real renderer", () => {
     await expect.poll(verdict).toBe("Unsaved key — save it to use it. Model catalog reachable: fixture-model. Authentication and chat not verified.");
     for (const erased of ["", "   "]) {
       await type(erased);
-      expect(await evaluate(`${input}.value`)).toBe(erased);
-      expect(await evaluate(`${testButton}.disabled`)).toBe(true);
+      await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe(erased);
+      await expect.poll(() => evaluate(`${testButton}?.disabled ?? null`), { timeout: 10_000 }).toBe(true);
       await evaluate(`${testButton}.click(); true`);
       expect(await evaluate("window.keyTests.length")).toBe(2);
     }
@@ -189,14 +192,14 @@ describe("control-omb ui drives the real renderer", () => {
     await evaluate("window.rejectKeySave = true");
     await save();
     await expect.poll(async () => (await ui("snapshot", info.ui)).snapshot).toContain("Fixture save rejected");
-    expect(await evaluate(`${input}.value`)).toBe("fixture-replacement-key");
+    await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe("fixture-replacement-key");
     await type("");
-    expect(await evaluate(`${testButton}.disabled`)).toBe(true);
+    await expect.poll(() => evaluate(`${testButton}?.disabled ?? null`), { timeout: 10_000 }).toBe(true);
     await type("fixture-replacement-key");
     await evaluate("window.rejectKeySave = false");
     await save();
-    await expect.poll(() => evaluate(`${input}.value`)).toBe("");
-    await expect.poll(() => evaluate(`${testButton}.disabled`)).toBe(false);
+    await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe("");
+    await expect.poll(() => evaluate(`${testButton}?.disabled ?? null`), { timeout: 10_000 }).toBe(false);
     await click("Test");
     await expect.poll(() => evaluate("window.keyTests")).toEqual([
       { provider: "openaiCompat" }, { provider: "openaiCompat", key: "fixture-draft-key" }, { provider: "openaiCompat" },
@@ -291,10 +294,49 @@ describe("control-omb ui drives the real renderer", () => {
     // CLI, so all three are verified; one failed and one was a dry run.
     expect(tree).toContain("3 steps · 3 verified · 1 failed · 1 dry run");
 
+    // Hit-test the actual layout, not just the Tailwind class strings: the
+    // blank band beside the floating card must reach the transcript while
+    // the card and composer remain interactive.
+    const hitTest = await ui("eval", info.ui, "--js", `(() => {
+      const card = document.querySelector('section[aria-label="This run"]');
+      const dock = card.parentElement.parentElement;
+      const rect = card.getBoundingClientRect();
+      const blank = document.elementFromPoint(dock.getBoundingClientRect().left + 8, rect.top + rect.height / 2);
+      const onCard = document.elementFromPoint(rect.left + 20, rect.top + 20);
+      const scroll = document.querySelector('[role="log"]').parentElement;
+      const composer = ${COMPOSER};
+      const input = composer.getBoundingClientRect();
+      return {
+        blankReachesTranscript: scroll.contains(blank) && !dock.contains(blank) && getComputedStyle(scroll).overflowY === 'auto',
+        cardInteractive: card.contains(onCard),
+        composerInteractive: document.elementFromPoint(input.left + input.width / 2, input.top + input.height / 2) === composer,
+      };
+    })()`);
+    expect(hitTest).toMatchObject({ result: { blankReachesTranscript: true, cardInteractive: true, composerInteractive: true } });
+
     // These are real control operations: the fixture health check succeeds
     // and a deliberately missing UI target rejects instead of reporting green.
     expect(await runControlOmb(["doctor", "--url", info.url])).toMatchObject({ ok: true });
     await expect(ui("click", info.ui, "--name", "Deliberately missing QA control")).rejects.toThrow("no element is named");
+
+    // A control the app paints after its data arrives must still be
+    // clickable. Resolving --name used to take one snapshot, so a lookup
+    // that landed a tick early failed as "no element is named" — the smoke's
+    // own model row, and ~1 run in 8 red on four unrelated branches. The
+    // button below is planted with the same delay the real one has.
+    await ui("eval", info.ui, "--js", `(() => {
+      const late = document.createElement("button");
+      late.textContent = "Late QA control";
+      late.setAttribute("aria-label", "Late QA control");
+      // Keep this synthetic target inside the viewport: appending a normal
+      // flow sibling below the full-height app makes click scroll the app
+      // out of view, interfering with the real controls exercised next.
+      late.style.cssText = 'position:fixed;top:0;left:0;z-index:2147483647';
+      setTimeout(() => document.body.appendChild(late), 1500);
+      return "planted";
+    })()`);
+    expect(await ui("click", info.ui, "--name", "Late QA control")).toMatchObject({ ok: true });
+    await ui("eval", info.ui, "--js", `document.querySelector('[aria-label="Late QA control"]').remove()`);
 
     mkdirSync(evidenceDir, { recursive: true });
     const shotPath = join(evidenceDir, "chat-ui.png");

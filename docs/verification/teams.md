@@ -19,9 +19,10 @@ pnpm exec vitest run server/index.test.ts -t "creates team computers|shares one 
 
 The server test uses `launchVerificationServer`, sends a sample conversation,
 creates an empty team, moves two existing bots, saves shared instructions,
-empties and renames the team, imports a legacy template with a colliding name,
-and restarts the exact disposable server. It checks retained instructions and
-conversation messages, archived membership, rejected nonempty deletion and
+renames the populated team, adds and removes members, then empties and renames
+it again. It imports a legacy template with a colliding name and restarts the
+exact disposable server. It checks retained instructions and conversation
+messages, archived bots moving to General when their team is deleted, and
 explicit empty-team deletion. API requests and `control-omb` wait/messages
 results are kept beside the fixture log in `*.team-lifecycle.json`.
 
@@ -31,11 +32,16 @@ conversations readable and persists their task migrations, logs a diagnostic,
 and leaves the malformed file byte-for-byte unchanged. Later team and shared
 instruction writes still fail closed until that file is repaired.
 
-The renderer test uses `control-omb ui launch`, opens **Create team**, leaves it
-empty, moves two bots through Team map, edits shared instructions and reloads.
-A second fixture client moves the bots out; live updates retain the empty team
-and expose rename/delete. Rename preserves instructions; delete confirms that
-the team's instructions will be removed. It captures
+The renderer test uses `control-omb ui launch`, opens **Create team**, and checks
+that renaming preserves the sidebar's collapsed state and ordering. It moves
+two bots through Team map, edits membership, and creates a bot directly in the
+team. Dismissing that pending creation must retain unsaved membership edits and
+select the created bot when its response arrives. It edits shared instructions
+and reloads. A second fixture client moves the bots out; live updates retain the
+empty team. Rename preserves instructions; delete confirms that the team's
+instructions will be removed. A delayed, failed deletion cannot be submitted
+twice and remains retryable; confirmation focus stays contained and returns to
+its trigger when dismissed. It captures
 `.omb-scratch/verify-evidence/team-lifecycle.png` before deletion.
 New lifecycle labels use the existing string catalog; untranslated packs fall
 back to the English labels without changing or regenerating other translations.
@@ -60,12 +66,12 @@ next bot click, and Escape during arrangement restores the original position.
 Idle cards omit the redundant Ready label. A computer shortcut appears only on
 the selected bot and opens that bot's access settings while Team map remains
 mounted.
-The **Add → Box computer** entry explains provider charges and cannot create a
+The **Add → Boat computer** entry explains provider charges and cannot create a
 machine while this credential-free fixture is disconnected. Opening and
 cancelling it leaves the server's computer inventory unchanged.
 
 The focused `server/index.test.ts` cases run the real server against a local
-HTTP Box stand-in, with a disposable fake token and no paid account or container
+HTTP Boat stand-in, with a disposable fake token and no paid account or container
 engine. They verify explicit cost acknowledgement, invalid/foreign-origin
 request denial, read-only inventory, durable failed-create records, same-id
 retry without a second machine, concurrent provisioning rejection, and busy-team
@@ -74,17 +80,17 @@ checked; this is not a full server-restart assertion. Opening a shared desktop
 requires taking human control first.
 
 A second case confirms that Auto bots' direct and room turns receive the same
-Box ID, while an explicit Off bot receives no computer. The real shared-resource
+Boat ID, while an explicit Off bot receives no computer. The real shared-resource
 lock rejects overlapping work and lifecycle changes; human control is shared
 across the team's bots, while a bot's control capability cannot impersonate
 another bot and is revoked after its turn. Removing the simulated provider
 machine causes a clear failure, never an automatic paid replacement. These
-checks prove server routing and ownership, not actual Box provisioning or
+checks prove server routing and ownership, not actual Boat provisioning or
 remote desktop operation.
 
 The separate `team-computers-ui` test uses a real OMB server and renderer with
-an owned loopback HTTP Box provider. It creates a named machine through **Add →
-Box computer**, verifies opening the shelf never provisions a machine, cancels
+an owned loopback HTTP Boat provider. It creates a named machine through **Add →
+Boat computer**, verifies opening the shelf never provisions a machine, cancels
 and confirms a pointer drop, explicitly unassigns before moving to another team,
 and preserves bot settings and the computer registry across a browser reload.
 It also checks an Auto bot's **Computer** panel names the shared team machine
@@ -101,11 +107,11 @@ For a separately driven computer-use preview, run:
 node --experimental-strip-types scripts/testing/team-computers-preview.ts
 ```
 
-The printed `previewUrl` is disposable. `boxFixtureApi` exposes a fixture-only
+The printed `previewUrl` is disposable. `boatFixtureApi` exposes a fixture-only
 `GET /__fixture` receipt of provider calls; `POST /__fixture` with
 `{"refuseCreate":true}` enables the simulated 429 response, and false clears it.
 The launch hook accepts only a literal `http://127.0.0.1:PORT` and installs a
-fixed fake token. It cannot inherit a real Box token or use a remote provider.
+fixed fake token. It cannot inherit a real Boat token or use a remote provider.
 Ctrl-C stops the owned renderer/server and local provider. Guest bootstrap
 commands are acknowledged by the stand-in but never execute.
 
@@ -131,9 +137,16 @@ The owner API keeps the existing `/api/sidebar-sections` name for older clients:
 - `POST { name, botIds?: string[] }` creates a named team or moves the supplied
   bots into it. Omitted/empty `botIds` creates an empty team. An empty name with
   selected bots moves them into General. Chief conflicts change no memberships.
-- `PATCH ?section=NAME { name }` renames an empty team and its instructions.
-- `DELETE ?section=NAME` removes an empty team and its instructions. Bots,
-  archived bots and group chats must be moved out first.
+- `PUT ?section=NAME { addBotIds: string[], removeBotIds: string[] }` updates
+  membership in an existing team. Removed bots move to General. Invalid or
+  stale membership changes are rejected without partially applying the move.
+- `PATCH ?section=NAME { name }` renames a team, including its bots, archived
+  bots, group chats, shared instructions, management grants and assigned team
+  computer. It cannot merge into an existing team or rename during active work.
+- `DELETE ?section=NAME` removes the team and its shared instructions while
+  retaining bots, archived bots, group chats and their conversations in General.
+  Finish active work and unassign any team computer first. Chief conflicts
+  reject the deletion rather than changing leadership.
 
 The registry shares the atomic section-context file so rename/delete cannot
 split a team's name from its instructions. Team labels are remembered before a

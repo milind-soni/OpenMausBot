@@ -1,7 +1,13 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { teamImportPreview } from "./team-import";
 import { takeImportName } from "../../shared/import-name";
+import { NEWER_PACKAGE_MESSAGE } from "../../shared/package-format";
+
+const fixture = (name: string) =>
+  JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "shared", "package-fixtures", name), "utf8"));
 
 describe("team import preview", () => {
   it("previews numbered copies using the same name allocator as the importer", () => {
@@ -125,5 +131,46 @@ Create the team.`);
       chiefOfStaff: "Scout",
       apps: [{ label: "Reddit", optional: false }],
     });
+  });
+
+  it("previews every part of a shared team (package v2) with the importer's own parser", () => {
+    const preview = teamImportPreview(fixture("full-team.v2.json"));
+    expect(preview).toMatchObject({
+      kind: "package",
+      version: 2,
+      name: "Sales desk",
+      teamName: "Sales desk",
+      chiefOfStaff: "Morgan",
+      brief: expect.stringContaining("49 per seat"),
+      members: [{ name: "Morgan", title: "Sales lead" }, { name: "Scout", title: "Prospect researcher" }, { name: "Quill", title: "Outreach writer" }],
+      rooms: 1,
+      playbooks: 1,
+      routines: 2,
+      skills: ["pricing-policy", "research-brief"],
+      offeredSkills: ["objection-handling"],
+      connections: [{ label: "CRM", url: "https://mcp.example.com/crm", values: 1 }],
+      notes: 2,
+      presets: ["Support agent"],
+      apps: [{ label: "HubSpot", optional: false }],
+    });
+    expect(preview.pictures?.[0]).toMatch(/^data:image\/png;base64,iVBOR/);
+    expect(preview.pictures?.slice(1)).toEqual([null, null]);
+  });
+
+  it("previews a preset file (skills and presets, no team) as preset bots for New bot", () => {
+    expect(teamImportPreview(fixture("library-only.v2.json"))).toMatchObject({
+      kind: "package", version: 2, library: true, name: "Sales skills", members: [], rooms: 0, routines: 0, skills: [],
+      presets: ["Support agent"], offeredSkills: ["follow-up"],
+    });
+  });
+
+  it("names the problem in a shared team before anything is added", () => {
+    expect(() => teamImportPreview(fixture("newer.v3.json"))).toThrow(NEWER_PACKAGE_MESSAGE);
+    const skillsOnly = fixture("library-only.v2.json");
+    delete skillsOnly.package.presets;
+    expect(() => teamImportPreview(skillsOnly)).toThrow("This file has no bots or preset bots to add.");
+    const broken = fixture("full-team.v2.json");
+    broken.package.rooms[0].members.push("ghost");
+    expect(() => teamImportPreview(broken)).toThrow("Room desk references unknown agent: ghost");
   });
 });

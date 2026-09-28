@@ -4,6 +4,7 @@ import {
   CirclePower,
   ClipboardPaste,
   FlaskConical,
+  Globe,
   Loader2,
   Pencil,
   Plus,
@@ -13,24 +14,49 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { claudeUserMcpEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { updateMcpServers } from "@/lib/mcp-servers";
-import { api } from "@/state/store";
+import { api, useStore, type ConfigStatus } from "@/state/store";
 
-export interface McpServerListing {
+import { Switch } from "./SettingsPrimitives";
+
+/** A server this computer starts (a command) or one reached at a URL —
+ * the two shapes the server stores. Secrets arrive as names only. */
+interface StdioMcpListing {
   name: string;
   command: string;
   args: string[];
   envKeys: string[];
   enabled: boolean;
 }
+interface RemoteMcpListing {
+  name: string;
+  type: "http" | "sse";
+  url: string;
+  headerKeys: string[];
+  enabled: boolean;
+}
+/** managedBy: the enrolled organisation has not approved this server, so it
+ * stays configured but never reaches bots. */
+export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & { managedBy?: string };
+
+export function isRemoteMcpListing(server: McpServerListing): server is RemoteMcpListing {
+  return "url" in server;
+}
+
+type McpTransport = "stdio" | "remote";
 
 interface McpDraft {
   name: string;
+  transport: McpTransport;
   command: string;
   args: string;
   env: string;
+  type: "http" | "sse";
+  url: string;
+  headers: string;
 }
 
 interface ProbeResult {
@@ -44,8 +70,9 @@ interface McpMessage {
   params?: Record<string, string | number>;
 }
 
-const EMPTY_DRAFT: McpDraft = { name: "", command: "", args: "", env: "" };
+const EMPTY_DRAFT: McpDraft = { name: "", transport: "stdio", command: "", args: "", env: "", type: "http", url: "", headers: "" };
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/;
 
 export function parseMcpArguments(value: string): string[] {
   return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -71,6 +98,28 @@ export function parseMcpEnvironment(
   return { ok: true, env };
 }
 
+/** `Name: value` per line, the way headers are written everywhere. A blank
+ * value beside a saved header keeps the saved value, as with env above. */
+export function parseMcpHeaders(
+  value: string,
+  savedKeys: readonly string[] = [],
+): { ok: true; headers: Record<string, string | true> } | { ok: false; error: McpMessage } {
+  const saved = new Set(savedKeys);
+  const headers: Record<string, string | true> = {};
+  for (const original of value.split(/\r?\n/)) {
+    const line = original.trim();
+    if (!line) continue;
+    const colon = line.indexOf(":");
+    if (colon <= 0) return { ok: false, error: { key: "mcp.headers.useColon", params: { line } } };
+    const key = line.slice(0, colon).trim();
+    const secret = line.slice(colon + 1).trim();
+    if (!HEADER_NAME.test(key)) return { ok: false, error: { key: "mcp.headers.invalidName", params: { key } } };
+    if (Object.hasOwn(headers, key)) return { ok: false, error: { key: "mcp.headers.duplicate", params: { key } } };
+    headers[key] = secret === "" && saved.has(key) ? true : secret;
+  }
+  return { ok: true, headers };
+}
+
 function probeToolsLabel(tools: ProbeResult["tools"]): string {
   if (!tools?.length) return t("mcp.probe.noTools");
   const names = tools.map((tool) => tool.name).join(", ");
@@ -80,17 +129,32 @@ function probeToolsLabel(tools: ProbeResult["tools"]): string {
 }
 
 function draftFor(server: McpServerListing): McpDraft {
+  // Values are intentionally never returned by the server. A blank value
+  // beside an existing key is a write-only “keep saved value” placeholder.
+  if (isRemoteMcpListing(server)) {
+    return {
+      ...EMPTY_DRAFT,
+      name: server.name,
+      transport: "remote",
+      type: server.type,
+      url: server.url,
+      headers: server.headerKeys.map((key) => `${key}: `).join("\n"),
+    };
+  }
   return {
+    ...EMPTY_DRAFT,
     name: server.name,
     command: server.command,
     args: server.args.join("\n"),
-    // Values are intentionally never returned by the server. A blank value
-    // beside an existing key is a write-only “keep saved value” placeholder.
     env: server.envKeys.map((key) => `${key}=`).join("\n"),
   };
 }
 
 export function McpServersPanel() {
+  const { state: store } = useStore();
+  // While enrolled with custom servers off, only approved servers can be added.
+  const policy = store.config?.managedPolicy;
+  const restricted = Boolean(policy && !policy.mcp.allowCustom);
   const [servers, setServers] = useState<McpServerListing[] | null>(null);
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [draft, setDraft] = useState<McpDraft>(EMPTY_DRAFT);
@@ -157,17 +221,31 @@ export function McpServersPanel() {
     setDraft(EMPTY_DRAFT);
   };
 
+  /** The request body for the draft, or the message that stops it. */
+  const draftBody = (
+    existing: McpServerListing | undefined,
+  ): { ok: true; body: Record<string, unknown> } | { ok: false; error: McpMessage } => {
+    const name = draft.name.trim();
+    if (draft.transport === "remote") {
+      const url = draft.url.trim();
+      if (!name || !/^https?:\/\//i.test(url)) return { ok: false, error: { key: "mcp.err.nameAndUrl" } };
+      const parsed = parseMcpHeaders(draft.headers, existing && isRemoteMcpListing(existing) ? existing.headerKeys : []);
+      if (!parsed.ok) return parsed;
+      return { ok: true, body: { type: draft.type, url, headers: parsed.headers } };
+    }
+    const command = draft.command.trim();
+    if (!name || !command) return { ok: false, error: { key: "mcp.err.nameAndCommand" } };
+    const parsed = parseMcpEnvironment(draft.env, existing && !isRemoteMcpListing(existing) ? existing.envKeys : []);
+    if (!parsed.ok) return parsed;
+    return { ok: true, body: { command, args: parseMcpArguments(draft.args), env: parsed.env } };
+  };
+
   const save = async () => {
     const name = draft.name.trim();
-    const command = draft.command.trim();
-    if (!name || !command) {
-      setError({ key: "mcp.err.nameAndCommand" });
-      return;
-    }
     const existing = editing === "new" ? undefined : servers?.find((server) => server.name === editing);
-    const parsedEnv = parseMcpEnvironment(draft.env, existing?.envKeys);
-    if (!parsedEnv.ok) {
-      setError(parsedEnv.error);
+    const prepared = draftBody(existing);
+    if (!prepared.ok) {
+      setError(prepared.error);
       return;
     }
     setBusy("save");
@@ -181,9 +259,7 @@ export function McpServersPanel() {
           method: editing === "new" ? "POST" : "PUT",
           body: JSON.stringify({
             ...(editing === "new" ? { name } : {}),
-            command,
-            args: parseMcpArguments(draft.args),
-            env: parsedEnv.env,
+            ...prepared.body,
             ...(existing ? { enabled: existing.enabled } : {}),
           }),
         },
@@ -288,7 +364,8 @@ export function McpServersPanel() {
             </button>
             <button
               type="button"
-              disabled={busy !== null}
+              disabled={busy !== null || restricted}
+              title={restricted && policy ? t("policy.managedBy", { organization: policy.organizationName }) : undefined}
               onClick={() => {
                 setImportOpen((open) => !open);
                 setError(null);
@@ -300,7 +377,8 @@ export function McpServersPanel() {
             </button>
             <button
               type="button"
-              disabled={busy !== null}
+              disabled={busy !== null || (restricted && !policy?.mcp.allowlist.length)}
+              title={restricted && policy ? t("policy.managedBy", { organization: policy.organizationName }) : undefined}
               onClick={() => {
                 setEditing("new");
                 setDraft(EMPTY_DRAFT);
@@ -314,6 +392,9 @@ export function McpServersPanel() {
           </div>
         </div>
 
+        {restricted && policy && <p role="status" className="mt-3 text-[12.5px] leading-relaxed text-ink-secondary">{t("policy.mcpRestricted", { organization: policy.organizationName })}</p>}
+        <ClaudeMcpSwitch />
+
         {importOpen && (
           <div className="mt-4 rounded-2xl border border-hairline/60 bg-card p-4 sm:p-5">
             <div className="text-[14px] font-medium text-ink">{t("mcp.import")}</div>
@@ -325,7 +406,7 @@ export function McpServersPanel() {
               onChange={(event) => setImportText(event.target.value)}
               spellCheck={false}
               rows={8}
-              placeholder={'{\n  "mcpServers": {\n    "notes": { "command": "npx", "args": ["-y", "@example/notes-mcp"], "env": { "NOTES_TOKEN": "…" } }\n  }\n}'}
+              placeholder={'{\n  "mcpServers": {\n    "notes": { "command": "npx", "args": ["-y", "@example/notes-mcp"], "env": { "NOTES_TOKEN": "…" } },\n    "docs": { "type": "http", "url": "https://mcp.example.com/mcp", "headers": { "Authorization": "Bearer …" } }\n  }\n}'}
               className="mt-3 w-full resize-y rounded-lg border border-hairline/60 bg-raised px-3 py-2.5 font-mono text-[12px] leading-relaxed text-ink outline-none focus:border-accent"
             />
             <div className="mt-3 flex items-center justify-end gap-2">
@@ -365,6 +446,25 @@ export function McpServersPanel() {
         {editing && (
           <div className="mt-4 rounded-2xl border border-hairline/60 bg-card p-4 sm:p-5">
             <div className="text-[14px] font-medium text-ink">{editing === "new" ? t("mcp.editorNew") : t("mcp.editorEdit", { name: editing })}</div>
+            {editing === "new" && (
+              <div className="mt-3 inline-flex rounded-lg bg-raised p-0.5" role="radiogroup" aria-label={t("mcp.field.type")}>
+                {(["stdio", "remote"] as const).map((transport) => (
+                  <button
+                    key={transport}
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.transport === transport}
+                    onClick={() => setDraft((current) => ({ ...current, transport }))}
+                    className={cn(
+                      "rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors",
+                      draft.transport === transport ? "bg-card text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
+                    )}
+                  >
+                    {t(transport === "stdio" ? "mcp.transport.stdio" : "mcp.transport.remote")}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <label className="block">
                 <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.name")}</span>
@@ -378,6 +478,43 @@ export function McpServersPanel() {
                   className="mt-1.5 w-full rounded-lg border border-hairline/60 bg-raised px-3 py-2.5 text-[13px] text-ink outline-none focus:border-accent disabled:opacity-60"
                 />
               </label>
+              {draft.transport === "remote" ? (
+                <>
+                  <label className="block">
+                    <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.url")}</span>
+                    <input
+                      autoFocus={editing !== "new"}
+                      value={draft.url}
+                      onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))}
+                      placeholder="https://mcp.example.com/mcp"
+                      className="mt-1.5 w-full rounded-lg border border-hairline/60 bg-raised px-3 py-2.5 text-[13px] text-ink outline-none focus:border-accent"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.type")}</span>
+                    <select
+                      value={draft.type}
+                      onChange={(event) => setDraft((current) => ({ ...current, type: event.target.value === "sse" ? "sse" : "http" }))}
+                      className="mt-1.5 w-full rounded-lg border border-hairline/60 bg-raised px-3 py-2.5 text-[13px] text-ink outline-none focus:border-accent"
+                    >
+                      <option value="http">{t("mcp.type.http")}</option>
+                      <option value="sse">{t("mcp.type.sse")}</option>
+                    </select>
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.headers")}</span>
+                    <textarea
+                      value={draft.headers}
+                      onChange={(event) => setDraft((current) => ({ ...current, headers: event.target.value }))}
+                      placeholder="Authorization: Bearer …"
+                      rows={4}
+                      className="mt-1.5 w-full resize-y rounded-lg border border-hairline/60 bg-raised px-3 py-2.5 font-mono text-[12px] text-ink outline-none focus:border-accent"
+                    />
+                    <span className="mt-1.5 block text-[11px] text-ink-secondary">{t("mcp.headersHint")}</span>
+                  </label>
+                </>
+              ) : (
+                <>
               <label className="block">
                 <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.command")}</span>
                 <input
@@ -409,6 +546,8 @@ export function McpServersPanel() {
                 />
                 {editing !== "new" && <span className="mt-1.5 block text-[11px] text-ink-secondary">{t("mcp.envHint")}</span>}
               </label>
+                </>
+              )}
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={closeEditor} className="rounded-lg px-3 py-2 text-[12.5px] text-ink-secondary hover:bg-raised">{t("mcp.cancel")}</button>
@@ -440,15 +579,19 @@ export function McpServersPanel() {
                 <div key={server.name} className="rounded-2xl border border-hairline/50 bg-card px-4 py-4 sm:px-5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                     <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", server.enabled ? "bg-success/10 text-success" : "bg-raised text-ink-secondary")}>
-                      <ServerCog size={19} />
+                      {isRemoteMcpListing(server) ? <Globe size={19} /> : <ServerCog size={19} />}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-[14px] font-medium text-ink">{server.name}</span>
                         <span className={cn("rounded-full px-2 py-0.5 text-[10.5px]", server.enabled ? "bg-success/10 text-success" : "bg-raised text-ink-secondary")}>{t(server.enabled ? "mcp.badge.on" : "mcp.badge.off")}</span>
+                        {server.managedBy && <span className="rounded-full bg-raised px-2 py-0.5 text-[10.5px] text-ink-secondary">{t("policy.managedBy", { organization: server.managedBy })}</span>}
                       </div>
-                      <div className="mt-1 truncate font-mono text-[11.5px] text-ink-secondary">{[server.command, ...server.args].join(" ")}</div>
-                      {server.envKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.secretsSaved", { keys: server.envKeys.join(", ") })}</div>}
+                      {server.managedBy && <div className="mt-1 text-[11.5px] text-ink-secondary">{t("policy.mcpBlocked", { organization: server.managedBy })}</div>}
+                      <div className="mt-1 truncate font-mono text-[11.5px] text-ink-secondary">{isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}</div>
+                      {isRemoteMcpListing(server)
+                        ? server.headerKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.headersSaved", { keys: server.headerKeys.join(", ") })}</div>
+                        : server.envKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.secretsSaved", { keys: server.envKeys.join(", ") })}</div>}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       <button type="button" disabled={busy !== null} onClick={() => void test(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
@@ -477,6 +620,52 @@ export function McpServersPanel() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The one Claude-only setting on this page, in the words a person would
+ * use. Claude bots normally see just the servers listed here; this switch
+ * also gives them the MCP servers and connectors of this machine's own
+ * Claude Code setup — what Codex bots already do with their config. Saved
+ * on the workspace; the next message picks it up. */
+function ClaudeMcpSwitch() {
+  const { state, dispatch } = useStore();
+  const enabled = claudeUserMcpEnabled(state.config);
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const toggle = async () => {
+    if (saving) return;
+    setSaving(true);
+    setFailed(false);
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ features: { claudeUserMcp: !enabled } }),
+      });
+      dispatch({ type: "configStatus", config });
+    } catch {
+      setFailed(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 flex items-start justify-between gap-4 rounded-2xl border border-hairline/50 bg-card px-4 py-4 sm:px-5">
+      <div className="min-w-0">
+        <div className="text-[14px] font-medium text-ink">{t("mcp.claude.title")}</div>
+        <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{t("mcp.claude.desc")}</p>
+        {failed && <p role="alert" className="mt-1 text-[12px] text-danger">{t("mcp.claude.error")}</p>}
+      </div>
+      <Switch
+        checked={enabled}
+        aria-label={t("mcp.claude.aria")}
+        disabled={saving}
+        onClick={() => void toggle()}
+        className="mt-0.5 shrink-0 disabled:cursor-wait disabled:opacity-50"
+      />
     </div>
   );
 }

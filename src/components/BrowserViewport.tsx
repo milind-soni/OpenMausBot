@@ -53,6 +53,8 @@ export function BrowserViewport({ frame, width, height, driving, input: sendInpu
   input: BrowserInput; acknowledge: (seq: number) => void; onDecodeError: () => void; onReturnToToolbar: () => void;
 }) {
   const screen = useRef<HTMLImageElement>(null);
+  const lastAckedSrc = useRef("");
+  const lastAckedSeq = useRef(-1);
   const frameWidth = frame.metadata?.deviceWidth ?? width;
   const frameHeight = frame.metadata?.deviceHeight ?? height;
   const src = `data:image/${frame.format === "png" ? "png" : "jpeg"};base64,${frame.data}`;
@@ -68,6 +70,12 @@ export function BrowserViewport({ frame, width, height, driving, input: sendInpu
   }, [pressed]);
   const rendered = () => {
     if (screen.current?.complete && screen.current.naturalWidth > 0 && screen.current.currentSrc === src) {
+      // onLoad and the rAF effect can both fire for one frame; ACK once per
+      // (src, seq). The seq half still ACKs identical-pixel re-encodes, which
+      // reuse the src and so fire no load event of their own.
+      if (screen.current.currentSrc === lastAckedSrc.current && frame.seq === lastAckedSeq.current) return;
+      lastAckedSrc.current = screen.current.currentSrc;
+      lastAckedSeq.current = frame.seq;
       acknowledge(frame.seq);
     }
   };

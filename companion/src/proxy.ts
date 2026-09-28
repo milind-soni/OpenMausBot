@@ -247,6 +247,15 @@ const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string, mu
   // would turn every resume into a full re-hydration, silently.
   const lastEventId = req.headers["last-event-id"];
   if (lastEventId) out["last-event-id"] = String(lastEventId);
+  // Range is how a player seeks inside a voice note; dropping it would turn
+  // every scrub into a full re-download on metered phones. Only the
+  // canonical single-range shapes travel — anything else stays behind and
+  // the harness answers the complete file, which is always correct.
+  const range = req.headers.range;
+  if (typeof range === "string") {
+    const canonical = range.trim();
+    if (/^bytes=\d*-\d*$/.test(canonical)) out.range = canonical;
+  }
   return out;
 };
 

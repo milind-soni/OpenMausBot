@@ -181,6 +181,8 @@ describe("sign in with your email on a hosted server", () => {
     const me = await call("/api/auth/session", { headers: { cookie, origin: `https://${HOST}` } });
     expect(me.status).toBe(200);
     expect(me.body).toMatchObject({ kind: "session", email: "her@example.test", scopes: ["admin", "client"], via: "cookie" });
+    // only a hosted team workspace says so; the web UI's first run reads it
+    expect(me.body).not.toHaveProperty("hosted");
     // admin scope: settings are hers to change
     const config = await call("/api/config", { method: "PUT", body: { language: "en" }, headers: { cookie, origin: `https://${HOST}` } });
     expect(config.status).toBe(200);

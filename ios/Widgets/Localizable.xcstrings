@@ -1,0 +1,78 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%lld active" : {
+      "extractionState" : "manual"
+    },
+    "%lld need you" : {
+      "extractionState" : "manual"
+    },
+    "%lld working" : {
+      "extractionState" : "manual"
+    },
+    "All quiet" : {
+      "extractionState" : "manual"
+    },
+    "Answered" : {
+      "extractionState" : "manual"
+    },
+    "As of %@" : {
+      "extractionState" : "manual"
+    },
+    "Bot" : {
+      "extractionState" : "manual"
+    },
+    "Bots waiting on your answer, replyable right from the home screen." : {
+      "extractionState" : "manual"
+    },
+    "Chat" : {
+      "extractionState" : "manual"
+    },
+    "Choose the chat this widget watches." : {
+      "extractionState" : "manual"
+    },
+    "Everything the Updates pill shows, with the chats that need you first." : {
+      "extractionState" : "manual"
+    },
+    "Needs You" : {
+      "extractionState" : "manual"
+    },
+    "Needs you" : {
+      "extractionState" : "manual"
+    },
+    "Nothing working" : {
+      "extractionState" : "manual"
+    },
+    "One chat's status at a glance — pick which one on the widget's settings." : {
+      "extractionState" : "manual"
+    },
+    "Open MausBot first" : {
+      "extractionState" : "manual"
+    },
+    "Open MausBot to answer" : {
+      "extractionState" : "manual"
+    },
+    "Open MausBot to pair" : {
+      "extractionState" : "manual"
+    },
+    "The bots working right now and how long each has been at it — even when the app is closed." : {
+      "extractionState" : "manual"
+    },
+    "This request has changed. Open the chat to review it." : {
+      "extractionState" : "manual"
+    },
+    "To review" : {
+      "extractionState" : "manual"
+    },
+    "Unlock iPhone, then answer again." : {
+      "extractionState" : "manual"
+    },
+    "Updates" : {
+      "extractionState" : "manual"
+    },
+    "Working" : {
+      "extractionState" : "manual"
+    }
+  },
+  "version" : "1.0"
+}

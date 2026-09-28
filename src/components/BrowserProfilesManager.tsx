@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { Globe, Plus, Trash2 } from "lucide-react";
 import { api, ApiError, useStore, type Bot, type BotAnnouncement, type BrowserProfile, type ConfigStatus } from "@/state/store";
 import { browserProfileDeletionBlockReason, browserProfilesMutation, newBrowserProfileId } from "@/lib/browser-profiles";
-import { readSessionState } from "@/lib/session";
+import { isOwnerOrAdmin, readSessionState } from "@/lib/session";
 import { t } from "@/lib/i18n";
 
 /** Browser-panel and workspace settings share one editor. The server owns
@@ -27,7 +27,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
   useEffect(() => {
     let alive = true;
     void readSessionState().then((session) => {
-      if (alive) setCanManage(session.kind === "loopback" || (session.kind === "session" && session.scopes.includes("admin")));
+      if (alive) setCanManage(isOwnerOrAdmin(session));
     });
     return () => { alive = false; };
   }, []);

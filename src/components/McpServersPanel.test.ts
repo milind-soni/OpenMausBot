@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { parseMcpArguments, parseMcpEnvironment } from "./McpServersPanel";
+import { parseMcpArguments, parseMcpEnvironment, parseMcpHeaders } from "./McpServersPanel";
 import { setLocale, t } from "@/lib/i18n";
 
 afterEach(() => setLocale("en"));
@@ -29,6 +29,25 @@ describe("MCP server form", () => {
     expect(parseMcpEnvironment("TOKEN=one\nTOKEN=two")).toEqual({
       ok: false,
       error: { key: "mcp.env.duplicate", params: { key: "TOKEN" } },
+    });
+  });
+
+  it("reads headers as Name: value lines, keeping saved values behind blanks", () => {
+    expect(parseMcpHeaders("Authorization: Bearer abc:def\nX-Org:acme\n\nCookie: ", ["Cookie"])).toEqual({
+      ok: true,
+      headers: { Authorization: "Bearer abc:def", "X-Org": "acme", Cookie: true },
+    });
+    expect(parseMcpHeaders("Authorization Bearer x")).toEqual({
+      ok: false,
+      error: { key: "mcp.headers.useColon", params: { line: "Authorization Bearer x" } },
+    });
+    expect(parseMcpHeaders("Bad Header: x")).toEqual({
+      ok: false,
+      error: { key: "mcp.headers.invalidName", params: { key: "Bad Header" } },
+    });
+    expect(parseMcpHeaders("X-A: 1\nX-A: 2")).toEqual({
+      ok: false,
+      error: { key: "mcp.headers.duplicate", params: { key: "X-A" } },
     });
   });
 

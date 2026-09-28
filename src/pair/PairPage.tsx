@@ -3,6 +3,7 @@ import { DesktopWorkspaceSwitcher } from "../components/DesktopWorkspaceSwitcher
 
 import {
   defaultDeviceLabel,
+  isConnected,
   newAttemptId,
   pairWithCode,
   readSessionState,
@@ -49,7 +50,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
     void readSessionState().then(setSession);
   }, []);
 
-  const connected = session?.kind === "loopback" || session?.kind === "session";
+  const connected = isConnected(session);
   const emailOffered = environment?.capabilities.emailSignIn === true;
 
   async function submitCode(e: React.FormEvent) {

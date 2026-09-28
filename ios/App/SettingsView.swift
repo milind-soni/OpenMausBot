@@ -441,7 +441,7 @@ struct ConnectionSecurityView: View {
                     }
                 }
             } else {
-                ContentUnavailableView("No computer connected", systemImage: "laptopcomputer.slash")
+                EmptyStateView("No computer connected", systemImage: "laptopcomputer.slash")
             }
         }
         .navigationTitle("Connection & Security")

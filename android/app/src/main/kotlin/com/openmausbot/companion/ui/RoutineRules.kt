@@ -95,12 +95,12 @@ object RoutineRules {
     const val MAUS_FOOTER: String =
         "Uses this agent's selected model and computer setting on the paired computer."
     const val CLOUD_READY_FOOTER: String =
-        "Runs the agent and its tools inside its Box virtual machine. The VM wakes " +
+        "Runs the agent and its tools inside its Boat virtual machine. The VM wakes " +
             "automatically for each run; keep OpenMausBot running so its scheduler can " +
             "launch the job."
     const val CLOUD_BLOCKED_FOOTER: String =
         "This existing Cloud VM choice is preserved, but it cannot run until the paired " +
-            "computer has a configured Box API key and an available Box agent."
+            "computer has a configured Boat API key and an available Boat agent."
 
     /** Soonest first; a routine with no next run sorts last. */
     fun sorted(routines: List<Routine>): List<Routine> =
