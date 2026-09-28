@@ -25,6 +25,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { createServer as createTcpServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -352,6 +353,35 @@ async function serverUp(port: number, pid?: number): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Bind-then-release probe for `serve`'s port negotiation: false when another
+ * process already holds the loopback port. A probe can never reserve the port —
+ * a third party can still take it before the spawned child binds — so a lost
+ * race relaunches on the next free pair rather than trusting this answer. */
+function loopbackPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createTcpServer();
+    probe.once("error", () => resolve(false));
+    probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
+  });
+}
+
+// The standalone server walks up to MAX_PORT_ATTEMPTS + 1 candidates on
+// EADDRINUSE (server/index.ts); the CLI probes the same span, then pins its
+// child to the pair it picked. A stolen probe port costs one child boot each,
+// so relaunches are bounded tighter than the port walk.
+const SERVE_PORT_SCAN = 100;
+const SERVE_LAUNCH_ATTEMPTS = 5;
+
+/** First loopback port at or above `start` that nothing else holds. `exclude`
+ * keeps the webhook scan off the port the main listener just negotiated. */
+async function firstFreeLoopbackPort(start: number, exclude?: number): Promise<number | null> {
+  for (let candidate = start; candidate <= start + SERVE_PORT_SCAN && candidate <= 65_535; candidate++) {
+    if (candidate === exclude) continue;
+    if (await loopbackPortFree(candidate)) return candidate;
+  }
+  return null;
 }
 
 /** Check identity before reusing a running process. Never attach to another
@@ -924,8 +954,8 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     OMB_DATA_DIR: options.dataDir,
-    OMB_PORT: String(options.port),
-    OMB_WEBHOOK_PORT: process.env.OMB_WEBHOOK_PORT || String(options.port + 1),
+    // OMB_PORT and OMB_WEBHOOK_PORT are assigned per launch attempt below: the
+    // CLI negotiates a free pair, then pins the child to it.
     OMB_PORT_PINNED: "1",
   };
   if (options.local) delete env.OMB_PUBLIC_URL;
@@ -942,104 +972,173 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   if (options.label && !process.env.OMB_ENVIRONMENT_LABEL) env.OMB_ENVIRONMENT_LABEL = options.label;
   if (plan) env.OMB_TUNNEL_SOCKET = plan.origin.socketPath;
   let logPath: string | undefined;
-  let logFd: number | undefined;
   let tailscaleServing = false;
   let tailscaleAttempted = false;
   let startupCancelled = false;
   const cancelStartup = () => { startupCancelled = true; };
-  process.on("SIGINT", cancelStartup);
-  process.on("SIGTERM", cancelStartup);
-  let child: ChildProcess;
-  try {
-    if (options.guided) {
-      const logsDir = join(options.dataDir, "logs");
-      mkdirSync(logsDir, { recursive: true, mode: 0o700 });
-      logPath = join(logsDir, `server-${Date.now()}-${process.pid}.log`);
-      logFd = openSync(logPath, "wx", 0o600);
-      log("\nStarting your workspace…");
-    }
-    if (tailscale) {
-      tailscaleAttempted = true;
-      const served = await tailscaleServe(tailscale, options.port);
-      // The CLI can finish enabling background serving while cancellation is
-      // arriving. Wait for that bounded command, then undo it before exiting.
-      if (startupCancelled) throw new SetupCancelled();
-      if ("failure" in served) throw new Error(`--tailscale: ${explainTailscaleFailure(served.failure)}`);
-      tailscaleServing = true;
-      publicUrl = served.origin;
-      log(`tailscale: serving https://${tailscale.dnsName} → http://127.0.0.1:${options.port} (only your tailnet can reach it)`);
-    }
-    if (startupCancelled) throw new SetupCancelled();
-    if (publicUrl) env.OMB_PUBLIC_URL = publicUrl;
-    child = spawn(entry.command, entry.args, { env, stdio: [ownerToken ? "pipe" : "ignore", logFd ?? "inherit", logFd ?? "inherit"] });
-    if (ownerToken) {
-      child.stdin?.on("error", () => { /* the server exited first; startup reports it */ });
-      child.stdin?.end(`${ownerToken}\n`);
-      serveOwnerToken = ownerToken;
-    }
-  } catch (error) {
-    if ((tailscaleServing || (startupCancelled && tailscaleAttempted)) && tailscale) await tailscaleServeOff(tailscale).catch(() => undefined);
-    if (plan) cleanupTunnelOrigin(plan.origin);
-    if (error instanceof SetupCancelled) {
-      log("Startup cancelled. No server was started; your saved work is unchanged.");
-      return 130;
-    }
-    throw error;
-  } finally {
-    if (logFd !== undefined) closeSync(logFd);
-    process.removeListener("SIGINT", cancelStartup);
-    process.removeListener("SIGTERM", cancelStartup);
-  }
+  let child: ChildProcess | null = null;
   let exited: number | null = null;
-  const childExit = new Promise<number>((done) => {
-    child.once("error", () => { exited = 1; done(1); });
-    child.once("exit", (code, signal) => { exited = code ?? (signal === "SIGTERM" || signal === "SIGINT" ? 0 : 1); done(exited); });
-  });
+  let childExit: Promise<number> = Promise.resolve(0);
   let tunnel: RunningTunnel | null = null;
   let caddy: RunningCaddy | null = null;
   let stopping: Promise<void> | null = null;
+  const terminateChild = async () => {
+    if (!child || exited !== null) return;
+    child.kill("SIGTERM");
+    const timer = setTimeout(() => child?.kill("SIGKILL"), 10_000);
+    timer.unref();
+    await childExit;
+    clearTimeout(timer);
+  };
   const stop = () => {
     stopping ??= (async () => {
       // The gateway and the edge stop accepting before the server they forward to goes away.
       if (tunnel) await tunnel.stop().catch(() => undefined);
       if (caddy) await caddy.stop().catch(() => undefined);
       if (tailscaleServing && tailscale) await tailscaleServeOff(tailscale).catch(() => undefined);
-      if (exited === null) {
-        child.kill("SIGTERM");
-        const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
-        timer.unref();
-        await childExit;
-        clearTimeout(timer);
-      }
+      await terminateChild();
       if (plan) cleanupTunnelOrigin(plan.origin);
     })();
     return stopping;
   };
   const onSignal = () => { void stop(); };
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
+  let shutdownSignalsArmed = false;
+  process.on("SIGINT", cancelStartup);
+  process.on("SIGTERM", cancelStartup);
+
+  // The CLI negotiates ports for the child it launches, the same way the
+  // desktop parent owns port selection: probe a free pair, then pin the child
+  // to it (OMB_PORT_PINNED above) so the ports the proxies and the readiness
+  // check target can never drift. A probe cannot hold the port, so a third
+  // party can still claim it before the child's own bind — that surfaces as a
+  // fast exit while the negotiated port is held, and the launch retries on
+  // the next free pair.
+  const requestedPort = options.port;
+  const requestedWebhookPort = Number(process.env.OMB_WEBHOOK_PORT) || requestedPort + 1;
+  let port = requestedPort;
+  let webhookPort = requestedWebhookPort;
+  let ready = false;
 
   try {
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline && exited === null && !stopping) {
-      if (await serverUp(options.port, child.pid)) break;
-      await new Promise((r) => setTimeout(r, 250));
+    for (let attempt = 0; attempt < SERVE_LAUNCH_ATTEMPTS && !ready && !stopping; attempt++) {
+      const freePort = await firstFreeLoopbackPort(port);
+      if (freePort === null) {
+        console.error(`no free loopback port at or above ${port}; free a port or pass --port`);
+        return 1;
+      }
+      port = freePort;
+      const freeWebhookPort = await firstFreeLoopbackPort(requestedWebhookPort, port);
+      if (freeWebhookPort === null) {
+        console.error(`no free loopback port at or above ${requestedWebhookPort} for the webhook receiver; free a port or set OMB_WEBHOOK_PORT`);
+        return 1;
+      }
+      webhookPort = freeWebhookPort;
+      if (port !== requestedPort) log(`note: port ${requestedPort} is in use; using http://127.0.0.1:${port}`);
+      if (webhookPort !== requestedWebhookPort) log(`note: webhook port ${requestedWebhookPort} is in use; using ${webhookPort}`);
+      env.OMB_PORT = String(port);
+      env.OMB_WEBHOOK_PORT = String(webhookPort);
+
+      let logFd: number | undefined;
+      try {
+        if (options.guided) {
+          if (!logPath) {
+            const logsDir = join(options.dataDir, "logs");
+            mkdirSync(logsDir, { recursive: true, mode: 0o700 });
+            logPath = join(logsDir, `server-${Date.now()}-${process.pid}.log`);
+            log("\nStarting your workspace…");
+          }
+          logFd = openSync(logPath, "a", 0o600);
+        }
+        if (tailscale) {
+          tailscaleAttempted = true;
+          if (tailscaleServing) await tailscaleServeOff(tailscale).catch(() => undefined);
+          const served = await tailscaleServe(tailscale, port);
+          // The CLI can finish enabling background serving while cancellation is
+          // arriving. Wait for that bounded command, then undo it before exiting.
+          if (startupCancelled) throw new SetupCancelled();
+          if ("failure" in served) throw new Error(`--tailscale: ${explainTailscaleFailure(served.failure)}`);
+          tailscaleServing = true;
+          publicUrl = served.origin;
+          log(`tailscale: serving https://${tailscale.dnsName} → http://127.0.0.1:${port} (only your tailnet can reach it)`);
+        }
+        if (startupCancelled) throw new SetupCancelled();
+        if (publicUrl) env.OMB_PUBLIC_URL = publicUrl;
+        child = spawn(entry.command, entry.args, { env, stdio: [ownerToken ? "pipe" : "ignore", logFd ?? "inherit", logFd ?? "inherit"] });
+        if (ownerToken) {
+          child.stdin?.on("error", () => { /* the server exited first; startup reports it */ });
+          child.stdin?.end(`${ownerToken}\n`);
+          serveOwnerToken = ownerToken;
+        }
+      } catch (error) {
+        if ((tailscaleServing || (startupCancelled && tailscaleAttempted)) && tailscale) {
+          await tailscaleServeOff(tailscale).catch(() => undefined);
+          tailscaleServing = false;
+        }
+        if (error instanceof SetupCancelled) {
+          log("Startup cancelled. No server was started; your saved work is unchanged.");
+          return 130;
+        }
+        throw error;
+      } finally {
+        if (logFd !== undefined) closeSync(logFd);
+        process.removeListener("SIGINT", cancelStartup);
+        process.removeListener("SIGTERM", cancelStartup);
+      }
+      exited = null;
+      childExit = new Promise<number>((done) => {
+        child!.once("error", () => { exited = 1; done(1); });
+        child!.once("exit", (code, signal) => { exited = code ?? (signal === "SIGTERM" || signal === "SIGINT" ? 0 : 1); done(exited); });
+      });
+      if (!shutdownSignalsArmed) {
+        shutdownSignalsArmed = true;
+        process.on("SIGINT", onSignal);
+        process.on("SIGTERM", onSignal);
+      }
+
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline && exited === null && !stopping) {
+        if (await serverUp(port, child!.pid)) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (exited !== null) {
+        // A dead child whose negotiated port is already held by someone else
+        // lost the probe→bind race; negotiate the next pair and relaunch.
+        if (!stopping && exited !== 0 && attempt + 1 < SERVE_LAUNCH_ATTEMPTS && !(await loopbackPortFree(port))) {
+          log(`port ${port} was claimed while the server was starting; trying the next free port`);
+          continue;
+        }
+        if (exited !== 0) log(`OpenMausBot could not start.${logPath ? ` Details: ${logPath}` : " See the output above."}`);
+        return exited;
+      }
+      if (stopping) return await childExit;
+      if (!(await serverUp(port, child!.pid))) {
+        console.error(`OpenMausBot did not become ready within a minute.${logPath ? ` Details: ${logPath}` : " See its output above."}`);
+        await stop();
+        return 1;
+      }
+      // The webhook receiver is a second bind on the negotiated pair, and a
+      // pinned child that loses it still serves — leaving Caddy and Tailscale
+      // pointed at a foreign socket. Relaunch on a fresh pair when the port
+      // was taken, the same way a stolen main port is handled.
+      try {
+        const ingress = (await api(port, "/api/webhooks")).body?.ingress;
+        if (ingress?.available === false && attempt + 1 < SERVE_LAUNCH_ATTEMPTS && !(await loopbackPortFree(webhookPort))) {
+          log(`webhook port ${webhookPort} was claimed while the server was starting; trying a new pair`);
+          await terminateChild();
+          continue;
+        }
+      } catch { /* ingress verification is best-effort; the receiver logged its own failure */ }
+      ready = true;
     }
-    if (exited !== null) {
-      if (exited !== 0) log(`OpenMausBot could not start.${logPath ? ` Details: ${logPath}` : " See the output above."}`);
-      return exited;
-    }
-    if (stopping) return await childExit;
-    if (!(await serverUp(options.port, child.pid))) {
-      console.error(`OpenMausBot did not become ready within a minute.${logPath ? ` Details: ${logPath}` : " See its output above."}`);
-      await stop();
-      return 1;
+    if (!ready) {
+      if (stopping) return await childExit;
+      return exited ?? 1;
     }
     if (stopping || exited !== null) return await childExit;
     if (options.domain && caddyBinary) {
       try {
-        caddy = await startCaddy({ binary: caddyBinary, dataDir: options.dataDir, domain: options.domain, appPort: options.port, webhookPort: Number(env.OMB_WEBHOOK_PORT), log });
-        log(`https: Caddy serves ${publicUrl} → http://127.0.0.1:${options.port}; it gets the certificate from Let's Encrypt once DNS for ${options.domain} points at this machine`);
+        caddy = await startCaddy({ binary: caddyBinary, dataDir: options.dataDir, domain: options.domain, appPort: port, webhookPort, log });
+        log(`https: Caddy serves ${publicUrl} → http://127.0.0.1:${port}; it gets the certificate from Let's Encrypt once DNS for ${options.domain} points at this machine`);
         void caddy.exited.then((code) => {
           if (!stopping) log(`caddy: stopped (exit ${code ?? "signal"}); ${publicUrl} is no longer served. Stop and start the server again.`);
         });
@@ -1049,7 +1148,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
         return 1;
       }
     }
-    if (plan && child.pid) {
+    if (plan && child?.pid) {
       tunnel = startTunnel({
         dataDir: options.dataDir,
         access: plan.access,
@@ -1061,11 +1160,11 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
       tunnel.started.catch((error: unknown) => log(`tunnel: ${message(error)}`));
     }
     log("");
-    log(`OpenMausBot is running on http://127.0.0.1:${options.port}${publicUrl ? `, reachable at ${publicUrl}` : ""}`);
+    log(`OpenMausBot is running on http://127.0.0.1:${port}${publicUrl ? `, reachable at ${publicUrl}` : ""}`);
     if (options.guided) {
       log("Your bots and conversations are saved automatically.");
       log(`Details if you need help: ${logPath}`);
-      if (options.open !== false && !await openDashboard(options.port)) log("Open the local address above in a browser on this computer.");
+      if (options.open !== false && !await openDashboard(port)) log("Open the local address above in a browser on this computer.");
     } else {
       log(`data: ${options.dataDir}`);
       log(describeBrowserEngine(browserEngineStatus({ dataDir: options.dataDir })));
@@ -1081,12 +1180,12 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
           new Promise((done) => { timer = setTimeout(done, 15_000); })]);
         if (timer) clearTimeout(timer);
       }
-      if (!stopping && exited === null) await showPhonePairing(options, publicUrl, log).catch((error: unknown) => log(`no pairing code: ${message(error)}`));
+      if (!stopping && exited === null) await showPhonePairing({ ...options, port }, publicUrl, log).catch((error: unknown) => log(`no pairing code: ${message(error)}`));
     } else if (options.pair && !options.guided) {
       log("");
       // A refused code is no reason to stop a server that is running fine.
       try {
-        log(await mintPairing(options.port, { label: options.label ? `${options.label} owner` : undefined, client: options.client, publicUrl: publicUrl ?? undefined }));
+        log(await mintPairing(port, { label: options.label ? `${options.label} owner` : undefined, client: options.client, publicUrl: publicUrl ?? undefined }));
         log("");
         log("another device later:  openmausbot pair --label \"Kitchen iPad\"");
       } catch (error) {
@@ -1102,6 +1201,8 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     await stop();
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
+    process.removeListener("SIGINT", cancelStartup);
+    process.removeListener("SIGTERM", cancelStartup);
   }
 }
 
