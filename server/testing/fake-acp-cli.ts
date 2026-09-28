@@ -89,6 +89,19 @@ import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
+
+// Follow the spawning server down, including on Windows where ppid does
+// not change after parent exit. Inline: fakes must stay self-contained.
+{
+  const spawner = process.ppid;
+  const orphanWatch = setInterval(() => {
+    if (process.ppid !== spawner) process.exit(0);
+    try { process.kill(spawner, 0); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") process.exit(0);
+    }
+  }, 500);
+  orphanWatch.unref();
+}
 const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 // opencode-shaped surface: the session carries its own model catalog and the
 // model is chosen with session/set_config_option, because `opencode acp` takes

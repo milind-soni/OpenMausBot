@@ -5,6 +5,7 @@ import type {
   RuntimeEvent,
   RuntimeEventListener,
   SendTurnInput,
+  TextGenerationOptions,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQuestions, questionChoices } from "../../shared/ask-question.ts";
@@ -43,6 +44,7 @@ interface Completion {
 }
 
 interface CompletionJson {
+  model?: string;
   choices?: Array<{
     index?: number;
     message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; reasoning_details?: unknown; tool_calls?: unknown; function_call?: unknown };
@@ -51,7 +53,7 @@ interface CompletionJson {
   }>;
   error?: unknown;
   base_resp?: { status_code?: unknown; status_msg?: unknown };
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; cost?: number };
 }
 
 /** The message of a JSON error body a provider returned with HTTP 200.
@@ -159,6 +161,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     signal?: AbortSignal,
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
     tools: ChatToolDefinition[] = [],
+    onUsage?: TextGenerationOptions["onUsage"],
   ): Promise<Completion> => {
     // Idle timer that is renewed on every received chunk during streaming
     const timeoutController = new AbortController();
@@ -196,6 +199,17 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
       if (!stream || response.headers.get("content-type")?.includes("application/json")) {
         const json = await response.json() as CompletionJson;
+        if (onUsage) {
+          activeSignal.throwIfAborted();
+          const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+          onUsage({
+            model: typeof json.model === "string" && json.model.trim() ? json.model : model,
+            input: count(json.usage?.prompt_tokens),
+            output: count(json.usage?.completion_tokens),
+            cachedInput: count(json.usage?.prompt_tokens_details?.cached_tokens),
+            costUsd: count(json.usage?.cost),
+          });
+        }
         const bodyError = providerError(json);
         if (bodyError) throw new ChatProtocolError(`provider returned a completion error: ${bodyError.slice(0, 200)}`);
         const message = json.choices?.[0]?.message;
@@ -651,7 +665,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       provider: options.driverKind,
       capabilities: { ...(options.computerUse ? { computerMcp: options.tools !== false,
         // Same gate as cloudComputerMcp: with tools off the runtime cannot
-        // mount the leased Box descriptor either. The fleet invariant test
+        // mount the leased Boat descriptor either. The fleet invariant test
         // pins usesCloudComputer === (remoteAgent || cloudComputerMcp).
         usesCloudComputer: options.tools !== false, cloudComputerMcp: options.tools !== false, localComputerMcp: options.tools !== false,
         browserMcp: options.tools !== false, nativeImageInput: true, images: true } : {}),
@@ -691,9 +705,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return () => listeners.delete(listener);
       },
     },
-    generateText: async (prompt, { signal } = {}) => {
+    generateText: async (prompt, { signal, onUsage } = {}) => {
       const model = options.generateModel?.() ?? options.models().default;
-      const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal);
+      const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage);
       if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
       return text.trim() ? text : reasoning;
     },

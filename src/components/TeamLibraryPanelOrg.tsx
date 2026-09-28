@@ -82,12 +82,12 @@ function OrgPackageCard({
       <div className="min-w-0 flex-1">
         <h3 className="truncate text-[14px] font-medium text-ink">{entry.name}</h3>
         <p className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{entry.tagline}</p>
-        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-secondary/80">
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-tertiary">
           <span>{orgPublisherLine(entry)}</span>
           {badge && <span className="rounded-full bg-accent/10 px-2 py-0.5 text-accent-text">{badge}</span>}
           {entry.release && <span>{entry.release.version}</span>}
         </p>
-        <p className="mt-0.5 truncate text-[11.5px] text-ink-secondary/80">{orgContentsLine(entry.contents)}</p>
+        <p className="mt-0.5 truncate text-[11.5px] text-ink-tertiary">{orgContentsLine(entry.contents)}</p>
         {notes.map((note) => <p key={note} className="mt-0.5 text-[11.5px] text-warning">{note}</p>)}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1.5">

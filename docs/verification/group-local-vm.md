@@ -60,13 +60,13 @@ targeted.
 Direct-turn regressions additionally send two different requests through a
 Local VM-pinned conversation while the bot default is Cloud, checking the
 actual MCP descriptor, prompt, matching preview surface, and capability expiry.
-A channel member's explicit This computer and Cloud (Box or VPS) destinations
+A channel member's explicit This computer and Cloud (Boat or VPS) destinations
 mount exactly as its bot thread mounts them: the same checks, the same
 control gate, and the same consent boundary for waking or creating a cloud
 computer. The fixture proves the host descriptor reaches the speaker behind a
 working gate that closes when the turn settles, that a missing CUA driver is
 reported instead of dispatching without the promised tools, and that a Cloud
-speaker wakes its own archived Box, runs there, and gives it back for the next
+speaker wakes its own archived Boat, runs there, and gives it back for the next
 turn. The VPS mount shares the bot-thread code path but has no channel fixture
 yet. Channels still have no conversation pin and no Auto fallback to the host.
 
@@ -75,15 +75,15 @@ tool discovers ready, startable, and provisionable destinations without mutating
 them. Selecting one ends the old turn, immediately blocks its previous computer
 and browser capabilities, and resumes the original request with fresh tools and
 one user-history entry. Auto prefers a ready destination over creating a cloud
-computer. The fake Box boundary verifies wake, create, reuse, and a computer
+computer. The fake Boat boundary verifies wake, create, reuse, and a computer
 disappearing between discovery and dispatch; no real paid computer is created.
 Stop, provider failure, Off, a new queued request, and rejected in-flight manual
 surface changes have regression coverage. The VPS fixture separately proves
 starting a stopped container and creating a missing one only after selection.
 
 Two limits remain explicit: a stopped Local VM is not destructively rebuilt to
-make selection succeed, and the native Box runner does not expose the local
-agents MCP. Switching back from an already Cloud-pinned native Box conversation
+make selection succeed, and the native Boat runner does not expose the local
+agents MCP. Switching back from an already Cloud-pinned native Boat conversation
 therefore uses the composer destination selector for now.
 
 Run the regression coverage without a container engine:
@@ -103,3 +103,12 @@ boundary, preserves a workspace file while removing the container, and restarts
 the server in that same disposable home. Auto recovers the prior VM once capacity
 is free, preserves its file, and neither probes nor provisions a bot that never
 had a VM. The occupied-cap case remains unprovisioned.
+
+The pool regressions start two cold seats concurrently while one seat's
+inspection is blocked, then show a third turn waiting and reusing a released
+seat. They repeat with a full existing per-bot inventory: the per-bot cap
+still rejects its next desktop, while switching to pool mode permits its own
+configured seats. `maxInstances` limits the selected mode, not the total
+containers retained across mode changes. Both scenarios use the isolated
+container boundary above and require the actual fake-engine MCP descriptors
+to match the assigned seats; no real desktop or model is contacted.

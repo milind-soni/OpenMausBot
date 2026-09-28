@@ -98,6 +98,23 @@ export function cachedKnown(u: Pick<TaskUsage, "cachedInput">): boolean {
   return hasFiniteCost(u.cachedInput);
 }
 
+/** Column heading for a table of headlineTokens: "New tokens" once the cache
+ * split is known and the figure leaves cache re-reads out, else "Tokens". */
+export function tokensColumnLabel(total: TaskUsage): string {
+  return t(cachedKnown(total) ? "usage.colNewTokens" : "usage.colTokens");
+}
+
+/** The line under a fresh-token total: what it leaves out, and everything
+ * that went through the model, the figure a provider's dashboard shows. */
+export function cachedUsageNote(total: TaskUsage): string | null {
+  const cached = cachedInput(total);
+  if (cached <= 0) return null;
+  return t("usage.cachedNote", {
+    cached: formatTokens(cached),
+    total: formatTokens(total.input + total.output),
+  });
+}
+
 export type ContextTone = "quiet" | "warning" | "danger";
 
 /** The last model call's prompt against the model's window, with the same

@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   discoverExistingPerBotLocalVms,
+  discoverExistingPoolLocalVms,
   localVmInventoryEntry,
   shouldArmLocalVmIdle,
 } from "./local-vm-inventory.ts";
 import {
   perBotLocalVmTarget,
+  poolLocalVmTarget,
   type ContainerComputerStatus,
 } from "./container-computer.ts";
 
@@ -70,5 +72,24 @@ describe("Local VM inventory", () => {
     expect(shouldArmLocalVmIdle({ container: "running", managed: false })).toBe(false);
     expect(shouldArmLocalVmIdle({ container: "stopped", managed: true })).toBe(false);
     expect(shouldArmLocalVmIdle(null)).toBe(false);
+  });
+
+  it("discovers pool seats by container name across the whole seat range", async () => {
+    const existingNames = new Set([poolLocalVmTarget(0).containerName]);
+    const exists = vi.fn(async (_runtime, target) => existingNames.has(target.containerName));
+
+    const found = await discoverExistingPoolLocalVms(3, "docker", exists);
+
+    expect(found).toEqual([poolLocalVmTarget(0)]);
+    expect(exists).toHaveBeenCalledTimes(3);
+  });
+
+  it("clamps a nonsensical pool seat count to at least one probe", async () => {
+    const exists = vi.fn(async () => false);
+
+    const found = await discoverExistingPoolLocalVms(0, "docker", exists);
+
+    expect(found).toEqual([]);
+    expect(exists).toHaveBeenCalledTimes(1);
   });
 });

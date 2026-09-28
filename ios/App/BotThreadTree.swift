@@ -100,15 +100,7 @@ struct BotThreadTree: View {
             .padding(.leading, 88)
             .padding(.trailing, 18)
             .padding(.bottom, isExpanded ? 12 : 0)
-            .task(id: "\(nextSnoozeExpiry ?? 0):\(snoozeTick)") {
-                guard let nextSnoozeExpiry else { return }
-                let seconds = max(0, (nextSnoozeExpiry - Date().timeIntervalSince1970 * 1_000) / 1_000) + 0.05
-                // Remote deadlines can be arbitrarily distant. Bound the
-                // duration conversion and re-arm with the tick until due.
-                try? await Task.sleep(for: .seconds(min(86_400, seconds)))
-                guard !Task.isCancelled else { return }
-                snoozeTick += 1
-            }
+            .snoozeExpiryTick(nextSnoozeExpiry, tick: $snoozeTick)
         }
     }
 
@@ -140,11 +132,39 @@ struct BotThreadTree: View {
         creating = true
         Task {
             defer { creating = false }
-            if let created = await session.createTask(for: bot, title: nil) {
+            if let created = await session.createRosterThread(for: bot) {
                 open(.bot(created))
-            } else if session.actionError == nil {
-                session.actionError = "Couldn't create a thread. Check the connection and try again."
             }
+        }
+    }
+}
+
+extension Session {
+    /// A new thread started from the home list, in either density. A
+    /// failure always says something, even when the client had no error.
+    func createRosterThread(for bot: Bot) async -> Bot? {
+        if let created = await createTask(for: bot, title: nil) { return created }
+        if actionError == nil {
+            actionError = "Couldn't create a thread. Check the connection and try again."
+        }
+        return nil
+    }
+}
+
+extension View {
+    /// A timed snooze ends on the wall clock, not on a server ping: bump
+    /// `tick` when the nearest expiry passes so a view reading the thread
+    /// list folds that thread back in without waiting for the next snapshot.
+    /// Mirrors the desktop's useSnoozeExpiry.
+    func snoozeExpiryTick(_ nextExpiry: Double?, tick: Binding<Int>) -> some View {
+        task(id: "\(nextExpiry ?? 0):\(tick.wrappedValue)") {
+            guard let nextExpiry else { return }
+            let seconds = max(0, (nextExpiry - Date().timeIntervalSince1970 * 1_000) / 1_000) + 0.05
+            // Remote deadlines can be arbitrarily distant. Bound the
+            // duration conversion and re-arm with the tick until due.
+            try? await Task.sleep(for: .seconds(min(86_400, seconds)))
+            guard !Task.isCancelled else { return }
+            tick.wrappedValue += 1
         }
     }
 }

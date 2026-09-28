@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resolveLocale, setLocale, t, tFromServer } from "./i18n";
+import { documentLanguage, resolveLocale, setLocale, t, tFromServer } from "./i18n";
 import { en, localeChoices, locales } from "@/locales";
 
 afterEach(() => {
@@ -163,5 +163,61 @@ describe("tFromServer", () => {
   it("prefers the catalog over stale text saved with an older card", () => {
     expect(tFromServer("approval.held.destructive", "This looked destructive, so auto mode stopped to ask."))
       .toBe(en["approval.held.destructive"]);
+  });
+});
+
+// Screen readers pick a voice and pronunciation rules from <html lang>. A
+// German or Japanese interface read out with English rules is gibberish, so
+// the page language follows the pack that is actually showing.
+describe("page language", () => {
+  afterEach(() => {
+    setLocale("en");
+    vi.unstubAllGlobals();
+  });
+
+  it("names every picker language with a valid BCP-47 tag", () => {
+    expect(localeChoices.map(({ code }) => documentLanguage(code))).toEqual([
+      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk",
+    ]);
+    for (const { code } of localeChoices) {
+      expect(Intl.getCanonicalLocales(documentLanguage(code))).toEqual([documentLanguage(code)]);
+    }
+  });
+
+  it("tags an alias with the pack it shows", () => {
+    expect(documentLanguage("pt")).toBe("pt-BR");
+    expect(documentLanguage("zh-hant")).toBe("zh-TW");
+    expect(documentLanguage("zh-hk")).toBe("zh-TW");
+  });
+
+  it("sets the page language and direction whenever the locale changes", () => {
+    const root = { lang: "en", dir: "" };
+    vi.stubGlobal("document", { documentElement: root });
+    setLocale("de-AT");
+    expect(root).toEqual({ lang: "de", dir: "ltr" });
+    setLocale("pt-BR");
+    expect(root.lang).toBe("pt-BR");
+    setLocale("zh-Hant-TW");
+    expect(root.lang).toBe("zh-TW");
+    setLocale("ja");
+    expect(root.lang).toBe("ja");
+    // an unknown language shows English, so the page says English
+    setLocale("xx-YY");
+    expect(root.lang).toBe("en");
+  });
+
+  it("tags the page from the system language the moment the module loads", async () => {
+    const root = { lang: "en", dir: "" };
+    vi.stubGlobal("document", { documentElement: root });
+    vi.stubGlobal("navigator", { language: "ja-JP" });
+    vi.resetModules();
+    await import("./i18n");
+    expect(root).toEqual({ lang: "ja", dir: "ltr" });
+  });
+
+  it("still switches language where there is no page (tests, workers)", () => {
+    vi.stubGlobal("document", undefined);
+    expect(setLocale("fr")).toBe("fr");
+    expect(t("engines.local")).not.toBe("");
   });
 });

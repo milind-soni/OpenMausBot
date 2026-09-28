@@ -136,6 +136,35 @@ public enum ConnectionAdvice {
         return (502...504).contains(code) || (520...530).contains(code)
     }
 
+    /// Which failures prove a request never reached this computer, so a
+    /// write the server consumes on first delivery — an answer — may move
+    /// to another route without double-claiming it. Dial and handshake
+    /// failures never sent a byte, and 521/523 are the gateway reporting
+    /// the origin refused the connection or was unreachable. Everything
+    /// ambiguous stays put: a timeout, 504, or 524 may have landed the
+    /// write and lost only its response, and so may 502/503 — a gateway
+    /// can emit either after forwarding the request — and 522 means the
+    /// origin took the connection but never answered, so the write may
+    /// have landed; replaying any of these could read as "unavailable"
+    /// even though the answer was accepted.
+    public static func provablyUndeliveredRequest(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .cannotFindHost, .cannotConnectToHost, .secureConnectionFailed,
+                 .serverCertificateHasBadDate, .serverCertificateUntrusted,
+                 .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid,
+                 .clientCertificateRejected, .clientCertificateRequired:
+                return true
+            default:
+                return false
+            }
+        }
+        guard let apiError = error as? APIError,
+              case let .status(code, _) = apiError
+        else { return false }
+        return code == 521 || code == 523
+    }
+
     /// The offline banner as advice rather than an NSURLError string.
     ///
     /// Each code names the thing the person can actually check — the raw

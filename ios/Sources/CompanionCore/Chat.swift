@@ -6,7 +6,7 @@ import Foundation
 
 /// A chat is a bot or a room. They share a thread, which is what every
 /// message, approval and page is keyed by.
-public enum Chat: Identifiable, Hashable {
+public enum Chat: Identifiable, Hashable, Codable, Sendable {
     case bot(Bot)
     case room(Room)
 

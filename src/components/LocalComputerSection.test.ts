@@ -79,7 +79,7 @@ describe("computer inventory request wiring", () => {
     );
   });
 
-  it("builds the exact confirmed Local VM, Box, and VPS lifecycle requests", () => {
+  it("builds the exact confirmed Local VM, Boat, and VPS lifecycle requests", () => {
     const confirm = vi.fn(() => true);
     const local = confirmComputerAction(perBotLocalVmDeletePlan(cloudVm), confirm);
     const cloudDelete = confirmComputerAction(cloudComputerActionPlan("delete", ownedCloudComputer), confirm);
@@ -289,7 +289,7 @@ describe("cloud computer inventory UI", () => {
 
   it("keeps disconnected, unavailable, and empty states distinct", () => {
     const disconnected = renderCard({ configured: false });
-    expect(disconnected).toContain("Box is not connected");
+    expect(disconnected).toContain("Boat is not connected");
     expect(disconnected).not.toContain("No OpenMaus-managed cloud computers found");
 
     const unavailable = renderCard({ unavailableReason: "boat.dev is unavailable" });
@@ -298,7 +298,7 @@ describe("cloud computer inventory UI", () => {
 
     const endpointFailure = renderCard({ configured: null, unavailableReason: "Computer inventory could not load" });
     expect(endpointFailure).toContain("Computer inventory could not load");
-    expect(endpointFailure).not.toContain("Box is not connected");
+    expect(endpointFailure).not.toContain("Boat is not connected");
 
     const empty = renderCard();
     expect(empty).toContain("No OpenMaus-managed cloud computers found");
@@ -343,7 +343,7 @@ describe("cloud computer inventory UI", () => {
 
   it("does not treat an unavailable or unconfigured empty inventory as proof of deletion", () => {
     for (const payload of [
-      { configured: true, available: false, problem: "Box is unavailable", instances: [] },
+      { configured: true, available: false, problem: "Boat is unavailable", instances: [] },
       { configured: false, available: false, problem: null, instances: [] },
     ]) {
       const result = reconcileCloudInventoryPayload(

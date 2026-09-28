@@ -294,7 +294,7 @@ export function VoiceSettings({
             placeholder={configured ? "••••••••  (paste to replace)" : cloudProvider.placeholder}
             aria-label={`${cloudProvider.name} key`}
             autoComplete="off"
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
           <button
             onClick={() => void saveKey()}
@@ -340,7 +340,7 @@ export function VoiceSettings({
             aria-label="Chatterbox server address"
             autoComplete="off"
             spellCheck={false}
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
           <button
             onClick={() => void saveServer()}
@@ -359,7 +359,7 @@ export function VoiceSettings({
           aria-label="Chatterbox model"
           autoComplete="off"
           spellCheck={false}
-          className="mt-2 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          className="mt-2 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
         />
         <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">
           Any OpenAI-compatible server running Chatterbox works, no key needed.{" "}
@@ -383,7 +383,7 @@ export function VoiceSettings({
               value={selectedVoice}
               onChange={(e) => chooseVoice(e.target.value)}
               aria-label={`${bot.name}'s voice`}
-              className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none"
+              className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:outline-none"
             >
               <option value="">
                 {loadingVoices

@@ -2,6 +2,8 @@ package com.openmausbot.companion.ui
 
 import com.openmausbot.companion.core.AvatarCrop
 import com.openmausbot.companion.core.Bot
+import com.openmausbot.companion.core.BotOverviewGrant
+import com.openmausbot.companion.core.BotOverviewGrantLevel
 import com.openmausbot.companion.core.ConfigFlag
 import com.openmausbot.companion.core.ConfigStatus
 import com.openmausbot.companion.core.ModelSelection
@@ -464,6 +466,46 @@ class ProfileRulesTest {
         assertEquals(AvatarCrop.MASCOT, form.crop)
         assertEquals("", form.voice)
         assertFalse(form.speakReplies)
+    }
+
+    @Test
+    fun `connector grants render one read-only row per service in the server's order`() {
+        val rows = ProfileRules.connectorGrantRows(
+            listOf(
+                BotOverviewGrant("gmail", BotOverviewGrantLevel.All, toolCount = 0),
+                BotOverviewGrant("google_calendar", BotOverviewGrantLevel.Partial, toolCount = 2),
+                BotOverviewGrant("notion", BotOverviewGrantLevel.None, toolCount = 0),
+                BotOverviewGrant("linear", BotOverviewGrantLevel.Partial, toolCount = 1),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                ConnectorGrantRow("Gmail", "All tools"),
+                ConnectorGrantRow("Google calendar", "2 tools"),
+                ConnectorGrantRow("Notion", "No tools"),
+                ConnectorGrantRow("Linear", "1 tool"),
+            ),
+            rows,
+        )
+    }
+
+    @Test
+    fun `absent grants have no rows for the sheet to draw`() {
+        assertEquals(emptyList<ConnectorGrantRow>(), ProfileRules.connectorGrantRows(null))
+        // An empty list is the explicit no-tools record; its no-tools line
+        // belongs to the sheet, and the rules hand it no rows to draw.
+        assertEquals(emptyList<ConnectorGrantRow>(), ProfileRules.connectorGrantRows(emptyList()))
+    }
+
+    @Test
+    fun `a partial grant reads its tool count verbatim`() {
+        assertEquals(
+            listOf(ConnectorGrantRow("Github", "0 tools")),
+            ProfileRules.connectorGrantRows(
+                listOf(BotOverviewGrant("github", BotOverviewGrantLevel.Partial, toolCount = 0)),
+            ),
+        )
     }
 
     private fun voices() = listOf(

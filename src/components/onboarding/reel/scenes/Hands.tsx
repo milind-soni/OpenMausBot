@@ -9,7 +9,7 @@ import { Check, ExternalLink, Hand, Loader2, MousePointer2, Settings2, X } from 
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { reducedMotion } from "@/lib/onboarding";
-import type { SceneProps } from "./OrbitingApps";
+import type { SceneProps } from "./types";
 
 const HANDS_MS = 6400;
 

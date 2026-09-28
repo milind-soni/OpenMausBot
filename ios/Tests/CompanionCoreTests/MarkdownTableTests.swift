@@ -200,7 +200,7 @@ final class MarkdownTableTests: XCTestCase {
         ])
     }
 
-    func testBracketSpaceIsNotACheckboxAndAQuotedTaskStaysAQuote() {
+    func testBracketSpaceIsNotACheckboatAndAQuotedTaskStaysAQuote() {
         XCTAssertEqual(Markdown.blocks("- [ x ] no"), [.bullet(indent: 0, text: "[ x ] no")])
         XCTAssertEqual(Markdown.blocks("> - [x] done"), [.quote("- [x] done")])
     }

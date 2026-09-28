@@ -6,6 +6,7 @@ import {
   hasUsableConnectedApps,
   connectedInventoryCopy,
   connectorActionLabel,
+  connectorSetupNotice,
   disconnectAccountConfirmation,
   mergeCompleteConnectorStatus,
   mergeCurrentConnectorStatus,
@@ -297,5 +298,41 @@ describe("an answer the server was not sure about", () => {
   it("treats a missing authority flag as authoritative, preserving today's behaviour", () => {
     const merged = mergeCompleteConnectorStatus(connectedGmail, {}, new Map(), new Map());
     expect(merged.gmail.connected).toBe(false);
+  });
+});
+
+describe("connected apps setup notice", () => {
+  const base = { configured: false, stale: false, remoteClient: false };
+
+  it("tells a fresh install what to do instead of reporting an outage", () => {
+    // A source build, a fixture or a fresh self-hosted server never had a
+    // connection service: nothing is down, the user just has not added a key.
+    expect(connectorSetupNotice({ ...base, setup: "needs-setup" })).toEqual({
+      key: "connectors.setupNeeded",
+      tone: "info",
+    });
+    expect(connectorSetupNotice({ ...base, setup: "needs-setup", remoteClient: true })).toEqual({
+      key: "connectors.setupNeededRemote",
+      tone: "info",
+    });
+  });
+
+  it("still warns when the managed service really is unavailable", () => {
+    expect(connectorSetupNotice({ ...base, setup: "service-unavailable" })).toEqual({
+      key: "connectors.notConfigured",
+      tone: "warning",
+    });
+  });
+
+  it("keeps the warning for an older host that does not say why", () => {
+    expect(connectorSetupNotice({ ...base, setup: undefined })).toEqual({
+      key: "connectors.notConfigured",
+      tone: "warning",
+    });
+  });
+
+  it("says nothing when apps work or the stale banner already explains", () => {
+    expect(connectorSetupNotice({ ...base, configured: true, setup: "ready" })).toBeNull();
+    expect(connectorSetupNotice({ ...base, stale: true, setup: "needs-setup" })).toBeNull();
   });
 });

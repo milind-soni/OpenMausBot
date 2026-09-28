@@ -1,5 +1,5 @@
 // The voice, driven against a stub rather than the live service — same
-// rule as the box and computer-proxy contract tests: what we send, and how
+// rule as the boat and computer-proxy contract tests: what we send, and how
 // a refusal is reported, are the things that break.
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

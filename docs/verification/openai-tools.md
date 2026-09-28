@@ -64,9 +64,9 @@ and service-specific limits remain separate from the implemented protocol.
 The OpenAI-compatible driver opts into structured image input and mounts the
 harness-provided `localComputer` and `browser` stdio descriptors. It does not
 discover or grant a desktop itself. Host, VM, VPS and room routing continue to
-use the harness's existing ownership and permission gates. The driver's Box
+use the harness's existing ownership and permission gates. The driver's Boat
 bridge consumes the separately leased cloud descriptor and keeps the selected
-API model; other engines retain their native Box runner.
+API model; other engines retain their native Boat runner.
 
 MCP images become bounded inline image parts. Tool results retain their call IDs;
 only after the full tool-result batch is appended does a separate image message
@@ -92,10 +92,10 @@ approval denial with no side effect, malformed images and a screenshot larger
 than the ordinary text frame limit. They do not use real desktop access or paid
 inference, and do not establish vision/tool support for every provider model.
 
-### Box bridge
+### Boat bridge
 
-`pnpm exec vitest run server/drivers/chat-box-tools.test.ts server/openai-box.e2e.test.ts`
-tests an owned loopback Box/API fixture. It covers direct chats, group member
+`pnpm exec vitest run server/drivers/chat-boat-tools.test.ts server/openai-boat.e2e.test.ts`
+tests an owned loopback Boat/API fixture. It covers direct chats, group member
 turns and cloud routines retaining the selected model, screenshots arriving as
 image parts, and human control blocking an approved action. Bridge tests cover
 each advertised action, invalid arguments, expired control capabilities,
@@ -103,8 +103,8 @@ changed ownership and in-flight cancellation without replay.
 
 Model screenshots use native resolution and a separate file from panel frames.
 Every action rechecks the harness control gate. Commands run with an isolated
-environment; Box and control credentials do not enter model messages. Tests
-use synthetic image bytes, not a paid Box account or real desktop input.
+environment; Boat and control credentials do not enter model messages. Tests
+use synthetic image bytes, not a paid Boat account or real desktop input.
 
 ## Text-only model connections
 
@@ -134,15 +134,15 @@ questions again. No fallback replays a requested operation without its tools.
 
 Cloud routine readiness uses the executing bot’s selected runner (including a
 thread’s model override at dispatch), rather than any available cloud engine.
-The probe checks the bot-owned or inherited team Box without provisioning or
-waking it. Dispatch repeats the check so a removed key or unavailable Box fails
+The probe checks the bot-owned or inherited team Boat without provisioning or
+waking it. Dispatch repeats the check so a removed key or unavailable Boat fails
 the run before model execution. Explicit Cloud still permits creating/waking
-the bot’s own Box; a missing assigned team computer requires explicit repair.
+the bot’s own Boat; a missing assigned team computer requires explicit repair.
 
-Run `pnpm exec vitest run server/routine-requests.test.ts server/openai-box.e2e.test.ts`
+Run `pnpm exec vitest run server/routine-requests.test.ts server/openai-boat.e2e.test.ts`
 for target selection and the isolated direct/group/scheduled bridge fixture,
-including credentials removed after scheduling and a Box outage at dispatch.
-The fixture also holds the Box readiness response: the execution stays busy,
+including credentials removed after scheduling and a Boat outage at dispatch.
+The fixture also holds the Boat readiness response: the execution stays busy,
 `wait` cannot report it settled, and Stop prevents dispatch when the response
 arrives. Readiness is part of generation-owned setup, not an untracked wait
 before turn admission.

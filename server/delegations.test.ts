@@ -132,6 +132,17 @@ describe("queueDelegation", () => {
     expect(_pendingCount(from.threadId)).toBe(0);
   });
 
+  it("accepts six handoffs per source thread and refuses the seventh", () => {
+    const item = { toBotId: target.id, message: "next task", depth: 0 };
+    for (let index = 0; index < 6; index++) {
+      expect(queueDelegation(commsBus, from, item, 1).result).toBe("ok");
+    }
+    expect(queueDelegation(commsBus, from, item, 1).result).toBe("too_many");
+    expect(_pendingCount(from.threadId)).toBe(6);
+    const sibling = store.createTask(from.id, "Separate work", false)!;
+    expect(queueDelegation(commsBus, from, item, 1, sibling.threadId).result).toBe("ok");
+  });
+
   it("queues, broadcasts, and drops a 'Delegated to @Target' chip on the source thread", () => {
     const result = queueDelegation(commsBus, from, {
       toBotId: target.id,
@@ -1503,7 +1514,8 @@ describe("peer wake helpers", () => {
     let now = 1_000_000;
     const budget = new DelegationWakeBudget(() => now);
 
-    for (let i = 0; i < DELEGATION_WAKE_MAX_PER_WINDOW; i++) {
+    expect(DELEGATION_WAKE_MAX_PER_WINDOW).toBe(6);
+    for (let i = 0; i < 6; i++) {
       expect(budget.tryAcquire("t1")).toBe(true);
     }
     // cap reached — no further wakes within the same window

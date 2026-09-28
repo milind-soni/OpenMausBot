@@ -20,7 +20,7 @@ import type { Destination } from "./surface.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
-import { botAvatarProfile } from "../shared/bot-avatar.ts";
+import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode } from "../shared/approval-mode.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
@@ -698,6 +698,27 @@ export class Store {
       if (b.avatarCrop !== undefined && avatar.avatarCrop !== b.avatarCrop) {
         delete b.avatarCrop;
         botsMigrated = true;
+      }
+      if (b.avatarZoom !== undefined) {
+        const zoom = clampAvatarZoom(b.avatarZoom);
+        if (zoom === AVATAR_ZOOM_MIN) {
+          delete b.avatarZoom;
+          botsMigrated = true;
+        } else if (b.avatarZoom !== zoom) {
+          b.avatarZoom = zoom;
+          botsMigrated = true;
+        }
+      }
+      for (const key of ["avatarFocusX", "avatarFocusY"] as const) {
+        if (b[key] === undefined) continue;
+        const focus = clampAvatarFocus(b[key]);
+        if (focus === AVATAR_FOCUS_CENTER) {
+          delete b[key];
+          botsMigrated = true;
+        } else if (b[key] !== focus) {
+          b[key] = focus;
+          botsMigrated = true;
+        }
       }
     }
     for (const b of this.bots) {

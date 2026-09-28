@@ -73,7 +73,7 @@ window.fetch = async (input, init) => {
     }
     return json({ image: vmScreenshot });
   }
-  // The real server refuses provision/sleep while a turn owns the box.
+  // The real server refuses provision/sleep while a turn owns the boat.
   if (path.endsWith("/computer/provision")) {
     if (turnActive) return json({ error: CLOUD_COMPUTER_BUSY_ERROR }, 409);
     return json({ state: "idle" });
@@ -160,7 +160,7 @@ function Fixture() {
     const base = state.instances[0];
     if (base && !state.instances.some((instance) => instance.driverKind === "boxAgent")) {
       // Registry display only; every cloud operation remains the transport
-      // stub above, never the paid Box service.
+      // stub above, never the paid Boat service.
       dispatch({ type: "instances", instances: [...state.instances,
         { ...base, instanceId: "fixture-box", driverKind: "boxAgent" }] });
     }

@@ -115,7 +115,7 @@ describe("the dialog's state", () => {
       { body: { error: "Morgan has more than 30 skills.", choices: { skills: ["a", "b", "c"] } } });
     expect(shareRefused(counted, refusal)).toEqual({ preview: null, available: ["a", "b", "c"], included: [],
       error: "Morgan has more than 30 skills. Choose fewer skills and try again." });
-    // A refusal that names no skills (a network error) keeps the boxes already drawn.
+    // A refusal that names no skills (a network error) keeps the boats already drawn.
     expect(shareRefused(counted, new Error("offline"))).toEqual({ preview: null, available: ["a", "b"], included: [], error: "offline" });
     expect(shareRefused(SHARE_VIEW_START, "down")).toEqual({ ...SHARE_VIEW_START, error: "down" });
   });

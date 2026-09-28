@@ -22,7 +22,9 @@ export const ASK_USER_QUESTION_TOOL = "AskUserQuestion";
  * grow without bound. */
 export const MAX_QUESTIONS = 6;
 export const MAX_OPTIONS = 12;
-const MAX_QUESTION_TEXT = 400;
+/** Long enough for a real question. The card collapses the preview and
+ * expands to this whole text; cutting it here would throw the rest away. */
+export const MAX_QUESTION_TEXT = 8_000;
 const MAX_LABEL = 120;
 const MAX_DESCRIPTION = 400;
 /** One free-text answer. Long enough for a sentence or two of context. */
@@ -48,7 +50,7 @@ export interface QuestionRequestCardData {
   questions: AskQuestion[];
   /** Where the ask came from: a real tool call ("tool", also the meaning
    * of absent on cards saved before this field existed) or a block OMB
-   * parsed out of model-authored output ("output" — the BoxAgent
+   * parsed out of model-authored output ("output" — the BoatAgent
    * transport). Only drives the agent-composed badge; it never changes
    * how a card is answered. */
   origin?: "tool" | "output";
@@ -119,7 +121,7 @@ export function parseAskQuestions(input: unknown): AskQuestion[] | null {
 }
 
 /** The fenced block a turn-boundary agent ends its run with when it wants
- * to ask the person something (the BoxAgent transport): the harness cannot
+ * to ask the person something (the BoatAgent transport): the harness cannot
  * pause mid-run, so the questions ride the final output and OMB parses them
  * at settle. The block is model-authored — untrusted input like any tool
  * call — so its body runs through parseAskQuestions and the same caps. */
@@ -151,7 +153,7 @@ export function stripOmbAskBlock(output: string): string {
 /** The prompt contract that teaches a model the turn-held ask transport: end
  * the reply with a fenced `omb-ask` block carrying the questions, and the
  * answers come back on the next prompt. A harness that cannot pause mid-run
- * (the BoxAgent transport) appends this to every prompt; the caps in the text
+ * (the BoatAgent transport) appends this to every prompt; the caps in the text
  * are the constants above, so the taught contract and the parser cannot
  * drift apart. */
 export function ombAskProtocolPrompt(): string {
@@ -267,7 +269,7 @@ export const ASK_USER_TOOL_DEFINITION = {
 } as const;
 
 /** The synthetic tool string for an ask parsed out of model-authored final
- * output (the BoxAgent turn-held transport): there is no tool call to name,
+ * output (the BoatAgent turn-held transport): there is no tool call to name,
  * but the event and the ASKS_A_PERSON backstop need one string. */
 export const OMB_ASK_TOOL = "omb-ask";
 
@@ -301,7 +303,7 @@ export function answerWithoutPreamble(answer: string): string {
 }
 
 /** The longest formatted answer OMB will echo back into a follow-up prompt
- * (the BoxAgent continuation). formatQuestionAnswers itself does not
+ * (the BoatAgent continuation). formatQuestionAnswers itself does not
  * truncate — the tool-result channel has no stated limit — but a prompt is
  * not the place to find one: six answers at the custom-answer cap is the
  * most a legitimate reply weighs, so that is the ceiling. */

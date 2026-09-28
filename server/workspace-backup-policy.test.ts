@@ -8,7 +8,7 @@ describe("workspace backup data boundary", () => {
       anthropic: { key: "claude-secret", url: "https://claude.example" },
       openaiCompat: { key: "api-secret", url: "https://api.example", model: "model", provider: "provider" },
       composio: { apiKey: "composio-secret", userId: "source-account", sessionId: "source-session" },
-      box: { token: "box-secret" }, opencodeGo: { apiKey: "go-secret" },
+      box: { token: "boat-secret" }, opencodeGo: { apiKey: "go-secret" },
       tts: { key: "voice-secret", fishKey: "fish-secret", voice: "source-voice", provider: "fish" },
       imageGen: { key: "image-secret", customApiKey: "custom-secret", customUrl: "https://images.example/v1", provider: "custom" },
       instances: { source: { driver: "claudeAgent", environment: { ORDINARY_NAME: "env-secret" }, config: { unknown: "driver-secret" } } },

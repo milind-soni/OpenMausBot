@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This runs only the bundled offline thread fixture. CI creates and deletes
-# its own simulators; no phone is paired and no desktop data is opened.
+# This runs only the bundled offline thread and roster fixtures. CI creates
+# and deletes its own simulators; no phone is paired and no desktop data is
+# opened.
 cd "$(dirname "$0")/../ios"
 
 runtime_id=$(xcrun simctl list runtimes -j | python3 -c '
@@ -50,5 +51,7 @@ for kind in iphone ipad; do
     -parallel-testing-enabled NO \
     -only-testing:OpenMausCompanionUITests/ThreadNavigationUITests \
     -only-testing:OpenMausCompanionUITests/TranscriptPresentationUITests \
+    -only-testing:OpenMausCompanionUITests/SwipeBackUITests \
+    -only-testing:OpenMausCompanionUITests/RosterDensityUITests \
     CODE_SIGNING_ALLOWED=NO test
 done

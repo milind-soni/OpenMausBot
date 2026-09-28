@@ -5,21 +5,21 @@ import type { InstanceInfo } from "@/state/store";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../../shared/computer-contention";
 
 describe("remote VPS preview", () => {
-  it("uses the selected bot's bridge or the actual Box fallback, never an unrelated bridge", () => {
+  it("uses the selected bot's bridge or the actual Boat fallback, never an unrelated bridge", () => {
     const plain = { instanceId: "plain", driverKind: "claude", snapshot: { state: "available" } } as InstanceInfo;
     const bridge = { ...plain, instanceId: "bridge", driverKind: "openai-compat", capabilities: { cloudComputerMcp: true } } as InstanceInfo;
-    const box = { ...plain, instanceId: "box", driverKind: "boxAgent" };
+    const boat = { ...plain, instanceId: "box", driverKind: "boxAgent" };
     expect(cloudRunner([plain, bridge], "plain")).toBeUndefined();
     expect(cloudRunner([plain, bridge], "bridge")).toBe(bridge);
-    expect(cloudRunner([plain, bridge, box], "plain")).toBe(box);
-    expect(cloudRunner([plain, bridge, box], "bridge")).toBe(bridge);
-    expect(cloudRunner([plain, { ...bridge, snapshot: { state: "unavailable" } }, box], "bridge")?.snapshot.state).toBe("unavailable");
-    expect(cloudRunner([plain, bridge, box])).toBeUndefined();
+    expect(cloudRunner([plain, bridge, boat], "plain")).toBe(boat);
+    expect(cloudRunner([plain, bridge, boat], "bridge")).toBe(bridge);
+    expect(cloudRunner([plain, { ...bridge, snapshot: { state: "unavailable" } }, boat], "bridge")?.snapshot.state).toBe("unavailable");
+    expect(cloudRunner([plain, bridge, boat])).toBeUndefined();
   });
   it("retries only known transient contention, not permanent 409 failures", () => {
     expect(isRemoteScreenshotContention({ status: 409, message: "this bot's cloud computer is being changed — wait for it to finish" })).toBe(true);
     expect(isRemoteScreenshotContention({ status: 409, message: "the VPS is being prepared — try again shortly" })).toBe(true);
-    for (const message of ["VPS is not configured", "The VPS computer is not ready", "Choose Cloud before changing or opening this Box. Auto only checks existing computer state."]) {
+    for (const message of ["VPS is not configured", "The VPS computer is not ready", "Choose Cloud before changing or opening this Boat. Auto only checks existing computer state."]) {
       expect(isRemoteScreenshotContention({ status: 409, message })).toBe(false);
     }
     expect(isRemoteScreenshotContention({ status: 503, message: "this bot's cloud computer is being changed — wait for it to finish" })).toBe(false);

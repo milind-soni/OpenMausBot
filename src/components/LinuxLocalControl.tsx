@@ -123,7 +123,7 @@ export function LinuxLocalControl() {
             </span>
           </div>
           {local.driverPath && (
-            <div className="mt-2 break-all font-mono text-[10px] text-ink-secondary/80" title={local.driverPath}>
+            <div className="mt-2 break-all font-mono text-[10px] text-ink-tertiary" title={local.driverPath}>
               {bundledDriver ? t("computer.linux.bundledDriver") : local.driverPath}
               {local.driverVersion ? ` · ${local.driverVersion}` : ""}
             </div>

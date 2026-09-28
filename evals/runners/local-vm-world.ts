@@ -89,7 +89,10 @@ export class LocalVmWorld extends BaseWorld {
       (up) => up,
       20_000,
     );
-    await this.initBase(base, this.planPath + ".evidence.jsonl", join(this.fixtureHome, "eval-gates"));
+    // eval-gates lives under the server's OMB_DATA_DIR so installSkill's
+    // <dataRoot>/skills target is the directory index.ts hot-loads user
+    // skills from; anywhere else and installed skills never reach the prompt.
+    await this.initBase(base, this.planPath + ".evidence.jsonl", join(data, "eval-gates"));
     for (const bot of scenario.bots) {
       const created = await this.api.post("/api/bots", { name: bot.name });
       if (created.status >= 300) throw new Error("bot create failed: " + JSON.stringify(created.body));

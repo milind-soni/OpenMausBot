@@ -37,7 +37,7 @@ async function safeJson(res: Response): Promise<any> {
 }
 
 /** Prefer ElevenLabs' own words over anything we can invent — it knows the
- * plan, the quota and the model name. Mirrors box.boxErrorMessage. */
+ * plan, the quota and the model name. Mirrors boat.boatErrorMessage. */
 function message(status: number, what: string, body: any): string {
   const theirs =
     (typeof body?.detail === "string" && body.detail.trim()) ||

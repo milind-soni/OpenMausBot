@@ -79,7 +79,7 @@ describe("commandSummary", () => {
 describe("askInputSummary", () => {
   it("prefers a question, at its longer limit", () => {
     const question = "Which of these should I keep? ".repeat(12);
-    expect(askInputSummary({ question, command: "ls" })).toBe(question.trim().slice(0, 300));
+    expect(askInputSummary({ question, command: "ls" })).toBe(question.trim());
   });
 
   it("keeps a multi-line command multi-line — the card shows it as it will run", () => {

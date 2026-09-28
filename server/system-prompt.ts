@@ -50,6 +50,8 @@ export function buildSystemPrompt(
   return { text: sections.map((section) => section.text).join(""), sections, stable: halves(false), volatile: halves(true) };
 }
 
+// The "box*" prompt kinds are Boat's historical kind literals; events and
+// persisted surfaces carry them, so only prose was renamed.
 export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent" | "box-chat" | "vps" | "local";
 
 /** One ladder for the computer paragraph, so the settings preview, a direct
@@ -89,13 +91,13 @@ const COMPUTER_PARAGRAPH: Record<ComputerPromptKind, string> = {
   "box-agent": "",
   "box-chat": " You control the assigned cloud computer. Inspect it with screenshots; click coordinates refer to the full image. Use the advertised computer tools for desktop actions and shell commands.",
   vps:
-    " You have your own self-hosted remote Linux computer through the official Cua tools. This is a VPS, not Box; using it does not require a Box API key. Its filesystem is disposable: everything on it is wiped whenever its container is recreated, so keep long-lived work somewhere durable — push it to a remote, or hand the results back in chat — instead of leaving it only on that computer. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully.",
+    " You have your own self-hosted remote Linux computer through the official Cua tools. This is a VPS, not Boat; using it does not require a Boat API key. Its filesystem is disposable: everything on it is wiped whenever its container is recreated, so keep long-lived work somewhere durable — push it to a remote, or hand the results back in chat — instead of leaving it only on that computer. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully.",
   local:
     " You can act on the user's computer through the computer tools. Discover the target app/window and inspect its state first. Prefer window-targeted accessibility actions with background delivery so the user can keep working in another app; do not bring OpenMausBot or another app to the front just to inspect it. Use the dedicated browser tools for browser work when available, keeping the user's intended browser profile/account, and OpenMausBot's configuration/proposal tools for supported bot setup rather than clicking through this app. Full-desktop input, app activation, and foreground delivery can move the real cursor, change focus, or switch desktops: use them only when the user asked for foreground control or agrees after background control reports it cannot perform the action. Do not silently retry a background refusal as foreground input, including through shell scripts, AppleScript/System Events, or another automation tool. If a background action unexpectedly changes focus, report it and stop that route rather than continuing to interrupt the user. Never promise that arbitrary desktop actions can run in the background.",
 };
 
-/** The computer paragraph plus the shared sign-in policy. A box driven by
- * the box agent has no paragraph (the agent already lives there) but the
+/** The computer paragraph plus the shared sign-in policy. A boat driven by
+ * the boat agent has no paragraph (the agent already lives there) but the
  * sign-in policy still applies. */
 export function computerPrompt(kind: ComputerPromptKind | null): string {
   if (!kind) return "";
@@ -137,13 +139,13 @@ export function customMcpPrompt(names: string[]): string {
   return ` The user also added ${names.length === 1 ? "an MCP server" : "MCP servers"} for you: ${list}. Use their available tools under the engine's normal approval rules.`;
 }
 export const CREDENTIAL_PROMPT =
-  " If a supported API key is missing for the service actually needed, use request_credential to create a secure credential request. Before requesting a computer-provider key, inspect the configured targets with select_computer; an existing self-hosted VPS does not need Box credentials. Do not request a different provider's key merely because a task mentions cloud. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
+  " If a supported API key is missing for the service actually needed, use request_credential to create a secure credential request. Before requesting a computer-provider key, inspect the configured targets with select_computer; an existing self-hosted VPS does not need Boat credentials. Do not request a different provider's key merely because a task mentions cloud. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
 export const THREADS_PROMPT =
   " A thread is one conversation with its own history and its own run; a bot can have several running at once, and the person sees them as rows under that bot. Use start_thread to open one on yourself for separate work, or on a teammate to hand them a job that should run on its own. Use list_threads to see how the ones you opened are going. When you mention a thread to the person, write its title as #Title so it links. Do not use a ticket comment, a note, or a room post as a stand-in for a thread.";
 const PROPOSAL_RESULT_PROMPT =
   " Follow the tool result: with granted Full Access it may report applied immediately; then continue the requested work without asking for another confirmation. If it reports a pending review, end the turn and wait for the in-app decision. Never claim success before an applied result, and report failures honestly. Full Access does not grant another bot broader permissions.";
 export const ROUTINE_PROMPT =
-  " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. Keep run_on omitted or maus to use the bot's current model and configured computer, including its VPS. A routine's box (legacy cloud) destination switches to a Box-hosted agent, not the configured VPS; choose it only when the user explicitly wants that Box runner. Convert calendar requests such as the first or last day of each month or the second Monday to a five-field cron expression with an explicit IANA timezone; use interval for elapsed every-N-minutes work. Never replace a calendar rule with daily AI date checking or an approximate weekly schedule; clarify ambiguous or unsupported requests." + PROPOSAL_RESULT_PROMPT;
+  " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. Keep run_on omitted or maus to use the bot's current model and configured computer, including its VPS. A routine's box (legacy cloud) destination switches to a Boat-hosted agent, not the configured VPS; choose it only when the user explicitly wants that Boat runner. Convert calendar requests such as the first or last day of each month or the second Monday to a five-field cron expression with an explicit IANA timezone; use interval for elapsed every-N-minutes work. Never replace a calendar rule with daily AI date checking or an approximate weekly schedule; clarify ambiguous or unsupported requests." + PROPOSAL_RESULT_PROMPT;
 export const ROUTINE_EXECUTION_PROMPT =
   " Execute this routine now: use available peer tools for required handoffs rather than merely announcing that you will wait; after an accepted delegation, end this turn for automatic resumption, and report a concrete blocker if no handoff is possible.";
 export const LEARN_PROMPT =

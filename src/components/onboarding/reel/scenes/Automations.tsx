@@ -13,7 +13,7 @@ import { CheckCircle2, Loader2, MousePointer2, Zap } from "lucide-react";
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { reducedMotion } from "@/lib/onboarding";
-import type { SceneProps } from "./OrbitingApps";
+import type { SceneProps } from "./types";
 
 const AUTOMATIONS_MS = 6200;
 
@@ -126,7 +126,7 @@ export function Automations({ playing, onCue, onEnded, label }: SceneProps) {
         <div className="relative grid grid-cols-[34px_repeat(5,1fr)]" style={{ height: HOURS.length * ROW }}>
           <div className="relative">
             {HOURS.map((hour, i) => (
-              <div key={hour} className="absolute right-1.5 -translate-y-1/2 text-[8.5px] tabular-nums text-ink-secondary/70" style={{ top: i * ROW }}>
+              <div key={hour} className="absolute right-1.5 -translate-y-1/2 text-[8.5px] tabular-nums text-ink-tertiary" style={{ top: i * ROW }}>
                 {hour} AM
               </div>
             ))}

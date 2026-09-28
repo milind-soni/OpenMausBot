@@ -88,7 +88,7 @@ export function GoalRunCard({ message }: { message: Message }) {
             </span>
           </div>
           {detail && <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-ink-secondary">{detail}</p>}
-          <p className="mt-1 text-[11.5px] text-ink-secondary/80">
+          <p className="mt-1 text-[11.5px] text-ink-tertiary">
             {run.coordinatorName} coordinating · {turns}
           </p>
         </div>

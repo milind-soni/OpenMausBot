@@ -19,8 +19,8 @@ hold for every engine.** The engine families on main are: **Claude Code** (strea
 `drivers/pi.ts`), the **ACP family** sharing `drivers/acp/core.ts` (Cursor, Gemini, Droid, Grok
 Build, Hermes, Kimi, OpenCode Go, Qwen, custom, Antigravity), the **OpenAI-compatible HTTP
 family** sharing `drivers/openai-chat.ts` (openai-compat for OpenRouter/Groq/Together/llama.cpp,
-xAI Grok API, MiniMax, and local hosts through `local-inject.ts`), and the **box agent**
-(`drivers/boxagent.ts`, the turn runs on a cloud box). Each item below ends with a per-family
+xAI Grok API, MiniMax, and local hosts through `local-inject.ts`), and the **boat agent**
+(`drivers/boatagent.ts`, the turn runs on a cloud boat). Each item below ends with a per-family
 decision: **full**, **degraded** (what is lost is stated), or **not supported** (hidden behind a
 capability flag, per the existing rule in `contracts.ts` that a bot is never told it has a
 capability its driver cannot mount). Engine-specific channels (Claude hooks) are accelerators; the
@@ -337,7 +337,7 @@ baseline run in step 10 is executed for at least Claude, Codex and one ACP engin
 
 ## Every engine, every item
 
-| Item | Claude Code | Codex | pi | ACP family | HTTP family (OpenAI-compatible) | Box agent |
+| Item | Claude Code | Codex | pi | ACP family | HTTP family (OpenAI-compatible) | Boat agent |
 | --- | --- | --- | --- | --- | --- | --- |
 | 0.1 digest | full | full | full | full | degraded: reply + usage only (no tools) | degraded: reply + usage only |
 | 0.2 tool results | full (hooks, untruncated) | preview via protocol | preview via protocol | preview via protocol | n/a (no tools) | not supported |

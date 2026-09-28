@@ -321,7 +321,7 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   const runOn = destination(args.run_on ?? args.runOn);
   const timeoutMinutes = args.timeout_minutes ?? args.timeoutMinutes;
   if (runOn != null && runOn !== "maus" && runOn !== "cloud") {
-    return { fields, error: 'Use run_on="maus" for the bot’s current model and configured computer (including VPS), or run_on="box" only for the Box-hosted agent. Legacy "cloud" also means Box.' };
+    return { fields, error: 'Use run_on="maus" for the bot’s current model and configured computer (including VPS), or run_on="box" only for the Boat-hosted agent. Legacy "cloud" also means Boat.' };
   }
   if (timeoutMinutes != null && (
     typeof timeoutMinutes !== "number" || !Number.isInteger(timeoutMinutes) || timeoutMinutes < 5 || timeoutMinutes > 240
@@ -983,11 +983,14 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (!routineId || !action) {
       return { text: "propose_routine_action needs a routine_id and supported action.", isError: true };
     }
+    const forBotId = String(args.for_bot_id ?? "").trim();
     const body: Json = {
       fromBotId: BOT_ID,
       fromThreadId: THREAD_ID,
       action,
       routineId,
+      // JSON.stringify drops the key entirely when no target was named
+      ...(forBotId ? { forBotId } : {}),
     };
     if (action === "update") {
       if (!jsonRecord(args.changes)) {
@@ -1088,6 +1091,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         action: args.action,
         text: args.text,
         oldText: args.old_text,
+        ...(typeof args.until === "string" && args.until.trim() ? { until: args.until.trim() } : {}),
       }),
     });
     if (r.error || r.ok !== true) {

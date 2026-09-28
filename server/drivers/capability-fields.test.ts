@@ -2,12 +2,12 @@
 // typed replacements for the boxAgent composite reads in dispatch and rooms.
 // The fleet invariant at the bottom is the zero-behavior-change proof for
 // every swapped site: usesCloudComputer must equal the union it replaces, and
-// remoteAgent must be declared by exactly the box-native driver.
+// remoteAgent must be declared by exactly the boat-native driver.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
-import { BoxAgentDriver } from "./boxagent.ts";
+import { BoatAgentDriver } from "./boatagent.ts";
 import { BUILT_IN_DRIVERS } from "./builtIn.ts";
 import { ClaudeDriver } from "./claude.ts";
 import { CodexDriver } from "./codex.ts";
@@ -31,15 +31,15 @@ describe("typed capability fields (remoteAgent / usesCloudComputer)", () => {
   });
 
   it("declares the box-native engine remote and cloud-bound without a bridge mount", async () => {
-    const box = await keep(BoxAgentDriver.create({
-      instanceId: "caps-box", displayName: "Caps Box",
-      environment: { BOX_TOKEN: "box-test-token" }, enabled: true, config: { pollMs: 0 },
+    const boat = await keep(BoatAgentDriver.create({
+      instanceId: "caps-box", displayName: "Caps Boat",
+      environment: { BOX_TOKEN: "boat-test-token" }, enabled: true, config: { pollMs: 0 },
     }));
-    expect(box.adapter.capabilities.remoteAgent).toBe(true);
-    expect(box.adapter.capabilities.usesCloudComputer).toBe(true);
-    // The agent switches to Box's model — it never consumes the descriptor,
+    expect(boat.adapter.capabilities.remoteAgent).toBe(true);
+    expect(boat.adapter.capabilities.usesCloudComputer).toBe(true);
+    // The agent switches to Boat's model — it never consumes the descriptor,
     // so cloudComputerMcp stays absent (its own contract excludes it).
-    expect(box.adapter.capabilities.cloudComputerMcp).toBeUndefined();
+    expect(boat.adapter.capabilities.cloudComputerMcp).toBeUndefined();
   });
 
   it("keeps usesCloudComputer locked to cloudComputerMcp on the chat runtime", async () => {
@@ -88,7 +88,7 @@ describe("typed capability fields (remoteAgent / usesCloudComputer)", () => {
         config: driver.driverKind === "customAcp" ? { cli: "echo" } : {},
       }));
       const caps = instance.adapter.capabilities;
-      // remoteAgent is exactly the box-native driver: this biconditional is
+      // remoteAgent is exactly the boat-native driver: this biconditional is
       // what lets every former driverKind === "boxAgent" capability read
       // become caps.remoteAgent === true without changing an outcome.
       expect(caps.remoteAgent === true, driver.driverKind).toBe(driver.driverKind === "boxAgent");

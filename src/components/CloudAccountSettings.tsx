@@ -1,13 +1,40 @@
 import { useEffect, useRef, useState } from "react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
+import type { CloudMachine } from "../../electron/cloud-home.mjs";
 import { t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
+
+const MACHINE_TEXT = {
+  provisioning: "cloudHome.provisioning",
+  ready: "cloudHome.ready",
+  stopped: "cloudHome.stopped",
+  "payment-problem": "cloudHome.paymentProblem",
+  failed: "cloudHome.failed",
+} as const;
+
+/** The person's Cloud machine: where it stands, and one way in. Status and
+ * address come only from the verified native snapshot; the pairing code
+ * never reaches this page. A render helper (no hooks), part of the card. */
+function cloudHomeCard({ machine, busy, failed, onConnect }: { machine: CloudMachine; busy: boolean; failed: boolean; onConnect: () => void }) {
+  const connectable = machine.status === "ready";
+  return <Card title={t("cloudHome.title")}>
+    <div data-cloud-home={machine.status} className="flex flex-col items-start gap-3">
+      <p role="status" className={machine.status === "ready" ? "text-[14px] text-ink" : "text-[13px] text-ink-secondary"}>{t(MACHINE_TEXT[machine.status])}</p>
+      {connectable && <>
+        <button type="button" disabled={busy} className="ui-button" onClick={onConnect}>{t("cloudHome.connect")}</button>
+        <p className="text-[12px] text-ink-secondary">{t("cloudHome.connectHelp")}</p>
+      </>}
+      {failed && <p role="alert" className="text-[13px] text-danger">{t("cloudHome.connectFailed")}</p>}
+    </div>
+  </Card>;
+}
 
 /** The public native snapshot carries no credential and cannot activate Pro. */
 export function CloudAccountSettings() {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
   const [account, setAccount] = useState<CloudAccountState | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(false), [confirm, setConfirm] = useState(false);
+  const [homeFailed, setHomeFailed] = useState(false);
   const generation = useRef(0), revision = useRef(0), pending = useRef(false);
   useEffect(() => {
     const current = ++generation.current, initial = revision.current;
@@ -70,5 +97,9 @@ export function CloudAccountSettings() {
       {error && <p role="alert" className="mt-3 text-[13px] text-danger">{t("cloudAccount.actionFailed")}</p>}
       {!account && <button type="button" disabled={busy} className="ui-button mt-3" onClick={() => void perform(() => bridge.state())}>{t("organization.refresh")}</button>}
     </Card>
+    {account?.status === "connected" && account.machine && cloudHomeCard({ machine: account.machine, busy, failed: homeFailed,
+      onConnect: () => { setHomeFailed(false); void perform(async () => {
+        try { return await bridge.connectHome(); } catch { setHomeFailed(true); return bridge.state(); }
+      }); } })}
   </>;
 }

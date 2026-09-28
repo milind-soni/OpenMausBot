@@ -11,6 +11,7 @@ const nodeSchema = z.object({
   status: z.enum(["source", "queued", "running", "waiting", "resume", "completed", "failed", "cancelled"]),
   result: z.string().default(""), reported: z.boolean().default(false),
   executions: z.number().int().nonnegative().default(0), startedAt: z.number().optional(),
+  lastProgressAt: z.number().optional(),
   approvalGranted: z.boolean().default(false),
   kind: z.enum(["work", "assignment"]).default("work"),
 });
@@ -120,6 +121,17 @@ export class RoomHandoffs {
   private effectiveAgeMs(root: RoomHandoff): number {
     return Math.max(0, this.now() - root.createdAt - this.pausedMs(root));
   }
+  /** The wall-clock cap is a stall window, not a total-age limit: it is
+   * measured from the tree's creation or its last durable progress,
+   * whichever is later. */
+  private capOrigin(root: RoomHandoff): number {
+    return root.lastProgressAt ?? root.createdAt;
+  }
+  /** Records durable progress on the root — a dispatch, a settlement, or a
+   * cancellation — restarting the hard-cap stall window from now. */
+  private stampProgress(root: RoomHandoff): void {
+    root.lastProgressAt = Math.max(root.lastProgressAt ?? root.createdAt, this.now());
+  }
   /** The earliest moment this node may be failed for lifetime: the tree
    * ceiling, a running node's own start plus a minimum runway, or, for work
    * parked in a busy teammate's queue, its own queue window (#1238). The
@@ -131,7 +143,15 @@ export class RoomHandoffs {
     const ceiling = n.status === "queued" && n.executions === 0
       ? anchor + this.limits.queueMs
       : root.createdAt + this.limits.lifetimeMs + this.pausedMs(root);
-    return Math.min(Math.max(ceiling, anchor + this.limits.minRunwayMs), root.createdAt + this.limits.hardCapMs);
+    const normal = Math.min(Math.max(ceiling, anchor + this.limits.minRunwayMs), this.capOrigin(root) + this.limits.hardCapMs);
+    // An in-flight synthesis turn keeps at least the runway its dispatch
+    // promised even when the hard cap lands mid-run; the cap still clamps
+    // the deadline, so a hung synthesis dies at that edge instead of
+    // becoming immortal.
+    if (n.status === "running" && this.owesOnlySynthesis(n)) {
+      return Math.max(normal, anchor + this.limits.minRunwayMs);
+    }
+    return normal;
   }
   /** An ancestor past its ceiling is not failed while a descendant is still
    * running inside its own runway; cancelling would cascade into that work. */
@@ -148,6 +168,16 @@ export class RoomHandoffs {
     return (children.length > 0 && children.every(c => terminal(c))) ||
       children.some(c => this.owesFollowUp(c) || (c.status === "queued" && c.executions === 0));
   }
+  /** A node whose children have all settled owes only its own synthesis
+   * turn: the step that returns their results to the requester. The hard
+   * cap must not kill that turn mid-flight or starve it of its dispatch.
+   * A synthesis owed to a teammate who is permanently busy is a stall, not
+   * progress, and stays subject to the cap. */
+  private owesOnlySynthesis(n: RoomHandoff): boolean {
+    const children = this.children(n.id);
+    return children.length > 0 && children.every(c => terminal(c)) &&
+      (n.status === "running" || (n.status === "resume" && !this.hooks.busy(n)));
+  }
   /** Names the budget, the node's status, and the elapsed time. Work that
    * never started reports the queue window it waited out, not the tree's. */
   private lifetimeError(n: RoomHandoff): string {
@@ -161,7 +191,23 @@ export class RoomHandoffs {
    * execution never pauses long enough to age its lifetime budget. */
   private hardCapError(n: RoomHandoff): string {
     const root = this.root(n);
-    return `Room handoff hard cap exhausted: node was ${n.status} after ${duration(this.now() - root.createdAt)} of the ${duration(this.limits.hardCapMs)} wall-clock cap`;
+    const first = `Room handoff hard cap exhausted: node was ${n.status} after ${duration(this.now() - root.createdAt)} of the ${duration(this.limits.hardCapMs)} wall-clock cap`;
+    // Graceful expiry: settled children are real work the tree produced,
+    // so the expiry still carries a bounded digest of their results. A
+    // wide tree cannot turn the error into a dump: each result is tailed
+    // to 512 chars and the digest to 4 KiB, with the elided count named.
+    const settled = [...this.nodes.values()]
+      .filter(x => x.rootId === root.id && x.parentId && terminal(x))
+      .map(x => `${x.key} [${x.status}] ${x.result.slice(-512)}`);
+    if (!settled.length) return first;
+    const lines: string[] = [];
+    let used = 0;
+    for (const line of settled) {
+      if (used + line.length + 1 > 4096) break;
+      lines.push(line); used += line.length + 1;
+    }
+    const elided = settled.length - lines.length;
+    return `${first}\n${lines.join("\n")}${elided ? `\n(+${elided} elided)` : ""}`;
   }
 
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined,
@@ -207,7 +253,7 @@ export class RoomHandoffs {
     // The wall-clock hard cap ignores pauses, so the runway actually
     // available is the shorter of the two remainders.
     const lifetimeRemaining = this.limits.lifetimeMs - this.effectiveAgeMs(root);
-    const hardCapRemaining = root.createdAt + this.limits.hardCapMs - this.now();
+    const hardCapRemaining = this.capOrigin(root) + this.limits.hardCapMs - this.now();
     const remaining = Math.min(lifetimeRemaining, hardCapRemaining);
     if (remaining < this.limits.minRunwayMs) {
       throw new Error(`Room handoff budget exhausted: only ${duration(Math.max(remaining, 0))} of the ${duration(this.limits.lifetimeMs)} tree lifetime remains`);
@@ -257,6 +303,7 @@ export class RoomHandoffs {
     if (!terminal(node)) {
       node.status = status; node.result = reason;
       this.controllers.get(node.id)?.abort();
+      this.stampProgress(this.root(node));
     }
     // Settlement closes the paused span now, not at the next periodic tick.
     this.trackExecutionPauses();
@@ -312,11 +359,13 @@ export class RoomHandoffs {
     // Validate and expire deepest nodes first so each one is failed with its
     // own status; an ancestor's cancellation then only sweeps what is left.
     // The hard cap overrides the runner and follow-up protections: it is the
-    // bound that stops a tree whose execution never pauses.
+    // bound that stops a tree whose execution never pauses. A tree whose only
+    // remaining obligation is its own synthesis turn is spared, so settled
+    // results are returned instead of dying inside a failed tree.
     for (const n of [...this.nodes.values()].reverse()) {
       if (terminal(n)) continue;
       const error = this.hooks.validate(n, n.parentId ? this.nodes.get(n.parentId) : undefined);
-      const hardCapped = this.now() >= this.root(n).createdAt + this.limits.hardCapMs;
+      const hardCapped = !this.owesOnlySynthesis(n) && this.now() >= this.capOrigin(this.root(n)) + this.limits.hardCapMs;
       if (error || hardCapped || (this.now() > this.deadline(n) && !this.protectsRunner(n) && !this.owesFollowUp(n))) {
         this.cancelTree(n, error ?? (hardCapped ? this.hardCapError(n) : this.lifetimeError(n)), "failed");
       }
@@ -345,6 +394,7 @@ export class RoomHandoffs {
       const resumed = n.status === "resume";
       const childCount = this.children(n.id).length;
       root.executions += executionCost; n.status = "running"; n.startedAt = this.now();
+      this.stampProgress(root);
       // Open the pause at the moment execution starts, not at the next tick:
       // the lifetime clock must not charge the gap before observation.
       const pause = this.pauses.get(root.id) ?? { accumulatedMs: 0 };
@@ -358,7 +408,7 @@ export class RoomHandoffs {
         n.result = result.text.slice(0, 12_000);
         if (this.children(n.id).length > childCount) n.status = "waiting";
         else if (!result.ok) this.cancelTree(n, n.result || "Room agent failed", "failed");
-        else n.status = "completed";
+        else { n.status = "completed"; this.stampProgress(root); }
         // Close the paused span with the settlement itself: work enqueued
         // before the next periodic tick must be admitted against the aged
         // budget, not the still-open pause's overstated runway.

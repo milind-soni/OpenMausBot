@@ -133,7 +133,7 @@ export function CommandRow({
             {status === "opened" ? <Check size={14} /> : <TerminalSquare size={14} />}
             {status === "opened" ? t("engineSetup.terminalOpened") : actionLabel}
           </button>
-          <p aria-live="polite" className="mt-1.5 text-center text-[11px] text-ink-secondary/70">
+          <p aria-live="polite" className="mt-1.5 text-center text-[11px] text-ink-tertiary">
             {status === "opened" ? t("engineSetup.pasteHint") : t("engineSetup.copyOnOpenHint")}
           </p>
         </>
@@ -331,7 +331,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
           {busy === "install" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           {busy === "install" ? t("engineSetup.installing") : managed.label}
         </button>
-        <p className="mt-1.5 text-center text-[11px] text-ink-secondary/70">
+        <p className="mt-1.5 text-center text-[11px] text-ink-tertiary">
           {t("engineSetup.downloadNote", { mb: Math.ceil(managed.downloadBytes / 1024 / 1024) })}
         </p>
         {error && <p className="mt-2 text-[11.5px] text-danger">{error}</p>}
@@ -481,7 +481,7 @@ export function EngineSetup({
       )}
 
       {!signInOnly && install.needsNode && !install.server && (
-        <p className="mt-2 text-[11px] leading-relaxed text-ink-secondary/70">
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-tertiary">
           {/* the sentence is one catalog entry; {npm} marks where the code
               chip goes, so a translator can move it */}
           {t("engineSetup.needsNode").split("{npm}").flatMap((part, index) =>

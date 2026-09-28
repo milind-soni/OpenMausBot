@@ -1,4 +1,5 @@
 import { createManagedDesktopStore } from "./managed-desktop.mjs";
+import { CLOUD_MACHINE_CONNECTABLE, parseCloudSummary, parsePairingGrant } from "./cloud-home.mjs";
 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
 const TOKEN = /^omc_[A-Za-z0-9_-]{43}$/;
@@ -79,6 +80,13 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     try { await request("session", { method: "DELETE", body: {}, token: previous.token, signal: AbortSignal.timeout(20_000) }); }
     catch (error) { if (![401, 403].includes(error?.status)) throw error; }
   }
+  /** The verified machine to connect to; null unless a current session
+   * reports one that is running. */
+  function homeTarget() {
+    const current = state();
+    const machine = current.status === "connected" ? current.machine : undefined;
+    return machine?.origin && CLOUD_MACHINE_CONNECTABLE.includes(machine.status) ? { origin: machine.origin } : null;
+  }
   function signOut() {
     if (clearing) return clearing;
     const previous = grant ?? issued ?? cleanup, stamp = reset();
@@ -104,6 +112,9 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         throw Object.assign(new Error("Cloud identity changed."), { status: 401 });
       }
       const access = entitlement(result.entitlement);
+      // The Admin's state decides what the machine allows (a lapsed payment
+      // is "payment-problem", not a hidden machine). A malformed one is none.
+      const machine = parseCloudSummary(result.cloud);
       if (next.expiresAt !== previous.expiresAt) {
         const replacement = { ...previous, expiresAt: next.expiresAt };
         await store.write(replacement);
@@ -112,7 +123,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
       verifiedUntil = Math.min(grant.expiresAt, now() + REFRESH_MS,
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
-      publish({ ...view("connected"), entitlement: access, verifiedAt: now(), verifiedUntil });
+      publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), verifiedAt: now(), verifiedUntil });
       schedule(async () => { publish(view("unavailable", "verification-expired")); return refresh(); }, verifiedUntil - now());
     } catch (error) {
       if (!current(stamp)) return state();
@@ -192,6 +203,17 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     cancel: () => pending || value.status === "connecting" ? signOut() : Promise.resolve(state()),
     refresh, signOut,
     async openDashboard() { await openBrowser(`${origin}/cloud`); return state(); },
+    homeTarget,
+    /** Ask the Admin for one single-use pairing code on that machine. The
+     * code is returned to main only, for one navigation; it is not kept. */
+    async pairHome() {
+      const target = homeTarget(), current = grant;
+      if (!target || !current) throw new Error("Your Cloud is not ready to connect yet.");
+      const result = await request("pairing", { method: "POST", body: {}, token: current.token });
+      const pairing = parsePairingGrant(result, target.origin, now());
+      if (!pairing) throw new Error("Invalid Cloud pairing response.");
+      return pairing;
+    },
     close() { closed = true; reset(); },
   };
 }

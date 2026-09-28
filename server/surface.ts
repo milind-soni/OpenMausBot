@@ -1,12 +1,12 @@
 // Where a bot's hands land — and therefore where the person goes when it
 // needs them. A turn can mount two places at once (a computer plus the
 // built-in browser), which is exactly what confused people: "do this on the
-// web" landed in the cloud box's Chrome one turn and in the Browser tab the
+// web" landed in the cloud boat's Chrome one turn and in the Browser tab the
 // next, and the "needs your hands" plea never said which. Everything that
 // decides or describes a surface lives here, so the picker, the dispatch,
 // the system prompt and the notification cannot drift apart.
 
-/** A place a bot can act. `cloud` covers both the Box and VPS backends —
+/** A place a bot can act. `cloud` covers both the Boat and VPS backends —
  * from the person's seat they are the same "cloud computer" panel. */
 import type { Surface } from "../shared/wire.ts";
 export type { Surface };

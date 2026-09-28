@@ -7,7 +7,7 @@ import {
   localComputerDisabledReason,
   localComputerSelectable,
   persistedComputerSelectionMatches,
-  resolveBoxPanelAction,
+  resolveBoatPanelAction,
   shouldPollCloudPreview,
 } from "./local-computer";
 
@@ -115,117 +115,117 @@ describe("local computer UI eligibility", () => {
     ).toBe(false);
   });
 
-  it("reports an inherited team Box without choosing a private Box or local fallback", () => {
+  it("reports an inherited team Boat without choosing a private Boat or local fallback", () => {
     for (const configured of [false, true]) {
-      for (const boxState of [null, "idle", "archived", "provisioning"]) {
+      for (const boatState of [null, "idle", "archived", "provisioning"]) {
         for (const canUseCloud of [false, true]) {
-          expect(resolveBoxPanelAction({ computer: undefined, configured, boxState, canUseCloud,
-            autoLocal: true, teamComputer: true })).toBe("team-box");
+          expect(resolveBoatPanelAction({ computer: undefined, configured, boatState, canUseCloud,
+            autoLocal: true, teamComputer: true })).toBe("team-boat");
         }
       }
     }
-    expect(resolveBoxPanelAction({ computer: "cloud", configured: true, boxState: "idle",
-      canUseCloud: true, autoLocal: true, teamComputer: true })).toBe("ensure-box");
+    expect(resolveBoatPanelAction({ computer: "cloud", configured: true, boatState: "idle",
+      canUseCloud: true, autoLocal: true, teamComputer: true })).toBe("ensure-boat");
   });
 
-  it("never creates a missing Box merely because an Auto panel opened", () => {
+  it("never creates a missing Boat merely because an Auto panel opened", () => {
     expect(
-      resolveBoxPanelAction({
+      resolveBoatPanelAction({
         computer: undefined,
         configured: true,
-        boxState: null,
+        boatState: null,
         canUseCloud: true,
         autoLocal: true,
       }),
     ).toBe("local");
     expect(
-      resolveBoxPanelAction({
+      resolveBoatPanelAction({
         computer: undefined,
         configured: true,
-        boxState: null,
+        boatState: null,
         canUseCloud: true,
         autoLocal: false,
       }),
     ).toBe("auto-unavailable");
   });
 
-  it("shows existing Auto Boxes without provisioning or waking them", () => {
+  it("shows existing Auto Boats without provisioning or waking them", () => {
     const base = {
       configured: true,
       canUseCloud: true,
       autoLocal: true,
       computer: undefined,
     };
-    for (const boxState of ["idle", "ready", "running"]) {
-      expect(resolveBoxPanelAction({ ...base, boxState })).toBe("show-ready-box");
+    for (const boatState of ["idle", "ready", "running"]) {
+      expect(resolveBoatPanelAction({ ...base, boatState })).toBe("show-ready-boat");
     }
-    for (const boxState of ["archived", "stopped"]) {
-      expect(resolveBoxPanelAction({ ...base, boxState })).toBe("show-sleeping-box");
+    for (const boatState of ["archived", "stopped"]) {
+      expect(resolveBoatPanelAction({ ...base, boatState })).toBe("show-sleeping-boat");
     }
-    for (const boxState of ["provisioning", "creating", "unknown-provider-state"]) {
-      expect(resolveBoxPanelAction({ ...base, boxState })).toBe("show-pending-box");
+    for (const boatState of ["provisioning", "creating", "unknown-provider-state"]) {
+      expect(resolveBoatPanelAction({ ...base, boatState })).toBe("show-pending-boat");
     }
   });
 
   it("provisions only after an explicit Cloud choice", () => {
-    expect(resolveBoxPanelAction({
+    expect(resolveBoatPanelAction({
       computer: "cloud",
       configured: true,
-      boxState: null,
+      boatState: null,
       canUseCloud: true,
       autoLocal: true,
-    })).toBe("ensure-box");
-    expect(resolveBoxPanelAction({
+    })).toBe("ensure-boat");
+    expect(resolveBoatPanelAction({
       computer: "cloud",
       configured: true,
-      boxState: "archived",
+      boatState: "archived",
       canUseCloud: true,
       autoLocal: true,
-    })).toBe("ensure-box");
+    })).toBe("ensure-boat");
   });
 
   it("watches instead of provisioning while a turn owns the box", () => {
     const cloud = { computer: "cloud" as const, configured: true, canUseCloud: true, autoLocal: true, busy: true };
-    // a ready box is shown as it is — its frames already stream in mid-turn
-    for (const boxState of ["ready", "idle", "running"]) {
-      expect(resolveBoxPanelAction({ ...cloud, boxState })).toBe("attach-ready-box");
+    // a ready boat is shown as it is — its frames already stream in mid-turn
+    for (const boatState of ["ready", "idle", "running"]) {
+      expect(resolveBoatPanelAction({ ...cloud, boatState })).toBe("attach-ready-boat");
     }
     // anything else is the turn's to create or wake; the panel waits
-    for (const boxState of ["archived", "stopped", "provisioning", null]) {
-      expect(resolveBoxPanelAction({ ...cloud, boxState })).toBe("busy-box");
+    for (const boatState of ["archived", "stopped", "provisioning", null]) {
+      expect(resolveBoatPanelAction({ ...cloud, boatState })).toBe("busy-boat");
     }
     // busy never unlocks the cloud when it is not available
-    expect(resolveBoxPanelAction({ ...cloud, boxState: "ready", canUseCloud: false })).toBe("auto-unavailable");
+    expect(resolveBoatPanelAction({ ...cloud, boatState: "ready", canUseCloud: false })).toBe("auto-unavailable");
     // and Auto stays observation-only regardless of busy
-    expect(resolveBoxPanelAction({ ...cloud, computer: undefined, boxState: "ready" })).toBe("show-ready-box");
-    expect(resolveBoxPanelAction({ ...cloud, computer: undefined, boxState: null, autoLocal: false })).toBe("auto-unavailable");
+    expect(resolveBoatPanelAction({ ...cloud, computer: undefined, boatState: "ready" })).toBe("show-ready-boat");
+    expect(resolveBoatPanelAction({ ...cloud, computer: undefined, boatState: null, autoLocal: false })).toBe("auto-unavailable");
   });
 
   it("never gives the box-native engine a passive Auto creation exception", () => {
     // Engine kind intentionally is not an input: every engine follows the
     // same read-only Auto rule, including boxAgent.
-    expect(resolveBoxPanelAction({
+    expect(resolveBoatPanelAction({
       computer: undefined,
       configured: true,
-      boxState: null,
+      boatState: null,
       canUseCloud: true,
       autoLocal: false,
     })).toBe("auto-unavailable");
-    expect(resolveBoxPanelAction({
+    expect(resolveBoatPanelAction({
       computer: undefined,
       configured: true,
-      boxState: "archived",
+      boatState: "archived",
       canUseCloud: true,
       autoLocal: false,
-    })).toBe("show-sleeping-box");
+    })).toBe("show-sleeping-boat");
   });
 
-  it("falls back locally when the selected engine cannot use an existing Box", () => {
+  it("falls back locally when the selected engine cannot use an existing Boat", () => {
     expect(
-      resolveBoxPanelAction({
+      resolveBoatPanelAction({
         computer: undefined,
         configured: true,
-        boxState: "running",
+        boatState: "running",
         canUseCloud: false,
         autoLocal: true,
       }),

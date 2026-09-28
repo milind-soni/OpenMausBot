@@ -9,7 +9,7 @@ import { Check, TerminalSquare } from "lucide-react";
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { reducedMotion } from "@/lib/onboarding";
-import type { SceneProps } from "./OrbitingApps";
+import type { SceneProps } from "./types";
 
 const AGENT_CHAT_MS = 5400;
 

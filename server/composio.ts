@@ -289,6 +289,23 @@ export function connectorAvailability(
   return storeState === "unavailable" ? "unreadable" : "unconfigured";
 }
 
+/** Why connected apps are off, when they are. `mode: "unavailable"` alone
+ * cannot tell a server that was never given a connection service (a source
+ * build, a fixture, a fresh self-hosted server: the user has to add a key)
+ * from the installed desktop app whose managed service has not answered
+ * (something really is wrong). Only the packaged desktop app, the one child
+ * started with OMB_DESKTOP_PARENT=1, registers with the managed service, so
+ * only there is a missing service an outage. */
+export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
+
+export function connectorSetup(
+  cfg: AppConfig,
+  desktopManaged: boolean = process.env.OMB_DESKTOP_PARENT === "1",
+): ConnectorSetup {
+  if (configured(cfg)) return "ready";
+  return desktopManaged ? "service-unavailable" : "needs-setup";
+}
+
 async function brokerRequest(path: string, init?: RequestInit): Promise<Response> {
   const broker = brokerAccess();
   if (!broker) throw new Error("The connected-apps service is unavailable");

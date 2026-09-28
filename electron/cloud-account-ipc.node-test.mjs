@@ -6,6 +6,7 @@ import localOrigin from "./local-origin.cjs";
 import environments from "./environments.cjs";
 
 const origin = "http://127.0.0.1:48993", methods = ["state", "begin", "reopen", "cancel", "refresh", "signOut", "openDashboard"];
+const bridgeMethods = [...methods, "connectHome"];
 function preload({ enabled = true, remote = false } = {}) {
   let bridge; const invoked = [];
   vm.runInNewContext(readFileSync(new URL("./preload.cjs", import.meta.url), "utf8"), {
@@ -18,8 +19,8 @@ function preload({ enabled = true, remote = false } = {}) {
 }
 test("personal Cloud bridge is desktop-local, contains no capability access, and discards all renderer arguments", async () => {
   const f = preload();
-  for (const method of methods) await f.bridge.cloudAccount[method]({ origin: "https://evil.example.test", paid: true, accessToken: "forged" });
-  assert.deepEqual(f.invoked, methods.map(method => [`cloud-account:${method}`]));
+  for (const method of bridgeMethods) await f.bridge.cloudAccount[method]({ origin: "https://evil.example.test", paid: true, accessToken: "forged", code: "ABCD-EFGH-JKLM" });
+  assert.deepEqual(f.invoked, bridgeMethods.map(method => [`cloud-account:${method}`]));
   assert.equal(f.bridge.cloudAccount.connection, undefined);
   assert.equal(preload({ enabled: false }).bridge.cloudAccount, undefined);
   assert.equal(preload({ remote: true }).bridge.cloudAccount, undefined);
@@ -33,13 +34,14 @@ test("production personal Cloud IPC guards exact local main frame and forwards n
     localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
     rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" },
     ensureCloudAccount: () => Object.fromEntries(methods.map(method => [method, (...args) => { calls.push([method, ...args]); return { status: "signed-out" }; }])),
+    connectCloudHome: (...args) => { calls.push(["connectHome", ...args]); return { status: "connected" }; },
   });
   vm.runInContext(source.slice(start, end), context);
-  for (const method of methods) {
+  for (const method of bridgeMethods) {
     const handle = handlers.get(`cloud-account:${method}`);
     await handle({ sender: contents, senderFrame: frame }, { paid: true });
     for (const sender of [{ sender: contents, senderFrame: { url: `${origin}/subframe` } }, { sender: {}, senderFrame: frame },
       { sender: contents, senderFrame: { url: "https://remote.example.test" } }, { sender: contents }]) assert.throws(() => handle(sender), /only available/);
   }
-  assert.deepEqual(calls, methods.map(method => [method]));
+  assert.deepEqual(calls, bridgeMethods.map(method => [method]));
 });

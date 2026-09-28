@@ -27,11 +27,17 @@
 //                      server can vary it per test. A missing file, or a body
 //                      of exactly __FAIL__, makes the call fail outright —
 //                      the shape a caller's fallback path has to survive.
+//   FAKE_CLAUDE_TEXT_ROUTES path of a JSON object {"marker": "reply"}, read
+//                      fresh each run: a one-shot prompt containing a marker
+//                      gets that reply (first match wins), before
+//                      FAKE_CLAUDE_TEXT_FILE is consulted.
 //   FAKE_CLAUDE_TEXT_DUMP like FAKE_CLAUDE_DUMP, but for one-shot text runs,
 //                      so they never overwrite a turn's dump mid-test.
 //   FAKE_CLAUDE_TEXT_HANG when set, the one-shot text mode never replies —
 //                      the caller's abort signal is the only way it ends,
 //                      which is exactly what its tests need to prove.
+//   FAKE_CLAUDE_TEXT_RESULT raw --output-format json one-shot response;
+//                      unset, wraps the text reply with synthetic usage.
 //   FAKE_CLAUDE_REPLIES JSON array of strings (or string arrays for multiple
 //                      assistant items) used in order across turns. This makes
 //                      bounded multi-turn orchestration deterministic.
@@ -63,13 +69,38 @@
 //                      which `--permission-mode auto` starts in "default",
 //                      the way the real CLI (2.1.266) does for Haiku 4.5 and
 //                      Sonnet 4.5: init reports the mode it actually runs in.
+//   Every result's total_cost_usd is the process's running total (0.01 per
+//   result), the way the real CLI reports it: read the latest, never sum.
+//   Its modelUsage is the same running count per model (tokens and costUSD).
+//   FAKE_CLAUDE_COST_STATE dir: the real CLI (2.1.282) restores a session's
+//                      running cost on --resume, so a resumed process's first
+//                      total already counts the earlier turns. The fake saves
+//                      its running cost per session id here, and a --resume
+//                      launch starts from it.
+//   FAKE_CLAUDE_RESUMED_API_ERROR 1: a --resume launch plays its first turn
+//                      the `api-error` way — an error result with no cost
+//                      figure — and its later turns normally.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
+
+// Follow the spawning server down, including on Windows where ppid does
+// not change after parent exit. Inline: fakes must stay self-contained.
+{
+  const spawner = process.ppid;
+  const orphanWatch = setInterval(() => {
+    if (process.ppid !== spawner) process.exit(0);
+    try { process.kill(spawner, 0); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") process.exit(0);
+    }
+  }, 500);
+  orphanWatch.unref();
+}
 const scriptedReplies = (() => {
   try {
     const parsed = JSON.parse(process.env.FAKE_CLAUDE_REPLIES ?? "[]");
@@ -152,6 +183,7 @@ function runHooks(event: string, payload: Record<string, unknown>): string {
   return stdout;
 }
 let turnsPlayed = 0;
+let resumedErrorPlayed = false;
 const argAfter = (flag: string): string | null => {
   const i = argv.indexOf(flag);
   return i === -1 ? null : (argv[i + 1] ?? null);
@@ -196,14 +228,17 @@ if (argv[0] === "auth" && argv[1] === "status") {
 // One-shot helper mode used by generateText/reviewPermission. The prompt is
 // deliberately read from stdin so sensitive review text never appears in
 // argv or process listings.
-if (argAfter("--output-format") === "text") {
+if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
   const prompt = await new Promise<string>((resolve) => {
     let input = "";
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (chunk) => { input += chunk; });
     process.stdin.on("end", () => resolve(input));
   });
-  const oneShotDump = process.env.FAKE_CLAUDE_TEXT_DUMP ?? process.env.FAKE_CLAUDE_DUMP;
+  // Memory upkeep's background one-shots (on for every bot) never overwrite
+  // the shared turn dump a test reads; FAKE_CLAUDE_TEXT_DUMP still records them.
+  const upkeepCall = /You are the (?:CAPTURE|TIDY|ORGANIZE) step of a memory system/.test(prompt);
+  const oneShotDump = process.env.FAKE_CLAUDE_TEXT_DUMP ?? (upkeepCall ? undefined : process.env.FAKE_CLAUDE_DUMP);
   if (oneShotDump) {
     writeFileSync(
       oneShotDump,
@@ -215,18 +250,42 @@ if (argAfter("--output-format") === "text") {
     // top-level await, which Node would otherwise treat as fatal
     await new Promise(() => setInterval(() => {}, 1 << 30));
   }
+  const replyText = (text: string, code = 0) => {
+    const model = argAfter("--model") ?? "claude-haiku-4-5";
+    process.stdout.write(argAfter("--output-format") === "json"
+      ? process.env.FAKE_CLAUDE_TEXT_RESULT ?? JSON.stringify({
+          type: "result", is_error: code !== 0, result: text,
+          usage: { input_tokens: 10, cache_read_input_tokens: 2, cache_creation_input_tokens: 3, output_tokens: 5 },
+          total_cost_usd: 0.01,
+          modelUsage: { [model]: { inputTokens: 10, cacheReadInputTokens: 2, cacheCreationInputTokens: 3, outputTokens: 5, costUSD: 0.01 } },
+        })
+      : code === 0 ? text : "");
+    process.exit(code);
+  };
+  // FAKE_CLAUDE_TEXT_ROUTES: a JSON file {"marker": "reply"}, re-read each
+  // run; the first marker the prompt contains picks the reply, so one run
+  // can answer a capture, a tidy-up and a title differently.
+  if (process.env.FAKE_CLAUDE_TEXT_ROUTES && existsSync(process.env.FAKE_CLAUDE_TEXT_ROUTES)) {
+    try {
+      const routes = JSON.parse(readFileSync(process.env.FAKE_CLAUDE_TEXT_ROUTES, "utf8")) as Record<string, string>;
+      const hit = Object.entries(routes).find(([marker]) => prompt.includes(marker));
+      if (hit) {
+        replyText(hit[1]);
+      }
+    } catch {
+      // a malformed routes file falls through to the plain reply below
+    }
+  }
   if (process.env.FAKE_CLAUDE_TEXT_FILE) {
     const file = process.env.FAKE_CLAUDE_TEXT_FILE;
     const reply = existsSync(file) ? readFileSync(file, "utf8") : "__FAIL__";
     if (reply.trim() === "__FAIL__") {
       process.stderr.write("fake one-shot text failed\n");
-      process.exit(1);
+      replyText("fake one-shot text failed", 1);
     }
-    process.stdout.write(reply);
-    process.exit(0);
+    replyText(reply);
   }
-  process.stdout.write("fake generated text\n");
-  process.exit(0);
+  replyText("fake generated text\n");
 }
 
 // Line-driven, like the real CLI under --input-format stream-json: each user
@@ -247,6 +306,18 @@ const permissionMode =
 let dumped = false;
 let turnRunning = false;
 let steered: string[] = [];
+// the running cost behind total_cost_usd and modelUsage; a --resume launch
+// starts from the session's saved one (FAKE_CLAUDE_COST_STATE)
+type FakeModelUsage = { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; costUSD: number };
+const costStateFile = process.env.FAKE_CLAUDE_COST_STATE ? join(process.env.FAKE_CLAUDE_COST_STATE, `${sessionId}.json`) : null;
+const runningCost: { total: number; modelUsage: Record<string, FakeModelUsage> } = (() => {
+  if (costStateFile && argv.includes("--resume")) {
+    try {
+      return JSON.parse(readFileSync(costStateFile, "utf8"));
+    } catch {}
+  }
+  return { total: 0, modelUsage: {} };
+})();
 let stdinEnded = false;
 let steerGateArmed = false;
 
@@ -358,7 +429,9 @@ const playTurn = (prompt: JsonValue) => {
     process.exit(3);
   }
 
-  if (mode === "api-error") {
+  const resumedError = process.env.FAKE_CLAUDE_RESUMED_API_ERROR === "1" && argv.includes("--resume") && !resumedErrorPlayed;
+  if (resumedError) resumedErrorPlayed = true;
+  if (mode === "api-error" || resumedError) {
     const text = process.env.FAKE_CLAUDE_API_ERROR ?? "API Error: 529 Overloaded. This is a server-side issue, usually temporary.";
     out({ type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text }] }, error: "unknown", is_api_error_message: true });
     out({ type: "result", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", result: text });
@@ -464,9 +537,25 @@ const playTurn = (prompt: JsonValue) => {
     runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
   }
 
+  // total_cost_usd is the process's running total (2.1.282: "read the latest
+  // result rather than summing across results"); usage is this turn's own.
   const finish = () => {
     runHooks("Stop", { stop_hook_active: false });
-    out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
+    runningCost.total = Number((runningCost.total + 0.01).toFixed(2));
+    const counted = (runningCost.modelUsage[model] ??= { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0 });
+    counted.inputTokens += 10;
+    counted.cacheReadInputTokens += 2;
+    counted.outputTokens += 5;
+    counted.costUSD = Number((counted.costUSD + 0.01).toFixed(2));
+    if (costStateFile) writeFileSync(costStateFile, JSON.stringify(runningCost));
+    out({
+      type: "result",
+      is_error: false,
+      stop_reason: "end_turn",
+      total_cost_usd: runningCost.total,
+      usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 },
+      modelUsage: runningCost.modelUsage,
+    });
     turnRunning = false;
     finishIfDone();
   };

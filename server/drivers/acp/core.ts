@@ -63,7 +63,7 @@ import type {
 import { newEventId, newId, TurnNotStartedError } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
-import { parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
+import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
 import { appendNative } from "../native.ts";
 import { acpPermissionCommand, permissionLaunchCwd } from "../permission-command.ts";
@@ -520,7 +520,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         };
         const allowedCredentials = new Set(support.credentialEnv ?? []);
         // two lists, one rule: foreign PROVIDER keys must not flip a CLI's
-        // billing off its own login, and WORKSPACE credentials (box token,
+        // billing off its own login, and WORKSPACE credentials (boat token,
         // voice key, …) are the harness's secrets — riding along in
         // `...process.env` is not a grant. A driver keeps only what its
         // credentialEnv allowlist names.
@@ -693,7 +693,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         // The bot's computer, mounted exactly like the Claude driver does:
         // host and sandbox Cua connections expose Cua Driver's own MCP server.
-        // (A cloud box is not mounted here at all: a cloud turn runs ON the box.)
+        // (A cloud boat is not mounted here at all: a cloud turn runs ON the boat.)
         if (turn.integrations?.localComputer) {
           const local = turn.integrations.localComputer;
           servers.push({
@@ -991,7 +991,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           const tool = kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool";
           const isShellCommand = !isQuestion && kind === "execute" && !/^mcp(?:__|[.:])/i.test(String(toolCall.title ?? ""));
-          const summary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool).slice(0, 200);
+          const rawSummary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool);
+          const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200);
           // One structured question beside the flat choices: the richer card
           // renders from it while older clients keep answering through
           // `choices`. Built once here so the emit and the answer path can

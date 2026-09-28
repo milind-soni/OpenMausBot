@@ -65,6 +65,19 @@ const render = (m: Message) =>
   renderToStaticMarkup(createElement(QuestionCard, { threadId: "thread-1", bot, message: m }));
 
 describe("QuestionCard", () => {
+  it("offers the full question when the ask is long", () => {
+    const question = "Quick onboarding check. ".repeat(20);
+    const markup = render(message({
+      questionRequest: {
+        version: 1,
+        questions: [{ question, options: [] }],
+      },
+    }));
+    expect(markup).toContain("Show full question");
+    expect(markup).toContain("line-clamp-4");
+    expect(markup).toContain(question);
+  });
+
   it("shows the model's own question and options instead of an approval", () => {
     const markup = render(message());
     expect(markup).toContain("Hazelnut has a question");

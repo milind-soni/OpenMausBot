@@ -224,10 +224,10 @@ describe("threads a bot closed", () => {
     expect(markup).toContain("closed by Parker");
     expect(markup).not.toContain("opened by");
     expect(markup).toContain('title="Helper 1 · Closed"');
-    expect(markup).toContain("text-ink-secondary/70");
+    expect(markup).toContain('text-ink-tertiary">Helper 1</span>');
     // a live status outranks the closed note; the selected row is not dimmed
     expect(render({ threadId: "h", title: "Helper 1", closedBy, busy: true })).toContain('title="Helper 1 · Working"');
-    expect(render({ threadId: "h", title: "Helper 1", closedBy }, true)).not.toContain("text-ink-secondary/70");
+    expect(render({ threadId: "h", title: "Helper 1", closedBy }, true)).not.toContain('text-ink-tertiary">Helper 1</span>');
   });
 });
 
@@ -435,7 +435,7 @@ describe("archived threads", () => {
     expect(threadByline({ openedBy: { botId: "scout", name: "Scout", at: 1 }, archivedAt: 5, closedBy: { botId: "pm", name: "Parker", at: 2 } })).toBe("closed by Parker");
     const markup = render({ threadId: "1", title: "Put away", archivedAt: 5 });
     expect(markup).toContain("Archived");
-    expect(markup).toContain("text-ink-secondary/70");
+    expect(markup).toContain('text-ink-tertiary">Put away</span>');
     expect(render({ threadId: "1", title: "Put away", archivedAt: 5, busy: true })).toContain('title="Put away · Working · Archived"');
   });
   it("treats archivedAt: 0 as archived, because zero is a valid timestamp at the API boundary", () => {

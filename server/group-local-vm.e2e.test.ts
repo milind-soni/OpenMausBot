@@ -20,13 +20,13 @@ let dumpFile = "";
 let finishFile = "";
 let cuaDescriptor = "";
 let stderr = "";
-let boxServer: Server;
-let boxRow: { id: string; name: string; state: string } | null = null;
-let allowBoxCreation = false;
-let holdBoxPrompt = false;
-let boxReply = "Cloud fixture completed";
-const boxCalls: Array<{ method: string; path: string }> = [];
-const boxPrompts: Array<Record<string, unknown>> = [];
+let boatServer: Server;
+let boatRow: { id: string; name: string; state: string } | null = null;
+let allowBoatCreation = false;
+let holdBoatPrompt = false;
+let boatReply = "Cloud fixture completed";
+const boatCalls: Array<{ method: string; path: string }> = [];
+const boatPrompts: Array<Record<string, unknown>> = [];
 const vmState = (state: Record<string, unknown> = {}) => writeFileAtomic(stateFile, JSON.stringify(state));
 const api = async (method: string, path: string, body?: unknown) => {
   const r = await fetch(base + path, { method, headers: { "content-type": "application/json" },
@@ -68,36 +68,36 @@ beforeAll(async () => {
   mkdirSync(data); mkdirSync(join(ui, "assets"), { recursive: true });
   writeFileSync(join(ui, "index.html"), "<title>Isolated VM routing</title>");
   writeFileSync(join(ui, "assets", "test.css"), "body{}");
-  boxServer = createServer(async (req, res) => {
+  boatServer = createServer(async (req, res) => {
     const path = new URL(req.url ?? "/", "http://box.fixture").pathname;
-    boxCalls.push({ method: req.method ?? "GET", path });
+    boatCalls.push({ method: req.method ?? "GET", path });
     res.setHeader("content-type", "application/json");
     let raw = ""; for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
     if (path === "/boxes" && req.method === "POST") {
-      if (!allowBoxCreation) { res.statusCode = 409; return res.end(JSON.stringify({ error: "Unexpected Box creation in routing fixture" })); }
-      boxRow = { id: "bx_23456789", name: body.name ?? "fixture-new-box", state: "idle" };
-      return res.end(JSON.stringify({ box: boxRow }));
+      if (!allowBoatCreation) { res.statusCode = 409; return res.end(JSON.stringify({ error: "Unexpected Boat creation in routing fixture" })); }
+      boatRow = { id: "bx_23456789", name: body.name ?? "fixture-new-box", state: "idle" };
+      return res.end(JSON.stringify({ box: boatRow }));
     }
-    if (path === "/boxes") return res.end(JSON.stringify({ boxes: boxRow ? [boxRow] : [] }));
+    if (path === "/boxes") return res.end(JSON.stringify({ boxes: boatRow ? [boatRow] : [] }));
     if (/^\/boxes\/bx_[^/]+$/.test(path)) {
-      if (req.method === "DELETE") { boxRow = null; return res.end("{}"); }
-      if (!boxRow) res.statusCode = 404;
-      else if (req.method === "PATCH" && body.name) boxRow.name = body.name;
-      return res.end(JSON.stringify(boxRow ? { box: boxRow } : { error: "missing" }));
+      if (req.method === "DELETE") { boatRow = null; return res.end("{}"); }
+      if (!boatRow) res.statusCode = 404;
+      else if (req.method === "PATCH" && body.name) boatRow.name = body.name;
+      return res.end(JSON.stringify(boatRow ? { box: boatRow } : { error: "missing" }));
     }
     if (path.endsWith("/desktop")) return res.end(JSON.stringify({ desktopUrl: "https://desktop.fixture.invalid/" }));
-    if (path.endsWith("/resume") && boxRow) { boxRow.state = "idle"; return res.end("{}"); }
+    if (path.endsWith("/resume") && boatRow) { boatRow.state = "idle"; return res.end("{}"); }
     if (path.endsWith("/prompt") && req.method === "POST") {
-      boxPrompts.push(body);
+      boatPrompts.push(body);
       return res.end(JSON.stringify({ promptRun: { id: "fixture-prompt" } }));
     }
-    if (path.includes("/prompts/")) return res.end(JSON.stringify({ promptRun: holdBoxPrompt
-      ? { status: "running" } : { status: "finished", result: boxReply } }));
+    if (path.includes("/prompts/")) return res.end(JSON.stringify({ promptRun: holdBoatPrompt
+      ? { status: "running" } : { status: "finished", result: boatReply } }));
     return res.end("{}");
   });
-  await new Promise<void>(resolve => boxServer.listen(0, "127.0.0.1", resolve));
-  const boxPort = (boxServer.address() as { port: number }).port;
+  await new Promise<void>(resolve => boatServer.listen(0, "127.0.0.1", resolve));
+  const boatPort = (boatServer.address() as { port: number }).port;
   writeFileSync(join(data, "config.json"), JSON.stringify({ instances: { claude: {
     driver: "claudeAgent", config: { cli: join(ROOT, "server/testing/fake-claude-cli.ts") },
     environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_DUMP: dumpFile, FAKE_CLAUDE_SLOW_FINISH_GATE: finishFile },
@@ -112,7 +112,7 @@ beforeAll(async () => {
         APPDATA: join(fixtureHome, "appdata"), LOCALAPPDATA: join(fixtureHome, "localappdata"),
         TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
         OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
-        OMB_BOX_API: `http://127.0.0.1:${boxPort}`,
+        OMB_BOX_API: `http://127.0.0.1:${boatPort}`,
         OMB_USER_DATA: join(fixtureHome, "user-data"),
       }, stdio: ["ignore", "pipe", "pipe"],
     });
@@ -129,7 +129,7 @@ afterAll(async () => {
   if (stateFile) vmState();
   if (finishFile) writeFileSync(finishFile, "finish");
   await waitForExit(child, { signal: "SIGTERM" });
-  if (boxServer) await new Promise<void>(resolve => boxServer.close(() => resolve()));
+  if (boatServer) await new Promise<void>(resolve => boatServer.close(() => resolve()));
   if (fixtureHome) await removeTempDir(fixtureHome);
 });
 const rooms: string[] = [];
@@ -155,6 +155,78 @@ const send = (id: string) => api("POST", `/api/groups/${id}/messages`, { text: "
 const stop = (id: string) => api("POST", `/api/groups/${id}/interrupt`, {});
 
 describe("Group Local VM ownership on the real isolated server", () => {
+  it.each([false, true])("provisions concurrent cold pool seats (existing per-bot desktops: %s)", async (existingPerBot) => {
+    vmState({ containers: [] });
+    rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const bots: any[] = [];
+    const readState = () => JSON.parse(readFileSync(stateFile, "utf8"));
+    try {
+      await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 2 } });
+      for (const name of ["Pool first", "Pool second", "Pool waiter"]) {
+        const { bot } = await api("POST", "/api/bots", { name });
+        await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm", browser: false });
+        bots.push(bot);
+      }
+      if (existingPerBot) {
+        for (const bot of bots.slice(0, 2)) await api("POST", `/api/bots/${bot.id}/local-computer/run`, {});
+        const capped = await fetch(base + `/api/bots/${bots[2].id}/local-computer/run`, {
+          method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+        });
+        expect(capped.status).toBe(409); // The existing per-bot limit still holds.
+      }
+      await api("PATCH", "/api/config", { localVm: { mode: "pool", maxInstances: 2 } });
+      vmState({ ...readState(), blockedTarget: "pool:0" });
+      rmSync(stateFile + ".entered", { force: true });
+      await api("POST", `/api/bots/${bots[0].id}/messages`, { text: "Hold the first seat." });
+      await until(() => existsSync(stateFile + ".entered") && readFileSync(stateFile + ".entered", "utf8") === "pool:0", Boolean);
+      // The first seat owns its lease and is still inspecting. The other
+      // seat must provision and dispatch without waiting for that inspection.
+      await api("POST", `/api/bots/${bots[1].id}/messages`, { text: "Hold the second seat." });
+      const secondComputer = computer(await dump());
+      const secondStatus = await api("GET", `/api/bots/${bots[1].id}/local-computer`);
+      expect(secondStatus).toMatchObject({ ready: true, target_key: "pool:1" });
+      expect(JSON.stringify(secondComputer)).toContain(secondStatus.container_name);
+      expect(readState().blockedTarget).toBe("pool:0");
+      expect((await gate(secondComputer)).status).toBe(200);
+
+      rmSync(dumpFile, { force: true });
+      vmState({ ...readState(), blockedTarget: undefined });
+      const firstComputer = computer(await dump());
+      const firstStatus = await api("GET", `/api/bots/${bots[0].id}/local-computer`);
+      expect(firstStatus).toMatchObject({ ready: true, target_key: "pool:0" });
+      expect(JSON.stringify(firstComputer)).toContain(firstStatus.container_name);
+      expect((await gate(firstComputer)).status).toBe(200);
+      expect(readState().actions.filter((action: any) => action.target.startsWith("pool:"))).toEqual([
+        { action: "run", target: "pool:1" }, { action: "run", target: "pool:0" },
+      ]);
+
+      rmSync(dumpFile, { force: true });
+      await api("POST", `/api/bots/${bots[2].id}/messages`, { text: "Wait for an available seat." });
+      await until(async () => {
+        const state = await api("GET", "/api/bots?messages=30");
+        return state.bots.find((bot: any) => bot.id === bots[2].id)?.messages
+          .some((message: any) => String(message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"));
+      }, Boolean);
+      expect(existsSync(dumpFile)).toBe(false);
+      const waitingStatus = await api("GET", `/api/bots/${bots[2].id}/local-computer`);
+      const holder = waitingStatus.target_key === "pool:0" ? bots[0] : bots[1];
+      await api("POST", `/api/bots/${holder.id}/interrupt`, {}); await idle(holder.id);
+      expect(JSON.stringify(computer(await dump()))).toContain(waitingStatus.container_name);
+      expect(readState().containers.filter((key: string) => key.startsWith("pool:")).sort()).toEqual(["pool:0", "pool:1"]);
+    } finally {
+      vmState({ ...readState(), blockedTarget: undefined });
+      writeFileSync(finishFile, "finish");
+      for (const bot of bots) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+      await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+      vmState();
+      await waitForExit(child, { signal: "SIGTERM" });
+      await startServer();
+    }
+  }, 45_000);
+
   it("recovers only previously provisioned Auto VMs after idle removal and server restart, within the instance cap", async () => {
     vmState({ containers: [] });
     await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 1 } });
@@ -286,35 +358,35 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const scope = createHash("sha256").update(environmentId).digest("hex").slice(0, 12);
       const prefix = bot.id.slice(0, 8).replace(/[^a-z0-9]/g, "");
       const suffix = createHash("sha256").update(bot.id).digest("hex").slice(0, 6);
-      boxRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "idle" };
-      boxReply = 'Choose a color.\n```omb-ask\n{"questions":[{"question":"Which color?","options":["Blue","Green"]}]}\n```';
-      const count = boxPrompts.length;
+      boatRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "idle" };
+      boatReply = 'Choose a color.\n```omb-ask\n{"questions":[{"question":"Which color?","options":["Blue","Green"]}]}\n```';
+      const count = boatPrompts.length;
       await api("POST", `/api/bots/${bot.id}/messages`, { text: "Ask before choosing the color" });
       const transcript = () => api("GET", `/api/threads/${bot.threadId}/messages?limit=50`);
       const shown = await until(transcript, value => value.messages.some((message: any) => message.card?.questionRequest));
       const card = shown.messages.find((message: any) => message.card?.questionRequest).card;
       expect(card.questionRequest).toMatchObject({ origin: "output", questions: [{ question: "Which color?" }] });
       expect(card.answered).toBeFalsy();
-      expect(boxPrompts.length).toBe(count + 1);
+      expect(boatPrompts.length).toBe(count + 1);
       const state = await api("GET", "/api/bots?messages=0");
       expect(state.bots.find((candidate: any) => candidate.id === bot.id).busy).toBe(true);
       const decisions = await api("GET", "/api/decisions");
       expect(decisions.decisions).toContainEqual(expect.objectContaining({ botId: bot.id, source: "question", origin: "output" }));
 
-      boxReply = "Cloud fixture completed";
+      boatReply = "Cloud fixture completed";
       const message = "The user answered your questions.\n\nQ: Which color?\nA: Green";
       expect(await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.requestId, behavior: "answer", message }))
         .toMatchObject({ outcome: "answered" });
       await idle(bot.id);
-      expect(boxPrompts.length).toBe(count + 2);
-      expect(JSON.stringify(boxPrompts.at(-1))).toContain("A: Green");
+      expect(boatPrompts.length).toBe(count + 2);
+      expect(JSON.stringify(boatPrompts.at(-1))).toContain("A: Green");
       expect(JSON.stringify(await transcript())).toContain("Cloud fixture completed");
     } finally {
-      boxReply = "Cloud fixture completed";
+      boatReply = "Cloud fixture completed";
       await api("POST", `/api/bots/${bot.id}/interrupt`, {});
       await idle(bot.id);
       await api("DELETE", `/api/bots/${bot.id}`);
-      boxRow = null;
+      boatRow = null;
       await api("PUT", "/api/config", { box: { token: "" } });
     }
   });
@@ -324,8 +396,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
     const bots: any[] = [];
     try {
       vmState();
-      holdBoxPrompt = true;
-      allowBoxCreation = true;
+      holdBoatPrompt = true;
+      allowBoatCreation = true;
       await api("PUT", "/api/config", { box: { token: "box_fixture" } });
       for (const name of ["Computer holder", "Computer waiter"]) {
         const { bot } = await api("POST", "/api/bots", { name, section });
@@ -334,9 +406,9 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const requestId = randomUUID();
       await api("POST", "/api/team-computers", { requestId, name: "Wait watchdog fixture", acknowledgeCost: true });
       await api("PATCH", `/api/team-computers/${requestId}`, { section, acknowledgeSharedAccess: true });
-      const count = boxPrompts.length;
+      const count = boatPrompts.length;
       await api("POST", `/api/bots/${bots[0].id}/messages`, { text: "Hold the shared computer" });
-      await until(() => boxPrompts.length, length => length > count);
+      await until(() => boatPrompts.length, length => length > count);
       await api("POST", `/api/bots/${bots[1].id}/messages`, { text: "Wait for the shared computer" });
       const transcript = () => api("GET", `/api/threads/${bots[1].threadId}/messages?limit=50`);
       await until(transcript, value => JSON.stringify(value).includes("Waiting for"));
@@ -348,21 +420,21 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const state = await api("GET", "/api/bots?messages=0");
       expect(state.bots.find((bot: any) => bot.id === bots[1].id).busy).toBe(true);
       vmState();
-      holdBoxPrompt = false;
+      holdBoatPrompt = false;
       await idle(bots[0].id);
       await idle(bots[1].id);
-      expect(boxPrompts.length).toBe(count + 2);
+      expect(boatPrompts.length).toBe(count + 2);
       expect(JSON.stringify(await transcript())).toContain("Cloud fixture completed");
     } finally {
       vmState();
-      holdBoxPrompt = false;
-      allowBoxCreation = false;
+      holdBoatPrompt = false;
+      allowBoatCreation = false;
       for (const bot of bots) {
         await api("POST", `/api/bots/${bot.id}/interrupt`, {});
         await idle(bot.id);
         await api("DELETE", `/api/bots/${bot.id}`);
       }
-      boxRow = null;
+      boatRow = null;
       await api("PUT", "/api/config", { box: { token: "" } });
     }
   });
@@ -377,10 +449,10 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const scope = createHash("sha256").update(environmentId).digest("hex").slice(0, 12);
       const prefix = bot.id.slice(0, 8).replace(/[^a-z0-9]/g, "");
       const suffix = createHash("sha256").update(bot.id).digest("hex").slice(0, 6);
-      boxRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "archived" };
-      allowBoxCreation = true;
-      if (state === "missing-auto") { boxRow = null; vmState({ failed: true }); }
-      boxCalls.length = 0; boxPrompts.length = 0;
+      boatRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "archived" };
+      allowBoatCreation = true;
+      if (state === "missing-auto") { boatRow = null; vmState({ failed: true }); }
+      boatCalls.length = 0; boatPrompts.length = 0;
       await api("POST", `/api/bots/${bot.id}/messages`, { text: "Open Chrome on the cloud VM" });
       const before: any = await dump();
       if (computer(before)) expect((await gate(computer(before))).status).toBe(200);
@@ -388,30 +460,30 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const options = await (await fetch(base + "/api/internal/computer/select", { headers: { authorization: `Bearer ${token}` } })).json() as any;
       expect(options.options.find((option: any) => option.surface === "cloud")).toMatchObject({ available: true, ready: false,
         canStart: state !== "missing-auto", canCreate: state === "missing-auto" });
-      expect(boxCalls.every(call => call.method === "GET")).toBe(true);
+      expect(boatCalls.every(call => call.method === "GET")).toBe(true);
       const result = await fetch(base + "/api/internal/computer/select", { method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ surface: state === "missing-auto" ? "auto" : "cloud" }) });
       expect(await result.json()).toMatchObject({ status: "pending", surface: "cloud" });
       if (computer(before)) expect((await gate(computer(before))).status).toBe(401);
       expect((await fetch(base + "/api/internal/computer/select", { headers: { authorization: `Bearer ${token}` } })).status).toBe(200);
-      expect(boxCalls.every(call => call.method === "GET")).toBe(true);
-      if (state === "removed") boxRow = null;
+      expect(boatCalls.every(call => call.method === "GET")).toBe(true);
+      if (state === "removed") boatRow = null;
       writeFileSync(finishFile, "finish");
       await until(() => api("GET", "/api/bots?messages=30"), result => {
         const saved = result.bots.find((b: any) => b.id === bot.id);
-        return !saved.busy && boxPrompts.length === 1;
+        return !saved.busy && boatPrompts.length === 1;
       });
-      expect(boxCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(state === "wake" ? 0 : 1);
-      expect(boxCalls.some(call => call.path.endsWith("/resume"))).toBe(state === "wake");
-      expect(boxPrompts[0]).toMatchObject({ model: "claude-fable-5" });
+      expect(boatCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(state === "wake" ? 0 : 1);
+      expect(boatCalls.some(call => call.path.endsWith("/resume"))).toBe(state === "wake");
+      expect(boatPrompts[0]).toMatchObject({ model: "claude-fable-5" });
       await api("POST", `/api/bots/${bot.id}/messages`, { text: "Inspect the current page on the same cloud VM" });
-      await until(async () => boxPrompts.length === 2 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bot.id).busy, Boolean);
-      expect(boxCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(state === "wake" ? 0 : 1);
+      await until(async () => boatPrompts.length === 2 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bot.id).busy, Boolean);
+      expect(boatCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(state === "wake" ? 0 : 1);
     } finally {
       writeFileSync(finishFile, "finish");
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id);
-      boxRow = null;
-      allowBoxCreation = false;
+      boatRow = null;
+      allowBoatCreation = false;
       await api("DELETE", `/api/bots/${bot.id}`);
       await api("PUT", "/api/config", { box: { token: "" } });
     }
@@ -591,7 +663,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     }
   });
 
-  it("runs a channel speaker's own Cloud destination on its Box, waking it first", async () => {
+  it("runs a channel speaker's own Cloud destination on its Boat, waking it first", async () => {
     const { bots, group } = await room();
     try {
       await api("PUT", "/api/config", { box: { token: "box_fixture" } });
@@ -600,18 +672,18 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const scope = createHash("sha256").update(environmentId).digest("hex").slice(0, 12);
       const prefix = bots[0].id.slice(0, 8).replace(/[^a-z0-9]/g, "");
       const suffix = createHash("sha256").update(bots[0].id).digest("hex").slice(0, 6);
-      boxRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "archived" };
-      boxCalls.length = 0; boxPrompts.length = 0;
+      boatRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "archived" };
+      boatCalls.length = 0; boatPrompts.length = 0;
       await send(group.id);
-      await until(async () => boxPrompts.length === 1 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bots[0].id).busy, Boolean);
-      expect(boxCalls.some(call => call.path.endsWith("/resume"))).toBe(true);
-      expect(boxCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(0);
+      await until(async () => boatPrompts.length === 1 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bots[0].id).busy, Boolean);
+      expect(boatCalls.some(call => call.path.endsWith("/resume"))).toBe(true);
+      expect(boatCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(0);
       expect(JSON.stringify(await api("GET", "/api/bots?messages=30"))).not.toContain("not available in channels yet");
-      // The Box is given back: the same speaker can take the room again.
+      // The Boat is given back: the same speaker can take the room again.
       await send(group.id);
-      await until(async () => boxPrompts.length === 2 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bots[0].id).busy, Boolean);
+      await until(async () => boatPrompts.length === 2 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bots[0].id).busy, Boolean);
     } finally {
-      boxRow = null;
+      boatRow = null;
       await stop(group.id);
       await idle(bots[0].id);
       await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "vm" });

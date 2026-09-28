@@ -80,7 +80,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
         {WEEKDAY_LABELS.map((label, index) => (
           <div
             key={`${label}-${index}`}
-            className="flex h-6 items-center justify-center text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-secondary/75"
+            className="flex h-6 items-center justify-center text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-tertiary"
           >
             {label}
           </div>
@@ -116,8 +116,8 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
                     : isToday
                       ? "font-semibold text-accent group-hover:bg-accent/12"
                       : isOutsideMonth
-                        ? "text-ink-secondary/35 group-hover:bg-raised group-hover:text-ink-secondary"
-                        : "text-ink-secondary group-hover:bg-raised group-hover:text-ink"
+                        ? "text-ink-tertiary group-hover:bg-raised group-hover:text-ink"
+                        : "text-ink group-hover:bg-raised"
                 }`}
               >
                 {date.getDate()}

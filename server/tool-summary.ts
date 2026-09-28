@@ -1,6 +1,7 @@
 // What a tool call is about to do, in words a chip or a permission card can
 // show. Redacted before it is cut: a command line is where credentials get
 // pasted, and a key sliced in half would slip past the shapes redaction knows.
+import { MAX_QUESTION_TEXT } from "../shared/ask-question.ts";
 import { redactSecrets, redactSecretsInText } from "./redact.ts";
 
 /** Display-only excerpt, never the raw protocol payload. Bound traversal and
@@ -45,7 +46,6 @@ export function toolDetailPreview(value: unknown): string | undefined {
   return text.length > 6_000 ? `${text.slice(0, 6_000)}\n[… preview shortened]` : text;
 }
 
-const QUESTION_LIMIT = 300;
 const LIMIT = 200;
 
 function fieldsOf(input: unknown): Record<string, unknown> | undefined {
@@ -72,7 +72,7 @@ export function commandSummary(input: unknown): string | undefined {
 export function askInputSummary(input: unknown): string | undefined {
   const fields = fieldsOf(input);
   if (!fields) return undefined;
-  if (typeof fields.question === "string") return cut(fields.question, QUESTION_LIMIT);
+  if (typeof fields.question === "string") return cut(fields.question, MAX_QUESTION_TEXT);
   if (typeof fields.command === "string") return cut(fields.command, LIMIT);
   if (typeof fields.url === "string") return cut(fields.url, LIMIT);
   const text = JSON.stringify(fields);

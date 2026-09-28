@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeEvent } from "../contracts.ts";
+import { GrokDriver } from "./grok.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
@@ -35,6 +36,67 @@ async function runTurn(body: string, driver: "openai-compat" | "minimax" = "open
   await instance.dispose();
   return events;
 }
+
+describe("createOpenAIChatRuntime one-shot usage", () => {
+  const fixture = async (body: unknown) => {
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
+      init?.signal?.throwIfAborted();
+      return new Response(typeof body === "string" ? body : JSON.stringify(body), { headers: { "content-type": "application/json" } });
+    }));
+    return GrokDriver.create({
+      instanceId: "grok-helper", displayName: "Grok", enabled: true,
+      config: GrokDriver.defaultConfig(), environment: { XAI_API_KEY: "fixture-key" },
+    });
+  };
+  const choices = [{ message: { content: "helper result" }, finish_reason: "stop" }];
+
+  it("reports the actual helper model and known provider usage once, preserving the text result", async () => {
+    const instance = await fixture({
+      model: "grok-3-mini-actual", choices,
+      usage: { prompt_tokens: 120, completion_tokens: 20, prompt_tokens_details: { cached_tokens: 100 }, cost: 0.004 },
+    });
+    const onUsage = vi.fn();
+    await expect(instance.generateText!("summarize", { onUsage })).resolves.toBe("helper result");
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0]![1]!.body as string).model).toBe("grok-3-mini");
+    expect(instance.models.default).toBe("grok-4.7");
+    expect(onUsage.mock.calls).toEqual([[{ model: "grok-3-mini-actual", input: 120, output: 20, cachedInput: 100, costUsd: 0.004 }]]);
+    await expect(instance.generateText!("plain summary")).resolves.toBe("helper result");
+    await instance.dispose();
+  });
+
+  it.each([
+    [undefined, undefined],
+    [{ prompt_tokens: "12", completion_tokens: -1, cost: null }, undefined],
+    [{ prompt_tokens: 0, completion_tokens: 0, prompt_tokens_details: { cached_tokens: 0 }, cost: 0 }, 0],
+  ])("preserves unknown usage and explicit zeroes (%j)", async (usage, expected) => {
+    const instance = await fixture({ choices, usage });
+    const onUsage = vi.fn();
+    await instance.generateText!("summarize", { onUsage });
+    expect(onUsage.mock.calls).toEqual([[{ model: "grok-3-mini", input: expected, output: expected, cachedInput: expected, costUsd: expected }]]);
+    await instance.dispose();
+  });
+
+  it.each([
+    { choices: [{ message: { content: null, tool_calls: [{ id: "call-1", type: "function", function: { name: "unexpected", arguments: "{}" } }] }, finish_reason: "tool_calls" }] },
+    { choices: [] },
+    { error: { message: "synthetic provider failure" } },
+  ])("reports billed usage before rejecting unusable helper output (%j)", async body => {
+    const instance = await fixture({ ...body, usage: { prompt_tokens: 10, completion_tokens: 5 } });
+    const onUsage = vi.fn();
+    await expect(instance.generateText!("summarize", { onUsage })).rejects.toThrow();
+    expect(onUsage.mock.calls).toEqual([[{ model: "grok-3-mini", input: 10, output: 5, cachedInput: undefined, costUsd: undefined }]]);
+    await instance.dispose();
+  });
+
+  it("does not invent usage for malformed JSON or an aborted request", async () => {
+    const instance = await fixture("not JSON");
+    const onUsage = vi.fn();
+    await expect(instance.generateText!("summarize", { onUsage })).rejects.toThrow();
+    await expect(instance.generateText!("summarize", { onUsage, signal: AbortSignal.abort() })).rejects.toThrow();
+    expect(onUsage).not.toHaveBeenCalled();
+    await instance.dispose();
+  });
+});
 
 describe("createOpenAIChatRuntime tool approvals", () => {
   // A bot on an OpenAI-compatible engine used to stop for a card on EVERY

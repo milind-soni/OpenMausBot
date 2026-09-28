@@ -756,6 +756,7 @@ export function normalizeMathDelimiters(text: string): string {
   return normalized;
 }
 
+/** Render message Markdown with math, protected code, scoped attachments, and mentions. */
 function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
   text: string; streaming?: boolean; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean;

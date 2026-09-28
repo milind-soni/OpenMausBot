@@ -344,8 +344,10 @@ export function pendingDelegationSnapshot(): Array<{
 }
 
 /** How many handoffs one turn may queue. Small on purpose: this is the only
- * thing standing between a confused bot and a fan-out of real turns. */
-const MAX_QUEUED_PER_THREAD = 4;
+ * thing standing between a confused bot and a fan-out of real turns. Six,
+ * not four: a lead running a weekly check-in over a five-member team is the
+ * ordinary case, and hitting the cap there silently dropped one teammate. */
+const MAX_QUEUED_PER_THREAD = 6;
 
 /** Validate and enqueue a delegation. Pushes a "Delegated to @B: reason"
  * chip to the source thread so the user can see what was queued. */
@@ -979,7 +981,13 @@ export function buildDelegationFailurePrompt(targetName: string, reason: string)
   ].join("\n\n");
 }
 
-export const DELEGATION_WAKE_MAX_PER_WINDOW = 3;
+// Must not be smaller than MAX_QUEUED_PER_THREAD: every delegate reply is
+// one wake, so a fan-out that the queue cap allows has to be resumable
+// within the window. Three failed a five-member weekly check-in whose
+// replies all landed inside four minutes ("Delegation follow-up limit
+// reached"), while the same routine passed a week earlier only because the
+// replies happened to spread over twenty.
+export const DELEGATION_WAKE_MAX_PER_WINDOW = 6;
 export const DELEGATION_WAKE_WINDOW_MS = 5 * 60 * 1000;
 
 /** Bounded auto-wake budget per source thread. A delegation completion

@@ -9,7 +9,7 @@ import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import type { MausColor } from "@/lib/mascot";
 import { reducedMotion } from "@/lib/onboarding";
-import type { SceneProps } from "./OrbitingApps";
+import type { SceneProps } from "./types";
 
 const CHANNELS_MS = 6000;
 

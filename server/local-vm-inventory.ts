@@ -1,6 +1,7 @@
 import {
   containerComputerExists,
   perBotLocalVmTarget,
+  poolLocalVmTarget,
   type ContainerComputerStatus,
   type LocalVmTarget,
   type Runtime,
@@ -57,6 +58,24 @@ export async function discoverExistingPerBotLocalVms(
     candidates.map(({ target }) => exists(runtime, target)),
   );
   return candidates.filter((_, index) => existing[index]);
+}
+
+/** Discover the pool-mode seats that actually have containers (issue #1654).
+ * Same exactness rule as the per-bot walk above: a derived name alone is not
+ * ownership, so a pre-existing container must also carry this target's
+ * verified labels. */
+export async function discoverExistingPoolLocalVms(
+  seatCount: number,
+  runtime: Runtime,
+  exists: (
+    runtime: Runtime,
+    target: LocalVmTarget,
+  ) => Promise<boolean> = containerComputerExists,
+): Promise<LocalVmTarget[]> {
+  const seats = Math.max(1, Math.floor(seatCount));
+  const targets = Array.from({ length: seats }, (_, seat) => poolLocalVmTarget(seat));
+  const existing = await Promise.all(targets.map((target) => exists(runtime, target)));
+  return targets.filter((_, index) => existing[index]);
 }
 
 /** The public inventory is an explicit allow-list. In particular, it cannot

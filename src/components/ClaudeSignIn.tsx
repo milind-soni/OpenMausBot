@@ -146,7 +146,7 @@ export function ClaudeSignIn({ instanceId }: { instanceId: string }) {
               onChange={(e) => setCode(e.target.value)}
               autoComplete="off"
               spellCheck={false}
-              className="w-full rounded-md border border-line bg-surface px-3 py-2 font-mono text-[13px] text-ink outline-none focus:border-accent-border"
+              className="w-full rounded-md border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink outline-none focus:border-accent-border"
             />
             <button
               type="button"

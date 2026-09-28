@@ -14,6 +14,10 @@ import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+/** Deterministic name for the seeded starter bot of a verification fixture,
+ * deliberately outside the server/names.ts pool so no suite can plan a bot
+ * that collides with the starter (#1257). */
+export const FIXTURE_STARTER_BOT_NAME = "Fixture Starter";
 const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
 // `ui` verbs never discover anything: each takes the handle its launch printed.
 const MUTATING = new Set([
@@ -392,15 +396,15 @@ export async function launchVerificationServer(
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
   extraProviders: Array<"codex"> = [],
-  /** Programmatic tests only: an owned loopback Box provider, never a live account. */
-  boxFixtureApi?: string,
+  /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
+  boatFixtureApi?: string,
 ): Promise<VerificationServer> {
-  if (boxFixtureApi) {
-    if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boxFixtureApi)) {
-      throw new ControlOmbError("Box verification requires an explicit loopback HTTP provider");
+  if (boatFixtureApi) {
+    if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boatFixtureApi)) {
+      throw new ControlOmbError("Boat verification requires an explicit loopback HTTP provider");
     }
-    try { new URL(boxFixtureApi); }
-    catch { throw new ControlOmbError("Box verification requires a valid loopback port"); }
+    try { new URL(boatFixtureApi); }
+    catch { throw new ControlOmbError("Boat verification requires a valid loopback port"); }
   }
   if (localVm) {
     const endpoint = new URL(localVm.host);
@@ -421,11 +425,11 @@ export async function launchVerificationServer(
   mkdirSync(evidenceDir, { recursive: true });
   const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
-    ...(boxFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
+    ...(boatFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
     instances: {
       // The synthetic map omits the default computer engine. Register it
-      // only when an owned Box provider backs this fixture's cloud panel.
-      ...(boxFixtureApi ? { computer: { driver: "boxAgent" } } : {}),
+      // only when an owned Boat provider backs this fixture's cloud panel.
+      ...(boatFixtureApi ? { computer: { driver: "boxAgent" } } : {}),
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
       } } : {}),
@@ -453,7 +457,7 @@ export async function launchVerificationServer(
     OMB_AGENT_BROWSER_PATH: browser.binaryPath,
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
-  if (boxFixtureApi) childEnv.OMB_BOX_API = boxFixtureApi;
+  if (boatFixtureApi) childEnv.OMB_BOX_API = boatFixtureApi;
   const serverArgs = ["--experimental-strip-types"];
   if (childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE === "1") {
     serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "fail-audio-append-once.mjs")).href);
@@ -486,6 +490,40 @@ export async function launchVerificationServer(
       if (Date.now() >= deadline) throw new Error(`verification server did not become ready; see ${logPath}`);
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
+  } catch (error) {
+    await waitForExit(child, { signal: "SIGTERM" });
+    await removeTempDir(dataDir);
+    throw error;
+  }
+
+  // The first-run seed gives the starter a random friendly name from
+  // server/names.ts, and that pool shares names with bots e2e suites plan
+  // ("Quill" among them). A name-based assertion then reports the starter as
+  // a phantom leaked bot and flakes (#1257). Pin the name so fixture state is
+  // deterministic for every suite built on this launcher; identity remains
+  // the honest comparison in tests either way.
+  try {
+    const timeout = AbortSignal.timeout(1_000);
+    const list = await fetch(`${url}/api/bots`, {
+      headers: { origin: url },
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+    const body = list.ok ? await list.json() as { bots?: Array<{ id: string }> } : null;
+    const seeded = body?.bots;
+    if (!Array.isArray(seeded) || seeded.length !== 1) {
+      throw new Error(`verification fixture did not seed exactly one starter bot; see ${logPath}`);
+    }
+    // The list request may consume most of its own budget, so the rename
+    // gets a fresh timeout; sharing one signal could abort a healthy PATCH
+    // and terminate the whole fixture over a slow first request.
+    const renameTimeout = AbortSignal.timeout(1_000);
+    const rename = await fetch(`${url}/api/bots/${seeded[0].id}/profile`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: url },
+      body: JSON.stringify({ name: FIXTURE_STARTER_BOT_NAME }),
+      signal: signal ? AbortSignal.any([signal, renameTimeout]) : renameTimeout,
+    });
+    if (!rename.ok) throw new Error(`verification starter rename failed (${rename.status}); see ${logPath}`);
   } catch (error) {
     await waitForExit(child, { signal: "SIGTERM" });
     await removeTempDir(dataDir);

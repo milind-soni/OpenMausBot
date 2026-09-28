@@ -918,7 +918,7 @@ describe("VPS computer", () => {
     }
   });
 
-  it("fails clearly for BoxAgent and engines without computer MCP", () => {
+  it("fails clearly for BoatAgent and engines without computer MCP", () => {
     expect(vpsDriverError("boxAgent", true)).toMatch(/cannot use a self-hosted VPS/);
     expect(vpsDriverError("codex", false)).toMatch(/cannot mount/);
     expect(vpsDriverError("claudeAgent", true)).toBeNull();

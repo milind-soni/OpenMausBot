@@ -125,7 +125,7 @@ export function ExportTranscriptMenu({
           aria-label="Export options"
           className="absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/50"
         >
-          <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-ink-secondary/70">
+          <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
             Export Conversation
           </div>
 

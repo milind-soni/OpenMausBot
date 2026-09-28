@@ -4,6 +4,7 @@ import App from "./App";
 import { readSessionState, SERVICE_TRUST_REASON, takePairingCodeFromLocation, takeInvitedEmailFromLocation } from "./lib/session";
 import { bootstrapBrand } from "./lib/brand";
 import { applySkin, readSkin } from "./lib/skins";
+import { applyFont, readFont } from "./lib/fonts";
 import { PairPage } from "./pair/PairPage";
 import "katex/dist/katex.min.css";
 import "./styles.css";
@@ -13,6 +14,7 @@ import "./styles.css";
 // title, accent) is fetched the same way so a white-labelled deployment never
 // flashes the default name; it waits at most a moment and falls back silently.
 applySkin(readSkin());
+applyFont(readFont());
 
 /** A pairing link lands on /pair. A remote browser without a session lands
  * there too, because every API call would otherwise fail with "pair this

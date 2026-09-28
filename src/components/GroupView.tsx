@@ -64,6 +64,9 @@ import {
   tailWindowStart,
 } from "@/lib/transcript-window";
 import { useReplyDraft } from "@/lib/drafts";
+import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
+import { pendingApprovals } from "./PendingApproval";
+import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 
 function dayLabel(at: number): string {
   const d = new Date(at);
@@ -159,7 +162,7 @@ function PinToggle({ group, message }: { group: Group; message: Message }) {
         })
       }
       aria-label={pinned ? t("chat.unpinMessage") : t("chat.pinMessage")}
-      className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+      className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-70"
       title={pinned ? t("chat.unpinHint") : t("room.pinHint")}
     >
       {pinned ? <PinOff size={14} /> : <Pin size={14} />}
@@ -293,7 +296,7 @@ const Transcript = memo(function Transcript({
                       onClick={() => onReply(m)}
                       aria-label={t("chat.replyToMessage")}
                       title={t("chat.reply")}
-                      className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-70"
                     >
                       <MessageSquareReply size={14} />
                     </button>
@@ -355,14 +358,14 @@ const Transcript = memo(function Transcript({
                       onClick={() => onReply(m)}
                       aria-label={t("chat.replyToMessage")}
                       title={t("chat.reply")}
-                      className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-70"
                     >
                       <MessageSquareReply size={14} />
                     </button>
                     <PinToggle group={group} message={m} />
                   </>
                 )}
-                <span className="self-end pb-1 text-[11px] tabular-nums text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">
+                <span className="self-end pb-1 text-[11px] tabular-nums text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
                   {formatTime(m.at)}
                 </span>
               </div>
@@ -508,7 +511,7 @@ function RoomWorkingFolder({ group }: { group: Group }) {
           }}
         >
           <input
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 font-mono text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline"
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 font-mono text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none"
             placeholder={t("room.folder.placeholder")}
             value={draft ?? group.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
@@ -994,6 +997,16 @@ export function GroupView({ group }: { group: Group }) {
     lastGroupMessage?.from?.botId,
   ]);
   const presenceVisible = waiting || popping !== null;
+  const announcement = useMemo((): TranscriptSnapshot => {
+    const approval = pendingApprovals(group.messages)[0];
+    return {
+      busy: Boolean(group.working || group.busyBotId),
+      reply: latestReply(group.messages, (m) => m.from?.name ?? group.name),
+      approval: approval
+        ? { id: approval.requestId, name: approval.message.from?.name ?? speaker?.name ?? group.name }
+        : undefined,
+    };
+  }, [group.messages, group.working, group.busyBotId, group.name, speaker?.name]);
   const presenceSpeaker =
     speaker ?? awaited ?? members.find((member) => member.id === popping?.botId) ?? members[0];
 
@@ -1155,17 +1168,28 @@ export function GroupView({ group }: { group: Group }) {
       <div
         style={headerDragStyle}
         className={cn(
-          "flex items-center justify-between px-5 py-3",
+          // @container so the header can wrap in a narrow column. A container
+          // query never matches the container itself, so the row that has to
+          // wrap is the child below, not this element.
+          "@container/roomhead px-5 py-3",
           // Room for the drawer button, which overlays this corner below md.
           "pl-11 md:pl-5",
         )}
       >
-        <div className="flex min-w-0 items-center gap-2" style={headerNoDragStyle}>
+        {/* The control row cannot shrink below its content, so in a narrow
+            column (a phone, or the sidebar open in a small window) the room
+            name truncated to nothing and the thread picker slid under the
+            controls. Narrow, the header wraps like the 1:1 chat header: name
+            line on top, controls underneath on the right. The room's controls
+            do not fold to icons, so it wraps below 48rem rather than 30rem. */}
+        <div data-roomhead-row className="flex items-center justify-between @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:gap-y-1">
+        <div data-roomhead-identity className="flex min-w-0 items-center gap-2 @max-3xl/roomhead:basis-full" style={headerNoDragStyle}>
           <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
           {!setupPending && !group.dm && <GroupTaskPicker group={group} />}
         </div>
         <div
-          className="flex items-center gap-1.5"
+          data-roomhead-controls
+          className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
           // The caption buttons sit over the header's right end; drop this
           // control row 16px (visual only) below the 26px overlay.
           style={controlsShiftStyle}
@@ -1216,6 +1240,7 @@ export function GroupView({ group }: { group: Group }) {
             </button>
           )}
         </div>
+        </div>
       </div>
 
       {findOpen && <ChatFindBar threadId={group.threadId} onClose={() => setFindOpen(false)} />}
@@ -1249,7 +1274,7 @@ export function GroupView({ group }: { group: Group }) {
             title={t("room.bulletin.title")}
           >
             <Pin size={12} className="shrink-0 text-ink-secondary" />
-            <span className={cn("truncate text-[12.5px]", group.bulletin ? "text-ink-secondary" : "text-ink-secondary/60")}>
+            <span className={cn("truncate text-[12.5px]", group.bulletin ? "text-ink-secondary" : "text-ink-tertiary")}>
               {group.bulletin.split("\n")[0] || (remoteClient ? t("room.bulletin.none") : t("room.bulletin.add"))}
             </span>
           </button>
@@ -1334,7 +1359,8 @@ export function GroupView({ group }: { group: Group }) {
           className="flex w-full flex-col gap-3"
           style={{ paddingBottom: composerDock.pad }}
           role="log"
-          aria-live="polite"
+          // off, as in ChatView: TranscriptAnnouncer speaks once per reply
+          aria-live="off"
           aria-label={t("room.aria", { name: group.name })}
         >
           {group.messages.length === 0 && (
@@ -1419,6 +1445,8 @@ export function GroupView({ group }: { group: Group }) {
         </div>
         )}
       </div>
+
+      <TranscriptAnnouncer threadKey={transcriptKey} snapshot={announcement} />
 
       {!follow && (
         <button

@@ -553,7 +553,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         </button>
       </div>
 
-      <div className="text-[11.5px] text-ink-secondary/70">
+      <div className="text-[11.5px] text-ink-tertiary">
         Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up
       </div>
     </div>

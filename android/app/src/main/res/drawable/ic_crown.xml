@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A crown, after a Chief of Staff's name on the home list: the mark the desktop
+  sidebar and the iPhone put there. Drawn here rather than pulled from
+  `material-icons-extended`: neither icon set Compose ships has a crown, and the
+  extended artifact is thousands of vectors for a handful of uses.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M4.1,16.5L2.3,7.4C2.2,6.9 2.8,6.6 3.2,6.9L7.6,10.4L11.3,4.2C11.6,3.7 12.4,3.7 12.7,4.2L16.4,10.4L20.8,6.9C21.2,6.6 21.8,6.9 21.7,7.4L19.9,16.5ZM4.6,18.2H19.4V19.4C19.4,19.9 19,20.3 18.5,20.3H5.5C5,20.3 4.6,19.9 4.6,19.4Z" />
+</vector>

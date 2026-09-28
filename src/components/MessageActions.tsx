@@ -44,8 +44,8 @@ export function MessageActions({
         title={t("chat.messageActions")}
         aria-expanded={open}
         className={cn(
-          "rounded-md p-1.5 text-ink-secondary transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
-          open ? "bg-raised text-ink opacity-100" : "opacity-0",
+          "rounded-md p-1.5 text-ink-secondary transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-70",
+          open ? "bg-raised text-ink opacity-100 touch:opacity-100" : "opacity-0",
         )}
       >
         <Ellipsis size={14} aria-hidden="true" />

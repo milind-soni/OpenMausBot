@@ -156,17 +156,17 @@ type BotRecord = {
     expect(await evaluate("[...document.querySelectorAll('[data-team-key] article span')].some(span => span.textContent.trim() === 'Ready')")).toBe(false);
     expect(await evaluate("document.querySelectorAll('[data-team-canvas] [aria-label^=\"Computer for \"]').length")).toBe(0);
 
-    // The full-app fixture has no Box credentials. The explicit + entry
+    // The full-app fixture has no Boat credentials. The explicit + entry
     // explains paid creation, but cannot allocate anything until connected.
     const beforeComputers = await api("GET", "/api/team-computers");
     expect(beforeComputers.configured).toBe(false);
     await evaluate("document.querySelector('summary[aria-label=\"Add to team map\"]').focus(); true");
     await ui("press", "--keys", "Enter");
-    await click("Box computer");
-    await expect.poll(snapshot).toContain("Connect your Box account before creating a cloud computer.");
-    await expect.poll(snapshot).toContain("Your Box plan and usage charges apply.");
+    await click("Boat computer");
+    await expect.poll(snapshot).toContain("Connect your Boat account before creating a cloud computer.");
+    await expect.poll(snapshot).toContain("Your Boat plan and usage charges apply.");
     const inputRefs = (await ui("snapshot")).refs as Record<string, { role: string; name: string }>;
-    const nameInput = Object.entries(inputRefs).filter(([, entry]) => entry.role === "textbox" && entry.name === "New Box computer");
+    const nameInput = Object.entries(inputRefs).filter(([, entry]) => entry.role === "textbox" && entry.name === "New Boat computer");
     expect(nameInput).toHaveLength(1);
     await ui("type", "--ref", `@${nameInput[0][0]}`, "--text", "Fixture desktop");
     expect(await evaluate("document.querySelector('[aria-label=\"Team computers\"] button[type=submit]').disabled")).toBe(true);
@@ -174,7 +174,7 @@ type BotRecord = {
     await click("Cancel");
     await click("Close computers");
     expect(await evaluate("Boolean(document.querySelector('[aria-label=\"Team computers\"]'))")).toBe(false);
-    receipts.unconfiguredComputerCreation = "Explicit Add entry shows cost disclosure and keeps Create Box disabled without credentials.";
+    receipts.unconfiguredComputerCreation = "Explicit Add entry shows cost disclosure and keeps Create Boat disabled without credentials.";
 
     await evaluate(`(() => {
       const card = document.querySelector(${JSON.stringify(`[data-bot-id=${JSON.stringify(ben.id)}]`)});

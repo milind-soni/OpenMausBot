@@ -171,9 +171,10 @@ export interface SendTurnInput {
      * bridge harness-controlled lets it turn connection requests into trusted
      * chat cards consistently across provider CLIs. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
-    /** Box's native runner or an explicitly capable driver consumes this
+    /** Boat's native runner or an explicitly capable driver consumes this
      * leased descriptor. Other computers use the stdio descriptor below. */
     computer?: {
+      // kind "box" and field boxId keep their historical names (leased-wire contract).
       kind?: "box";
       boxId: string;
       token: string;
@@ -262,18 +263,18 @@ export interface ProviderAdapter {
      * told it has a computer whose tools its driver cannot mount — it
      * burns turns hunting for tools that aren't there. */
     computerMcp?: boolean;
-    /** Consumes the leased Box descriptor without switching to Box's model. */
+    /** Consumes the leased Boat descriptor without switching to Boat's model. */
     cloudComputerMcp?: boolean;
-    /** True when the whole turn executes on the cloud computer (the Box native
+    /** True when the whole turn executes on the cloud computer (the Boat native
      * agent — POST /boxes/{id}/prompt) instead of in the host harness. Such a
-     * driver claims the box exclusively, cannot use host or Local VM surfaces,
+     * driver claims the boat exclusively, cannot use host or Local VM surfaces,
      * and every tool call acts on that machine's screen (screen pollers start
      * with screenIsTheWork). Implies a cloud-computer turn even though the
      * driver mounts no computer descriptor — cloudComputerMcp stays false. */
     remoteAgent?: boolean;
     /** True when this driver's turn can run against a cloud computer — natively
-     * (remoteAgent) or by mounting the leased Box descriptor (cloudComputerMcp).
-     * Gates every cloud attach path (attachBotBox / attachTeamBox canMount). */
+     * (remoteAgent) or by mounting the leased Boat descriptor (cloudComputerMcp).
+     * Gates every cloud attach path (attachBotBoat / attachTeamBoat canMount). */
     usesCloudComputer?: boolean;
     /** True when the driver mounts turn.integrations.composio (the user's
      * connected apps). Same rule again: a key in the config says the user
@@ -502,6 +503,19 @@ export interface DriverCreateInput<Config> {
   config: Config;
 }
 
+export interface TextGenerationUsage {
+  model: string;
+  input?: number;
+  output?: number;
+  cachedInput?: number;
+  costUsd?: number;
+}
+
+export interface TextGenerationOptions {
+  signal?: AbortSignal;
+  onUsage?: (usage: TextGenerationUsage) => void;
+}
+
 export interface ProviderInstance {
   readonly instanceId: InstanceId;
   readonly driverKind: DriverKind;
@@ -524,7 +538,7 @@ export interface ProviderInstance {
   /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries.
    * The signal is a best-effort cap: drivers that can honor it abort the
    * underlying provider call; the rest keep their own timeout. */
-  generateText?(prompt: string, options?: { signal?: AbortSignal }): Promise<string>;
+  generateText?(prompt: string, options?: TextGenerationOptions): Promise<string>;
   /** Isolated, tool-free permission review on this same provider. Kept
    * separate from generateText so the UI never infers a security capability
    * from a generic helper that may expose prompts in argv or lack approvals. */

@@ -1325,7 +1325,7 @@ export function vpsComputerMcp(cfg: AppConfig, botId: string, containerRef?: str
 
 export function vpsDriverError(driverKind: string, computerMcp: boolean): string | null {
   if (driverKind === "boxAgent") {
-    return "The Computer engine runs its agent on Box and cannot use a self-hosted VPS — choose Claude or an ACP engine";
+    return "The Computer engine runs its agent on Boat and cannot use a self-hosted VPS — choose Claude or an ACP engine";
   }
   if (!computerMcp) {
     return "This model engine cannot mount a self-hosted VPS computer — choose Claude or an ACP engine";

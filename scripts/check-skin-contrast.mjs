@@ -94,6 +94,11 @@ const SURFACES = ["--color-app", "--color-panel", "--color-raised", "--color-rai
 const PAIRS = [
   ...SURFACES.map((s) => ["--color-ink", s, 4.5]),
   ...SURFACES.map((s) => ["--color-ink-secondary", s, 4.5]),
+  // Quiet text (timestamps, hints, placeholders) has its own token rather
+  // than an opacity on the secondary ink: `text-ink-secondary/70` measured
+  // 2.6:1 on Linen and was never checked here. It is body-size text, so it
+  // is held to the same 4.5:1 on the same surfaces.
+  ...SURFACES.map((s) => ["--color-ink-tertiary", s, 4.5]),
   ["--color-bubble-user-ink", "--color-bubble-user", 4.5],
   ["--color-accent-ink", "--color-accent", 4.5],
   ["--color-danger-ink", "--color-danger", 4.5],
@@ -115,6 +120,12 @@ const PAIRS = [
   ["--color-focus", "--color-app", 3],
   ["--color-focus", "--color-panel", 3],
   ["--color-focus", "--color-card", 3],
+  // A focused text field paints its own border in the ring colour (the
+  // browser outline is off for fields), so the ring also has to clear the
+  // fills the fields themselves use.
+  ["--color-focus", "--color-inset", 3],
+  ["--color-focus", "--color-raised", 3],
+  ["--color-focus", "--color-control", 3],
   // Surface against surface. Text contrast alone will not catch a skin that
   // gives two surfaces the same value: Atelier and Lagoon both defined
   // `raised` as the pure white they use for a card, so every chip, hover fill
@@ -203,6 +214,9 @@ for (const [fg, bg] of [
   ["--color-ink", "--color-raised"],
   ["--color-ink-secondary", "--color-raised-hover"],
   ["--color-ink-secondary", "--color-inset"],
+  ["--color-ink-tertiary", "--color-bubble-user"],
+  ["--color-ink-tertiary", "--color-raised-hover"],
+  ["--color-ink-tertiary", "--color-inset"],
   ["--color-accent", "--color-inset"],
   ["--color-accent-text", "--color-bubble-user"],
   ["--color-ink", "--color-control"],

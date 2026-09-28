@@ -169,7 +169,7 @@ After:
 
 ## Not covered
 
-- Only the Local VM path was run end to end. Cloud box and VPS computers were not;
+- Only the Local VM path was run end to end. Cloud boat and VPS computers were not;
   `vm_exec` is Local VM only.
 - The group/room view got the same "no bubble for attachment-only messages" change; it
   was type- and test-checked but not looked at in a real room.

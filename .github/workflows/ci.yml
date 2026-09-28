@@ -30,21 +30,34 @@ jobs:
   # (vite.config.ts, fileParallelism:false) and takes 17–19 minutes on one
   # runner, so slow runners hit the job cap and read as red PRs, and a broken
   # smoke stayed hidden behind any vitest failure for a day. Each piece is now
-  # its own job: platform-independent checks run once, the suite runs in three
-  # shards per platform, and every smoke reports on its own. The `gate` jobs
-  # at the end keep the three check names the branch ruleset requires.
+  # its own job: platform-independent checks run once, the suite runs in four
+  # shards per platform, and every smoke reports on its own. One final `CI`
+  # check aggregates the required jobs (see docs/ci.md for ruleset migration).
   static:
     name: typecheck + lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      runtime: ${{ steps.scope.outputs.runtime }}
+      mobile: ${{ steps.scope.outputs.mobile }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history lets PR selection use the merge base, including deletes
+          # and both sides of renames, without GitHub's changed-file page limit.
+          fetch-depth: 0
+          persist-credentials: false
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: pnpm
+      - name: Select checks for this change
+        id: scope
+        run: node scripts/ci-scope.mjs
       - run: pnpm install --frozen-lockfile
+      - name: Verify CI selection and documentation references
+        run: pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts
       - name: Validate locale catalogs
         run: pnpm i18n:check
       - run: pnpm typecheck
@@ -57,6 +70,7 @@ jobs:
     # Admit the expensive runner fan-out only after the quick checks pass.
     # A failing preflight still fails the required gates; nothing is waived.
     needs: static
+    if: needs.static.outputs.runtime == 'true'
     # vitest splits the file list deterministically across shards, so a
     # failure names the same shard on every run and one shard is reproducible
     # locally with the same --shard flag.
@@ -98,6 +112,7 @@ jobs:
 
   behavior-evals:
     needs: static
+    if: needs.static.outputs.runtime == 'true'
     # The offline behavior-eval tiers (#1503): the evals' own vitest gate
     # (redaction, trace, golden replay), the tier-1 scenario runner, and the
     # tier-2 golden replay through the same entrypoint developers use. Tier
@@ -144,6 +159,7 @@ jobs:
 
   packaged-server:
     needs: static
+    if: needs.static.outputs.runtime == 'true'
     # `pnpm build:server`, then the bundle is copied out of the repo and run
     # with no node_modules in reach: every bare import must be inlined.
     name: packaged server smoke (${{ matrix.os }})
@@ -165,6 +181,7 @@ jobs:
 
   windows-cua:
     needs: static
+    if: needs.static.outputs.runtime == 'true'
     name: Windows CUA host smoke
     runs-on: windows-latest
     timeout-minutes: 10
@@ -182,6 +199,7 @@ jobs:
 
   electron-smokes:
     needs: static
+    if: needs.static.outputs.runtime == 'true'
     # Real Electron utility processes against disposable homes and fake CLIs.
     # Never the live app. Each script prints its own evidence lines.
     name: Electron smokes (macOS)
@@ -207,18 +225,12 @@ jobs:
         run: pnpm build:server && pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs
 
   gate:
-    # The branch ruleset requires exactly these three check names — they were
-    # the per-OS test job. Each now reports the combined result of every job
-    # above, so the requirement holds without a settings change. Once the
-    # ruleset requires this gate directly, collapse the matrix to one job.
-    name: typecheck + test (${{ matrix.os }})
+    # One aggregation, not three queued runners doing the same check.
+    name: CI
     needs: [static, vitest, behavior-evals, packaged-server, windows-cua, electron-smokes]
     # Still report failed/skipped dependencies, but don't keep a superseded
     # workflow alive just to schedule its summary jobs.
     if: ${{ !cancelled() }}
-    strategy:
-      matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -230,12 +242,18 @@ jobs:
             const needs = JSON.parse(process.env.NEEDS);
             const rows = Object.entries(needs).map(([job, { result }]) => `${result.padEnd(9)} ${job}`);
             console.log(rows.join("\n"));
-            const bad = Object.entries(needs).filter(([, { result }]) => result !== "success");
+            const runtime = needs.static.outputs.runtime;
+            if (runtime !== "true" && runtime !== "false") throw new Error("Missing CI selection");
+            const bad = Object.entries(needs).filter(([job, { result }]) => {
+              const expected = job === "static" || runtime === "true" ? "success" : "skipped";
+              return result !== expected;
+            });
             if (bad.length) { console.error(`\n${bad.length} required job(s) did not pass: ${bad.map(([job]) => job).join(", ")}`); process.exit(1); }
           '
 
   cloudflared-linux-arm64:
     needs: static
+    if: needs.static.outputs.runtime == 'true'
     name: cloudflared installer (Linux ARM64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
@@ -257,8 +275,9 @@ jobs:
 
   foss:
     needs: static
+    if: needs.static.outputs.runtime == 'true'
     # LICENSING.md promises that deleting enterprise/ leaves a working
-    # open-source edition. Prove it on every change: typecheck, the edition
+    # open-source edition. Prove it on runtime changes: typecheck, the edition
     # tests, and a boot that reports "oss" even with a key set.
     name: open-source edition builds without enterprise/
     runs-on: ubuntu-latest
@@ -289,6 +308,7 @@ jobs:
 
   control-plane:
     needs: static
+    if: needs.static.outputs.runtime == 'true'
     name: control-plane check + workerd tests + dry run
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -308,6 +328,7 @@ jobs:
 
   ui-smoke:
     needs: static
+    if: needs.static.outputs.runtime == 'true'
     # Advisory, outside the required `test` matrix: the renderer recipe in
     # docs/verification/chat-ui.md run by a machine. It downloads the pinned
     # agent-browser release (digest verified) and its Chrome, drives the real
@@ -350,6 +371,7 @@ jobs:
 
   package-linux:
     needs: static
+    if: needs.static.outputs.runtime == 'true'
     name: package + smoke (Ubuntu 24.04 x64)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -418,9 +440,10 @@ jobs:
 
   ios:
     needs: static
+    if: needs.static.outputs.mobile == 'true'
     name: Swift tests + iOS build + thread UI
     runs-on: macos-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Swift package tests
@@ -452,11 +475,11 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  # Deliberately not scoped to android/**: :core's test fixtures are read from
-  # ios/Tests/CompanionCoreTests/Fixtures, so a path filter would skip the
-  # Kotlin suite on exactly the change that breaks it.
+  # Selection includes shared/server changes AND ios/**: :core's fixtures
+  # come from ios/Tests/CompanionCoreTests/Fixtures, not just android/**.
   android:
     needs: static
+    if: needs.static.outputs.mobile == 'true'
     name: Kotlin tests + Android build
     runs-on: ubuntu-24.04
     timeout-minutes: 25

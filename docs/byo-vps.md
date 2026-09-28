@@ -9,7 +9,7 @@ passphrase, and never runs an agent remotely.
 ## What works
 
 - A per-bot Linux desktop in a managed container on your VPS, driven through the official Cua tools.
-- Live screen preview in the Computer panel and in transcripts, same as a Box.
+- Live screen preview in the Computer panel and in transcripts, same as a Boat.
 - Explicit **Cloud** with the **Self-hosted VPS** backend provisions or starts the container. **Auto** reuses
   a ready container by default; an off-by-default **Start VPS automatically** switch lets that bot prepare
   or wake its managed container when needed. Scheduled and manually triggered routine runs always start it,

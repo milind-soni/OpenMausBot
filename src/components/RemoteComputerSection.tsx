@@ -4,7 +4,7 @@ import { Laptop, Loader2, Unplug } from "lucide-react";
 import { Card } from "./SettingsPrimitives";
 
 const inputClass =
-  "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
+  "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none";
 
 function errorText(error: unknown): string {
   return String((error as { message?: string })?.message ?? error).replace(

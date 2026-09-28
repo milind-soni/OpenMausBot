@@ -206,8 +206,9 @@ targets:
               NSExtensionActivationSupportsFileWithMaxCount: 4
               NSExtensionActivationSupportsAttachmentsWithMaxCount: 4
 
-  # The Live Activity lives in a widget extension. It shares the mascot's
-  # drawing and data with the app, and the activity contract in Shared/.
+  # The Live Activity lives in a widget extension, alongside the home-screen
+  # widgets. It shares the mascot's drawing and data with the app, and the
+  # activity contract in Shared/.
   OpenMausCompanionWidgets:
     type: app-extension
     platform: iOS
@@ -218,8 +219,15 @@ targets:
     sources:
       - path: Widgets
       - path: Shared
+      # Home-screen widgets read their snapshot from the App Group, and the
+      # answer intent resolves tokens through the same shared connection
+      # store the Share extension uses.
+      - path: AppShared
       - path: App/MausAvatar.swift
       - path: App/MausFaceData.swift
+      # MascotState resolves the face for the post-answer refresh a widget
+      # performs; it is self-contained above Core, so it rides along.
+      - path: App/MascotState.swift
     dependencies:
       # MausAvatar draws whichever body a bot wears, and the body catalog and
       # its path parser live in CompanionCore. The extension shares the
@@ -233,12 +241,25 @@ targets:
         CURRENT_PROJECT_VERSION: "6"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
+        APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: true
+    # The widget extension joins the trusted-extension family the Share
+    # extension set up: the App Group carries its snapshot, and the shared
+    # keychain access group carries the tokens its answer intent will ask
+    # for.
+    entitlements:
+      path: Widgets/OpenMausCompanionWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.openmausbot.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)group.com.openmausbot.shared
     info:
       path: Widgets/Info.plist
       properties:
         CFBundleDisplayName: MausBot
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        OpenMausKeychainAccessGroup: $(AppIdentifierPrefix)group.com.openmausbot.shared
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

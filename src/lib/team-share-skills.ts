@@ -8,7 +8,7 @@ import type { PackageDocument } from "../../shared/package-format.js";
 // lists the rest. Once the person ticks or unticks one, the request names
 // exactly the ticked skills, and a choice that cannot fit is refused with a
 // sentence. Either way the team's skill names come back, on a refusal too,
-// so the boxes never disappear and a refused choice can always be changed.
+// so the boats never disappear and a refused choice can always be changed.
 
 /** The team's skill names from an export response, or from a refusal's body. */
 export function skillChoicesFrom(value: unknown): string[] | null {
@@ -21,7 +21,7 @@ export function includedSkills(document: PackageDocument): string[] {
   return document.package.skills?.entries.map((entry) => entry.name) ?? [];
 }
 
-/** What to ask for: "all" until the person changes a box, then exactly the
+/** What to ask for: "all" until the person changes a boat, then exactly the
  * ticked skills the team still has (a skill removed meanwhile has no box to
  * untick, so it is never sent). */
 export function requestedSkills(choice: ReadonlySet<string> | null, available: readonly string[] | null): "all" | string[] {
@@ -29,11 +29,11 @@ export function requestedSkills(choice: ReadonlySet<string> | null, available: r
   return [...choice].filter((name) => !available || available.includes(name));
 }
 
-/** The boxes ticked once "all" has answered: the skills it put in the file,
+/** The boats ticked once "all" has answered: the skills it put in the file,
  * less any name a bot left out over its 30-skill limit. Such a name can be
  * in the file for another bot, but ticked it would be asked for on both and
  * refused. Without those names the ticked list is always a choice that fits,
- * so unticking any box never lands on a refusal. */
+ * so unticking any boat never lands on a refusal. */
 export function startingTicks(result: { document: PackageDocument; skipped: ReadonlyArray<{ part: string; reason: string }> }): string[] {
   const overLimit = new Set(result.skipped.flatMap((skip) => {
     const name = skip.reason === "bot_skill_limit" ? /\.skills\[([^\]]+)\]$/.exec(skip.part)?.[1] : undefined;
@@ -42,7 +42,7 @@ export function startingTicks(result: { document: PackageDocument; skipped: Read
   return includedSkills(result.document).filter((name) => !overLimit.has(name));
 }
 
-/** Which boxes show ticked: the person's choice, else the starting ticks
+/** Which boats show ticked: the person's choice, else the starting ticks
  * from "all", else (nothing counted yet) every skill. */
 export function tickedSkills(
   choice: ReadonlySet<string> | null,

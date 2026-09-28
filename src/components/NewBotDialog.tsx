@@ -187,7 +187,7 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
                 value={audience}
                 disabled={saving}
                 onChange={(event) => setAudience(event.target.value as VisibilityMode)}
-                className="rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] text-ink focus:border-hairline focus:outline-none"
+                className="rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] text-ink focus:outline-none"
               >
                 <option value="everyone">{t("botSettings.visibility.everyone")}</option>
                 <option value="admins">{t("botSettings.visibility.admins")}</option>
@@ -201,7 +201,7 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
                 onChange={(event) => setPeople(event.target.value)}
                 placeholder={t("botSettings.visibility.peoplePlaceholder")}
                 aria-label={t("botSettings.visibility.peopleLabel")}
-                className="min-w-[16rem] flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-1.5 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+                className="min-w-[16rem] flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-1.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
               />
             )}
           </div>

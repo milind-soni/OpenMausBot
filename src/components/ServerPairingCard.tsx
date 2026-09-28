@@ -51,7 +51,7 @@ export function lastSeen(lastSeenAt: number, now = Date.now()): string {
 }
 
 const button = "rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-50";
-const quiet = "rounded-md border border-line px-3 py-1.5 text-[13px] text-ink hover:bg-surface";
+const quiet = "rounded-md border border-hairline/50 px-3 py-1.5 text-[13px] text-ink hover:bg-control";
 
 /** Settings → Remote access: mint a one-time pairing code with a QR for
  * the phone app (or for a non-phone client — MCP, `openmausbot pair`, a
@@ -162,7 +162,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
         </button>
       </div> : <p data-server-pairing-portal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
       {pairingCodes && offer ? (
-        <div className="mt-4 rounded-lg border border-line bg-surface p-4">
+        <div className="mt-4 rounded-lg border border-hairline/40 bg-inset p-4">
           {expired ? (
             <p className="text-[13px] text-ink-secondary">{t("remote.serverPairing.expired")}</p>
           ) : (
@@ -194,7 +194,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       {devices.length === 0 ? (
         <p className="mt-1 text-[12.5px] text-ink-secondary">{t("remote.serverPairing.noDevices")}</p>
       ) : (
-        <ul className="mt-1 divide-y divide-line">
+        <ul className="mt-1 divide-y divide-hairline/40">
           {devices.map((device) => (
             <li key={device.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[13px]">
               <span className="text-ink">

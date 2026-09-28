@@ -3,6 +3,8 @@ package com.openmausbot.companion.ui
 import com.openmausbot.companion.core.AvatarCrop
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotProfilePatch
+import com.openmausbot.companion.core.BotOverviewGrant
+import com.openmausbot.companion.core.BotOverviewGrantLevel
 import com.openmausbot.companion.core.ConfigStatus
 import com.openmausbot.companion.core.Voice
 import com.openmausbot.companion.core.VoiceProvider
@@ -47,6 +49,12 @@ data class VoiceChoice(
     val enabled: Boolean,
 )
 
+/** One read-only row of the profile sheet's Connected apps section. */
+data class ConnectorGrantRow(
+    val service: String,
+    val summary: String,
+)
+
 object ProfileRules {
     /** `String(prompt.trimming….prefix(400))` in `generateImage`. */
     const val GENERATE_PROMPT_LIMIT: Int = 400
@@ -61,6 +69,21 @@ object ProfileRules {
     const val AVATAR_FOOTER: String =
         "PNG, JPEG, GIF, or WebP, up to 10 MB. Images are stored on your paired computer " +
             "and loaded with this phone's pairing token."
+
+    // Grants are assigned per bot on the computer (the web grant editor);
+    // the phone only reads the overview's summary back. The footer says so,
+    // the way the closed voice states explain a repair this form cannot offer.
+    const val CONNECTED_APPS: String = "Connected apps"
+
+    const val CONNECTED_APPS_FOOTER: String =
+        "Tool grants are assigned in OpenMausBot on your computer. This phone shows them read-only."
+
+    private const val GRANTS_ALL: String = "All tools"
+
+    private const val GRANTS_NONE: String = "No tools"
+
+    /** The record exists but grants nothing — stronger than "no apps connected". */
+    const val GRANTS_NONE_ANY: String = "No tools granted on any connected app."
 
     private const val GENERATE_READY_FOOTER: String =
         "Generation uses the shared image provider configured on your computer. No provider " +
@@ -356,5 +379,35 @@ object ProfileRules {
         AvatarCrop.CIRCLE -> "Circle"
         AvatarCrop.ROUNDED -> "Rounded"
         AvatarCrop.SQUARE -> "Square"
+    }
+
+    /**
+     * The Connected apps section's rows, in the server's order. An unknown
+     * level decodes as partial, so every entry that survives decode has a
+     * row; an empty list is the explicit no-tools record, and the sheet
+     * gives it [GRANTS_NONE_ANY] rather than drawing nothing.
+     */
+    fun connectorGrantRows(grants: List<BotOverviewGrant>?): List<ConnectorGrantRow> =
+        grants?.map { grant ->
+            ConnectorGrantRow(
+                service = serviceLabel(grant.slug),
+                summary = when (grant.level) {
+                    BotOverviewGrantLevel.All -> GRANTS_ALL
+                    BotOverviewGrantLevel.None -> GRANTS_NONE
+                    BotOverviewGrantLevel.Partial ->
+                        grant.toolCount.toString() + " tool" + if (grant.toolCount == 1) "" else "s"
+                },
+            )
+        } ?: emptyList()
+
+    /**
+     * The summary names services by slug ("gmail", "google_calendar"); the
+     * row shows the same name with separators spaced and the first letter
+     * raised, and nothing stronger: the catalog's display labels stay on the
+     * computer, and this section must not invent its own.
+     */
+    private fun serviceLabel(slug: String): String {
+        val spaced = slug.replace('_', ' ').replace('-', ' ').trim()
+        return if (spaced.isEmpty()) slug else spaced.replaceFirstChar { it.uppercase() }
     }
 }

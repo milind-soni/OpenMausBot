@@ -164,6 +164,33 @@ describe("thread control placement", () => {
     expect(markup).not.toMatch(/class="[^"]*chat-text[^"\n]*bg-bubble-user/);
   });
 
+  it("wraps the header into a name line and a chip line when the column is narrow", () => {
+    // On a phone, or with a panel beside the chat, the header's chip group
+    // cannot shrink: the name truncated to nothing and the rename pencil
+    // landed under the export button. Below 30rem the header wraps instead.
+    // The query lives on the container's child row: a container query never
+    // matches the container element itself. (Approach from #1289.)
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false } }));
+    expect(markup).toContain("@container/chathead");
+    const row = /data-chathead-row="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(row[1].split(" ")).toContain("@max-[30rem]/chathead:flex-wrap");
+    const identity = /data-chathead-identity="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(identity[1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "@max-[30rem]/chathead:basis-full"]));
+    const controls = /data-chathead-controls="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(controls[1].split(" ")).toEqual(expect.arrayContaining(["shrink-0", "@max-[30rem]/chathead:ml-auto", "@max-[30rem]/chathead:flex-wrap"]));
+  });
+
+  it("keeps the Chief of Staff badge on one line instead of stacking a word per line", () => {
+    // #1871: the badge shrank with the name and wrapped "Chief / of / Staff",
+    // taller than the header row.
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false, chiefOfStaff: true } }));
+    const badge = /<span title="Chief of Staff" class="([^"]*)"><svg[^>]*lucide-crown[^]*?<\/svg> <span class="([^"]*)">Chief of Staff<\/span>/.exec(markup)!;
+    expect(badge[1].split(" ")).toEqual(expect.arrayContaining(["shrink-0", "whitespace-nowrap"]));
+    // In a narrow column it folds to the crown, so the name keeps the room;
+    // the label stays for screen readers and as the tooltip.
+    expect(badge[2].split(" ")).toContain("@max-4xl/chathead:sr-only");
+  });
+
   it("keeps the selected thread's model in the header and permissions inside the composer pill", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup.match(/data-test-model-control/g)).toHaveLength(1);
@@ -184,5 +211,29 @@ describe("thread control placement", () => {
     expect(markup).not.toContain("data-test-model-control");
     expect(markup).not.toContain("data-test-approval-control");
     delete window.ogb;
+  });
+});
+
+// A polite live region on the whole transcript re-reads every change: the
+// ticking "Thinking 3s", each activity label, every chip. The log stays a
+// landmark people can browse, and one quiet status line speaks when a
+// reply is done or an approval is waiting.
+describe("screen reader announcements", () => {
+  it("keeps the transcript log out of live announcements", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(markup).toMatch(/role="log" aria-live="off" aria-label="Conversation with Pepper"/);
+  });
+
+  it("does not make the working label a second live region", async () => {
+    const { TurnPresence } = await import("./TurnPresence");
+    const markup = renderToStaticMarkup(createElement(TurnPresence, { avatar: null, visible: true, label: "Running a command", since: 1 }));
+    expect(markup).toContain("Running a command");
+    expect(markup).not.toMatch(/thinking-shimmer[^"]*" aria-live/);
+  });
+
+  it("renders one visually hidden status line for finished replies", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(markup.match(/data-testid="transcript-announcer"/g)).toHaveLength(1);
+    expect(markup).toMatch(/<p role="status" aria-live="polite" aria-atomic="true" class="sr-only" data-testid="transcript-announcer">/);
   });
 });

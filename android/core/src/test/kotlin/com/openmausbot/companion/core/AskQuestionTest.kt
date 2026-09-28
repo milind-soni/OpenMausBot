@@ -95,7 +95,7 @@ class AskQuestionTest {
 
     @Test
     fun `decodes an agent-composed ask and tolerates unknown fields`() {
-        // Origin rides on the wire only for the BoxAgent transport; a
+        // Origin rides on the wire only for the BoatAgent transport; a
         // tool-call ask leaves it unset, and fields we do not know yet must
         // never fail the transcript decode.
         val composed = card(

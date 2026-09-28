@@ -81,6 +81,10 @@ final class Session: ObservableObject {
     /// NavigationStack after the exact detached task has been activated.
     @Published private(set) var notificationChat: Chat?
 
+    /// A chat a deep link asked for, consumed by the roster's
+    /// NavigationStack the same way a notification response is.
+    @Published private(set) var pendingChat: Chat?
+
     private var client: CompanionClient?
     /// Ciphertext-only operations survive navigation and transient
     /// disconnects so a retry cannot accidentally reseal the same value with
@@ -178,7 +182,7 @@ final class Session: ObservableObject {
         let arguments = ProcessInfo.processInfo.arguments
         if (arguments.contains("-store-preview") || arguments.contains("-computer-switcher-preview")),
            let url = Bundle.main.url(
-               forResource: arguments.contains("-images-preview") ? "ImagePreview" : arguments.contains("-chat-update-preview") ? "ChatUpdatePreview" : arguments.contains("-chat-presentation-preview") ? "ChatPresentationPreview" : arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
+               forResource: arguments.contains("-images-preview") ? "ImagePreview" : arguments.contains("-chat-update-preview") ? "ChatUpdatePreview" : arguments.contains("-chat-presentation-preview") ? "ChatPresentationPreview" : arguments.contains("-roster-preview") ? "RosterPreview" : arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
                withExtension: "json"
            ),
            let data = try? Data(contentsOf: url),
@@ -267,6 +271,11 @@ final class Session: ObservableObject {
                let pagesData = try? Data(contentsOf: pagesURL),
                let pages = try? JSONDecoder().decode([String: ThreadPage].self, from: pagesData) {
                 for (threadID, page) in pages { state.merge(page, intoThread: threadID) }
+            }
+            if arguments.contains("-reset-list-density") {
+                // The fresh-install default is checked in UI tests; an
+                // earlier run on the same simulator may have saved a choice.
+                UserDefaults.standard.removeObject(forKey: PrefKey.rosterDensity)
             }
             status = .live
             return
@@ -472,16 +481,33 @@ final class Session: ObservableObject {
         }
     }
 
-    func receivePairingURL(_ url: URL) {
-        guard let invite = PairingInvite.parse(url) else {
+    func receiveURL(_ url: URL) {
+        guard let link = CompanionDeepLink.parse(url) else {
             actionError = "That pairing invitation is not valid. Start pairing again on your computer."
             return
         }
-        pairingInvite = CompanionPairingInvitePolicy.nextInvite(
-            current: pairingInvite,
-            after: .received(invite)
-        )
-        pairingRequested = true
+        switch link {
+        case let .pairing(invite):
+            pairingInvite = CompanionPairingInvitePolicy.nextInvite(
+                current: pairingInvite,
+                after: .received(invite)
+            )
+            pairingRequested = true
+        case let .chat(threadId):
+            openChat(threadId: threadId)
+        }
+    }
+
+    /// A deep link that names a chat. An id this phone does not know — a
+    /// stale widget row, a thread deleted since — lands on the roster
+    /// silently: it is not the person's mistake, so it is not worth a banner.
+    func openChat(threadId: String) {
+        guard let chat = state.chat(forThread: threadId) else { return }
+        pendingChat = chat
+    }
+
+    func consumePendingChat() {
+        pendingChat = nil
     }
 
     func beginPairing() {

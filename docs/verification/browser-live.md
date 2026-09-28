@@ -143,5 +143,5 @@ data. VM/cloud transport and turn-bound switching are separately covered by
 `server/group-local-vm.e2e.test.ts`, `server/vps-routing.test.ts` and
 `server/index.test.ts` with
 isolated providers. These are not evidence of real cloud provisioning. Native
-Box currently does not expose the agents selector tool, so switching away
-from an active native Box destination still requires the composer selector.
+Boat currently does not expose the agents selector tool, so switching away
+from an active native Boat destination still requires the composer selector.

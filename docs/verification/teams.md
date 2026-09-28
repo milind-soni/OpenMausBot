@@ -66,12 +66,12 @@ next bot click, and Escape during arrangement restores the original position.
 Idle cards omit the redundant Ready label. A computer shortcut appears only on
 the selected bot and opens that bot's access settings while Team map remains
 mounted.
-The **Add → Box computer** entry explains provider charges and cannot create a
+The **Add → Boat computer** entry explains provider charges and cannot create a
 machine while this credential-free fixture is disconnected. Opening and
 cancelling it leaves the server's computer inventory unchanged.
 
 The focused `server/index.test.ts` cases run the real server against a local
-HTTP Box stand-in, with a disposable fake token and no paid account or container
+HTTP Boat stand-in, with a disposable fake token and no paid account or container
 engine. They verify explicit cost acknowledgement, invalid/foreign-origin
 request denial, read-only inventory, durable failed-create records, same-id
 retry without a second machine, concurrent provisioning rejection, and busy-team
@@ -80,17 +80,17 @@ checked; this is not a full server-restart assertion. Opening a shared desktop
 requires taking human control first.
 
 A second case confirms that Auto bots' direct and room turns receive the same
-Box ID, while an explicit Off bot receives no computer. The real shared-resource
+Boat ID, while an explicit Off bot receives no computer. The real shared-resource
 lock rejects overlapping work and lifecycle changes; human control is shared
 across the team's bots, while a bot's control capability cannot impersonate
 another bot and is revoked after its turn. Removing the simulated provider
 machine causes a clear failure, never an automatic paid replacement. These
-checks prove server routing and ownership, not actual Box provisioning or
+checks prove server routing and ownership, not actual Boat provisioning or
 remote desktop operation.
 
 The separate `team-computers-ui` test uses a real OMB server and renderer with
-an owned loopback HTTP Box provider. It creates a named machine through **Add →
-Box computer**, verifies opening the shelf never provisions a machine, cancels
+an owned loopback HTTP Boat provider. It creates a named machine through **Add →
+Boat computer**, verifies opening the shelf never provisions a machine, cancels
 and confirms a pointer drop, explicitly unassigns before moving to another team,
 and preserves bot settings and the computer registry across a browser reload.
 It also checks an Auto bot's **Computer** panel names the shared team machine
@@ -107,11 +107,11 @@ For a separately driven computer-use preview, run:
 node --experimental-strip-types scripts/testing/team-computers-preview.ts
 ```
 
-The printed `previewUrl` is disposable. `boxFixtureApi` exposes a fixture-only
+The printed `previewUrl` is disposable. `boatFixtureApi` exposes a fixture-only
 `GET /__fixture` receipt of provider calls; `POST /__fixture` with
 `{"refuseCreate":true}` enables the simulated 429 response, and false clears it.
 The launch hook accepts only a literal `http://127.0.0.1:PORT` and installs a
-fixed fake token. It cannot inherit a real Box token or use a remote provider.
+fixed fake token. It cannot inherit a real Boat token or use a remote provider.
 Ctrl-C stops the owned renderer/server and local provider. Guest bootstrap
 commands are acknowledged by the stand-in but never execute.
 

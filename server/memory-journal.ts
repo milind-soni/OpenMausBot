@@ -34,7 +34,9 @@ import {
 } from "./memory-store.ts";
 import { redactSecretsInText } from "./redact.ts";
 
-export type MemoryActor = "bot" | "person" | "import";
+/** "upkeep" is the harness itself: background capture and the tidy-up
+ * (server/memory-upkeep.ts) for a bot with Memory upkeep switched on. */
+export type MemoryActor = "bot" | "person" | "import" | "upkeep";
 export type MemoryChangeKind = "created" | "edited" | "deleted";
 
 export interface MemoryJournalEntry {
@@ -45,7 +47,8 @@ export interface MemoryJournalEntry {
   path: string;
   actor: MemoryActor;
   /** How it got there: "ui", "api", "turn", "disk" (changed outside the
-   * app between turns — an editor, Obsidian), "revert", "import". */
+   * app between turns — an editor, Obsidian), "revert", "import", and for
+   * upkeep "capture", "organize" or "tidy". */
   via: string;
   threadId?: string;
   kind: MemoryChangeKind;

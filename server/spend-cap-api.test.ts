@@ -11,6 +11,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
+import { CAPTURE_MARKER } from "./memory-capture.ts";
+import { ORGANIZE_MARKER } from "./memory-organize.ts";
+import { TIDY_MARKER } from "./memory-tidy.ts";
+import { readUsage } from "./usage-ledger.ts";
 
 describe("spend cap and prices through real turns", () => {
   let session: VerificationServer;
@@ -34,6 +38,111 @@ describe("spend cap and prices through real turns", () => {
   const api = (path: string, init: RequestInit = {}) => fetch(`${session.info.url}${path}`, init);
   const put = (body: unknown) => api("/api/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const send = (botId: string, text: string) => api(`/api/bots/${encodeURIComponent(botId)}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+
+  it("books memory helper usage and checks the cap before every background call", async () => {
+    await session.close();
+    const routes = join(layerDir, "memory-replies.json");
+    const dump = join(layerDir, "memory-call.json");
+    writeFileSync(routes, JSON.stringify({
+      [CAPTURE_MARKER]: '[{"text":"Project codename is Bluebird","kind":"fact","confidence":0.9}]',
+      [ORGANIZE_MARKER]: '{"moves":[]}',
+      [TIDY_MARKER]: '{"pairs":[]}',
+    }));
+    session = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_TEXT_ROUTES: routes, FAKE_CLAUDE_TEXT_DUMP: dump },
+      undefined, undefined, undefined, { dir: layerDir, licenseKey: "fixture-key" });
+    const created = await api("/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Budgeted memory" }) });
+    expect(created.status).toBe(201);
+    const { bot } = await created.json() as any;
+    const memory = `/api/bots/${bot.id}/memory`;
+    const json = (method: string, body?: unknown): RequestInit => ({ method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const rows = () => readUsage(session.info.dataDir, { from: new Date(Date.now() - 86_400_000), to: new Date() }).filter((row) => row.botId === bot.id);
+    const tidy = async () => {
+      const response = await api(`${memory}/tidy`, json("POST"));
+      expect(response.status).toBe(200);
+      return (await response.json() as any).report;
+    };
+    const text = async () => (await (await api(`${memory}/file?path=MEMORY.md`)).json() as any).text as string;
+    expect((await api(`${memory}/file`, json("PUT", { path: "MEMORY.md", text:
+      Array.from({ length: 5 }, (_, i) => `- 2026-01-01 · Project note ${i}\n`).join("") +
+      "- 2026-01-01 · Expired appointment · until 2026-01-02\n" }))).status).toBe(200);
+    expect((await put({ budgets: { monthlyUsd: 0.01 }, memory: { captureQuietMs: 1_000 } })).status).toBe(200);
+
+    // Organize spends the cap; the contradiction call in the same pass must
+    // never reach the provider. Free deterministic cleanup still runs.
+    const notices = await openSse(`${session.info.url}/api/events`);
+    try {
+      expect(await tidy()).toMatchObject({ expired: 1, contradictionsChecked: false });
+      await notices.until((frame) => frame.kind === "notify" && frame.notification?.kind === "spend", 5_000);
+      const notice = notices.frames.find((frame) => frame.kind === "notify" && frame.notification?.kind === "spend");
+      // Notification navigation needs a real chat, not the ledger-only ID.
+      expect(notice.notification).toMatchObject({ botId: bot.id, threadId: bot.threadId });
+    } finally {
+      notices.close();
+    }
+    await expect.poll(rows).toHaveLength(1);
+    expect(rows()[0]).toMatchObject({
+      botId: bot.id, botName: bot.name, driverKind: "claudeAgent", model: "claude-haiku-4-5",
+      input: 15, output: 5, cachedInput: 2, costUsd: 0.01, costSource: "reported",
+      trigger: { kind: "bot", botId: bot.id }, threadId: expect.stringMatching(/^memory-/),
+    });
+    const atCap = readFileSync(dump, "utf8");
+    expect(JSON.parse(atCap).prompt).toContain(ORGANIZE_MARKER);
+    expect(await text()).not.toContain("Expired appointment");
+    expect(await tidy()).toMatchObject({ contradictionsChecked: false });
+    expect(readFileSync(dump, "utf8")).toBe(atCap);
+    expect(rows()).toHaveLength(1);
+
+    // Raising the cap permits the remaining model step and records a unique
+    // background call, without changing the bot's main thread/model.
+    expect((await put({ budgets: { monthlyUsd: 0.03 } })).status).toBe(200);
+    expect(await tidy()).toMatchObject({ contradictionsChecked: true });
+    await expect.poll(rows).toHaveLength(2);
+    expect(new Set(rows().map((row) => row.threadId)).size).toBe(2);
+    const lastTidyCall = readFileSync(dump, "utf8");
+    expect(JSON.parse(lastTidyCall).prompt).toContain(TIDY_MARKER);
+
+    // A foreground turn reaches the cap; its automatic capture is blocked.
+    expect((await send(bot.id, "Project codename is Bluebird.")).status).toBeLessThan(300);
+    await control(["wait", "--bot", bot.id, "--timeout", "30"]);
+    await expect.poll(async () => (await (await api(`${memory}/upkeep`)).json() as any).lastCapture,
+      { timeout: 15_000 }).toMatchObject({ added: 0 });
+    expect(readFileSync(dump, "utf8")).toBe(lastTidyCall);
+    expect(await text()).not.toContain("Bluebird");
+
+    // Another turn after raising the cap allows capture, which itself
+    // crosses the cap. The following organization call must be skipped.
+    expect((await put({ budgets: { monthlyUsd: 0.045 } })).status).toBe(200);
+    expect((await send(bot.id, "Remember the project codename is Bluebird.")).status).toBeLessThan(300);
+    await control(["wait", "--bot", bot.id, "--timeout", "30"]);
+    await expect.poll(text, { timeout: 15_000 }).toContain("Bluebird");
+    await expect.poll(rows).toHaveLength(5);
+    expect(JSON.parse(readFileSync(dump, "utf8")).prompt).toContain(CAPTURE_MARKER);
+    const usage = await (await api("/api/usage")).json() as any;
+    expect(usage.budget).toMatchObject({ exceeded: true });
+    expect(usage.budget.spentUsd).toBeCloseTo(0.05);
+    expect(rows().filter((row) => row.threadId.startsWith("memory-"))).toHaveLength(3);
+  }, 120_000);
+
+  it.each([
+    { name: "missing usage stays unpriced", metadata: {}, costUsd: null, costSource: undefined },
+    { name: "reported zero stays reported", metadata: { total_cost_usd: 0 }, costUsd: 0, costSource: "reported" },
+    { name: "tokens without cost are estimated", metadata: { usage: { input_tokens: 10, output_tokens: 5 } }, costUsd: 0.000035, costSource: "estimated" },
+  ])("memory helper accounting: $name", async ({ metadata, costUsd, costSource }) => {
+    await session.close();
+    session = await launchVerificationServer({ ...process.env,
+      FAKE_CLAUDE_TEXT_RESULT: JSON.stringify({ type: "result", result: '{"moves":[]}', ...metadata }),
+    }, undefined, undefined, undefined, { dir: layerDir, licenseKey: "fixture-key" });
+    const { bot } = await control(["new-bot", "--name", "Helper usage"]);
+    expect((await api(`/api/bots/${bot.id}/memory/file`, {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "MEMORY.md", text: "- 2026-01-01 · Prefers concise replies\n" }),
+    })).status).toBe(200);
+    expect((await api(`/api/bots/${bot.id}/memory/tidy`, { method: "POST" })).status).toBe(200);
+    const rows = () => readUsage(session.info.dataDir, { from: new Date(Date.now() - 86_400_000), to: new Date() });
+    await expect.poll(rows).toHaveLength(1);
+    expect(rows()[0]!.costUsd).toBe(costUsd);
+    expect(rows()[0]!.costSource).toBe(costSource);
+  }, 60_000);
 
   it("refuses the next turn once the month reaches the cap, prices turns, and lets a raised cap through", async () => {
     const edition = (await (await api("/api/edition")).json()) as { edition: string; features: string[] };

@@ -8,7 +8,7 @@ import type { SendTurnInput } from "../contracts.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { chatImage, type ChatImagePart } from "./chat-images.ts";
-import { ChatBoxClient } from "./chat-box-tools.ts";
+import { ChatBoatClient } from "./chat-boat-tools.ts";
 
 export interface ChatToolDefinition {
   type: "function";
@@ -26,7 +26,7 @@ export interface ChatToolSession {
 }
 
 type Server = { command: string; args: string[]; env: Record<string, string> };
-type BoxDescriptor = NonNullable<NonNullable<SendTurnInput["integrations"]>["computer"]>;
+type BoatDescriptor = NonNullable<NonNullable<SendTurnInput["integrations"]>["computer"]>;
 const STARTUP_MS = 8_000;
 const CALL_MS = 10 * 60_000;
 const FRAME_BYTES = 2 * 1024 * 1024;
@@ -239,7 +239,7 @@ function boundedText(value: string): string {
 }
 
 export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false): Promise<ChatToolSession> {
-  const servers: Array<[string, Server | BoxDescriptor]> = [];
+  const servers: Array<[string, Server | BoatDescriptor]> = [];
   if (computerUse && integrations?.computer) servers.push(["computer", integrations.computer]);
   if (computerUse && integrations?.localComputer) servers.push(["computer", integrations.localComputer]);
   if (computerUse && integrations?.browser) servers.push(["browser", integrations.browser]);
@@ -251,7 +251,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if ("command" in server) servers.push([name, server]);
   }
   if (servers.length > 32) throw new Error("MCP server count exceeds the 32-server limit");
-  const clients: Array<ChatMcpClient | ChatBoxClient> = [];
+  const clients: Array<ChatMcpClient | ChatBoatClient> = [];
   let closed = false;
   let closing: Promise<void> | undefined;
   const close = (): Promise<void> => {
@@ -266,7 +266,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const cancel = () => { void close().catch(() => {}); };
   signal.addEventListener("abort", cancel, { once: true });
   const definitions: ChatToolDefinition[] = [];
-  const registered = new Map<string, { client: ChatMcpClient | ChatBoxClient; name: string; schema: ValidateFunction }>();
+  const registered = new Map<string, { client: ChatMcpClient | ChatBoatClient; name: string; schema: ValidateFunction }>();
   try {
     if (signal.aborted) throw aborted();
     // Start independent servers concurrently; consume results in config order
@@ -275,7 +275,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       if (signal.aborted || closed) throw aborted();
       // Every mounted MCP server can return images when the caller enables
       // image delivery, including custom servers. Text stays bounded below.
-      const client = "boxId" in descriptor ? new ChatBoxClient(descriptor) : new ChatMcpClient(descriptor, computerUse);
+      const client = "boxId" in descriptor ? new ChatBoatClient(descriptor) : new ChatMcpClient(descriptor, computerUse);
       clients.push(client);
       return { name, client, tools: await client.tools(signal) };
     }));

@@ -39,8 +39,9 @@ describe("channel queue", () => {
     expect(run).toHaveBeenLastCalledWith(expect.objectContaining({
       groupId: "group-a",
       threadId: "thread-a",
-      text: "first follow-up",
-      mode: "chat",
+      // M2: the drain hands the run the leading coalesced group; a chat
+      // item never merges with the goal item behind it
+      items: [expect.objectContaining({ text: "first follow-up", mode: "chat" })],
     }));
     expect(_queuedChannelCount("thread-a")).toBe(1);
 
@@ -48,8 +49,7 @@ describe("channel queue", () => {
     drainChannelMessages(() => working, run);
     expect(run).toHaveBeenCalledTimes(2);
     expect(run).toHaveBeenLastCalledWith(expect.objectContaining({
-      text: "second follow-up",
-      mode: "goal",
+      items: [expect.objectContaining({ text: "second follow-up", mode: "goal" })],
     }));
     expect(_queuedChannelCount("thread-a")).toBe(0);
   });
@@ -62,10 +62,11 @@ describe("channel queue", () => {
     const run = vi.fn();
     drainChannelMessages(() => false, run);
     expect(run).toHaveBeenCalledWith(expect.objectContaining({
-      threadId: "thread-sender", text: "from the paired person", sender: { name: "Priya" },
+      threadId: "thread-sender",
+      items: [expect.objectContaining({ text: "from the paired person", sender: { name: "Priya" } })],
     }));
     drainChannelMessages(() => false, run);
-    const owner = run.mock.calls.map(([input]) => input).find((input) => input.text === "from the owner");
+    const owner = run.mock.calls.map(([input]) => input.items[0]).find((item) => item.text === "from the owner");
     expect(owner).toBeDefined();
     expect(owner.sender).toBeUndefined();
   });
@@ -85,7 +86,7 @@ describe("channel queue", () => {
     expect(() => restoreChannelMessages()).not.toThrow();
     const run = vi.fn();
     drainChannelMessages(() => false, run);
-    const legacy = run.mock.calls.map(([input]) => input).find((input) => input.threadId === "thread-legacy");
+    const legacy = run.mock.calls.map(([input]) => input).find((input) => input.threadId === "thread-legacy")?.items[0];
     expect(legacy).toMatchObject({ id: "legacy-channel-followup-without-sender", text: "queued by an older build", mode: "chat" });
     expect(legacy.sender).toBeUndefined();
   });
@@ -100,7 +101,7 @@ describe("channel queue", () => {
 
     const run = vi.fn();
     drainChannelMessages(() => false, run);
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({ id: keep.id, text: "keep" }));
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ id: keep.id, text: "keep" })] }));
   });
 
   it("lifts the whole queue atomically for a live steer, so a settle cannot drain it too", () => {
@@ -133,16 +134,20 @@ describe("channel queue", () => {
     const head = queueChannelMessage("group-f", "thread-f", "the head must stay");
     const later = queueChannelMessage("group-f", "thread-f", "named by the request");
 
-    // The steer path settles held.items[0]; a hold granted for a later id
+    // The steer path settles the head group; a hold granted for a later id
     // would steer and delete the head's words instead. Nothing may move.
     expect(holdChannelQueue("group-f", "thread-f", later.id)).toBeNull();
     expect(_queuedChannelCount("thread-f")).toBe(2);
     const run = vi.fn();
     drainChannelMessages(() => false, run);
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({ id: head.id, text: "the head must stay" }));
+    // M2: same-sender contiguous items drain as ONE coalesced group
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      items: [
+        expect.objectContaining({ id: head.id, text: "the head must stay" }),
+        expect.objectContaining({ id: later.id, text: "named by the request" }),
+      ],
+    }));
     expect(run).toHaveBeenCalledTimes(1);
-    cancelChannelMessage("group-f", head.id);
-    cancelChannelMessage("group-f", later.id);
     expect(_queuedChannelCount("thread-f")).toBe(0);
   });
 
@@ -158,10 +163,15 @@ describe("channel queue", () => {
     const run = vi.fn();
     drainChannelMessages(() => false, run);
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({ id: first.id }));
-    expect(_queuedChannelCount("thread-d")).toBe(1);
-    expect(queuedChannelMessage("group-d", "thread-d", "send_late_123456")?.id).toBe(late.id);
-    cancelChannelMessage("group-d", late.id);
+    // M2: the words that queued during the hold are the same sender inside
+    // the window, so the restored head drains as one coalesced item with them
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      items: [
+        expect.objectContaining({ id: first.id }),
+        expect.objectContaining({ id: late.id, sendId: "send_late_123456" }),
+      ],
+    }));
+    expect(_queuedChannelCount("thread-d")).toBe(0);
   });
 
   it("restores the held queue when the head's reply target can no longer be resolved", () => {
@@ -181,13 +191,15 @@ describe("channel queue", () => {
     expect(_queuedChannelCount("thread-h")).toBe(1);
     const run = vi.fn();
     drainChannelMessages(() => false, run);
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({ id: head.id, replyToId: "msg_gone" }));
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ id: head.id, replyToId: "msg_gone" })] }));
     cancelChannelMessage("group-h", head.id);
   });
 
   it("settles only the steered head and re-queues the tail for the room drain", () => {
     const head = queueChannelMessage("group-e", "thread-e", "folded into the running turn");
-    const tail = queueChannelMessage("group-e", "thread-e", "still waits its own turn");
+    // a different sender: M2 steers the head GROUP, so the tail must not be
+    // part of it to still test the requeue
+    const tail = queueChannelMessage("group-e", "thread-e", "still waits its own turn", { sender: { name: "Priya" } });
     const held = holdChannelQueue("group-e", "thread-e", head.id)!;
 
     settleHeldChannelQueueHead(held);
@@ -196,7 +208,7 @@ describe("channel queue", () => {
     const run = vi.fn();
     drainChannelMessages(() => false, run);
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({ id: tail.id, text: "still waits its own turn" }));
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ id: tail.id, text: "still waits its own turn" })] }));
     expect(_queuedChannelCount("thread-e")).toBe(0);
   });
 });

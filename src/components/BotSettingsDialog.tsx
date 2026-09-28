@@ -338,7 +338,7 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
           </button>
         </div>
 
-        <div className="mx-4 mb-2 flex shrink-0 items-center gap-2 rounded-lg bg-control/70 px-2.5 py-2">
+        <div className="mx-4 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2 focus-within:border-focus">
           <Search size={14} className="shrink-0 text-ink-secondary" />
           <input
             value={query}

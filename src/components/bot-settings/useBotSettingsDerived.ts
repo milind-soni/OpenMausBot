@@ -26,6 +26,9 @@ export type BotPatch = Partial<
     | "mascotBody"
     | "avatarUrl"
     | "avatarCrop"
+    | "avatarZoom"
+    | "avatarFocusX"
+    | "avatarFocusY"
     | "alwaysAllow"
     | "autoApprove"
     | "approvalMode"
@@ -78,7 +81,7 @@ export function useBotSettingsDerived(bot: Bot) {
   const browserAllowed = bot.browser !== false;
   const browserEnabled = browserFeature && browserAllowed;
   // "Works on: Browser" needs everything the switch needs except the switch
-  // itself; the box-native Computer engine has no browser-only mode.
+  // itself; the boat-native Computer engine has no browser-only mode.
   const browserSelectable = desktopBrowser && browserFeature && canUseBrowser && engine?.driverKind !== "boxAgent";
   const browserDisabledReason = !desktopBrowser
     ? browserUnavailableReason(state.config)

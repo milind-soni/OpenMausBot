@@ -52,6 +52,52 @@ pnpm exec vitest run server/paired-thread-targets-api.test.ts server/independent
 These launch isolated fake-provider fixtures. No server routes or pairing
 protocol changes are needed for the Android UI.
 
+## Compact home list
+
+The home list has two densities, chosen per device in **Settings → Threads
+list → List density**. Compact is the default: one line per bot and group, a
+crown after a Chief of Staff, a hand while a bot waits on you and a spinner in
+place of the time while it works. Only a bot with two or more threads shows
+**› N**, which lists them under the bot's name and ends with **New thread**;
+a long press on any bot offers **New thread** and **Manage threads**.
+Comfortable is the earlier layout and keeps its own logic. The compact rules
+mirror the iPhone companion's compact list and are tested in `:core`:
+
+```sh
+./gradlew :core:test --tests '*RosterDensityTest' \
+  :app:testDebugUnitTest --tests '*RosterScreenTest' --tests '*ChatPreferencesTest'
+```
+
+`RosterScreenTest` mounts the real roster and Settings over a real Session,
+`RosterFixture` (a synthetic fleet with every state the list draws, the
+counterpart of the iPhone companion's roster preview fleet) and a loopback
+server, with native graphics so text is measured for real. It checks:
+
+- compact is the default, one line per bot, with the crown and no Threads row
+  for a single-thread bot, and the Chief of Staff row set apart from Needs
+  attention;
+- the hand and the spinner on bot and group rows;
+- a single-thread bot's long press and TalkBack action create a thread, with
+  a spinner on the row until it opens;
+- **› 3** lists Pepper's threads in line with its name, without the routine
+  run, with a pin on the pinned one and a "Threads" heading over the unfiled
+  one, and ends with **New thread**; closing the folder or tapping **› 3** again
+  closes what it should; a list whose count goes away stays closed when the
+  threads come back;
+- search, including a single-thread bot's match; groups and the **+** that
+  makes one; "No bots yet" never drawn over group rows;
+- the role gives way before the name; at twice the text size names wrap
+  between whole words with automatic hyphenation off, including a two-word
+  name on a narrow phone;
+- the setting switches back to comfortable and is saved; comfortable keeps its
+  Threads tree;
+- in both densities at twice the text size, the first title starts under the
+  header and the last row scrolls fully clear of the floating bottom bar.
+
+Two things these checks cannot settle: this host has no hyphenation patterns,
+so only a device shows that no hyphen is added to a wrapped name, and TalkBack
+speech needs a real screen reader.
+
 ## Installable preview
 
 The output is `android/app/build/outputs/apk/preview/app-preview.apk`. This is
@@ -68,7 +114,8 @@ For manual testing, launch the disposable fixture from
 [threads.md](threads.md), enable Phone only on that fixture, and pair only a
 test emulator/device to it. Check:
 
-1. Home → expand Pepper → Email → open each named conversation.
+1. Home → Pepper's **› 3** (compact) or its Threads row (comfortable) → Email →
+   open each named conversation.
 2. Search a folder or thread name, then clear it; disclosure state survives.
 3. Type in one thread, switch through its header, type in another and return.
    Text and attachments must not move between conversations.
@@ -102,3 +149,31 @@ without any task-switch POST or change to the server-selected thread.
 - Preview APK assembled and its v2 signature verified.
 - Fixtures remained synthetic and confined to disposable loopback HTTP;
   no real pairing, device installation, or live-provider test was performed.
+
+## Compact home list — 2026-09-27
+
+- The 24 `RosterDensityTest` cases did not compile before the rules existed.
+  On the unfixed layout at twice the text size, the clearance check failed:
+  the last row ended at 818 dp, under the bottom bar's top at 804 dp. It passes
+  with the measured inset. Ten of the twelve `RosterScreenTest` checks failed
+  on the roster before the compact list existed.
+- 621 core tests and 971 app tests passed (`cleanTest :core:test
+  :app:testDebugUnitTest`), with no failures or skips. `:app:assembleDebug` and
+  `:app:assemblePreview` succeeded; the preview APK's v2 signature and its
+  `com.openmausbot.companion.preview` application ID were verified.
+- Fixtures were synthetic and confined to a loopback server. No emulator,
+  device installation, pairing or live-provider test was performed.
+
+## Compact home list review fixes — 2026-09-27
+
+- The reworked `RosterDensityTest` did not compile before the compact-only
+  rules existed. On the unfixed screen, 8 of the 20 `RosterScreenTest` checks
+  failed: hyphenation, the unfiled label and the pin, the list that reopened by
+  itself, progress while a thread is made, the Chief of Staff spacing, and
+  "No bots yet" over group rows. The other 12 pin behaviour that already held.
+- 627 core tests and 979 app tests passed (`cleanTest :core:test
+  :app:testDebugUnitTest`), with no failures or skips. `:app:assembleDebug` and
+  `:app:assemblePreview` succeeded; the preview APK's v2 signature and its
+  application ID were verified.
+- Fixtures were synthetic and confined to a loopback server. No emulator,
+  device installation, pairing or live-provider test was performed.

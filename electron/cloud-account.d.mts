@@ -9,6 +9,8 @@ export interface CloudAccountState {
   entitlement?: { plan: "free" | "pro"; status: "active" | "inactive"; expiresAt: number | null; version: number };
   verifiedAt?: number;
   verifiedUntil?: number;
+  /** The person's Cloud home machine, when their plan has one. */
+  machine?: import("./cloud-home.mjs").CloudMachine;
 }
 export interface CloudAccountBridge {
   state(): Promise<CloudAccountState>;
@@ -18,6 +20,8 @@ export interface CloudAccountBridge {
   refresh(): Promise<CloudAccountState>;
   signOut(): Promise<CloudAccountState>;
   openDashboard(): Promise<CloudAccountState>;
+  /** Lists the Cloud machine under Servers and opens it in this window. */
+  connectHome(): Promise<CloudAccountState>;
   onState(callback: (state: CloudAccountState) => void): () => void;
 }
 
@@ -44,6 +48,8 @@ export interface CloudAccountClient {
   refresh(): Promise<CloudAccountState>;
   signOut(): Promise<CloudAccountState>;
   openDashboard(): Promise<CloudAccountState>;
+  homeTarget(): { origin: string } | null;
+  pairHome(): Promise<import("./cloud-home.mjs").CloudHomeGrant>;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {

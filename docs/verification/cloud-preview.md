@@ -10,7 +10,7 @@ Open the printed `previewUrl` in a browser or an isolated Electron window.
 The fixture starts the standard fake-engine harness in a temporary home,
 creates its own test bot through the mapped control command, and mounts the
 real `ComputerPanel`. Only the cloud transport is simulated. It never needs
-a Box API key and never contacts a cloud provider. Ctrl-C stops both servers
+a Boat API key and never contacts a cloud provider. Ctrl-C stops both servers
 and removes their temporary data; the printed harness log remains.
 
 Verify these transitions with computer use:
@@ -30,7 +30,7 @@ Verify these transitions with computer use:
    **Cloud screen connected**, even though the bot is still busy.
 6. Turn **Busy** on, then **Reconnect panel**. The fixture, like the server,
    refuses `provision` with 409 while a turn is active. The panel must still
-   connect and show the screen (it attaches to the ready box without
+   connect and show the screen (it attaches to the ready boat without
    provisioning) — not **Couldn't reach the computer** with a red
    "being used by an active turn" alert. Turn **Busy** off: the panel stays
    connected.
@@ -71,6 +71,6 @@ and persistent server log. To reuse already installed test binaries, set
 The fixture tests actual image decoding, request cancellation, fresh frame
 selection, and renderer feedback. Host work continuing after cancellation is
 simulated in-page; `server/vps-routing.test.ts` separately covers the real HTTP
-route with fake SSH/Docker. Neither fixture proves a real VPS connection, Box
+route with fake SSH/Docker. Neither fixture proves a real VPS connection, Boat
 provisioning, native viewer windows, or account authentication. Test those
 separately with an explicitly isolated provider fixture when changing those paths.

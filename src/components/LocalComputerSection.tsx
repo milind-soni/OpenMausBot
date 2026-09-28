@@ -45,7 +45,7 @@ interface Status {
   workspace_guest_path: string;
   viewer_url: string;
   idle_timeout_ms: number;
-  mode: "shared" | "per-bot";
+  mode: "shared" | "per-bot" | "pool";
   max_instances: number;
   commands: {
     install: string | null;
@@ -192,7 +192,7 @@ export function cloudComputerInventoryState(instance: CloudComputerInventoryInst
   return computerStateLabel(cloudComputerInventoryStateKind(instance));
 }
 
-/** Box's account LIST is eventually consistent. Preserve the result of an
+/** Boat's account LIST is eventually consistent. Preserve the result of an
  * action the provider accepted instead of letting an older snapshot make a
  * confirmed deletion reappear, a pending deletion disappear, or a sleeping
  * computer look awake. */
@@ -215,7 +215,7 @@ export function reconcileCloudInventorySnapshot(
     return [{ ...instance, state: "archived" }];
   });
 
-  // A transitioning Box can briefly disappear from LIST. Keep the last safe
+  // A transitioning Boat can briefly disappear from LIST. Keep the last safe
   // row until LIST returns the terminal sleeping state.
   for (const instance of previous) {
     if (overrides[instance.boxId] !== "sleeping" || incomingIds.has(instance.boxId)) continue;
@@ -229,7 +229,7 @@ export function reconcileCloudInventorySnapshot(
   return { instances, overrides: nextOverrides };
 }
 
-/** An empty list proves deletion only when Box says the inventory read was
+/** An empty list proves deletion only when Boat says the inventory read was
  * authoritative. Provider outages and disconnected accounts must not erase
  * the last known row or settle a pending deletion as successful. */
 export function reconcileCloudInventoryPayload(
@@ -960,7 +960,7 @@ export function LocalComputerSection() {
     return () => controller.abort();
   }, [inventoryRefreshKey, refreshInventory, status?.mode]);
 
-  // Box account listing is deliberately not polled. It can be expensive and
+  // Boat account listing is deliberately not polled. It can be expensive and
   // Settings must remain an observation-only surface until the person clicks
   // Sleep or Delete.
   useEffect(() => {
@@ -1128,7 +1128,7 @@ export function LocalComputerSection() {
       );
 
       if (deletionPending) {
-        // Box may accept a background operation before the computer is gone.
+        // Boat may accept a background operation before the computer is gone.
         // Keep the row visible as Removing while we check, then drop the
         // optimistic state if the provider still lists it so the person can
         // refresh or retry instead of being shown a false success forever.

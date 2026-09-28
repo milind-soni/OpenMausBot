@@ -38,9 +38,9 @@ describe("resolveComputerPromptKind", () => {
     [{ kind: "vm", driverKind: "claude", cloudComputerMcp: undefined, vmPrivate: false }, "vm-shared"],
     [{ kind: "vm", driverKind: "claude", cloudComputerMcp: true, vmPrivate: true }, "vm-private"],
     [{ kind: "vm", driverKind: "boxAgent", cloudComputerMcp: false, vmPrivate: false }, "vm-shared"],
-    // a box plan: the agent earns its own kind, a driver that keeps its
+    // a boat plan: the agent earns its own kind, a driver that keeps its
     // identity and speaks the computer MCP gets the chat paragraph, and the
-    // bare box branch stays reachable for drivers the swap cannot replace
+    // bare boat branch stays reachable for drivers the swap cannot replace
     [{ kind: "box", driverKind: "boxAgent", cloudComputerMcp: false, vmPrivate: false }, "box-agent"],
     [{ kind: "box", driverKind: "codex", cloudComputerMcp: true, vmPrivate: false }, "box-chat"],
     [{ kind: "box", driverKind: "codex", cloudComputerMcp: false, vmPrivate: false }, "box"],
@@ -60,7 +60,7 @@ describe("resolveComputerPromptKind", () => {
 describe("computerPrompt", () => {
   it("gives every kind its own paragraph plus the sign-in policy, and silence to none", () => {
     expect(computerPrompt(null)).toBe("");
-    // the box agent already lives on the computer: no paragraph, only the
+    // the boat agent already lives on the computer: no paragraph, only the
     // shared sign-in policy still applies
     expect(computerPrompt("box-agent")).toBe(SIGN_IN_PROMPT);
     const paragraphs: Record<string, string> = {
@@ -68,7 +68,7 @@ describe("computerPrompt", () => {
       "vm-shared": "shared, isolated Cua sandbox",
       box: "You have your own cloud computer",
       "box-chat": "You control the assigned cloud computer",
-      vps: "This is a VPS, not Box",
+      vps: "This is a VPS, not Boat",
       local: "act on the user's computer",
     };
     for (const [kind, distinct] of Object.entries(paragraphs)) {

@@ -188,8 +188,8 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
         <p className="text-[12px] leading-relaxed text-ink-secondary">Drag a computer onto a team, or choose its team below. Bots on Auto will use it.</p>
         {(error || readError || inventory?.problem) && <p role="alert" className="rounded-lg bg-danger/10 p-3 text-[12px] text-danger">{error || readError || inventory?.problem}</p>}
         {inventory && !inventory.configured && <div className="rounded-xl border border-hairline/50 p-3 text-[12px]">
-          <p className="text-ink-secondary">Connect your Box account before creating a cloud computer.</p>
-          <button className={`${control} mt-2 border border-hairline/50`} onClick={settings}>Connect Box</button>
+          <p className="text-ink-secondary">Connect your Boat account before creating a cloud computer.</p>
+          <button className={`${control} mt-2 border border-hairline/50`} onClick={settings}>Connect Boat</button>
         </div>}
         {creating ? <form className="space-y-3 rounded-xl border border-hairline/60 bg-card p-3" onSubmit={(event) => {
           event.preventDefault();
@@ -202,16 +202,16 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
             submittedName.current = null;
           });
         }}>
-          <label className="block text-[12px] font-medium" htmlFor="canvas-computer-name">New Box computer</label>
+          <label className="block text-[12px] font-medium" htmlFor="canvas-computer-name">New Boat computer</label>
           <input ref={nameInput} id="canvas-computer-name" className={field} value={name} maxLength={60} placeholder="e.g. Engineering desktop" disabled={busy !== null || submittedName.current !== null} onChange={(event) => setName(event.target.value)} />
-          <p className="text-[11px] leading-relaxed text-ink-secondary">Creates a cloud machine in your connected boat.dev account. Your Box plan and usage charges apply. It stays unassigned until you choose a team.</p>
+          <p className="text-[11px] leading-relaxed text-ink-secondary">Creates a cloud machine in your connected boat.dev account. Your Boat plan and usage charges apply. It stays unassigned until you choose a team.</p>
           <div className="flex justify-end gap-1">
             <button type="button" className={control} disabled={busy !== null} onClick={() => setCreating(false)}>Cancel</button>
             <button type="submit" className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[12px] font-medium text-white disabled:opacity-40" disabled={!inventory?.configured || !name.trim() || busy !== null}>
-              {busy === "create" && <Loader2 size={13} className="animate-spin" />}Create Box
+              {busy === "create" && <Loader2 size={13} className="animate-spin" />}Create Boat
             </button>
           </div>
-        </form> : <button className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-hairline/60 px-3 py-3 text-[12px] text-ink-secondary hover:bg-control hover:text-ink" disabled={busy !== null} onClick={() => setCreating(true)}><Plus size={14} /> New Box computer</button>}
+        </form> : <button className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-hairline/60 px-3 py-3 text-[12px] text-ink-secondary hover:bg-control hover:text-ink" disabled={busy !== null} onClick={() => setCreating(true)}><Plus size={14} /> New Boat computer</button>}
         {inventory?.computers.map((computer) => {
           const ready = ["idle", "ready", "running"].includes(computer.state);
           const starting = ["init", "provisioning", "provisioned", "cloning", "starting"].includes(computer.state);
@@ -230,7 +230,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
             onLostPointerCapture={() => { if (pointer.current) clearDrag(); }}
             className="flex touch-none select-none cursor-grab items-center gap-2.5 rounded-lg py-1 outline-none active:cursor-grabbing">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-control text-ink-secondary"><Box size={18} /></span>
-            <span className="min-w-0"><span className="block truncate text-[13px] font-medium">{computer.name}</span><span className="block text-[11px] text-ink-secondary">Box · {busy === computer.id ? "Updating…" : computer.state}</span></span>
+            <span className="min-w-0"><span className="block truncate text-[13px] font-medium">{computer.name}</span><span className="block text-[11px] text-ink-secondary">Boat · {busy === computer.id ? "Updating…" : computer.state}</span></span>
           </div>
           {computer.problem && <p className="mt-2 text-[11px] text-danger">{computer.problem}</p>}
           <label className="sr-only" htmlFor={`computer-team-${computer.id}`}>Team for {computer.name}</label>
@@ -241,7 +241,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
           </select>
           {computer.section !== null && <p className="mt-1.5 text-[10px] text-ink-secondary">Unassign to move to another team.</p>}
           <div className="mt-2 flex flex-wrap gap-1">
-            {!ready && !starting && <button className={control} title="Starts this Box; your provider's usage charges apply" disabled={busy !== null || held} onClick={() => void mutate(computer.id, () => post(computer.id, "provision", { acknowledgeCost: true }))}>Start / retry</button>}
+            {!ready && !starting && <button className={control} title="Starts this Boat; your provider's usage charges apply" disabled={busy !== null || held} onClick={() => void mutate(computer.id, () => post(computer.id, "provision", { acknowledgeCost: true }))}>Start / retry</button>}
             {ready && !held && <button className={control} disabled={busy !== null} onClick={() => void mutate(computer.id, () => post(computer.id, "sleep"))}>Sleep</button>}
             {ready && <button className={`${control} flex items-center gap-1.5`} title="Pauses bot control while you use the desktop" disabled={busy !== null} onClick={() => void mutate(computer.id, async () => {
               await post(computer.id, "control", { action: "take", controlLeaseId: controlLeaseId.current });

@@ -51,6 +51,19 @@ import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 
+// Follow the spawning server down, including on Windows where ppid does
+// not change after parent exit. Inline: fakes must stay self-contained.
+{
+  const spawner = process.ppid;
+  const orphanWatch = setInterval(() => {
+    if (process.ppid !== spawner) process.exit(0);
+    try { process.kill(spawner, 0); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") process.exit(0);
+    }
+  }, 500);
+  orphanWatch.unref();
+}
+
 // stdout and stderr are separate pipes: the writer cannot order them for
 // the reader, and a fixed sleep only pretends to. These knobs synchronize
 // on the test instead — it watches the driver consume the earlier stream

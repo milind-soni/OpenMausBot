@@ -1,15 +1,15 @@
 # Waiting for a shared computer
 
-Run the real-server fixture in an isolated home, with a local Box API stub:
+Run the real-server fixture in an isolated home, with a local Boat API stub:
 
 ```sh
-pnpm exec vitest run server/index.test.ts -t 'shares one team computer|dispatches the conversation.s pinned computer|blocks bot-scoped Box lifecycle'
+pnpm exec vitest run server/index.test.ts -t 'shares one team computer|dispatches the conversation.s pinned computer|blocks bot-scoped Boat lifecycle'
 pnpm exec vitest run server/turn-resources.test.ts server/group-local-vm.e2e.test.ts server/shared-computers.e2e.test.ts
 ```
 
 The shared-team-computer case proves:
 
-- A first turn starts on the Box stub; a second thread under the same bot
+- A first turn starts on the Boat stub; a second thread under the same bot
   waits without sending another provider prompt.
 - Stop cancels the waiting thread without interrupting the owner.
 - A room waits for that same computer, with a visible activity message.
@@ -23,5 +23,5 @@ Waiting is bounded by the existing computer/team availability wait window
 Desktop ownership still spans a turn so screenshot/click sequences cannot
 interleave. This is automatic waiting, not simultaneous control of one screen.
 
-These fixtures do not contact Box or operate the user's desktop. They verify
-server behavior and transcript state, not visual rendering or a live Box.
+These fixtures do not contact Boat or operate the user's desktop. They verify
+server behavior and transcript state, not visual rendering or a live Boat.

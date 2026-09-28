@@ -15,6 +15,7 @@ import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-ico
 import type { McpServerSpec } from "./contracts.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
+import { CLOUD_SEAT_IDLE_STOP_MS } from "./cloud-overflow.ts";
 
 const optionalText = z.string().optional();
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
@@ -93,7 +94,8 @@ const roomConfigSchema = z.object({
     .min(MIN_ROOM_TURN_TIMEOUT_MINUTES)
     .max(MAX_ROOM_TURN_TIMEOUT_MINUTES),
   /** Room handoff tree lifetime. Active execution pauses this clock; the
-   * hard cap is wall-clock and bounds trees that never stop executing. */
+   * hard cap is the maximum stall window, measured wall-clock from the
+   * tree's last durable progress. */
   handoffLifetimeMinutes: z.number().int().min(1).max(MAX_ROOM_TURN_TIMEOUT_MINUTES).optional(),
   handoffMinRunwayMinutes: z.number().int().min(1).max(MAX_ROOM_TURN_TIMEOUT_MINUTES).optional(),
   handoffHardCapMinutes: z.number().int().min(1).max(7 * MAX_ROOM_TURN_TIMEOUT_MINUTES).optional(),
@@ -105,8 +107,14 @@ const roomConfigSchema = z.object({
       (rooms.handoffHardCapMinutes ?? DEFAULT_ROOM_HANDOFF_HARD_CAP_MINUTES),
   { message: "rooms handoff bounds must satisfy handoffMinRunwayMinutes <= handoffLifetimeMinutes <= handoffHardCapMinutes" },
 );
+/** Isolation for bot desktops. Migration note (issue #1654): switching
+ * modes changes lease keys and vm-home directories, so desktops cold-start
+ * under the new mode — a pool seat lives in vm-homes/pool-N — while the old
+ * mode's workspaces stay on disk until removed. maxInstances caps per-bot
+ * desktops in per-bot mode, or the pool's seat count in pool mode; it is
+ * not a total across modes. Default stays "shared". */
 const localVmConfigSchema = z.object({
-  mode: z.enum(["shared", "per-bot"]).optional(),
+  mode: z.enum(["shared", "per-bot", "pool"]).optional(),
   maxInstances: z
     .number()
     .int()
@@ -273,6 +281,10 @@ const featureConfigSchema = z.object({
   skillAuthoring: z.boolean().optional(),
   /** Show each tool run in the transcript. Off unless explicitly enabled. */
   showToolCalls: z.boolean().optional(),
+  /** Run a routine inside the conversation it reports to, instead of a hidden
+   * thread. Off unless explicitly enabled. The run still starts from its own
+   * instructions, but the messages stay in that chat. */
+  routinesInConversation: z.boolean().optional(),
   /** Experimental built-in browser. Off until explicitly enabled; each bot
    * also has its own switch. */
   browser: z.boolean().optional(),
@@ -286,8 +298,23 @@ const featureConfigSchema = z.object({
   claudeUserMcp: z.boolean().optional(),
   /** LLM-generated titles for new bot threads. Off until explicitly
    * enabled; a one-shot that fails or answers junk leaves the first-message
-   * snippet in place — see llmThreadTitlesEnabled. */
+  * snippet in place — see llmThreadTitlesEnabled. */
   llmThreadTitles: z.boolean().optional(),
+  /** Before each turn, passages from the bot's own memory files and earlier
+   * conversations that share words with the message ride into the turn.
+   * Read-only; on unless explicitly switched off — see autoRecallEnabled. */
+  autoRecall: z.boolean().optional(),
+  /** Idle release for computer claims (#1653): a desktop seat that stays
+   * screen-quiet for 90 seconds is released to waiting turns while its
+   * holder's turn still lives; the previous holder re-claims directly
+   * for 10 minutes and yields to an occupied seat. Off until baked; see
+   * computerClaimIdleReleaseEnabled for how to enable it by hand. */
+  computerClaimIdleRelease: z.boolean().optional(),
+  /** Consented cloud overflow for local computer waits (#1655): a wait
+   * may offer a per-second-billed cloud seat, but only through an explicit
+   * consent card or a configured allowlist — never a silent Auto default.
+   * Off until baked; see cloudOverflowEnabled for how to enable it by hand. */
+  cloudOverflow: z.boolean().optional(),
 });
 /** First-run progress. Kept in the workspace config rather than a browser so
  * it survives cleared site data and is shared by every paired client. Hint
@@ -407,6 +434,8 @@ const appConfigSchema = z.object({
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
+  /** Historical config section name "box" (the persisted config.json key); the
+   * provider is Boat now and the key is kept for compatibility. */
   box: z.object({ token: optionalText }).optional(),
   vps: vpsConfigSchema.optional(),
   /** Optional OpenCode key; persisted write-only and passed only to its child. */
@@ -459,10 +488,26 @@ const appConfigSchema = z.object({
     compactAt: z.number().positive().max(10_000_000).optional(),
     autoCompact: z.boolean().optional(),
   }).optional(),
+  /** Memory upkeep timing, for bots with Memory upkeep switched on. */
+  memory: z.object({
+    /** Quiet time after a turn before its facts are captured (ms). */
+    captureQuietMs: z.number().int().min(1_000).max(24 * 60 * 60_000).optional(),
+    /** Local hour (0-23) after which the nightly tidy-up runs. */
+    tidyHour: z.number().int().min(0).max(23).optional(),
+  }).strict().optional(),
   threads: threadsConfigSchema.optional(),
   /** The authorization decision log (server/decision-log.ts): days of month
    * files kept, at least; OMB_DECISION_RETENTION_DAYS wins when set. */
   decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
+  /** #1655 cloud-overflow settings. perSecondCostUsd is the operator's own
+   * verified rate: with no price configured the feature stays inert rather
+   * than show an invented one. allowlistedThreads carries standing consent
+   * for exact thread ids. */
+  cloudOverflow: z.object({
+    perSecondCostUsd: z.number().positive().max(10).optional(),
+    idleStopMs: z.number().int().positive().max(24 * 60 * 60_000).optional(),
+    allowlistedThreads: z.array(z.string().min(1)).max(1000).optional(),
+  }).strict().optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
@@ -509,6 +554,7 @@ export interface AppConfig {
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
+  /** Persisted under the historical config key "box" (ascii.dev renamed Box to Boat). */
   box?: { token?: string };
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
@@ -519,11 +565,16 @@ export interface AppConfig {
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };
+  memory?: { captureQuietMs?: number; tidyHour?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
-   * separate container, durable workspace, viewer and lease. */
-  localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
+   * separate container, durable workspace, viewer and lease. Pool runs N
+   * seats shared by all conversations, with per-thread affinity (#1654). */
+  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; autoRecall?: boolean; computerClaimIdleRelease?: boolean; cloudOverflow?: boolean; routinesInConversation?: boolean };
+  /** #1655: consented cloud overflow for local computer waits. The cost is
+   * the operator's own per-second rate; unset keeps the feature inert. */
+  cloudOverflow?: { perSecondCostUsd?: number; idleStopMs?: number; allowlistedThreads?: string[] };
   /** First-run progress; see onboardingConfigSchema. */
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[] };
   /** Named browser sessions any bot can be pointed at. */
@@ -662,8 +713,9 @@ export interface RoomHandoffLimitsMs {
 }
 
 /** Room handoff tree budgets in milliseconds. The tree lifetime pauses
- * while a node is actively executing; the hard cap is wall-clock and bounds
- * trees that never stop. Read when the server starts. */
+ * while a node is actively executing; the hard cap is the maximum stall
+ * window, measured wall-clock from the tree's last durable progress. Read
+ * when the server starts. */
 export function roomHandoffLimits(cfg: AppConfig): RoomHandoffLimitsMs {
   return {
     lifetimeMs: (cfg.rooms?.handoffLifetimeMinutes ?? DEFAULT_ROOM_HANDOFF_LIFETIME_MINUTES) * 60_000,
@@ -692,7 +744,7 @@ export function threadEventLogRetentionDays(cfg: AppConfig): number | null {
   return cfg.threads?.eventLogRetentionDays ?? null;
 }
 
-export function localVmMode(cfg: AppConfig): "shared" | "per-bot" {
+export function localVmMode(cfg: AppConfig): "shared" | "per-bot" | "pool" {
   return cfg.localVm?.mode ?? DEFAULT_LOCAL_VM_MODE;
 }
 
@@ -706,8 +758,30 @@ export function skillAuthoringEnabled(cfg: AppConfig): boolean {
   return cfg.features?.skillAuthoring !== false;
 }
 
+/** Automatic recall is read-only, so it is on unless switched off. */
+export function autoRecallEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.autoRecall !== false;
+}
+
+export const DEFAULT_CAPTURE_QUIET_MS = 2 * 60_000;
+export const DEFAULT_TIDY_HOUR = 3;
+
+export function captureQuietMs(cfg: AppConfig): number {
+  return cfg.memory?.captureQuietMs ?? DEFAULT_CAPTURE_QUIET_MS;
+}
+
+export function tidyHour(cfg: AppConfig): number {
+  return cfg.memory?.tidyHour ?? DEFAULT_TIDY_HOUR;
+}
+
 export function showToolCallsEnabled(cfg: AppConfig): boolean {
   return cfg.features?.showToolCalls === true;
+}
+
+/** A routine's turns are posted in the conversation that receives its card.
+ * Off by default, so scheduled work stays in a hidden thread. */
+export function routinesInConversationEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.routinesInConversation === true;
 }
 
 /** Workspace-level gate for the experimental built-in browser. A bot's own
@@ -747,6 +821,48 @@ export function llmThreadTitlesEnabled(cfg: AppConfig): boolean {
   return cfg.features?.llmThreadTitles === true;
 }
 
+/** Idle release for computer claims (#1653): a whole-turn desktop hold
+ * ends after a screen-quiet window (default 90 seconds, screen-poller
+ * frames excluded) instead of at turn settle, and the previous holder
+ * re-claims directly inside a reclaim window (default 10 minutes) while
+ * yielding to a seat another turn already holds. Off unless an explicit
+ * `true` — bake it as a maintainer-only flag first, exactly like
+ * sharedComputers: enable by hand in ~/.openmausbot/config.json
+ * (`{"features": {"computerClaimIdleRelease": true}}`) and restart. */
+export function computerClaimIdleReleaseEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.computerClaimIdleRelease === true;
+}
+
+/** Consented cloud overflow for local computer waits (#1655): while a turn
+ * waits for a local desktop, it may offer overflow to a per-second-billed
+ * cloud seat — never silently: the card names the cost, and only an
+ * explicit per-conversation consent or a configured allowlist thread may
+ * start the machine, which then hard-stops after an idle window. Off
+ * unless an explicit `true`, like computerClaimIdleRelease: enable by
+ * hand in ~/.openmausbot/config.json
+ * (`{"features": {"cloudOverflow": true}, "cloudOverflow": {"perSecondCostUsd": 0.0004}}`)
+ * and restart. */
+export function cloudOverflowEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.cloudOverflow === true;
+}
+
+/** The per-second rate shown on the card, or null when the operator has
+ * not set one: the offer fails closed rather than guess a price. */
+export function cloudOverflowPerSecondCostUsd(cfg: AppConfig): number | null {
+  const cost = cfg.cloudOverflow?.perSecondCostUsd;
+  return typeof cost === "number" && Number.isFinite(cost) && cost > 0 ? cost : null;
+}
+
+/** How long a cloud seat may stay screen-quiet before it is stopped. */
+export function cloudOverflowIdleStopMs(cfg: AppConfig): number {
+  return cfg.cloudOverflow?.idleStopMs ?? CLOUD_SEAT_IDLE_STOP_MS;
+}
+
+/** Threads with standing consent, by exact thread id. */
+export function cloudOverflowAllowlistedThreads(cfg: AppConfig): Set<string> {
+  return new Set(cfg.cloudOverflow?.allowlistedThreads ?? []);
+}
+
 /** Config sections no provider driver reads. A write that touches only
  * these must not rebuild the fleet: rebuilding disposes every engine child
  * and reloads it, seconds of work that would also interrupt in-flight
@@ -762,8 +878,10 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "threads",
   "automaticRecovery",
   "context",
+  "memory",
   "localVm",
   "features",
+  "cloudOverflow",
   "browserProfiles",
   "onboarding",
 ]);
@@ -872,6 +990,7 @@ export function loadConfig(): AppConfig {
   if (process.env.OPENAI_COMPAT_PROVIDER !== undefined) cfg.openaiCompat.provider = process.env.OPENAI_COMPAT_PROVIDER;
   cfg.composio = { ...cfg.composio };
   if (process.env.COMPOSIO_API_KEY !== undefined) cfg.composio.apiKey = process.env.COMPOSIO_API_KEY;
+  // BOX_TOKEN keeps its historical name; the provider is Boat.
   cfg.box = { ...cfg.box };
   if (process.env.BOX_TOKEN !== undefined) cfg.box.token = process.env.BOX_TOKEN;
   cfg.opencodeGo = { ...cfg.opencodeGo };
@@ -1045,7 +1164,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "memory", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -1248,6 +1367,7 @@ function injectedEnvironment(cfg: AppConfig, driver: string): Map<string, string
     environment.set("OPENAI_COMPAT_API_KEY", cfg.openaiCompat.key);
   if (driver === "openai-compat" && cfg.openaiCompat?.url)
     environment.set("OPENAI_COMPAT_URL", cfg.openaiCompat.url);
+  // driverKind "boxAgent" and env BOX_TOKEN keep their historical names.
   if (driver === "boxAgent" && cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
   if (driver === "opencodeGo" && cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
   return environment;

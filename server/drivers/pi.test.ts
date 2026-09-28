@@ -627,9 +627,9 @@ describe("PiDriver turns (fake CLI)", () => {
     const dump = join(dir, "dump.jsonl");
     // Plant a workspace credential on the harness process itself — the leak
     // path is `...process.env`, not just input.environment.
-    const savedBox = process.env.BOX_TOKEN;
+    const savedBoat = process.env.BOX_TOKEN;
     const savedXai = process.env.XAI_API_KEY;
-    process.env.BOX_TOKEN = "box-secret-value";
+    process.env.BOX_TOKEN = "boat-secret-value";
     process.env.XAI_API_KEY = "xai-secret-value";
     try {
       await create(undefined, {
@@ -639,8 +639,8 @@ describe("PiDriver turns (fake CLI)", () => {
       });
       await instance.dispose();
     } finally {
-      if (savedBox === undefined) delete process.env.BOX_TOKEN;
-      else process.env.BOX_TOKEN = savedBox;
+      if (savedBoat === undefined) delete process.env.BOX_TOKEN;
+      else process.env.BOX_TOKEN = savedBoat;
       if (savedXai === undefined) delete process.env.XAI_API_KEY;
       else process.env.XAI_API_KEY = savedXai;
     }

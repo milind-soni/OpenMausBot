@@ -51,10 +51,24 @@ real `URLSession` tests:
 
 ## Threads on iPhone and iPad
 
-Tap **Threads** beneath a bot on the home screen to expand its conversations.
+The home list comes in two densities, chosen per device in **Settings → List
+density**, like the desktop sidebar's density:
+
+- **Compact** (the default) gives each bot and group one line: the face, the
+  name, a crown after a Chief of Staff, the role, and the time — replaced by a
+  spinner while the bot works, with a hand in the bot's colour when it waits
+  on you. A bot with more than one active thread shows **› N** (closed,
+  archived and snoozed threads are left out, as in the list it opens); tap it
+  to list those threads under the bot's name, ending with **New thread**.
+  Long-press any bot for **New thread** and **Manage threads**. Groups are
+  rows too, and the **+** on their title makes a new one.
+- **Comfortable** keeps the larger two-line rows with the latest message,
+  groups as tiles, and a **Threads** row beneath every bot.
+
 Desktop folders appear in the same order, with working, queued, waiting and
-unread state shown on each thread. Search matches thread and folder names.
-Internal routine runs are kept out of this list.
+unread state shown on each thread. Search matches thread and folder names and
+lists what matched under each bot. Internal routine runs are kept out of this
+list.
 
 Inside a chat, tap the bot/thread name in the header to switch conversations,
 create a thread, or rename/delete one. In the thread picker, tap **Select** to
@@ -210,7 +224,8 @@ the host computer remain unreachable through the companion.
   deliver the result. A phone that draws its own version of what just happened
   is a phone that disagrees with the laptop.
 - **Messaging-app shape, not settings-list shape.** Mascot faces at roster size,
-  the bot's role as a chip beside its name, timestamps that say "Yesterday"
+  the bot's role beside its name (quiet text in compact, a chip in
+  comfortable), timestamps that say "Yesterday"
   rather than a date, and a gap-based separator in the transcript instead of a
   stamp on every message. The palette in `MausAvatar.swift` is copied verbatim
   from `src/lib/mascot.ts`: a bot the user knows as "the orange one" should be

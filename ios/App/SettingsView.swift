@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage(PrefKey.activityDetail) private var activityDetail = ActivityDetail.full.rawValue
     @AppStorage(PrefKey.islandIntro) private var islandIntro = IslandIntro.oncePerBot.rawValue
     @AppStorage(PrefKey.language) private var language = AppLanguage.system.rawValue
+    @AppStorage(PrefKey.rosterDensity) private var rosterDensity = RosterDensity.default.rawValue
     private let onConnect: (() -> Void)?
 
     init(onConnect: (() -> Void)? = nil) {
@@ -102,6 +103,28 @@ struct SettingsView: View {
                 Text("Chat")
             } footer: {
                 Text(LocalizedStringKey(ActivityDetail(rawValue: activityDetail)?.caption ?? ""))
+            }
+
+            Section {
+                // Bound through the resolved value, so a stored value this
+                // build cannot read still shows the density actually in use.
+                Picker(selection: Binding(
+                    get: { RosterDensity(stored: rosterDensity) },
+                    set: { rosterDensity = $0.rawValue }
+                )) {
+                    ForEach(RosterDensity.allCases, id: \.self) { density in
+                        Text(LocalizedStringKey(density.label)).tag(density)
+                    }
+                } label: {
+                    Label {
+                        Text("List density")
+                    } icon: {
+                        SettingsIcon(symbol: "list.bullet", color: .indigo)
+                    }
+                }
+                .accessibilityIdentifier("list-density")
+            } footer: {
+                Text(LocalizedStringKey(RosterDensity(stored: rosterDensity).caption))
             }
 
             Section {

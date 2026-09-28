@@ -111,10 +111,10 @@ card for a person. What differs per engine is only how the ask travels:
 | Grok Build, Minimax, OpenAI-compatible endpoints | The injected `ask_user` tool | Yes — up to 6 |
 | ACP engines (Cursor, Antigravity, Gemini CLI, Qwen Code, OpenCode, …) | Option-match round-trip on the ACP permission request | One at a time — the request carries one choice set |
 | Pi | Free-text round-trip over `extension_ui_request` | One at a time |
-| BoxAgent (cloud computer) | A fenced `omb-ask` block in the run's final output; the turn stays open until you answer or the ask times out | Yes — up to 6 |
+| BoatAgent (cloud computer) | A fenced `omb-ask` block in the run's final output; the turn stays open until you answer or the ask times out | Yes — up to 6 |
 
 A question the harness parsed out of model-authored output rather than a
-real tool call — the BoxAgent transport — carries an "Agent-composed
+real tool call — the BoatAgent transport — carries an "Agent-composed
 question" badge on the card, and the decision log records it with
 `origin: output`. Flat clients (notifications, older companion builds)
 see plain buttons only when a card asks a single choice question; a

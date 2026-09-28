@@ -23,7 +23,7 @@ beforeEach(() => {
   bridge = { state: vi.fn().mockResolvedValue({ status: "signed-out" }), begin: vi.fn().mockResolvedValue({ status: "connecting" }),
     reopen: vi.fn().mockResolvedValue({ status: "connecting" }), cancel: vi.fn().mockResolvedValue({ status: "signed-out" }),
     refresh: vi.fn().mockResolvedValue(free), signOut: vi.fn().mockResolvedValue({ status: "signed-out" }), openDashboard: vi.fn().mockResolvedValue(free),
-    onState: vi.fn(callback => { push = callback; return () => {}; }) };
+    connectHome: vi.fn().mockResolvedValue(free), onState: vi.fn(callback => { push = callback; return () => {}; }) };
   vi.stubGlobal("window", { ogb: { cloudAccount: bridge } }); vi.stubGlobal("fetch", vi.fn()); setLocale("en");
 });
 afterEach(() => { vi.unstubAllGlobals(); setLocale("en"); });
@@ -53,4 +53,47 @@ it("never accesses account bridge from remote companion pages", async () => {
 it("a late initial snapshot cannot replace a newer revoked state", async () => {
   let resolve!: (state: CloudAccountState) => void; vi.mocked(bridge.state).mockReturnValueOnce(new Promise(done => { resolve = done; }));
   render(); f.effects[0](); push({ status: "reauth-required" }); resolve(free); await flush(); expect(render().html).toContain("expired or was revoked");
+});
+
+const pro: CloudAccountState = { ...free, entitlement: { plan: "pro", status: "active", expiresAt: 1_900_000_000_000, version: 2 } };
+const origin = "https://home-7f3k2.fly.dev";
+it("stays exactly as before when the account has no Cloud machine", async () => {
+  await ready(free);
+  expect(render().html).not.toContain("Your Cloud");
+  expect(render().html).not.toContain("Connect to my Cloud");
+  push(pro); expect(render().html).not.toContain("Connect to my Cloud");
+});
+it.each([
+  ["provisioning", "Setting up your Cloud", false],
+  ["ready", "Your Cloud is ready", true],
+  ["stopped", "Your Cloud is stopped", false],
+  ["payment-problem", "problem with your payment", false],
+  ["failed", "could not be set up yet", false],
+] as const)("shows the %s machine state plainly", async (status, text, connectable) => {
+  await ready({ ...pro, machine: { status, ...(status === "provisioning" ? {} : { origin }) } });
+  const html = render().html;
+  expect(html).toContain(`data-cloud-home="${status}"`);
+  expect(html).toContain(text);
+  expect(html.includes("Connect to my Cloud")).toBe(connectable);
+  expect(html).not.toContain("Could not complete this Cloud action");
+});
+it("promises no included AI: the person signs in with their own account there", async () => {
+  await ready({ ...pro, machine: { status: "ready", origin } });
+  const html = render().html;
+  expect(html).toContain("sign in there with your own Claude or ChatGPT account, or an API key");
+  expect(html).not.toMatch(/included/i);
+});
+it("connects with one click, sending nothing from the page", async () => {
+  await ready({ ...pro, machine: { status: "ready", origin } });
+  click("Connect to my Cloud"); await flush();
+  expect(bridge.connectHome).toHaveBeenCalledExactlyOnceWith();
+});
+it("reports a failed connection as its own message", async () => {
+  vi.mocked(bridge.connectHome).mockRejectedValueOnce(new Error("offline"));
+  const state = { ...pro, machine: { status: "ready" as const, origin } };
+  vi.mocked(bridge.state).mockResolvedValue(state);
+  await ready(state);
+  click("Connect to my Cloud"); await flush();
+  expect(render().html).toContain("Could not connect to your Cloud");
+  expect(render().html).not.toContain("Could not complete this Cloud action");
 });
