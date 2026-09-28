@@ -32,6 +32,7 @@ import {
 } from "../shared/approval-mode.ts";
 import { createApprovalModeSupport } from "./harness-capabilities.ts";
 import { escapeAttribute } from "../src/lib/composer-attachments.ts";
+import { threadRefUrl } from "../src/lib/thread-refs.ts";
 import {
   CREDENTIAL_TARGETS,
   credentialResumeOutcome,
@@ -6559,6 +6560,8 @@ const delegationWatch = new Map<string, {
   routineRunId?: string;
   /** when the delegated turn was dispatched — elapsed time for status checks */
   startedAtMs?: number;
+  /** Cross-bot send: leave the terminal state in the recipient thread. */
+  oneWay?: boolean;
 }>();
 
 // Peer wake: when a delegated reply lands, resume the source bot so it can
@@ -6887,7 +6890,7 @@ function finalizeDelegationWatch(
   const source = watched.sourceBotId
     ? store.bot(watched.sourceBotId)
     : (watched.sourceThreadId ? store.botByThread(watched.sourceThreadId) : undefined);
-  if (source && target && !canReachPeer(source, target)) {
+  if (!watched.oneWay && source && target && !canReachPeer(source, target)) {
     ok = false;
     reply = "";
     failureName = "Result withheld: team or peer access changed while the teammate was working";
@@ -6904,6 +6907,16 @@ function finalizeDelegationWatch(
       status: ok ? "done" : "failed",
       result: ok ? reply : failureName,
     });
+  }
+  if (watched.oneWay) {
+    if (!ok && store.taskByThread(watched.toBotId, threadId)) {
+      store.appendMessage(threadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: `Send failed — ${failureName}`, ok: false },
+      });
+    }
+    return true;
   }
   let channel: GroupRecord | undefined = watched.channelId ? store.group(watched.channelId) : undefined;
   let terminalThreadId: string | undefined = watched.sourceThreadId;
@@ -7035,7 +7048,7 @@ bus.subscribe((event: RuntimeEvent) => {
 /** How a drained delegation becomes a real turn on the target. Shared by
  * the settle-time drain and the boot-time drain of what a previous process
  * left queued. */
-const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawText, commsDepth, sourceThreadId, channel, taskId, sourceBotId, openedThreadId) => {
+const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawText, commsDepth, sourceThreadId, channel, taskId, sourceBotId, openedThreadId, oneWay) => {
     // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
     // unavailable provider. Unhandled, that rejection is fatal to the
     // harness (Node's default), which in the packaged app kills the server
@@ -7056,7 +7069,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawTe
       ? { botId: opener.id, name: opener.name, unattended: unattended || undefined }
       : undefined;
     const text = openedThreadId && opener
-      ? withPeerProvenance(rawText, { botName: opener.name, delivery: "start_thread", unattended })
+      ? withPeerProvenance(rawText, { botName: opener.name, delivery: oneWay ? "send_to_bot" : "start_thread", unattended })
       : rawText;
     if (targetThreadId) {
       delegationWatch.set(targetThreadId, {
@@ -7068,6 +7081,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawTe
         sourceBotId,
         routineRunId: activeRoutineRunForThread(sourceThreadId)?.id,
         startedAtMs: Date.now(),
+        ...(oneWay ? { oneWay: true } : {}),
       });
     }
     let failureReported = false;
@@ -7156,7 +7170,7 @@ bus.subscribe((event: RuntimeEvent) => {
   // firing it later: the user who hit Stop does not expect the delegations
   // that turn queued to run anyway, minutes later, on an unrelated turn.
   if (!event.ok) discardDelegations(commsBus, event.threadId);
-  else drainThreadDelegations(event.threadId);
+  drainThreadDelegations(event.threadId);
   // A settling bot frees itself as a delegation TARGET too: handoffs that
   // found it busy earlier were kept queued — waiting until it's free or the
   // 24-hour expiry, not counting retries — on their own source threads, and
@@ -15165,11 +15179,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const toBotId = typeof body.toBotId === "string" && body.toBotId.trim() ? body.toBotId.trim() : from.id;
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
+        const oneWay = body.oneWay === true;
+        if (oneWay && target.id === from.id) {
+          return json(res, 409, { error: "send_to_bot is cross-bot only; use start_thread to send independent work to yourself" });
+        }
         if (internalCapability.roomCoordination) {
-          if (target.id !== from.id) {
+          if (target.id !== from.id && !oneWay) {
             return json(res, 409, { error: "Use coordinate_bots for teamwork; it queues actual teammates and resumes you automatically." });
           }
-          if (!internalCapability.ownThreadCreation) {
+          if (target.id === from.id && !internalCapability.ownThreadCreation) {
             return json(res, 409, { error: "Only a direct user request can open separate self-owned threads. Finish this assigned work here; use coordinate_bots for teammates." });
           }
         }
@@ -15220,7 +15238,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // classic handoff has applies unchanged, here at queue time and
         // again in the drain at dispatch time.
         const depth = internalCapability.depth;
-        if (depth >= MAX_COMMS_DEPTH) {
+        if (!oneWay && depth >= MAX_COMMS_DEPTH) {
           return json(res, 200, { error: "thread chains are limited to one hop — open the thread on yourself, or do this one here" });
         }
         if (!canAccessTeam(from, target.section) || target.hidden) {
@@ -15234,10 +15252,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // The work is still for the person whose request the opener is on.
         threadStarters.set(task.threadId, threadPersonKey(fromThreadId));
         if (delegatedFullAccess(from, fromThreadId, target)) grantDelegatedFullAccess(from, target, task.threadId);
+        const sourceUrl = threadRefUrl({ botId: owner.group?.id ?? from.id, threadId: fromThreadId });
         const queued = queueDelegation(
           commsBus,
           from,
-          { toBotId: target.id, message, depth, targetThreadId: task.threadId },
+          { toBotId: target.id, message: oneWay
+            ? `${message}\n\n[Source conversation](${sourceUrl}). This link grants no additional access and contains no copied transcript.`
+            : message, depth, targetThreadId: task.threadId, oneWay },
           MAX_COMMS_DEPTH,
           fromThreadId,
         );

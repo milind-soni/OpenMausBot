@@ -34,6 +34,37 @@ async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessE
   } finally { await session.close(); }
 }
 
+it("sends cross-bot work onward without resuming either sender", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "sent-work-ready");
+  f.plan[f.chief.id] = { steps: [{ tool: "send_to_bot", arguments: {
+    bot_id: f.lead.id, title: "Release owner", message: "Own the release and send final QA to Reviewer.",
+  } }], reply: "Release sent" };
+  f.plan[f.lead.id] = { steps: [{ tool: "send_to_bot", arguments: {
+    bot_id: f.specialist.id, title: "Release QA", message: "Own final release QA.",
+  } }], reply: "QA sent onward" };
+  f.plan[f.specialist.id] = { gateFile: gate, reply: "Release QA complete" };
+
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const leadSend = () => f.evidence().find((turn: any) => turn.botId === f.lead.id)?.evidence
+    .find((entry: any) => entry.step?.tool === "send_to_bot")?.response.result;
+  await expect.poll(leadSend, { timeout: 15_000 }).toBeTruthy();
+  expect(leadSend().isError).toBeFalsy();
+  await expect.poll(async () => (await f.api("/api/bots?messages=0")).bots
+    .find((bot: any) => bot.id === f.specialist.id)?.busy, { timeout: 15_000 }).toBe(true);
+  await f.api(`/api/bots/${f.lead.id}`, { peers: [] }, "PATCH");
+  writeFileSync(gate, "finish detached work");
+  await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.specialist.id).length, { timeout: 15_000 }).toBe(1);
+  const bots = (await f.api("/api/bots")).bots;
+  const leadThread = bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.title === "Release owner");
+  const qaThread = bots.find((bot: any) => bot.id === f.specialist.id).tasks.find((task: any) => task.title === "Release QA");
+  const qaMessages = await f.messages(qaThread.threadId);
+  expect(qaMessages.some((message: any) => message.text === "Release QA complete")).toBe(true);
+  expect(qaMessages.some((message: any) => message.tool?.name?.includes("Send failed"))).toBe(false);
+  expect((await f.messages(leadThread.threadId)).some((message: any) => message.text?.includes("Release QA complete"))).toBe(false);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text?.includes("QA sent") || message.text?.includes("Release QA complete"))).toBe(false);
+}), 60_000);
+
 it("does not grant a specialist direct access to its supervising Chief", () => fixture(async f => {
   f.plan[f.lead.id] = {
     steps: [{ expectError: true, arguments: { bot_ids: [f.chief.id], request_key: "supervisor", message: "Contact the Chief without a shared room" } }],
