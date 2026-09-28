@@ -1951,11 +1951,11 @@
   "botAccess.grants.search": "Пошук інструментів",
   "botAccess.grants.noMatches": "Жодний інструмент не відповідає пошуку.",
   "botAccess.grants.verbHint": "Вибрати всі інструменти цього класу",
+  "connectors.grants.limited": "Боти з обмеженими інструментами: {count}",
+  "connectors.grants.more": " +{count} ще",
   "botAccess.grants.verb.read": "Читати",
   "botAccess.grants.verb.draft": "Чернетка",
   "botAccess.grants.verb.send": "Надіслати",
   "botAccess.grants.verb.modify": "Змінити",
-  "botAccess.grants.verb.delete": "Видалити",
-  "connectors.grants.limited": "Боти з обмеженими інструментами: {count}",
-  "connectors.grants.more": " +{count} ще"
+  "botAccess.grants.verb.delete": "Видалити"
 }

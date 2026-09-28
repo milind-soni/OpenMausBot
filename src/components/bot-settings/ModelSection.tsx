@@ -4,6 +4,7 @@
 // picker's floating popover (absolute, ~480px tall) would open below the
 // fold and only become visible by scrolling; the in-flow menu pushes the
 // Effort card down instead and is fully visible where it opens.
+import { t } from "@/lib/i18n";
 import { EffortRow, ModelPicker } from "../ModelPicker";
 import { useStore, type Bot } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
@@ -21,9 +22,9 @@ export function ModelSection({ bot }: { bot: Bot }) {
           contained
           label={
             <div>
-              <div className="text-[15px] font-medium text-ink">Default model</div>
+              <div className="text-[15px] font-medium text-ink">{t("botSettings.model.defaultModel")}</div>
               <div className="mt-0.5 text-[13px] text-ink-secondary">
-                {draft ? "Starting model for the new bot and its threads." : "For groups and new threads. Also updates the selected idle thread; other existing threads keep their model."}
+                {draft ? t("botSettings.model.defaultModelDraftHint") : t("botSettings.model.defaultModelHint")}
               </div>
               <ProposalStatus bot={bot} kind="chief" />
             </div>
@@ -37,14 +38,14 @@ export function ModelSection({ bot }: { bot: Bot }) {
         className="rounded-xl bg-card p-4"
         label={
           <div>
-            <div className="text-[15px] font-medium text-ink">{modelVariants ? "Reasoning" : "Effort"}</div>
+            <div className="text-[15px] font-medium text-ink">{modelVariants ? t("botSettings.model.reasoning") : t("botSettings.model.effort")}</div>
             {/* Says what the app does, not what the engine ends up at:
                 Codex applies a level to the whole thread and has no way to
                 take one back, so "currently: engine default" was a promise
                 we could not keep for a thread that had already been sent
                 one. Sending nothing is true on every engine. */}
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              {modelVariants ? (draft ? "Starting reasoning variant for the new bot." : "For groups, new threads, and the selected idle thread. Other existing threads keep their variant.") : `How hard this bot thinks in groups and new threads${bot.modelSelection.effort ? "" : " (Default: no level is sent)"}`}
+              {modelVariants ? (draft ? t("botSettings.model.reasoningDraftHint") : t("botSettings.model.reasoningHint")) : t("botSettings.model.effortHint") + (bot.modelSelection.effort ? "" : t("botSettings.model.effortHintDefaultSuffix"))}
             </div>
             <ProposalStatus bot={bot} kind="chief" />
           </div>

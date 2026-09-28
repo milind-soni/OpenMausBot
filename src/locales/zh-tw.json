@@ -1914,11 +1914,11 @@
   "botAccess.grants.search": "搜尋工具",
   "botAccess.grants.noMatches": "沒有工具符合該搜尋。",
   "botAccess.grants.verbHint": "選取此類別的所有工具",
+  "connectors.grants.limited": "工具受限的機器人：{count}",
+  "connectors.grants.more": " +{count} 個",
   "botAccess.grants.verb.read": "讀取",
   "botAccess.grants.verb.draft": "草稿",
   "botAccess.grants.verb.send": "傳送",
   "botAccess.grants.verb.modify": "修改",
-  "botAccess.grants.verb.delete": "刪除",
-  "connectors.grants.limited": "工具受限的機器人：{count}",
-  "connectors.grants.more": " +{count} 個"
+  "botAccess.grants.verb.delete": "刪除"
 }

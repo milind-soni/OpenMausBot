@@ -1406,11 +1406,11 @@
   "botAccess.grants.search": "Pesquisar ferramentas",
   "botAccess.grants.noMatches": "Nenhuma ferramenta corresponde à pesquisa.",
   "botAccess.grants.verbHint": "Selecionar todas as ferramentas desta classe",
+  "connectors.grants.limited": "Bots com ferramentas limitadas: {count}",
+  "connectors.grants.more": " +{count} mais",
   "botAccess.grants.verb.read": "Ler",
   "botAccess.grants.verb.draft": "Rascunho",
   "botAccess.grants.verb.send": "Enviar",
   "botAccess.grants.verb.modify": "Modificar",
-  "botAccess.grants.verb.delete": "Excluir",
-  "connectors.grants.limited": "Bots com ferramentas limitadas: {count}",
-  "connectors.grants.more": " +{count} mais"
+  "botAccess.grants.verb.delete": "Excluir"
 }

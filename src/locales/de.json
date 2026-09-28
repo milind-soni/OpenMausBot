@@ -1410,11 +1410,11 @@
   "botAccess.grants.search": "Tools suchen",
   "botAccess.grants.noMatches": "Keine Tools passen zur Suche.",
   "botAccess.grants.verbHint": "Jedes Tool dieser Klasse auswählen",
+  "connectors.grants.limited": "Bots mit eingeschränkten Tools: {count}",
+  "connectors.grants.more": " +{count} weitere",
   "botAccess.grants.verb.read": "Lesen",
   "botAccess.grants.verb.draft": "Entwerfen",
   "botAccess.grants.verb.send": "Senden",
   "botAccess.grants.verb.modify": "Ändern",
-  "botAccess.grants.verb.delete": "Löschen",
-  "connectors.grants.limited": "Bots mit eingeschränkten Tools: {count}",
-  "connectors.grants.more": " +{count} weitere"
+  "botAccess.grants.verb.delete": "Löschen"
 }

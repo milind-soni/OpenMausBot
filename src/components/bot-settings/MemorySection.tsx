@@ -14,6 +14,7 @@ import { FileText, FolderOpen, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import {
   MEMORY_INDEX,
   capacityStatus,
@@ -157,7 +158,7 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
   const createTopic = async () => {
     const name = topicFileName(newTopic);
     if (!name) {
-      setError("Give the topic a name — letters, numbers, spaces, dots or dashes.");
+      setError(t("botMemory.topicNameError"));
       return;
     }
     setNewTopic("");
@@ -245,14 +246,14 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
             readOnly={editing.readOnly}
             placeholder={
               editing.path === MEMORY_INDEX
-                ? "Nothing remembered yet. The bot writes durable notes here — or add your own."
-                : "Write the note here."
+                ? t("botMemory.empty")
+                : t("botMemory.writeNote")
             }
-            aria-label={editing.path === MEMORY_INDEX ? "Bot memory" : `Memory file ${editing.path}`}
+            aria-label={editing.path === MEMORY_INDEX ? t("botMemory.ariaIndex") : t("botMemory.ariaFile", { path: editing.path })}
             onChange={(e) => setEditing({ ...editing, text: e.target.value, dirty: true })}
           />
           {editing.readOnly ? (
-            <p className="mt-2 text-[12px] text-ink-secondary">Daily logs are the bot's own record of what it did; they are not loaded into conversations and are read-only here.</p>
+            <p className="mt-2 text-[12px] text-ink-secondary">{t("botMemory.dailyLogsHint")}</p>
           ) : (
             <div className="mt-2 flex items-center gap-3">
               <button type="button" onClick={() => void save(editing.hash)} disabled={saving || !editing.dirty} className={buttonCls}>
@@ -267,7 +268,7 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
           )}
           {savedDraft !== null && (
             <div className="mt-3">
-              <div className="mb-1 text-[12px] text-ink-secondary">Your unsaved draft, kept so nothing is lost:</div>
+              <div className="mb-1 text-[12px] text-ink-secondary">{t("botMemory.draftWarning")}</div>
               <pre className="max-h-[160px] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline/40 bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink">
                 {savedDraft}
               </pre>
@@ -282,8 +283,8 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
       {overview && (
         <div className="rounded-xl bg-card p-4">
           <MemoryFileRows
-            title="Topic files"
-            hint="Longer notes the bot reads on demand. Click one to edit it."
+            title={t("botMemory.topicFiles")}
+            hint={t("botMemory.topicHint")}
             files={overview.topics}
             selected={editing?.path}
             onOpen={(file) => void open(file.path)}
@@ -293,8 +294,8 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
             <input
               className={cn(inputCls, "py-1.5 text-[13px]")}
               value={newTopic}
-              placeholder="New topic name, e.g. clients"
-              aria-label="New topic name"
+              placeholder={t("botMemory.newTopicPlaceholder")}
+              aria-label={t("botMemory.newTopicAria")}
               onChange={(e) => setNewTopic(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") void createTopic();
@@ -307,8 +308,8 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
           {overview.logs.length > 0 && (
             <div className="mt-4">
               <MemoryFileRows
-                title="Daily logs"
-                hint="What the bot did each day, in its own words. Not loaded into conversations."
+                title={t("botMemory.dailyLogs")}
+                hint={t("botMemory.dailyLogsDescription")}
                 files={overview.logs}
                 selected={editing?.path}
                 onOpen={(file) => void open(file.path)}
@@ -343,7 +344,7 @@ export function MemoryGauge({ index }: { index: MemoryCapacity }) {
   return (
     <div className={cn("rounded-xl p-4", status.level === "over" ? "border border-danger/30 bg-danger/10" : "bg-card")}>
       <div className="flex items-center justify-between gap-3 text-[13px]">
-        <span className="font-medium text-ink">How much of MEMORY.md loads</span>
+        <span className="font-medium text-ink">{t("botMemory.loadAmount")}</span>
         <span className={cn("text-[12px]", status.level === "over" ? "text-danger" : "text-ink-secondary")}>
           {index.lines} / {index.maxLines} lines · {formatBytes(index.bytes)} / {formatBytes(index.maxBytes)}
         </span>
@@ -426,7 +427,7 @@ export function MemoryFileRows({
       <div className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">{title}</div>
       <div className="mt-0.5 text-[12px] text-ink-secondary">{hint}</div>
       {files.length === 0 ? (
-        <div className="mt-2 text-[12.5px] text-ink-secondary">None yet.</div>
+        <div className="mt-2 text-[12.5px] text-ink-secondary">{t("botMemory.noneYet")}</div>
       ) : (
         <div className="mt-2 overflow-hidden rounded-lg border border-hairline/40">
           {files.map((file) => (

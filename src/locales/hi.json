@@ -1392,11 +1392,11 @@
   "botAccess.grants.search": "टूल खोजें",
   "botAccess.grants.noMatches": "इस खोज से कोई टूल नहीं मिला।",
   "botAccess.grants.verbHint": "इस श्रेणी के सभी टूल चुनें",
+  "connectors.grants.limited": "सीमित टूल वाले बॉट: {count}",
+  "connectors.grants.more": " +{count} और",
   "botAccess.grants.verb.read": "पढ़ें",
   "botAccess.grants.verb.draft": "ड्राफ़्ट",
   "botAccess.grants.verb.send": "भेजें",
   "botAccess.grants.verb.modify": "बदलें",
-  "botAccess.grants.verb.delete": "मिटाएँ",
-  "connectors.grants.limited": "सीमित टूल वाले बॉट: {count}",
-  "connectors.grants.more": " +{count} और"
+  "botAccess.grants.verb.delete": "मिटाएँ"
 }

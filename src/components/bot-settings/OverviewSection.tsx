@@ -107,7 +107,7 @@ export function OverviewSection({
       <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Does</div>
         {overview.does.length === 0 ? (
-          <p className="mt-2 text-[13px] text-ink-secondary">Nothing scheduled or learned yet.</p>
+          <p className="mt-2 text-[13px] text-ink-secondary">{t("botOverview.empty")}</p>
         ) : (
           <ul className="mt-2 flex flex-col gap-1.5 text-[13px] leading-relaxed text-ink">
             {overview.does.map((line, i) => (
@@ -118,9 +118,9 @@ export function OverviewSection({
       </div>
 
       <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Can reach</div>
+        <div className="text-[15px] font-medium text-ink">{t("botOverview.canReach")}</div>
         {overview.reaches.length === 0 ? (
-          <p className="mt-2 text-[13px] text-ink-secondary">Nothing yet.</p>
+          <p className="mt-2 text-[13px] text-ink-secondary">{t("botOverview.nothingYet")}</p>
         ) : (
           <ul className="mt-2 flex flex-col gap-1.5 text-[13px] leading-relaxed text-ink">
             {overview.reaches.map((line, i) => (
@@ -148,7 +148,7 @@ export function OverviewSection({
 
       <div className="rounded-xl bg-card p-4">
         <div className="flex items-baseline justify-between gap-3">
-          <div className="text-[15px] font-medium text-ink">Recent changes</div>
+          <div className="text-[15px] font-medium text-ink">{t("botOverview.recentChanges")}</div>
           <button
             type="button"
             onClick={() => onOpen("history")}
@@ -158,7 +158,7 @@ export function OverviewSection({
           </button>
         </div>
         {overview.recent.length === 0 ? (
-          <p className="mt-2 text-[13px] text-ink-secondary">Nothing changed recently.</p>
+          <p className="mt-2 text-[13px] text-ink-secondary">{t("botOverview.noRecentChanges")}</p>
         ) : (
           <ul className="mt-2 flex flex-col gap-1.5 text-[13px] text-ink">
             {overview.recent.map((entry, i) => (
