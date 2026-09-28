@@ -9,7 +9,7 @@
 // trust. If either child exits, both stop and the machine restarts.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chownSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { cloudHomeConfiguration, cloudHomeHost, prepareCloudHomeVolume, withoutIgnoredCloudKeys, type CloudHomeConfig } from "./cloud-home.ts";
 
@@ -25,11 +25,12 @@ export function passwdIds(passwd: string, name: string): { uid: number; gid: num
 }
 
 /** The server child's environment: the operator's contract plus fixed
- * ports and paths, never a platform gateway's settings. The edge child gets
+ * ports and paths (Linux paths inside the image, so POSIX joins on every
+ * host that builds them, tests included), never a platform gateway's settings. The edge child gets
  * only what it needs to route. */
 export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.ProcessEnv, home: string) {
   const server: NodeJS.ProcessEnv = {
-    ...withoutIgnoredCloudKeys(env), HOME: home, OMB_DATA_DIR: env.OMB_DATA_DIR || join(home, ".openmausbot"),
+    ...withoutIgnoredCloudKeys(env), HOME: home, OMB_DATA_DIR: env.OMB_DATA_DIR || posix.join(home, ".openmausbot"),
     OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800", OMB_PUBLIC_URL: config.publicOrigin,
     OMB_WEBHOOK_PUBLIC_URL: env.OMB_WEBHOOK_PUBLIC_URL || config.publicOrigin,
   };
