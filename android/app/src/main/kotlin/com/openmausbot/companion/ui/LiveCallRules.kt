@@ -11,6 +11,7 @@ sealed interface LiveCallBarModel {
     data object Hidden : LiveCallBarModel
 
     data class Local(
+        /** "Live with Ada" while live, before the [clock]; otherwise what is happening, or why the call ended. */
         val title: String,
         val caption: String,
         val heard: String,
@@ -19,10 +20,16 @@ sealed interface LiveCallBarModel {
         val phase: LiveCallPhase,
         /** An ended call offers Try again ([LiveCallSnapshot.canRetry]). */
         val canRetry: Boolean = true,
+        /** While live: the clock after [title]. A name too long for the line gives way; the clock never does. */
+        val clock: String? = null,
     ) : LiveCallBarModel
 
-    /** A call on this chat that another device holds the microphone for. Only Hang up applies. */
-    data class Remote(val title: String, val callId: String) : LiveCallBarModel
+    /**
+     * A call on this chat that another device holds the microphone for. Only Hang up applies.
+     * [title] and [clock] make the first line, as on this phone's own call; [device], where the
+     * call is, has a line of its own under it.
+     */
+    data class Remote(val title: String, val clock: String, val device: String, val callId: String) : LiveCallBarModel
 }
 
 data class LiveVoiceOption(val id: String, val label: String)
@@ -126,7 +133,14 @@ object LiveCallRules {
         }
     }
 
-    fun title(botName: String, elapsed: String): String = "Live with $botName · $elapsed"
+    /** "Live with Ada · 1:05", the banner's line. The bars draw it in its two parts, [liveWith] and [clockSuffix]. */
+    fun title(botName: String, elapsed: String): String = liveWith(botName) + clockSuffix(elapsed)
+
+    /** "Live with Ada": the part of a bar's line that gives way when the bot's name is too long for it. */
+    fun liveWith(botName: String): String = "Live with $botName"
+
+    /** " · 1:05": the part of a bar's line after [liveWith] that always shows. */
+    fun clockSuffix(elapsed: String): String = " · $elapsed"
 
     fun clientLabel(client: String): String = when (client) {
         "desktop" -> "your computer"
@@ -134,6 +148,13 @@ object LiveCallRules {
         "android" -> "another phone"
         else -> "another device"
     }
+
+    /**
+     * The remote bar's second line: where the call is. The desktop's remote
+     * bar says it the same way ("Pepper is on a Live call from an iPhone"),
+     * and so does the iPhone's.
+     */
+    fun fromDevice(client: String): String = "From ${clientLabel(client)}"
 
     /** The 409 `activeCall` wording: who is on the line. */
     fun busyMessage(active: LiveCallState): String =
@@ -185,12 +206,13 @@ object LiveCallRules {
             val name = local.botName.ifBlank { botName }
             val title = when (local.phase) {
                 LiveCallPhase.STARTING -> CONNECTING
-                LiveCallPhase.LIVE -> title(name, elapsed(local.liveSince ?: nowMs, nowMs))
+                LiveCallPhase.LIVE -> liveWith(name)
                 LiveCallPhase.ENDING -> HANGING_UP
                 LiveCallPhase.ENDED -> local.notice ?: CALL_ENDED
                 LiveCallPhase.IDLE -> ""
             }
-            return LiveCallBarModel.Local(title, local.caption, local.heard, local.muted, local.speaker, local.phase, local.canRetry)
+            val clock = if (local.phase == LiveCallPhase.LIVE) elapsed(local.liveSince ?: nowMs, nowMs) else null
+            return LiveCallBarModel.Local(title, local.caption, local.heard, local.muted, local.speaker, local.phase, local.canRetry, clock)
         }
         val remote = server
             ?.takeIf {
@@ -198,7 +220,9 @@ object LiveCallRules {
             }
             ?: return LiveCallBarModel.Hidden
         return LiveCallBarModel.Remote(
-            title = "${title(botName, elapsed(remote.startedAt.toLong(), nowMs))} · on ${clientLabel(remote.client)}",
+            title = liveWith(botName),
+            clock = elapsed(remote.startedAt.toLong(), nowMs),
+            device = fromDevice(remote.client),
             callId = remote.callId,
         )
     }

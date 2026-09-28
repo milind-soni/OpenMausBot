@@ -130,6 +130,16 @@ object TranscriptLayout {
         message.role == Message.Role.USER -> BubbleTail.TRAILING
         else -> BubbleTail.LEADING
     }
+
+    /**
+     * How far to scroll the transcript, in px, after it got [shrunkBy] px
+     * shorter from the bottom — the call bar under it grew — so that a list
+     * that showed its end shows it again. [hiddenBelow] is how much of the
+     * list's end is below it now. If more is hidden than the list lost, the
+     * end was out of view already: the reader had scrolled up, and stays put.
+     */
+    fun keepEndInView(hiddenBelow: Int, shrunkBy: Int): Int =
+        if (shrunkBy > 0 && hiddenBelow in 1..shrunkBy) hiddenBelow else 0
 }
 
 /**

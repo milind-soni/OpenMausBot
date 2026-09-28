@@ -30,6 +30,8 @@ import com.openmausbot.companion.core.LiveCallStatus
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.StreamFrame
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
@@ -83,6 +85,22 @@ class LiveCallChatWiringTest {
         messages = listOf(Message("m1", Message.Role.USER, Message.Kind.TEXT, 1.0, text = "what time is it", via = "call")),
     )
     private val nova = bot(id = "bot-2", name = "Nova")
+    /** Scout's chat, longer than the screen, ending on the answer to a spoken request. */
+    private val longChat = fixture.copy(
+        messages = (1..14).map { index ->
+            if (index % 2 == 1) {
+                Message("q$index", Message.Role.USER, Message.Kind.TEXT, index.toDouble(), text = "Where are we with release step $index?")
+            } else {
+                Message("a$index", Message.Role.BOT, Message.Kind.TEXT, index.toDouble(), text = "Step $index is done: the branch is cut, the notes are drafted and the nightly build passed.")
+            }
+        } + listOf(
+            Message("q15", Message.Role.USER, Message.Kind.TEXT, 15.0, text = "What is left on the release checklist?", via = "call"),
+            Message("a16", Message.Role.BOT, Message.Kind.TEXT, 16.0, text = NEWEST),
+        ),
+    )
+
+    /** Set to hold the computer's answer to a hang-up, so the bar stays on "Hanging up…". */
+    @Volatile private var endGate: CountDownLatch? = null
 
     @Before
     fun startServer() {
@@ -93,8 +111,10 @@ class LiveCallChatWiringTest {
                 return when {
                     request.method == "POST" && request.path == "/api/live/session" ->
                         json(201, """{"call":${call("connecting")},"transport":{"type":"webrtc","sdp":"v=0\r\nanswer\r\n"}}""")
-                    request.method == "POST" && request.path == "/api/live/call/end" ->
+                    request.method == "POST" && request.path == "/api/live/call/end" -> {
+                        endGate?.await(5, TimeUnit.SECONDS)
                         json(200, """{"call":${call("ended")}}""")
+                    }
                     request.path == "/api/live/call" -> json(200, """{"call":null}""")
                     request.path == "/api/instances" -> json(200, """{"instances":[]}""")
                     request.path?.startsWith("/api/threads/") == true -> json(200, """{"messages":[],"hasMore":false}""")
@@ -184,7 +204,7 @@ class LiveCallChatWiringTest {
                 ),
             )
         }
-        compose.waitUntil(5_000) { compose.onAllNodesWithText("on your computer", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("From your computer").fetchSemanticsNodes().isNotEmpty() }
         compose.onAllNodesWithContentDescription("Mute").assertCountEquals(0)
         // The line is busy: a call from here would only be refused.
         compose.onNodeWithContentDescription("Call Scout").assertDoesNotExist()
@@ -194,6 +214,51 @@ class LiveCallChatWiringTest {
         val end = requests.first { it.path == "/api/live/call/end" }
         assertEquals("c7", CompanionJson.parseToJsonElement(end.body.readUtf8()).jsonObject.getValue("callId").jsonPrimitive.content)
         assertEquals(0, transport.offers, "another device's call never touches this phone's media")
+    }
+
+    /**
+     * The bar sits under the transcript and changes height: one line while it
+     * connects, a caption line more once the call is live, one line again
+     * while it hangs up; the remote bar comes with a second line of its own.
+     * Each time, the chat's newest message stays whole above the bar.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h891dp")
+    fun `the newest message stays above the bar as the bar grows and shrinks`() {
+        mount(bots = listOf(longChat)) { chatScreen(longChat) }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(NEWEST, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+
+        compose.onNodeWithContentDescription("Call Scout").performClick()
+        compose.waitUntil(10_000) { requests.any { it.path == "/api/live/session" } }
+        compose.onNodeWithText("Connecting…").assertIsDisplayed()
+        assertNewestAbove("Live call")
+
+        attach()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Live with Scout", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.runOnIdle { transport.say("""{"type":"session.output_transcript.delta","delta":"Three things are left."}""") }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Three things are left.").fetchSemanticsNodes().isNotEmpty() }
+        assertNewestAbove("Live call")
+
+        endGate = CountDownLatch(1)
+        compose.onNodeWithContentDescription("Hang up").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Hanging up…").fetchSemanticsNodes().isNotEmpty() }
+        assertNewestAbove("Live call")
+        endGate?.countDown()
+        compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("Live call").fetchSemanticsNodes().isEmpty() }
+
+        compose.runOnIdle {
+            frames.tryEmit(
+                StreamFrame(
+                    Frame.LiveCall(
+                        "bot-1", "thread-bot-1",
+                        LiveCallState("c7", "bot-1", "thread-bot-1", "desktop", "marin", System.currentTimeMillis().toDouble(), LiveCallStatus.LIVE),
+                    ),
+                    seq = 4,
+                ),
+            )
+        }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("From your computer").fetchSemanticsNodes().isNotEmpty() }
+        assertNewestAbove("Live call on another device")
     }
 
     @Test
@@ -239,6 +304,19 @@ class LiveCallChatWiringTest {
                 ),
             )
         }
+    }
+
+    /**
+     * The newest message is whole above the bar [description] names: its last
+     * line ends at or above the bar's top. Its own size and place, not what
+     * the list's clip leaves of it.
+     */
+    private fun assertNewestAbove(description: String) {
+        compose.waitForIdle()
+        val newest = compose.onNodeWithText(NEWEST, useUnmergedTree = true).fetchSemanticsNode()
+        val bottom = newest.positionInRoot.y + newest.size.height
+        val bar = compose.onNodeWithContentDescription(description).fetchSemanticsNode().boundsInRoot
+        assertTrue(bottom <= bar.top, "the newest message runs under the bar: it ends at $bottom, the bar starts at ${bar.top}")
     }
 
     @Composable
@@ -309,6 +387,11 @@ class LiveCallChatWiringTest {
             listener?.onChannelOpen()
         }
 
+        /** A frame on the data channel, as OpenAI would send it. */
+        fun say(json: String) {
+            listener?.onMessage(json)
+        }
+
         override fun setMuted(muted: Boolean) = Unit
 
         override fun sendClose() {
@@ -320,5 +403,9 @@ class LiveCallChatWiringTest {
         companion object {
             const val OFFER = "v=0\r\noffer\r\n"
         }
+    }
+
+    private companion object {
+        const val NEWEST = "Three things: update the changelog, tag the release, and post the notes."
     }
 }

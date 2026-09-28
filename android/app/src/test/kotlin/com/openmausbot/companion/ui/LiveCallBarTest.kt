@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
@@ -66,9 +67,10 @@ class LiveCallBarTest {
 
     @Test
     fun aLiveBarShowsTheClockTheCaptionAndTheThreeControls() {
-        mount(LiveCallBarModel.Local("Live with Ada · 1:05", "Hello there", "", muted = false, speaker = true, phase = LiveCallPhase.LIVE))
+        mount(LiveCallBarModel.Local("Live with Ada", "Hello there", "", muted = false, speaker = true, phase = LiveCallPhase.LIVE, clock = "1:05"))
         compose.onNodeWithContentDescription("Live call").assertExists()
-        compose.onNodeWithText("Live with Ada · 1:05").assertIsDisplayed()
+        compose.onNodeWithText("Live with Ada", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText(" · 1:05", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("Captions").assertTextEquals("Hello there")
         // TalkBack reads the caption, not a label standing in for it.
         compose.onAllNodesWithContentDescription("Captions").assertCountEquals(0)
@@ -142,13 +144,41 @@ class LiveCallBarTest {
 
     @Test
     fun aRemoteBarOnlyHangsUp() {
-        mount(LiveCallBarModel.Remote("Live with Ada · 0:09 · on your computer", "c1"))
+        mount(LiveCallBarModel.Remote("Live with Ada", "0:09", "From your computer", "c1"))
         compose.onNodeWithContentDescription("Live call on another device").assertExists()
-        compose.onNodeWithText("Live with Ada · 0:09 · on your computer").assertIsDisplayed()
+        compose.onNodeWithText("Live with Ada", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText(" · 0:09", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("From your computer").assertIsDisplayed()
         compose.onAllNodesWithContentDescription("Mute").assertCountEquals(0)
         compose.onAllNodesWithContentDescription("Live call settings").assertCountEquals(0)
         compose.onNodeWithText("Hang up").performClick()
         assertEquals(listOf("hangup"), taps)
+    }
+
+    /**
+     * A name too long for the line gives way, and only the name: on the
+     * narrowest phone in common use the clock, where the call is and every
+     * button stay whole, on the remote bar and on this phone's own call.
+     */
+    @Test
+    @Config(qualifiers = "w360dp-h640dp")
+    fun aLongNameGivesWayToTheClockOnBothBars() {
+        val name = "Live with $LONG_NAME"
+        var model by mutableStateOf<LiveCallBarModel>(LiveCallBarModel.Remote(name, "12:34", "From your computer", "c1"))
+        mountInChat { model }
+        assertTheNameGivesWay(name, " · 12:34", before = compose.onNodeWithText("Hang up"))
+        val device = compose.onNodeWithText("From your computer", useUnmergedTree = true).assertIsDisplayed()
+        val where = layoutOf("From your computer")
+        assertFalse(where.multiParagraph.didExceedMaxLines || where.isLineEllipsized(0), "where the call is was cut off")
+        val bar = compose.onNodeWithContentDescription("Live call on another device").fetchSemanticsNode().boundsInRoot
+        val line = device.fetchSemanticsNode().boundsInRoot
+        assertTrue(line.left >= bar.left && line.top >= bar.top && line.right <= bar.right && line.bottom <= bar.bottom, "where the call is sits outside the bar: $line $bar")
+
+        compose.runOnIdle {
+            model = LiveCallBarModel.Local(name, "It is noon.", "", muted = false, speaker = true, phase = LiveCallPhase.LIVE, clock = "12:34")
+        }
+        assertTheNameGivesWay(name, " · 12:34", before = compose.onNodeWithContentDescription("Live call settings"))
+        listOf("Live call settings", "Mute", "Hang up").forEach { compose.onNodeWithContentDescription(it).assertIsDisplayed() }
     }
 
     @Test
@@ -256,6 +286,19 @@ class LiveCallBarTest {
     private fun ended(reason: String) =
         LiveCallBarModel.Local(reason, "", "", muted = false, speaker = true, phase = LiveCallPhase.ENDED)
 
+    /** The line's name part is cut short; its clock is whole, and ends before [before], the line's first button. */
+    private fun assertTheNameGivesWay(name: String, clock: String, before: SemanticsNodeInteraction) {
+        assertTrue(layoutOf(name).isLineEllipsized(0), "the name should give way")
+        compose.onNodeWithText(name, useUnmergedTree = true).assertIsDisplayed()
+        val shown = compose.onNodeWithText(clock, useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val clockLayout = layoutOf(clock)
+        // It never wraps, so its layout is as wide as its words: drawn whole, the node is too.
+        val whole = clockLayout.multiParagraph.intrinsics.maxIntrinsicWidth
+        assertTrue(shown.width >= whole - 0.5f, "the clock was cut off: ${shown.width} of $whole px")
+        val button = before.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue(shown.right <= button.left, "the clock runs into the button: $shown $button")
+    }
+
     /**
      * The bar as `ChatScreen` places it, full width less 12 dp a side, on the
      * phone the test's qualifiers set up: w320dp is the narrowest Android draws
@@ -302,5 +345,10 @@ class LiveCallBarTest {
                 bitmap.getPixels(pixels, 0, width, root[0] + line.left.roundToInt(), root[1] + line.top.roundToInt(), width, height)
             }
         }
+    }
+
+    private companion object {
+        /** Forty characters: more than the bar's line holds on a phone. */
+        const val LONG_NAME = "Scout, the Quarterly Release Coordinator"
     }
 }

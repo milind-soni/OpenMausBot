@@ -18,6 +18,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,6 +69,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -115,9 +118,12 @@ import com.openmausbot.companion.core.TranscriptRow
 import com.openmausbot.companion.core.target
 import com.openmausbot.companion.core.transcriptRows
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -591,6 +597,27 @@ private fun LoadedChat(
     LaunchedEffect(threadId, tail, liveText?.length ?: 0) {
         if (liveCount == 0 || itemCount == 0) return@LaunchedEffect
         listState.scrollToItem(itemCount - 1)
+    }
+    // The call bar sits under the transcript and changes height as a call
+    // goes on: a caption line once it is live, a second line on the remote
+    // bar. The list gets shorter from the bottom then, and a LazyColumn keeps
+    // its top where it was, so the newest message would slide out of sight
+    // under the bar. A list that showed its end keeps showing it, whatever
+    // made it shorter; one the reader has scrolled up stays where it is.
+    LaunchedEffect(listState) {
+        var height = -1
+        snapshotFlow { listState.layoutInfo }.collect { info ->
+            val shrunkBy = if (height < 0) 0 else height - info.viewportSize.height
+            height = info.viewportSize.height
+            val by = TranscriptLayout.keepEndInView(info.endHiddenBelow(), shrunkBy)
+            if (by == 0 || listState.isScrollInProgress) return@collect
+            try {
+                listState.scrollBy(by.toFloat())
+            } catch (taken: CancellationException) {
+                // A drag took the list first: the reader is in charge.
+                currentCoroutineContext().ensureActive()
+            }
+        }
     }
     // A search hit lands on its message.
     LaunchedEffect(focusedMessageId, transcript.size) {
@@ -1809,3 +1836,14 @@ private fun Composer(
 
 /** A Live call the phone button asked for, while the first-call disclosure is up. */
 private data class PendingLiveCall(val botId: String, val threadId: String, val botName: String)
+
+/**
+ * How much of the list's end — its last item and the padding after it — lies
+ * below the viewport, in px: 0 while the end shows, and [Int.MAX_VALUE] when
+ * the last item is not even laid out (the end is a screen or more away).
+ */
+private fun LazyListLayoutInfo.endHiddenBelow(): Int {
+    val last = visibleItemsInfo.lastOrNull() ?: return 0
+    if (last.index < totalItemsCount - 1) return Int.MAX_VALUE
+    return (last.offset + last.size + afterContentPadding - viewportEndOffset).coerceAtLeast(0)
+}

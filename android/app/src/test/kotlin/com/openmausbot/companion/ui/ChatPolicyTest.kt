@@ -282,6 +282,23 @@ class TranscriptLayoutTest {
     fun `an index past the end is not a stretch`() {
         assertFalse(TranscriptLayout.startsNewStretch(listOf(message("a", 0.0)), 4))
     }
+
+    /**
+     * The call bar under the transcript grows (its caption line, the remote
+     * bar's second line), so the list gets shorter from the bottom. A list
+     * that showed its end scrolls back by what the end lost; a reader who had
+     * scrolled up stays where they are.
+     */
+    @Test
+    fun `a list that showed its end keeps it in view when it gets shorter`() {
+        assertEquals(40, TranscriptLayout.keepEndInView(hiddenBelow = 40, shrunkBy = 40), "it was at the end")
+        assertEquals(25, TranscriptLayout.keepEndInView(hiddenBelow = 25, shrunkBy = 40), "part of what it lost was empty space")
+        assertEquals(0, TranscriptLayout.keepEndInView(hiddenBelow = 0, shrunkBy = 40), "the end still shows")
+        assertEquals(0, TranscriptLayout.keepEndInView(hiddenBelow = 300, shrunkBy = 40), "the reader had scrolled up")
+        assertEquals(0, TranscriptLayout.keepEndInView(hiddenBelow = 41, shrunkBy = 40), "the end was already out of view")
+        assertEquals(0, TranscriptLayout.keepEndInView(hiddenBelow = 40, shrunkBy = 0), "the list kept its height")
+        assertEquals(0, TranscriptLayout.keepEndInView(hiddenBelow = 40, shrunkBy = -20), "a taller list needs no help")
+    }
 }
 
 class SearchPolicyTest {

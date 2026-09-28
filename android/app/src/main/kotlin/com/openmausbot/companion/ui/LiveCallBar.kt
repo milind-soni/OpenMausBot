@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -112,7 +113,7 @@ private fun LocalBar(model: LiveCallBarModel.Local, actions: LiveCallBarActions,
             }
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                BarTitle(text = model.title, tint = LIVE_GREEN, maxLines = 1, modifier = Modifier.weight(1f))
+                BarTitle(text = model.title, tint = LIVE_GREEN, maxLines = 1, modifier = Modifier.weight(1f), clock = model.clock)
                 BarIcon(contentDescription = "Live call settings", onClick = actions.onSettings, icon = Icons.Filled.Settings)
                 BarIcon(
                     contentDescription = if (model.muted) "Unmute" else "Mute",
@@ -151,10 +152,11 @@ private fun LocalBar(model: LiveCallBarModel.Local, actions: LiveCallBarActions,
 
 /**
  * The phone icon and the title — or, once the call is over, the reason. The
- * icon keeps to the first line however many lines follow it.
+ * icon keeps to the first line however many lines follow it. With a [clock],
+ * the title is "Live with Ada" and the clock follows it (see [NameAndClock]).
  */
 @Composable
-private fun BarTitle(text: String, tint: Color, maxLines: Int, modifier: Modifier = Modifier) {
+private fun BarTitle(text: String, tint: Color, maxLines: Int, modifier: Modifier = Modifier, clock: String? = null) {
     Row(modifier = modifier, verticalAlignment = Alignment.Top) {
         Box(
             modifier = Modifier.height(with(LocalDensity.current) { TITLE_LINE_HEIGHT.toDp() }),
@@ -162,14 +164,49 @@ private fun BarTitle(text: String, tint: Color, maxLines: Int, modifier: Modifie
         ) {
             Icon(imageVector = Icons.Filled.Call, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
         }
+        if (clock != null) {
+            NameAndClock(title = text, clock = clock, modifier = Modifier.padding(start = 8.dp))
+        } else {
+            Text(
+                text = text,
+                fontSize = 15.sp,
+                lineHeight = TITLE_LINE_HEIGHT,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = maxLines,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+    }
+}
+
+/**
+ * "Live with Ada · 1:05" on one line, in two parts so that only the bot's
+ * name gives way: the clock is measured first, whole, and the name takes what
+ * is left, cut short with "…" when it needs more. The clock's digits are
+ * tabular, so a long name is not cut a letter shorter or longer every second.
+ * TalkBack reads the two as one, with the whole name.
+ */
+@Composable
+private fun NameAndClock(title: String, clock: String, modifier: Modifier = Modifier) {
+    Row(modifier = modifier.semantics(mergeDescendants = true) {}) {
         Text(
-            text = text,
+            text = title,
             fontSize = 15.sp,
             lineHeight = TITLE_LINE_HEIGHT,
             fontWeight = FontWeight.SemiBold,
-            maxLines = maxLines,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 8.dp),
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Text(
+            text = LiveCallRules.clockSuffix(clock),
+            fontSize = 15.sp,
+            lineHeight = TITLE_LINE_HEIGHT,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            softWrap = false,
+            style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"),
         )
     }
 }
@@ -223,28 +260,33 @@ private fun EndedRow(notice: String, canRetry: Boolean, actions: LiveCallBarActi
     }
 }
 
+/**
+ * A call another device holds: "Live with Ada · 1:05" as on this phone's own
+ * call, with only Hang up, and where the call is ("From your computer") on a
+ * line of its own under it, where the live bar has its caption — so the clock
+ * never has to make room for it on a narrow phone.
+ */
 @Composable
 private fun RemoteBar(model: LiveCallBarModel.Remote, onHangUp: () -> Unit, modifier: Modifier) {
-    Row(
+    Column(
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
-            .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)
+            .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 4.dp)
             .semantics { contentDescription = "Live call on another device" },
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(imageVector = Icons.Filled.Call, contentDescription = null, tint = LIVE_GREEN, modifier = Modifier.size(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BarTitle(text = model.title, tint = LIVE_GREEN, maxLines = 1, modifier = Modifier.weight(1f), clock = model.clock)
+            TextButton(onClick = onHangUp) { Text("Hang up", color = MaterialTheme.colorScheme.error) }
+        }
         Text(
-            text = model.title,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold,
+            text = model.device,
+            fontSize = 13.sp,
+            color = secondaryTint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 8.dp),
+            modifier = Modifier.padding(start = 24.dp, bottom = 2.dp),
         )
-        TextButton(onClick = onHangUp) { Text("Hang up", color = MaterialTheme.colorScheme.error) }
     }
 }
 

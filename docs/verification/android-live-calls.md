@@ -205,8 +205,8 @@ curl -s -X POST http://127.0.0.1:PORT/api/live/session -H 'content-type: applica
   -d "{\"botId\":\"$BOT\",\"sdp\":\"v=0\\r\\n\",\"client\":\"desktop\"}"
 ```
 
-The phone's chat shows "Live with Kiwi · 0:0x · on your computer" with only
-Hang up, and the header's phone icon is gone while that call runs (a call
+The phone's chat shows "Live with Kiwi · 0:0x" over "From your computer", with
+only Hang up, and the header's phone icon is gone while that call runs (a call
 from here would only be refused as busy). Go back to the bot list during the
 call: no banner (a call another device holds shows only in its chat). Tap
 Hang up in the chat: the bar goes and `GET /api/live/call` is

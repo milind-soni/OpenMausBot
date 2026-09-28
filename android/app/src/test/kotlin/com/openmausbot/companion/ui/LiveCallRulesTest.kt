@@ -42,6 +42,22 @@ class LiveCallRulesTest {
     @Test
     fun theTitleReadsLiveWithTheBotAndTheClock() {
         assertEquals("Live with Ada · 1:05", LiveCallRules.title("Ada", "1:05"))
+        // The bars draw it in two parts, so that a long name gives way and the clock does not.
+        assertEquals("Live with Ada", LiveCallRules.liveWith("Ada"))
+        assertEquals(" · 1:05", LiveCallRules.clockSuffix("1:05"))
+    }
+
+    /**
+     * The remote bar's second line: where the call is, in the desktop's words
+     * for the same bar ("Pepper is on a Live call from an iPhone",
+     * `call.live.onPhone`) and the iPhone's.
+     */
+    @Test
+    fun aRemoteBarSaysWhereTheCallIsFrom() {
+        assertEquals("From your computer", LiveCallRules.fromDevice("desktop"))
+        assertEquals("From an iPhone", LiveCallRules.fromDevice("ios"))
+        assertEquals("From another phone", LiveCallRules.fromDevice("android"))
+        assertEquals("From another device", LiveCallRules.fromDevice("fridge"))
     }
 
     @Test
@@ -144,7 +160,7 @@ class LiveCallRulesTest {
             liveSince = 1_000, caption = "Hello there", heard = "hi", muted = true,
         )
         assertEquals(
-            LiveCallBarModel.Local("Live with Ada · 1:05", "Hello there", "hi", muted = true, speaker = true, phase = LiveCallPhase.LIVE),
+            LiveCallBarModel.Local("Live with Ada", "Hello there", "hi", muted = true, speaker = true, phase = LiveCallPhase.LIVE, clock = "1:05"),
             LiveCallRules.barModel(local, call, "t1", "Ada", 66_000),
             "from liveSince on this phone's clock, not the computer's startedAt",
         )
@@ -161,7 +177,7 @@ class LiveCallRulesTest {
     @Test
     fun aCallFromAnotherDeviceShowsAsRemoteOnItsChatOnly() {
         assertEquals(
-            LiveCallBarModel.Remote("Live with Ada · 1:05 · on your computer", "c1"),
+            LiveCallBarModel.Remote("Live with Ada", "1:05", "From your computer", "c1"),
             LiveCallRules.barModel(LiveCallSnapshot(), call, "t1", "Ada", 125_000),
         )
         assertEquals(LiveCallBarModel.Hidden, LiveCallRules.barModel(LiveCallSnapshot(), call, "other", "Bo", 125_000))
@@ -201,7 +217,7 @@ class LiveCallRulesTest {
     @Test
     fun aCallWithAStatusThisBuildDoesNotKnowStillShowsItsRemoteBar() {
         assertEquals(
-            LiveCallBarModel.Remote("Live with Ada · 1:05 · on your computer", "c1"),
+            LiveCallBarModel.Remote("Live with Ada", "1:05", "From your computer", "c1"),
             LiveCallRules.barModel(LiveCallSnapshot(), call.copy(status = LiveCallStatus.UNKNOWN), "t1", "Ada", 125_000),
         )
     }
@@ -218,7 +234,7 @@ class LiveCallRulesTest {
             "the Mac's `ending` echo of this phone's hang-up is not a call on another phone",
         )
         assertEquals(
-            LiveCallBarModel.Remote("Live with Ada · 1:05 · on another phone", "c2"),
+            LiveCallBarModel.Remote("Live with Ada", "1:05", "From another phone", "c2"),
             LiveCallRules.barModel(hungUp, ours.copy(callId = "c2"), "t1", "Ada", 125_000),
             "a different call on the same chat is still another device's",
         )
