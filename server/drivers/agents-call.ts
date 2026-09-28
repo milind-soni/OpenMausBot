@@ -16,6 +16,7 @@ import { catalogProfileFromEnv, SHARED_COMPUTER_TOOL_NAMES, WEEKDAYS } from "./a
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { boundedAgentResult } from "./agents-result.ts";
+import { suggestTeamTaskOwner } from "./team-route-client.ts";
 
 /** Counters for the guards that refuse without a round trip. One context
  * serves one turn: the harness spawns a proxy per turn, so "this turn" and
@@ -40,6 +41,9 @@ export interface ToolCallContext {
   externalRuntime: boolean;
   coordinating: boolean;
   sharedComputers: boolean;
+  teamRouting: boolean;
+  teamRouteEndpoint: string;
+  teamRouteToken: string;
   client: HarnessClient;
   turn: TurnGuards;
 }
@@ -64,6 +68,9 @@ export function toolCallContextFromEnv(env: NodeJS.ProcessEnv): ToolCallContext 
     externalRuntime: profile.externalRuntime,
     coordinating: profile.coordinating,
     sharedComputers: profile.sharedComputers,
+    teamRouting: profile.teamRouting,
+    teamRouteEndpoint: profile.teamRouting ? env.OMB_TEAM_ROUTE_ENDPOINT ?? "" : "",
+    teamRouteToken: profile.teamRouting ? env.OMB_TEAM_ROUTE_TOKEN ?? "" : "",
     client: harnessClientFromEnv(env),
     turn: {
       createdThisTurn: 0,
@@ -472,6 +479,17 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     return {
       text: `Rendered the native options card in this Watcher thread (message ${String(result.messageId ?? "created")}). Wait for the person's click or custom response; the card itself authorizes no external action.`,
     };
+  }
+  if (name === "suggest_team_task_owner") {
+    if (!context.teamRouting) {
+      return { text: "Jev team routing is not enabled for this turn. No request was sent.", isError: true };
+    }
+    return suggestTeamTaskOwner(args, {
+      endpoint: context.teamRouteEndpoint,
+      token: context.teamRouteToken,
+      botId: BOT_ID,
+      harness: { api },
+    });
   }
   // Second lock. With sharing off the tool is not in the catalog, so a front
   // end already refuses the call as an unknown tool — the same answer a build

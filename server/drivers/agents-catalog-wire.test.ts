@@ -232,6 +232,27 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
+  it("offers Jev routing only to a configured top-level Chief, including bounded direct chats", () => {
+    const enabled = {
+      OMB_BOT_ID: "chief",
+      OMB_TURN_DEPTH: "0",
+      OMB_IS_CHIEF_OF_STAFF: "1",
+      OMB_TEAM_ROUTE_ENABLED: "1",
+      OMB_TEAM_ROUTE_ENDPOINT: "https://jack.example/v1/team-route/suggest",
+      OMB_TEAM_ROUTE_TOKEN: "fixture-token",
+      OMB_ROOM_TURN: "1",
+    };
+    const names = (env: NodeJS.ProcessEnv) =>
+      availableTools(catalogProfileFromEnv(env)).map((tool) => tool.name);
+    expect(names(enabled)).toContain("suggest_team_task_owner");
+    expect(names({ ...enabled, OMB_IS_CHIEF_OF_STAFF: "0" })).not.toContain("suggest_team_task_owner");
+    expect(names({ ...enabled, OMB_TURN_DEPTH: "1" })).not.toContain("suggest_team_task_owner");
+    expect(names({ ...enabled, OMB_EXTERNAL_RUNTIME: "1" })).not.toContain("suggest_team_task_owner");
+    expect(names({ ...enabled, OMB_TEAM_ROUTE_ENDPOINT: undefined })).not.toContain("suggest_team_task_owner");
+    expect(names({ ...enabled, OMB_TEAM_ROUTE_TOKEN: undefined })).not.toContain("suggest_team_task_owner");
+    expect(names({ ...enabled, OMB_TEAM_ROUTE_TOKEN: "" })).not.toContain("suggest_team_task_owner");
+  });
+
   it("writes the routine fields out identically in both routine tools", () => {
     // One source constant, serialized in full twice: see the wire-size table
     // for what that costs, and the next test for why it is not a $ref.

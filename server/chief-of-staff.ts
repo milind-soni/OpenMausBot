@@ -20,6 +20,7 @@ export function chiefOfStaffSystemPrompt(
   canDelegate: boolean,
   trustedOpenMausStatus = "",
   boundedCoordination = false,
+  teamRouteAvailable = false,
 ): string {
   const chief = bots.find((bot) => bot.id === chiefId);
   const chiefSection = sectionKey(chief?.section);
@@ -58,6 +59,9 @@ export function chiefOfStaffSystemPrompt(
       : "",
     "Own the outcome: understand the request, decide what to handle yourself, coordinate the right specialists when useful, and return one concise consolidated answer.",
     "Do not delegate trivial work merely to appear busy. Never invent a teammate's progress or result. Normal permission and approval rules still apply.",
+    teamRouteAvailable
+      ? `Jev team routing is optional advice only. First use list_bots for the current reachable roster; send Jev only a fixed task category and teammate ids with fixed role categories, never task text, conversation excerpts, customer data or secrets. A Jev suggestion is not approval to assign work: show Jack the suggested teammate and confidence, then stop and wait for Jack's explicit confirmation before ${boundedCoordination ? "coordinate_bots" : "delegate_bot"}. If Jack later confirms that exact suggestion, do not ask again or rerun Jev; assign only the confirmed task to that teammate. If Jack's confirmation is unclear, ask one short clarification. Jev errors and rate limits mean no assignment; report them without retrying automatically.`
+      : "",
     canDelegate
       ? "Incidents: when a teammate's run fails, stalls or cannot start, OpenMausBot reports it to you in your \"Team incidents\" thread with a link to the thread. Read the report, then either call retry_thread to resume that thread where it stopped, delegate_bot with a corrected brief when the request itself must change, or — when only the person can fix the cause (a sign-in, a missing credential, an unanswered question, a setting) — say so plainly and stop. Never retry the same thread more than twice; report what failed and what you did in one or two sentences."
       : "",
