@@ -48,6 +48,7 @@ import { CompanyBackupSettings } from "./CompanyBackupSettings";
 import { cn } from "@/lib/cn";
 import { setNotificationSounds, useNotificationSounds } from "@/lib/notification-preferences";
 import { setShowThreads, useShowThreads } from "@/lib/thread-preferences";
+import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 
 // `labelKey`, not a label: t() reads the active pack when it is called, so a
@@ -64,7 +65,7 @@ export const SECTIONS: Array<{
   { id: "desktopWorkspaces", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
   { id: "organization", labelKey: "settings.section.organization", icon: Building2, keywords: ["company", "organization", "organisation", "sign in", "enroll", "managed", "models", "disconnect"] },
   { id: "cloudAccount", labelKey: "settings.section.cloudAccount", icon: User, keywords: ["cloud", "account", "personal", "sign in", "pro", "subscription", "billing"] },
-  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display", "notifications", "sound", "sounds", "mute", "silent", "chime"] },
+  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime"] },
   { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "learn", "skill", "authoring", "browser", "profiles"] },
   { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "mistral", "vps"] },
   { id: "decisionModel", labelKey: "settings.section.decisionModel", icon: Zap, keywords: ["decision", "jev", "typesafe", "routing", "auto", "rooms", "who answers"] },
@@ -385,6 +386,19 @@ function ShowThreadsRow() {
         checked={enabled}
         aria-label={t("settings.threadDisplay.show")}
         onClick={() => setShowThreads(!enabled)}
+      />
+    </SettingRow>
+  );
+}
+
+function RunCardRow() {
+  const enabled = useShowRunCard();
+  return (
+    <SettingRow title={t("settings.runCard.title")} subtitle={t("settings.runCard.subtitle")}>
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.runCard.show")}
+        onClick={() => setShowRunCard(!enabled)}
       />
     </SettingRow>
   );
@@ -802,6 +816,7 @@ export function SettingsModal() {
                   <ShowThreadsRow />
                   <NotificationSoundsRow />
                   {!remoteActive && <ToolCallsRow />}
+                  <RunCardRow />
                 </div>
               </>
             )}

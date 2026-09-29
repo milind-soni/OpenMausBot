@@ -10,6 +10,8 @@ const fixture = vi.hoisted(() => ({
   section: "appearance" as AppSettingsSection,
   showThreads: true,
   setShowThreads: vi.fn(),
+  showRunCard: true,
+  setShowRunCard: vi.fn(),
   notificationSounds: true,
   setNotificationSounds: vi.fn(),
   api: vi.fn(),
@@ -26,6 +28,10 @@ vi.mock("@/state/store", async (importOriginal) => ({
 vi.mock("@/lib/thread-preferences", () => ({
   useShowThreads: () => fixture.showThreads,
   setShowThreads: fixture.setShowThreads,
+}));
+vi.mock("@/lib/run-card-preferences", () => ({
+  useShowRunCard: () => fixture.showRunCard,
+  setShowRunCard: fixture.setShowRunCard,
 }));
 vi.mock("@/lib/notification-preferences", () => ({
   useNotificationSounds: () => fixture.notificationSounds,
@@ -47,6 +53,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   fixture.section = "appearance";
   fixture.showThreads = true;
+  fixture.showRunCard = true;
   fixture.notificationSounds = true;
   fixture.switches = [];
   vi.stubGlobal("window", {});
@@ -97,6 +104,27 @@ describe("Settings → Appearance", () => {
     expect(fixture.setNotificationSounds).toHaveBeenCalledWith(!enabled);
     expect(fixture.api).not.toHaveBeenCalled();
     expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("offers the run card visibility toggle in Appearance", () => {
+    fixture.showRunCard = true;
+    const html = render();
+    expect(html).toContain('aria-label="Show the run card"');
+    expect(html).toContain("This run");
+    expect(html).toContain("saving the run as a skill");
+    const toggle = fixture.switches.find((props) => props["aria-label"] === "Show the run card")!;
+    expect(toggle.checked).toBe(true);
+    toggle.onClick!({} as never);
+    expect(fixture.setShowRunCard).toHaveBeenCalledWith(false);
+    expect(fixture.api).not.toHaveBeenCalled();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+
+    fixture.showRunCard = false;
+    render();
+    const off = fixture.switches.filter((props) => props["aria-label"] === "Show the run card").at(-1)!;
+    expect(off.checked).toBe(false);
+    off.onClick!({} as never);
+    expect(fixture.setShowRunCard).toHaveBeenLastCalledWith(true);
   });
 
   it("leaves non-appearance General settings in place", () => {
