@@ -342,6 +342,9 @@ const instanceConfigSchema = z.object({
   config: z.json().optional(),
 });
 const instanceConfigMapSchema = z.record(z.string(), instanceConfigSchema);
+/** The decision-model lanes (#1630): where the bounded chooser sends its
+ * choice requests. Owned here so the schema cannot drift from the client. */
+export const DECISION_MODEL_PROVIDERS = ["typesafe", "vercel", "openrouter", "custom"] as const;
 const defaultModelSelectionSchema = z.object({
   instanceId: z.string().trim().min(1).max(200),
   model: z.string().trim().min(1).max(500),
@@ -430,6 +433,31 @@ const appConfigSchema = z.object({
    * upstream (e.g. "fireworks"). Both are non-secret and optional. */
   openaiCompat: z
     .object({ key: optionalText, url: optionalText, model: optionalText, provider: optionalText })
+    .optional(),
+  /** Opt-in bounded decision model for computer-use choices (#1630). An
+   * absent or incomplete section is the off state — no flag, no chooser.
+   * The key is a secret like every other provider key; provider/url/model/
+   * threshold are routing settings carried on /api/config. */
+  decisionModel: z
+    .object({
+      provider: z.enum(DECISION_MODEL_PROVIDERS).optional(),
+      url: optionalText,
+      apiKey: optionalText,
+      model: optionalText,
+      threshold: z.number().min(0.5).max(1).optional(),
+      /** Which consumers may consult the model. Absent = none: the
+       * connection can be calibrated without anything acting on it. */
+      uses: z.object({ steerPolicy: z.boolean().optional() }).optional(),
+      /** The 1:1 busy-send chooser's knobs. Asymmetric by design: a wrong
+       * queue is undone with the Steer chip, a wrong steer costs the turn. */
+      steerPolicy: z
+        .object({
+          queueOverrideThreshold: z.number().min(0.5).max(1).optional(),
+          steerOverrideThreshold: z.number().min(0.5).max(1).optional(),
+          budgetMs: z.number().min(250).max(1500).optional(),
+        })
+        .optional(),
+    })
     .optional(),
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
@@ -542,8 +570,40 @@ const appConfigSchema = z.object({
 const storedAppConfigSchema = appConfigSchema.extend({
   browserProfiles: storedBrowserProfilesSchema.optional(),
 });
+/** Plain HTTP for the decision endpoint is reserved for the operator's
+ * own machine: the requests carry accessibility text and, when one is
+ * configured, the key. Empty clears the endpoint and stays allowed.
+ * decision-model.ts enforces the same rule at the point of use, so env
+ * and stored values — which skip this patch schema — cannot reopen a
+ * cleartext lane to a remote host. */
+export function isDecisionUrlTransportSecure(value: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:") return true;
+  if (parsed.protocol !== "http:") return false;
+  const host = parsed.hostname.toLowerCase();
+  if (host === "localhost" || host === "::1" || host === "[::1]") return true;
+  const octets = host.match(/^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  return octets !== null && octets.slice(1).every((octet) => Number(octet) <= 255);
+}
+
 const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true })
-  .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional() });
+  .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional() })
+  .superRefine((value, ctx) => {
+    const url = value.decisionModel?.url?.trim();
+    if (!url) return;
+    if (!isDecisionUrlTransportSecure(url)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["decisionModel", "url"],
+        message: "decisionModel.url must use https (http is allowed only on a loopback host)",
+      });
+    }
+  });
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig {
@@ -571,6 +631,20 @@ export interface AppConfig {
   decisions?: { retentionDays?: number };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
+  /** Bounded decision-model connection; absent = the chooser stays off. */
+  decisionModel?: {
+    provider?: "typesafe" | "vercel" | "openrouter" | "custom";
+    url?: string;
+    apiKey?: string;
+    model?: string;
+    threshold?: number;
+    uses?: { steerPolicy?: boolean };
+    steerPolicy?: {
+      queueOverrideThreshold?: number;
+      steerOverrideThreshold?: number;
+      budgetMs?: number;
+    };
+  };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   /** Persisted under the historical config key "box" (ascii.dev renamed Box to Boat). */
   box?: { token?: string };
@@ -1010,6 +1084,17 @@ export function loadConfig(): AppConfig {
   if (process.env.OPENAI_COMPAT_URL !== undefined) cfg.openaiCompat.url = process.env.OPENAI_COMPAT_URL;
   if (process.env.OPENAI_COMPAT_MODEL !== undefined) cfg.openaiCompat.model = process.env.OPENAI_COMPAT_MODEL;
   if (process.env.OPENAI_COMPAT_PROVIDER !== undefined) cfg.openaiCompat.provider = process.env.OPENAI_COMPAT_PROVIDER;
+  cfg.decisionModel = { ...cfg.decisionModel };
+  if (process.env.DECISION_MODEL_API_KEY !== undefined) cfg.decisionModel.apiKey = process.env.DECISION_MODEL_API_KEY;
+  if (process.env.DECISION_MODEL_URL !== undefined) cfg.decisionModel.url = process.env.DECISION_MODEL_URL;
+  if (process.env.DECISION_MODEL_MODEL !== undefined) cfg.decisionModel.model = process.env.DECISION_MODEL_MODEL;
+  if (process.env.DECISION_MODEL_PROVIDER !== undefined && (DECISION_MODEL_PROVIDERS as readonly string[]).includes(process.env.DECISION_MODEL_PROVIDER)) {
+    cfg.decisionModel.provider = process.env.DECISION_MODEL_PROVIDER as AppConfig["decisionModel"] extends undefined ? never : NonNullable<AppConfig["decisionModel"]>["provider"];
+  }
+  if (process.env.DECISION_MODEL_THRESHOLD !== undefined) {
+    const threshold = Number(process.env.DECISION_MODEL_THRESHOLD);
+    if (Number.isFinite(threshold)) cfg.decisionModel.threshold = Math.min(1, Math.max(0.5, threshold));
+  }
   cfg.composio = { ...cfg.composio };
   if (process.env.COMPOSIO_API_KEY !== undefined) cfg.composio.apiKey = process.env.COMPOSIO_API_KEY;
   // BOX_TOKEN keeps its historical name; the provider is Boat.
@@ -1061,6 +1146,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.decider?.key, "OMB_JEV_API_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
+    [patch.decisionModel?.apiKey, "DECISION_MODEL_API_KEY"],
   ];
   for (const [value, name] of secrets) {
     if (value === undefined) continue;
@@ -1074,11 +1160,20 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.anthropic?.url, "OMB_ANTHROPIC_API_URL"],
     [patch.openaiCompat?.model, "OPENAI_COMPAT_MODEL"],
     [patch.openaiCompat?.provider, "OPENAI_COMPAT_PROVIDER"],
+    [patch.decisionModel?.url, "DECISION_MODEL_URL"],
+    [patch.decisionModel?.model, "DECISION_MODEL_MODEL"],
+    [patch.decisionModel?.provider, "DECISION_MODEL_PROVIDER"],
   ];
   for (const [value, name] of settings) {
     if (value === undefined) continue;
     if (value) process.env[name] = value;
     else delete process.env[name];
+  }
+  // The threshold rides the same env-first overlay as url/model/provider:
+  // without this, a saved threshold writes the file while loadConfig()
+  // keeps answering with the boot-injected value until relaunch.
+  if (patch.decisionModel?.threshold !== undefined) {
+    process.env.DECISION_MODEL_THRESHOLD = String(patch.decisionModel.threshold);
   }
 }
 
@@ -1124,7 +1219,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
  * What an engine is meant to receive arrives under another name through its
  * instance environment (the hosted model token as ANTHROPIC_API_KEY or
  * OPENMAUSBOT_COMPANY_API_KEY), so nothing here is ever an engine's input. */
-export const CONTROL_PLANE_ENV = ["OMB_LICENSE_KEY", "OMB_INSTALLATION_CREDENTIAL"] as const;
+export const CONTROL_PLANE_ENV = ["OMB_LICENSE_KEY", "OMB_INSTALLATION_CREDENTIAL", "DECISION_MODEL_API_KEY"] as const;
 export const CONTROL_PLANE_ENV_PREFIX = "OMB_CLOUD_";
 
 /** Drop every control-plane secret from a child-process env (in place). No
@@ -1198,11 +1293,15 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "profile", "rooms", "threads", "context", "memory", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "decisionModel", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots", "memory", "decider"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
     const merged: JsonObject = current.success ? { ...current.data } : {};
+    // decisionModel's nested groups (uses, steerPolicy) must keep their
+    // disk-stored siblings; capture them before Object.assign overwrites
+    // the section copy below.
+    const storedDecisionModel = key === "decisionModel" && current.success ? current.data : undefined;
     // parseStoredConfig requires threads.maxConcurrentPerBot, so creating
     // the section with only an event-log knob must still persist a valid
     // concurrency default.
@@ -1213,6 +1312,19 @@ export function saveConfig(
     // keeps its value.
     for (const [sectionKey, sectionValue] of Object.entries(section as Record<string, unknown>)) {
       if (sectionValue === null) delete merged[sectionKey];
+    }
+    // decisionModel carries two nested groups (uses, steerPolicy) whose
+    // knobs are saved one at a time: a partial patch must merge into the
+    // stored group, not replace it and silently drop its siblings.
+    if (key === "decisionModel") {
+      for (const nested of ["uses", "steerPolicy"] as const) {
+        const incoming = (section as Record<string, unknown>)[nested];
+        if (!incoming || typeof incoming !== "object") continue;
+        const stored = storedDecisionModel?.[nested];
+        merged[nested] = (stored && typeof stored === "object"
+          ? { ...(stored as Record<string, unknown>), ...(incoming as Record<string, unknown>) }
+          : incoming) as JsonObject;
+      }
     }
     disk[key] = merged;
   }

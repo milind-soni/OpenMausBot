@@ -32,6 +32,10 @@ export type LocalComputerConnection = {
 export function gatedLocalComputer(
   connection: LocalComputerConnection,
   control: { url: string; token: string },
+  /** Decision-model env for the bridge's opt-in chooser (#1630). Absent on
+   * every default install; passed only for a configured, calibrated
+   * connection, which is the entire opt-in. */
+  decision?: Record<string, string>,
 ): LocalComputerConnection {
   return {
     ...connection,
@@ -47,6 +51,7 @@ export function gatedLocalComputer(
       OMB_CUA_ARGS: JSON.stringify(connection.args),
       OMB_CONTROL_URL: control.url,
       OMB_CONTROL_TOKEN: control.token,
+      ...decision,
     },
   };
 }

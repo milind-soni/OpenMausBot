@@ -245,6 +245,35 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
       );
     case "thread.token-usage.updated":
       return typeof value.input === "number" && typeof value.output === "number";
+    case "decision.chooser":
+      return (
+        (value.outcome === "acted" ||
+          value.outcome === "abstained" ||
+          value.outcome === "reobserve" ||
+          value.outcome === "below-threshold" ||
+          value.outcome === "superseded" ||
+          value.outcome === "error") &&
+        stringOrMissing(value.selectedId) &&
+        (value.confidence === undefined ||
+          (typeof value.confidence === "number" && Number.isFinite(value.confidence) && value.confidence >= 0 && value.confidence <= 1)) &&
+        stringOrMissing(value.model) &&
+        stringOrMissing(value.flow) &&
+        stringOrMissing(value.detail)
+      );
+    case "decision.admission":
+      return (
+        value.surface === "direct" &&
+        (value.layer === "preference-default" ||
+          value.layer === "model-override" ||
+          value.layer === "mechanical-clamp" ||
+          value.layer === "human") &&
+        (value.decision === "steer" || value.decision === "queue") &&
+        (value.preference === "steer" || value.preference === "queue") &&
+        (value.confidence === undefined ||
+          (typeof value.confidence === "number" && Number.isFinite(value.confidence) && value.confidence >= 0 && value.confidence <= 1)) &&
+        stringOrMissing(value.model) &&
+        stringOrMissing(value.detail)
+      );
     case "runtime.error":
       return typeof value.message === "string" &&
         (value.setup === undefined || typeof value.setup === "boolean") &&

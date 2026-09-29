@@ -595,6 +595,17 @@ export interface ConfigStatus {
   mistral?: { configured: boolean };
   anthropic?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
+  /** Bounded decision-model connection (#1630). Routing settings only; the
+   * key is write-only like every other credential. */
+  decisionModel?: {
+    configured: boolean;
+    /** a stored key exists even when the connection is not yet complete */
+    hasKey: boolean;
+    provider?: "typesafe" | "vercel" | "openrouter" | "custom";
+    url: string;
+    model: string;
+    threshold: number;
+  };
   /** what this server is entitled to; Settings shows only what works here.
    * `license` reaches admins only, and only while the key is inside its
    * warning window or grace period. */
@@ -704,7 +715,7 @@ export interface BrowserProfile {
 // Settings shows (a saved key's Test button used to vanish that way).
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
+  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "decisionModel" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "decider"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -725,6 +736,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     tts: frame.tts,
     decider: frame.decider,
     imageGen: frame.imageGen,
+    decisionModel: frame.decisionModel,
     profile: frame.profile,
     language: frame.language,
     features: frame.features,

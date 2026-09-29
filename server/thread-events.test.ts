@@ -177,6 +177,41 @@ describe("readThreadEvents", () => {
     expect(page.entries.map((entry) => (entry.data as { eventId: string }).eventId)).toEqual(["valid-retry"]);
   });
 
+  it("round-trips chooser outcomes and discards a malformed one", () => {
+    const eventsDir = tmp();
+    const nativeDir = tmp();
+    writeFileSync(
+      join(eventsDir, "t1.ndjson"),
+      line(runtime({ eventId: "ok", type: "decision.chooser", createdAt: "2026-09-21T10:00:00.000Z", outcome: "acted", selectedId: "click:0", confidence: 0.95, model: "jev-latest", flow: "local" })) +
+        line(runtime({ eventId: "bad-confidence", type: "decision.chooser", createdAt: "2026-09-21T10:00:01.000Z", outcome: "acted", confidence: 1.5 })) +
+        line(runtime({ eventId: "bad-outcome", type: "decision.chooser", createdAt: "2026-09-21T10:00:02.000Z", outcome: "maybe" })),
+    );
+    const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0]).toMatchObject({
+      kind: "runtime",
+      data: { eventId: "ok", outcome: "acted", selectedId: "click:0", confidence: 0.95, flow: "local" },
+    });
+  });
+
+  it("round-trips admission decisions and discards a malformed one", () => {
+    const eventsDir = tmp();
+    const nativeDir = tmp();
+    writeFileSync(
+      join(eventsDir, "t1.ndjson"),
+      line(runtime({ eventId: "ok", type: "decision.admission", createdAt: "2026-09-24T10:00:00.000Z", surface: "direct", layer: "model-override", decision: "queue", preference: "steer", confidence: 0.95, model: "jev-latest", detail: "override:queue" })) +
+        line(runtime({ eventId: "bad-confidence", type: "decision.admission", createdAt: "2026-09-24T10:00:01.000Z", surface: "direct", layer: "model-override", decision: "queue", preference: "steer", confidence: 1.5 })) +
+        line(runtime({ eventId: "bad-layer", type: "decision.admission", createdAt: "2026-09-24T10:00:02.000Z", surface: "direct", layer: "vibes", decision: "queue", preference: "steer" })) +
+        line(runtime({ eventId: "bad-decision", type: "decision.admission", createdAt: "2026-09-24T10:00:03.000Z", surface: "direct", layer: "human", decision: "maybe", preference: "queue" })),
+    );
+    const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0]).toMatchObject({
+      kind: "runtime",
+      data: { eventId: "ok", layer: "model-override", decision: "queue", preference: "steer", confidence: 0.95 },
+    });
+  });
+
   it("keeps walking backward when a corrupt tail record would otherwise consume the limit", () => {
     const eventsDir = tmp();
     const nativeDir = tmp();

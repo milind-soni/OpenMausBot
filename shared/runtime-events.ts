@@ -164,6 +164,35 @@ export type RuntimeEvent = RuntimeEventBase &
     // configuring something, not by retrying — the UI offers setup instead.
     // `terminal: true` records failure of the complete turn, rather than a
     // transient error or a legacy provider's diagnostic during cancellation.
+    | {
+        /** The opt-in decision model answered a computer-use step (#1630).
+         * `acted` steps skipped a screenshot and an LLM turn; every other
+         * outcome silently fell back to the normal loop. */
+        type: "decision.chooser";
+        outcome: "acted" | "abstained" | "reobserve" | "below-threshold" | "superseded" | "error";
+        selectedId?: string;
+        confidence?: number;
+        model?: string;
+        flow?: string;
+        detail?: string;
+      }
+    | {
+        /** Admission telemetry (steer-vs-queue): one event per busy 1:1 send
+         * and each human Steer press, naming which layer decided. */
+        type: "decision.admission";
+        /** Which surface decided; the 1:1 busy-send seam today. */
+        surface: "direct";
+        /** The deciding layer: the bot's configured fallback, a confident
+         * model override, a hard mechanical rule, or the human. */
+        layer: "preference-default" | "model-override" | "mechanical-clamp" | "human";
+        /** What was done. */
+        decision: "steer" | "queue";
+        /** The bot's configured fallback. */
+        preference: "steer" | "queue";
+        confidence?: number;
+        model?: string;
+        detail?: string;
+      }
     // `claudeUpdate: true` narrows a setup failure to "this Claude Code is
     // too old for the model": the UI offers to run `claude update` for them.
     | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean }

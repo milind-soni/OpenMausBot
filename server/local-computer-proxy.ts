@@ -8,6 +8,12 @@ const {
   OMB_CUA_ARGS: encodedArgs,
   OMB_CONTROL_URL: url,
   OMB_CONTROL_TOKEN: token,
+  OMB_DECISION_PROVIDER: decisionProvider,
+  OMB_DECISION_URL: decisionUrl,
+  OMB_DECISION_API_KEY: decisionApiKey,
+  OMB_DECISION_MODEL: decisionModel,
+  OMB_DECISION_THRESHOLD: decisionThreshold,
+  OMB_DECISION_FLOW: decisionFlow,
   ...childEnv
 } = process.env;
 
@@ -27,10 +33,53 @@ try {
   process.exit(2);
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (host === "localhost" || host === "::1" || host === "[::1]") return true;
+  const octets = host.match(/^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  return octets !== null && octets.slice(1).every((octet) => Number(octet) <= 255);
+}
+
+/** The decision endpoint carries accessibility text — and, when one is
+ * configured, the key — so plain HTTP is reserved for the operator's own
+ * machine: https anywhere, http only on a loopback host. Kept local:
+ * importing the model client here would pull its SDK into this child. */
+function secureDecisionUrl(raw: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (parsed.username || parsed.password) return false;
+  if (parsed.protocol === "https:") return true;
+  return parsed.protocol === "http:" && isLoopbackHost(parsed.hostname);
+}
+
+// The chooser is opt-in by env (#1630): the harness passes these values
+// only for a configured, probe-calibrated connection, and they are
+// revalidated here so a stray or malformed env never half-enables it.
+const decisionThresholdValue = Number(decisionThreshold);
+const decision =
+  decisionProvider && decisionModel && decisionFlow &&
+  typeof decisionUrl === "string" && secureDecisionUrl(decisionUrl) &&
+  !decisionProvider.includes("\0") && !decisionModel.includes("\0") &&
+  Number.isFinite(decisionThresholdValue) && decisionThresholdValue >= 0.5 && decisionThresholdValue <= 1
+    ? {
+        provider: decisionProvider,
+        url: decisionUrl,
+        model: decisionModel,
+        threshold: decisionThresholdValue,
+        flow: decisionFlow,
+        ...(decisionApiKey ? { apiKey: decisionApiKey } : {}),
+      }
+    : undefined;
+
 runMcpBridge({
   command: command!,
   args,
   env: { ...childEnv, PATH: augmentedPath() },
   label: "Local Cua Driver",
   gate: { url: url!, token: token! },
+  ...(decision ? { decision } : {}),
 });
