@@ -502,17 +502,23 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
         20_000,
       );
       // silencing the peer's completion must never silence the peer asking a
-      // person for something only a person can give
+      // person for something only a person can give — and the banner must
+      // point at the pair conversation the turn now runs in
+      let pairRowId: string | undefined;
+      await expect.poll(async () => {
+        pairRowId = (await botState(peer.id))?.tasks.find((task: { title?: string }) => task.title === "@Quill")?.threadId;
+        return pairRowId;
+      }, { timeout: 15_000 }).toBeTruthy();
       expect(frame.notification).toMatchObject({
         kind: "question",
         botId: peer.id,
-        threadId: peer.threadId,
+        threadId: pairRowId,
         title: "Sage has a question",
       });
-      // the card is really open in the peer's thread — the banner is not
-      // announcing something the person cannot act on (a new bot's onboarding
-      // card sits above it, so take the turn's own)
-      const card = (await botState(peer.id))?.messages.findLast(
+      // the card is really open in that pair conversation — the banner is
+      // not announcing something the person cannot act on (a new bot's
+      // onboarding card sits above it, so take the turn's own)
+      const card = (await api("GET", `/api/threads/${pairRowId}/messages?limit=50`)).body.messages.findLast(
         (message: { kind: string; card?: { title?: string } }) => message.kind === "options" && Boolean(message.card),
       );
       expect(card?.card).toMatchObject({ title: "Your bot has a question", subtitle: "Which color?" });

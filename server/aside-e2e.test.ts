@@ -1,11 +1,14 @@
-// The aside lane, end to end: a peer ask that lands while its target is
-// mid-turn on a seam-capable engine folds into the RUNNING turn. The
-// envelope physically enters the live session through Adapter.steer, the
-// transcript records it as peer context (never steering, never a
-// delegation), the asker gets an honest receipt, and the turn settles with
-// the aside folded into its reply — once, not replayed at the settle
-// boundary. The no-seam degradation (busy ACP peer → delegation queue)
-// stays pinned by the ask_bot busy-fallback e2e in comms.test.ts.
+// The aside lane, end to end: a second peer ask that arrives while the pair
+// conversation's own turn is mid-flight on a seam-capable engine folds into
+// that RUNNING turn. The envelope physically enters the live session through
+// Adapter.steer, the transcript records it as peer context (never steering,
+// never a delegation), the asker gets an honest receipt, and the turn
+// settles with the aside folded into its reply — once, not replayed at the
+// settle boundary. A peer busy in an UNRELATED thread is the other half of
+// the #1684 routing: the ask never enters that thread, it queues as a
+// delegation for the pair conversation and runs there. The no-seam
+// degradation (busy ACP pair turn → delegation queue) stays pinned by the
+// ask_bot busy-fallback e2e in comms.test.ts.
 //
 // POSIX-gated like the other CLI e2es (the fakes are shebang scripts).
 import { spawn, type ChildProcess } from "node:child_process";
@@ -123,8 +126,9 @@ posixOnly("peer aside lane e2e", () => {
     await removeTempDir(home);
   });
 
+
   it(
-    "folds a peer ask into a busy Claude turn as an aside: honest receipt, enveloped transcript line, no delegation, folded reply, no replay",
+    "folds a second ask into the pair conversation's busy turn as an aside: honest receipt, enveloped transcript line, no delegation, folded reply, no replay",
     async () => {
       rmSync(finishGate, { force: true });
       // determinism: the ask-peer CLI asks the FIRST visible bot, so hide
@@ -141,17 +145,27 @@ posixOnly("peer aside lane e2e", () => {
         name: "Asker",
         modelSelection: { instanceId: "grok", model: "fake-model" },
       });
+      const pairRowId = async () =>
+        (await getBot(helper.id))?.tasks?.find((task: any) => task.title === "@Asker")?.threadId as string | undefined;
+      const pairMessages = async (): Promise<any[]> => {
+        const threadId = await pairRowId();
+        return threadId ? (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).body.messages : [];
+      };
 
-      // Helper's turn opens and parks in the slow gap after its tool result
-      expect((await api("POST", `/api/bots/${helper.id}/messages`, { text: "first" })).status).toBe(202);
-      await waitUntil(async () => (await getBot(helper.id))?.busy === true, 15_000, "helper turn never started");
+      // The first ask opens the pair conversation (#1684: classic asks run
+      // there, never in the recipient's selected thread) and its turn parks
+      // in the slow gap after its tool result — the running turn a second
+      // ask must fold into.
+      expect((await startRoutine(asker.id, "hey @Helper ping")).status).toBe(201);
+      await waitUntil(async () => (await getBot(helper.id))?.busy === true, 15_000, "helper pair turn never started");
+      await waitUntil(async () => Boolean(await pairRowId()), 15_000, "pair conversation never appeared");
       await waitUntil(
-        async () => (await getBot(helper.id))?.messages.some((m: any) => m.kind === "activity"),
+        async () => (await pairMessages()).some((m: any) => m.kind === "activity"),
         15_000,
         "helper tool chip never landed",
       );
 
-      // Asker asks while Helper is mid-turn
+      // Asker asks again while the pair conversation is mid-turn
       expect((await startRoutine(asker.id, "hey @Helper ping")).status).toBe(201);
       let askerBot: any;
       await waitUntil(async () => {
@@ -172,11 +186,10 @@ posixOnly("peer aside lane e2e", () => {
         ),
       ).toBe(false);
 
-      // Helper's transcript already shows the folded context: user-role,
+      // The pair transcript already shows the folded context: user-role,
       // enveloped, marked aside (never steered), attributed to the peer
-      const midTurn = await getBot(helper.id);
-      expect(midTurn.busy).toBe(true); // an aside is not an interruption
-      const asideLine = midTurn.messages.find((m: any) => m.aside === true);
+      expect((await getBot(helper.id))?.busy).toBe(true); // an aside is not an interruption
+      const asideLine = (await pairMessages()).find((m: any) => m.aside === true);
       expect(asideLine).toBeTruthy();
       expect(asideLine.role).toBe("user");
       expect(asideLine.kind).toBe("text");
@@ -189,14 +202,75 @@ posixOnly("peer aside lane e2e", () => {
       // is the proof the words entered the live session
       writeFileSync(finishGate, "finish");
       await waitUntil(async () => (await getBot(helper.id))?.busy === false, 20_000, "helper turn never settled");
-      const settled = await getBot(helper.id);
-      const finalReply = settled.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
-      expect(finalReply.text).toContain(`reply to: first + steered: ${ENVELOPE_OPEN}`);
+      const settledPair = await pairMessages();
+      const finalReply = settledPair.findLast((m: any) => m.kind === "text" && m.role === "bot");
+      expect(finalReply.text).toContain("reply to: ");
+      expect(finalReply.text).toContain(` + steered: ${ENVELOPE_OPEN}`);
       expect(finalReply.text).toContain(ASIDE_TEXT);
       // one injection, no replay: the settle boundary retired the row, it
       // did not fold the same words a second time
-      expect(settled.messages.filter((m: any) => m.aside === true)).toHaveLength(1);
-      expect(settled.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text?.startsWith("reply to:"))).toHaveLength(1);
+      expect(settledPair.filter((m: any) => m.aside === true)).toHaveLength(1);
+      expect(settledPair.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text?.startsWith("reply to:"))).toHaveLength(1);
+    },
+    60_000,
+  );
+
+  it(
+    "keeps an ask out of a busy unrelated thread: it queues for the pair conversation instead",
+    async () => {
+      rmSync(finishGate, { force: true });
+      // the same pair survives across tests in this server
+      const bots = (await api("GET", "/api/bots")).body.bots;
+      const helper = bots.find((b: any) => b.name === "Helper");
+      const asker = bots.find((b: any) => b.name === "Asker");
+      const pairRowId = async () =>
+        (await getBot(helper.id))?.tasks?.find((task: any) => task.title === "@Asker")?.threadId as string | undefined;
+      const pairMessages = async (): Promise<any[]> => {
+        const threadId = await pairRowId();
+        return threadId ? (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).body.messages : [];
+      };
+
+      // Helper's person-driven turn opens in its own thread and parks in
+      // the slow gap — a conversation the ask has no business entering
+      expect((await api("POST", `/api/bots/${helper.id}/messages`, { text: "second" })).status).toBe(202);
+      await waitUntil(async () => (await getBot(helper.id))?.busy === true, 15_000, "helper turn never started");
+      await waitUntil(
+        async () => (await getBot(helper.id))?.messages.some((m: any) => m.kind === "activity"),
+        15_000,
+        "helper tool chip never landed",
+      );
+
+      // Asker asks while Helper is mid-turn elsewhere
+      expect((await startRoutine(asker.id, "hey @Helper ping")).status).toBe(201);
+      let askerBot: any;
+      await waitUntil(async () => {
+        askerBot = await getBot(asker.id);
+        const reply = askerBot.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
+        return Boolean(reply?.text?.includes("peer says:") && !askerBot.busy);
+      }, 25_000, "asker never got its reply");
+
+      // the receipt is the delegation fallback, aimed at the pair
+      // conversation — not a fold into the unrelated running turn
+      const askerReply = askerBot.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
+      expect(askerReply.text).toContain("peer says: Helper is busy right now");
+      expect(askerReply.text).toContain("queued as a delegation");
+      expect(askerReply.text).toContain("Task id:");
+      expect(
+        askerBot.messages.some(
+          (m: any) => m.kind === "activity" && m.tool?.name === "Delegated to @Helper: asked while busy",
+        ),
+      ).toBe(true);
+
+      // the unrelated thread stays untouched: no folded context ever enters it
+      expect(((await getBot(helper.id))?.messages ?? []).filter((m: any) => m.aside === true)).toHaveLength(0);
+
+      // release: the person's turn settles and the queued ask runs in the
+      // pair conversation, delegated prefix and all
+      writeFileSync(finishGate, "finish");
+      await waitUntil(async () =>
+        (await pairMessages()).some((m: any) => m.role === "user" && typeof m.text === "string" && m.text.includes("Delegated by @Asker")),
+      20_000, "delegated ask never reached the pair conversation");
+      await waitUntil(async () => (await getBot(helper.id))?.busy === false, 20_000, "helper turns never settled");
     },
     60_000,
   );

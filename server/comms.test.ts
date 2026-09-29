@@ -143,6 +143,19 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
     return { status: started.status, body: { run } };
   };
 
+  // Classic asks and delegations run in the standing pair conversation with
+  // the sender, a row the recipient's sidebar never selected (#1684): read
+  // its transcript the way a client would, through the public thread API.
+  const pairThreadMessages = async (botId: string, senderName: string): Promise<any[]> => {
+    const state = (await api("GET", "/api/bots")).body;
+    const pair = state.bots
+      .find((b: any) => b.id === botId)
+      ?.tasks?.find((task: any) => task.title === `@${senderName}`);
+    return pair
+      ? (await api("GET", `/api/threads/${pair.threadId}/messages?limit=100`)).body.messages
+      : [];
+  };
+
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-comms-test-"));
@@ -384,10 +397,12 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       expect(channel.messages.some((m: any) => m.from?.botId === asker.id)).toBe(true);
       expect(channel.messages.some((m: any) => m.from?.botId === helper.id && m.text?.includes("hello from fake acp"))).toBe(true);
 
-      // B's thread received the attributed message and ran a real turn,
-      // plus a receive-side chip pointing at the same channel
+      // B's pair conversation received the attributed message and ran a
+      // real turn there, plus a receive-side chip in B's own thread
+      // pointing at the same channel
       const helperBot = state.bots.find((b: any) => b.id === helper.id);
-      const inbound = helperBot.messages.find((m: any) => m.role === "user" && m.kind === "text");
+      const inbound = (await pairThreadMessages(helper.id, "Asker"))
+        .find((m: any) => m.role === "user" && m.kind === "text");
       expect(inbound.text).toContain("[Message from @Asker");
       expect(inbound.text).toContain("ping from fake");
       // the transport is on the line itself, not only in its wording: a
@@ -438,7 +453,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
             && message.role === "bot"
             && message.text?.includes("peer says: Gemini Helper replied:"),
         );
-        const helperReplied = helperBot.messages.some(
+        const helperReplied = (await pairThreadMessages(helper.id, "Gemini Asker")).some(
           (message: any) =>
             message.kind === "text"
             && message.role === "bot"
@@ -463,13 +478,13 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       );
       expect(askerReply.text).toContain("peer says: Gemini Helper replied:");
       expect(askerReply.text).toContain("hello from fake acp");
-      const helperReply = helperBot.messages.findLast(
+      const helperReply = (await pairThreadMessages(helper.id, "Gemini Asker")).findLast(
         (message: any) => message.kind === "text" && message.role === "bot",
       );
       expect(helperReply.text).toContain("hello from fake acp");
       expect(helperReply.text).not.toContain("peer says:");
 
-      const inbound = helperBot.messages.find(
+      const inbound = (await pairThreadMessages(helper.id, "Gemini Asker")).find(
         (message: any) => message.kind === "text" && message.role === "user",
       );
       expect(inbound.text).toContain("[Message from @Gemini Asker");
@@ -502,7 +517,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
         operator = state.bots.find((bot: any) => bot.name === "Pixel" && bot.section === "Launch");
-        const replied = operator?.messages.some(
+        const replied = operator && (await pairThreadMessages(operator.id, "Atlas")).some(
           (message: any) => message.role === "bot" && message.text?.includes("hello from fake acp"),
         );
         if (operator && replied && !operator.busy) break;
@@ -522,7 +537,8 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
         modelSelection: defaultSelection,
       });
       expect(operator.chiefOfStaff).toBeFalsy();
-      expect(operator.messages.some((message: any) => message.text?.includes("Review the new onboarding flow."))).toBe(true);
+      expect((await pairThreadMessages(operator.id, "Atlas"))
+        .some((message: any) => message.text?.includes("Review the new onboarding flow."))).toBe(true);
     },
     45_000,
   );
@@ -569,7 +585,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
         note = askerBot.messages.find(
           (m: any) => m.kind === "activity" && m.tool?.name === "Messaged @Helper",
         );
-        const helperReplied = helperBot.messages.some(
+        const helperReplied = (await pairThreadMessages(helper.id, "Asker")).some(
           (m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes("hello from fake acp"),
         );
         const resultReturned = askerBot.messages.some(
@@ -615,7 +631,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
 
       // B ran a depth-1 turn: the inbound user text carries the delegation
       // prefix, B's reply is the happy-mode line (no agents integration).
-      const helperInbound = helperBot.messages.find(
+      const helperInbound = (await pairThreadMessages(helper.id, "Asker")).find(
         (m: any) => m.role === "user" && m.kind === "text",
       );
       expect(helperInbound.text).toContain("[Delegated by @Asker");
@@ -624,7 +640,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       // the author rides on the line itself, not only in its prefix — a
       // renderer must not show A's handoff as B's user speaking
       expect(helperInbound.peerAsk).toEqual({ botId: asker.id, name: "Asker" });
-      const helperReply = helperBot.messages.findLast(
+      const helperReply = (await pairThreadMessages(helper.id, "Asker")).findLast(
         (m: any) => m.kind === "text" && m.role === "bot",
       );
       expect(helperReply.text).toContain("hello from fake acp");
@@ -834,12 +850,12 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       let helperBot: any;
       await waitUntil(async () => {
         helperBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === helper.id);
-        const delivered = helperBot.messages.some(
+        const delivered = (await pairThreadMessages(helper.id, "GateAsker")).some(
           (m: any) => m.role === "user" && m.kind === "text" && m.text?.includes("ping from fake"),
         );
         return Boolean(delivered && !helperBot.busy);
       }, 30_000, "queued message never reached the freed peer");
-      const inbound = helperBot.messages.find(
+      const inbound = (await pairThreadMessages(helper.id, "GateAsker")).find(
         (m: any) => m.role === "user" && m.kind === "text" && m.text?.includes("ping from fake"),
       );
       expect(inbound.text).toContain("[Delegated by @GateAsker");
@@ -888,9 +904,17 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
         return Boolean(approvalCard);
       }, 20_000, "initial ask_bot approval card never appeared");
 
-      // B becomes busy while the approval is open. After Allow, ask_bot has
+      // B becomes busy while the approval is open — in the standing pair
+      // conversation this ask will run in (#1684), so the fallback waits on
+      // the very thread the delegation targets. After Allow, ask_bot has
       // to fall back to the durable queue, but that queue inherits Allow.
-      expect((await api("POST", `/api/bots/${helper.id}/messages`, { text: "hold until reload" })).status).toBe(202);
+      let pairThreadId: string | undefined;
+      await waitUntil(async () => {
+        const helperState = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: any) => b.id === helper.id);
+        pairThreadId = helperState?.tasks?.find((task: any) => task.title === "@ReloadAsker")?.threadId;
+        return Boolean(pairThreadId);
+      }, 10_000, "pair conversation never appeared behind the approval card");
+      expect((await api("POST", `/api/bots/${helper.id}/messages`, { text: "hold until reload", threadId: pairThreadId })).status).toBe(202);
       await waitUntil(async () => {
         const current = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: any) => b.id === helper.id);
         return Boolean(current?.busy);
@@ -1274,7 +1298,8 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
         );
         const helperStarted =
           helperBot.messages.some((m: any) => m.role === "user" && m.kind === "text") ||
-          helperBot.busy;
+          helperBot.busy ||
+          (await pairThreadMessages(helper.id, "Asker")).some((m: any) => m.role === "user" && m.kind === "text");
         if (card && !helperStarted) break;
         if (Date.now() > cardDeadline) {
           throw new Error(
@@ -1312,7 +1337,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
         const peerFolded = finalAsker.messages.findLast(
           (m: any) => m.kind === "text" && m.role === "bot",
         )?.text?.includes("peer says:");
-        const helperReplied = finalHelper.messages.some(
+        const helperReplied = (await pairThreadMessages(helper.id, "Asker")).some(
           (m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes("hello from fake acp"),
         );
         if (peerFolded && helperReplied && !finalHelper.busy && !finalAsker.busy) break;
@@ -1321,6 +1346,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
             `B never ran after allow\n` +
               `asker tail: ${JSON.stringify(finalAsker.messages.slice(-8))}\n` +
               `helper tail: ${JSON.stringify(finalHelper.messages.slice(-6))}\n` +
+            `pair tail: ${JSON.stringify((await pairThreadMessages(helper.id, "Asker")).slice(-6))}\n` +
               `stderr: ${stderr.slice(-2000)}`,
           );
         }
@@ -1444,7 +1470,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       // Match the actual reply text — the greeting on the seeded bot
       // matches `role:"bot" kind:"text"` too, so a generic text search
       // would break before B even runs.
-      const reply = helperBot.messages.find(
+      const reply = (await pairThreadMessages(helper.id, "Asker")).find(
         (m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes("hello from fake acp"),
       );
       if (reply && !helperBot.busy) break;
@@ -1456,7 +1482,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       await new Promise((r) => setTimeout(r, 250));
     }
 
-    const reply = helperBot.messages.findLast(
+    const reply = (await pairThreadMessages(helper.id, "Asker")).findLast(
       (m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes("hello from fake acp"),
     );
     // If the guard were broken, B would have called ask_bot at depth=1 and
