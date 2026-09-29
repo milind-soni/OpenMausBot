@@ -312,6 +312,16 @@ class LiveCallManagerTest {
     }
 
     @Test
+    fun `a call that cannot take the audio from another call ends at once`() = runTest {
+        val f = Fixture(this)
+        f.audio.refuseFocus = true
+        f.manager.start("b1", "t1", "Ada", grant)
+        runCurrent()
+        assertEquals(LiveCallRules.FOCUS_LOST_MESSAGE, f.manager.state.value.notice)
+        assertEquals(false, f.manager.state.value.holdsMedia)
+    }
+
+    @Test
     fun `losing the audio to another app ends the call`() = runTest {
         val f = Fixture(this).live()
         requireNotNull(f.audio.onFocusLost).invoke()
@@ -1108,10 +1118,13 @@ class LiveCallManagerTest {
         val speakers = mutableListOf<Boolean>()
         var ends = 0
         var onFocusLost: (() -> Unit)? = null
+        /** Another call holds the audio: focus is refused as the call begins. */
+        var refuseFocus = false
 
         override fun begin(speaker: Boolean, onFocusLost: () -> Unit) {
             begins += speaker
             this.onFocusLost = onFocusLost
+            if (refuseFocus) onFocusLost()
         }
 
         override fun setSpeaker(speaker: Boolean) {

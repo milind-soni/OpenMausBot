@@ -130,7 +130,14 @@ internal class AndroidLiveCallAudioRoute(context: Context) : LiveCallAudioRoute 
             }
             .build()
         focusRequest = request
-        audioManager.requestAudioFocus(request)
+        // Refused while a phone or VoIP call holds the audio: this call must
+        // not share the microphone and route with it, and no loss will ever
+        // come for focus that was never granted.
+        if (audioManager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            focusRequest = null
+            onFocusLost()
+            return
+        }
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         this.speaker = speaker
         routing = true
