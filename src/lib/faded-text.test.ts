@@ -11,7 +11,7 @@
 // the secondary ink with an opacity modifier again.
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SKIN_IDS } from "./skins";
 
@@ -98,12 +98,14 @@ describe("faded text", () => {
   it("never fades the secondary ink with an opacity modifier", () => {
     const faded: string[] = [];
     for (const file of sources(src)) {
+      // DECORATIVE names files with "/"; relative() joins with "\" on Windows
+      const where = relative(src, file).split(sep).join("/");
       readFileSync(file, "utf8").split("\n").forEach((line, index) => {
         for (const [utility, variants] of line.matchAll(/(?<![\w-])((?:[\w-]+:)*)text-ink-secondary\/[\w.[\]]+/g)) {
           // WCAG 1.4.3 exempts a disabled control's text
           if (variants.split(":").includes("disabled")) continue;
-          if (`${relative(src, file)} ${utility}` in DECORATIVE) continue;
-          faded.push(`${relative(src, file)}:${index + 1} ${utility}`);
+          if (`${where} ${utility}` in DECORATIVE) continue;
+          faded.push(`${where}:${index + 1} ${utility}`);
         }
       });
     }
