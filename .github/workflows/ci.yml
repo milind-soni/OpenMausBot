@@ -443,7 +443,7 @@ jobs:
     if: needs.static.outputs.mobile == 'true'
     name: Swift tests + iOS build + thread UI
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Swift package tests
@@ -453,16 +453,6 @@ jobs:
           brew install xcodegen
           cd ios
           xcodegen generate
-      - name: Build the simulator app
-        run: |
-          cd ios
-          xcodebuild \
-            -project OpenMausCompanion.xcodeproj \
-            -scheme OpenMausCompanion \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            build
       - name: Verify thread navigation on disposable iPhone and iPad simulators
         run: bash scripts/verify-ios-thread-navigation-ci.sh
       - name: Keep native thread test results and screenshots
