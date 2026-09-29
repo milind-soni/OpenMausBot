@@ -424,6 +424,12 @@ Folder transfers are limited to 256 KiB per file and do not follow links or
 delete files. Local screen control also needs OS permissions and a supported
 desktop driver. Microphone access is not included.
 
+Only conversations you start yourself on that server can use what you share;
+other people's bots, routines and webhooks there cannot. Keys and sign-in
+stores (`~/.ssh`, cloud CLIs, browser profiles, keychains) and `.git`
+internals stay out of reach of any shared folder, and the desktop keeps a log
+of every request under **Computer access**.
+
 Sharing works while this desktop is awake and running, including when viewing
 another workspace. **Stop sharing** revokes access; closing the app stops the
 connector. An action already sent to a local app may still finish. **Forget**

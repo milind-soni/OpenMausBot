@@ -15,9 +15,10 @@ ipcRenderer.on("package:install", (_event, url) => {
 });
 
 // Main can finish loading the document before React subscribes. Retain only
-// the fixed actions (Organisation, and the openmausbot://cloud link), never a
-// destination supplied by a renderer.
-const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud"]);
+// the fixed actions (Organisation, the openmausbot://cloud link, and plain
+// Settings → OMB Cloud from the lending menu-bar item), never a destination
+// supplied by a renderer.
+const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings"]);
 let pendingSettingsAction = null;
 const appSettingsListeners = new Set();
 ipcRenderer.on("app:open-settings", (_event, section) => {
@@ -302,6 +303,13 @@ const bridge = {
       ipcRenderer.on("cloud-account:state-changed", handler);
       return () => ipcRenderer.removeListener("cloud-account:state-changed", handler);
     },
+    // "Let my Cloud use this Mac": main decides the Cloud; no argument names it.
+    lending: {
+      state: () => ipcRenderer.invoke("lending:state"),
+      chooseFolder: () => ipcRenderer.invoke("lending:folder"),
+      save: input => ipcRenderer.invoke("lending:save", input),
+      stop: () => ipcRenderer.invoke("lending:stop"),
+    },
   } : undefined,
   organization: process.argv.includes("--omb-company-desktop=1") ? {
     settingsOpened: () => ipcRenderer.invoke("organization:settings-opened"),
@@ -337,6 +345,7 @@ const bridge = {
     chooseFolder: () => ipcRenderer.invoke("sharing:folder"),
     save: (id, grant) => ipcRenderer.invoke("sharing:save", id, grant),
     revoke: id => ipcRenderer.invoke("sharing:revoke", id),
+    activity: id => ipcRenderer.invoke("sharing:activity", id),
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),
 };

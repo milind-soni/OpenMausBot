@@ -23,6 +23,8 @@ export interface CloudAccountBridge {
   /** Lists the Cloud machine under Servers and opens it in this window. */
   connectHome(): Promise<CloudAccountState>;
   onState(callback: (state: CloudAccountState) => void): () => void;
+  /** "Let my Cloud use this Mac" (docs/cloud-pro.md). */
+  lending?: import("./computer-sharing.mjs").CloudLendingBridge;
 }
 
 export declare const CLOUD_ORIGIN: string;

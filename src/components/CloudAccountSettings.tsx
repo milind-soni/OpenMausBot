@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { CloudAccountState } from "../../electron/cloud-account.mjs";
+import type { CloudAccountBridge, CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudMachine } from "../../electron/cloud-home.mjs";
 import { t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
+import { CloudLending } from "./CloudLending";
 
 const MACHINE_TEXT = {
   provisioning: "cloudHome.provisioning",
@@ -15,7 +16,7 @@ const MACHINE_TEXT = {
 /** The person's Cloud machine: where it stands, and one way in. Status and
  * address come only from the verified native snapshot; the pairing code
  * never reaches this page. A render helper (no hooks), part of the card. */
-function cloudHomeCard({ machine, busy, failed, onConnect }: { machine: CloudMachine; busy: boolean; failed: boolean; onConnect: () => void }) {
+function cloudHomeCard({ machine, busy, failed, onConnect, lending }: { machine: CloudMachine; busy: boolean; failed: boolean; onConnect: () => void; lending?: CloudAccountBridge["lending"] }) {
   const connectable = machine.status === "ready";
   return <Card title={t("cloudHome.title")}>
     <div data-cloud-home={machine.status} className="flex flex-col items-start gap-3">
@@ -25,6 +26,8 @@ function cloudHomeCard({ machine, busy, failed, onConnect }: { machine: CloudMac
         <p className="text-[12px] text-ink-secondary">{t("cloudHome.connectHelp")}</p>
       </>}
       {failed && <p role="alert" className="text-[13px] text-danger">{t("cloudHome.connectFailed")}</p>}
+      {/* Part of connecting: lend this Mac to the Cloud, or not. A switch, never a dialog. */}
+      {lending && <CloudLending bridge={lending} />}
     </div>
   </Card>;
 }
@@ -126,6 +129,6 @@ export function CloudAccountSettings({ linkRequest = 0 }: { linkRequest?: number
       {error && <p role="alert" className="mt-3 text-[13px] text-danger">{t("cloudAccount.actionFailed")}</p>}
       {!account && <button type="button" disabled={busy} className="ui-button mt-3" onClick={() => void perform(() => bridge.state())}>{t("organization.refresh")}</button>}
     </Card>
-    {account?.status === "connected" && account.machine && cloudHomeCard({ machine: account.machine, busy, failed: homeFailed, onConnect: connectHome })}
+    {account?.status === "connected" && account.machine && cloudHomeCard({ machine: account.machine, busy, failed: homeFailed, onConnect: connectHome, lending: bridge.lending })}
   </>;
 }
