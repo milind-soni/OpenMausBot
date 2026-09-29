@@ -4,6 +4,7 @@ Run the isolated integration recipe:
 
 ```sh
 pnpm exec vitest run server/full-access-workflows.e2e.test.ts
+pnpm exec vitest run server/full-access-downline.e2e.test.ts
 pnpm exec vitest run server/team-setup-requests.test.ts server/profile-requests.test.ts server/routine-requests.test.ts
 pnpm exec electron scripts/smoke-approval-modes.cjs --all-threads-only
 pnpm typecheck
@@ -39,6 +40,27 @@ of a real provider's planning quality or authentication.
   change while the bot default remains Ask.
 - An expired turn token is refused, and Full does not authorize changes to
   an existing bot outside the Chief's team scope.
+
+## Delegated Full down the line
+
+`server/full-access-downline.e2e.test.ts` uses the same stopped-fixture seeding
+for a Full-access Chief (Clive) and an ordinary bot with Full (Ola), with two
+teammates on Ask (Ada, Bea):
+
+- Clive → Ada → Bea through `coordinate_bots`: both teammates' provider turns
+  run with `bypassPermissions`, neither thread has an unanswered card, and each
+  opens with one chip naming where Full came from. Ada's and Bea's own levels
+  stay Ask. The record of where Bea's Full came from survives a restart and
+  is not on the wire.
+- Ola → Bea: Ola's own Full is not passed on. Bea's new thread stays on her
+  level, with no chip.
+- The same Clive → Ada → Bea chain in a room: both room turns run Full,
+  carried by the handoff chain rather than the shared room thread.
+
+Unit coverage: `server/auto-approve.test.ts` (the pass-on rule) and
+`server/independent-task-store.test.ts` (a level the person sets clears the
+record; malformed saved records are dropped). On `main` before this change
+the e2e test fails where Bea's turn ran with `default` (Ask).
 
 ## Evidence and limits
 
