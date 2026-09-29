@@ -395,7 +395,7 @@ export const Transcript = memo(function Transcript({
 export function RoutedByLine({ routedBy }: { routedBy: NonNullable<Message["routedBy"]> }) {
   const percent = Math.round(Math.min(1, Math.max(0, routedBy.probability)) * 100);
   return (
-    <div data-testid="routed-by" className="mt-1 px-1 text-[11px] text-ink-secondary/80">
+    <div data-testid="routed-by" className="mt-1 px-1 text-[11px] text-ink-tertiary">
       {t("room.routedBy", { percent: String(percent) })}
     </div>
   );
