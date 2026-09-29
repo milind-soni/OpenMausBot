@@ -1367,6 +1367,20 @@ describe("credential env preference", () => {
     expect(process.env.OPENAI_COMPAT_MODEL).toBe("boot-model");
     expect(process.env.OPENAI_COMPAT_PROVIDER).toBe("boot-provider");
   });
+
+  it("syncCredentialEnv keeps the decision threshold in step with a save", () => {
+    // loadConfig() prefers DECISION_MODEL_THRESHOLD over the file, so a
+    // mid-session save must update it or the boot value shadows the save
+    process.env.DECISION_MODEL_THRESHOLD = "0.9";
+    syncCredentialEnv({ decisionModel: { threshold: 0.75 } });
+    expect(process.env.DECISION_MODEL_THRESHOLD).toBe("0.75");
+    syncCredentialEnv({ decisionModel: { threshold: 1 } });
+    expect(process.env.DECISION_MODEL_THRESHOLD).toBe("1");
+    // absent from the patch: untouched, like every other setting
+    syncCredentialEnv({ xai: { key: "just-saved" } });
+    expect(process.env.DECISION_MODEL_THRESHOLD).toBe("1");
+    delete process.env.DECISION_MODEL_THRESHOLD;
+  });
 });
 
 describe("workspace credential env strip", () => {

@@ -28,6 +28,8 @@ import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 
 import { CONTROL_REFUSAL_PLAIN, createControlClient } from "./control-client.ts";
+import { createDecisionChooser } from "./decision-chooser.ts";
+import { createDecisionModelClient, decisionModelProvider } from "./decision-model.ts";
 import { augmentedPath } from "./env-path.ts";
 import { createToolListNormalizer } from "./mcp-tool-schema.ts";
 
@@ -140,6 +142,17 @@ export interface BridgeOptions {
   /** Enables the who-is-driving gate: the harness's loopback control
    * endpoint plus its per-boot token. Absent → fully transparent bridge. */
   gate?: { url: string; token: string };
+  /** Enables the opt-in decision-model chooser (#1630) on eligible
+   * computer-use steps. Only honored together with `gate`, whose control
+   * endpoint carries the turn goal and receives the outcome reports. */
+  decision?: {
+    provider: string;
+    url: string;
+    apiKey?: string;
+    model: string;
+    threshold: number;
+    flow: string;
+  };
 }
 
 /** Collect a byte stream into complete newline-terminated lines. MCP's
@@ -214,6 +227,52 @@ export function createGateInterceptor(options: {
   };
 }
 
+/** The chooser's slice of the same queue discipline as the gate: an
+ * eligible `tools/call` is answered near-side only after the decision
+ * model resolves; everything else passes through untouched. The chooser's
+ * own invariant lives in its implementation — any failure forwards the
+ * original call, so this layer only ever adds a decision, never an error. */
+export function createChooserInterceptor(options: {
+  intercept: (call: { id: number | string; name: string; arguments: unknown }) => Promise<{ handled: boolean; text?: string }>;
+  answer: (line: string) => void;
+  forward: (line: string) => void;
+}): (line: string) => Promise<void> {
+  let queue: Promise<void> = Promise.resolve();
+  return (line: string) => {
+    queue = queue.then(async () => {
+      let frame: any = null;
+      try {
+        frame = JSON.parse(line);
+      } catch {
+        // not a frame this layer understands — forward untouched
+      }
+      if (!frame || frame.method !== "tools/call" || frame.id === undefined || typeof frame.params?.name !== "string") {
+        options.forward(line);
+        return;
+      }
+      let decision: { handled: boolean; text?: string };
+      try {
+        decision = await options.intercept({ id: frame.id, name: frame.params.name, arguments: frame.params.arguments });
+      } catch {
+        // A chooser failure must never break a run.
+        decision = { handled: false };
+      }
+      if (decision.handled) {
+        options.answer(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: frame.id,
+            result: { content: [{ type: "text", text: decision.text ?? "" }] },
+          }),
+        );
+        return;
+      }
+      options.forward(line);
+    });
+    return queue;
+  };
+}
+
 export interface McpBridgeInterceptorOptions {
   /** Writes a JSON-RPC response line to the agent's stdout. */
   answer: (line: string) => void;
@@ -225,6 +284,11 @@ export interface McpBridgeInterceptorOptions {
     refusalText?: string;
     getRefusalReason?: () => string | undefined;
   };
+  /** Optional decision-model chooser (#1630); when set, an eligible
+   * `tools/call` may be answered here instead of forwarded. */
+  chooser?: {
+    intercept: (call: { id: number | string; name: string; arguments: unknown }) => Promise<{ handled: boolean; text?: string }>;
+  };
 }
 
 /** The near-side MCP method filter. `ping` is answered here so the bundled
@@ -233,15 +297,38 @@ export interface McpBridgeInterceptorOptions {
 export function createMcpBridgeInterceptor(
   options: McpBridgeInterceptorOptions,
 ): (line: string) => void | Promise<void> {
+  // The chooser runs downstream of the gate — a held computer never
+  // reaches it. Its queue keeps answers ordered behind the gate's, and the
+  // returned promise now covers both layers so a closing stdin still
+  // waits for an in-flight decision.
+  let chooserBusy = Promise.resolve();
+  const chooserLayer = options.chooser
+    ? createChooserInterceptor({
+        intercept: options.chooser.intercept,
+        answer: options.answer,
+        forward: options.forward,
+      })
+    : null;
+  const throughChooser = (line: string) => {
+    if (!chooserLayer) {
+      options.forward(line);
+      return;
+    }
+    const completion = chooserLayer(line);
+    chooserBusy = chooserBusy.then(
+      () => completion,
+      () => completion,
+    );
+  };
   const afterPing = options.gate
     ? createGateInterceptor({
         isHeld: options.gate.isHeld,
-        forward: options.forward,
+        forward: throughChooser,
         refuse: options.answer,
         refusalText: options.gate.refusalText,
         getRefusalReason: options.gate.getRefusalReason,
       })
-    : (line: string) => { options.forward(line); };
+    : (line: string) => { throughChooser(line); };
   return (line: string) => {
     let frame: any = null;
     try {
@@ -256,7 +343,8 @@ export function createMcpBridgeInterceptor(
       }
       return;
     }
-    return afterPing(line);
+    const completion = afterPing(line);
+    return chooserLayer ? Promise.resolve(completion).then(() => chooserBusy) : completion;
   };
 }
 
@@ -275,6 +363,74 @@ export function runMcpBridge(options: BridgeOptions): void {
     ? createControlClient({ url: options.gate.url, token: options.gate.token })
     : null;
   let refusalReason: string | undefined;
+  // One ownership source for both layers: the gate refuses a held computer
+  // up front, and the chooser re-checks the same state immediately before
+  // acting on a decision — a hold acquired mid-decision still wins.
+  const isHeldByHuman = async () => {
+    refusalReason = undefined;
+    const state = await client!.state(true);
+    refusalReason = state.blockedReason;
+    return state.held;
+  };
+
+  // The chooser's driver calls (get_window_state, click) ride the same
+  // child under correlated string ids; their responses are routed back to
+  // the chooser instead of the agent's stdout. JSON-RPC allows string ids,
+  // and the prefix keeps them from colliding with the agent's own frames.
+  const chooserCalls = new Map<string, (line: string) => void>();
+  let chooserSeq = 0;
+  const callDriver = (name: string, args: Record<string, unknown>): Promise<unknown> =>
+    new Promise((resolve, reject) => {
+      chooserSeq += 1;
+      const id = `omb-chooser-${chooserSeq}`;
+      const timer = setTimeout(() => {
+        chooserCalls.delete(id);
+        reject(new Error("driver call timed out"));
+      }, 15_000);
+      timer.unref?.();
+      chooserCalls.set(id, (line) => {
+        clearTimeout(timer);
+        chooserCalls.delete(id);
+        let frame: any = null;
+        try {
+          frame = JSON.parse(line);
+        } catch {
+          // not a frame — the chooser sees a failed driver call
+        }
+        const result = frame?.result;
+        if (result && typeof result === "object" && !Array.isArray(result) && result.isError === true) {
+          reject(new Error("driver call failed"));
+          return;
+        }
+        resolve(result ?? null);
+      });
+      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }) + "\n");
+    });
+  const decision = options.decision;
+  const decisionProvider = decision ? decisionModelProvider(decision.provider) : null;
+  const decisionClient =
+    decision && decisionProvider && options.gate
+      ? createDecisionModelClient({
+          provider: decisionProvider,
+          url: decision.url,
+          ...(decision.apiKey ? { apiKey: decision.apiKey } : {}),
+          model: decision.model,
+          threshold: decision.threshold,
+        })
+      : null;
+  const chooser =
+    decisionClient && decision
+      ? createDecisionChooser({
+          client: decisionClient.client,
+          threshold: decision.threshold,
+          goal: () => client!.decisionContext().then((context) => context?.goal ?? null),
+          report: (report) => {
+            void client!.reportDecision({ ...report, flow: decision.flow });
+          },
+          callDriver,
+          isHeld: isHeldByHuman,
+        })
+      : null;
 
   const answer = (line: string) => process.stdout.write(line + "\n");
   const forward = (line: string) => child.stdin.write(line + "\n");
@@ -284,16 +440,12 @@ export function runMcpBridge(options: BridgeOptions): void {
     ...(options.gate
       ? {
           gate: {
-            isHeld: async () => {
-              refusalReason = undefined;
-              const state = await client!.state(true);
-              refusalReason = state.blockedReason;
-              return state.held;
-            },
+            isHeld: isHeldByHuman,
             getRefusalReason: () => refusalReason,
           },
         }
       : {}),
+    ...(chooser ? { chooser: { intercept: chooser.intercept } } : {}),
   });
   const toolLists = createToolListNormalizer();
   let pendingInput = Promise.resolve();
@@ -315,7 +467,24 @@ export function runMcpBridge(options: BridgeOptions): void {
   // Injected responses and refusals must never land inside one of the
   // child's half-written frames, so the child's stdout is re-emitted at
   // line granularity as well.
-  const outbound = createLineSplitter((line) => process.stdout.write(toolLists.rewriteResponse(line) + "\n"));
+  const outbound = createLineSplitter((line) => {
+    // Internal chooser driver calls never join the agent's protocol stream —
+    // including a late answer that arrives after its 15s timeout already
+    // gave up: the id is gone from the map, but the prefix still marks it.
+    if (line.includes("omb-chooser-")) {
+      let frame: any = null;
+      try {
+        frame = JSON.parse(line);
+      } catch {
+        frame = null;
+      }
+      if (frame && typeof frame.id === "string" && frame.id.startsWith("omb-chooser-")) {
+        chooserCalls.get(frame.id)?.(line);
+        return;
+      }
+    }
+    process.stdout.write(toolLists.rewriteResponse(line) + "\n");
+  });
   child.stdout.on("data", (chunk) => outbound.push(chunk));
   child.stdout.on("end", () => outbound.flush());
 
