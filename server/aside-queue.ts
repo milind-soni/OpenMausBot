@@ -45,6 +45,11 @@ export interface AsideItem {
   aside: {
     fromBotId: string;
     fromBotName: string;
+    /** The conversation the words were sent from, so a Stop pressed
+     * there can withdraw exactly this send. Absent on rows written by
+     * older builds: those stay deliverable, and revalidation falls back
+     * to the sender's current main thread. */
+    fromThreadId?: string;
     unattended?: boolean;
     commsDepth: number;
   };
@@ -68,6 +73,19 @@ const asides = new Map<string, AsideEntry>(); // threadId → waiting asides
  * the same words. */
 const inFlight = new Set<string>();
 
+/** A batch awaiting its seam call, still reachable by the cancel paths:
+ * the words have left the shared queue, but a Stop on the conversation
+ * that sent them must still be able to withdraw them. */
+interface InFlightAsideBatch {
+  items: AsideItem[];
+  /** cancelAsides ran while the seam was awaited: if the seam refuses, the
+   * batch retires with its lane instead of returning to a queue that no
+   * longer exists — even one a later send may have recreated. */
+  laneCancelled: boolean;
+}
+
+const inFlightBatches = new Map<string, InFlightAsideBatch>(); // threadId → batch awaiting its seam call
+
 /** The mandatory non-steering envelope (audit §5.2). Every mid-turn channel
  * OMB can ride is steering-branded, so the words themselves must say what
  * they are: peer context from a named sender, not a course change. */
@@ -87,7 +105,7 @@ export function asideEnvelope(fromName: string, text: string): string {
  * never began come back; a row whose transcript already shows its queueId
  * marker was injected before the process died, and those words must never
  * run twice, so the row is retired instead of requeued. */
-export function restoreAsideMessages(store: AsideStore): void {
+export function restoreAsideMessages(store: AsideStore, revalidate?: AsideRevalidator): void {
   asides.clear();
   for (const row of chatFollowups("aside")) {
     if (row.status !== "pending") continue;
@@ -95,18 +113,34 @@ export function restoreAsideMessages(store: AsideStore): void {
       settleChatFollowups([row.id], null);
       continue;
     }
-    const entry = asides.get(row.threadId) ?? { botId: row.ownerId, items: [] };
-    if (entry.botId !== row.ownerId) throw new Error("queued aside belongs to another bot");
-    entry.items.push({
+    const item: AsideItem = {
       messageId: row.id,
       text: row.payload.text,
       prompt: row.payload.prompt ?? row.payload.text,
       aside: row.payload.aside ?? { fromBotId: row.ownerId, fromBotName: "teammate", commsDepth: 0 },
       trigger: row.payload.trigger,
-    });
+    };
+    // A restart is exactly when the world can have moved: the sender may
+    // be gone, access revoked, an approval newly required. A row that no
+    // longer passes revalidation retires cancelled — tombstoned like any
+    // cancelled follow-up — instead of waking up as a peer's turn.
+    if (revalidate && !revalidate(item, row.ownerId)) {
+      settleChatFollowups([row.id], "cancelled");
+      continue;
+    }
+    const entry = asides.get(row.threadId) ?? { botId: row.ownerId, items: [] };
+    if (entry.botId !== row.ownerId) throw new Error("queued aside belongs to another bot");
+    entry.items.push(item);
     asides.set(row.threadId, entry);
   }
 }
+
+/** Whether one waiting aside may still be delivered: the caller re-checks
+ * the admission that let it in (sender exists, still reaches the target,
+ * source conversation still the sender's, no approval newly required).
+ * Failed items retire cancelled at the next boundary — never injected,
+ * never degraded into a turn. */
+export type AsideRevalidator = (item: AsideItem, targetBotId: string) => boolean;
 
 export interface QueuedAside {
   id: string;
@@ -121,6 +155,7 @@ export function queueAsideMessage(
   options: {
     fromBotId: string;
     fromBotName: string;
+    fromThreadId?: string;
     unattended?: boolean;
     commsDepth: number;
     trigger?: UsageTrigger;
@@ -134,6 +169,7 @@ export function queueAsideMessage(
     aside: {
       fromBotId: options.fromBotId,
       fromBotName: options.fromBotName,
+      ...(options.fromThreadId ? { fromThreadId: options.fromThreadId } : {}),
       ...(options.unattended ? { unattended: true } : {}),
       commsDepth: options.commsDepth,
     },
@@ -196,9 +232,40 @@ export function recordInjectedAsides(store: AsideStore, threadId: string, items:
  * ever read them. Tombstoned like a cancelled follow-up. */
 export function cancelAsides(threadId: string): void {
   const entry = asides.get(threadId);
-  if (!entry) return;
-  settleChatFollowups(entry.items.map((item) => item.messageId), "cancelled");
-  asides.delete(threadId);
+  if (entry) {
+    settleChatFollowups(entry.items.map((item) => item.messageId), "cancelled");
+    asides.delete(threadId);
+  }
+  // A batch still awaiting its seam call cannot be pulled back — the words
+  // may already be running — but if the seam refuses, they must not return
+  // to a lane that no longer exists.
+  const flight = inFlightBatches.get(threadId);
+  if (flight) flight.laneCancelled = true;
+}
+
+/** Withdraw every waiting aside sent FROM one conversation: Stop was
+ * pressed there, and the words that conversation parked in a teammate's
+ * lane go with it. Exact by source thread; other lanes and other sources
+ * are untouched, and a batch already mid-seam keeps its own rules. */
+export function cancelAsidesFromSource(fromThreadId: string): void {
+  for (const [threadId, entry] of asides) {
+    const withdrawn = entry.items.filter((item) => item.aside.fromThreadId === fromThreadId);
+    if (!withdrawn.length) continue;
+    settleChatFollowups(withdrawn.map((item) => item.messageId), "cancelled");
+    const remaining = entry.items.filter((item) => item.aside.fromThreadId !== fromThreadId);
+    if (remaining.length) asides.set(threadId, { botId: entry.botId, items: remaining });
+    else asides.delete(threadId);
+  }
+  // The same withdrawal must reach words already awaiting a seam call:
+  // they left the shared queue, so the loop above cannot see them. Pull
+  // them out of the in-flight batch — if the seam refuses, only the rest
+  // go back; if it delivers, what ran is recorded without them.
+  for (const flight of inFlightBatches.values()) {
+    const withdrawn = flight.items.filter((item) => item.aside.fromThreadId === fromThreadId);
+    if (!withdrawn.length) continue;
+    settleChatFollowups(withdrawn.map((item) => item.messageId), "cancelled");
+    flight.items = flight.items.filter((item) => item.aside.fromThreadId !== fromThreadId);
+  }
 }
 
 /** Fold everything waiting on this thread into its running turn.
@@ -231,8 +298,12 @@ export async function attemptAsideInjection(
   if (inFlight.has(threadId)) return { delivered: false, count: entry.items.length };
   const batch = entry.items;
   entry.items = [];
-  const ids = batch.map((item) => item.messageId);
-  settleChatFollowups(ids, "dispatching");
+  settleChatFollowups(batch.map((item) => item.messageId), "dispatching");
+  // The words left the shared queue, but the cancel paths must still reach
+  // them: the batch stays registered for the whole seam await, so a Stop on
+  // the sending conversation withdraws from it and a lane cancel dooms it.
+  const flight: InFlightAsideBatch = { items: batch, laneCancelled: false };
+  inFlightBatches.set(threadId, flight);
   inFlight.add(threadId);
   let outcome: SteerOutcome;
   try {
@@ -241,29 +312,36 @@ export async function attemptAsideInjection(
     outcome = "indeterminate";
   } finally {
     inFlight.delete(threadId);
+    inFlightBatches.delete(threadId);
   }
   if (outcome === "refused") {
-    if (asides.get(threadId) === entry) {
-      // Still our lane: back on the queue, ahead of anything that
-      // arrived during the seam call.
-      entry.items = [...batch, ...entry.items];
-      settleChatFollowups(ids, "pending");
+    // Withdrawals that landed mid-await already settled their rows and
+    // left the batch; only what is still in it comes back.
+    const live = flight.items;
+    const liveIds = live.map((item) => item.messageId);
+    const current = asides.get(threadId);
+    if (!flight.laneCancelled && current && current.botId === botId) {
+      // Still our lane — the same entry, or one rebuilt around items a
+      // mid-await withdrawal left behind: back on the queue, ahead of
+      // anything that arrived during the seam call.
+      current.items = [...live, ...current.items];
+      settleChatFollowups(liveIds, "pending");
     } else {
       // cancelAsides took the lane while the seam call was awaited: the
       // words never ran, but their lane is gone, so they retire with it
       // instead of coming back as phantom rows after a restart.
-      settleChatFollowups(ids, "cancelled");
+      settleChatFollowups(liveIds, "cancelled");
     }
     return { delivered: false, count: batch.length };
   }
   try {
-    recordInjectedAsides(store, threadId, batch);
+    recordInjectedAsides(store, threadId, flight.items);
   } catch (error) {
     // The seam says the words may already be running; a failed transcript
     // write must never hand them to a later boundary. Retire the rows
     // loudly instead of replaying them.
     console.error("aside-queue: could not record injected asides", error);
-    settleChatFollowups(ids, null);
+    settleChatFollowups(flight.items.map((item) => item.messageId), null);
     if (asides.get(threadId) === entry && entry.items.length === 0) asides.delete(threadId);
   }
   return { delivered: true, count: batch.length };
@@ -287,6 +365,9 @@ export interface AsideDrainOptions {
   ) => void | Promise<void>;
   /** Busy-elsewhere tests from the caller's admission module. */
   isBlocked?: (botId: string, threadId: string) => boolean;
+  /** Retire items whose admission no longer holds (sender deleted, access
+   * revoked, approval now required) before they can inject or degrade. */
+  revalidate?: AsideRevalidator;
 }
 
 /**
@@ -301,7 +382,7 @@ export interface AsideDrainOptions {
  * correction lands ahead of peer context.
  */
 export async function drainAsideMessages(options: AsideDrainOptions): Promise<void> {
-  const { store, inject, run, isBlocked } = options;
+  const { store, inject, run, isBlocked, revalidate } = options;
   for (const [threadId, entry] of asides) {
     if (inFlight.has(threadId)) continue;
     const bot = store.projectBotForTask
@@ -311,6 +392,18 @@ export async function drainAsideMessages(options: AsideDrainOptions): Promise<vo
       // the bot or task was deleted while the aside waited
       cancelAsides(threadId);
       continue;
+    }
+    if (revalidate && entry.items.some((item) => !revalidate(item, entry.botId))) {
+      // The lane may have waited through a world change. Retire only what
+      // no longer passes — a later send from a still-welcome peer must not
+      // lose its words to an earlier one's revocation.
+      const revoked = entry.items.filter((item) => !revalidate(item, entry.botId));
+      settleChatFollowups(revoked.map((item) => item.messageId), "cancelled");
+      entry.items = entry.items.filter((item) => revalidate(item, entry.botId));
+      if (!entry.items.length) {
+        asides.delete(threadId);
+        continue;
+      }
     }
     if (bot.busy) {
       // Seam attempt: one batched call for everything waiting here.
