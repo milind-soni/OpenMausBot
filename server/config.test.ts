@@ -1367,6 +1367,15 @@ describe("credential env preference", () => {
     expect(process.env.OPENAI_COMPAT_MODEL).toBe("boot-model");
     expect(process.env.OPENAI_COMPAT_PROVIDER).toBe("boot-provider");
   });
+
+  it("syncCredentialEnv keeps the decision-model threshold env in step with a save", () => {
+    // loadConfig() prefers DECISION_MODEL_THRESHOLD over the file, so a
+    // saved threshold must reach the env immediately or the boot-injected
+    // value keeps shadowing it until restart
+    process.env.DECISION_MODEL_THRESHOLD = "0.9";
+    syncCredentialEnv({ decisionModel: { threshold: 0.65 } });
+    expect(process.env.DECISION_MODEL_THRESHOLD).toBe("0.65");
+  });
 });
 
 describe("workspace credential env strip", () => {
@@ -1414,6 +1423,8 @@ describe("workspace credential env strip", () => {
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_VOICE_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_FISH_AUDIO_API_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_OPENAI_IMAGE_KEY");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("DECISION_MODEL_API_KEY");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("DECISION_MODEL_URL");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_BROWSER_CONNECTION");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_USER_DATA");
   });

@@ -342,6 +342,9 @@ const instanceConfigSchema = z.object({
   config: z.json().optional(),
 });
 const instanceConfigMapSchema = z.record(z.string(), instanceConfigSchema);
+/** The decision-model lanes (#1630): where the bounded chooser sends its
+ * choice requests. Owned here so the schema cannot drift from the client. */
+export const DECISION_MODEL_PROVIDERS = ["typesafe", "vercel", "openrouter", "custom"] as const;
 const defaultModelSelectionSchema = z.object({
   instanceId: z.string().trim().min(1).max(200),
   model: z.string().trim().min(1).max(500),
@@ -430,6 +433,19 @@ const appConfigSchema = z.object({
    * upstream (e.g. "fireworks"). Both are non-secret and optional. */
   openaiCompat: z
     .object({ key: optionalText, url: optionalText, model: optionalText, provider: optionalText })
+    .optional(),
+  /** Opt-in bounded decision model for computer-use choices (#1630). An
+   * absent or incomplete section is the off state — no flag, no chooser.
+   * The key is a secret like every other provider key; provider/url/model/
+   * threshold are routing settings carried on /api/config. */
+  decisionModel: z
+    .object({
+      provider: z.enum(DECISION_MODEL_PROVIDERS).optional(),
+      url: optionalText,
+      apiKey: optionalText,
+      model: optionalText,
+      threshold: z.number().min(0.5).max(1).optional(),
+    })
     .optional(),
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
@@ -571,6 +587,14 @@ export interface AppConfig {
   decisions?: { retentionDays?: number };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
+  /** Bounded decision-model connection; absent = the chooser stays off. */
+  decisionModel?: {
+    provider?: "typesafe" | "vercel" | "openrouter" | "custom";
+    url?: string;
+    apiKey?: string;
+    model?: string;
+    threshold?: number;
+  };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   /** Persisted under the historical config key "box" (ascii.dev renamed Box to Boat). */
   box?: { token?: string };
@@ -1010,6 +1034,17 @@ export function loadConfig(): AppConfig {
   if (process.env.OPENAI_COMPAT_URL !== undefined) cfg.openaiCompat.url = process.env.OPENAI_COMPAT_URL;
   if (process.env.OPENAI_COMPAT_MODEL !== undefined) cfg.openaiCompat.model = process.env.OPENAI_COMPAT_MODEL;
   if (process.env.OPENAI_COMPAT_PROVIDER !== undefined) cfg.openaiCompat.provider = process.env.OPENAI_COMPAT_PROVIDER;
+  cfg.decisionModel = { ...cfg.decisionModel };
+  if (process.env.DECISION_MODEL_API_KEY !== undefined) cfg.decisionModel.apiKey = process.env.DECISION_MODEL_API_KEY;
+  if (process.env.DECISION_MODEL_URL !== undefined) cfg.decisionModel.url = process.env.DECISION_MODEL_URL;
+  if (process.env.DECISION_MODEL_MODEL !== undefined) cfg.decisionModel.model = process.env.DECISION_MODEL_MODEL;
+  if (process.env.DECISION_MODEL_PROVIDER !== undefined && (DECISION_MODEL_PROVIDERS as readonly string[]).includes(process.env.DECISION_MODEL_PROVIDER)) {
+    cfg.decisionModel.provider = process.env.DECISION_MODEL_PROVIDER as AppConfig["decisionModel"] extends undefined ? never : NonNullable<AppConfig["decisionModel"]>["provider"];
+  }
+  if (process.env.DECISION_MODEL_THRESHOLD !== undefined) {
+    const threshold = Number(process.env.DECISION_MODEL_THRESHOLD);
+    if (Number.isFinite(threshold)) cfg.decisionModel.threshold = Math.min(1, Math.max(0.5, threshold));
+  }
   cfg.composio = { ...cfg.composio };
   if (process.env.COMPOSIO_API_KEY !== undefined) cfg.composio.apiKey = process.env.COMPOSIO_API_KEY;
   // BOX_TOKEN keeps its historical name; the provider is Boat.
@@ -1061,6 +1096,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.decider?.key, "OMB_JEV_API_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
+    [patch.decisionModel?.apiKey, "DECISION_MODEL_API_KEY"],
   ];
   for (const [value, name] of secrets) {
     if (value === undefined) continue;
@@ -1074,12 +1110,19 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.anthropic?.url, "OMB_ANTHROPIC_API_URL"],
     [patch.openaiCompat?.model, "OPENAI_COMPAT_MODEL"],
     [patch.openaiCompat?.provider, "OPENAI_COMPAT_PROVIDER"],
+    [patch.decisionModel?.url, "DECISION_MODEL_URL"],
+    [patch.decisionModel?.model, "DECISION_MODEL_MODEL"],
+    [patch.decisionModel?.provider, "DECISION_MODEL_PROVIDER"],
   ];
   for (const [value, name] of settings) {
     if (value === undefined) continue;
     if (value) process.env[name] = value;
     else delete process.env[name];
   }
+  // The threshold is env-preferred too (loadConfig clamps the env value), so
+  // a saved threshold must win immediately rather than on the next restart.
+  const threshold = patch.decisionModel?.threshold;
+  if (threshold !== undefined) process.env.DECISION_MODEL_THRESHOLD = String(threshold);
 }
 
 /** Env names of every workspace credential this process may be holding —
@@ -1098,6 +1141,8 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OPENAI_COMPAT_URL",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
+  "DECISION_MODEL_API_KEY",
+  "DECISION_MODEL_URL",
   "OMB_TTS_KEY",
   "OMB_FISH_AUDIO_API_KEY",
   "OMB_JEV_API_KEY",
@@ -1198,7 +1243,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "profile", "rooms", "threads", "context", "memory", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "decisionModel", "decider", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "memory", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
