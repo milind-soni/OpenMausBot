@@ -224,6 +224,42 @@ describe("authenticated browser viewer relay", () => {
     await expect(openS()).rejects.toThrow("browser engine is installed");
     expect(nativeClose).toHaveBeenCalledTimes(2);
   });
+  it("gates a reconnect on the pending session reset instead of racing the stuck daemon (#1383)", async () => {
+    const openS = () => live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true,
+      res: new ResponseFixture() as unknown as ServerResponse, spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "s" } } });
+    let finishReset!: (closed: boolean) => void;
+    nativeClose.mockImplementationOnce(() => new Promise((resolve) => { finishReset = resolve; }));
+    execute.mockRejectedValueOnce(Object.assign(new Error("Command failed"), { stderr: "Missing X server or $DISPLAY" }));
+    await expect(openS()).rejects.toThrow("Reconnect to retry");
+    expect(nativeClose).toHaveBeenCalledTimes(1);
+    // While teardown is still polling, a reconnect must not issue another
+    // command or start a second reset against the same daemon.
+    const reconnecting = openS();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(nativeClose).toHaveBeenCalledTimes(1);
+    finishReset(true);
+    await reconnecting;
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[1]?.[1]).toEqual(["stream", "status", "--json", "--no-webmcp"]);
+    expect(nativeClose).toHaveBeenCalledTimes(1);
+  });
+  it("starts a fresh reset when the reconnect probe finds the daemon still stuck (#1383)", async () => {
+    const openS = () => live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true,
+      res: new ResponseFixture() as unknown as ServerResponse, spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "s" } } });
+    let finishReset!: (closed: boolean) => void;
+    nativeClose.mockImplementationOnce(() => new Promise((resolve) => { finishReset = resolve; }));
+    execute.mockRejectedValueOnce(Object.assign(new Error("Command failed"), { stderr: "Missing X server or $DISPLAY" }));
+    await expect(openS()).rejects.toThrow("Reconnect to retry");
+    const reconnecting = openS();
+    // The daemon outlived the first close; the probe fails the same way and
+    // schedules another reset instead of reporting a healthy session.
+    execute.mockRejectedValueOnce(Object.assign(new Error("Command failed"), { stderr: "Missing X server or $DISPLAY" }));
+    nativeClose.mockResolvedValueOnce(true);
+    finishReset(false);
+    await expect(reconnecting).rejects.toThrow("Reconnect to retry");
+    expect(nativeClose).toHaveBeenCalledTimes(2);
+  });
   it("only acknowledges the exact frame rendered by this bound viewer", async () => {
     const { res, socket, action } = await open();
     socket.receive(frame);
