@@ -94,12 +94,17 @@ export interface TaskRecord extends WireTask {
    * it landed. Absent means legacy/unknown: it may be a person's choice,
    * so only positively identified auto pins yield to Works on changes. */
   surfaceSource?: "user" | "auto";
+  /** When a person last explicitly restored (unarchived) this thread. The
+   * auto-archive sweep exempts a thread whose restore is newer than its
+   * close (#1280): restoring is a statement the thread is wanted, and only
+   * closing it again re-arms the retention window. */
+  restoredAt?: number;
 }
 
 /** TaskRecord fields no client may see. Everything else must be on WireTask:
  * the exactness assertion below fails to compile when either side drifts,
  * so a new server field forces a decision — wire-visible or private here. */
-export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource";
+export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource" | "restoredAt";
 export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>>;
 type AssertExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 type AssertSameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : never) : never;
@@ -113,7 +118,7 @@ export const taskWireProjectionIsExact: TaskWireProjectionIsExact = true;
 export function toWireTask(task: TaskRecord): WireTask {
   const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages,
     appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel,
-    surfaceSource: _surfaceSource, ...wire } = task;
+    surfaceSource: _surfaceSource, restoredAt: _restoredAt, ...wire } = task;
   return wire;
 }
 
@@ -2400,6 +2405,7 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!bot || !task) return null;
     if (patch.projectId !== undefined && !this.project(botId, patch.projectId)) return null;
+    const wasArchived = task.archivedAt !== undefined;
     for (const key of TASK_PATCH_FIELDS) {
       if (Object.prototype.hasOwnProperty.call(patch, key)) {
         Object.assign(task, { [key]: structuredClone(patch[key]) });
@@ -2412,6 +2418,11 @@ export class Store {
     if (task.snoozedUntil === 0 && patch.unread === true) task.snoozedUntil = undefined;
     if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
     if (Object.prototype.hasOwnProperty.call(patch, "pinned") && task.pinned !== true) delete task.pinned;
+    // Unarchiving an archived thread is the one restore gesture, wherever
+    // it came from — the API today, other surfaces later. Stamping it here
+    // gives the auto-archive sweep its restore exemption (#1280): a sweep
+    // must never file away a thread the person just pulled back out.
+    if (wasArchived && task.archivedAt === undefined) task.restoredAt = Date.now();
     if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
     bot.unread = bot.tasks!.some((candidate) => candidate.unread);
     this.saveBots();

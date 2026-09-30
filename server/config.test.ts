@@ -22,6 +22,7 @@ import { customMcpServers,
   maxConcurrentBotThreads,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
+  threadAutoArchiveDays,
   showToolCallsEnabled,
   routinesInConversationEnabled,
   saveConfig,
@@ -123,6 +124,19 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch({ threads: { eventLogRetentionDays: null } })).toEqual({ threads: { eventLogRetentionDays: null } });
     for (const value of [0, -1, 1.5, "30", 3660]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: value } })).toThrow("threads.eventLogRetentionDays");
+    }
+  });
+
+  it("keeps auto-archive off unless a window is configured", () => {
+    expect(threadAutoArchiveDays({})).toBeNull();
+    expect(threadAutoArchiveDays(parseStoredConfig({ threads: { maxConcurrentPerBot: 2 } }))).toBeNull();
+    const configured = parseStoredConfig({ threads: { maxConcurrentPerBot: 2, autoArchiveDays: 30 } });
+    expect(threadAutoArchiveDays(configured)).toBe(30);
+    // the knob patches on its own and null is the explicit clear marker
+    expect(parseConfigPatch({ threads: { autoArchiveDays: 30 } })).toEqual({ threads: { autoArchiveDays: 30 } });
+    expect(parseConfigPatch({ threads: { autoArchiveDays: null } })).toEqual({ threads: { autoArchiveDays: null } });
+    for (const value of [0, -1, 1.5, "30", 3660]) {
+      expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 2, autoArchiveDays: value } })).toThrow("threads.autoArchiveDays");
     }
   });
 
@@ -646,6 +660,22 @@ describe("saving the newer sections", () => {
       expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
       // the persisted section must survive the stricter boot-time parse
       expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("clears the auto-archive window with null while sibling knobs survive", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({}));
+    try {
+      saveConfig({ threads: { maxConcurrentPerBot: 3, autoArchiveDays: 7, eventLogRetentionDays: 30 } });
+      saveConfig({ threads: { autoArchiveDays: null } });
+      const disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
+      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
+      expect(threadAutoArchiveDays(parseStoredConfig(disk))).toBeNull();
     } finally {
       rmSync(path, { force: true });
     }

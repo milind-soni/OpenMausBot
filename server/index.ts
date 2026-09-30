@@ -149,6 +149,7 @@ import {
   threadEventLogMaxBytes,
   maxConcurrentBotThreads,
   threadEventLogRetentionDays,
+  threadAutoArchiveDays,
   saveConfig,
   showToolCallsEnabled,
   routinesInConversationEnabled,
@@ -183,6 +184,7 @@ import {
   onConfigSaved,
 } from "./config.ts";
 import { sweepThreadEventLogs, type ThreadLogRetentionCandidate } from "./thread-retention.ts";
+import { effectiveAutoArchiveDays, selectAutoArchiveThreads, type AutoArchiveCandidate } from "./thread-auto-archive.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -19306,6 +19308,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (typeof body.parkDirectMessages !== "boolean") return json(res, 400, { error: "parkDirectMessages must be true or false" });
         patch.parkDirectMessages = body.parkDirectMessages;
       }
+      // Per-bot override of the global auto-archive window (#1280):
+      // absent inherits the global setting, 0 disables auto-archive for
+      // this bot alone, null clears back to inherit.
+      if (body.autoArchiveDays !== undefined) {
+        if (body.autoArchiveDays === null) patch.autoArchiveDays = undefined;
+        else if (
+          typeof body.autoArchiveDays === "number" && Number.isInteger(body.autoArchiveDays)
+          && body.autoArchiveDays >= 0 && body.autoArchiveDays <= 3650
+        ) {
+          patch.autoArchiveDays = body.autoArchiveDays;
+        } else {
+          return json(res, 400, { error: "autoArchiveDays must be an integer between 0 and 3650, or null" });
+        }
+      }
       // Per-bot selection of app-wide MCP servers. Omitted keeps the current
       // selection; null restores all enabled servers; [] explicitly mounts none.
       let requestedMcpServers = existingBot?.mcpServers;
@@ -22946,6 +22962,78 @@ try {
 // holds the process open.
 setInterval(sweepThreadEventLogsNow, THREAD_LOG_RETENTION_SWEEP_MS).unref();
 
+// #1280: optional auto-archive of long-closed threads. Archive, not
+// delete — it is reversible and keeps resume cursors, instance state, cwd,
+// and handoff state (#1194). A thread qualifies only when it has been
+// closed longer than the window (global setting, per-bot override) and is
+// not busy, unread, snoozed, pinned, carrying queued work, carrying an
+// open direct handoff, or a standing peer pair conversation a peer reopens
+// by sending again; already-archived threads are never re-archived, and
+// a thread explicitly restored after its close is exempt until closed
+// again. The initial run waits for the queues to restore below: queued
+// work must be visible before the first sweep files anything away.
+const THREAD_AUTO_ARCHIVE_SWEEP_MS = 24 * 60 * 60 * 1000;
+
+function autoArchiveClosedThreadsNow(): void {
+  const globalDays = threadAutoArchiveDays(cfg);
+  // Pending delegations pin both ends of the handoff: the source thread
+  // (pendingThreads / wakes / watch source) and the target thread the
+  // delegation will land in (queue targetThreadId, resolved to the
+  // recipient's default thread when absent, plus the watch map key).
+  // Archiving the target mid-delegation hides the drained result because
+  // startTurn clears closedBy but never resets archivedAt (#1194).
+  const pendingDelegationTargetThreads = new Set(
+    pendingDelegationSnapshot()
+      .map((pending) => pending.targetThreadId ?? store.bot(pending.toBotId)?.threadId)
+      .filter((threadId): threadId is string => threadId !== undefined),
+  );
+  let archived = 0;
+  for (const bot of store.bots) {
+    const days = effectiveAutoArchiveDays(globalDays, bot.autoArchiveDays);
+    if (days === null) continue;
+    const now = Date.now();
+    const candidates: AutoArchiveCandidate[] = (bot.tasks ?? []).map((task) => ({
+      threadId: task.threadId,
+      autoArchiveDays: days,
+      closedAt: task.closedBy?.at ?? null,
+      archivedAt: task.archivedAt ?? null,
+      restoredAt: task.restoredAt ?? null,
+      unread: task.unread === true,
+      busy: threadBusy(bot.id, task.threadId),
+      // Same asleep rule as the thread list: "until activity" (0) or a
+      // wake time still in the future.
+      snoozed: task.snoozedUntil === 0 || (task.snoozedUntil !== undefined && task.snoozedUntil > now),
+      pinned: task.pinned === true,
+      hasQueuedWork:
+        hasQueuedSteeredMessages(bot.id, task.threadId) ||
+        pendingThreads().includes(task.threadId) ||
+        pendingDelegationTargetThreads.has(task.threadId) ||
+        [...delegationWatch.values()].some((watch) => watch.sourceThreadId === task.threadId) ||
+        delegationWatch.has(task.threadId) ||
+        pendingDelegationWakes.has(task.threadId),
+      // resolvePairConversation reuses this row when the peer writes again,
+      // and reuse does not unarchive — so the sweep must never file it away.
+      peerConversation: task.openedBy?.kind === "pair",
+      openDirectHandoff: roomHandoffs.activeDirect(task.threadId),
+    }));
+    for (const threadId of selectAutoArchiveThreads(candidates, now)) {
+      store.patchTask(bot.id, threadId, { archivedAt: now });
+      archived++;
+    }
+  }
+  if (archived > 0) console.log(`[auto-archive] archived ${archived} long-closed thread(s)`);
+}
+
+// A days-scale window needs no tighter cadence; unref so the timer never
+// holds the process open.
+setInterval(() => {
+  try {
+    autoArchiveClosedThreadsNow();
+  } catch (error) {
+    console.warn(`thread auto-archive sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}, THREAD_AUTO_ARCHIVE_SWEEP_MS).unref();
+
 // A dispatch claim is deliberately committed before transcript/provider work.
 // If we died after that point, its outcome is unknown: recover the user's words
 // and a review notice, never hand them to a model for a second execution.
@@ -22989,6 +23077,16 @@ for (const row of chatFollowups()) {
 restoreSteeredMessages();
 restoreAsideMessages(store);
 restoreChannelMessages();
+
+// Now that interrupted sends are settled and every still-pending queue is
+// back in memory, the first auto-archive sweep can see queued work before
+// it decides — a startup sweep must never file away a thread whose words
+// are still waiting to run.
+try {
+  autoArchiveClosedThreadsNow();
+} catch (error) {
+  console.warn(`thread auto-archive sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+}
 
 // Repair known auto pins that conflict with Works on before dispatch starts.
 // Legacy pins have no provenance and may be deliberate person selections:

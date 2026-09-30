@@ -367,6 +367,12 @@ const threadsConfigSchema = z.object({
   /** Days a closed or archived thread's event logs survive (#1280).
    * Absent keeps them forever. */
   eventLogRetentionDays: z.number().int().min(1).max(3650).optional(),
+  /** Days a closed thread waits before auto-archive (#1280). The window
+   * runs from the thread's most recent close. Snoozed, pinned,
+   * queued-work-carrying, and standing peer-conversation threads are never
+   * archived, and a thread explicitly restored after archiving is exempt
+   * until it is closed again. Absent keeps auto-archive off, the default. */
+  autoArchiveDays: z.number().int().min(1).max(3650).optional(),
 }).strict();
 /** Workspace-wide defaults every new bot starts with (Store.createBot). */
 const newBotsConfigSchema = z.object({
@@ -378,11 +384,13 @@ const newBotsPatchSchema = z.object({
   effort: newBotsConfigSchema.shape.effort.nullable(),
 }).strict();
 /** PATCH threads: every knob is independently patchable, and null clears an
- * event-log knob back to its absent (off) default. */
+ * optional knob (event-log or auto-archive) back to its absent (off)
+ * default. */
 const threadsPatchSchema = threadsConfigSchema.extend({
   maxConcurrentPerBot: threadsConfigSchema.shape.maxConcurrentPerBot.optional(),
   eventLogMaxBytes: threadsConfigSchema.shape.eventLogMaxBytes.nullable(),
   eventLogRetentionDays: threadsConfigSchema.shape.eventLogRetentionDays.nullable(),
+  autoArchiveDays: threadsConfigSchema.shape.autoArchiveDays.nullable(),
 });
 const appConfigSchema = z.object({
   /** Verified by the dedicated domain endpoint, never a generic config patch. */
@@ -523,14 +531,15 @@ const appConfigSchema = z.object({
    * files kept, at least; OMB_DECISION_RETENTION_DAYS wins when set. */
   decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
   /** #1655 cloud-overflow settings. perSecondCostUsd is the operator's own
-   * verified rate: with no price configured the feature stays inert rather
-   * than show an invented one. allowlistedThreads carries standing consent
-   * for exact thread ids. */
+  * verified rate: with no price configured the feature stays inert rather
+  * than show an invented one. allowlistedThreads carries standing consent
+  * for exact thread ids. */
   cloudOverflow: z.object({
     perSecondCostUsd: z.number().positive().max(10).optional(),
     idleStopMs: z.number().int().positive().max(24 * 60 * 60_000).optional(),
     allowlistedThreads: z.array(z.string().min(1)).max(1000).optional(),
   }).strict().optional(),
+
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
@@ -588,7 +597,7 @@ export interface AppConfig {
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string; aboutMe?: string };
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
-  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
+  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number; autoArchiveDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
@@ -767,6 +776,14 @@ export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
  * forever. */
 export function threadEventLogRetentionDays(cfg: AppConfig): number | null {
   return cfg.threads?.eventLogRetentionDays ?? null;
+}
+
+/** Days a closed thread waits before auto-archive (#1280), measured from
+ * its most recent close; snoozed, pinned, queued-work, handoff-carrying,
+ * and post-restore threads are exempt. Null — the default — keeps
+ * auto-archive off. */
+export function threadAutoArchiveDays(cfg: AppConfig): number | null {
+  return cfg.threads?.autoArchiveDays ?? null;
 }
 
 export function localVmMode(cfg: AppConfig): "shared" | "per-bot" | "pool" {
