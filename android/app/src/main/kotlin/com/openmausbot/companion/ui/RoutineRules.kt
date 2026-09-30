@@ -75,6 +75,8 @@ object RoutineRules {
     const val DELETE_MESSAGE: String = "Past run receipts remain available."
     const val DELETED_AGENT: String = "Deleted agent"
     const val WAITING_ON_YOU: String = "This thread is waiting for your answer."
+    /** iOS: the Needs attention line in an expanded run. */
+    const val NOT_DONE: String = "The final reply says the task was not done."
     const val UNSUPPORTED_SCHEDULE_ERROR: String =
         "Choose a supported schedule before saving this routine."
 
@@ -178,21 +180,23 @@ object RoutineRules {
 
     enum class PausedBadge(val label: String) { PAUSED("Paused"), COMPLETED("Completed") }
 
-    enum class RunStatus { RUNNING, COMPLETED, WAITING, FAILED, CANCELLED, PENDING }
+    enum class RunStatus { RUNNING, COMPLETED, WAITING, ATTENTION, FAILED, CANCELLED, PENDING }
 
     /** `String.symbol` / `String.tint` in the Swift, as one decision. */
     fun runStatus(status: String): RunStatus = when (status) {
         "running" -> RunStatus.RUNNING
         "completed" -> RunStatus.COMPLETED
         "waiting" -> RunStatus.WAITING
+        "attention" -> RunStatus.ATTENTION
         "failed", "missed" -> RunStatus.FAILED
         "cancelled" -> RunStatus.CANCELLED
         else -> RunStatus.PENDING
     }
 
-    /** `run.status == "waiting" ? "Needs you" : run.status.capitalized`. */
+    /** `run.displayStatus == "waiting" ? "Needs you" : … "Needs attention" : run.status.capitalized`. */
     fun runStatusLabel(status: String): String {
         if (status == "waiting") return "Needs you"
+        if (status == "attention") return "Needs attention"
         return status.split(' ').joinToString(" ") { word ->
             word.lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) }
         }

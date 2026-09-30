@@ -119,6 +119,9 @@ export interface RoutineRun {
   attachments?: RoutineContextAttachment[];
   target: RoutineTarget;
   goalStatus?: RoutineGoalStatus;
+  /** Completed, but the decision model read the final reply as not done:
+   * shown as "Needs attention". The status stays completed. */
+  outcome?: { kind: "blocked"; probability: number };
   botId: string;
   groupId?: string;
   runOn: RoutineRunOn;

@@ -345,6 +345,24 @@ describe("cron routines use the existing persistent scheduler", () => {
     expect(h.manager.listRuns()).toHaveLength(2); expect(h.started).toHaveLength(2);
   });
 
+  it("marks a completed run as needing attention without failing, retrying or counting it", async () => {
+    const h = harness(start);
+    const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    const run = h.manager.listRuns()[0]!;
+    // only a completed run takes the mark
+    expect(h.manager.markRunOutcome(run.id, { kind: "blocked", probability: 0.9 })).toBeNull();
+    h.manager.handleRuntimeEvent({ eventId: "done", provider: "fake", threadId: run.threadId!, createdAt: new Date().toISOString(), type: "turn.completed", ok: true });
+    const marked = h.manager.markRunOutcome(run.id, { kind: "blocked", probability: 0.9 });
+    expect(marked).toMatchObject({ status: "completed", outcome: { kind: "blocked", probability: 0.9 } });
+    expect(h.changed.at(-1)).toMatchObject({ id: run.id, outcome: { kind: "blocked" } });
+    expect(h.failed).toHaveLength(0);
+    expect(h.manager.listRoutines()[0]?.failureStreak ?? 0).toBe(0);
+    // durable across a restart, and a corrupt mark is dropped on load
+    expect(new RoutineManager(h.options).listRuns()[0]?.outcome).toEqual({ kind: "blocked", probability: 0.9 });
+    expect(h.manager.markRunOutcome("no-such-run", { kind: "blocked", probability: 0.9 })).toBeNull();
+  });
+
   it("stamps busy-target deferral, notices once past the window, then dispatches normally", async () => {
     const h = harness(start); h.setBot("busy");
     const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));

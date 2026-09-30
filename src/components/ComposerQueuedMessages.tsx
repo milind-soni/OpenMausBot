@@ -110,6 +110,9 @@ export function QueuedComposerMessages({
       {items.some((item) => item.reason === "capacity") && (
         <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.capacity")}</p>
       )}
+      {items.some((item) => item.reason === "separate") && (
+        <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.separate")}</p>
+      )}
       <ul className="divide-y divide-hairline/25" aria-label={t("composer.queued.list")}>
         {items.map((item, index) => (
           <li key={item.queueId} className="flex min-h-10 min-w-0 items-center gap-2 px-2.5 py-1.5">

@@ -4,6 +4,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import formats from "ajv-formats";
 import { stripControlPlaneEnv } from "../config.ts";
+import { CONNECTOR_META_TOOLS } from "../connector-advertisement.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
@@ -20,6 +21,13 @@ export interface ChatToolResult { text: string; ok: boolean; images?: ChatImageP
 export class ChatToolSessionError extends Error {}
 export interface ChatToolSession {
   definitions: ChatToolDefinition[];
+  /** Advertised names a tool pick may withhold: connected-app tools and the
+   * person's own MCP servers. OpenMausBot's own servers (agents, computer,
+   * browser) and Composio's gateway and connection tools are never here. */
+  trimmable: ReadonlySet<string>;
+  /** Stop advertising these tools for the rest of the turn; a call to one is
+   * then refused like any other name the turn never advertised. */
+  withhold(names: Iterable<string>): void;
   validate(name: string, args: unknown): void;
   execute(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<ChatToolResult>;
   close(): Promise<void>;
@@ -238,6 +246,17 @@ function boundedText(value: string): string {
   return `${bytes.subarray(0, end).toString()}\n[MCP result truncated at 50KB; request less output.]`;
 }
 
+/** The servers mountChatTools starts for the harness itself. Every other
+ * server is a connected app or one the person configured. */
+const HARNESS_SERVERS: ReadonlySet<string> = new Set(["computer", "browser", "agents"]);
+const CONNECTION_TOOL = /_(?:MANAGE|WAIT_FOR)_CONNECTIONS$/i;
+
+function isTrimmable(server: string, tool: string): boolean {
+  if (HARNESS_SERVERS.has(server)) return false;
+  if (server === "composio") return !CONNECTOR_META_TOOLS.includes(tool) && !CONNECTION_TOOL.test(tool);
+  return true;
+}
+
 export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false): Promise<ChatToolSession> {
   const servers: Array<[string, Server | BoatDescriptor]> = [];
   if (computerUse && integrations?.computer) servers.push(["computer", integrations.computer]);
@@ -267,6 +286,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   signal.addEventListener("abort", cancel, { once: true });
   const definitions: ChatToolDefinition[] = [];
   const registered = new Map<string, { client: ChatMcpClient | ChatBoatClient; name: string; schema: ValidateFunction }>();
+  const trimmable = new Set<string>();
   try {
     if (signal.aborted) throw aborted();
     // Start independent servers concurrently; consume results in config order
@@ -303,6 +323,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         let name = base;
         for (let index = 2; registered.has(name); index += 1) { const suffix = `_${index}`; name = base.slice(0, 64 - suffix.length) + suffix; }
         registered.set(name, { client, name: tool.name, schema });
+        if (isTrimmable(server, tool.name)) trimmable.add(name);
         definitions.push({ type: "function", function: { name, description, parameters } });
         if (Buffer.byteLength(JSON.stringify(definitions)) > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
       }
@@ -315,8 +336,16 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if (!tool) throw new Error("The requested tool was not advertised for this turn");
     if (!object(args) || !tool.schema(args)) throw new Error("Tool arguments do not match the advertised input schema; use its required fields and types");
   };
+  const withhold = (names: Iterable<string>) => {
+    for (const name of names) {
+      if (!trimmable.delete(name)) continue;
+      registered.delete(name);
+      const index = definitions.findIndex((definition) => definition.function.name === name);
+      if (index >= 0) definitions.splice(index, 1);
+    }
+  };
   return {
-    definitions, validate, close,
+    definitions, trimmable, withhold, validate, close,
     async execute(name, args, callSignal) {
       validate(name, args);
       if (callSignal.aborted) { await close(); throw aborted(); }

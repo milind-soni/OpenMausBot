@@ -45,6 +45,8 @@
 //                   | slow-tool (start a tool call and send nothing while it
 //                     "runs" for FAKE_ACP_TOOL_MS, default 600 — a quiet
 //                     `sleep` or build — then finish it and answer)
+//                   | repeat-tool (the same tool call five times, then answer
+//                     after FAKE_ACP_TOOL_MS: the stuck-check e2e)
 //                   | stall-after-tool (finish a tool call, then go fully
 //                     silent forever: the guard must still fire once no tool
 //                     is running)
@@ -806,6 +808,21 @@ function handle(msg: any) {
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
       };
+      if (mode === "repeat-tool") {
+        // the same call five times, the repeat detector's first threshold,
+        // then a quiet FAKE_ACP_TOOL_MS before answering: a turn going in
+        // circles that is still running when anything reacts to it
+        for (let index = 0; index < 5; index++) {
+          const id = `tc-repeat-${index}`;
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: id, title: "npm test -- auth.test.ts" } } });
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", toolCallId: id, status: "completed" } } });
+        }
+        setTimeout(() => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "still failing" } } } });
+          complete();
+        }, Number(process.env.FAKE_ACP_TOOL_MS ?? 600));
+        return;
+      }
       if (mode === "slow-tool" || mode === "stall-after-tool") {
         const tool = (update: Record<string, unknown>) =>
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { toolCallId: "tc-slow", ...update } } });

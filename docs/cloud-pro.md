@@ -707,17 +707,21 @@ computers belong to this machine on every request.
   `OMB_ELEVENLABS_API` or `decider.baseUrl` when set, for development and
   tests, else Boat's, ElevenLabs' and Jev's own APIs) and an included token
   only to its relay, whatever those settings say.
-- **The decision relay takes two requests, and the app sends it nothing
-  else.** Through the included token the app sends only room routing's
+- **The decision relay takes only the app's own requests, and the app sends
+  it nothing else.** Through the included token the app sends room routing's
   request (one question `answer`, a choice with the fixed instructions in
   `server/decider/room-routing.ts`, and state keys `room`, `humans_in_room`,
   `bots_in_room`, `new_message` and, when there are recent lines,
-  `recent_messages`) and the Settings key check's fixed request, within the
-  relay's caps (a body of at most 64 KiB, a state of at most 24,000 bytes as
-  JSON). `server/decider/relay.ts` checks each request before it is sent; one
-  that does not fit is not sent, and the room falls back as for any other
-  decision-model failure. Any other decision job, now or added later, uses
-  only the person's own Jev key until the relay accepts it too.
+  `recent_messages`), the Settings key check's fixed request, and each other
+  job's request exactly as its contract in `server/decider/jobs.ts` defines
+  it (fixed instructions, fixed options or levels where it has them, only its
+  state keys), within the relay's caps (a body of at most 64 KiB, a state of
+  at most 24,000 bytes as JSON). `server/decider/relay.ts` checks each request
+  before it is sent; one that does not fit is not sent, and the job falls
+  back as for any other decision-model failure. The Admin's relay holds the
+  same contracts (`DECIDER_JOBS` in openmaus-cloud) and refuses anything
+  else; a job added later uses only the person's own Jev key until both
+  sides have its contract.
 - **Included decisions are on until switched off.** While the decision model
   runs on the included token, its master switch counts as on unless the person
   switched it off in **Settings → Decision model**; an explicit off always

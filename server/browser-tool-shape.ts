@@ -52,6 +52,14 @@ export function slimBrowserToolList(result: unknown): unknown {
   return { ...result, tools };
 }
 
+/** Add one of OpenMausBot's own browser tools to the engine's list, once:
+ * an engine tool of the same name is replaced, never listed twice. */
+export function advertiseBrowserTool(result: unknown, tool: { name: string }): unknown {
+  if (!isRecord(result) || !Array.isArray(result.tools)) return result;
+  const others = (result.tools as unknown[]).filter((entry) => !isRecord(entry) || entry.name !== tool.name);
+  return { ...result, tools: [...others, tool] };
+}
+
 /** Drop harness-owned arguments a model sent anyway. */
 export function stripHarnessOwnedArguments(params: unknown): unknown {
   if (!isRecord(params) || !isRecord(params.arguments)) return params;

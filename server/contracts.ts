@@ -230,6 +230,12 @@ export interface SendTurnInput {
     custom?: Record<string, McpServerSpec>;
   };
   cwd?: string;
+  /** The decision model's tool pick (server/decider/tool-pick.ts), set only
+   * while that job is on. A driver that lists its MCP tools itself may call
+   * it once with the tools it could withhold; it resolves to the names to
+   * keep, or null to keep them all. It never rejects; `signal` is the turn's
+   * own Stop. */
+  pickTools?: (tools: ReadonlyArray<{ name: string; description: string }>, signal?: AbortSignal) => Promise<ReadonlySet<string> | null>;
   /** Let the engine also load the MCP servers from the person's own CLI
    * setup (Claude Code's user-scope servers and claude.ai connectors). Off
    * by default: a bot gets the servers its owner gave it, and each extra

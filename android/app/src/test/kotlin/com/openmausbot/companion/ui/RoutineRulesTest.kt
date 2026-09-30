@@ -245,6 +245,7 @@ class RoutineRulesTest {
         assertEquals(RoutineRules.RunStatus.RUNNING, RoutineRules.runStatus("running"))
         assertEquals(RoutineRules.RunStatus.COMPLETED, RoutineRules.runStatus("completed"))
         assertEquals(RoutineRules.RunStatus.WAITING, RoutineRules.runStatus("waiting"))
+        assertEquals(RoutineRules.RunStatus.ATTENTION, RoutineRules.runStatus("attention"))
         assertEquals(RoutineRules.RunStatus.FAILED, RoutineRules.runStatus("failed"))
         assertEquals(RoutineRules.RunStatus.FAILED, RoutineRules.runStatus("missed"))
         assertEquals(RoutineRules.RunStatus.CANCELLED, RoutineRules.runStatus("cancelled"))
@@ -255,6 +256,7 @@ class RoutineRulesTest {
     @Test
     fun `waiting reads as Needs you and everything else is capitalized`() {
         assertEquals("Needs you", RoutineRules.runStatusLabel("waiting"))
+        assertEquals("Needs attention", RoutineRules.runStatusLabel("attention"))
         assertEquals("Completed", RoutineRules.runStatusLabel("completed"))
         assertEquals("Failed", RoutineRules.runStatusLabel("FAILED"))
         assertEquals("Something Newer", RoutineRules.runStatusLabel("something newer"))

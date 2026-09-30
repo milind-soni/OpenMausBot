@@ -829,3 +829,52 @@ describe("structured tool execution boundaries", () => {
     expect(f.recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
   });
 });
+
+describe("decision-model tool pick", () => {
+  const names = (request: ChatRequest) => request.tools?.map((tool) => tool.function.name);
+
+  it("offers only connected-app and custom MCP tools, and advertises just the kept ones", async () => {
+    const f = await fixture((_body, response) => answer(response));
+    const offered: Array<ReadonlyArray<{ name: string; description: string }>> = [];
+    const audit = f.integrations!.custom!.audit as { command: string; args: string[]; env: Record<string, string> };
+    await f.start({
+      // The harness's own server is never offered, so never withheld.
+      integrations: { ...f.integrations, agents: audit },
+      pickTools: async (tools) => {
+        offered.push(tools);
+        return new Set(["audit_write"]);
+      },
+    });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(offered).toEqual([[
+      { name: "audit_write", description: "Synthetic fixture operation" },
+      { name: "audit_wait", description: "Synthetic fixture operation" },
+      { name: "audit_fail", description: "Synthetic fixture operation" },
+    ]]);
+    expect(names(f.requests[0]!)).toEqual(["agents_write", "agents_wait", "agents_fail", "audit_write", "ask_user"]);
+  });
+
+  it("refuses a call to a withheld tool like any name the turn never advertised", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) return sse(response, [chunk({ tool_calls: [toolCall("audit_fail")] }, "tool_calls")]);
+      answer(response);
+    });
+    await f.start({ pickTools: async () => new Set(["audit_write"]) });
+    // A failed tool call marks the turn as not ok, as it does for any name.
+    await f.completed();
+    expect(names(f.requests[0]!)).toEqual(["audit_write", "ask_user"]);
+    const result = f.requests[1]!.messages.find((message) => message.role === "tool");
+    expect(JSON.stringify(result?.content)).toMatch(/not advertised/);
+    expect(f.effects()).toEqual([]);
+  });
+
+  it("keeps every tool when the pick has no answer or fails", async () => {
+    const picks = [async () => null, async () => { throw new Error("boom"); }, () => { throw new Error("sync boom"); }];
+    for (const pickTools of picks) {
+      const f = await fixture((_body, response) => answer(response));
+      await f.start({ pickTools: pickTools as SendTurnInput["pickTools"] });
+      expect(await f.completed()).toMatchObject({ ok: true });
+      expect(names(f.requests[0]!)).toEqual(["audit_write", "audit_wait", "audit_fail", "ask_user"]);
+    }
+  });
+});

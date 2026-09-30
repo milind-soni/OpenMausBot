@@ -16,6 +16,9 @@ public struct NotificationFrame: Codable, Hashable, Sendable {
     public var threadId: String
     public var title: String
     public var body: String
+    /// Arrive without a sound: finished work the harness judged can wait.
+    /// Absent on older servers and on anything that needs the person.
+    public var quiet: Bool? = nil
 
     /// A bot blocked on you, as opposed to one reporting in.
     public var isBlocking: Bool { kind == "approval" || kind == "question" }

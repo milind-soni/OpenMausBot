@@ -1130,9 +1130,17 @@ data class RoutineRun(
     val finishedAt: Double? = null,
     val output: String? = null,
     val error: String? = null,
+    /** "blocked" when the decision model read a completed run's final reply
+     *  as not done. The status stays "completed". */
+    val outcome: String? = null,
     val createdAt: Double,
     val seenAt: Double? = null,
-)
+) {
+    /** iOS `displayStatus`: a completed run whose reply says it was not done
+     *  reads as "attention" (Needs attention). */
+    val displayStatus: String
+        get() = if (status == "completed" && outcome == "blocked") "attention" else status
+}
 
 @Serializable
 data class RoutineInput(

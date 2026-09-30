@@ -44,6 +44,18 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(BotTask.self, from: JSONEncoder().encode(execution)), execution)
     }
 
+    func testRoutineRunOutcomeIsOptionalAndOnlyMarksACompletedRun() throws {
+        let run = #"{"id":"r1","routineId":"x","routineName":"Balance","botId":"b","runOn":"maus","scheduledFor":1,"status":"completed","manual":false,"createdAt":1"#
+        let legacy = try JSONDecoder().decode(RoutineRun.self, from: Data((run + "}").utf8))
+        let blocked = try JSONDecoder().decode(RoutineRun.self, from: Data((run + #","outcome":"blocked"}"#).utf8))
+        XCTAssertNil(legacy.outcome)
+        XCTAssertEqual(legacy.displayStatus, "completed")
+        XCTAssertEqual(blocked.displayStatus, "attention")
+        var failed = blocked
+        failed.status = "failed"
+        XCTAssertEqual(failed.displayStatus, "failed")
+    }
+
     func testDecodesThePagedFleet() throws {
         let fleet = try decode(Fleet.self, "bots-paged")
         XCTAssertFalse(fleet.bots.isEmpty)
@@ -776,6 +788,22 @@ final class DecodingTests: XCTestCase {
         XCTAssertTrue(notification.isBlocking)
         XCTAssertEqual(notification.threadId, "t1")
         XCTAssertEqual(frame.frame.threadId, "t1")
+        XCTAssertNil(notification.quiet)
+    }
+
+    func testAQuietNotifyFrameAndANewKindDecode() throws {
+        let json = """
+        {"kind":"notify","seq":13,"notification":{
+          "kind":"stuck","botId":"b1","botName":"Scout","threadId":"t1",
+          "title":"Scout looks stuck","body":"Repeating the same steps.","quiet":true}}
+        """
+        let frame = try JSONDecoder().decode(StreamFrame.self, from: Data(json.utf8))
+        guard case let .notify(notification) = frame.frame else {
+            return XCTFail("expected .notify")
+        }
+        XCTAssertEqual(notification.kind, "stuck")
+        XCTAssertEqual(notification.quiet, true)
+        XCTAssertFalse(notification.isBlocking)
     }
 
     // MARK: - A newer computer than the phone

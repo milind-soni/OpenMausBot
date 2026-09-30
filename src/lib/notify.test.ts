@@ -147,6 +147,20 @@ describe("notification sounds", () => {
     expect(notices).toHaveLength(1);
     expect(notices[0]?.options).toMatchObject({ body: frame.body, silent: true });
   });
+
+  it("posts a quiet frame silently, keeping the banner", () => {
+    const { notices } = installNotification("granted");
+    showNotification({ ...frame, quiet: true }, vi.fn());
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.options).toMatchObject({ body: frame.body, silent: true });
+  });
+
+  it("never makes a muted computer ding, quiet or not", () => {
+    sounds.enabled = false;
+    const { notices } = installNotification("granted");
+    showNotification({ ...frame, quiet: false }, vi.fn());
+    expect(notices[0]?.options?.silent).toBe(true);
+  });
 });
 
 describe("buildNotificationOptions", () => {

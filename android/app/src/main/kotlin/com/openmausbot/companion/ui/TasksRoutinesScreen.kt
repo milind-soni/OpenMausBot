@@ -451,7 +451,7 @@ private fun RoutineRunRow(
     onOpenTask: (NotificationTarget) -> Unit,
 ) {
     var expanded by remember(run.id) { mutableStateOf(false) }
-    val status = RoutineRules.runStatus(run.status)
+    val status = RoutineRules.runStatus(run.displayStatus)
     val tint = runStatusTint(status)
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -477,7 +477,7 @@ private fun RoutineRunRow(
                 )
             }
             Text(
-                text = RoutineRules.runStatusLabel(run.status),
+                text = RoutineRules.runStatusLabel(run.displayStatus),
                 fontSize = 12.sp,
                 color = tint,
             )
@@ -518,6 +518,13 @@ private fun RoutineRunRow(
                         color = attentionTint,
                     )
                 }
+                if (run.displayStatus == "attention") {
+                    Text(
+                        text = RoutineRules.NOT_DONE,
+                        fontSize = 14.sp,
+                        color = attentionTint,
+                    )
+                }
                 NotificationTarget.from(run.botId, run.threadId)?.let { target ->
                     ActionRow(
                         text = "Open thread",
@@ -552,7 +559,7 @@ private fun RunStatusIcon(status: RoutineRules.RunStatus, tint: Color) {
             tint = tint,
             modifier = size,
         )
-        RoutineRules.RunStatus.FAILED -> Icon(
+        RoutineRules.RunStatus.ATTENTION, RoutineRules.RunStatus.FAILED -> Icon(
             imageVector = Icons.Filled.Warning,
             contentDescription = null,
             tint = tint,
@@ -581,7 +588,7 @@ private fun RunStatusIcon(status: RoutineRules.RunStatus, tint: Color) {
 @Composable
 private fun runStatusTint(status: RoutineRules.RunStatus): Color = when (status) {
     RoutineRules.RunStatus.COMPLETED -> MaterialTheme.colorScheme.primary
-    RoutineRules.RunStatus.WAITING -> attentionTint
+    RoutineRules.RunStatus.WAITING, RoutineRules.RunStatus.ATTENTION -> attentionTint
     RoutineRules.RunStatus.FAILED -> MaterialTheme.colorScheme.error
     else -> secondaryTint
 }

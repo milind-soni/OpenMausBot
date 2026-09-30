@@ -6,8 +6,9 @@
 export type DeciderProvider = "jev";
 
 /** Jobs a person can switch on or off one by one in Settings. */
-export type DeciderJob = "roomRouting";
-export const DECIDER_JOBS: readonly DeciderJob[] = ["roomRouting"];
+export type { DeciderJob } from "../../shared/decider-jobs.ts";
+export { DECIDER_JOBS } from "../../shared/decider-jobs.ts";
+import type { DeciderJob } from "../../shared/decider-jobs.ts";
 
 /** Where a decision is asked from: a job, or the Settings key check (which
  * runs whatever the switches say, because it tests the key itself). */

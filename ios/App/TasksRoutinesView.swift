@@ -166,6 +166,7 @@ private struct RoutineRunRow: View {
                 if let output = run.output, !output.isEmpty { Text(output).textSelection(.enabled) }
                 if let error = run.error, !error.isEmpty { Text(error).foregroundStyle(.red).textSelection(.enabled) }
                 if run.status == "waiting" { Text("This thread is waiting for your answer.").foregroundStyle(.orange) }
+                if run.displayStatus == "attention" { Text("The final reply says the task was not done.").foregroundStyle(.orange) }
                 if let threadId = run.threadId,
                    let target = NotificationTarget(botId: run.botId, threadId: threadId) {
                     Button("Open thread", systemImage: "arrow.up.right.square") {
@@ -176,7 +177,7 @@ private struct RoutineRunRow: View {
             .font(.subheadline)
         } label: {
             HStack {
-                Image(systemName: run.status.symbol).foregroundStyle(run.status.tint)
+                Image(systemName: run.displayStatus.symbol).foregroundStyle(run.displayStatus.tint)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(run.routineName)
                     ((bot.map { Text(verbatim: $0.name) } ?? Text("Deleted agent"))
@@ -184,8 +185,8 @@ private struct RoutineRunRow: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(run.status == "waiting" ? "Needs you" : run.status.capitalized)
-                    .font(.caption).foregroundStyle(run.status.tint)
+                Text(run.displayStatus == "waiting" ? "Needs you" : run.displayStatus == "attention" ? "Needs attention" : run.status.capitalized)
+                    .font(.caption).foregroundStyle(run.displayStatus.tint)
             }
         }
     }
@@ -529,6 +530,7 @@ private extension String {
         case "running": "play.circle.fill"
         case "completed": "checkmark.circle.fill"
         case "waiting": "hand.raised.circle.fill"
+        case "attention": "exclamationmark.circle.fill"
         case "failed", "missed": "exclamationmark.triangle.fill"
         case "cancelled": "xmark.circle.fill"
         default: "clock.fill"
@@ -537,7 +539,7 @@ private extension String {
     var tint: Color {
         switch self {
         case "completed": .green
-        case "waiting": .orange
+        case "waiting", "attention": .orange
         case "failed", "missed": .red
         default: .secondary
         }

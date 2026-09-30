@@ -21,6 +21,7 @@ import type { AppConfig } from "../config.ts";
 import { deciderCredential, type ServiceCredential } from "../included-services.ts";
 import { jevBackend } from "./jev.ts";
 import { appendDeciderLog, stateHash } from "./log.ts";
+import { jobDefaultOn } from "./jobs.ts";
 import { KEY_CHECK_QUESTION, KEY_CHECK_STATE, relayAccepts, relaySeam } from "./relay.ts";
 import type {
   Answers, AskOptions, BackendResult, ChoiceAnswer, ChoiceQuestion, DeciderBackend, DeciderFailure, DeciderJob,
@@ -28,6 +29,7 @@ import type {
 } from "./types.ts";
 
 export { DECIDER_JOBS } from "./types.ts";
+import { DECIDER_JOBS } from "./types.ts";
 
 /** Used when a caller passes no timeout. Room routing passes its own. */
 export const DEFAULT_DECIDER_TIMEOUT_MS = 1_500;
@@ -81,10 +83,16 @@ export function deciderEnabled(cfg: AppConfig): boolean {
   return account.included ? cfg.decider?.enabled !== false : cfg.decider?.enabled === true;
 }
 
-/** One job's own switch. Absent means on: turning the decider on turns on
- * what it decides unless a job was switched off by hand. */
+/** One job's own switch. Absent means the job's default (jobs.ts): jobs that
+ * only add information start on, jobs that change what a bot sees or does
+ * start off until someone switches them on. */
 export function deciderJobOn(cfg: AppConfig, job: DeciderJob): boolean {
-  return cfg.decider?.jobs?.[job] !== false;
+  return cfg.decider?.jobs?.[job] ?? jobDefaultOn(job);
+}
+
+/** Every job's switch as it takes effect, for Settings. */
+export function deciderJobs(cfg: AppConfig): Record<DeciderJob, boolean> {
+  return Object.fromEntries(DECIDER_JOBS.map((job) => [job, deciderJobOn(cfg, job)])) as Record<DeciderJob, boolean>;
 }
 
 /** Whether a job would be asked right now. Callers check this before they
@@ -103,7 +111,7 @@ export function describeDecider(cfg: AppConfig) {
     configured: Boolean(account),
     ...(account?.included ? { included: true as const } : {}),
     enabled: deciderEnabled(cfg),
-    jobs: { roomRouting: deciderJobOn(cfg, "roomRouting") },
+    jobs: deciderJobs(cfg),
   };
 }
 

@@ -152,7 +152,7 @@ it("offers the included computers, voice and decisions with no key, and never sh
   expect(status.status).toBe(200);
   expect(status.body.box).toEqual({ configured: true, included: true });
   expect(status.body.tts).toMatchObject({ configured: true, ready: true, provider: "elevenlabs", voice: "preset0voice0id", included: true });
-  expect(status.body.decider).toEqual({ provider: "jev", configured: true, included: true, enabled: true, jobs: { roomRouting: true } });
+  expect(status.body.decider).toEqual({ provider: "jev", configured: true, included: true, enabled: true, jobs: expect.objectContaining({ roomRouting: true }) });
   const saved = readFileSync(join(home, ".openmausbot", "config.json"), "utf8");
   for (const includedToken of includedTokens) {
     expect(JSON.stringify(status.body)).not.toContain(includedToken);

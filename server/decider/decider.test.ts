@@ -274,7 +274,7 @@ describe("the key check", () => {
 
 describe("settings rules", () => {
   it("saving a key switches the decider and its room job on", () => {
-    expect(deciderSavePatch({ key: " tsk_new " }, undefined)).toEqual({ ok: true, patch: { key: "tsk_new", enabled: true, jobs: { roomRouting: true } } });
+    expect(deciderSavePatch({ key: " tsk_new " }, undefined)).toEqual({ ok: true, patch: { key: "tsk_new", enabled: true, jobs: expect.objectContaining({ roomRouting: true }) } });
     // even when the room job had been switched off by hand before
     expect(deciderSavePatch({ key: "tsk_new" }, { enabled: false, jobs: { roomRouting: false } }))
       .toMatchObject({ ok: true, patch: { enabled: true, jobs: { roomRouting: true } } });
@@ -288,11 +288,11 @@ describe("settings rules", () => {
 
   it("a job switch merges with the others", () => {
     expect(deciderSavePatch({ jobs: { roomRouting: false } }, { key: KEY, jobs: { roomRouting: true } }))
-      .toEqual({ ok: true, patch: { jobs: { roomRouting: false } } });
+      .toEqual({ ok: true, patch: { jobs: expect.objectContaining({ roomRouting: false }) } });
   });
 
   it("status is booleans only and the switch reads off while no key is saved", () => {
-    expect(describeDecider(ON)).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(describeDecider(ON)).toEqual({ provider: "jev", configured: true, enabled: true, jobs: expect.objectContaining({ roomRouting: true }) });
     expect(JSON.stringify(describeDecider({ decider: { ...ON.decider, baseUrl: "https://internal.example" } }))).not.toMatch(/tsk_|internal/);
     expect(describeDecider({ decider: { enabled: true } })).toMatchObject({ configured: false, enabled: false });
     expect(deciderReady(ON, "roomRouting")).toBe(true);
@@ -346,7 +346,7 @@ describe("Cloud Pro's included decisions", () => {
     await route(decider({ decider: { ...ON.decider, baseUrl: "http://127.0.0.1:9" } }, fetchImpl));
     expect(sent(fetchImpl, 1)).toEqual({ url: "http://127.0.0.1:9/v1/systemone", auth: `Bearer ${KEY}` });
     expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain(INCLUDED);
-    expect(describeDecider(ON)).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(describeDecider(ON)).toEqual({ provider: "jev", configured: true, enabled: true, jobs: expect.objectContaining({ roomRouting: true }) });
   });
 
   it("an own key is on only once switched on, as without Cloud Pro", async () => {
@@ -362,7 +362,7 @@ describe("Cloud Pro's included decisions", () => {
     cloudPro();
     const fetchImpl = theo();
     const off: AppConfig = { decider: { enabled: false } };
-    expect(describeDecider(off)).toEqual({ provider: "jev", configured: true, included: true, enabled: false, jobs: { roomRouting: true } });
+    expect(describeDecider(off)).toEqual({ provider: "jev", configured: true, included: true, enabled: false, jobs: expect.objectContaining({ roomRouting: true }) });
     expect(deciderReady(off, "roomRouting")).toBe(false);
     await expect(route(decider(off, fetchImpl))).resolves.toEqual({ ok: false, reason: "disabled" });
     const jobOff: AppConfig = { decider: { jobs: { roomRouting: false } } };
@@ -377,7 +377,7 @@ describe("Cloud Pro's included decisions", () => {
     for (const env of [{}, { OMB_CLOUD_DECIDER_TOKEN: INCLUDED }, { OMB_CLOUD_DECIDER_URL: RELAY }]) {
       vi.unstubAllEnvs();
       for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
-      expect(describeDecider({})).toEqual({ provider: "jev", configured: false, enabled: false, jobs: { roomRouting: true } });
+      expect(describeDecider({})).toEqual({ provider: "jev", configured: false, enabled: false, jobs: expect.objectContaining({ roomRouting: true }) });
       expect(deciderReady({}, "roomRouting")).toBe(false);
       await expect(route(decider({}, fetchImpl))).resolves.toEqual({ ok: false, reason: "disabled" });
       await expect(decider({}, fetchImpl).testKey()).resolves.toEqual({ ok: false, reason: "no_key" });
@@ -388,7 +388,7 @@ describe("Cloud Pro's included decisions", () => {
   it("Settings sees it as included and never sees the token", () => {
     cloudPro();
     const status = describeDecider({});
-    expect(status).toEqual({ provider: "jev", configured: true, included: true, enabled: true, jobs: { roomRouting: true } });
+    expect(status).toEqual({ provider: "jev", configured: true, included: true, enabled: true, jobs: expect.objectContaining({ roomRouting: true }) });
     expect(JSON.stringify(status)).not.toContain(INCLUDED);
   });
 
@@ -437,13 +437,15 @@ describe("Cloud Pro's included decisions", () => {
   it("a job the relay does not take uses only an own key", async () => {
     cloudPro();
     const fetchImpl = theo();
-    // any job added after room routing, until the relay accepts it
-    const later = "toolSelection" as DeciderJob;
-    expect(deciderReady({}, later)).toBe(false);
-    await expect(decider({}, fetchImpl).choose(later, STATE, QUESTION)).resolves.toEqual({ ok: false, reason: "no_key" });
+    // any job added later with no contract in jobs.ts, switched on by hand
+    const later = "futureJob" as DeciderJob;
+    const laterOn = { decider: { jobs: { [later]: true } } } as AppConfig;
+    const ownKeyOn = { decider: { ...ON.decider, jobs: { [later]: true } } } as AppConfig;
+    expect(deciderReady(laterOn, later)).toBe(false);
+    await expect(decider(laterOn, fetchImpl).choose(later, STATE, QUESTION)).resolves.toEqual({ ok: false, reason: "no_key" });
     expect(fetchImpl).not.toHaveBeenCalled();
-    expect(deciderReady(ON, later)).toBe(true);
-    await expect(decider(ON, fetchImpl).choose(later, STATE, QUESTION)).resolves.toMatchObject({ ok: true });
+    expect(deciderReady(ownKeyOn, later)).toBe(true);
+    await expect(decider(ownKeyOn, fetchImpl).choose(later, STATE, QUESTION)).resolves.toMatchObject({ ok: true });
     expect(sent(fetchImpl)).toEqual({ url: "https://api.typesafe.ai/v1/systemone", auth: `Bearer ${KEY}` });
   });
 
@@ -496,7 +498,7 @@ describe("Cloud Pro's included decisions", () => {
     expect(deciderSavePatch({ enabled: true }, {}, true)).toEqual({ ok: true, patch: { enabled: true } });
     expect(deciderSavePatch({ enabled: false }, {}, true)).toEqual({ ok: true, patch: { enabled: false } });
     // saving an own key still turns it and the room job on
-    expect(deciderSavePatch({ key: "tsk_new" }, { enabled: false }, true)).toEqual({ ok: true, patch: { key: "tsk_new", enabled: true, jobs: { roomRouting: true } } });
+    expect(deciderSavePatch({ key: "tsk_new" }, { enabled: false }, true)).toEqual({ ok: true, patch: { key: "tsk_new", enabled: true, jobs: expect.objectContaining({ roomRouting: true }) } });
     // without Cloud Pro, as before
     expect(deciderSavePatch({ key: "" }, { enabled: true, key: KEY }, false)).toEqual({ ok: true, patch: { key: "", enabled: false } });
     expect(deciderSavePatch({ enabled: true }, {}, false)).toMatchObject({ ok: false });

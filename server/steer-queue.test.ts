@@ -406,6 +406,29 @@ describe("steer-queue module", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("runs a separate request as its own turn, never merged with the words around it, in order", () => {
+    const bot = fakeBot("bot-separate", "thread-separate", true);
+    const store = fakeStore([bot]);
+    queueSteeredMessage(bot.id, bot.threadId, "also check the footer");
+    queueSteeredMessage(bot.id, bot.threadId, "book me a cab", { reason: "separate" });
+    queueSteeredMessage(bot.id, bot.threadId, "for 6pm");
+    queueSteeredMessage(bot.id, bot.threadId, "and order lunch", { reason: "separate" });
+    const run = vi.fn();
+    bot.busy = false;
+    for (let settle = 0; settle < 5; settle++) drainSteeredMessages(store, run);
+    expect(run.mock.calls.map((call) => call[2])).toEqual(["also check the footer", "book me a cab", "for 6pm", "and order lunch"]);
+    expect(store.messages.map((m) => m.text)).toEqual(["also check the footer", "book me a cab", "for 6pm", "and order lunch"]);
+    expect(_queuedCount(bot.threadId)).toBe(0);
+  });
+
+  it("shows a separate request's reason on its chip and its retry receipt", () => {
+    const queued = queueSteeredMessage("bot-separate-chip", "thread-separate-chip", "book me a cab", { reason: "separate", sendId: "send-cab" });
+    expect(queuedSteerSnapshot(() => true)["thread-separate-chip"]).toEqual([{ queueId: queued.id, text: "book me a cab", reason: "separate" }]);
+    expect(queuedSteeredMessage("bot-separate-chip", "thread-separate-chip", "send-cab")?.reason).toBe("separate");
+    expect(queuedThreadPosition("bot-separate-chip", "thread-separate-chip")).toBeNull();
+    expect(cancelSteeredMessage("bot-separate-chip", queued.id)).toBe(true);
+  });
+
   it("drops a cancelled message so drain does not send it", () => {
     const bot = fakeBot("bot-cancel", "thread-cancel", true);
     const store = fakeStore([bot]);

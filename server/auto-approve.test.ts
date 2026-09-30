@@ -95,6 +95,19 @@ describe("held notes", () => {
       .toBe("The provider requires your approval for this action.");
   });
 
+  it("says why the risk check held a Full access approval, on permissions only", () => {
+    expect(approvalHeldNote({ source: "decider-risk", permission: true })).toBe("approval.held.risky");
+    expect(approvalHeldReason({ source: "decider-risk", permission: true })).toBe(HELD_NOTE["approval.held.risky"]);
+    expect(HELD_NOTE["approval.held.risky"]).toMatch(/^Held for you: this looks risky/);
+    expect(approvalHeldNote({ source: "decider-risk", permission: false })).toBeUndefined();
+  });
+
+  it("never holds for risk by itself: only the decision model's check can", () => {
+    for (const mode of ["ask", "edits", "auto", "custom", "full"] as const) {
+      expect(autoVerdict(mode, "Bash", { commandAllowed: true }).source).not.toBe("decider-risk");
+    }
+  });
+
   it("has a catalog entry for every note, so the client can translate by key", () => {
     for (const [key, text] of Object.entries(HELD_NOTE)) {
       expect(englishCatalog[key as keyof typeof englishCatalog], key).toBe(text);

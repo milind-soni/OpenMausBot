@@ -73,6 +73,8 @@ export function RoutineRunCard({
 
   const copy = run.goalStatus
     ? GOAL_COPY[run.goalStatus]
+    : run.outcome === "blocked" && run.status === "completed"
+      ? { label: t("routines.outcome.blocked"), tone: "text-warning" }
     : run.status === "queued" && run.deferredAt != null
       ? { label: "Deferred: target busy", tone: "text-warning" }
       : COPY[run.status];

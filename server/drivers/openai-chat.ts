@@ -432,6 +432,18 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const seenCalls = new Set<string>();
       try {
         tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse);
+        // The decision model may trim a long list of connected-app and MCP
+        // tools to the ones this message might need. Only those tools are
+        // offered to it; any failure keeps them all.
+        const pickTools = turn.pickTools;
+        if (pickTools && tools.trimmable.size) {
+          const session = tools;
+          const offered = session.definitions.filter((definition) => session.trimmable.has(definition.function.name))
+            .map((definition) => ({ name: definition.function.name, description: definition.function.description }));
+          const keep = await Promise.resolve().then(() => pickTools(offered, abort.signal)).catch(() => null);
+          abort.signal.throwIfAborted();
+          if (keep) session.withhold(offered.map((tool) => tool.name).filter((name) => !keep.has(name)));
+        }
         let optionalQuestionOnly = options.tools !== false && tools.definitions.length === 0;
         // The runtime's one built-in tool rides the same list: ask_user is
         // how a chat-completions engine reaches a person. An MCP server that

@@ -4,8 +4,8 @@ import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
-import { closeMessageDb, recallMatchTerm, recallTerms } from "./message-db.ts";
-import { buildRecall, enoughMatches, memoryPassages, RECALL_CLOSE, RECALL_OPEN, recallQuery, renderRecall, topicPassages } from "./recall.ts";
+import { closeMessageDb, insertMessage, recallMatchTerm, recallTerms } from "./message-db.ts";
+import { buildRecall, buildRecallJudged, enoughMatches, memoryPassages, RECALL_CLOSE, RECALL_OPEN, recallQuery, renderRecall, topicPassages } from "./recall.ts";
 import { appendMemoryLog, searchMemoryFiles, writeMemoryFile, writeMemoryTopic, WORKSPACES_DIR } from "./workspace.ts";
 
 const BOT = "bot-recall-test";
@@ -150,5 +150,57 @@ describe("recall from memory files", () => {
     writeMemoryTopic(BOT, "dining.md", "- Loves pasta\n");
     expect(buildRecall({ botId: BOT, message: "ok", threadIds: [], label: () => "", author: () => "" })).toBeNull();
     expect(buildRecall({ botId: BOT, message: "schedule the quarterly review", threadIds: [], label: () => "", author: () => "" })).toBeNull();
+  });
+});
+
+describe("recall with the decision model's judgement", () => {
+  beforeEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    rmSync(WORKSPACES_DIR, { recursive: true, force: true });
+  });
+
+  const input = (message: string, threadIds: string[] = []) =>
+    ({ botId: BOT, message, threadIds, label: () => "your main chat", author: (hit: { role: string }) => (hit.role === "user" ? "Omkar" : "Bot") });
+  const QUESTION = "when does the invoice go out?";
+
+  function seed() {
+    writeMemoryTopic(BOT, "alpha.md", "- The invoice for Acme goes out on the 5th\n");
+    writeMemoryTopic(BOT, "beta.md", "- Invoice template lives in Drive\n");
+    writeMemoryTopic(BOT, "gamma.md", "- An invoice joke from the offsite\n");
+    insertMessage("main", { id: "m1", role: "user", kind: "text", text: "Send the Acme invoice by Friday", at: Date.now() });
+  }
+
+  it("asks once about every candidate, puts the likeliest first and leaves out the unrelated", async () => {
+    seed();
+    const keyword = buildRecall(input(QUESTION, ["main"]))!;
+    const judge = vi.fn(async (_message: string, candidates: readonly string[]) =>
+      candidates.map((candidate) => (candidate.includes("joke") ? 0.02 : candidate.includes("template") ? 0.4 : 0.9)));
+    const judged = (await buildRecallJudged(input(QUESTION, ["main"]), judge, 0.15))!;
+    expect(judge).toHaveBeenCalledTimes(1);
+    const [message, candidates] = judge.mock.calls[0]!;
+    expect(message).toBe(QUESTION);
+    expect(candidates).toHaveLength(4);
+    expect(candidates.some((candidate) => candidate.startsWith("memory/gamma.md: "))).toBe(true);
+    expect(candidates.some((candidate) => candidate.startsWith("your main chat: Omkar: "))).toBe(true);
+    expect(keyword.text).toContain("joke");
+    expect(judged.text).not.toContain("joke");
+    expect(judged.text.indexOf("Acme goes out")).toBeLessThan(judged.text.indexOf("template"));
+    expect(judged).toMatchObject({ notes: 2, conversations: 1 });
+  });
+
+  it("with no answer, or one that does not cover every candidate, is exactly the keyword selection", async () => {
+    seed();
+    const keyword = buildRecall(input(QUESTION, ["main"]));
+    await expect(buildRecallJudged(input(QUESTION, ["main"]), async () => null, 0.15)).resolves.toEqual(keyword);
+    await expect(buildRecallJudged(input(QUESTION, ["main"]), async () => [0.9], 0.15)).resolves.toEqual(keyword);
+  });
+
+  it("never asks about a topic the message named, or when nothing else was found", async () => {
+    writeMemoryTopic(BOT, "dining.md", "---\naliases: [restaurants]\n---\n- Loves pasta\n");
+    const judge = vi.fn(async (_message: string, candidates: readonly string[]) => candidates.map(() => 0));
+    const block = await buildRecallJudged(input("any restaurants tonight?"), judge, 0.15);
+    expect(block?.text).toContain("Loves pasta");
+    expect(judge).not.toHaveBeenCalled();
   });
 });

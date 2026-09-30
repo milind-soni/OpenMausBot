@@ -46,7 +46,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
-import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegationInheritsFullAccess } from "./auto-approve.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegationInheritsFullAccess, type AutoVerdict } from "./auto-approve.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import type { CommandAllowlistCandidate, CommandAllowlistResponse } from "../shared/command-allowlist.ts";
 import { updateClaudeCli } from "./claude-update.ts";
@@ -115,7 +115,7 @@ import {
 import * as composio from "./composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
-import { buildRecall } from "./recall.ts";
+import { buildRecall, buildRecallJudged, plainSnippet } from "./recall.ts";
 import { createMemoryUpkeep, upkeepEnabled } from "./memory-upkeep.ts";
 import { appendAboutMe, commitLearned, planLearned } from "./profile-learned.ts";
 import { canAccessTeam, canReachPeer, coordinatorSupervises, livePeerRoster, livePeerRosterBlock, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
@@ -238,7 +238,7 @@ import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-g
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./drivers/acp/opencode-go.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
-import { readMessageText, recallMessages, recentMessages, searchMessagesAsync, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing } from "./message-db.ts";
+import { readMessageText, recallMessages, recentMessages, type RecallHit, searchMessagesAsync, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
 import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentText, type Incident, type IncidentKind } from "./incidents.ts";
@@ -300,7 +300,7 @@ import {
 import { CLOUD_PERSONAL_REFUSAL, settleCloudOwnership, type CloudOwnership } from "./cloud-owner.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
 import { holdIncludedServices } from "./included-services.ts";
-import type { ProviderInstance } from "./contracts.ts";
+import type { ProviderInstance, SendTurnInput } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "./peer-delivery.ts";
@@ -314,6 +314,8 @@ import {
   sectionKey,
   Store,
   titleFromLlm,
+  UNTITLED_TASK,
+  UNTITLED_THREAD,
   type BotRecord,
   type GroupDefaultResponder,
   type GroupRecord,
@@ -324,6 +326,16 @@ import {
 import * as tts from "./tts/index.ts";
 import { createDecider, deciderIncludedHere, deciderReady, deciderSavePatch, describeDecider } from "./decider/index.ts";
 import { decideRoomResponder, type RoomRoutingInput } from "./decider/room-routing.ts";
+import { judgeRecallCandidates, MEMORY_RECALL_MIN_PROBABILITY, reorderSearchResults } from "./decider/memory-recall.ts";
+import { pickSkills } from "./decider/skill-pick.ts";
+import { decideTaskOutcome } from "./decider/task-outcome.ts";
+import { SteerSplitLane, decideSteerSplit, type SteerSplitInput } from "./decider/steer-split.ts";
+import { decideRiskHold, riskCheckSkips } from "./decider/risk-check.ts";
+import { decideStuck, lastUserText, recentToolSteps, stuckChip } from "./decider/stuck-check.ts";
+import { decideNotificationQuiet, notificationQuietable } from "./decider/notify-urgency.ts";
+import { decideToolPick } from "./decider/tool-pick.ts";
+import { decideWorkPlace, type WorkPlace } from "./decider/work-place.ts";
+import { decideModelRoute, lighterModelFor } from "./decider/model-routing.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS, peerMessageText } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
@@ -380,6 +392,12 @@ import {
   setSkillEnabled,
   skillPackageStamps,
   skillsSystemPrompt,
+  skillIndexEntries,
+  namesIndexEntries,
+  renderSkillNamesIndex,
+  renderSkillsIndex,
+  skillsTurnNote,
+  type SkillIndexEntry,
   stageSkillWrite,
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
@@ -1448,7 +1466,7 @@ function recentWorkSources(bot: BotRecord) {
  * turn the person started — because a message from another bot, a webhook
  * or a room must not be able to pull a private chat into its reply. The
  * conversations are the ones session_search would search, minus this one. */
-function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opts: { conversations: boolean; userName: string }): string {
+async function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opts: { conversations: boolean; userName: string }): Promise<string> {
   if (!autoRecallEnabled(cfg)) return "";
   const roomByThread = new Map<string, GroupRecord>();
   if (opts.conversations) {
@@ -1465,7 +1483,7 @@ function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opt
       .filter((id) => id !== threadId && (!CLOUD_HOME || cloudOwnerOnlyThread(id)))
     : [];
   try {
-    const recalled = buildRecall({
+    const input: Parameters<typeof buildRecall>[0] = {
       botId: bot.id,
       message,
       threadIds,
@@ -1477,7 +1495,13 @@ function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opt
         return id === bot.threadId ? "your main chat" : "an earlier chat";
       },
       author: (hit) => (hit.role === "user" ? hit.peer ?? opts.userName : hit.from ?? bot.name),
-    });
+    };
+    // The decision model's memory recall job: one question over every
+    // candidate, the likeliest first and the unrelated left out. Off, or no
+    // answer: the keyword selection, exactly as without it.
+    const recalled = deciderReady(cfg, "memoryRecall")
+      ? await buildRecallJudged(input, (query, candidates) => judgeRecallCandidates(decider, query, candidates), MEMORY_RECALL_MIN_PROBABILITY)
+      : buildRecall(input);
     if (recalled) console.log(`auto-recall: ${bot.name} (${bot.id}) got ${recalled.notes} note and ${recalled.conversations} conversation passage(s) in ${threadId}`);
     return recalled?.text ?? "";
   } catch (err) {
@@ -1486,9 +1510,35 @@ function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opt
   }
 }
 
+/** The notes in front of a turn's message, the recalled block last (its
+ * closing line says the message follows). */
+function turnNotes(...notes: string[]): string {
+  return notes.filter(Boolean).join("\n\n");
+}
+
 /** The recalled block in front of a turn's message, or the message alone. */
 function withRecalled(recalled: string, text: string): string {
   return recalled ? `${recalled}\n\n${text}` : text;
+}
+
+/** The skills section of a bot's system prompt. With the decision model's
+ * skill pick job ready it lists names only, the same every turn so the
+ * prompt cache holds, and `pick` carries what a turn asks about; otherwise
+ * today's full index. */
+function skillsIndexPlan(botId: string): { system: string; pick?: { entries: SkillIndexEntry[]; listed: SkillIndexEntry[] } } {
+  if (!deciderReady(cfg, "skillPick")) return { system: skillsSystemPrompt(botId) };
+  const entries = skillIndexEntries(botId);
+  const listed = namesIndexEntries(botId, entries);
+  if (!listed.length) return { system: renderSkillsIndex(entries) };
+  return { system: renderSkillNamesIndex(botId, listed), pick: { entries, listed } };
+}
+
+/** The skills note in front of this turn's message: the full entries of the
+ * skills that fit it or, with no answer, the full index; "" while skills
+ * are not picked. */
+async function skillsTurnPrompt(plan: ReturnType<typeof skillsIndexPlan>, message: string): Promise<string> {
+  if (!plan.pick) return "";
+  return skillsTurnNote(plan.pick.entries, await pickSkills(decider, message, plan.pick.listed));
 }
 
 /** Bots in one room must be visible to the same people: a room is one
@@ -2902,7 +2952,9 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
 /** The bot's browser for this turn: agent-browser, one isolated session per
  * browser profile or per bot (docs/plans/browser-engine.md). Null, with the
  * reason logged once, when the engine is not on this machine. */
-const browserRuntime = new BrowserRuntime();
+// Click by description is offered per tools/list, so a Settings change to the
+// decider applies from the next turn.
+const browserRuntime = new BrowserRuntime({ clickByDescription: { decider, ready: () => deciderReady(cfg, "browserClick") } });
 const browserLive = new BrowserLive({ runtime: browserRuntime });
 // Temporary profiles last for this server run, but are never saved to disk.
 // The viewer and the agent must address the SAME temporary browser.
@@ -3473,6 +3525,27 @@ const store = new Store(
 const teamComputers = new TeamComputers(join(DATA_DIR, "team-computers.json"), ENVIRONMENT_ID);
 let followupsReady = false;
 const sendSequencer = new SendSequencer();
+// Busy sends to one thread go through here one at a time while the decision
+// model sorts them into "same task" and "separate request"
+// (server/decider/steer-split.ts). Without a thread id, nothing waits.
+const steerSplitLane = new SteerSplitLane();
+function inSteerSplitLane<T>(threadId: string | undefined, work: () => Promise<T>): () => Promise<T> {
+  return () => threadId ? steerSplitLane.run(threadId, work) : work();
+}
+
+/** What the running turn of a thread was asked: the thread's title (when it
+ * is not the placeholder) and the newest person's line that started a turn,
+ * as opposed to one steered into it. */
+function steerSplitInputFor(botId: string, threadId: string, message: string): SteerSplitInput {
+  const title = store.taskByThread(botId, threadId)?.title;
+  const request = store.activePath(threadId)
+    .findLast((line) => line.role === "user" && line.kind === "text" && !line.steered && Boolean(line.text?.trim()));
+  return {
+    ...(title && title !== UNTITLED_TASK && title !== UNTITLED_THREAD ? { title } : {}),
+    ...(request?.text ? { request: request.text } : {}),
+    message,
+  };
+}
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
 hostedModels?.reconcile(store);
@@ -3608,7 +3681,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "profile", label: "Profile changes", text: agentsMounted ? PROFILE_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace) }) },
-    { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
+    { id: "skills", label: "Skills index", text: privateWorkspace ? skillsIndexPlan(bot.id).system : "" },
   ]);
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
   return {
@@ -5524,6 +5597,10 @@ const lastReply = new Map<string, string>();
 const sessionModelByThread = new Map<string, string>();
 /** threads already told that the provider's reviewer never started */
 const nativeReviewNoticed = new Set<string>();
+/** Full access approvals waiting on the decision model's risk check, by
+ * `threadId:requestId`. request.resolved removes one, so an answer that
+ * lands after the request was settled elsewhere acts on nothing. */
+const riskChecksInFlight = new Set<string>();
 /** a driver kind as the chat should name it: "claudeAgent" → "Claude" */
 const providerLabel = (provider: string): string => {
   const bare = provider.replace(/Agent$/, "");
@@ -5533,9 +5610,15 @@ const providerLabel = (provider: string): string => {
 /** Put a notification on the wire. Clients decide what to do with it — a
  * desktop notification now, a push to a paired phone later. */
 function notify(notification: Notification | null) {
+  if (!notification) return;
   // nested rather than spread — the frame's own `kind` names the frame,
   // exactly like {kind:"message", message} and {kind:"bot", bot}
-  if (notification) broadcast({ kind: "notify", notification });
+  const send = (frame: Notification) => broadcast({ kind: "notify", notification: frame });
+  // A report of finished work may arrive quietly when the decision model
+  // judges it can wait (decider/notify-urgency.ts). It waits at most the
+  // job's 1.5 s budget; anything else, and any failure, sends as today.
+  if (!notificationQuietable(notification) || !deciderReady(cfg, "notifyUrgency")) return send(notification);
+  void decideNotificationQuiet(decider, notification).then(send, () => send(notification));
 }
 
 // Group threads: the fold needs to know WHO is talking — the turn engine
@@ -5547,6 +5630,11 @@ type RoutedBy = NonNullable<Message["routedBy"]>;
  * speaker's next reply line carries `routedBy` (stamped in the runtime fold
  * below), so the room can say "Picked by Jev". Only a routed round sets it. */
 const routedRoomReplies = new Map<string, { botId: string; routedBy: RoutedBy }>();
+/** Direct turns the decision model moved to the engine's lighter model, by
+ * thread: that turn's first reply line carries `routedBy` with the model, so
+ * the chat can say "Light model · easy message". Keyed to the turn's
+ * dispatch generation, so a later turn's reply is never stamped. */
+const lightModelReplies = new Map<string, { generation: string; routedBy: RoutedBy }>();
 
 // The latest running token totals for the turn in flight on each thread.
 // Providers report cumulative-within-turn numbers; the final value is folded
@@ -5559,6 +5647,10 @@ const turnContext = new Map<string, { tokens?: number; window?: number }>();
 // the same class of stuck-loop detection; retaining an unlimited set of
 // unique arguments would let one pathological turn grow the server forever.
 const repeats = new RepeatDetector({ thresholds: [5, 10, 20], maxKeysPerThread: 256 });
+/** Turns whose stuck check has been asked, by thread: the token its answer
+ * must still find to act. Cleared wherever `repeats` settles, so an answer
+ * that lands after the turn ended says nothing. */
+const stuckChecks = new Map<string, symbol>();
 
 // ── stall watchdog ─────────────────────────────────────────────────────
 // ask_bot has a short inline wait budget, while room turns have a separately
@@ -5592,6 +5684,7 @@ const watchdog = new TurnWatchdog({
     const stalledVmTarget = groupSpeakers.has(turn.threadId) ? localVmThreadTargets.get(turn.threadId) : undefined;
     revokeInternalCapabilitiesForThread(turn.threadId);
     repeats.settle(turn.threadId);
+    stuckChecks.delete(turn.threadId);
     const bot = botForThread(turn.botId, turn.threadId);
     const routineRun = activeRoutineRunForThread(turn.threadId);
     const instance = bot
@@ -6485,6 +6578,90 @@ function turnSurfacePlan(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string
   });
 }
 
+/** The places an Auto turn could reach without creating or starting
+ * anything, for the decision model's work-place question. Mirrors the Auto
+ * branches of startTurn's dispatch; whether a place really attaches is still
+ * decided there, and one that does not falls through to the rest of the
+ * usual order. Synchronous and local: no status probe, no network. */
+function autoWorkPlaces(bot: BotRecord, instance: NonNullable<ReturnType<typeof registry.get>>, threadId: string): WorkPlace[] {
+  const caps = instance.adapter.capabilities;
+  const places: WorkPlace[] = [];
+  const cloud = bot.cloudBackend === "vps"
+    ? managedPolicy.computerAllowed("vps") && !computerPlaceRefusal("vps") && !vps.vpsDriverError(instance.driverKind, caps.computerMcp === true)
+    : caps.usesCloudComputer === true && boat.boatConfigured(cfg) && !computerPlaceRefusal("box");
+  if (cloud) places.push("cloud_computer");
+  if (caps.computerMcp === true && caps.remoteAgent !== true && !computerPlaceRefusal("localVm")) {
+    // The same seat attachLocalVm's Auto path would look at, without
+    // recording any pool affinity.
+    const target = localVmMode(cfg) === "pool"
+      ? poolLocalVmTarget(localVmSeatPool.candidate(threadId, localVmPoolSeatHolder))
+      : localVmTargetForBot(bot.id);
+    if (localVmSeen.has(target.key)) places.push("local_vm");
+  }
+  if (!computerPlaceRefusal("thisComputer") && shouldMountLocalComputer({ requested: undefined, hostPlatform: process.platform,
+    providerSupportsLocal: caps.localComputerMcp === true }) && readCuaConnection()) places.push("this_computer");
+  return places;
+}
+
+const WORK_PLACE_SURFACE: Record<WorkPlace, Surface> = { this_computer: "local", local_vm: "vm", cloud_computer: "cloud" };
+
+/** The place the decision model says an Auto turn should try first
+ * (server/decider/work-place.ts), or null for today's order. Only for a
+ * person's own message on an unpinned Auto turn with two or more places to
+ * choose between; never for a pin, an explicit Works on, a team computer or
+ * an automation. Resolves, never rejects. */
+function workPlaceFirst(
+  bot: BotRecord,
+  instance: NonNullable<ReturnType<typeof registry.get>>,
+  plan: ReturnType<typeof turnSurfacePlan>,
+  threadId: string,
+  message: string,
+): Promise<Surface | null> | null {
+  if (!deciderReady(cfg, "workPlace") || plan.computer !== undefined || plan.pinned || inheritedTeamComputer(bot)) return null;
+  const places = autoWorkPlaces(bot, instance, threadId);
+  if (places.length < 2) return null;
+  return decideWorkPlace(decider, { message, bot: { name: bot.name, description: bot.description }, places })
+    .then((choice) => choice.kind === "place" ? WORK_PLACE_SURFACE[choice.place] : null, () => null);
+}
+
+/** The lighter model this direct turn runs on when the decision model finds
+ * the message easy (server/decider/model-routing.ts), or null for the bot's
+ * own model. Resolves, never rejects. */
+function lightModelTurn(input: {
+  instance: NonNullable<ReturnType<typeof registry.get>>;
+  model: string | undefined;
+  threadId: string;
+  botName: string;
+  message: string;
+  excludedIds: ReadonlySet<string>;
+  contextTokens: number | undefined;
+}): Promise<{ model: string; probability: number } | null> | null {
+  if (!deciderReady(cfg, "modelRouting")) return null;
+  const history = store.activePath(input.threadId).filter((m) => m.kind === "text" && !input.excludedIds.has(m.id) && m.text?.trim());
+  const light = lighterModelFor({
+    driverKind: input.instance.driverKind,
+    model: input.model,
+    catalog: input.instance.models,
+    capabilities: input.instance.adapter.capabilities,
+    contextTokens: input.contextTokens ?? Math.ceil(history.reduce((n, m) => n + Buffer.byteLength(m.text ?? ""), 0) / 4),
+  });
+  if (!light) return null;
+  const userName = cfg.profile?.name?.trim() || "User";
+  const recent = history.slice(-4).map((m) => ({ from: m.role === "user" ? userName : input.botName, text: m.text ?? "" }));
+  return decideModelRoute(decider, { message: input.message, recent })
+    .then((route) => route.kind === "light" ? { model: light, probability: route.probability } : null, () => null);
+}
+
+/** The tool-pick callback a turn hands its driver (SendTurnInput.pickTools),
+ * or nothing while the job is off. */
+function toolPickFor(message: string): SendTurnInput["pickTools"] {
+  if (!deciderReady(cfg, "toolPick") || !message.trim()) return undefined;
+  return async (tools, signal) => {
+    const pick = await decideToolPick(decider, { message, tools }, { signal });
+    return pick.kind === "keep" ? pick.names : null;
+  };
+}
+
 function turnProvider(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string): RemoteComputerProvider | null {
   if (runOn === "cloud" || inheritedTeamComputer(bot)) return "box";
   const wants = turnSurfacePlan(bot, runOn, threadId).computer;
@@ -6937,8 +7114,12 @@ bus.subscribe((event: RuntimeEvent) => {
     const routed = group && m.role === "bot" && m.kind === "text" ? routedRoomReplies.get(event.threadId) : undefined;
     const routedBy = routed && speaker && routed.botId === speaker.botId ? routed.routedBy : undefined;
     if (routedBy) routedRoomReplies.delete(event.threadId);
+    const light = bot && m.role === "bot" && m.kind === "text" ? lightModelReplies.get(event.threadId) : undefined;
+    const lightBy = light && light.generation === directTurnGenerationByThread.get(event.threadId) ? light.routedBy : undefined;
+    if (light) lightModelReplies.delete(event.threadId);
+    const direct = lightBy ? { ...m, routedBy: lightBy } : m;
     const message = store.appendMessage(event.threadId, group && m.role === "bot" ? { ...m, from: speaker, ...(routedBy ? { routedBy } : {}) }
-      : proven ? { ...m, requestMessageId: owner.messageId } : m);
+      : proven ? { ...direct, requestMessageId: owner.messageId } : direct);
     return message;
   };
 
@@ -7102,6 +7283,81 @@ bus.subscribe((event: RuntimeEvent) => {
           },
         });
       }
+      // The card path: a person decides. Also where a Full access approval
+      // the risk check held lands, once its answer is in (below).
+      const showCard = (cardVerdict: AutoVerdict | null, rule?: string) => {
+        const heldContext = { source: cardVerdict?.source, permission };
+        // A structured ask (Claude's AskUserQuestion) is a question whatever
+        // the provider routed it as: it has no allow/deny answer, only the
+        // model's own options. The card carries them so the person can choose.
+        const questions = event.questions?.length ? event.questions : undefined;
+        const message = pushMessage({
+          role: "bot",
+          kind: "options",
+          card: {
+            title:
+              permission && event.approvalScope === "local-computer"
+                ? "Local computer approval"
+                : permission
+                  ? "Approval needed"
+                  : "Your bot has a question",
+            subtitle: event.summary,
+            options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
+            requestId: event.requestId,
+            tool: permission ? event.tool : undefined,
+            questionRequest: questions
+              ? { version: 1, questions, ...(event.origin === "output" ? { origin: "output" as const } : {}) }
+              : undefined,
+            commandAllowlist: command ?? undefined,
+            // Provider-owned session grants remain separate from exact commands.
+            // Never on a guest's turn: an "always" for it would outlive it.
+            allowSession: permission && event.allowSession && !event.requiresExplicitApproval && !guestDriven ? true : undefined,
+            // The text stays for cards saved before heldCode existed, and for
+            // clients that do not know the key yet.
+            held: approvalHeldReason(heldContext),
+            heldCode: approvalHeldNote(heldContext),
+            approvalScope: event.approvalScope,
+          },
+        });
+        if (event.requestId) askMessageByRequest.set(`${event.threadId}:${event.requestId}`, message.id);
+        if (command && asker && event.requestId) pendingCommandRules.set(`${event.threadId}:${event.requestId}`, { botId: asker.id, candidate: command });
+        // Every card that reaches a human is a decision too: "the provider
+        // left this for you, in this mode". `question` marks the cards no
+        // rule may ever answer; a permission card without a verdict (no known
+        // asker, or no requestId to answer through) can only mean nothing was
+        // granted.
+        appendDecision(DATA_DIR, {
+          threadId: event.threadId,
+          requestId: event.requestId,
+          botId: asker?.id,
+          botName: asker?.name,
+          tool: event.tool,
+          summary: event.summary,
+          decision: "card-shown",
+          source: !permission ? "question" : cardVerdict ? cardVerdict.source : "no-grant",
+          origin: !permission && event.origin === "output" ? "output" : undefined,
+          ...(rule ? { rule } : {}),
+          unattended: unattended || undefined,
+        });
+        // Notify from HERE, not from a separate subscriber on request.opened:
+        // this is the branch where a card actually reached a human. Anything
+        // Full access answered took the early return above and never buzzes.
+        if (asker) {
+          const card = store.messagesFor(event.threadId).find((candidate) => candidate.id === message.id)?.card;
+          if (card && !card.answered) {
+            // the bot is not working now — it is waiting on a person
+            if (bot) store.setTaskActivity(bot.id, event.threadId, "waiting-on-you");
+            else if (asker.busy) store.setActivity(asker.id, "waiting-on-you");
+            const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || asker;
+            notify(buildNotification(
+              permission ? "approval" : "question",
+              notificationBot,
+              (routineRun && routineSourceThread(routineRun)) || event.threadId,
+              event.summary,
+            ));
+          }
+        }
+      };
       if (verdict?.approve && asker && event.requestId) {
         const settled = verdict.approve;
         const instance = event.providerInstanceId
@@ -7119,7 +7375,7 @@ bus.subscribe((event: RuntimeEvent) => {
         // Claiming approval first and correcting later means a moment
         // where the transcript says "approved" over a request nothing
         // answered — and if the provider is gone entirely, forever.
-        void (async () => {
+        const approve = async () => {
           const outcome = await deliverFullAccessApproval(instance?.adapter, event.threadId, requestId, event.turnId, isCurrent);
           if (!isCurrent()) return;
           if (outcome !== "allowed-once") {
@@ -7148,87 +7404,50 @@ bus.subscribe((event: RuntimeEvent) => {
             decision: "auto-approved",
             source: verdict.source,
           });
-        })().catch(() => {
+        };
+        const receiptFailed = () => {
           // A receipt failure must neither crash the server nor manufacture
           // a new permission request after the provider took our answer.
           console.error("[approval] Could not record the provider approval result.");
-        });
+        };
+        // Risk check (decider/risk-check.ts): before Full access answers for
+        // the person, a confident "High" holds the request for them instead.
+        // It only ever turns this approval into a card: a saved exact command
+        // is the person's own answer already and is never second-guessed, and
+        // reviewed read-only tools are not asked about. Any failure, timeout
+        // or less sure answer approves exactly as below.
+        if (verdict.source === "full-access" && deciderReady(cfg, "riskCheck") && !riskCheckSkips(tool)) {
+          const requestKey = `${event.threadId}:${requestId}`;
+          const turnAtAsk = liveTurnByThread.get(event.threadId);
+          riskChecksInFlight.add(requestKey);
+          const input = [...store.activePath(event.threadId)].reverse()
+            .find((candidate) => candidate.kind === "activity" && candidate.tool?.name === tool && candidate.tool.input)?.tool?.input;
+          const task = bot
+            ? store.taskByThread(bot.id, event.threadId)?.title
+            : group?.tasks?.find((candidate) => candidate.threadId === event.threadId)?.title;
+          void (async () => {
+            const risk = await decideRiskHold(decider, { tool, summary, command: event.command?.command, input, task });
+            // Answered or withdrawn while Jev thought: nothing left to answer.
+            if (!riskChecksInFlight.delete(requestKey)) return;
+            // A card only while its turn and thread are still the ones that
+            // asked; otherwise, like any less sure answer, approve as today.
+            const stillAsking = !shouldIgnoreProviderEvent(event) &&
+              liveTurnByThread.get(event.threadId) === turnAtAsk &&
+              Boolean(store.botByThread(event.threadId) || store.groupByThread(event.threadId));
+            if (!risk.hold || !stillAsking) return approve();
+            showCard({ approve: null, source: "decider-risk" }, `riskCheck High p=${risk.probability.toFixed(2)}`);
+          })().catch(receiptFailed);
+          break;
+        }
+        void approve().catch(receiptFailed);
         break;
       }
-      const heldContext = { source: verdict?.source, permission };
-      // A structured ask (Claude's AskUserQuestion) is a question whatever
-      // the provider routed it as: it has no allow/deny answer, only the
-      // model's own options. The card carries them so the person can choose.
-      const questions = event.questions?.length ? event.questions : undefined;
-      const message = pushMessage({
-        role: "bot",
-        kind: "options",
-        card: {
-          title:
-            permission && event.approvalScope === "local-computer"
-              ? "Local computer approval"
-              : permission
-                ? "Approval needed"
-                : "Your bot has a question",
-          subtitle: event.summary,
-          options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
-          requestId: event.requestId,
-          tool: permission ? event.tool : undefined,
-          questionRequest: questions
-            ? { version: 1, questions, ...(event.origin === "output" ? { origin: "output" as const } : {}) }
-            : undefined,
-          commandAllowlist: command ?? undefined,
-          // Provider-owned session grants remain separate from exact commands.
-          // Never on a guest's turn: an "always" for it would outlive it.
-          allowSession: permission && event.allowSession && !event.requiresExplicitApproval && !guestDriven ? true : undefined,
-          // The text stays for cards saved before heldCode existed, and for
-          // clients that do not know the key yet.
-          held: approvalHeldReason(heldContext),
-          heldCode: approvalHeldNote(heldContext),
-          approvalScope: event.approvalScope,
-        },
-      });
-      if (event.requestId) askMessageByRequest.set(`${event.threadId}:${event.requestId}`, message.id);
-      if (command && asker && event.requestId) pendingCommandRules.set(`${event.threadId}:${event.requestId}`, { botId: asker.id, candidate: command });
-      // Every card that reaches a human is a decision too: "the provider
-      // left this for you, in this mode". `question` marks the cards no
-      // rule may ever answer; a permission card without a verdict (no known
-      // asker, or no requestId to answer through) can only mean nothing was
-      // granted.
-      appendDecision(DATA_DIR, {
-        threadId: event.threadId,
-        requestId: event.requestId,
-        botId: asker?.id,
-        botName: asker?.name,
-        tool: event.tool,
-        summary: event.summary,
-        decision: "card-shown",
-        source: !permission ? "question" : verdict ? verdict.source : "no-grant",
-        origin: !permission && event.origin === "output" ? "output" : undefined,
-        unattended: unattended || undefined,
-      });
-      // Notify from HERE, not from a separate subscriber on request.opened:
-      // this is the branch where a card actually reached a human. Anything
-      // Full access answered took the early return above and never buzzes.
-      if (asker) {
-        const card = store.messagesFor(event.threadId).find((candidate) => candidate.id === message.id)?.card;
-        if (card && !card.answered) {
-          // the bot is not working now — it is waiting on a person
-          if (bot) store.setTaskActivity(bot.id, event.threadId, "waiting-on-you");
-          else if (asker.busy) store.setActivity(asker.id, "waiting-on-you");
-          const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || asker;
-          notify(buildNotification(
-            permission ? "approval" : "question",
-            notificationBot,
-            (routineRun && routineSourceThread(routineRun)) || event.threadId,
-            event.summary,
-          ));
-        }
-      }
+      showCard(verdict);
       break;
     }
     case "request.resolved": {
       if (event.requestId) pendingCommandRules.delete(`${event.threadId}:${event.requestId}`);
+      if (event.requestId) riskChecksInFlight.delete(`${event.threadId}:${event.requestId}`);
       // answered (by whoever): the turn is working again, unless it settled
       const waiting = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       if (bot && store.taskByThread(bot.id, event.threadId)?.activity === "waiting-on-you") {
@@ -7489,7 +7708,25 @@ bus.subscribe((event: RuntimeEvent) => {
             ? reply || routineRun.output || routineRun.routineName
             : reply;
           const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || bot;
-          notify(buildNotification("done", notificationBot, routineReportThread ?? event.threadId, completionDetail, { avatarUrl: notificationBot.avatarUrl }));
+          const notifyThreadId = routineReportThread ?? event.threadId;
+          const notifyDone = () => notify(buildNotification("done", notificationBot, notifyThreadId, completionDetail, { avatarUrl: notificationBot.avatarUrl }));
+          const finalReply = routineRun ? reply || routineRun.output || "" : "";
+          if (routineRun && finalReply.trim() && deciderReady(cfg, "taskOutcome")) {
+            // An ok turn is not always a done task: ask the decision model
+            // whether the reply says it was carried out, holding the
+            // "finished" notification for at most its budget. Only a clear
+            // "blocked" changes anything; every other answer is today's.
+            const completedRun = routineRun;
+            void decideTaskOutcome(decider, { name: completedRun.routineName, prompt: completedRun.prompt, reply: finalReply })
+              .then((outcome) => {
+                if (outcome.kind !== "blocked") return notifyDone();
+                routines?.markRunOutcome(completedRun.id, { kind: "blocked", probability: outcome.probability });
+                notify(buildNotification("routine-blocked", notificationBot, notifyThreadId, completionDetail, { avatarUrl: notificationBot.avatarUrl }));
+              })
+              .catch((error) => console.warn("task outcome: could not notify", error));
+          } else {
+            notifyDone();
+          }
         }
         if (screenPollers.has(event.threadId)) {
           // the last live frame becomes a settled inline screen message —
@@ -8049,7 +8286,10 @@ function finalizeDelegationWatch(
 // from every permission ask's summary (the command being approved).
 bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
-  if (event.type === "turn.completed" || event.type === "session.exited") return void repeats.settle(event.threadId);
+  if (event.type === "turn.completed" || event.type === "session.exited") {
+    stuckChecks.delete(event.threadId);
+    return void repeats.settle(event.threadId);
+  }
   let key: string | null = null;
   if (event.type === "item.started" && event.itemType === "tool") {
     // a title with more than a bare identifier is a call with arguments
@@ -8067,7 +8307,43 @@ bus.subscribe((event: RuntimeEvent) => {
     kind: "activity",
     tool: { name: `Same call repeated ${threshold}× — ${tool}: ${args.slice(0, 80)}${args.length > 80 ? "…" : ""} — it may be stuck`, ok: false },
   });
+  checkStuck(event.threadId);
 });
+
+/** Stuck check (decider/stuck-check.ts), at the first repeat chip of a turn
+ * and never again in it: a confident "stuck" adds a plainer chip and a
+ * notification. It only reports; the turn runs on untouched. */
+function checkStuck(threadId: string) {
+  if (stuckChecks.has(threadId) || !deciderReady(cfg, "stuckCheck")) return;
+  const token = Symbol(threadId);
+  stuckChecks.set(threadId, token);
+  const owner = store.botByThread(threadId);
+  const group = owner ? undefined : store.groupByThread(threadId);
+  const speaker = group ? groupSpeakers.get(threadId) : undefined;
+  // the bot as this thread knows it (a thread-aware copy for a 1:1), or
+  // the room member speaking now
+  const who = owner ? botForThread(owner.id, threadId) ?? owner : speaker ? store.bot(speaker.botId) : undefined;
+  if (!who) return;
+  const path = store.activePath(threadId);
+  const title = owner
+    ? store.taskByThread(owner.id, threadId)?.title
+    : group?.tasks?.find((candidate) => candidate.threadId === threadId)?.title;
+  const task = lastUserText(path) ?? title;
+  void (async () => {
+    const verdict = await decideStuck(decider, { task, steps: recentToolSteps(path) });
+    // the turn settled (or a new one began) while the model thought, or the
+    // conversation is gone: nothing to report on
+    if (!verdict.stuck || stuckChecks.get(threadId) !== token) return;
+    if (!store.botByThread(threadId) && !store.groupByThread(threadId)) return;
+    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: stuckChip(who.name), ok: false } });
+    notify(buildNotification("stuck", who, threadId, "Repeating the same steps. Stop it or give it a hint.", {
+      avatarUrl: who.avatarUrl,
+      ...(group ? { group: { id: group.id, name: group.name } } : {}),
+    }));
+  })().catch(() => {
+    console.error("[decider] Could not report a stuck check.");
+  });
+}
 
 // Drain queued delegations for a source thread after its turn settles.
 // Run as a separate subscriber so the drain logic stays out of the main
@@ -8866,6 +9142,21 @@ async function startTurn(
   turnUsage.delete(threadId);
   turnContext.delete(threadId);
 
+  // The decision model's turn-start questions (server/decider): where an
+  // Auto turn looks first, and whether an easy message runs on the engine's
+  // lighter model. Both start now, side by side with the setup below, and
+  // each is awaited only where its answer is used, so together they add at
+  // most one short budget. Each is null while its job is off.
+  const personAsked = commsDepth === 0 && !userMessage.peerAsk && !opts?.automationSource && !opts?.unattended;
+  const continuation = Boolean(opts?.cardContinuation || opts?.computerSelectionContinuation || opts?.compactOnly);
+  const placeFirst = personAsked && !continuation && !opts?.coordination && opts?.runOn !== "cloud"
+    ? workPlaceFirst(bot, instance, plan, threadId, resolvedImages.text) : null;
+  const lightModel = !useInstanceDefaults && !continuation && !opts?.automationSource && !opts?.unattended
+    ? lightModelTurn({ instance, model, threadId, botName: bot.name, message: resolvedImages.text,
+      excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), contextTokens: task.usage?.context?.tokens })
+    : null;
+  lightModelReplies.delete(threadId);
+
   void (async () => {
     try {
       // Readiness can wait on the network. Admit the task first so its busy
@@ -9377,10 +9668,61 @@ async function startTurn(
         computerKind = "local";
       }
 
+      // An unattended run on a bot with a VPS configured never lands on the
+      // host's own desktop instead: a scheduled job clicking on someone's
+      // laptop is worse than a scheduled job that fails and says why.
+      const unattendedVps = cloudBackend === "vps" && Boolean(opts?.automationSource);
+      // Auto-only host fallback. Electron owns cua-driver/TCC attribution;
+      // the harness only reads its already-running connection descriptor.
+      const mountAutoHost = () => {
+        if (
+          integrations.computer ||
+          integrations.localComputer ||
+          wants !== undefined ||
+          unattendedVps ||
+          computerPlaceRefusal("thisComputer") ||
+          !shouldMountLocalComputer({
+            requested: undefined,
+            hostPlatform: process.platform,
+            providerSupportsLocal: mountsLocalComputer,
+          })
+        ) return;
+        const cua = readCuaConnection();
+        if (!cua) return;
+        // Lazy host claim (issue #1650): the gated integration mounts
+        // now, but the exclusive computer:host seat is taken only by the
+        // first screen tools/call, through the computer-control gate —
+        // the same seam as the Local VM (#1361) and the VPS. An Auto
+        // turn that never touches the screen holds no desktop seat and
+        // records no pin; a claim that finds the seat held waits behind
+        // the holder like every other seat instead of failing on the
+        // spot.
+        autoVmClaims.set(threadId, {
+          owner: resourceOwner,
+          lazy: true,
+          label: "this computer",
+          onRejected: surfaceLazyClaimRejection("this computer"),
+          claim: async () => {
+            await bindTurnComputer(resourceOwner, "computer:host", true);
+            pinAutoSurface("local");
+          },
+        });
+        integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
+        computerKind = "local";
+      };
+      // The decision model may have named the place this message fits best
+      // among those Auto can reach (workPlaceFirst). It is tried first,
+      // through its usual Auto mount; a place that does not attach leaves
+      // today's order to run as always. Cloud is already tried first.
+      const preferred = wants === undefined && placeFirst ? await placeFirst : null;
+      if (preferred === "vm" && !computerPlaceRefusal("localVm") && await attachLocalVm(false)) computerKind = "vm";
+      else if (preferred === "local") mountAutoHost();
+      const autoPlaced = computerKind !== null;
+
       // A VPS is a local-agent computer mount, never a remote agent runner.
       // Explicit Cloud may prepare/start it. Auto remains read-only unless
       // the person explicitly opted this bot into remote lifecycle actions.
-      if ((wants === "cloud" || (wants === undefined && managedPolicy.computerAllowed("vps"))) && cloudBackend === "vps") {
+      if ((wants === "cloud" || (wants === undefined && !autoPlaced && managedPolicy.computerAllowed("vps"))) && cloudBackend === "vps") {
         const unsupported = vps.vpsDriverError(instance.driverKind, mountsComputerMcp);
         if (unsupported && wants === "cloud") throw new Error(unsupported);
         if (unsupported && wants === undefined) autoVpsProblem = unsupported;
@@ -9437,7 +9779,7 @@ async function startTurn(
         previewCapture = attached.capture;
         computerKind = "box";
       }
-      if (!teamComputer && instance.adapter.capabilities.usesCloudComputer === true && (wants === "cloud" || wants === undefined) && cloudBackend === "box" && boat.boatConfigured(cfg)) {
+      if (!teamComputer && instance.adapter.capabilities.usesCloudComputer === true && (wants === "cloud" || (wants === undefined && !autoPlaced)) && cloudBackend === "box" && boat.boatConfigured(cfg)) {
         const attached = await attachBotBoat(bot, resourceOwner, {
           explicitCloud: wants === "cloud",
           canMount: instance.adapter.capabilities.usesCloudComputer === true,
@@ -9458,52 +9800,11 @@ async function startTurn(
         throw new Error("the cloud computer could not be created or reached");
       }
 
-      // Auto-only host fallback. Electron owns cua-driver/TCC attribution;
-      // the harness only reads its already-running connection descriptor.
       // Auto reaches a Local VM this bot already has before it ever touches the
       // host's own desktop: on a headless server that VM is the only desktop
       // there is, and a person who prepared one meant it to be used.
       if (wants === undefined && !integrations.computer && !integrations.localComputer && !computerPlaceRefusal("localVm") && await attachLocalVm(false)) computerKind = "vm";
-      // An unattended run on a bot with a VPS configured never lands on the
-      // host's own desktop instead: a scheduled job clicking on someone's
-      // laptop is worse than a scheduled job that fails and says why.
-      const unattendedVps = cloudBackend === "vps" && Boolean(opts?.automationSource);
-      if (
-        !integrations.computer &&
-        !integrations.localComputer &&
-        wants === undefined &&
-        !unattendedVps &&
-        !computerPlaceRefusal("thisComputer") &&
-        shouldMountLocalComputer({
-          requested: undefined,
-          hostPlatform: process.platform,
-          providerSupportsLocal: mountsLocalComputer,
-        })
-      ) {
-        const cua = readCuaConnection();
-        if (cua) {
-          // Lazy host claim (issue #1650): the gated integration mounts
-          // now, but the exclusive computer:host seat is taken only by the
-          // first screen tools/call, through the computer-control gate —
-          // the same seam as the Local VM (#1361) and the VPS. An Auto
-          // turn that never touches the screen holds no desktop seat and
-          // records no pin; a claim that finds the seat held waits behind
-          // the holder like every other seat instead of failing on the
-          // spot.
-          autoVmClaims.set(threadId, {
-            owner: resourceOwner,
-            lazy: true,
-            label: "this computer",
-            onRejected: surfaceLazyClaimRejection("this computer"),
-            claim: async () => {
-              await bindTurnComputer(resourceOwner, "computer:host", true);
-              pinAutoSurface("local");
-            },
-          });
-          integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
-          computerKind = "local";
-        }
-      }
+      mountAutoHost();
       if (
         wants === undefined &&
         cloudBackend === "vps" &&
@@ -9655,6 +9956,22 @@ async function startTurn(
       }
       const computerSelection = computerSelectionTurns.get(threadId);
       if (computerSelection) computerSelection.mounted = mountedComputer ?? (integrations.browser ? "browser" : undefined);
+      // Recall and the skills note are settled first: with the decision model
+      // they wait up to its short budget, and a Stop in that wait must still
+      // stop the turn at the check below.
+      const skillsPlan = privateWorkspace ? skillsIndexPlan(bot.id) : { system: "" };
+      // Automatic recall rides in front of THIS turn's message, never in the
+      // system prompt: the volatile half is re-sent whole whenever any part of
+      // it changes, and recall changes nearly every turn.
+      const [recalled, skillsNote] = await Promise.all([
+        autoRecallPrompt(bot, threadId, resolvedImages.text, {
+          // a routine run starts fresh by design, and a webhook is untrusted:
+          // neither pulls earlier conversations in
+          conversations: commsDepth === 0 && !opts?.coordination && !opts?.automationSource && !opts?.unattended,
+          userName: cfg.profile?.name?.trim() || "User",
+        }),
+        skillsTurnPrompt(skillsPlan, resolvedImages.text),
+      ]);
       // A cancelled adapter can be between accepting sendTurn and revealing
       // its provider turn id. Never overlap a replacement with that ambiguous
       // pre-id window: wait for the old handshake to settle or for its bounded
@@ -9704,22 +10021,13 @@ async function startTurn(
         // never redoes — or forgets — what another one already did
         { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId, ...recentWorkFilter() })) },
         { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace }) },
-        { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
+        { id: "skills", label: "Skills index", text: skillsPlan.system },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: boundedCoordination && tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : mentionPrompt(tagged) },
       ]);
       turnPromptBytes.set(threadId, { stable: Buffer.byteLength(prompt.stable), volatile: Buffer.byteLength(prompt.volatile) });
-      // Automatic recall rides in front of THIS turn's message, never in the
-      // system prompt: the volatile half is re-sent whole whenever any part of
-      // it changes, and recall changes nearly every turn.
-      const recalled = autoRecallPrompt(bot, threadId, resolvedImages.text, {
-        // a routine run starts fresh by design, and a webhook is untrusted:
-        // neither pulls earlier conversations in
-        conversations: commsDepth === 0 && !coordinationNode && !opts?.automationSource && !opts?.unattended,
-        userName: cfg.profile?.name?.trim() || "User",
-      });
       runningTurnEngines.set(threadId, instance);
       // The prompt carries the soul as saved now. If it changed during setup,
       // decide again from what is actually sent — except on a continuation
@@ -9737,20 +10045,29 @@ async function startTurn(
       // the one the person watches.
       const dispatchedConfig = sessionConfig(liveBot?.soul ?? bot.soul);
       if (strictResume && !(opts?.cardContinuation && continuingRoutine) && dispatchedConfig !== plannedConfig) dispatchContext = decideContext(dispatchedConfig);
+      // An easy message runs this one turn on the engine's lighter model
+      // (lightModelTurn), with the engine's default effort; the bot's saved
+      // selection is untouched. Its first reply line says so.
+      const light = lightModel ? await lightModel : null;
+      if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during setup");
+      if (light) lightModelReplies.set(threadId, { generation: dispatchClaimId,
+        routedBy: { provider: "jev", probability: Math.round(light.probability * 100) / 100, model: light.model } });
+      const pickTools = opts?.cardContinuation ? undefined : toolPickFor(resolvedImages.text);
       // Before sendTurn: an adapter may emit the whole turn before it resolves.
       handoffs.dispatching(threadId, dispatchClaimId, dispatchContext.handoff);
       const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         botId: bot.id,
         startupRecovery: cfg.automaticRecovery?.enabled === true && !opts?.automaticRecoveryAttempted,
-        text: withRecalled(recalled, dispatchContext.turnText),
+        text: withRecalled(turnNotes(skillsNote, recalled), dispatchContext.turnText),
         refreshSystemPrompt: true,
         images: turnImages,
         approvalMode: approvalModeForTurn(bot, commsDepth > 0, threadId),
         ...(guestConfined ? { guestConfined: true, confinedWhy: confinedWhy(threadId) } : {}),
-        model,
-        effort,
-        variant,
+        model: light?.model ?? model,
+        effort: light ? undefined : effort,
+        variant: light ? undefined : variant,
+        ...(pickTools ? { pickTools } : {}),
         // a rewound thread never resumes the abandoned branch's session
         // the active task's own session — another task's cursor would
         // resume the wrong conversation and defeat the context bubble
@@ -10000,6 +10317,7 @@ function routineRunCard(run: RoutineRun): NonNullable<Message["routineRun"]> {
     status: run.status,
   };
   if (run.goalStatus) card.goalStatus = run.goalStatus;
+  if (run.outcome?.kind === "blocked" && run.status === "completed") card.outcome = "blocked";
   if (run.deferredAt != null && run.status === "queued") card.deferredAt = run.deferredAt;
   if (run.threadId) card.executionThreadId = run.threadId;
   if (summary) card.summary = summary;
@@ -10019,7 +10337,7 @@ function routineRunFallbackText(card: NonNullable<Message["routineRun"]>): strin
           : card.goalStatus === "failed"
             ? "failed"
             : undefined;
-  const state = goalState ?? (
+  const state = goalState ?? (card.outcome === "blocked" ? "needs your attention" : undefined) ?? (
     card.status === "waiting"
       ? "needs your attention"
       : card.status === "completed"
@@ -11864,6 +12182,7 @@ async function runGroupMemberTurn(
       });
     }
   }
+  const roomSkillsPlan = workspace ? skillsIndexPlan(bot.id) : { system: "" };
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
     { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(cfg.profile) },
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
@@ -11882,7 +12201,7 @@ async function runGroupMemberTurn(
     // mounted, exactly as the 1:1 path decides it: memory_update is on the
     // agents server, so a room turn with it must be told to use it too.
     { id: "memory", label: "Memory", text: roomMemory ? `\n${roomMemory.trim()}` : "" },
-    { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id) : "" },
+    { id: "skills", label: "Skills index", text: roomSkillsPlan.system },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
   ]);
@@ -11893,6 +12212,15 @@ async function runGroupMemberTurn(
   // connector-failed first responder must not silently consume /learn for the
   // next eligible room member.
   if (skillAuthoring) skillAuthoringClaim.claimed = true;
+  // Recall and the skills note are settled before the checks below: with the
+  // decision model they wait up to its short budget, and a Stop in that wait
+  // must still stop the turn there. Notes only in a room: a private chat
+  // reaches a room through the explicit, disclosed session_search, never
+  // automatically.
+  const [roomRecalled, roomSkillsNote] = await Promise.all([
+    cardContinuation ? "" : autoRecallPrompt(bot, threadId, resolvedLatestImages.text, { conversations: false, userName }),
+    skillsTurnPrompt(roomSkillsPlan, resolvedLatestImages.text),
+  ]);
   // A stopped room handshake may not have revealed its provider turn id yet.
   // Do not launch a replacement into that ambiguous window; once the old id
   // is known it is retired and this bounded gate clears immediately.
@@ -11990,13 +12318,11 @@ async function runGroupMemberTurn(
     providerDispatched = true;
     turnPromptBytes.set(threadId, { stable: Buffer.byteLength(roomSystem.stable), volatile: Buffer.byteLength(roomSystem.volatile) });
     runningTurnEngines.set(threadId, instance);
-    // notes only in a room: a private chat reaches a room through the
-    // explicit, disclosed session_search, never automatically
-    const roomRecalled = cardContinuation ? "" : autoRecallPrompt(bot, threadId, resolvedLatestImages.text, { conversations: false, userName });
+    const roomPickTools = cardContinuation ? undefined : toolPickFor(resolvedLatestImages.text);
     guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         botId: readyBot.id,
-        text: withRecalled(roomRecalled, text),
+        text: withRecalled(turnNotes(roomSkillsNote, roomRecalled), text),
         refreshSystemPrompt: true,
         images: turnImages,
         approvalMode: roomTurnApprovalMode(readyBot, threadId, orchestration),
@@ -12007,6 +12333,7 @@ async function runGroupMemberTurn(
         cwd,
         integrations,
         mcpFromUserConfig: claudeUserMcpEnabled(cfg) && !managedPolicy.restrictsMcp(),
+        ...(roomPickTools ? { pickTools: roomPickTools } : {}),
         ...(instance.instanceId === readyBot.modelSelection.instanceId
           ? memberTurnSelection(readyBot.modelSelection)
           : { model: instance.models.default }),
@@ -15728,8 +16055,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (scope !== "all" && scope !== "conversations" && scope !== "memory") {
           return json(res, 400, { error: "scope must be all, conversations, or memory" });
         }
-        const memoryHits = scope === "conversations" || !q ? [] : searchMemoryFiles(from.id, q, limit);
-        if (scope === "memory") return json(res, 200, { hits: [], memoryHits });
+        const keywordMemoryHits = scope === "conversations" || !q ? [] : searchMemoryFiles(from.id, q, limit);
+        // The decision model's memory recall job only reorders what the
+        // search found, by meaning, and drops nothing: the bot asked. Off,
+        // or no answer: the keyword order.
+        const judged = (found: RecallHit[]) => q && deciderReady(cfg, "memoryRecall")
+          ? reorderSearchResults(decider, q,
+            { items: keywordMemoryHits, text: (hit) => `${hit.file}: ${plainSnippet(hit.snippet)}` },
+            { items: found, text: (hit) => plainSnippet(hit.snippet) })
+          : Promise.resolve({ memory: keywordMemoryHits, conversations: found });
+        if (scope === "memory") return json(res, 200, { hits: [], memoryHits: (await judged([])).memory });
         // Own threads: the bot's main chat and tasks, and the rooms it is a
         // member of with their tasks — conversations it already saw in full.
         // Still own-bot: another bot's threads never enter this list.
@@ -15749,7 +16084,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // private chat is one: in a 1:1 the user already owns every thread
         // the bot can reach, and a room's lines were said in the open.
         const inRoom = Boolean(store.groupByThread(fromThreadId));
-        const found = q ? recallMessages(q, ownThreads, limit, range) : recentMessages(ownThreads, range ?? {}, limit);
+        const { memory: memoryHits, conversations: found } = await judged(q ? recallMessages(q, ownThreads, limit, range) : recentMessages(ownThreads, range ?? {}, limit));
         const hits = found.map((hit) => {
           const room = roomByThread.get(hit.threadId);
           return {
@@ -20452,10 +20787,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const sendId = parseSendId(body.sendId);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);
+      // While a busy thread's sends are being sorted into "same task" and
+      // "separate request", they go one at a time, so a slow answer never
+      // lets a later message overtake an earlier one. With the job off,
+      // nothing waits here.
+      const splitLane = !guarded && deciderReady(cfg, "steerSplit") &&
+        (steerSplitLane.pending(threadId) || store.projectBotForTask(bot.id, threadId)?.busy === true);
       const receipt = await sendSequencer.run(
         sendId ? `bot:${bot.id}:${threadId}:${sendId}` : undefined,
         sendFingerprint(text, replyTo?.id),
-        async () => {
+        inSteerSplitLane(splitLane ? threadId : undefined, async () => {
           if (sendId) {
             if (cancelledChatFollowup("bot", bot.id, threadId, sendId)) {
               throw Object.assign(new Error("this queued sendId was cancelled; send a new message to try again"), { status: 409 });
@@ -20519,6 +20860,34 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           // loses a race with turn settlement, or the engine cannot steer, the
           // existing server-side queue records it atomically for the next turn.
           if (currentAtStart.busy) {
+            // Ask whether these words belong to the running task at all. A
+            // clear "separate request" is not steered in: it waits as its
+            // own queue item and runs as its own turn afterwards. Any other
+            // answer, or none within 800 ms, is today's steer-or-queue.
+            if (deciderReady(cfg, "steerSplit")) {
+              const split = await decideSteerSplit(decider, steerSplitInputFor(bot.id, threadId, text));
+              if (split.kind === "separate") {
+                // The wait was async: the turn may have settled, the task
+                // gone, or the bot been deleted meanwhile.
+                const current = store.projectBotForTask(bot.id, threadId);
+                if (!current) throw Object.assign(new Error("no such bot"), { status: 404 });
+                if (!store.taskByThread(bot.id, threadId)) {
+                  throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
+                }
+                if (!current.busy) {
+                  return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth), trigger);
+                }
+                const queued = queueSteeredMessage(current.id, threadId, text, {
+                  replyToId: replyTo?.id,
+                  sendId,
+                  prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+                  reason: "separate",
+                  sender: messageSender(auth),
+                  trigger,
+                });
+                return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: "separate" as const };
+              }
+            }
             const instance = runningTurnInstance(currentAtStart, threadId);
             let steered: SteerOutcome = "refused";
             // A live text steer has no image side channel. Keep an attachment
@@ -20596,7 +20965,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
           return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId, messageSender(auth), trigger);
-        },
+        }),
       );
       return json(res, 202, receipt);
     }

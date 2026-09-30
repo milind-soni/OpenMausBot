@@ -10,13 +10,20 @@ export function latestRoutineRun(routineId: string, runs: readonly RoutineRun[])
     .reduce<RoutineRun | undefined>((latest, run) => !latest || routineRunTime(run) > routineRunTime(latest) ? run : latest, undefined);
 }
 
+/** Completed, but its reply says the task was not done (the decision
+ * model's reading). Only ever a label: the run itself stays completed. */
+function needsAttention(run: RoutineRun): boolean {
+  return run.status === "completed" && run.outcome?.kind === "blocked";
+}
+
 export function routineRunLabel(run: RoutineRun): string {
   if (run.goalStatus) return t(`routines.goal.${run.goalStatus}`);
+  if (needsAttention(run)) return t("routines.outcome.blocked");
   return t(`routines.status.${run.status}`);
 }
 
 export function routineRunTone(run: RoutineRun): string {
-  if (run.status === "waiting" || ["needs-input", "limit-reached", "paused"].includes(run.goalStatus ?? "")) return "text-warning";
+  if (run.status === "waiting" || needsAttention(run) || ["needs-input", "limit-reached", "paused"].includes(run.goalStatus ?? "")) return "text-warning";
   if (["failed", "missed"].includes(run.status) || ["failed", "blocked"].includes(run.goalStatus ?? "")) return "text-danger";
   if (run.status === "running") return "text-accent";
   if (run.status === "completed" && (!run.goalStatus || run.goalStatus === "completed")) return "text-success";

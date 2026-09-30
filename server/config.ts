@@ -17,6 +17,7 @@ import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { CLOUD_SEAT_IDLE_STOP_MS } from "./cloud-overflow.ts";
 import { cloudHomeConfigured } from "./cloud-home.ts";
+import type { DeciderJob } from "../shared/decider-jobs.ts";
 
 const optionalText = z.string().optional();
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
@@ -481,7 +482,20 @@ const appConfigSchema = z.object({
       .max(2048)
       .refine((value) => !value || /^https?:\/\//i.test(value), "the decision model address must start with http:// or https://")
       .optional(),
-    jobs: z.object({ roomRouting: z.boolean().optional() }).optional(),
+    jobs: z.object({
+      roomRouting: z.boolean().optional(),
+      memoryRecall: z.boolean().optional(),
+      skillPick: z.boolean().optional(),
+      toolPick: z.boolean().optional(),
+      taskOutcome: z.boolean().optional(),
+      riskCheck: z.boolean().optional(),
+      steerSplit: z.boolean().optional(),
+      stuckCheck: z.boolean().optional(),
+      notifyUrgency: z.boolean().optional(),
+      workPlace: z.boolean().optional(),
+      modelRouting: z.boolean().optional(),
+      browserClick: z.boolean().optional(),
+    }).optional(),
   }).optional(),
   /** Avatar provider credentials stay separate; choosing a router never reuses a cloud key. */
   imageGen: z.object({
@@ -584,7 +598,7 @@ export interface AppConfig {
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string };
   /** The decision model; see the schema above and server/decider. */
-  decider?: { enabled?: boolean; provider?: "jev" | "off"; key?: string; baseUrl?: string; jobs?: { roomRouting?: boolean } };
+  decider?: { enabled?: boolean; provider?: "jev" | "off"; key?: string; baseUrl?: string; jobs?: Partial<Record<DeciderJob, boolean>> };
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string; aboutMe?: string };
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };

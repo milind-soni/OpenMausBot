@@ -62,6 +62,16 @@ describe("RoutineRunCard", () => {
     expect(markup).toContain('aria-label="Open run for Morning brief"');
   });
 
+  it("shows a completed run whose reply says it was not done as needing attention", () => {
+    const markup = renderToStaticMarkup(createElement(RoutineRunCard, {
+      message: message("completed", { outcome: "blocked", summary: "I couldn't sign in to the portal." }),
+      onOpen: vi.fn(),
+    }));
+    expect(markup).toContain("Needs attention");
+    expect(markup).not.toContain(">Completed<");
+    expect(markup).toContain("I couldn&#x27;t sign in to the portal.");
+  });
+
   it("keeps a terminal team-goal outcome distinct from scheduler completion", () => {
     const markup = renderToStaticMarkup(createElement(RoutineRunCard, {
       message: message("completed", { goalStatus: "blocked", summary: "The team needs a missing credential." }),

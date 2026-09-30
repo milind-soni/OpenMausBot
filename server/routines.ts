@@ -155,6 +155,10 @@ export interface RoutineRun {
    * while this preserves blocked/needs-input/limit semantics and closes the
    * cross-file crash-recovery gap with the room's goal card. */
   goalStatus?: RoutineGoalStatus;
+  /** A completed run whose final reply the decision model read as not done
+   * (server/decider/task-outcome.ts), with its probability. `status` stays
+   * completed: this only changes what the person is told. */
+  outcome?: RoutineRunOutcome;
   /** Snapshot the room as well as the coordinator so edited definitions do
    * not redirect already-queued team work. */
   groupId?: string;
@@ -190,6 +194,18 @@ export interface RoutineRun {
   denials?: string[];
   createdAt: number;
   seenAt?: number;
+}
+
+export interface RoutineRunOutcome {
+  kind: "blocked";
+  probability: number;
+}
+
+function loadOutcome(value: unknown): RoutineRunOutcome | undefined {
+  const outcome = value as Partial<RoutineRunOutcome> | undefined;
+  return outcome?.kind === "blocked" && typeof outcome.probability === "number" && outcome.probability >= 0 && outcome.probability <= 1
+    ? { kind: "blocked", probability: outcome.probability }
+    : undefined;
 }
 
 /** The previous report handed to the next run of a continuity routine. */
@@ -465,6 +481,7 @@ function cloneRun(run: RoutineRun): RoutineRun {
     ...run,
     attachments: cloneAttachments(run.attachments),
     denials: run.denials ? [...run.denials] : undefined,
+    ...(run.outcome ? { outcome: { ...run.outcome } } : {}),
   };
 }
 
@@ -831,8 +848,10 @@ export class RoutineManager {
               attachments: loadAttachments(run.attachments),
               sourceThreadId: persistedSourceThreadId.parse(run.sourceThreadId),
               resultsThreadId: persistedSourceThreadId.parse(run.resultsThreadId),
+              outcome: loadOutcome(run.outcome),
             };
             if (loaded.timeoutMinutes === undefined) delete loaded.timeoutMinutes;
+            if (loaded.outcome === undefined) delete loaded.outcome;
             return loaded;
           })
         : [];
@@ -1693,6 +1712,18 @@ export class RoutineManager {
     this.save();
     this.emitRun(run);
     if (event.type === "turn.completed") queueMicrotask(() => void this.tick());
+    return cloneRun(run);
+  }
+
+  /** Record that a completed run's reply says it was not done. Only a run
+   * that is still completed takes it; status, retries and the failure streak
+   * are untouched. */
+  markRunOutcome(runId: string, outcome: RoutineRunOutcome): RoutineRun | null {
+    const run = this.runs.find((candidate) => candidate.id === runId);
+    if (!run || run.status !== "completed" || run.target === "room-goal") return null;
+    run.outcome = { kind: outcome.kind, probability: outcome.probability };
+    this.save();
+    this.emitRun(run);
     return cloneRun(run);
   }
 

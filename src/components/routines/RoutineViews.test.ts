@@ -135,6 +135,12 @@ describe("central routine logs", () => {
     expect(markup).not.toContain("Needs your input");
   });
 
+  it("labels a completed run whose reply says it was not done as needing attention", () => {
+    const markup = logs({ runs: [{ ...run, status: "completed", outcome: { kind: "blocked", probability: 0.9 } }] });
+    expect(markup).toContain("Open Morning brief run: Needs attention");
+    expect(markup).toContain("text-warning");
+  });
+
   it("keeps a team-goal block distinct from successful scheduler completion", () => {
     const markup = logs({ runs: [{ ...run, status: "completed", goalStatus: "blocked" }] });
     expect(markup).toContain("Open Morning brief run: Blocked");

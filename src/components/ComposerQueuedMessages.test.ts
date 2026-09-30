@@ -54,6 +54,13 @@ describe("QueuedComposerMessages", () => {
     expect(markup).toContain('aria-label="Delete queued message 1 of 1"');
     expect(markup).not.toContain("Steer");
   });
+  it("says a message was queued as a separate request", () => {
+    const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, {
+      items: [{ queueId: "cab", text: "also book me a cab", reason: "separate" }],
+      onCancel: () => undefined,
+    }));
+    expect(markup).toContain("Queued as a separate request — it runs on its own after the current task.");
+  });
   it("shows the full queued text in an attached, truncated row with real actions", () => {
     const markup = renderToStaticMarkup(
       createElement(QueuedComposerMessages, {

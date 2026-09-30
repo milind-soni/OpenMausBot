@@ -452,9 +452,11 @@ export interface WireMessage {
   /** Set on a room message a bot pushed in with post_to_room. */
   peerPost?: { unattended?: boolean };
   /** A room reply whose speaker the decision model picked (an Auto room),
-   * with how sure it was. Absent on every other message; clients that do
-   * not know it ignore it. */
-  routedBy?: { provider: "jev"; probability: number };
+   * with how sure it was. With `model`: a direct reply the decision model
+   * sent to the engine's lighter model because the message looked easy
+   * (how sure it was that the message is light). Absent on every other
+   * message; clients that do not know it ignore it. */
+  routedBy?: { provider: "jev"; probability: number; model?: string };
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (ask_bot, start_thread). */
   peerAsk?: { botId: string; name: string; unattended?: boolean };
@@ -626,9 +628,11 @@ export interface WireGroup {
 // the app consumes, payload typed by the shape that actually goes over the
 // wire. Transport-owned frames (hello, ping) stay in src/lib/live-events.
 
-/** Why a steer-queue entry waits: a shared thread slot, or the bot's room
- * turn (which runs one at a time per bot). */
-export type SteerQueueReason = "capacity" | "group-turn";
+/** Why a steer-queue entry waits: a shared thread slot, the bot's room
+ * turn (which runs one at a time per bot), or `separate`: the decision
+ * model read it as a request unrelated to the running task, so it runs as
+ * its own follow-up turn instead of being steered or merged. */
+export type SteerQueueReason = "capacity" | "group-turn" | "separate";
 
 /** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the
  * `bot.queued` frame carries them: threadId → queued items. */

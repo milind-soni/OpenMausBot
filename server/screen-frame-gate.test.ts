@@ -25,6 +25,7 @@ describe("screenTouchingTool", () => {
     expect(screenTouchingTool("agent_browser_select")).toBe(true);
     expect(screenTouchingTool("agent_browser_check")).toBe(true);
     expect(screenTouchingTool("agent_browser_screenshot")).toBe(true);
+    expect(screenTouchingTool("mcp__browser__agent_browser_click_text")).toBe(true);
   });
 
   it("still leaves agent-browser's read-only tools and waits out", () => {

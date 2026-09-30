@@ -20,9 +20,18 @@ describe("buildNotification", () => {
     expect(buildNotification("routine-failed", bot, "thread-1", "boom")?.title).toBe("Scout's routine failed");
     expect(buildNotification("routine-deferred", bot, "thread-1", "target busy for 30 minutes")?.title)
       .toBe("Scout's routine is waiting");
+    expect(buildNotification("routine-blocked", bot, "thread-1", "I couldn't sign in to the portal")?.title)
+      .toBe("Scout's routine needs attention");
     expect(buildNotification("incident", bot, "thread-1", "the run stopped: exit_before_result")?.title).toBe("Scout hit a problem");
     expect(buildNotification("turn-failed", bot, "thread-1", "the Local VM is not ready")?.title)
       .toBe("Scout couldn't start");
+    expect(buildNotification("stuck", bot, "thread-1", "Repeating the same steps.")?.title).toBe("Scout looks stuck");
+  });
+
+  it("never marks a notification quiet itself: that is only the decision model's, later", () => {
+    for (const kind of ["approval", "question", "done", "takeover", "stuck"] as const) {
+      expect(buildNotification(kind, bot, "thread-1", "detail")).not.toHaveProperty("quiet");
+    }
   });
 
   it("announces a delegation settle as a resume with results", () => {

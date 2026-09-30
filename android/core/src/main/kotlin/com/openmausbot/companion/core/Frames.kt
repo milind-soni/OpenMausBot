@@ -30,6 +30,9 @@ data class NotificationFrame(
     val threadId: String,
     val title: String,
     val body: String,
+    /** Arrive without a sound: finished work the harness judged can wait.
+     * Absent (false) on older servers and on anything that needs the person. */
+    val quiet: Boolean = false,
 ) {
     val isBlocking: Boolean get() = kind == "approval" || kind == "question"
 }

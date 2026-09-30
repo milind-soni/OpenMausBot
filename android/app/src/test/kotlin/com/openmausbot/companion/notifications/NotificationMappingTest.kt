@@ -24,6 +24,10 @@ class NotificationMappingTest {
             NotificationMapping.CHANNEL_ROUTINE_FAILED,
             NotificationMapping.channelId(frame("routine-failed")),
         )
+        assertEquals(
+            NotificationMapping.CHANNEL_ROUTINE_FAILED,
+            NotificationMapping.channelId(frame("routine-blocked")),
+        )
         assertFalse(NotificationMapping.isHighImportance(frame("done")))
     }
 

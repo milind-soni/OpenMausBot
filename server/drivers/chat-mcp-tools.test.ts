@@ -334,3 +334,34 @@ describe("Chat MCP schema validation", () => {
     expect(alive(f.read().pid)).toBe(false);
   });
 });
+
+describe("tool pick support", () => {
+  const listed = ["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_MULTI_EXECUTE_TOOL", "GMAIL_MANAGE_CONNECTIONS", "GMAIL_SEND_EMAIL", "SLACK_POST_MESSAGE"];
+  const body = `if (message.method === "tools/list") { reply(message, {tools:${JSON.stringify(listed)}.map((name) => ({name,description:"Fixture " + name,inputSchema:schema}))}); continue; }`;
+
+  it("marks connected-app and custom tools trimmable, never harness or Composio gateway tools", async () => {
+    const apps = fixture(body);
+    const own = fixture();
+    const session = await mountChatTools({ composio: apps.server, agents: own.server, custom: { audit: own.server } }, apps.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual([
+      "agents_write", "composio_composio_search_tools", "composio_composio_multi_execute_tool", "composio_gmail_manage_connections",
+      "composio_gmail_send_email", "composio_slack_post_message", "audit_write",
+    ]);
+    expect([...session.trimmable]).toEqual(["composio_gmail_send_email", "composio_slack_post_message", "audit_write"]);
+  });
+
+  it("withholds only trimmable tools and refuses calls to them afterwards", async () => {
+    const apps = fixture(body);
+    const own = fixture();
+    const session = await mountChatTools({ composio: apps.server, agents: own.server }, apps.controller.signal);
+    sessions.push(session);
+    session.withhold(["composio_slack_post_message", "agents_write", "composio_composio_search_tools"]);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual([
+      "agents_write", "composio_composio_search_tools", "composio_composio_multi_execute_tool", "composio_gmail_manage_connections", "composio_gmail_send_email",
+    ]);
+    expect(session.trimmable.has("composio_slack_post_message")).toBe(false);
+    expect(() => session.validate("composio_slack_post_message", { value: "x" })).toThrow("not advertised");
+    expect(() => session.validate("composio_gmail_send_email", { value: "x" })).not.toThrow();
+  });
+});

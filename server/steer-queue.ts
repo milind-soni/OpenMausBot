@@ -264,6 +264,9 @@ export function drainSteeredMessages(
  * anyone's person texts, and unattributed local sends (the loopback owner)
  * are one identity — the transcript already names them all the same. */
 function coalesceIdentity(item: QueueEntry["items"][number]): string {
+  // A separate request is its own turn: an identity nothing else shares
+  // makes it a boundary on both sides.
+  if (item.reason === "separate") return `separate:${item.messageId}`;
   if (item.peerAsk) return `peer:${item.peerAsk.botId}:${item.unattended === true ? "unattended" : "attended"}`;
   if (item.unattended === true) return "unattended";
   if (item.sender) return `person:${item.sender.id ?? item.sender.name}`;

@@ -57,8 +57,10 @@ export function showNotification(
       // its own stack, so a bot's next "finished" never replaces it
       ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
       // The banner still lands; only the platform's alert sound is held
-      // back, which is what a person on a call with the bot asked for.
-      ...(notificationSoundsEnabled() ? {} : { silent: true }),
+      // back, which is what a person on a call with the bot asked for. A
+      // `quiet` frame (finished work the server judged can wait) lands the
+      // same way; nothing here ever makes a muted computer ding.
+      ...(frame.quiet || !notificationSoundsEnabled() ? { silent: true } : {}),
     };
     new Notification(frame.title, options).onclick = open;
   }

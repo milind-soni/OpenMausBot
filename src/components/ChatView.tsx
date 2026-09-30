@@ -77,6 +77,7 @@ import { ModelPicker } from "./ModelPicker";
 import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 
 import { SpeakButton } from "./SpeakButton";
+import { LightModelLine } from "./LightModelLine";
 import { CallButton, CallOverlay } from "./CallView";
 import { effectivePlace, toolPlace, type EffectivePlace } from "@/lib/place";
 import { cn } from "@/lib/cn";
@@ -583,6 +584,7 @@ function Bubble({
           </button>
         </div>
       )}
+      {!user && message.routedBy?.model && <LightModelLine routedBy={message.routedBy} />}
     </div>
   );
 }

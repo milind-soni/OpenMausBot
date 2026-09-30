@@ -21,7 +21,7 @@ object NotificationMapping {
 
     fun channelId(notification: NotificationFrame): String = when (notification.kind) {
         "approval", "question" -> CHANNEL_BLOCKING
-        "routine-failed" -> CHANNEL_ROUTINE_FAILED
+        "routine-failed", "routine-blocked" -> CHANNEL_ROUTINE_FAILED
         else -> CHANNEL_DONE
     }
 

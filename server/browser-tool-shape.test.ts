@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_BROWSER_RESULT_BUDGET, HARNESS_OWNED_BROWSER_PARAMS, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments } from "./browser-tool-shape.ts";
+import { advertiseBrowserTool, DEFAULT_BROWSER_RESULT_BUDGET, HARNESS_OWNED_BROWSER_PARAMS, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments } from "./browser-tool-shape.ts";
 
 const snapshotTool = {
   name: "agent_browser_snapshot",
@@ -57,5 +57,13 @@ describe("browser tool shaping", () => {
     expect(shaped.content[0].text).toContain("agent_browser_get_text");
     const custom = shapeBrowserToolResult({ content: [{ type: "text", text }] }, { budget: 1_000 }) as { content: Array<{ text: string }> };
     expect(custom.content[0].text.length).toBeLessThan(1_600);
+  });
+
+  it("advertises one of OpenMausBot's own tools once, replacing an engine tool of the same name", () => {
+    const own = { name: "agent_browser_click_text", inputSchema: { type: "object" } };
+    const listed = advertiseBrowserTool({ tools: [snapshotTool, { name: "agent_browser_click_text" }] }, own) as { tools: Array<{ name: string }> };
+    expect(listed.tools.map((tool) => tool.name)).toEqual(["agent_browser_snapshot", "agent_browser_click_text"]);
+    expect(listed.tools[1]).toBe(own);
+    expect(advertiseBrowserTool({ error: "x" }, own)).toEqual({ error: "x" });
   });
 });

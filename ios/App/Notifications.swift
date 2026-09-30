@@ -29,7 +29,9 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
         let content = UNMutableNotificationContent()
         content.title = notification.title
         content.body = notification.body
-        content.sound = .default
+        // A quiet frame still lands in the list and on the lock screen,
+        // just without the sound. Never set on approvals or questions.
+        content.sound = notification.quiet == true ? nil : UNNotificationSound.default
         content.categoryIdentifier = notification.isBlocking ? "OPENMAUS_APPROVAL" : "OPENMAUS_UPDATE"
         content.threadIdentifier = notification.threadId
         content.userInfo = [

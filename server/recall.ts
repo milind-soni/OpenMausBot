@@ -14,6 +14,7 @@ import { parseTopicHeader, readTopicHead, topicBody, topicWords } from "./memory
 import { listMemoryTopics, memoryDate, readMemoryTopic, searchMemoryFiles, workspaceDir } from "./workspace.ts";
 import { withoutExpired } from "./memory-entries.ts";
 import { join } from "node:path";
+import { rankByProbability } from "./decider/jobs.ts";
 
 /** Below this many characters a message is a nod, not a question. */
 export const RECALL_MIN_CHARS = 8;
@@ -57,8 +58,8 @@ export function recallQuery(text: string): string | null {
   return recallTerms(trimmed.slice(0, RECALL_QUERY_CHARS)).length ? trimmed.slice(0, RECALL_QUERY_CHARS) : null;
 }
 
-/** FTS5 brackets the matched terms in a snippet. */
-const plain = (snippet: string) => snippet.replace(/\[([^[\]]+)\]/g, "$1");
+/** FTS5 brackets the matched terms in a snippet; the text without them. */
+export const plainSnippet = (snippet: string) => snippet.replace(/\[([^[\]]+)\]/g, "$1");
 const matchedTerms = (snippet: string) => new Set([...snippet.matchAll(/\[([^[\]]+)\]/g)].map((m) => m[1]!.toLowerCase())).size;
 
 export function enoughMatches(query: string, snippet: string): boolean {
@@ -151,7 +152,9 @@ export function topicPassages(botId: string, query: string): RecallPassage[] {
   return out;
 }
 
-export function memoryPassages(botId: string, query: string): RecallPassage[] {
+/** The memory hits that pass the usual filters, as passages, before the
+ * cut to MEMORY_HITS: what automatic recall may put in front of a message. */
+function memoryCandidates(botId: string, query: string): RecallPassage[] {
   let hits: MemoryHit[] = [];
   try {
     hits = searchMemoryFiles(botId, query, MEMORY_HITS * 3, "any");
@@ -160,11 +163,14 @@ export function memoryPassages(botId: string, query: string): RecallPassage[] {
   }
   return hits
     .filter((hit) => recalled(hit.file) && enoughMatches(query, hit.snippet))
-    .slice(0, MEMORY_HITS)
-    .map((hit) => ({ source: "memory" as const, label: hit.file, at: hit.at, snippet: plain(hit.snippet) }));
+    .map((hit) => ({ source: "memory" as const, label: hit.file, at: hit.at, snippet: plainSnippet(hit.snippet) }));
 }
 
-export function conversationPassages(input: RecallInput, query: string): RecallPassage[] {
+export function memoryPassages(botId: string, query: string): RecallPassage[] {
+  return memoryCandidates(botId, query).slice(0, MEMORY_HITS);
+}
+
+function conversationCandidates(input: RecallInput, query: string): RecallPassage[] {
   if (!input.threadIds.length) return [];
   let hits: RecallHit[] = [];
   try {
@@ -174,14 +180,22 @@ export function conversationPassages(input: RecallInput, query: string): RecallP
   }
   return hits
     .filter((hit) => enoughMatches(query, hit.snippet))
-    .slice(0, CONVERSATION_HITS)
     .map((hit) => ({
       source: "conversation" as const,
       label: input.label(hit.threadId),
       at: hit.at,
-      snippet: hit.kind === "digest" ? `[what you did] ${plain(hit.snippet)}` : `${input.author(hit)}: ${plain(hit.snippet)}`,
+      snippet: hit.kind === "digest" ? `[what you did] ${plainSnippet(hit.snippet)}` : `${input.author(hit)}: ${plainSnippet(hit.snippet)}`,
     }));
 }
+
+export function conversationPassages(input: RecallInput, query: string): RecallPassage[] {
+  return conversationCandidates(input, query).slice(0, CONVERSATION_HITS);
+}
+
+/** Says, for each candidate passage (as "label: snippet"), how likely it is
+ * to help answer the message; null keeps the keyword order. The decision
+ * model's memory recall job (server/decider/memory-recall.ts). */
+export type RecallJudge = (message: string, candidates: readonly string[]) => Promise<readonly number[] | null>;
 
 /** The recalled block for this turn, or null when nothing is worth saying. */
 export function buildRecall(input: RecallInput): RecallResult | null {
@@ -191,4 +205,32 @@ export function buildRecall(input: RecallInput): RecallResult | null {
   const named = new Set(topics.map((passage) => passage.label));
   const notes = [...topics, ...memoryPassages(input.botId, query).filter((passage) => !named.has(passage.label))].slice(0, MEMORY_HITS);
   return renderRecall([...notes, ...conversationPassages(input, query)]);
+}
+
+/** buildRecall with a judge: the same candidates, one question for all of
+ * them, the likeliest first and those below `minProbability` left out,
+ * then the usual cut. Topics matched by name are not asked about: the
+ * message named them. With no answer, exactly buildRecall's selection. */
+export async function buildRecallJudged(input: RecallInput, judge: RecallJudge, minProbability: number): Promise<RecallResult | null> {
+  const query = recallQuery(input.message);
+  if (!query) return null;
+  const topics = topicPassages(input.botId, query);
+  const named = new Set(topics.map((passage) => passage.label));
+  let memory = memoryCandidates(input.botId, query).filter((passage) => !named.has(passage.label));
+  let conversations = conversationCandidates(input, query);
+  const candidates = [...memory, ...conversations];
+  if (candidates.length) {
+    const probabilities = await judge(input.message, candidates.map((passage) => `${passage.label}: ${passage.snippet}`));
+    if (probabilities?.length === candidates.length) {
+      const keep = <T>(items: readonly T[], ps: readonly number[]) =>
+        rankByProbability(items.map((item, index) => ({ item, p: ps[index]! })), ps)
+          .filter((entry) => entry.p >= minProbability)
+          .map((entry) => entry.item);
+      const split = memory.length;
+      memory = keep(memory, probabilities.slice(0, split));
+      conversations = keep(conversations, probabilities.slice(split));
+    }
+  }
+  const notes = [...topics, ...memory].slice(0, MEMORY_HITS);
+  return renderRecall([...notes, ...conversations.slice(0, CONVERSATION_HITS)]);
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserRuntime, TransportError, browserRuntimeEnv, type BrowserSpawnSpec } from "./browser-runtime.ts";
+import type { Decider } from "./decider/index.ts";
 
 const runtimes: BrowserRuntime[] = [];
 function runtime(options: ConstructorParameters<typeof BrowserRuntime>[0] = {}) {
@@ -165,6 +166,8 @@ lines.on('line', line => {
   else if (m.params.name === 'agent_browser_open' && m.params.arguments.url === 'https://refused.test') result = { isError:true, content:[{type:'text',text:'Navigation refused'}] };
   else if (m.params.name === 'agent_browser_snapshot' && process.env.REJECT_VERIFICATION === '1') { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'Snapshot refused'}})+'\\n'); return; }
   else if (m.params.name === 'agent_browser_snapshot' && process.env.HANG_VERIFICATION === '1') return;
+  else if (m.params.name === 'agent_browser_snapshot' && process.env.SNAPSHOT_TREE) result = { content:[{type:'text',text:process.env.SNAPSHOT_TREE}] };
+  else if (m.params.name === 'agent_browser_click' && process.env.FAIL_CLICKS === '1') result = { isError:true, content:[{type:'text',text:JSON.stringify(m.params)}] };
   else if (m.params.name === 'agent_browser_snapshot' && process.env.EMPTY_VERIFICATION === '1') result = { content:[] };
   else if (m.params.name === 'agent_browser_snapshot' && process.env.FAIL_VERIFICATION === '1') result = { isError:true, content:[{type:'text',text:'Snapshot unavailable'}] };
   else result = { content:[{type:'text',text:JSON.stringify(m.params)}],pid:process.pid };
@@ -415,5 +418,74 @@ describe("browser MCP shaping at the runtime boundary", () => {
       expect(bulky.content[0].text).toContain("trimmed this tool result");
       expect(bulky.content[1]).toMatchObject({ type: "image" });
     } finally { await value.closeAll(); }
+  });
+});
+
+describe("click by description", () => {
+  const TREE = "- heading \"Welcome back\" [level=1, ref=e1]\n- button \"Sign in\" [ref=e11]\n- button \"Cancel\" [ref=e12]";
+  const treeSpec = () => { const value = spec(); value.env.SNAPSHOT_TREE = TREE; return value; };
+  const answer = (choice: string, pTop: number) =>
+    ({ ok: true as const, provider: "jev" as const, latencyMs: 5, answers: { type: "choice" as const, choice, pTop, margin: pTop, probabilities: { [choice]: pTop } } });
+  type Choose = Decider["choose"] & ReturnType<typeof vi.fn>;
+  const choosing = (choice: string, pTop: number) => ({ choose: vi.fn(async () => answer(choice, pTop)) as unknown as Choose });
+
+  it("is offered only while the decider's job is ready", async () => {
+    let ready = false;
+    const value = runtime({ clickByDescription: { ready: () => ready, decider: choosing("e11", 0.9) } });
+    const names = async () => ((await value.agentRpc("s", treeSpec(), "tools/list", {})) as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
+    expect(await names()).toEqual(["echo"]);
+    ready = true;
+    expect(await names()).toEqual(["echo", "agent_browser_click_text"]);
+    expect(await runtime().agentRpc("s", treeSpec(), "tools/list", {})).toMatchObject({ tools: [{ name: "echo" }] });
+  });
+
+  it("snapshots in the bot's own session and clicks the ref Jev picked", async () => {
+    const decider = choosing("e11", 0.9);
+    const value = runtime({ clickByDescription: { ready: () => true, decider } });
+    const clicks = spec();
+    clicks.env.SNAPSHOT_TREE = TREE;
+    clicks.env.FAIL_CLICKS = "1";
+    const result = await value.agentRpc("s", treeSpec(), "tools/call", { name: "agent_browser_click_text", arguments: { target: "Sign in", session: "other-bot" } }) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]!.text).toContain("Clicked button \"Sign in\" [ref=e11] (Jev 90%).");
+    // The fake engine echoes a failed click's request: it went to @e11.
+    const failed = await value.agentRpc("f", clicks, "tools/call", { name: "agent_browser_click_text", arguments: { target: "Sign in" } }) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(failed.isError).toBe(true);
+    expect(failed.content[0]!.text).toContain(JSON.stringify({ name: "agent_browser_click", arguments: { selector: "@e11" } }));
+    expect(decider.choose).toHaveBeenCalledWith("browserClick", expect.objectContaining({ target: "Sign in" }), expect.anything(), expect.anything());
+  });
+
+  it("clicks nothing when Jev is unsure", async () => {
+    const value = runtime({ clickByDescription: { ready: () => true, decider: choosing("e11", 0.3) } });
+    // Any click would fail loudly here; none is attempted.
+    const clicks = treeSpec();
+    clicks.env.FAIL_CLICKS = "1";
+    const result = await value.agentRpc("s", clicks, "tools/call", { name: "agent_browser_click_text", arguments: { target: "a button" } }) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]!.text).toContain("nothing was clicked");
+    expect(result.content[0]!.text).not.toContain("\"selector\":\"@e11\"");
+  });
+
+  it("refuses without forwarding when the job is not ready", async () => {
+    const decider = choosing("e11", 0.9);
+    const value = runtime({ clickByDescription: { ready: () => false, decider } });
+    const result = await value.agentRpc("s", treeSpec(), "tools/call", { name: "agent_browser_click_text", arguments: { target: "Sign in" } }) as { isError: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("not available");
+    expect(decider.choose).not.toHaveBeenCalled();
+  });
+
+  it("does not click once a person takes the browser during the decision", async () => {
+    const decided = deferred();
+    const decider = { choose: vi.fn(async () => { await decided.promise; return answer("e11", 0.95); }) as unknown as Choose };
+    const value = runtime({ clickByDescription: { ready: () => true, decider } });
+    const pending = value.agentRpc("s", treeSpec(), "tools/call", { name: "agent_browser_click_text", arguments: { target: "Sign in" } });
+    const refused = expect(pending).rejects.toThrow(/paused/);
+    await vi.waitFor(() => expect(decider.choose).toHaveBeenCalled());
+    const taking = value.take("s", "person");
+    decided.resolve();
+    await refused;
+    await taking;
+    expect(value.canControl("s", "person")).toBe(true);
   });
 });

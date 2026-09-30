@@ -16,6 +16,9 @@ export interface RoutineRunCardData {
   deferredAt?: number;
   /** Exact terminal team-goal outcome when this run targeted a room. */
   goalStatus?: "completed" | "needs-input" | "blocked" | "limit-reached" | "paused" | "stopped" | "failed";
+  /** A completed run whose final reply says it was not done (the decision
+   * model's reading). The status stays completed. */
+  outcome?: "blocked";
   executionThreadId?: string;
   summary?: string;
   error?: string;

@@ -1179,8 +1179,17 @@ public struct RoutineRun: Codable, Hashable, Identifiable, Sendable {
     public var finishedAt: Double?
     public var output: String?
     public var error: String?
+    /// "blocked" when the decision model read a completed run's final reply as
+    /// not done. The status stays "completed".
+    public var outcome: String?
     public var createdAt: Double
     public var seenAt: Double?
+
+    /// The status the routine history shows: a completed run whose reply says
+    /// it was not done reads as "attention" (Needs attention).
+    public var displayStatus: String {
+        status == "completed" && outcome == "blocked" ? "attention" : status
+    }
 }
 
 public struct RoutineInput: Encodable, Sendable {

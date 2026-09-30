@@ -11,6 +11,7 @@ import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
+import { DECIDER_JOBS, type DeciderJob } from "../../shared/decider-jobs";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 
 const KEY_URL = "https://typesafe.ai";
@@ -45,9 +46,21 @@ export function deciderFailureText(result: { reason: string; status?: number }, 
   return key ? t(key) : t("decider.error.other");
 }
 
-/** Jobs that are not built yet: listed so people know what is coming, with
- * no switch, because a switch that does nothing would be a lie. */
-const COMING_SOON: LocaleKey[] = ["decider.jobs.browserClicks", "decider.jobs.toolSelection", "decider.jobs.placement"];
+/** Each job's name and one-line explanation, in DECIDER_JOBS order. */
+const JOB_TEXT: Record<DeciderJob, { title: LocaleKey; detail: LocaleKey }> = {
+  roomRouting: { title: "decider.jobs.roomRouting", detail: "decider.jobs.roomRoutingDetail" },
+  memoryRecall: { title: "decider.jobs.memoryRecall", detail: "decider.jobs.memoryRecallDetail" },
+  skillPick: { title: "decider.jobs.skillPick", detail: "decider.jobs.skillPickDetail" },
+  toolPick: { title: "decider.jobs.toolPick", detail: "decider.jobs.toolPickDetail" },
+  taskOutcome: { title: "decider.jobs.taskOutcome", detail: "decider.jobs.taskOutcomeDetail" },
+  riskCheck: { title: "decider.jobs.riskCheck", detail: "decider.jobs.riskCheckDetail" },
+  steerSplit: { title: "decider.jobs.steerSplit", detail: "decider.jobs.steerSplitDetail" },
+  stuckCheck: { title: "decider.jobs.stuckCheck", detail: "decider.jobs.stuckCheckDetail" },
+  notifyUrgency: { title: "decider.jobs.notifyUrgency", detail: "decider.jobs.notifyUrgencyDetail" },
+  workPlace: { title: "decider.jobs.workPlace", detail: "decider.jobs.workPlaceDetail" },
+  modelRouting: { title: "decider.jobs.modelRouting", detail: "decider.jobs.modelRoutingDetail" },
+  browserClick: { title: "decider.jobs.browserClick", detail: "decider.jobs.browserClickDetail" },
+};
 
 export function DecisionModelSettings() {
   const { state, dispatch } = useStore();
@@ -57,7 +70,6 @@ export function DecisionModelSettings() {
   const included = configured && decider?.included === true;
   const ownKey = configured && !included;
   const enabled = decider?.enabled ?? false;
-  const roomRouting = decider?.jobs.roomRouting ?? true;
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -194,28 +206,25 @@ export function DecisionModelSettings() {
 
       <Card title={t("decider.jobs.title")}>
         <ul className="flex flex-col">
-          <li className="flex items-start justify-between gap-4 py-2">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-ink">{t("decider.jobs.roomRouting")}</div>
-              <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t("decider.jobs.roomRoutingDetail")}</div>
-            </div>
-            <Switch
-              data-testid="decider-job-roomRouting"
-              aria-label={t("decider.jobs.roomRouting")}
-              checked={enabled && roomRouting}
-              disabled={!enabled || switching}
-              onClick={() => void patch({ jobs: { roomRouting: !roomRouting } })}
-              className="cursor-pointer"
-            />
-          </li>
-          {COMING_SOON.map((label) => (
-            <li key={label} data-testid="decider-coming-soon" aria-disabled="true" className="flex items-center justify-between gap-4 border-t border-hairline/40 py-2 opacity-50">
-              <span className="text-[13px] text-ink-secondary">{t(label)}</span>
-              <span className="rounded bg-control px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
-                {t("decider.jobs.comingSoon")}
-              </span>
-            </li>
-          ))}
+          {DECIDER_JOBS.map((job, index) => {
+            const on = decider?.jobs[job] ?? job === "roomRouting";
+            return (
+              <li key={job} className={cn("flex items-start justify-between gap-4 py-2", index > 0 && "border-t border-hairline/40")}>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-ink">{t(JOB_TEXT[job].title)}</div>
+                  <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t(JOB_TEXT[job].detail)}</div>
+                </div>
+                <Switch
+                  data-testid={`decider-job-${job}`}
+                  aria-label={t(JOB_TEXT[job].title)}
+                  checked={enabled && on}
+                  disabled={!enabled || switching}
+                  onClick={() => void patch({ jobs: { [job]: !on } })}
+                  className="cursor-pointer"
+                />
+              </li>
+            );
+          })}
         </ul>
       </Card>
     </>

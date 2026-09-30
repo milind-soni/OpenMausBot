@@ -66,6 +66,9 @@ class LocalNotificationPoster(
                 if (notification.isBlocking) NotificationCompat.CATEGORY_ALARM
                 else NotificationCompat.CATEGORY_STATUS,
             )
+            // A quiet frame still lands in the shade, without the channel's
+            // sound or vibration. Never set on approvals or questions.
+            .setSilent(notification.quiet)
         try {
             manager.notify(NotificationMapping.dedupeId(notification, sequence), 0, builder.build())
         } catch (_: SecurityException) {

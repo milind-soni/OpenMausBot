@@ -41,7 +41,7 @@ describe("decider config", () => {
       // the desktop hands the saved key over as env: now it is the one in use
       process.env.OMB_JEV_API_KEY = KEY;
       saveConfig({ decider: { enabled: true } });
-      expect(describeDecider(loadConfig())).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+      expect(describeDecider(loadConfig())).toEqual({ provider: "jev", configured: true, enabled: true, jobs: expect.objectContaining({ roomRouting: true }) });
       await decider.testKey();
       const calls = fetchImpl.mock.calls.map(([url, init]) => [String(url), (init!.headers as Record<string, string>).authorization]);
       expect(calls).toEqual([[`${relay}/v1/systemone`, "Bearer omb_decide_included"], ["https://api.typesafe.ai/v1/systemone", `Bearer ${KEY}`]]);
@@ -67,8 +67,8 @@ describe("decider config", () => {
     if (!planned.ok) throw new Error(planned.error);
     saveConfig({ decider: planned.patch });
     const disk = JSON.parse(readFileSync(join(DATA_DIR, "config.json"), "utf8"));
-    expect(disk.decider).toEqual({ key: KEY, enabled: true, jobs: { roomRouting: true } });
-    expect(describeDecider(loadConfig())).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(disk.decider).toEqual({ key: KEY, enabled: true, jobs: expect.objectContaining({ roomRouting: true }) });
+    expect(describeDecider(loadConfig())).toEqual({ provider: "jev", configured: true, enabled: true, jobs: expect.objectContaining({ roomRouting: true }) });
   });
 
   it("validates the section: a base URL must be http(s), the provider known", () => {

@@ -73,13 +73,17 @@ const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user", "omb-ask"]);
  * rule". `full-access` and `command-allowlist` are explicit user grants; `native-approval` is a card
  * the provider's own reviewer (Auto, or Custom's config) left for the person;
  * `explicit-approval-block` is a sandbox widening only Full may answer;
- * `no-grant` is an Ask or Edits card, where asking is the whole point. */
+ * `no-grant` is an Ask or Edits card, where asking is the whole point.
+ * `decider-risk` is a Full access approval the decision model's risk check
+ * held for the person (server/decider/risk-check.ts): never from
+ * autoVerdict itself, which stays pure. */
 export type AutoVerdictSource =
   | "full-access"
   | "command-allowlist"
   | "native-approval"
   | "explicit-approval-block"
-  | "no-grant";
+  | "no-grant"
+  | "decider-risk";
 
 export interface AutoVerdict {
   /** Chip text when the app answers for the person, null when a human
@@ -129,6 +133,7 @@ export const HELD_NOTE = {
     "This changes the provider sandbox, so only Full access can approve it automatically.",
   "approval.held.undeliveredFull": "Full access couldn't deliver this approval.",
   "approval.held.undelivered": "Approve for me couldn't answer this one.",
+  "approval.held.risky": "Held for you: this looks risky, so Full access did not approve it automatically.",
 } as const;
 
 export type HeldNoteKey = keyof typeof HELD_NOTE;
@@ -143,6 +148,7 @@ export function approvalHeldNote(context: {
   if (!context.permission) return undefined;
   if (context.source === "explicit-approval-block") return "approval.held.sandbox";
   if (context.source === "native-approval") return "approval.held.native";
+  if (context.source === "decider-risk") return "approval.held.risky";
   return undefined;
 }
 

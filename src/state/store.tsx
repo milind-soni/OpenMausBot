@@ -15,6 +15,7 @@ import {
 } from "react";
 import type { BotVisibility, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
 import type { TurnDigest } from "../../shared/digest";
+import type { DeciderJob } from "../../shared/decider-jobs";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
@@ -642,7 +643,7 @@ export interface ConfigStatus {
     configured: boolean;
     included?: boolean;
     enabled: boolean;
-    jobs: { roomRouting: boolean };
+    jobs: Record<DeciderJob, boolean>;
   };
   /** Shared write-only credential for on-demand GPT Image avatars. */
   imageGen?: {
@@ -3110,7 +3111,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   threadId: body.threadId,
                   queueId: body.queueId,
                   text: action.text,
-                  reason: body.reason === "capacity" || body.reason === "group-turn" ? body.reason : undefined,
+                  reason: body.reason === "capacity" || body.reason === "group-turn" || body.reason === "separate" ? body.reason : undefined,
                 });
               }
             })
