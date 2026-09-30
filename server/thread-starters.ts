@@ -38,6 +38,17 @@ export class ThreadStarters {
     return this.starters.get(threadId);
   }
 
+  /** The threads opened for one person, newest first, at most `limit`. */
+  threadsOf(person: string, limit: number): string[] {
+    const threads: string[] = [];
+    for (const [threadId, starter] of [...this.starters].reverse()) {
+      if (starter !== person) continue;
+      threads.push(threadId);
+      if (threads.length >= limit) break;
+    }
+    return threads;
+  }
+
   /** Record once; a thread keeps the person it was first opened for. */
   set(threadId: string, person: string | undefined): void {
     if (!person || !KEY.test(person) || !THREAD.test(threadId) || this.starters.has(threadId)) return;

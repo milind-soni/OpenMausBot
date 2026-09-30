@@ -28,7 +28,7 @@ registerHooks({
       }
       export async function containerComputerStatus(_run, _platform, target = SHARED_LOCAL_VM_TARGET) {
         writeFileSync(file + '.entered', target.key);
-        while (read().blocked) await new Promise(r => setTimeout(r, 30));
+        while (read().blocked || read().blockedTarget === target.key) await new Promise(r => setTimeout(r, 30));
         const missing = !(await containerComputerExists('podman', target));
         const ready = !missing && !read().failed;
         return { runtime: 'podman', daemonUp: true, image: true, create_supported: true, managed: !missing,

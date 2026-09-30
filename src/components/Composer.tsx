@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction 
 import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Square, Target, Users, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import {
@@ -51,7 +52,7 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { normalizeState } from "@/lib/mascot";
-import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
+import { goalCoordinatorForComposer, groupComposerHint, jevRoomRoutingOn, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
@@ -356,6 +357,8 @@ export function Composer({
     return mentionChoicesForQuery(pool, mention.query);
   }, [mention, dismissedAt, state.bots, bot?.id, group, members]);
   const mentionPickerOpen = candidates.length > 0;
+  const commandMotion = useMenuMotion(commandPickerOpen);
+  const mentionMotion = useMenuMotion(mentionPickerOpen);
 
   useEffect(
     () => setHighlight(0),
@@ -743,12 +746,18 @@ export function Composer({
         editText(base ? `${base} ${line.text}` : line.text);
       }
     });
-    const offEnd = bridge.onSpeechEnd(({ code }) => {
+    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
       setRecording(false);
       if (code === 2) {
         setSpeechError(t("composer.dictation.macOnly"));
       } else if (code === 1) {
-        setSpeechError(t("composer.dictation.permission"));
+        setSpeechError(t(
+          reason === "dictation-disabled"
+            ? "composer.dictation.disabled"
+            : reason === "speech-not-authorized"
+              ? "composer.dictation.permission"
+              : "composer.dictation.failed",
+        ));
       }
     });
     void bridge.speechStart();
@@ -806,11 +815,11 @@ export function Composer({
             </button>
           </div>
         ))}
-        {commandPickerOpen && (
+        {commandMotion.shown && (
           <div
             role="listbox"
             aria-label={t("composer.commands.aria")}
-            className="absolute bottom-full left-2 z-20 mb-2 w-80 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
+            className={cn("absolute bottom-full left-2 z-20 mb-2 w-80 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg", commandMotion.className)} {...commandMotion.exitProps}
           >
             <div className="border-b border-hairline/20 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">
               {t("composer.commands.title")}
@@ -846,12 +855,12 @@ export function Composer({
             ))}
           </div>
         )}
-        {mentionPickerOpen && (
+        {mentionMotion.shown && (
           <div
             ref={mentionListRef}
             role="listbox"
             aria-label={t("composer.mention.aria")}
-            className="absolute bottom-full left-2 z-20 mb-2 max-h-72 w-72 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg"
+            className={cn("absolute bottom-full left-2 z-20 mb-2 max-h-72 w-72 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", mentionMotion.className)} {...mentionMotion.exitProps}
           >
             {candidates.map((peer, i) => (
               <button
@@ -1135,7 +1144,7 @@ export function Composer({
                     ? t("composer.placeholder.goal", { name: group.name })
                     : t("composer.placeholder.group", {
                         name: group.name,
-                        hint: groupComposerHint(group, members ?? []),
+                        hint: groupComposerHint(group, members ?? [], { jevOn: jevRoomRoutingOn(state.config) }),
                       })
                   : t("composer.placeholder.bot", { name: bot?.name ?? "" })
           }

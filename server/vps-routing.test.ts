@@ -470,8 +470,8 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       const echo = snapshot.messages.find((m: any) => m.kind === "text" && m.text?.startsWith("echo: ")).text;
       // the VPS clause, including the disposable-filesystem warning
       expect(echo).toContain("self-hosted remote Linux computer");
-      expect(echo).toContain("This is a VPS, not Box");
-      expect(echo).toContain("using it does not require a Box API key");
+      expect(echo).toContain("This is a VPS, not Boat");
+      expect(echo).toContain("using it does not require a Boat API key");
       expect(echo).toContain("wiped whenever its container is recreated");
 
       // the official Cua MCP server was mounted through the VPS bridge
@@ -507,7 +507,7 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       expect(status.body).toMatchObject({ backend: "vps", ready: true, container: "running" });
 
       // Explicit Cloud with the VPS backend is still the selected local ACP
-      // engine with a VPS tool mount, not the unrelated native Box runner.
+      // engine with a VPS tool mount, not the unrelated native Boat runner.
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
       const explicitThread = (await api("POST", `/api/bots/${bot.id}/tasks`, {})).body.task.threadId;
       rmSync(`${acpDump}.mcp.json`, { force: true });
@@ -520,7 +520,7 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       expect(threadPreview.body).toMatchObject({ surface: "cloud", backend: "vps", ready: true });
 
       // Scheduling on the bot's setup must retain its ACP model + VPS tools,
-      // without requiring credentials for the unrelated Box-hosted runner.
+      // without requiring credentials for the unrelated Boat-hosted runner.
       const created = await api("POST", "/api/routines", {
         botId: bot.id, name: "VPS scheduled check", prompt: "Check the existing VPS.", enabled: false,
         schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
@@ -538,7 +538,7 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       const routineTools = JSON.parse(readFileSync(`${acpDump}.mcp.json`, "utf8"));
       expect(routineTools.find((tool: { name: string }) => tool.name === "computer")?.args).toContain("production-vps");
       const routineMessages = (await api("GET", `/api/threads/${completed.threadId}/messages?limit=100`)).body.messages;
-      expect(routineMessages.some((message: any) => message.text?.includes("This is a VPS, not Box"))).toBe(true);
+      expect(routineMessages.some((message: any) => message.text?.includes("This is a VPS, not Boat"))).toBe(true);
 
       // The turn claim is gone, but its durable container remains on the old
       // host. Keep that resource visible until the user removes it.

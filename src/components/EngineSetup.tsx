@@ -133,7 +133,7 @@ export function CommandRow({
             {status === "opened" ? <Check size={14} /> : <TerminalSquare size={14} />}
             {status === "opened" ? t("engineSetup.terminalOpened") : actionLabel}
           </button>
-          <p aria-live="polite" className="mt-1.5 text-center text-[11px] text-ink-secondary/70">
+          <p aria-live="polite" className="mt-1.5 text-center text-[11px] text-ink-tertiary">
             {status === "opened" ? t("engineSetup.pasteHint") : t("engineSetup.copyOnOpenHint")}
           </p>
         </>
@@ -331,7 +331,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
           {busy === "install" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           {busy === "install" ? t("engineSetup.installing") : managed.label}
         </button>
-        <p className="mt-1.5 text-center text-[11px] text-ink-secondary/70">
+        <p className="mt-1.5 text-center text-[11px] text-ink-tertiary">
           {t("engineSetup.downloadNote", { mb: Math.ceil(managed.downloadBytes / 1024 / 1024) })}
         </p>
         {error && <p className="mt-2 text-[11.5px] text-danger">{error}</p>}
@@ -407,13 +407,16 @@ export function EngineSetup({
   const signInCommand = install?.signInCommand;
   const signInOnly = intent === "cloud" && needsSignIn(instance);
   const deviceSignIn = signInOnly && instance.authentication?.method === "device-code";
+  const browserSignIn = signInOnly && instance.authentication?.method === "browser-pkce";
   const pasteSignIn = signInOnly && instance.authentication?.method === "paste-code";
   const command = signInOnly ? signInCommand : installCommand;
   const title = signInOnly
     ? t("engineSetup.signInTitle", { name: instance.displayName })
     : t("engineSetup.installTitle", { name: instance.displayName });
   const description = descriptionOverride ?? (signInOnly
-    ? deviceSignIn
+    ? browserSignIn
+      ? t("engineSetup.chatgpt.description")
+      : deviceSignIn
       ? t("engineSetup.device.description")
       : pasteSignIn
       ? t("engineSetup.claude.description")
@@ -432,12 +435,12 @@ export function EngineSetup({
 
   // Some engines are configured elsewhere (for example, a cloud computer
   // token) and intentionally have no install descriptor.
-  if (!install) {
+  if (!install || instance.snapshot.authenticationUnavailableReason) {
     return (
       <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
         <div className="text-[13px] font-semibold text-ink">{t("engineSetup.notReady", { name: instance.displayName })}</div>
         <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
-          {instance.snapshot.reason ?? t("engineSetup.noReason")}
+          {instance.snapshot.authenticationUnavailableReason ?? instance.snapshot.reason ?? t("engineSetup.noReason")}
         </p>
       </div>
     );
@@ -461,8 +464,8 @@ export function EngineSetup({
         </p>
       )}
 
-      {deviceSignIn ? (
-        <CodexDeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} />
+      {deviceSignIn || browserSignIn ? (
+        <CodexDeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} browserPkce={browserSignIn} />
       ) : pasteSignIn ? (
         <ClaudeSignIn key={instance.instanceId} instanceId={instance.instanceId} />
       ) : install.server && !signInOnly ? (
@@ -481,7 +484,7 @@ export function EngineSetup({
       )}
 
       {!signInOnly && install.needsNode && !install.server && (
-        <p className="mt-2 text-[11px] leading-relaxed text-ink-secondary/70">
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-tertiary">
           {/* the sentence is one catalog entry; {npm} marks where the code
               chip goes, so a translator can move it */}
           {t("engineSetup.needsNode").split("{npm}").flatMap((part, index) =>

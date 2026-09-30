@@ -473,6 +473,14 @@ public struct SendReceipt: Decodable, Sendable {
     }
 }
 
+/// What the respond route answered about a card. Only the plain and peer
+/// approval paths speak it; the specialized card resolvers write their own
+/// shapes, so `outcome` is optional and a body without one reads as nil
+/// rather than as a failure.
+private struct RespondResponse: Decodable {
+    let outcome: String?
+}
+
 /// The exact conversation a retriable send belongs to. Carrying the thread
 /// as well as the bot/room id prevents a Share Extension retry from landing
 /// in a different task if the desktop switches tasks while iOS is suspended.
@@ -1555,18 +1563,25 @@ public struct CompanionClient: Sendable {
     ///
     /// Addressed by thread rather than by bot on purpose: a request raised
     /// inside a room belongs to whichever member is speaking, and the
-    /// harness already knows which that is.
+    /// harness already knows which that is. Returns the server's outcome
+    /// when the body carries one, so a caller can tell an ask that never
+    /// ran (`unavailable`) from one that landed; the specialized card
+    /// branches answer in their own shapes and read as nil.
+    @discardableResult
     public func respond(
         threadId: String,
         requestId: String,
         behavior: String,
         message: String? = nil,
         reviewedSha256: String? = nil
-    ) async throws {
+    ) async throws -> String? {
         var body: [String: Any] = ["requestId": requestId, "behavior": behavior]
         if let message { body["message"] = message }
         if let reviewedSha256 { body["reviewedSha256"] = reviewedSha256 }
-        try await send(try makeRequest("POST", "/api/threads/\(threadId)/respond", body: body))
+        let request = try makeRequest("POST", "/api/threads/\(threadId)/respond", body: body)
+        let (data, response) = try await perform(request)
+        try Self.check(response, data)
+        return (try? JSONDecoder().decode(RespondResponse.self, from: data))?.outcome
     }
 
     /// Remember a grant so the same tool stops asking. The harness decides

@@ -79,6 +79,19 @@ val Bot.visibleTasks: List<BotTask>
     get() = tasks.orEmpty().filter { it.routineRunId == null }
 
 /**
+ * Older computers send no task list: the bot's one conversation, built from
+ * the bot's own fields. The thread tree lists it and the home list reads its
+ * status from it.
+ */
+internal val Bot.legacyTask: BotTask
+    get() = BotTask(
+        threadId = threadId, title = "", createdAt = createdAt,
+        modelSelection = modelSelection, busy = busy, activity = activity, unread = unread,
+        waitingOnTeammate = waitingOnTeammate,
+        approvalMode = approvalMode, autoApprove = autoApprove, alwaysAllow = alwaysAllow,
+    )
+
+/**
  * Preserve saved folder order. Threads inside a folder follow pin, then
  * newest update ([listedThreads]); attention does not reorder this list.
  * A missing folder leaves its threads unfiled. Search includes closed threads
@@ -95,12 +108,7 @@ fun Bot.threadGroups(
 ): List<BotThreadGroup> {
     val search = matching.trim()
     val threads = when {
-        tasks == null -> listOf(BotTask(
-            threadId = threadId, title = "", createdAt = createdAt,
-            modelSelection = modelSelection, busy = busy, activity = activity, unread = unread,
-            waitingOnTeammate = waitingOnTeammate,
-            approvalMode = approvalMode, autoApprove = autoApprove, alwaysAllow = alwaysAllow,
-        ))
+        tasks == null -> listOf(legacyTask)
         includingClosed || search.isNotEmpty() -> visibleTasks
         // Closed, archived, and snoozed threads fold away with the same
         // override: one that starts working, waits on the person, or turns

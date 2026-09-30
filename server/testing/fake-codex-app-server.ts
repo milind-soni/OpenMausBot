@@ -27,6 +27,8 @@
 //   FAKE_CODEX_ASK_HOLD        question modes: record the ask reply and hold the turn open, for
 //                              timeout tests that advance the clock
 //   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
+//   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
+//                     (a Codex that did not take them)
 //   FAKE_CODEX_APPROVAL_REQUEST JSON {method, params} override in approval mode
 //   FAKE_CODEX_ACCOUNT_EMAIL  synthetic ChatGPT identity (default ada@example.test)
 //   FAKE_CODEX_ACCOUNT_MODE   chatgpt (default) | api-key | none | unsupported | error | hang
@@ -50,6 +52,19 @@ import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 
 
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
+
+// Follow the spawning server down, including on Windows where ppid does
+// not change after parent exit. Inline: fakes must stay self-contained.
+{
+  const spawner = process.ppid;
+  const orphanWatch = setInterval(() => {
+    if (process.ppid !== spawner) process.exit(0);
+    try { process.kill(spawner, 0); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") process.exit(0);
+    }
+  }, 500);
+  orphanWatch.unref();
+}
 
 // stdout and stderr are separate pipes: the writer cannot order them for
 // the reader, and a fixed sleep only pretends to. These knobs synchronize
@@ -347,6 +362,11 @@ process.stdin.on("data", (chunk) => {
                   },
                 }),
               developer_instructions: process.env.FAKE_CODEX_INSTRUCTIONS ?? null,
+              // `-c features.<name>=<bool>` overrides, as the real config/read reports them.
+              features: Object.fromEntries(process.argv.flatMap((arg, index) => {
+                const match = process.argv[index - 1] === "-c" ? /^features\.(\w+)=(true|false)$/.exec(arg) : null;
+                return match && process.env.FAKE_CODEX_IGNORE_FEATURES !== "1" ? [[match[1], match[2] === "true"]] : [];
+              })),
             },
             origins: {},
           },

@@ -23,7 +23,7 @@ export function RawToggleAction({ active, onToggle, className }: RawToggleAction
       aria-pressed={active}
       title={label}
       className={cn(
-        "rounded-md p-1.5 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
+        "rounded-md p-1.5 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100",
         active
           ? "bg-raised text-accent opacity-100"
           : "text-ink-secondary opacity-0 hover:bg-raised hover:text-ink",

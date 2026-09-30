@@ -74,6 +74,19 @@ describe("math rendering", () => {
     expect(normalizeMathDelimiters(text)).toBe(text);
   });
 
+  it("protects consecutive inline code spans without swallowing the math between them", () => {
+    const text = "`\\(a\\)` text \\(x\\) `\\[b\\]` then \\(y\\) `$$c$$`";
+    expect(normalizeMathDelimiters(text)).toBe(
+      "`\\(a\\)` text $x$ `\\[b\\]` then $y$ `$$c$$`",
+    );
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(html.match(/<code\b/g)).toHaveLength(3);
+    expect(html.match(/class="katex"/g)).toHaveLength(2);
+    expect(html).toContain("\\(a\\)");
+    expect(html).toContain("\\[b\\]");
+    expect(html).toContain("$$c$$");
+  });
+
   it("protects fenced code when the closer has different indentation or is longer", () => {
     const text = "  ~~~tex\n\\(not rendered\\)\n ~~~~\n\nAfter \\(rendered\\).";
     const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));

@@ -28,6 +28,26 @@ vi.mock("./ConfirmDialog", () => ({
 }));
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
+it("shows plan billing and usage controls separately from legacy Codex sign-in", () => {
+  vi.stubGlobal("window", {});
+  const instance: InstanceInfo = {
+    instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT plan",
+    snapshot: { state: "available", authenticated: true, chatgptPlan: true, account: { email: "ada@example.test" } },
+    models: { default: "gpt-6.1-sol", options: [] }, authentication: { method: "browser-pkce", signOut: true },
+  };
+  const markup = renderToStaticMarkup(createElement(CodexAccountSettings, { instance }));
+  expect(markup).toContain("ChatGPT plan connected");
+  expect(markup).toContain("Using ChatGPT plan");
+  expect(markup).toContain("https://chatgpt.com/settings/usage");
+  expect(markup).toContain("You’re using your ChatGPT plan");
+  expect(markup).toContain("Got it");
+  expect(markup).not.toContain("sign-in that Codex stores");
+  vi.stubGlobal("localStorage", { getItem: () => "1" });
+  const confirmed = renderToStaticMarkup(createElement(CodexAccountSettings, { instance }));
+  expect(confirmed).not.toContain("You’re using your ChatGPT plan");
+  expect(confirmed).toContain("Manage usage");
+});
+
 it("uses the successful sign-out snapshot even when a later refresh would fail", async () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("navigator", { userAgent: "Linux" });

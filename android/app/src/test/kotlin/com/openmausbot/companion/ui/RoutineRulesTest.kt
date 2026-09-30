@@ -320,7 +320,7 @@ class RoutineRulesTest {
                 configured,
                 listOf(instance(driverKind = "boxAgent", state = "unavailable")),
             ).cloudReady,
-            "a Box agent that is not available is not a Cloud VM to run on",
+            "a Boat agent that is not available is not a Cloud VM to run on",
         )
     }
 

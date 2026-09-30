@@ -454,9 +454,12 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
       const ids = room.members.map((key) => botIds.get(key)!);
       let created = store.createGroup(room.name, ids, false, section);
       createdGroups.push(created);
-      const defaultResponder = room.defaultResponder.kind === "agent"
-        ? { kind: "member" as const, botId: botIds.get(room.defaultResponder.agent)! }
-        : { kind: room.defaultResponder.kind } as const;
+      const responder = room.defaultResponder;
+      const defaultResponder = responder.kind === "agent"
+        ? { kind: "member" as const, botId: botIds.get(responder.agent)! }
+        : responder.kind === "auto"
+          ? { kind: "auto" as const, ...(responder.agent ? { fallbackBotId: botIds.get(responder.agent)! } : {}) }
+          : { kind: responder.kind };
       created = store.patchGroup(created.id, {
         bulletin: room.bulletin ?? "",
         defaultResponder,

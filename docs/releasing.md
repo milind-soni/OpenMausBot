@@ -22,6 +22,13 @@ published release** workflow
 verifies and publishes its legacy mirror automatically. Never publish only the
 legacy draft.
 
+The release commit must have passed CI: the **CI passed on the release commit**
+job waits (while the platforms build) for ci.yml's `CI` check on the pinned
+commit and stops the release before any draft if it failed, was cancelled or
+never ran. For a manual run on a commit without a CI run, run **Actions → CI →
+Run workflow** on it first. `ship_without_ci` skips the wait, for emergencies
+only.
+
 The workflow refuses to overwrite an already-published version. Manual Release
 runs still require `package.json`'s version to be bumped on the selected ref.
 A release is rejected if any installer, stable download

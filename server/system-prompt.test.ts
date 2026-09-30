@@ -8,6 +8,7 @@ import { soulSystemPrompt } from "./bot-folder.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import {
   buildSystemPrompt,
+  cloudHomePrompt,
   userProfileSystemPrompt,
   computerPrompt,
   resolveComputerPromptKind,
@@ -38,9 +39,9 @@ describe("resolveComputerPromptKind", () => {
     [{ kind: "vm", driverKind: "claude", cloudComputerMcp: undefined, vmPrivate: false }, "vm-shared"],
     [{ kind: "vm", driverKind: "claude", cloudComputerMcp: true, vmPrivate: true }, "vm-private"],
     [{ kind: "vm", driverKind: "boxAgent", cloudComputerMcp: false, vmPrivate: false }, "vm-shared"],
-    // a box plan: the agent earns its own kind, a driver that keeps its
+    // a boat plan: the agent earns its own kind, a driver that keeps its
     // identity and speaks the computer MCP gets the chat paragraph, and the
-    // bare box branch stays reachable for drivers the swap cannot replace
+    // bare boat branch stays reachable for drivers the swap cannot replace
     [{ kind: "box", driverKind: "boxAgent", cloudComputerMcp: false, vmPrivate: false }, "box-agent"],
     [{ kind: "box", driverKind: "codex", cloudComputerMcp: true, vmPrivate: false }, "box-chat"],
     [{ kind: "box", driverKind: "codex", cloudComputerMcp: false, vmPrivate: false }, "box"],
@@ -60,7 +61,7 @@ describe("resolveComputerPromptKind", () => {
 describe("computerPrompt", () => {
   it("gives every kind its own paragraph plus the sign-in policy, and silence to none", () => {
     expect(computerPrompt(null)).toBe("");
-    // the box agent already lives on the computer: no paragraph, only the
+    // the boat agent already lives on the computer: no paragraph, only the
     // shared sign-in policy still applies
     expect(computerPrompt("box-agent")).toBe(SIGN_IN_PROMPT);
     const paragraphs: Record<string, string> = {
@@ -68,7 +69,7 @@ describe("computerPrompt", () => {
       "vm-shared": "shared, isolated Cua sandbox",
       box: "You have your own cloud computer",
       "box-chat": "You control the assigned cloud computer",
-      vps: "This is a VPS, not Box",
+      vps: "This is a VPS, not Boat",
       local: "act on the user's computer",
     };
     for (const [kind, distinct] of Object.entries(paragraphs)) {
@@ -273,5 +274,24 @@ describe("composioSystemPrompt", () => {
     const prompt = composioSystemPrompt({ gmail: { tools: "*" } });
     expect(prompt.startsWith(" ")).toBe(true);
     expect(prompt.startsWith("  ")).toBe(false);
+  });
+});
+
+describe("cloudHomePrompt", () => {
+  it("says the bot runs in the cloud, offers what works there, and never asks for a place that cannot exist", () => {
+    for (const tools of [true, false]) {
+      const text = cloudHomePrompt(tools);
+      expect(text).toMatch(/^ You run on the user's OMB Cloud, a server in the cloud, not on their own computer\./);
+      expect(text).toContain("Offer what works here: the built-in browser and cloud computers.");
+      expect(text).toContain("Never ask them to set up this computer or a Local VM; neither exists here.");
+      expect(text).not.toMatch(/Computer panel|container runtime|configure/i);
+    }
+  });
+
+  it("points to a lent Mac only when the turn has the shared-computer tools", () => {
+    expect(cloudHomePrompt(true)).toContain("check list_shared_computers: a Mac they lend to their Cloud is reachable through shared_computer");
+    expect(cloudHomePrompt(true)).toContain("turn on Let my Cloud use this Mac under Settings → OMB Cloud in the desktop app on that Mac");
+    expect(cloudHomePrompt(false)).not.toMatch(/shared_computer|list_shared_computers/);
+    expect(cloudHomePrompt(false)).toContain("You cannot see or use their Mac or PC, its screen or its files from here.");
   });
 });

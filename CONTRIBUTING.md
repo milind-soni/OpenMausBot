@@ -267,10 +267,11 @@ the preflight duration to an otherwise idle runner pool; it does not cure a
 GitHub-wide scheduling backlog.
 
 - **typecheck + lint** — typecheck, lint, locale catalogs (`pnpm i18n:check`), Electron syntax check, production UI build. Once, on Ubuntu; none of it is platform-specific.
-- **vitest (os, shard n/4)** — the suite on macOS, Ubuntu and Windows, split into four shards each. The suite runs its files serially on purpose (fake CLIs and a real harness server), so one runner takes ~19 minutes; a shard takes 4–10. To reproduce a shard's failure locally, run the same `pnpm exec vitest run --shard=n/4`. Failures also appear as annotations on the PR.
+- **vitest (os, shard n/4)** — the suite split into four shards per platform: Ubuntu and Windows on a PR; macOS as well on main, in the merge queue and on manual runs (macOS runners are scarce and only a couple of tests are macOS-only). The suite runs its files serially on purpose (fake CLIs and a real harness server), so one runner takes ~19 minutes; a shard takes 4–10. To reproduce a shard's failure locally, run the same `pnpm exec vitest run --shard=n/4`. Failures also appear as annotations on the PR.
 - **packaged server smoke (os)** — the server bundle copied out of the repo and started with no `node_modules` in reach.
-- **Windows CUA host smoke**, **Electron smokes (macOS)** — real Electron utility processes against disposable homes; never the live app.
-- **typecheck + test (os)** — the three checks the branch rules require. They only aggregate the jobs above; if one is red, the failing job is named in its log.
+- **Windows CUA host smoke**, **macOS smokes (packaged server + Electron)** — real Electron utility processes against disposable homes; never the live app.
+- **Swift tests + iOS build**, **Kotlin tests + Android build** — only when `ios/` or `android/` (or the CI setup) changes. The iPhone/iPad simulator UI suite runs nightly in `ios-thread-ui.yml`.
+- **CI** — the one check the branch rules require. It only aggregates the jobs above; if it is red, the failing job is named in its log.
 
 A `pre-push` hook installed by `pnpm install` runs lint, typecheck and the locale check before a push (about a minute). `git push --no-verify` skips it once; `OMB_SKIP_HOOKS=1` skips it for a session.
 

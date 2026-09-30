@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { botUsage, cachedInput, headlineTokens, contextChip, contextDetail, contextShare, costCaption, formatTaskTokens, formatTokens, formatUsd, uncachedInput, lastTurnDetail, sumUsage, usageChip, usageDetail } from "./usage";
+import { botUsage, cachedInput, cachedUsageNote, headlineTokens, tokensColumnLabel, contextChip, contextDetail, contextShare, costCaption, formatTaskTokens, formatTokens, formatUsd, uncachedInput, lastTurnDetail, sumUsage, usageChip, usageDetail } from "./usage";
 
 describe("usage formatting", () => {
   it("keeps output independent of the input headline, including a fully cached turn", () => {
@@ -122,6 +122,27 @@ describe("usage formatting", () => {
     expect(headlineTokens(longThread)).toBe(50_000);
     // an engine that never reported a cached share has only the raw total
     expect(headlineTokens({ input: 1_900_000, output: 12_000, costUsd: null, turns: 12 })).toBe(1_912_000);
+  });
+
+  it("labels a fresh-token total as new tokens and states the whole amount beside it", () => {
+    // MOCA-256: ~0.5B tokens through the model, nearly all of it the thread
+    // re-read from the prompt cache. The headline counts 2.1M; the note must
+    // not claim that figure is everything, and must give the 500M total.
+    const total = sumUsage([
+      { turns: 900, input: 300_000_000, cachedInput: 299_100_000, output: 400_000, costUsd: null },
+      { turns: 700, input: 199_000_000, cachedInput: 198_400_000, output: 200_000, costUsd: null },
+    ]);
+    expect(formatTokens(headlineTokens(total))).toBe("2.1M");
+    expect(tokensColumnLabel(total)).toBe("New tokens");
+    const note = cachedUsageNote(total)!;
+    expect(note).toContain("498M");
+    expect(note).toContain("500M went through the model");
+    expect(note).not.toMatch(/count everything/i);
+
+    // without a cache split the headline is the raw total, so plain "Tokens"
+    const uncached = { input: 1_900_000, output: 12_000, costUsd: null, turns: 12 };
+    expect(tokensColumnLabel(uncached)).toBe("Tokens");
+    expect(cachedUsageNote(uncached)).toBeNull();
   });
 
   it("headlines cost, otherwise input without mixing in output", () => {

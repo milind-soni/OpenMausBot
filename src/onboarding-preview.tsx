@@ -94,7 +94,7 @@ function Preview() {
   }, []);
 
   const control =
-    "rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] text-ink focus:border-hairline focus:outline-none";
+    "rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] text-ink focus:outline-none";
 
   return (
     <div data-skin="midnight" className="min-h-screen bg-app p-6 text-ink">

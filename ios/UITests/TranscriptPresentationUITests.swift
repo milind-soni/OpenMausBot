@@ -86,6 +86,10 @@ final class TranscriptPresentationUITests: XCTestCase {
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
             "-companion.prefs.islandIntro", "never",
             "-companion.prefs.activityDetail", detail,
+            // These tests open Pepper through its "Threads" row. The update
+            // fixture gives Pepper one thread, which only the comfortable
+            // density lists; the roster itself is RosterDensityUITests' job.
+            "-companion.prefs.rosterDensity", "comfortable",
             "-companion.onboarding.welcomeSeen", "YES",
             "-companion.onboarding.notificationsSeen", "YES"
         ]

@@ -14,7 +14,7 @@ import {
   type SessionState,
 } from "../lib/session";
 
-const input = "mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-[14px] text-ink outline-none focus:border-accent-border";
+const input = "mt-1 w-full rounded-md border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink outline-none focus:border-accent-border";
 const button = "mt-5 w-full rounded-md bg-accent px-4 py-2 text-[14px] font-medium text-accent-ink disabled:opacity-50";
 const fieldLabel = "mt-4 block text-[12px] font-medium text-ink-secondary";
 

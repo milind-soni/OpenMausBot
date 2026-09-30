@@ -1,0 +1,22 @@
+OpenMausBot ui/screen-reader, BEFORE (origin/main f5e8f60c). Isolated fixture (control-omb launch, fake engine: FAKE_CLAUDE_MODE=slow with a finish gate, 2 scripted tool calls, no mid-turn text), Vite dev UI on 127.0.0.1:5467, headless Chromium via Playwright. Base origin/main f5e8f60c.
+
+Counted: text changes of any live region (nearest aria-live wins, off = silent; else role=log/status/alert), deduplicated per region per mutation batch.
+
+Live-region text changes during one reply (send "hello", turn held 8000 ms, then settle + 2.5 s)
+total: 12
+  11	div[role=log aria-live=polite label="Conversation with Pepper"]
+  1	span[role=status]
+
+events (ms after send, region, tail of region text):
++    79  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AM
++   334  span[role=status]  …Working…
++   363  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking
++   369  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking0s
++  1370  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking1s
++  2370  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking2s
++  3371  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking3s
++  4371  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking4s
++  5371  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking5s
++  6370  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking6s
++  7371  div[role=log aria-live=polite label="Conversation with Pepper"]  …Today 12:42 AMHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMThinking7s
++  8259  div[role=log aria-live=polite label="Conversation with Pepper"]  …MHi, I'm Pepper. What would you like me to do?12:42 AMhello12:42 AMreply to: hello12:42 AM

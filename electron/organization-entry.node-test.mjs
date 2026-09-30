@@ -185,7 +185,7 @@ test("startup delivers a pending organisation action before default navigation a
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
   const startup = main.slice(main.indexOf("  let restoredOrganizationEntry = false;"), main.indexOf("  // Reconcile incomplete setup"));
   assert.ok(startup.indexOf("await deliverOrganizationEntry()") < startup.indexOf("createWindow()"));
-  assert.match(startup, /if \(!restoredOrganizationEntry && !deliveredOrganizationEntry && \(!mainWindow \|\| mainWindow.isDestroyed\(\)\)\) createWindow\(\)/);
+  assert.match(startup, /if \(!restoredOrganizationEntry && !deliveredOrganizationEntry && !deliveredCloudEntry && \(!mainWindow \|\| mainWindow.isDestroyed\(\)\)\) createWindow\(\)/);
 });
 
 test("concurrent links share one confirmation and stale confirmations cannot change a new selection", async () => {

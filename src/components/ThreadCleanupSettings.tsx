@@ -159,7 +159,7 @@ export function ThreadCleanupSettings() {
             className="size-4 accent-accent"
           />
           <label htmlFor="thread-log-retention-enabled" className="text-[13px] font-medium text-ink">{t("settings.threadCleanup.retention.enable")}</label>
-          <div className={`flex max-w-[160px] items-center rounded-lg border bg-inset ${errorKnob === "retention" ? "border-danger/60" : "border-hairline/40 focus-within:border-hairline"}`}>
+          <div className={`flex max-w-[160px] items-center rounded-lg border bg-inset ${errorKnob === "retention" ? "border-danger/60" : "border-hairline/40 focus-within:border-focus"}`}>
             <input
               id="thread-log-retention-days"
               type="number"
@@ -198,7 +198,7 @@ export function ThreadCleanupSettings() {
             className="size-4 accent-accent"
           />
           <label htmlFor="thread-log-cap-enabled" className="text-[13px] font-medium text-ink">{t("settings.threadCleanup.cap.enable")}</label>
-          <div className={`flex max-w-[160px] items-center rounded-lg border bg-inset ${errorKnob === "cap" ? "border-danger/60" : "border-hairline/40 focus-within:border-hairline"}`}>
+          <div className={`flex max-w-[160px] items-center rounded-lg border bg-inset ${errorKnob === "cap" ? "border-danger/60" : "border-hairline/40 focus-within:border-focus"}`}>
             <input
               id="thread-log-cap-mib"
               type="number"

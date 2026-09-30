@@ -98,6 +98,26 @@ function ownerIsAlive(owner) {
   return !ownerPredatesThisBoot(owner) && processIsAlive(owner.pid) && ownerIdentityMatches(owner);
 }
 
+/**
+ * Whether a record was written on this computer. The hostname alone cannot
+ * say: macOS renames the host when it joins another network, so a lease left
+ * by a crash on one network looked like another machine's on the next and the
+ * desktop refused to start until the file was deleted by hand (MOCA-270).
+ * The same boot session proves it too — the id is random per boot, so no two
+ * computers ever share one. A record from an earlier boot under another name
+ * cannot be told apart from another computer's and still fails closed.
+ */
+function sameMachine(record) {
+  if (record.host === hostname()) return true;
+  const boot = bootSession();
+  return boot !== null && typeof record.boot === "string" && record.boot === boot;
+}
+
+/** What to do when a record really does look like another computer's. */
+function otherMachineAdvice(path) {
+  return ` If OpenMausBot is not running on another computer that shares this folder, quit OpenMausBot, delete ${JSON.stringify(path)} and start again.`;
+}
+
 function isLeaseOwner(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   return value.version === 1
@@ -290,7 +310,7 @@ function claimReaperAuthority(leasePath, expected) {
 
     const current = readReaper(reaperPath, expected.token);
     if (!current) continue;
-    if (current.host !== candidate.host) {
+    if (!sameMachine(current)) {
       throw leaseError(
         `A stale OpenMausBot data-directory lease is being recovered on another machine. Recovery record: ${JSON.stringify(reaperPath)}.`,
       );
@@ -305,7 +325,7 @@ function retireDeadOwner(leasePath, expected) {
   if (!claimReaperAuthority(leasePath, expected)) return false;
   const current = readOwner(leasePath);
   if (!current || current.token !== expected.token) return true;
-  if (current.host !== hostname()) {
+  if (!sameMachine(current)) {
     throw leaseError(
       `The stale OpenMausBot data-directory lease changed ownership to another machine. Lease record: ${JSON.stringify(leasePath)}.`,
     );
@@ -350,9 +370,9 @@ function assertNoLiveDelegatedChild(dataDir) {
   const childLeasePath = join(dataDir, DELEGATED_CHILD_DIR, LEASE_NAME);
   const child = readOwner(childLeasePath);
   if (!child) return;
-  if (child.host !== hostname()) {
+  if (!sameMachine(child)) {
     throw leaseError(
-      `This OpenMausBot data directory still has a delegated server on another machine. Delegated server lease: ${JSON.stringify(childLeasePath)}.`,
+      `This OpenMausBot data directory still has a delegated server on another machine. Delegated server lease: ${JSON.stringify(childLeasePath)}.${otherMachineAdvice(childLeasePath)}`,
     );
   }
   if (ownerIsAlive(child)) {
@@ -397,7 +417,7 @@ function validateChildDelegation(dataDir, encoded) {
   const matchesLiveParent = (owner) => Boolean(owner
     && owner.pid === capability.pid
     && owner.token === capability.token
-    && owner.host === hostname()
+    && sameMachine(owner)
     && ownerIsAlive(owner));
   if (!matchesLiveParent(readOwner(parentLeasePath))) {
     throw invalid();
@@ -458,9 +478,9 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
 
       const current = readOwner(leasePath);
       if (!current) continue;
-      if (current.host !== owner.host) {
+      if (!sameMachine(current)) {
         throw leaseError(
-          `This OpenMausBot data directory is already owned by a process on another machine. Lease record: ${JSON.stringify(leasePath)}.`,
+          `This OpenMausBot data directory is already owned by a process on another machine. Lease record: ${JSON.stringify(leasePath)}.${otherMachineAdvice(leasePath)}`,
         );
       }
       if (ownerIsAlive(current)) {

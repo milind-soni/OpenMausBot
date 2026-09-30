@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "@/state/store";
-import { codexDeviceLink, deviceFlowUnavailable, DeviceSignInProgress, type DeviceSignInStatus } from "./CodexDeviceSignIn";
+import { chatgptPlanLink, codexDeviceLink, deviceFlowUnavailable, DeviceSignInProgress, type DeviceSignInStatus } from "./CodexDeviceSignIn";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -70,5 +70,40 @@ describe("Codex device sign-in UI", () => {
     expect(deviceFlowUnavailable(new Error("Network interrupted"))).toBe(false);
     expect(deviceFlowUnavailable(new ApiError("Temporarily busy", 503))).toBe(false);
     expect(deviceFlowUnavailable(new ApiError("Rate limited", 429))).toBe(false);
+  });
+});
+
+describe("ChatGPT plan browser sign-in", () => {
+  const authorizationUrl = "https://auth.openai.com/api/accounts/authorize?client_id=dynamic_agent_client&state=fixture&code_challenge=fixture";
+  const renderBrowser = (auth: DeviceSignInStatus) => renderToStaticMarkup(createElement(DeviceSignInProgress, { auth, browserPkce: true }));
+
+  it("uses the official browser flow without a device code or terminal command", () => {
+    expect(chatgptPlanLink(authorizationUrl)).toBe(authorizationUrl);
+    const html = renderBrowser({ ...waiting, authorizationUrl, userCode: undefined });
+    expect(html).toContain("Continue with ChatGPT");
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain("Waiting for you");
+    expect(html).not.toContain("Copy sign-in code");
+    expect(html).not.toContain("codex login");
+  });
+
+  it.each([
+    "http://auth.openai.com/api/accounts/authorize",
+    "https://auth.openai.com.evil.test/api/accounts/authorize",
+    "https://user@auth.openai.com/api/accounts/authorize",
+    "https://auth.openai.com/api/accounts/authorize#secret",
+    "https://auth.openai.com/codex/device",
+    "https://auth.openai.com/api/accounts/authorize/",
+    "javascript:alert(1)",
+  ])("does not expose an unexpected browser sign-in URL: %s", (url) => {
+    expect(chatgptPlanLink(url)).toBeNull();
+    const html = renderBrowser({ ...waiting, authorizationUrl: url });
+    expect(html).toContain('role="alert"');
+    expect(html).not.toContain("href=");
+  });
+
+  it("has browser-specific cancellation and expiry text", () => {
+    expect(renderBrowser({ ...waiting, phase: "cancelled" })).not.toContain("new code");
+    expect(renderBrowser({ ...waiting, phase: "expired" })).not.toContain("code expired");
   });
 });

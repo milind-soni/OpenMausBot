@@ -9,3 +9,4 @@ App/Info.plist
 App/OpenMausCompanion.entitlements
 ShareExtension/Info.plist
 ShareExtension/OpenMausShareExtension.entitlements
+Widgets/OpenMausCompanionWidgets.entitlements

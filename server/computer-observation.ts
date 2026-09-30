@@ -128,7 +128,7 @@ export class ObservationCoordinator {
   }
 
   /** canonicalFrame must describe the full screenshot, even when the image
-   * returned to the model is cropped. A box-provided full-frame hash works. */
+   * returned to the model is cropped. A boat-provided full-frame hash works. */
   observeFrame(canonicalFrame: string | null, crop: CropRegion | null) {
     this.metrics.screenshotsCaptured += 1;
     const hash = canonicalFrame
@@ -136,7 +136,7 @@ export class ObservationCoordinator {
       : null;
     const view = crop ? `${crop.x},${crop.y},${crop.width},${crop.height}` : "full";
     const signature = hash ? `${hash}:${view}` : null;
-    // If the box cannot provide a full-frame hash, fail open and send the
+    // If the boat cannot provide a full-frame hash, fail open and send the
     // valid image. Suppressing a possibly-new crop would be worse.
     const changed = signature === null || signature !== this.lastObservation;
     if (signature) this.lastObservation = signature;

@@ -44,7 +44,10 @@ unlisted model stays unpriced; a paired person's queued message, a live steer
 and a queue Steer leave the owner's running turn booked to the owner, while
 the queued message's own turn (1:1 and in a room) is the person's; and a
 guarded send with `onBehalfOf` is booked to that person, one without it to
-this machine, and a chat-only device cannot reach the route at all.
+this machine, and a chat-only device cannot reach the route at all. It also
+sends two turns to a Claude bot whose fake CLI restores the session's running
+cost on `--resume` (`FAKE_CLAUDE_COST_STATE`), the way the real CLI does: the
+second turn's result says 0.02, and both rows must still read 0.01.
 
 For the same by hand:
 
@@ -91,5 +94,11 @@ scope on both routes.
   in the CSV's `cost_source` column. A model with no known price stays
   unpriced; the summary counts those turns separately instead of treating them
   as free.
+- Claude's `total_cost_usd` is a running total, not a turn's figure: it grows
+  across the turns of one CLI process and, on `--resume`, starts from a cost
+  the CLI restored. The driver books each turn's growth. For a resumed
+  process it finds the restored state among the session's recent results in
+  `<data>/claude-cost-history.json`; without one, that first turn keeps its
+  whole figure.
 - The renderer's History card is not driven headlessly here; the fixture
   proves the server side and the table renders from a fixture in its unit test.

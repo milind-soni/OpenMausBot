@@ -1,12 +1,12 @@
 // End-to-end check of a running OpenMausBot harness server — the exact
 // flows the app drives, over the same HTTP API. No deps; Node 22+.
 //
-//   node scripts/e2e-server.mjs [--port 8799] [--with-box]
+//   node scripts/e2e-server.mjs [--port 8799] [--with-boat]
 //
 // Covered: server up + SSE hello, instance snapshots, a claude turn with a
 // streamed reply, the permission broker (allow AND deny), interrupt, a
-// codex turn, and — with --with-box + OMB_E2E_BOX_TOKEN — box provisioning,
-// a turn that runs ON the box (boxAgent), and a panel screenshot. Box computers are put to sleep at
+// codex turn, and — with --with-boat + OMB_E2E_BOX_TOKEN — boat provisioning,
+// a turn that runs ON the boat (boxAgent), and a panel screenshot. Boat computers are put to sleep at
 // the end. Test bots are deleted unless --keep-bots.
 //
 // Exits non-zero on the first hard failure; soft notes print as "skip".
@@ -19,7 +19,7 @@ const opt = (n, d) => {
 };
 const PORT = Number(opt("--port", process.env.OMB_PORT ?? 8799));
 const BASE = `http://127.0.0.1:${PORT}`;
-const WITH_BOX = flag("--with-box");
+const WITH_BOAT = flag("--with-boat") || flag("--with-box");
 const KEEP_BOTS = flag("--keep-bots");
 const BOX_TOKEN = process.env.OMB_E2E_BOX_TOKEN ?? "";
 
@@ -108,7 +108,7 @@ async function expectReply(bot, want, budgetMs) {
 }
 
 async function main() {
-  log(`e2e against ${BASE} (box: ${WITH_BOX ? "yes" : "no"})`);
+  log(`e2e against ${BASE} (box: ${WITH_BOAT ? "yes" : "no"})`);
 
   // ── server up ──
   const { bots } = await api("/api/bots").catch((e) => fail(`server not up at ${BASE} — ${e.message}`));
@@ -215,42 +215,42 @@ async function main() {
     }
 
     // ── box: cloud computer ──
-    if (WITH_BOX) {
-      if (!BOX_TOKEN) fail("--with-box needs OMB_E2E_BOX_TOKEN");
+    if (WITH_BOAT) {
+      if (!BOX_TOKEN) fail("--with-boat needs OMB_E2E_BOX_TOKEN");
       await api("/api/config", { method: "PUT", body: JSON.stringify({ box: { token: BOX_TOKEN } }) });
       const cfg = await api("/api/config");
       if (!cfg.box?.configured) fail("box token saved but /api/config still says unconfigured");
       log("  ✓ box token configured, providers hot-reloaded");
 
-      // a turn that runs ON the box (boxAgent) — provisions on first use.
-      // One bot, models walked via PATCH: each bot owns one persistent box,
+      // a turn that runs ON the boat (boxAgent) — provisions on first use.
+      // One bot, models walked via PATCH: each bot owns one persistent boat,
       // so re-provisioning per attempt would be wasteful. (On this account
       // the substrate's claude-code auth is expired — codex answers.)
-      const boxBot = await makeBot("E2E Computer", "computer", byKind.boxAgent?.models.default ?? "sonnet");
-      created.push(boxBot.id);
-      let boxSaid = false;
+      const boatBot = await makeBot("E2E Computer", "computer", byKind.boxAgent?.models.default ?? "sonnet");
+      created.push(boatBot.id);
+      let boatSaid = false;
       for (const optn of byKind.boxAgent?.models.options ?? [{ id: "sonnet" }]) {
-        await api(`/api/bots/${boxBot.id}`, {
+        await api(`/api/bots/${boatBot.id}`, {
           method: "PATCH",
           body: JSON.stringify({ modelSelection: { instanceId: "computer", model: optn.id } }),
         });
         const want = marker("box");
-        await send(boxBot.id, `Say exactly: ${want} — then stop.`);
-        const settled = await waitTurnDone(boxBot.id, 600_000); // first provision can take minutes
+        await send(boatBot.id, `Say exactly: ${want} — then stop.`);
+        const settled = await waitTurnDone(boatBot.id, 600_000); // first provision can take minutes
         if (settled.messages.some((m) => m.role === "bot" && m.kind === "text" && m.text?.includes(want))) {
           log(`  ✓ box agent replied from its own computer on ${optn.id}`);
-          boxSaid = true;
+          boatSaid = true;
           break;
         }
         const last = [...settled.messages].reverse().find((m) => m.role === "bot" && m.kind === "text");
         log(`  box model ${optn.id} settled without the marker (${(last?.text ?? "?").slice(0, 90)}) — trying next`);
       }
-      if (!boxSaid) fail("box agent answered on no catalog model");
+      if (!boatSaid) fail("box agent answered on no catalog model");
 
-      const shot = await api(`/api/bots/${boxBot.id}/computer/screenshot`, { method: "POST" });
+      const shot = await api(`/api/bots/${boatBot.id}/computer/screenshot`, { method: "POST" });
       if (!shot.png || shot.png.length < 10_000) fail("box screenshot came back empty");
       log(`  ✓ box screenshot (${Math.round(shot.png.length / 1024)} KB base64)`);
-      await api(`/api/bots/${boxBot.id}/computer/sleep`, { method: "POST" }).catch(() => {});
+      await api(`/api/bots/${boatBot.id}/computer/sleep`, { method: "POST" }).catch(() => {});
       log("  ✓ box asleep (billing paused)");
 
     }

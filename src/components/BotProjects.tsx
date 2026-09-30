@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, CheckCheck, Folder, MoreHorizontal, Pencil, Plus, X } from "lucide-react";
 import { useStore, type Bot, type BotProject } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 
 const FOLDER_EMOJI = ["📁", "💼", "🏠", "📬", "💡", "🚀", "🎨", "🧪", "📚", "🌱", "⭐", "🛠️"];
@@ -50,16 +51,18 @@ export function FolderActions({ project, canMoveUp, canMoveDown, canMarkRead, sa
     return () => window.removeEventListener("mousedown", outside);
   }, [menu]);
   const move = (direction: -1 | 1) => onMove(direction, close);
-  const position = menu && {
-    left: Math.max(8, Math.min(menu.left, window.innerWidth - 228)),
-    top: Math.max(8, Math.min(menu.top, window.innerHeight - 180)),
+  const motion = useHeldMenuMotion(menu);
+  const shown = motion.value;
+  const position = shown && {
+    left: Math.max(8, Math.min(shown.left, window.innerWidth - 228)),
+    top: Math.max(8, Math.min(shown.top, window.innerHeight - 180)),
   };
   return <>
     <button ref={actionRef} type="button" aria-label={t("folder.actions", { name: project.name })} title={t("folder.actions", { name: project.name })} aria-haspopup="menu" aria-expanded={Boolean(menu)}
       onClick={(event) => { if (menu) { close(); return; } const rect = event.currentTarget.getBoundingClientRect(); onMenuChange({ left: rect.left, top: rect.bottom + 4 }); }}
-      className="flex size-6 shrink-0 items-center justify-center rounded opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/folder:opacity-100 max-md:opacity-70"><MoreHorizontal size={13} /></button>
-    {position && createPortal(<div ref={menuRef} role="menu" aria-label={t("folder.actions", { name: project.name })} aria-busy={saving || undefined} data-thread-overlay style={position}
-      className="fixed z-50 w-[220px] rounded-lg border border-hairline/50 bg-card p-1 shadow-xl"
+      className="flex size-6 shrink-0 items-center justify-center rounded opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/folder:opacity-100 max-md:opacity-70 touch:opacity-70"><MoreHorizontal size={13} /></button>
+    {motion.shown && position && createPortal(<div ref={menuRef} role="menu" aria-label={t("folder.actions", { name: project.name })} aria-busy={saving || undefined} data-thread-overlay style={position}
+      className={cn("fixed z-50 w-[220px] rounded-lg border border-hairline/50 bg-card p-1 shadow-xl", motion.className)} {...motion.exitProps}
       onMouseDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); } else navigateThreadMenu(event); }}>
       <button type="button" role="menuitem" onClick={() => { close(); onEdit(); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Pencil size={12} />{t("folder.settings")}</button>

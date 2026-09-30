@@ -9,6 +9,7 @@ import {
   formatQuestionAnswers,
   MAX_ANSWER_ECHO,
   MAX_OPTIONS,
+  MAX_QUESTION_TEXT,
   MAX_QUESTIONS,
   ombAskProtocolPrompt,
   parseAskQuestions,
@@ -99,7 +100,7 @@ describe("parseAskQuestions", () => {
     const [question] = parseAskQuestions({
       questions: [{ question: "x".repeat(9000), options: [{ label: "y".repeat(9000) }] }],
     })!;
-    expect(question!.question.length).toBeLessThanOrEqual(400);
+    expect(question!.question.length).toBe(MAX_QUESTION_TEXT);
     expect(question!.options[0]!.label.length).toBeLessThanOrEqual(120);
   });
 });

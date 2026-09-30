@@ -12,6 +12,9 @@ export interface OnboardingStatus {
   version: number;
   reelSeen: boolean;
   hintsSeen: string[];
+  /** OMB Cloud home only: when a bot's turn first finished there. The
+   * server writes it (server/cloud-home.ts firstCloudTurnPatch). */
+  firstTurnAt?: string;
 }
 
 /** Bump when the welcome flow changes enough that existing users should see
@@ -32,6 +35,9 @@ export interface WelcomeViewer {
   /** This session may write the workspace config. Finishing the welcome
    * flow is such a write, and `PUT /api/config` is admin-only. */
   canSave: boolean;
+  /** An OMB Cloud home (docs/cloud-pro.md): its first run is the engine
+   * sign-in, not the welcome flow, which describes the person's computer. */
+  cloudHome?: boolean;
 }
 
 /** The desktop app's own window talking to its own server: never hosted,
@@ -56,10 +62,11 @@ export function spotlightsQuiet(viewer: WelcomeViewer | null): boolean {
  * reads as today (the owner); one that predates `hosted` reads as not
  * hosted, which is also what it always was to the welcome flow. */
 export function welcomeViewer(session: unknown): WelcomeViewer {
-  const record = session && typeof session === "object" ? (session as { hosted?: unknown; scopes?: unknown }) : {};
+  const record = session && typeof session === "object" ? (session as { hosted?: unknown; scopes?: unknown; cloudHome?: unknown }) : {};
   return {
     hosted: record.hosted === true,
     canSave: Array.isArray(record.scopes) ? record.scopes.includes("admin") : true,
+    ...(record.cloudHome === true ? { cloudHome: true } : {}),
   };
 }
 
@@ -69,13 +76,14 @@ export function welcomeViewer(session: unknown): WelcomeViewer {
  *
  * A session that cannot save the workspace config never gets it: it would
  * fail to save and come back on every visit. On a hosted workspace the tour
- * waits until the session is known to be an admin's. Callers that pass
- * neither field keep the old answer. */
+ * waits until the session is known to be an admin's. A Cloud home opens on
+ * its engine sign-in instead (cloudSignInDue); the flow can still be replayed
+ * from Settings. Callers that pass none of these fields keep the old answer. */
 export function welcomeDue(
   config: { onboarding?: OnboardingStatus } | null | undefined,
-  options: { remoteClient: boolean; legacyDone: boolean; hosted?: boolean; canSave?: boolean },
+  options: { remoteClient: boolean; legacyDone: boolean; hosted?: boolean; canSave?: boolean; cloudHome?: boolean },
 ): boolean {
-  if (options.remoteClient) return false;
+  if (options.remoteClient || options.cloudHome) return false;
   if (options.canSave === false) return false;
   if (options.hosted && options.canSave !== true) return false;
   if (!config) return false;
@@ -210,6 +218,19 @@ export function engineSummary<Instance extends SummaryInstance>(
   const setup = engines.filter((instance) => !ready(instance));
   const company = options.company ? instances.filter((instance) => instance.managed && ready(instance)).length : 0;
   return { ready: personal, setup, company, allReady: company > 0 || (personal.length > 0 && setup.length === 0) };
+}
+
+/** Whether a Cloud home shows its engine sign-in in place of a chat: the
+ * person connected from the desktop app (an admin session), and nothing there
+ * can run a bot yet. The default bot then shows the sign-in card rather than
+ * failing its first turn. Like the no-engines screen, this waits for the
+ * first /api/instances answer rather than flashing on a guess. */
+export function cloudSignInDue<Instance>(
+  viewer: WelcomeViewer | null,
+  state: { connected: boolean; instances: readonly Instance[] },
+  ready: (instance: Instance) => boolean,
+): boolean {
+  return Boolean(viewer?.cloudHome && viewer.canSave) && state.connected && state.instances.length > 0 && !state.instances.some(ready);
 }
 
 // ── motion ─────────────────────────────────────────────────────────────

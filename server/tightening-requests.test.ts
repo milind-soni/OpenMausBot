@@ -1,12 +1,16 @@
+import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
 import {
   TighteningRequestService,
+  tighteningCardCopy,
   type TighteningRequestStore,
 } from "./tightening-requests.ts";
 import type { OptionCardLike } from "./profile-requests.ts";
+import { botFolder } from "./bot-folder.ts";
+import { flushProfileHistory, readHistory, recordProfileChange } from "./profile-versions.ts";
 import type { BotRecord } from "./store.ts";
 
 interface StoredMessage {
@@ -434,7 +438,125 @@ describe("card plumbing", () => {
     });
     expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ tool: "tighten_permissions", options: ["Confirm", "Cancel"] });
     expect(card.detail).toContain("Approvals: full → ask");
-    expect(card.detail).toContain("Always-allow grants: remove Bash");
-    expect(card.detail).toContain("This reduces Scout's authority. Only the owner can grant it back.");
+    expect(card.detail).toContain("Always-allow grants: 2 → 1 — removed: Bash");
+    expect(card.detail).toContain("This reduces Scout's authority, and the reverse cannot be proposed back.");
+  });
+});
+
+describe("tightening card copy", () => {
+  it("renders one line per field with before and after, so a multi-field card reads in one pass", () => {
+    const before = {
+      approvalMode: "full" as const,
+      composio: true,
+      browser: true,
+      approvePeerComms: false,
+      alwaysAllow: ["Bash", "Read", "WebSearch"],
+      mcpServers: ["fs", "github"],
+      skills: ["pdf"],
+    };
+    const copy = tighteningCardCopy(
+      { name: "Scout", crossBot: false },
+      before,
+      { approvalMode: "ask", composio: false, browser: false, approvePeerComms: true, alwaysAllow: ["Bash", "WebSearch"], mcpServers: ["fs"], skills: ["pdf"] },
+      "incident lockdown",
+    );
+    expect(copy.detail).toBe([
+      "Why: incident lockdown",
+      "Approvals: full → ask",
+      "Connected apps: on → off",
+      "Browser: on → off",
+      "Peer contact: no approval → ask first",
+      "Always-allow grants: 3 → 1 — removed: Bash, WebSearch",
+      "MCP servers: 2 → 1 — unmounted: fs",
+      "Skills: 1 → 0 — disabled: pdf",
+      "This reduces Scout's authority, and the reverse cannot be proposed back.",
+    ].join("\n"));
+  });
+
+  it("caps removed-entry names with a count so a wide card stays readable", () => {
+    const grants = ["a", "b", "c", "d", "e", "f", "g"];
+    const copy = tighteningCardCopy(
+      { name: "Scout", crossBot: true },
+      { approvalMode: "auto" as const, composio: false, browser: false, approvePeerComms: false, alwaysAllow: grants, mcpServers: [], skills: [] },
+      { alwaysAllow: grants },
+      "r",
+    );
+    expect(copy.detail).toContain("Always-allow grants: 7 → 0 — removed: a, b, c, d, e (+2 more)");
+    expect(copy.detail).not.toContain("f, g");
+  });
+});
+
+describe("tightening history", () => {
+  it("records the proposing bot as actor and the card id as via, beside manual profile rows", async () => {
+    const { store, service, bot, propose } = harness({ mode: "full", alwaysAllow: ["Bash", "Read"], mcpServers: ["fs"], skills: ["pdf"] });
+    // A real bot gets its folder at creation; a synthetic one needs it so
+    // the history write has somewhere to land (profile-requests does the same).
+    mkdirSync(botFolder(bot.id), { recursive: true, mode: 0o700 });
+    recordProfileChange(bot.id, "user", "ui", { name: "Scout" }, { name: "Ranger" });
+    const card = propose({ approvalMode: "ask", alwaysAllow: ["Bash"], mcpServers: ["fs"], skills: ["pdf"] });
+    const result = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: card.requestId, behavior: "allow" });
+    expect(result).toMatchObject({ state: "applied" });
+    await flushProfileHistory(bot.id);
+    const rows = readHistory(bot.id);
+    const messageId = store.messagesFor(bot.threadId).find((message) => message.card?.requestId === card.requestId)!.id;
+    expect(rows.map((row) => [row.field, row.actor, row.via, row.before, row.after])).toEqual([
+      ["skills", "bot", `card:${messageId}`, "pdf", ""],
+      ["mcpServers", "bot", `card:${messageId}`, "fs", ""],
+      ["alwaysAllow", "bot", `card:${messageId}`, "Bash, Read", "Read"],
+      ["approvalMode", "bot", `card:${messageId}`, "full", "ask"],
+      ["name", "user", "ui", "Scout", "Ranger"],
+    ]);
+  });
+
+  it("records the card's committed change when a retry settles the receipt, even if the owner edited the mode meanwhile", async () => {
+    // A live snapshot at retry time would misattribute owner edits made
+    // between the failed attempt and the retry: re-flipping the mode to
+    // full would erase the row entirely, and any other value would be
+    // recorded as the card's doing. The row must derive from the card's
+    // frozen inputs, never the live bot.
+    const runLeg = async (ownerEdit?: BotRecord["approvalMode"]) => {
+      const { bot } = harness({ mode: "full" });
+      mkdirSync(botFolder(bot.id), { recursive: true, mode: 0o700 });
+      let failPatchMessage = true;
+      class BrittleMessages extends MemoryStore {
+        patchMessage(...args: Parameters<MemoryStore["patchMessage"]>): ReturnType<MemoryStore["patchMessage"]> {
+          if (failPatchMessage) throw new Error("disk full");
+          return super.patchMessage(...args);
+        }
+      }
+      const brittleStore = new BrittleMessages();
+      brittleStore.bots.set(bot.id, bot);
+      const brittle = new TighteningRequestService({
+        store: brittleStore,
+        mountedMcpServers: (record) => [...(record.mcpServers ?? [])],
+      });
+      const card = brittle.propose({ botId: bot.id, threadId: bot.threadId, intents: { approvalMode: "ask" }, reason: "r" });
+
+      // patchBot commits the downgrade; recording the decision on the card
+      // fails, so the applied change leaves no history row yet.
+      const first = brittle.resolve({ botId: bot.id, threadId: bot.threadId, requestId: card.requestId, behavior: "allow" });
+      expect(first).toMatchObject({ state: "applied" });
+      expect(bot.approvalMode).toBe("ask");
+      await flushProfileHistory(bot.id);
+      expect(readHistory(bot.id)).toEqual([]);
+
+      // The owner edits the mode directly while the card is still unsettled.
+      // The durable receipt keeps the retry on the settle-only path.
+      if (ownerEdit !== undefined) bot.approvalMode = ownerEdit;
+
+      // The write heals; the retry settles the card and records the
+      // committed change from the card's own frozen inputs.
+      failPatchMessage = false;
+      const second = brittle.resolve({ botId: bot.id, threadId: bot.threadId, requestId: card.requestId, behavior: "allow" });
+      expect(second).toMatchObject({ state: "already_settled" });
+      await flushProfileHistory(bot.id);
+      const messageId = brittleStore.messagesFor(bot.threadId).find((message) => message.card?.requestId === card.requestId)!.id;
+      expect(readHistory(bot.id).map((row) => [row.field, row.actor, row.via, row.before, row.after])).toEqual([
+        ["approvalMode", "bot", `card:${messageId}`, "full", "ask"],
+      ]);
+    };
+    await runLeg();
+    await runLeg("full");
+    await runLeg("auto");
   });
 });

@@ -25,6 +25,12 @@ describe("readClaudeModelCatalog", () => {
       contextWindow: 1_000_000,
     });
     expect(ids.indexOf("claude-opus-5-5")).toBe(ids.indexOf("claude-opus-5") - 1);
+    expect(STATIC_CLAUDE_MODELS.options[ids.indexOf("claude-sonnet-5-5")]).toEqual({
+      id: "claude-sonnet-5-5",
+      label: "Claude Sonnet 5.5",
+      contextWindow: 1_000_000,
+    });
+    expect(ids.indexOf("claude-sonnet-5-5")).toBe(ids.indexOf("claude-sonnet-5") - 1);
     expect(STATIC_CLAUDE_MODELS.default).toBe("claude-sonnet-5");
   });
 

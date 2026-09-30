@@ -309,7 +309,11 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         setNote(
           reason === "helper-build-failed"
             ? "The dictation helper couldn't be built. Install Apple's Command Line Tools and try again."
-            : "Dictation needs Microphone + Speech Recognition access in System Settings.",
+            : reason === "dictation-disabled"
+              ? "Turn on Dictation in System Settings → Keyboard, then try again."
+              : reason === "speech-not-authorized"
+                ? "Allow Speech Recognition in System Settings → Privacy & Security, then try again."
+                : "Dictation couldn't start. Try again.",
         );
         return;
       }
@@ -553,7 +557,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         </button>
       </div>
 
-      <div className="text-[11.5px] text-ink-secondary/70">
+      <div className="text-[11.5px] text-ink-tertiary">
         Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up
       </div>
     </div>

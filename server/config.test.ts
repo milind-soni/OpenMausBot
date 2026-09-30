@@ -23,6 +23,7 @@ import { customMcpServers,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
   showToolCallsEnabled,
+  routinesInConversationEnabled,
   saveConfig,
   skillAuthoringEnabled,
   sharedComputersEnabled,
@@ -496,6 +497,15 @@ describe("configuration boundaries", () => {
     expect(localVmMaxInstances({ localVm: { maxInstances: 3 } })).toBe(3);
   });
 
+  it("accepts pool mode with the same bounded seat count", () => {
+    expect(parseConfigPatch({ localVm: { mode: "pool", maxInstances: 4 } })).toEqual({
+      localVm: { mode: "pool", maxInstances: 4 },
+    });
+    expect(localVmMode({ localVm: { mode: "pool" } })).toBe("pool");
+    // The default must stay shared: pool ships config-gated (ADR-2).
+    expect(localVmMode({})).toBe("shared");
+  });
+
   it("keeps skill authoring on by default with an explicit opt-out, and the browser off by default", () => {
     expect(skillAuthoringEnabled({})).toBe(true);
     expect(skillAuthoringEnabled({ features: {} })).toBe(true);
@@ -513,6 +523,15 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch({ features: { browser: false } })).toEqual({ features: { browser: false } });
     expect(builtInBrowserEnabled({ features: { browser: false } })).toBe(false);
     expect(builtInBrowserEnabled({ features: { browser: true } })).toBe(true);
+    // An OMB Cloud home skips the welcome that turns it on, so there it is on
+    // until the person turns it off; any other server is unchanged.
+    const cloudHome = { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93" };
+    expect(builtInBrowserEnabled({}, {})).toBe(false);
+    expect(builtInBrowserEnabled({}, { OMB_PUBLIC_URL: "https://selfhosted.example.test" })).toBe(false);
+    expect(builtInBrowserEnabled({}, cloudHome)).toBe(true);
+    expect(builtInBrowserEnabled({ features: { skillAuthoring: true } }, cloudHome)).toBe(true);
+    expect(builtInBrowserEnabled({ features: { browser: false } }, cloudHome)).toBe(false);
+    expect(builtInBrowserEnabled({ features: { browser: true } }, cloudHome)).toBe(true);
     // named browser profiles: the list is the unit, ids are partition-safe
     expect(parseConfigPatch({ browserProfiles: [{ id: "work", name: " Work " }] })).toEqual({
       browserProfiles: [{ id: "work", name: "Work" }],
@@ -545,6 +564,14 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ features: { sharedComputers: "yes" } })).toThrow(
       "features.sharedComputers",
     );
+  });
+
+  it("keeps routine runs in a hidden thread unless the conversation option is on", () => {
+    expect(routinesInConversationEnabled({})).toBe(false);
+    expect(parseConfigPatch({ features: { routinesInConversation: true } })).toEqual({
+      features: { routinesInConversation: true },
+    });
+    expect(routinesInConversationEnabled({ features: { routinesInConversation: true } })).toBe(true);
   });
 
   it("keeps tool-call chips off by default and accepts an explicit opt-in", () => {
@@ -626,6 +653,12 @@ describe("saving the newer sections", () => {
 });
 
 describe("default fleet", () => {
+  it("adds a separate ChatGPT plan account without copying Codex credentials", () => {
+    const cfg: AppConfig = { instances: { codex: { driver: "codex", config: { cli: "/fixture/codex" }, environment: { CODEX_HOME: "/other-account", OPENAI_API_KEY: "not-for-plan" } } } };
+    expect(instanceConfigs(cfg).chatgpt).toMatchObject({ driver: "codex", displayName: "ChatGPT plan", config: { cli: "/fixture/codex", authMode: "chatgpt-plan" }, environment: {} });
+    expect(cfg.instances).not.toHaveProperty("chatgpt");
+    expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("chatgpt");
+  });
   it("adds Mistral to product fleets and scopes its saved credential to Mistral", () => {
     const map = instanceConfigs({ mistral: { key: "mistral-fixture" }, instances: { codex: { driver: "codex" } } });
     expect(map.mistral).toEqual({ driver: "mistral", environment: { MISTRAL_API_KEY: "mistral-fixture" } });
@@ -772,7 +805,7 @@ describe("Instance CLI override", () => {
     // instances section of config.json.
     const cfg: AppConfig = {
       xai: { key: "SECRET-XAI" },
-      box: { token: "SECRET-BOX" },
+      box: { token: "SECRET-BOAT" },
       opencodeGo: { apiKey: "SECRET-OCG" },
       instances: {
         claude: { driver: "claudeAgent" },
@@ -852,7 +885,7 @@ describe("credential env narrowing", () => {
   it("injects each credential only into the driver that consumes it", () => {
     const cfg: AppConfig = {
       xai: { key: "SECRET-XAI" },
-      box: { token: "SECRET-BOX" },
+      box: { token: "SECRET-BOAT" },
       opencodeGo: { apiKey: "SECRET-OCG" },
       instances: {
         grokApi: { driver: "grok" },
@@ -864,7 +897,7 @@ describe("credential env narrowing", () => {
     };
     const instances = instanceConfigs(cfg);
     expect(instances.grokApi.environment).toEqual({ XAI_API_KEY: "SECRET-XAI" });
-    expect(instances.computer.environment).toEqual({ BOX_TOKEN: "SECRET-BOX" });
+    expect(instances.computer.environment).toEqual({ BOX_TOKEN: "SECRET-BOAT" });
     expect(instances.opencode.environment).toEqual({ OPENCODE_API_KEY: "SECRET-OCG" });
     // engines that bring their own login receive NO workspace credential
     expect(instances.claude.environment).toEqual({});
@@ -874,20 +907,20 @@ describe("credential env narrowing", () => {
   it("hands no credential to any default-fleet CLI engine except the Computer", () => {
     // the default `grok` instance is the CLI-login grokAgent, not the
     // API-key driver, so a configured xai key reaches nobody by default
-    const cfg: AppConfig = { xai: { key: "SECRET-XAI" }, box: { token: "SECRET-BOX" } };
+    const cfg: AppConfig = { xai: { key: "SECRET-XAI" }, box: { token: "SECRET-BOAT" } };
     const instances = instanceConfigs(cfg);
     for (const [id, entry] of Object.entries(instances)) {
-      if (id === "computer") expect(entry.environment).toEqual({ BOX_TOKEN: "SECRET-BOX" });
+      if (id === "computer") expect(entry.environment).toEqual({ BOX_TOKEN: "SECRET-BOAT" });
       else expect(entry.environment).toEqual({});
     }
   });
 
   it("keeps a per-instance environment while layering the credential on top", () => {
     const cfg: AppConfig = {
-      box: { token: "SECRET-BOX" },
+      box: { token: "SECRET-BOAT" },
       instances: { computer: { driver: "boxAgent", environment: { MY_FLAG: "1" } } },
     };
-    expect(instanceConfigs(cfg).computer.environment).toEqual({ MY_FLAG: "1", BOX_TOKEN: "SECRET-BOX" });
+    expect(instanceConfigs(cfg).computer.environment).toEqual({ MY_FLAG: "1", BOX_TOKEN: "SECRET-BOAT" });
   });
 });
 
@@ -1013,6 +1046,50 @@ describe("credential env preference", () => {
     expect(cfg.opencodeGo).toEqual({ apiKey: "env-ocg" });
     expect(cfg.tts).toEqual({ key: "env-tts", fishKey: "env-fish", voice: "narrator" });
     expect(cfg.imageGen).toEqual({ key: "env-image" });
+  });
+
+  it("uses a preset voice only when the person has not chosen one or another provider", () => {
+    process.env.OMB_TTS_DEFAULT_VOICE = " preset-voice ";
+    expect(loadConfig().tts?.voice).toBe("preset-voice");
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ tts: { voice: "chosen" } }));
+    expect(loadConfig().tts?.voice).toBe("chosen");
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ tts: { provider: "system" } }));
+    expect(loadConfig().tts?.voice).toBeUndefined();
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ tts: { provider: "elevenlabs" } }));
+    expect(loadConfig().tts?.voice).toBe("preset-voice");
+  });
+
+  it("never takes Cloud Pro's included tokens for the person's own keys, in config or an engine's environment", () => {
+    const included = {
+      OMB_CLOUD_BOAT_URL: "https://cloud.example.test/api/cloud/services/boat/api/box/v1",
+      OMB_CLOUD_BOAT_TOKEN: "box_omb_included-relay-token",
+      OMB_CLOUD_VOICE_URL: "https://cloud.example.test/api/cloud/services/voice/v1",
+      OMB_CLOUD_VOICE_TOKEN: "omb_voice_included-relay-token",
+      OMB_CLOUD_DECIDER_URL: "https://cloud.example.test/api/cloud/services/decider",
+      OMB_CLOUD_DECIDER_TOKEN: "omb_decide_included-relay-token",
+    };
+    for (const [name, value] of Object.entries(included)) vi.stubEnv(name, value);
+    try {
+      const cfg = loadConfig();
+      expect(cfg.box?.token).toBeUndefined();
+      expect(cfg.tts?.key).toBeUndefined();
+      expect(cfg.decider?.key).toBeUndefined();
+      expect(instanceConfigs(cfg).computer?.environment).toEqual({});
+      saveConfig({ tts: { voice: "chosen" }, box: { token: "" }, decider: { enabled: true, jobs: { roomRouting: true } } });
+      const disk = readFileSync(join(DATA_DIR, "config.json"), "utf8");
+      const runtime = JSON.stringify([loadConfig(), instanceConfigs(loadConfig()), persistableInstanceConfigs(loadConfig())]);
+      for (const token of [included.OMB_CLOUD_BOAT_TOKEN, included.OMB_CLOUD_VOICE_TOKEN, included.OMB_CLOUD_DECIDER_TOKEN]) {
+        expect(disk).not.toContain(token);
+        expect(runtime).not.toContain(token);
+      }
+      // The person's own keys, from the environment here, are theirs as ever.
+      process.env.BOX_TOKEN = "box_own";
+      process.env.OMB_TTS_KEY = "sk-own";
+      expect(loadConfig()).toMatchObject({ box: { token: "box_own" }, tts: { key: "sk-own" } });
+      expect(instanceConfigs(loadConfig()).computer?.environment).toEqual({ BOX_TOKEN: "box_own" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("saves and removes the verified domain without replacing existing settings", () => {
@@ -1349,6 +1426,11 @@ describe("workspace credential env strip", () => {
     // consumed in-process (Computer driver / voice module), never by a CLI
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("BOX_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TTS_KEY");
+    // Cloud Pro's included relay tokens (the server also drops them from its
+    // own environment at startup; included-services.ts)
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_BOAT_TOKEN");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_VOICE_TOKEN");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_DECIDER_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_FISH_AUDIO_API_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_OPENAI_IMAGE_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_BROWSER_CONNECTION");

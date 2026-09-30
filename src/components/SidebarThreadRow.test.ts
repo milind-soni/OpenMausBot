@@ -5,11 +5,12 @@ import { setLocale } from "@/lib/i18n";
 import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, SidebarThreadRow, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 // The More menu lives behind component state and a portal, which a static
-// render never reaches. SidebarThreadRow uses exactly useState, useRef and
-// useEffect; stubbing those three (initial values first, state kept across a
-// re-render) lets this suite render the row directly, click the real action
-// button, and see the menu the click opened — the same extract-and-call
-// approach the ThreadRefs tests use for onClick props.
+// render never reaches. SidebarThreadRow uses exactly useState, useRef,
+// useEffect and (through its menu motion) useLayoutEffect; stubbing those four
+// (initial values first, state kept across a re-render, effects never run)
+// lets this suite render the row directly, click the real action button, and
+// see the menu the click opened — the same extract-and-call approach the
+// ThreadRefs tests use for onClick props.
 const rowHooks = vi.hoisted(() => {
   const slots: unknown[] = [];
   let cursor = 0;
@@ -35,6 +36,7 @@ vi.mock("react", async (importOriginal) => {
     useState: rowHooks.useState as unknown as typeof actual.useState,
     useRef: ((initial: unknown) => ({ current: initial })) as unknown as typeof actual.useRef,
     useEffect: (() => undefined) as unknown as typeof actual.useEffect,
+    useLayoutEffect: (() => undefined) as unknown as typeof actual.useLayoutEffect,
   };
 });
 
@@ -224,10 +226,10 @@ describe("threads a bot closed", () => {
     expect(markup).toContain("closed by Parker");
     expect(markup).not.toContain("opened by");
     expect(markup).toContain('title="Helper 1 · Closed"');
-    expect(markup).toContain("text-ink-secondary/70");
+    expect(markup).toContain('text-ink-tertiary">Helper 1</span>');
     // a live status outranks the closed note; the selected row is not dimmed
     expect(render({ threadId: "h", title: "Helper 1", closedBy, busy: true })).toContain('title="Helper 1 · Working"');
-    expect(render({ threadId: "h", title: "Helper 1", closedBy }, true)).not.toContain("text-ink-secondary/70");
+    expect(render({ threadId: "h", title: "Helper 1", closedBy }, true)).not.toContain('text-ink-tertiary">Helper 1</span>');
   });
 });
 
@@ -435,7 +437,7 @@ describe("archived threads", () => {
     expect(threadByline({ openedBy: { botId: "scout", name: "Scout", at: 1 }, archivedAt: 5, closedBy: { botId: "pm", name: "Parker", at: 2 } })).toBe("closed by Parker");
     const markup = render({ threadId: "1", title: "Put away", archivedAt: 5 });
     expect(markup).toContain("Archived");
-    expect(markup).toContain("text-ink-secondary/70");
+    expect(markup).toContain('text-ink-tertiary">Put away</span>');
     expect(render({ threadId: "1", title: "Put away", archivedAt: 5, busy: true })).toContain('title="Put away · Working · Archived"');
   });
   it("treats archivedAt: 0 as archived, because zero is a valid timestamp at the API boundary", () => {

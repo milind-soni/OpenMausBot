@@ -530,6 +530,89 @@ describe("ACP turns (fake CLI)", () => {
     expect(usage).toMatchObject({ input: 10, output: 5 });
   });
 
+  /** The fake CLI hardcodes its usage fixture, so the cache-usage tests tap
+   *  the spawned child's stdout in flight and splice the wanted usage into
+   *  the one reply that carries stopReason — the session/prompt result — at
+   *  the root or under _meta, the two shapes real agents send. */
+  const stubPromptResultUsage = (usage: Record<string, unknown>, at: "root" | "meta") => {
+    const spawn = procs.spawnCli;
+    vi.spyOn(procs, "spawnCli").mockImplementation((...args) => {
+      const child = spawn(...args);
+      const stdout = child.stdout;
+      const spliceUsage = (message: any) => {
+        if (message?.result && typeof message.result === "object" && "stopReason" in message.result) {
+          message.result = at === "root"
+            ? { ...message.result, usage: { ...usage }, _meta: {} }
+            : { ...message.result, _meta: { ...message.result._meta, ...usage } };
+        }
+        return message;
+      };
+      const rewriteChunk = (chunk: string) =>
+        chunk.split("\n").map((line) => {
+          if (!line.includes("stopReason")) return line;
+          try {
+            return JSON.stringify(spliceUsage(JSON.parse(line)));
+          } catch {
+            return line; // not a complete wire message: pass it through untouched
+          }
+        }).join("\n");
+      const realOn = stdout.on.bind(stdout);
+      vi.spyOn(stdout, "on").mockImplementation(((event: string, listener: (chunk: string) => void) =>
+        realOn(event, event === "data" ? (chunk: string) => listener(rewriteChunk(String(chunk))) : listener)) as never);
+      return child;
+    });
+  };
+
+  it("folds opencode cache reads into input and names them", async () => {
+    stubPromptResultUsage(
+      { inputTokens: 5030, outputTokens: 3, cachedReadTokens: 152960, totalTokens: 157993 },
+      "root",
+    );
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-usage-cache-exclusive", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated");
+    expect(usage).toMatchObject({ input: 157990, output: 3, cachedInput: 152960 });
+  });
+
+  it("leaves input alone when totalTokens shows cache reads already inside it", async () => {
+    stubPromptResultUsage(
+      { inputTokens: 1000, outputTokens: 10, cachedReadTokens: 800, totalTokens: 1010 },
+      "root",
+    );
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-usage-cache-inclusive", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated");
+    expect(usage).toMatchObject({ input: 1000, output: 10, cachedInput: 800 });
+  });
+
+  it("emits no cachedInput when the result reports no cache reads", async () => {
+    stubPromptResultUsage({ inputTokens: 900, outputTokens: 20, totalTokens: 920 }, "root");
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-usage-cache-absent", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated");
+    expect(usage).toMatchObject({ input: 900, output: 20 });
+    expect(usage && "cachedInput" in usage).toBe(false);
+  });
+
+  it("reads cache reads from _meta usage too", async () => {
+    stubPromptResultUsage(
+      { inputTokens: 5030, outputTokens: 3, cachedReadTokens: 152960, totalTokens: 157993 },
+      "meta",
+    );
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-usage-cache-meta", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated");
+    expect(usage).toMatchObject({ input: 157990, output: 3, cachedInput: 152960 });
+  });
+
   it("passes ACP stdio flags and strips foreign provider keys from the child env", async () => {
     await create();
     const dump = join(scratch, "dump.json");

@@ -127,6 +127,28 @@ export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInve
   return configured && phase === "ready" && !stale && Object.values(status).some((service) => service.connected);
 }
 
+/** What the host says about why connected apps are off (see
+ * `connectorSetup` in server/composio.ts). Absent from older hosts. */
+export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
+
+/** The one notice above the marketplace when connected apps are off. A fresh
+ * install that never had a connection service gets a calm "here is what to
+ * do"; only a real outage of the managed service, or an older host that does
+ * not say which it is, gets the warning. Two notices about the same fact is
+ * one too many, so the stale banner wins when it is showing. */
+export function connectorSetupNotice(state: {
+  configured: boolean;
+  stale: boolean;
+  setup: ConnectorSetup | undefined;
+  remoteClient: boolean;
+}): { key: LocaleKey; tone: "info" | "warning" } | null {
+  if (state.configured || state.stale) return null;
+  if (state.setup === "needs-setup") {
+    return { key: state.remoteClient ? "connectors.setupNeededRemote" : "connectors.setupNeeded", tone: "info" };
+  }
+  return { key: "connectors.notConfigured", tone: "warning" };
+}
+
 export function requiresAccountAlias(message: string) {
   return /account alias.*existing connection.*not replaced/i.test(message);
 }
@@ -269,6 +291,7 @@ export function PluginsPanel() {
   const [pagination, setPagination] = useState<CatalogPagination | null>(null);
   const [configured, setConfigured] = useState(false);
   const [mode, setMode] = useState<"managed" | "self-hosted" | "unavailable">("unavailable");
+  const [setup, setSetup] = useState<ConnectorSetup | undefined>(undefined);
   // Paint what we last knew before any request goes out: the module cache if
   // this window already fetched, otherwise the inventory saved on disk. An
   // empty panel is never the first thing a connected user sees.
@@ -399,6 +422,7 @@ export function PluginsPanel() {
         setPagination(r.pagination ?? null);
         setConfigured(Boolean(r.configured));
         setMode(r.mode ?? "unavailable");
+        setSetup(r.setup);
       })
       .catch((e) => {
         if (!alive) return;
@@ -543,6 +567,7 @@ export function PluginsPanel() {
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
   // Only worth saying once an app is actually connected and reachable.
+  const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
   const botsWithoutApps = hasUsableConnectedApps(configured, inventoryPhase, stale, status)
     ? botsMissingConnectedApps(state.bots, state.instances)
     : [];
@@ -657,17 +682,24 @@ export function PluginsPanel() {
           </label>
         </div>
 
-        {/* Two notices about the same fact is one too many: the stale banner
-            above already explains this launch, and "configure your own
-            connection service" is advice for someone who never set one up. */}
-        {!configured && !stale && (
-          <div className="mx-6 mb-1 rounded-xl bg-warning/10 px-4 py-3 text-[13px] text-warning sm:mx-8">
-            {t("connectors.notConfigured")}{" "}
+        {/* Not set up yet is not an outage: see connectorSetupNotice. */}
+        {setupNotice && (
+          <div
+            className={cn(
+              "mx-6 mb-1 rounded-xl px-4 py-3 text-[13px] sm:mx-8",
+              setupNotice.tone === "warning" ? "bg-warning/10 text-warning" : "bg-inset text-ink-secondary",
+            )}
+          >
+            {t(setupNotice.key)}{" "}
             <button
-              className={cn("font-medium underline underline-offset-2", remoteClient && "hidden")}
+              className={cn(
+                "font-medium underline underline-offset-2",
+                setupNotice.tone === "info" && "text-ink",
+                remoteClient && "hidden",
+              )}
               onClick={() => {
                 close();
-                dispatch({ type: "toggleAppSettings", open: true });
+                dispatch({ type: "toggleAppSettings", open: true, section: "connections" });
               }}
             >
               {t("connectors.openSettings")}

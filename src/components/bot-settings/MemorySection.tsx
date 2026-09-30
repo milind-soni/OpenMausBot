@@ -29,14 +29,23 @@ import {
   relativeTime,
   revertMemoryChange,
   saveMemoryDoc,
+  fetchUpkeepStatus,
+  tidyMemoryNow,
+  tidySummary,
+  noticedCount,
   topicFileName,
+  type UpkeepStatus,
   type MemoryCapacity,
   type MemoryFileInfo,
   type MemoryJournalRow,
   type MemoryOverview,
+  type LendingReview,
+  markMemoryReviewed,
 } from "@/lib/memory";
 import { shortPath } from "@/lib/short-path";
-import type { Bot } from "@/state/store";
+import { t } from "@/lib/i18n";
+import { ApiError, useStore, type Bot } from "@/state/store";
+import { Switch } from "../SettingsPrimitives";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { inputCls } from "./field";
 
@@ -61,6 +70,32 @@ interface Conflict {
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** On an OMB Cloud home: this bot's memory changed in a conversation the
+ * owner did not write, so its turns cannot use the owner's lent Mac until
+ * the owner has looked. It names the files that changed; one click accepts
+ * them as shown (no confirmation), and the server refuses it if anything
+ * changed since. */
+export function LendingReviewNotice({ changed, stale, busy, onReviewed }: { changed: readonly string[]; stale: boolean; busy: boolean; onReviewed: () => void }) {
+  return (
+    <div role="status" className="rounded-xl border border-danger/40 bg-card p-4">
+      <p className="text-[13px] leading-relaxed text-ink">{t(stale ? "memory.lendingReviewStale" : "memory.lendingReview")}</p>
+      {changed.length > 0 && (
+        <>
+          <p className="mt-2 text-[12px] text-ink-secondary">{t("memory.lendingReviewChanged")}</p>
+          <ul className="mt-1 space-y-0.5">
+            {changed.map((file) => (
+              <li key={file} className="break-all font-mono text-[12px] text-ink">{file}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      <button type="button" className={cn(buttonCls, "mt-3")} disabled={busy} onClick={onReviewed}>
+        {t("memory.lendingReviewed")}
+      </button>
+    </div>
+  );
+}
+
 export function MemorySection({ bot, active = true }: { bot: Bot; active?: boolean }) {
   const { capabilities } = useDesktopCapabilities();
   const [overview, setOverview] = useState<MemoryOverview | null>(null);
@@ -73,11 +108,24 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
   const [saving, setSaving] = useState(false);
   const [reverting, setReverting] = useState<string | null>(null);
   const [newTopic, setNewTopic] = useState("");
+  const [upkeep, setUpkeep] = useState<UpkeepStatus | null>(null);
+  const [tidying, setTidying] = useState(false);
+  // OMB Cloud home: memory changed where the owner did not write.
+  const [lendingReview, setLendingReview] = useState<LendingReview | null>(null);
+  const [lendingReviewStale, setLendingReviewStale] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const { dispatch } = useStore();
 
   const refresh = async (openPath?: string) => {
-    const [nextOverview, nextJournal] = await Promise.all([fetchMemoryOverview(bot.id), fetchMemoryJournal(bot.id)]);
+    const [nextOverview, nextJournal, nextUpkeep] = await Promise.all([
+      fetchMemoryOverview(bot.id),
+      fetchMemoryJournal(bot.id),
+      fetchUpkeepStatus(bot.id).catch(() => null),
+    ]);
     setOverview(nextOverview);
+    setLendingReview(nextOverview.lendingReview ?? null);
     setJournal(nextJournal);
+    setUpkeep(nextUpkeep);
     if (openPath) {
       const doc = await fetchMemoryDoc(bot.id, openPath);
       setEditing({ path: doc.path, text: doc.text, hash: doc.hash, dirty: false, readOnly: openPath.startsWith("memory/log/") });
@@ -162,7 +210,7 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
     }
     setNewTopic("");
     await open(`memory/${name}`);
-    setEditing((current) => (current ? { ...current, dirty: true, text: current.text || `# ${name.replace(/\.md$/, "")}\n\n` } : current));
+    setEditing((current) => (current ? { ...current, dirty: true, text: current.text || topicTemplate(name) } : current));
   };
 
   const revert = async (row: MemoryJournalRow) => {
@@ -193,6 +241,30 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
     }
   };
 
+  const toggleUpkeep = () => {
+    const enabled = bot.memoryUpkeep === false;
+    dispatch({ type: "updateBot", botId: bot.id, patch: { memoryUpkeep: enabled } });
+    setUpkeep((current) => (current ? { ...current, enabled } : current));
+  };
+
+  const tidyNow = async () => {
+    setTidying(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { report, overview: next } = await tidyMemoryNow(bot.id);
+      setOverview(next);
+      setJournal(await fetchMemoryJournal(bot.id));
+      setUpkeep(await fetchUpkeepStatus(bot.id));
+      if (editing && !editing.dirty) await open(editing.path);
+      setNotice(`${tidySummary(report)}.${report.note ? ` ${report.note}` : ""}`);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setTidying(false);
+    }
+  };
+
   const home = capabilities.host.homeDir;
 
   return (
@@ -219,7 +291,37 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
         )}
       </div>
 
+      {lendingReview && (
+        <LendingReviewNotice
+          changed={lendingReview.changed}
+          stale={lendingReviewStale}
+          busy={reviewing}
+          onReviewed={() => {
+            setReviewing(true);
+            markMemoryReviewed(bot.id, lendingReview.token)
+              .then(() => { setLendingReview(null); setLendingReviewStale(false); })
+              // Changed again since it was shown: show what is there now.
+              .catch((e: unknown) => {
+                if (e instanceof ApiError && e.status === 409) {
+                  setLendingReviewStale(true);
+                  return refresh();
+                }
+                setError(errorText(e));
+              })
+              .finally(() => setReviewing(false));
+          }}
+        />
+      )}
+
       {overview && <MemoryGauge index={overview.index} />}
+
+      <MemoryUpkeepCard
+        enabled={bot.memoryUpkeep !== false}
+        status={upkeep}
+        tidying={tidying}
+        onToggle={toggleUpkeep}
+        onTidy={() => void tidyNow()}
+      />
 
       {editing && (
         <div className="rounded-xl bg-card p-4">
@@ -335,7 +437,62 @@ export function MemorySection({ bot, active = true }: { bot: Bot; active?: boole
   );
 }
 
+/** A new topic's starting text: the header the topic index and recall read,
+ * so the other words a person would use for it are one line to fill in. */
+export function topicTemplate(fileName: string): string {
+  const title = fileName.replace(/\.md$/, "");
+  return `---\ntitle: ${title}\ndescription: \naliases: []\n---\n\n`;
+}
+
 // ── presentational pieces (tested through renderToStaticMarkup) ─────────
+
+export function MemoryUpkeepCard({
+  enabled,
+  status,
+  tidying,
+  onToggle,
+  onTidy,
+}: {
+  enabled: boolean;
+  status: UpkeepStatus | null;
+  tidying: boolean;
+  onToggle: () => void;
+  onTidy: () => void;
+}) {
+  return (
+    <div className="rounded-xl bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[15px] font-medium text-ink">Memory upkeep</div>
+          <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
+            Keeps these notes in shape without the bot having to remember to: notices facts you mention in chats and files them —
+            core facts here, detail in topic files it creates — and tidies up every night: expired notes are archived, duplicates
+            merged, contradicted notes crossed out. Facts about you are added to About me (Settings → General), where every bot reads
+            them and you can remove any. Every change shows below and can be undone.
+          </p>
+        </div>
+        <Switch checked={enabled} aria-label="Memory upkeep" onClick={onToggle} />
+      </div>
+      {enabled && status && !status.modelSteps && (
+        <p className="mt-2 text-[12.5px] text-ink-secondary">
+          This bot's engine can't make the quick background model call upkeep uses, so it only archives expired notes and
+          merges exact duplicates. Claude and chat-model engines can do the rest.
+        </p>
+      )}
+      {enabled && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button type="button" className={buttonCls} disabled={tidying} onClick={onTidy}>
+            {tidying ? "Tidying…" : "Tidy up now"}
+          </button>
+          <span className="text-[12.5px] text-ink-secondary">
+            {status?.lastTidy ? `Last tidy-up ${relativeTime(status.lastTidy.at)}: ${tidySummary(status.lastTidy).toLowerCase()}.` : "Not tidied yet."}
+            {status?.lastCapture && noticedCount(status.lastCapture) ? ` Last noticed ${noticedCount(status.lastCapture)} fact${noticedCount(status.lastCapture) === 1 ? "" : "s"} ${relativeTime(status.lastCapture.at)}.` : ""}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function MemoryGauge({ index }: { index: MemoryCapacity }) {
   const status = capacityStatus(index);

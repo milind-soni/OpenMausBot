@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
+import { DELEGATION_WAKE_MAX_PER_WINDOW } from "./delegations.ts";
 
 describe("routine delegation through the isolated harness", () => {
   let fixture: VerificationServer;
@@ -144,9 +145,9 @@ describe("routine delegation through the isolated harness", () => {
 
     const observer = (await control(["new-bot", "--name", "Unrelated observer"]) as any).bot;
     const observerThread = (await api("GET", "/api/bots")).bots.find((bot: any) => bot.id === observer.id).threadId;
-    // More retries than the three-wake burst budget must not exhaust it:
+    // More retries than the wake burst budget must not exhaust it:
     // these completions retry one held wake, not new logical follow-ups.
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index <= DELEGATION_WAKE_MAX_PER_WINDOW; index++) {
       await api("POST", `/api/bots/${observer.id}/messages`, { threadId: observerThread, text: `Unrelated work ${index}` });
       await dump(observerThread);
       finish(observerThread);

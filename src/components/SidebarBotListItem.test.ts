@@ -82,6 +82,45 @@ describe("BotListItem", () => {
     expect(markup).not.toContain("[digest]");
   });
 
+  // A turn can end on the approval card itself: Stop while it is open, or a
+  // provider that settles the ask without writing more. The card then reads
+  // Allowed or Denied, and the row must say the same, not "Approval needed".
+  describe("an approval card that ends the chat", () => {
+    const approval = (card: Partial<NonNullable<Bot["messages"][number]["card"]>>): Bot => bot({
+      messages: [
+        { id: "u1", role: "user", kind: "text", text: "list the files", at: 1 },
+        {
+          id: "c1", role: "bot", kind: "options", at: 2,
+          card: { title: "Approval needed", subtitle: "ls -la", options: ["Allow", "Deny"], requestId: "r1", tool: "Bash", ...card },
+        },
+      ] as Bot["messages"],
+    });
+
+    it("keeps the request's title while it is still open", () => {
+      expect(renderRow(approval({}))).toContain("Approval needed");
+    });
+
+    it("says Allowed once it was allowed", () => {
+      const markup = renderRow(approval({ answered: "allow" }));
+      expect(markup).toContain("Allowed");
+      expect(markup).not.toContain("Approval needed");
+    });
+
+    it("says Denied once it was denied, or closed by Stop", () => {
+      for (const answered of ["deny", "unavailable"]) {
+        const markup = renderRow(approval({ answered, dismissed: answered === "unavailable" }));
+        expect(markup).toContain("Denied");
+        expect(markup).not.toContain("Approval needed");
+      }
+    });
+
+    it("says Expired once nothing can answer it", () => {
+      const markup = renderRow(approval({ expired: true, options: [] }));
+      expect(markup).toContain("Expired");
+      expect(markup).not.toContain("Approval needed");
+    });
+  });
+
   it("leaves the full Chief card as one selectable hit area", () => {
     const markup = renderRow(bot({ chiefOfStaff: true }));
 

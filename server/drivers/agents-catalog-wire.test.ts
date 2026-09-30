@@ -73,6 +73,12 @@ function profiles(): Record<string, Profile> {
       }
     }
   }
+  // A Cloud home is one more switch on top of any of these; its fullest
+  // profiles are pinned, and differ from their family only where the test
+  // below says they may.
+  for (const name of ["direct+skills+shared+voice", "room+own-thread+skills+shared+voice"]) {
+    all[`${name}+cloud-home`] = { family: all[name]!.family, env: { ...all[name]!.env, OMB_CLOUD_HOME: "1" } };
+  }
   all.external = { family: "external", env: { OMB_EXTERNAL_RUNTIME: "1" } };
   // The external switch wins over every other one; pin that it still does.
   all["external+everything"] = {
@@ -84,6 +90,7 @@ function profiles(): Record<string, Profile> {
       OMB_SKILL_AUTHORING_ENABLED: "1",
       OMB_SHARED_COMPUTERS_ENABLED: "1",
       OMB_VOICE_NOTES: "1",
+      OMB_CLOUD_HOME: "1",
     },
   };
   return all;
@@ -99,30 +106,32 @@ const FULL = { direct: "direct+skills+shared+voice", room: "room+own-thread+skil
  * by more than 2%, and may not undercut it by more than 2% either: a smaller
  * catalog is the goal, so lock the win in by lowering the number. */
 const BUDGET_BASELINE: Record<string, number> = {
-  "direct": 43524,
-  "direct+voice": 44265,
-  "direct+shared": 45269,
-  "direct+shared+voice": 46010,
-  "direct+skills": 45450,
-  "direct+skills+voice": 46191,
-  "direct+skills+shared": 47195,
-  "direct+skills+shared+voice": 47936,
-  "room": 41542,
-  "room+voice": 42283,
-  "room+shared": 43287,
-  "room+shared+voice": 44028,
-  "room+skills": 43468,
-  "room+skills+voice": 44209,
-  "room+skills+shared": 45213,
-  "room+skills+shared+voice": 45954,
-  "room+own-thread": 42829,
-  "room+own-thread+voice": 43570,
-  "room+own-thread+shared": 44574,
-  "room+own-thread+shared+voice": 45315,
-  "room+own-thread+skills": 44755,
-  "room+own-thread+skills+voice": 45496,
-  "room+own-thread+skills+shared": 46500,
-  "room+own-thread+skills+shared+voice": 47241,
+  "direct": 44032,
+  "direct+voice": 44773,
+  "direct+shared": 45777,
+  "direct+shared+voice": 46518,
+  "direct+skills": 45958,
+  "direct+skills+voice": 46699,
+  "direct+skills+shared": 47703,
+  "direct+skills+shared+voice": 48444,
+  "room": 43207,
+  "room+voice": 43948,
+  "room+shared": 44952,
+  "room+shared+voice": 45693,
+  "room+skills": 45133,
+  "room+skills+voice": 45874,
+  "room+skills+shared": 46878,
+  "room+skills+shared+voice": 47619,
+  "room+own-thread": 44494,
+  "room+own-thread+voice": 45235,
+  "room+own-thread+shared": 46239,
+  "room+own-thread+shared+voice": 46980,
+  "room+own-thread+skills": 46420,
+  "room+own-thread+skills+voice": 47161,
+  "room+own-thread+skills+shared": 48165,
+  "room+own-thread+skills+shared+voice": 48906,
+  "direct+skills+shared+voice+cloud-home": 47778,
+  "room+own-thread+skills+shared+voice+cloud-home": 47083,
   "external": 3030,
   "external+everything": 3030,
 };
@@ -220,8 +229,27 @@ describe("agents proxy tools/list golden", () => {
     for (const [name, profile] of Object.entries(PROFILES)) {
       const full = new Map(toolsOf(wires[FULL[profile.family]]!).map((tool) => [tool.name, JSON.stringify(tool)]));
       for (const tool of toolsOf(wires[name]!)) {
+        // A Cloud home's own select_computer is pinned by the next test.
+        if (profile.env.OMB_CLOUD_HOME === "1" && tool.name === "select_computer") continue;
         expect(JSON.stringify(tool), `${name}: ${tool.name}`).toBe(full.get(tool.name));
       }
+    }
+  });
+
+  it("shows a Cloud home's bots no Local VM and no this computer, and every other server both", () => {
+    type SelectTool = Tool & { inputSchema: { properties: { surface: { enum: string[]; description: string } } } };
+    const select = (wire: string) => toolsOf(wire).find((tool) => tool.name === "select_computer") as SelectTool;
+    const cloudHome = Object.keys(PROFILES).filter((name) => name.endsWith("+cloud-home"));
+    expect(cloudHome).toHaveLength(2);
+    for (const name of cloudHome) {
+      const desktop = wires[name.slice(0, -"+cloud-home".length)]!;
+      const names = toolsOf(wires[name]!).map((tool) => tool.name);
+      expect(names).toEqual(toolsOf(desktop).map((tool) => tool.name).filter((tool) => tool !== "vm_exec"));
+      expect(select(desktop).inputSchema.properties.surface.enum).toEqual(["auto", "cloud", "vm", "local", "browser"]);
+      expect(toolsOf(desktop).map((tool) => tool.name)).toContain("vm_exec");
+      const surface = select(wires[name]!).inputSchema.properties.surface;
+      expect(surface.enum).toEqual(["auto", "cloud", "browser"]);
+      expect(surface.description).not.toMatch(/\b(?:vm|local) =/);
     }
   });
 

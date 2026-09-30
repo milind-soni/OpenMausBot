@@ -39,7 +39,7 @@ auth :7869; speaker cancellation batch :9812; group cancel batches :13402,
 `interruptTurn` (codex.ts:1571-1573 → `stop()`).
 
 Thread deletion (`deleteBotWithLifecycle`, index.ts:6647) refuses while a
-routine, group turn, Local VM turn, or Box-configured busy turn is active
+routine, group turn, Local VM turn, or Boat-configured busy turn is active
 (409 "stop this bot's work…"); a plain busy turn is torn down through the same
 graceful-first stop when its instance is disposed. No deletion path calls
 `killCliTree` directly.

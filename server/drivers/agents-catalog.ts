@@ -29,6 +29,9 @@ export interface CatalogProfile {
   sharedComputers: boolean;
   /** A voice is actually configured for this bot (tts voiceReady). */
   voiceNotes: boolean;
+  /** The server is a Cloud home (server/cloud-home.ts): no "this computer"
+   * of the person's and no Local VM to offer. */
+  cloudHome: boolean;
   /** Written into start_thread's schema in a coordinating turn. */
   botId: string;
 }
@@ -44,6 +47,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     skillAuthoring: env.OMB_SKILL_AUTHORING_ENABLED === "1",
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
     voiceNotes: env.OMB_VOICE_NOTES === "1",
+    cloudHome: env.OMB_CLOUD_HOME === "1",
     botId: env.OMB_BOT_ID ?? "",
   };
 }
@@ -158,8 +162,9 @@ const ROUTINE_FIELDS_SCHEMA = {
   schedule: ROUTINE_SCHEDULE_SCHEMA,
   run_on: {
     type: "string",
+    // "box" is Boat's historical run_on destination id (agents wire contract).
     enum: ["maus", "box"],
-    description: "Default maus keeps the bot's selected model and configured computer, INCLUDING a self-hosted VPS. Omit this field for normal schedules. box explicitly switches the agent to the Box-hosted runner; it requires Box setup and is not the generic cloud/VPS option. Legacy cloud values from list_routines mean box, not VPS.",
+    description: "Default maus keeps the bot's selected model and configured computer, INCLUDING a self-hosted VPS. Omit this field for normal schedules. box explicitly switches the agent to the Boat-hosted runner; it requires Boat setup and is not the generic cloud/VPS option. Legacy cloud values from list_routines mean box, not VPS.",
   },
   timeout_minutes: {
     type: "integer",
@@ -259,7 +264,8 @@ const toolDefinitions = (externalRuntime: boolean) => [
       bot_id: { type: "string", description: "One reachable teammate id from list_bots or list_room_targets." },
       title: { type: "string", description: "A short one-line title, at most 80 characters." },
       message: { type: "string", description: "Complete instructions; the recipient does not inherit this conversation." },
-    }, required: ["bot_id", "title", "message"] },
+      request_key: { type: "string", description: "A short unique key for this assignment. Reuse it for an identical retry." },
+    }, required: ["bot_id", "title", "message", "request_key"] },
   },
   {
     name: "list_bots",
@@ -339,7 +345,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
       "Choose where this conversation does computer work. Call with no arguments to inspect actual available choices and the current place. For a task needing computer interaction, select the requested place, or auto to choose a suitable configured computer without asking the user to use menus. OpenMausBot reuses an existing computer first; with a configured provider it can start or provision one when needed. Do not provision for ordinary chat or just to inspect availability. A pending result means end this turn immediately: OpenMausBot updates the conversation selector and resumes the original request with that computer's real tools. Do not use the old tools after requesting a switch, repeat the task, or claim the action is done. This cannot change permissions, override Off, or switch a teammate/routine/channel.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       surface: { type: "string", enum: ["auto", "cloud", "vm", "local", "browser"],
-        description: "auto = suitable configured computer, cloud = remote Box/VPS, vm = isolated Local VM, local = user's own desktop, browser = built-in browser. Omit to list." },
+        description: "auto = suitable configured computer, cloud = remote Boat/VPS, vm = isolated Local VM, local = user's own desktop, browser = built-in browser. Omit to list." },
     } },
   },
   {
@@ -581,6 +587,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
         action: { type: "string", enum: ["append", "replace", "remove", "supersede"] },
         text: { type: "string", minLength: 1, description: "Non-blank new text for append, replace, or supersede: the fact itself, without a date or bullet. Omit for remove; use remove to delete a passage." },
         old_text: { type: "string", minLength: 1, description: "Exact unique existing passage for replace, supersede, or remove. Omit for append." },
+        until: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Optional, for append or supersede: YYYY-MM-DD, the last day a temporary fact holds (an exam this weekend, a trip next week). After that day the entry is hidden from your memory." },
       },
       required: ["action"],
     },
@@ -680,12 +687,17 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "propose_routine_action",
     description:
-      "Prepare a user-requested change to one of this bot's existing routines. Use list_routines first to get the routine id." + PROPOSAL_OUTCOME,
+      "Prepare a user-requested change to one of this bot's existing routines. Use list_routines first to get the routine id. If the user asks to change ANOTHER bot's routine and that bot is in your section, call list_bots and pass that bot's id as for_bot_id; the routine keeps its owner and every run keeps that bot's engine and permissions." + PROPOSAL_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         routine_id: { type: "string", minLength: 1, description: "Routine id from list_routines." },
+        for_bot_id: {
+          type: "string",
+          description:
+            "Only when the requested change targets ANOTHER bot's routine and that bot is in your section: that bot's id from list_bots. Learn the routine id from that bot's own routines (it can run list_routines). Omit to change one of your own routines.",
+        },
         action: {
           type: "string",
           enum: ["update", "pause", "resume", "run_now", "delete"],
@@ -826,8 +838,25 @@ const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegatio
 const EXTERNAL_TOOL_NAMES = new Set(["list_bots", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
+// A Cloud home never offers this computer or a Local VM, so its bots are not
+// shown them as choices, nor a VM shell they could never have.
+const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
+const CLOUD_HOME_SURFACE = {
+  type: "string", enum: ["auto", "cloud", "browser"],
+  description: "auto = suitable configured computer, cloud = remote Boat/VPS, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",
+};
+
 /** The tools one turn is shown, exactly as tools/list serializes them. */
 export function availableTools(profile: CatalogProfile) {
+  const tools = catalogTools(profile);
+  return profile.cloudHome
+    ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
+      ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: CLOUD_HOME_SURFACE } } }
+      : tool)
+    : tools;
+}
+
+function catalogTools(profile: CatalogProfile) {
   const TOOLS = toolDefinitions(profile.externalRuntime);
   const BOT_SCOPED_TOOLS = profile.botId === WATCHER_OPTIONS_CARD_BOT_ID
     ? TOOLS

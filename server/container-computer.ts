@@ -96,6 +96,20 @@ export function perBotLocalVmTarget(botId: string): LocalVmTarget {
   };
 }
 
+/** A pool-mode seat (issue #1654): one of N desktops shared by every
+ * conversation, addressed by seat index. Identities stay disjoint from the
+ * shared singleton and from per-bot digests, so discovery, labels, and lease
+ * lanes never confuse the three modes. */
+export function poolLocalVmTarget(seat: number): LocalVmTarget {
+  return {
+    key: `pool:${seat}`,
+    containerName: `${CONTAINER}-p${seat}`,
+    workspaceDir: join(DATA_DIR, "vm-homes", `pool-${seat}`),
+    viewerPort: null,
+    label: `pool-${seat}`,
+  };
+}
+
 /** Only provisioning creates this durable directory; idle removal keeps it. */
 export function localVmWorkspaceExists(target: LocalVmTarget): boolean {
   try {

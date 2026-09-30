@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; routinesInConversation?: boolean };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -36,6 +36,12 @@ export function builtInBrowserEnabled(config: FeatureFlagConfig | null | undefin
  * shows that work is happening. */
 export function showToolCallsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.showToolCalls === true;
+}
+
+/** Routine turns are written into the conversation that receives the run card.
+ * Off by default — the run stays in a hidden thread and the chat only gets the card. */
+export function routinesInConversationEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.routinesInConversation === true;
 }
 
 /** Opt-in computer sharing — lending this desktop's folders, terminal or

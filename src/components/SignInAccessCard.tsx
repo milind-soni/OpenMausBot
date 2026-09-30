@@ -30,9 +30,9 @@ export function withoutEntry(lists: SignInLists, entry: string): SignInLists {
   return { admins: lists.admins.filter((item) => item !== entry), members: lists.members.filter((item) => item !== entry) };
 }
 
-const input = "w-full rounded-md border border-line bg-surface px-3 py-2 text-[14px] text-ink outline-none focus:border-accent-border";
+const input = "w-full rounded-md border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink outline-none focus:border-accent-border";
 const button = "rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-50";
-const quiet = "rounded-md border border-line px-2.5 py-1 text-[12px] text-ink hover:bg-surface";
+const quiet = "rounded-md border border-hairline/50 px-2.5 py-1 text-[12px] text-ink hover:bg-control";
 
 /** Settings → Remote access on a hosted server: who may sign in at /pair
  * with an emailed code. Admins only; saved through the config API and
@@ -130,7 +130,7 @@ export function SignInAccessCard() {
       {rows.length === 0 ? (
         <p className="mt-3 text-[12.5px] text-ink-secondary">{t("remote.signInAccess.empty")}</p>
       ) : (
-        <ul className="mt-3 divide-y divide-line">
+        <ul className="mt-3 divide-y divide-hairline/40">
           {rows.map(({ entry, role: entryRole }) => (
             <li key={entry} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[13px]">
               <span className="text-ink">

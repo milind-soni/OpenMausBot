@@ -101,7 +101,7 @@ export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: B
             </div>
           ) : (
             <div className="rounded-xl border border-dashed border-hairline bg-inset px-5 py-12 text-center">
-              <BookOpen size={22} className="mx-auto text-ink-secondary/60" />
+              <BookOpen size={22} className="mx-auto text-ink-tertiary" />
               <p className="mt-3 text-[13px] font-medium text-ink">No instructions yet</p>
               <p className="mt-1 text-[12px] text-ink-secondary">Add them from this bot’s profile.</p>
             </div>

@@ -6,7 +6,7 @@ import { writeFileAtomic } from "./atomic.ts";
 export const teamComputerCreate = z.object({
   name: z.string().trim().min(1).max(60).refine(value => [...value].every(character => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127)),
   acknowledgeCost: z.literal(true),
-  // Clients may keep this id across a lost create response. It is not a Box id.
+  // Clients may keep this id across a lost create response. It is not a Boat id.
   requestId: z.string().uuid(),
 }).strict();
 export const teamComputerAssignment = z.object({
@@ -24,7 +24,7 @@ export const teamComputerOwner = (id: string): string => `computer_${id}`;
 const failure = (message: string, status = 409) => Object.assign(new Error(message), { status });
 
 /** One server writer owns the data directory. Persist identity before any
- * provider call; failed/retried creates always retain the same Box journal key.
+ * provider call; failed/retried creates always retain the same Boat journal key.
  * Invalid or foreign restored state is never silently reset to an empty pool. */
 export class TeamComputers {
   private entries: TeamComputerRecord[] = [];

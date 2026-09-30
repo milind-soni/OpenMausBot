@@ -1,11 +1,12 @@
 // checkpoints.ts contract, exercised against REAL git in mkdtemp folders:
 // snapshots are commits in a shadow repo (idempotent when nothing changed),
-// restore moves the work tree back without moving HEAD (so a restore can be
+// restore retains the pre-restore safety point (so a restore can be
 // undone), excluded/ignored files are neither snapshotted nor deleted, a
 // user's own git repo in the folder is never touched, and dangerous folders
 // (home) are refused outright.
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -18,7 +19,7 @@ import { removeTempDir } from "./testing/cleanup.ts";
 const DATA_ROOT = mkdtempSync(join(tmpdir(), "omb-checkpoints-"));
 process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
 
-const { checkpointsEnabled, listCheckpoints, refusalReason, restore, snapshot } = await import(
+const { CHECKPOINTS_DIR, checkpointsEnabled, listCheckpoints, refusalReason, restore, snapshot } = await import(
   "./checkpoints.ts"
 );
 
@@ -83,7 +84,81 @@ describe("snapshot", () => {
     expect(second).toMatch(/^[0-9a-f]{40}$/);
     expect(second).not.toBe(first);
     const list = await listCheckpoints(bot, cwd);
-    expect(list.map((c) => c.label)).toEqual(["turn 33333333", "turn 11111111"]);
+    expect(list.map((c) => c.label)).toEqual(["turn 33333333"]);
+  });
+
+  it("keeps only the newest usable checkpoint and reclaims obsolete content", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "obsolete payload");
+    const first = await snapshot(bot, cwd, "old turn");
+    const shadow = join(CHECKPOINTS_DIR, bot,
+      createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
+    const oldBlob = userGit(shadow, "rev-parse", `${first}:a.txt`).trim();
+    writeFileSync(join(cwd, "a.txt"), "latest payload");
+    const latest = await snapshot(bot, cwd, "latest turn");
+    expect((await listCheckpoints(bot, cwd)).map(c => c.hash)).toEqual([latest]);
+    expect(() => userGit(shadow, "cat-file", "-e", oldBlob)).toThrow();
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("latest payload");
+    writeFileSync(join(cwd, "a.txt"), "uncommitted edit");
+    expect(await restore(bot, cwd, latest!)).toEqual({ ok: true });
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("latest payload");
+    const [undo] = await listCheckpoints(bot, cwd);
+    expect(await restore(bot, cwd, undo!.hash)).toEqual({ ok: true });
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("uncommitted edit");
+  });
+
+  it("excludes tagged cache directories while preserving their live files", async () => {
+    const { bot, cwd } = workspace();
+    const cache = join(cwd, "custom-target");
+    mkdirSync(cache);
+    writeFileSync(join(cwd, "a.txt"), "source");
+    writeFileSync(join(cache, "artifact"), "old build");
+    await snapshot(bot, cwd, "before cache tag");
+    writeFileSync(join(cache, "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n");
+    const latest = await snapshot(bot, cwd, "tagged cache");
+    const shadow = join(CHECKPOINTS_DIR, bot,
+      createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
+    expect(userGit(shadow, "ls-tree", "-r", "--name-only", latest!).trim()).toBe("a.txt");
+    writeFileSync(join(cache, "artifact"), "new build");
+    writeFileSync(join(cwd, "a.txt"), "edited source");
+    expect(await restore(bot, cwd, latest!)).toEqual({ ok: true });
+    expect(readFileSync(join(cache, "artifact"), "utf8")).toBe("new build");
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("source");
+  });
+
+  it("compacts legacy history even when the workspace has not changed", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "old");
+    await snapshot(bot, cwd, "original");
+    const shadow = join(CHECKPOINTS_DIR, bot,
+      createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
+    for (const text of ["middle", "latest"]) {
+      writeFileSync(join(cwd, "a.txt"), text);
+      userGit(shadow, "--work-tree", cwd, "add", "-A");
+      userGit(shadow, "commit", "-m", text);
+    }
+    expect(await listCheckpoints(bot, cwd)).toHaveLength(3);
+    const hash = await snapshot(bot, cwd, "unchanged");
+    expect(await listCheckpoints(bot, cwd)).toEqual([expect.objectContaining({ hash, label: "latest" })]);
+    expect(userGit(shadow, "rev-list", "--count", "HEAD").trim()).toBe("2");
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("latest");
+  });
+
+  it.skipIf(process.platform === "win32")("keeps the last complete backup when a new snapshot cannot read a file", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "recoverable");
+    const first = await snapshot(bot, cwd, "complete");
+    writeFileSync(join(cwd, "a.txt"), "unfinished");
+    const locked = join(cwd, "locked.txt");
+    writeFileSync(locked, "not readable");
+    chmodSync(locked, 0o000);
+    try {
+      expect(await snapshot(bot, cwd, "incomplete")).toBeNull();
+      expect((await listCheckpoints(bot, cwd)).map(c => c.hash)).toEqual([first]);
+      expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("unfinished");
+    } finally {
+      chmodSync(locked, 0o600);
+    }
   });
 
   it("never touches the user's folder itself (no .git appears in cwd)", async () => {
@@ -128,7 +203,7 @@ describe("restore", () => {
     const list = await listCheckpoints(bot, cwd);
     const safety = list.find((c) => c.label === "before restore");
     expect(safety).toBeDefined();
-    expect(list.some((c) => c.label === `restored ${checkpoint!.slice(0, 8)}`)).toBe(true);
+    expect(list).toHaveLength(1);
     const undo = await restore(bot, cwd, safety!.hash);
     expect(undo).toEqual({ ok: true });
     expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("two");
@@ -229,7 +304,6 @@ describe("nested and user-owned git repos", () => {
     const checkpoint = await snapshot(bot, cwd, "turn 1");
     expect(checkpoint).toMatch(/^[0-9a-f]{40}$/);
     writeFileSync(join(cwd, "a.txt"), "two");
-    await snapshot(bot, cwd, "turn 2");
     expect((await restore(bot, cwd, checkpoint!)).ok).toBe(true);
     expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("one");
 
@@ -300,9 +374,9 @@ describe("refusals", () => {
   });
 });
 
-describe("diffStat", () => {
-  it("names the files added, changed and deleted between two checkpoints", async () => {
-    const { diffStat } = await import("./checkpoints.ts");
+describe("diffWorkingTree", () => {
+  it("names settled changes without replacing the pre-turn restore point", async () => {
+    const { diffWorkingTree } = await import("./checkpoints.ts");
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "keep.txt"), "same");
     writeFileSync(join(cwd, "edit.txt"), "before");
@@ -311,22 +385,25 @@ describe("diffStat", () => {
     writeFileSync(join(cwd, "edit.txt"), "after");
     writeFileSync(join(cwd, "new.txt"), "hello");
     unlinkSync(join(cwd, "gone.txt"));
-    const after = await snapshot(bot, cwd, "settle aaaaaaaa");
     expect(before).not.toBeNull();
-    expect(after).not.toBeNull();
-    expect(await diffStat(bot, cwd, before!, after!)).toEqual({
+    expect(await diffWorkingTree(bot, cwd, before!)).toEqual({
       changed: ["edit.txt"],
       added: ["new.txt"],
       deleted: ["gone.txt"],
     });
+    expect((await listCheckpoints(bot, cwd)).map(c => c.hash)).toEqual([before]);
+    expect(await restore(bot, cwd, before!)).toEqual({ ok: true });
+    expect(readFileSync(join(cwd, "edit.txt"), "utf8")).toBe("before");
+    expect(readFileSync(join(cwd, "gone.txt"), "utf8")).toBe("bye");
+    expect(existsSync(join(cwd, "new.txt"))).toBe(false);
   });
 
-  it("returns null when the two hashes are equal or the folder is refused", async () => {
-    const { diffStat } = await import("./checkpoints.ts");
+  it("reports no changes and refuses protected folders", async () => {
+    const { diffWorkingTree } = await import("./checkpoints.ts");
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "one");
     const hash = await snapshot(bot, cwd, "turn bbbbbbbb");
-    expect(await diffStat(bot, cwd, hash!, hash!)).toBeNull();
-    expect(await diffStat(bot, homedir(), hash!, hash!)).toBeNull();
+    expect(await diffWorkingTree(bot, cwd, hash!)).toEqual({ changed: [], added: [], deleted: [] });
+    expect(await diffWorkingTree(bot, homedir(), hash!)).toBeNull();
   });
 });

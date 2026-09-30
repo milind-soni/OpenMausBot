@@ -425,6 +425,29 @@ describe("coordinate_bots on a teammate", () => {
     }
   }, 90_000);
 
+  it("returns the original one-way thread for a retry after the five-thread limit", async () => {
+    const sender = await createBot("Sender", "gated");
+    const recipient = await createBot("Recipient", "gated");
+    try {
+      expect((await api("PATCH", `/api/bots/${sender.id}`, { peers: [recipient.id] })).status).toBe(200);
+      const token = await heldTurn(sender, "Send five independent checks.");
+      const send = (index: number) => api("POST", "/api/internal/threads", {
+        toBotId: recipient.id, title: `Check ${index}`, message: `Run check ${index}.`,
+        requestKey: `check-${index}`, oneWay: true,
+      }, token);
+      const first = await send(0);
+      expect(first.status).toBe(201);
+      for (let index = 1; index < 5; index++) expect((await send(index)).status).toBe(201);
+      const retry = await send(0);
+      expect(retry.status).toBe(200);
+      expect(retry.body).toMatchObject({ threadId: first.body.threadId, replayed: true });
+      expect((await send(5)).status).toBe(429);
+      expect((await botState(recipient.id)).tasks).toHaveLength(6);
+    } finally {
+      await cleanup([sender.id, recipient.id]);
+    }
+  }, 60_000);
+
   it("rejects legacy peer starts, inaccessible peers, and oversized batches, and does not duplicate a retried request", async () => {
     const pm = await createBot("Pam", "gated");
     const near = await createBot("Near", "gated");

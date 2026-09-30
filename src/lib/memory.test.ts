@@ -8,9 +8,17 @@ import {
   journalSummary,
   relativeTime,
   topicFileName,
+  tidySummary,
   type MemoryCapacity,
   type MemoryJournalRow,
 } from "./memory";
+
+it("reports organized notes rather than saying nothing was tidied", () => {
+  const report = { at: 0, expired: 0, duplicates: 0, superseded: 0, deferred: 0, contradictionsChecked: false };
+  expect(tidySummary(report)).toBe("Nothing to tidy");
+  expect(tidySummary({ ...report, organized: 1 })).toBe("Filed 1 note into topics");
+  expect(tidySummary({ ...report, organized: 2 })).toBe("Filed 2 notes into topics");
+});
 
 const index = (overrides: Partial<MemoryCapacity> = {}): MemoryCapacity => ({
   lines: 40,
@@ -111,6 +119,7 @@ describe("journalSummary", () => {
       "Scout created the 2026-09-10 log with 1 line",
     );
     expect(journalSummary(row({ actor: "import" }), "Scout")).toBe("An import added 2 lines to MEMORY.md");
+    expect(journalSummary(row({ actor: "upkeep", via: "capture" }), "Scout")).toBe("Memory upkeep added 2 lines to MEMORY.md");
   });
 });
 
@@ -123,6 +132,9 @@ describe("journalSource", () => {
     expect(journalSource(row({ actor: "person", via: "disk" }))).toBe("changed outside the app");
     expect(journalSource(row({ actor: "person", via: "revert" }))).toBe("undo");
     expect(journalSource(row({ actor: "import", via: "import" }))).toBeNull();
+    expect(journalSource(row({ actor: "upkeep", via: "tidy" }))).toBe("tidy-up");
+    expect(journalSource(row({ actor: "upkeep", via: "capture", threadTitle: "Plans" }))).toBe("noticed in chat “Plans”");
+    expect(journalSource(row({ actor: "upkeep", via: "capture" }))).toBe("noticed in a chat");
   });
 });
 

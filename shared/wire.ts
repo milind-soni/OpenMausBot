@@ -50,7 +50,7 @@ export interface ModelSelection {
   variant?: string;
 }
 
-/** Which cloud computer backs computer: "cloud"; absent means Box. */
+/** Which cloud computer backs computer: "cloud"; absent means Boat. */
 export type CloudBackend = "box" | "vps";
 
 /** A place a bot can act. cloud covers both cloud backends — from the
@@ -74,6 +74,8 @@ export interface TaskOpenedBy {
   botId: string;
   name: string;
   delegationId?: string;
+  /** Durable identity of a one-way send, scoped to its source conversation. */
+  oneWaySend?: { sourceThreadId: string; requestKey: string };
   /** What kind of conversation the opener made this: "pair" is the one
    * durable conversation between two bots; "work" closes itself once its
    * result has been reported. */
@@ -252,13 +254,19 @@ export interface WireBot {
   avatarUrl: string | null;
   /** Mascot, or the crop applied to avatarUrl. */
   avatarCrop?: BotAvatarCrop;
+  /** Zoom of a custom image. Absent means 1, the unzoomed cover crop. */
+  avatarZoom?: number;
+  /** Horizontal point of the image kept in the crop, 0–1. Absent means center. */
+  avatarFocusX?: number;
+  /** Vertical point of the image kept in the crop, 0–1. Absent means center. */
+  avatarFocusY?: number;
   /** True when any task has unread output. */
   unread: boolean;
   /** Default for new tasks; navigating tasks never changes this value. */
   modelSelection: ModelSelection;
   /** where the bot works ("Works on"). Unset = auto. */
   computer?: Surface | "off";
-  /** Which cloud computer backs computer: "cloud"; absent means Box. */
+  /** Which cloud computer backs computer: "cloud"; absent means Boat. */
   cloudBackend?: CloudBackend;
   /** Auto mode may prepare/start this bot's managed VPS container. */
   autoStartVps?: boolean;
@@ -304,6 +312,11 @@ export interface WireBot {
   connectorTools?: Record<string, ConnectorToolGrant>;
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
+  /** Memory upkeep: the harness captures facts from finished chats into
+   * MEMORY.md and topic files, adds facts about the person to About me and
+   * tidies nightly. On unless explicitly false; every change is journaled
+   * and can be undone. */
+  memoryUpkeep?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */
   mcpServers?: string[];
   /** Id of a named browser profile; absent = the bot's own private session. */
@@ -342,7 +355,10 @@ export interface ResolvedSender {
  * owner on this machine, or a session-less local caller on a shared server
  * (`worker`: the Slack worker, or any other process on that machine). */
 export type CardAnswerer =
-  | { kind: "session"; name: string }
+  /** `person`: the answering session's opaque person key, recorded on an OMB
+   * Cloud home only, where it decides whether an answer came from the owner
+   * (server/cloud-lending.ts). */
+  | { kind: "session"; name: string; person?: string }
   | { kind: "loopback" }
   | { kind: "worker" };
 
@@ -386,6 +402,8 @@ export interface WireMessage {
     claudeUpdate?: boolean;
     /** Provider item identity, scoped to the owning turn. */
     itemId?: string;
+    /** Terminal one-way handoff notice identity for restart recovery. */
+    handoffId?: string;
     /** Whether the harness captured the full redacted result. Private
      * server-local spill paths are not exposed to clients. */
     fullResult?: boolean;
@@ -437,6 +455,10 @@ export interface WireMessage {
   from?: { botId: string; name: string; color: string };
   /** Set on a room message a bot pushed in with post_to_room. */
   peerPost?: { unattended?: boolean };
+  /** A room reply whose speaker the decision model picked (an Auto room),
+   * with how sure it was. Absent on every other message; clients that do
+   * not know it ignore it. */
+  routedBy?: { provider: "jev"; probability: number };
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (ask_bot, start_thread). */
   peerAsk?: { botId: string; name: string; unattended?: boolean };
@@ -531,10 +553,15 @@ export interface SecretRequestCardData {
   error?: string;
 }
 
+/** Who answers a room message nobody was @mentioned in. `auto` asks the
+ * decision model (server/decider/room-routing.ts) and falls back to
+ * `fallbackBotId` (else the first member) whenever it is off or unsure.
+ * Readers must treat any kind they do not know as the default lead. */
 export type GroupDefaultResponder =
   | { kind: "member"; botId: string }
   | { kind: "everyone" }
-  | { kind: "mentions" };
+  | { kind: "mentions" }
+  | { kind: "auto"; fallbackBotId?: string };
 
 /** One independent conversation inside a user-created channel. */
 export interface GroupTask {

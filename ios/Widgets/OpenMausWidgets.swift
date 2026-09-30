@@ -1,7 +1,8 @@
-// The widget extension: the bot's Live Activity, in the Dynamic Island and
-// on the lock screen. The face is the mascot engine's resting face for the
-// state — the system renders a snapshot, so it cannot move here, but it
-// changes with every update.
+// The widget extension: the bot's Live Activity in the Dynamic Island and
+// on the lock screen, and the home-screen widgets that render the updates
+// snapshot. The face is the mascot engine's resting face for the state —
+// the system renders a snapshot, so it cannot move here, but it changes
+// with every update.
 import ActivityKit
 import SwiftUI
 import WidgetKit
@@ -10,6 +11,12 @@ import WidgetKit
 struct OpenMausWidgets: WidgetBundle {
     var body: some Widget {
         BotActivityWidget()
+        NeedsYouWidget()
+        UpdatesDigestWidget()
+        WorkingMonitorWidget()
+        if #available(iOS 17.0, *) {
+            BotWidget()
+        }
     }
 }
 

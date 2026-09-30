@@ -235,6 +235,10 @@ export interface FollowupPayload {
   /** Who the usage ledger books the turn these words start to. Absent on
    * rows written before this existed. */
   trigger?: UsageTrigger;
+  /** When the words were queued (epoch ms), so drain-time coalescing can
+   * tell a contiguous burst from hours-apart texts. Rows written before
+   * this existed read as queued at restore time. */
+  queuedAt?: number;
   /** Aside-lane rows (kind "aside"): the peer whose words these are. The
    * prompt carries the non-steering envelope; text stays the raw words. */
   aside?: {
@@ -574,14 +578,57 @@ const STOP_WORDS = new Set(
  * whitespace-separated token becomes a quoted string, so `AND`, `NOT`,
  * `*`, `:`, and stray quotes are searched for rather than interpreted.
  * Tokens are ANDed — FTS5's default — so a hit contains all of them. */
-function ftsQuery(query: string): string | null {
+function ftsQuery(query: string, mode: SearchMode = "all"): string | null {
   const tokens = query
     .split(/\s+/)
     .map((token) => token.replace(/"/g, "").trim())
     .filter(Boolean);
   if (!tokens.length) return null;
   const content = tokens.filter((token) => !STOP_WORDS.has(token.toLowerCase()));
+  if (mode === "any") {
+    // Automatic recall searches with a whole message: any content word may
+    // match, ranked by bm25. Punctuation-only tokens are dropped, since a
+    // lone "?" or "—" would match nothing useful. No content word, no query.
+    const terms = recallTerms(query).map(recallMatchTerm).filter(Boolean);
+    return terms.length ? terms.join(" OR ") : null;
+  }
   return (content.length ? content : tokens).map((token) => `"${token}"`).join(" ");
+}
+
+/** One recall term as FTS5 syntax. The index does no stemming, so a word
+ * of four or more letters matches as a prefix, with a plural -s taken off
+ * first: "restaurant" and "restaurants" find each other. Skip punctuation
+ * terms: unicode61 cannot distinguish "-10" from "10" or "c++" from "c",
+ * even in a quoted FTS phrase. Explicit all-term search stays unchanged. */
+export function recallMatchTerm(term: string): string | null {
+  if (!/^[\p{L}\p{N}]+$/u.test(term)) return null;
+  if (!/^\p{L}{4,}$/u.test(term)) return `"${term}"`;
+  const stem = term.length > 4 && term.endsWith("s") && !term.endsWith("ss") ? term.slice(0, -1) : term;
+  return `"${stem}"*`;
+}
+
+/** "all": every word must match (session_search). "any": one is enough (automatic recall). */
+export type SearchMode = "all" | "any";
+
+/** Words that go at the end of a question and say nothing about its topic. */
+const RECALL_FILLER = new Set(
+  "about again also any anything can could does don't know me my please remember remind should tell there they us would hi hello hey thanks thank ok okay yes yeah no i'm im i've i'll i'd you're quick just".split(" "),
+);
+
+/** The content words of a message, for an any-term recall: lower-cased,
+ * de-duplicated, stop words and filler dropped. Ordinary separators between
+ * letters split words; signs, language symbols and versions (`-10`, `c++`,
+ * `v2.1`) survive as written rather than matching a different fact. */
+export function recallTerms(query: string): string[] {
+  const out: string[] = [];
+  for (const raw of query.split(/\s+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
+    const token = raw.replace(/"/g, "").replace(/^[\s.,;:!?()[\]{}'`“”‘’]+|[\s.,;:!?()[\]{}'`“”‘’]+$/g, "").toLowerCase();
+    if (token.length < 2 && !/\d/.test(token)) continue;
+    if (!/[\p{L}\p{N}]/u.test(token)) continue;
+    if (STOP_WORDS.has(token) || RECALL_FILLER.has(token)) continue;
+    if (!out.includes(token)) out.push(token);
+  }
+  return out.slice(0, 16);
 }
 
 /** How much of a matched message rides back in a hit. Wide enough that a
@@ -642,8 +689,8 @@ function rangeClause(range: RecallRange | undefined, column: string): { sql: str
   return { sql: parts.map((part) => ` AND ${part}`).join(""), params };
 }
 
-export function recallMessages(query: string, threadIds: readonly string[], limit = 12, range?: RecallRange): RecallHit[] {
-  const match = ftsQuery(query);
+export function recallMessages(query: string, threadIds: readonly string[], limit = 12, range?: RecallRange, mode: SearchMode = "all"): RecallHit[] {
+  const match = ftsQuery(query, mode);
   if (!match || !threadIds.length) return [];
   const placeholders = threadIds.map(() => "?").join(", ");
   const window = rangeClause(range, "m.at");
@@ -805,8 +852,8 @@ export interface MemoryHit {
 /** Relevance-ranked recall over ONE bot's memory files. Scoped by bot id
  * in SQL, the same way recallMessages scopes by thread: another bot's
  * memory is not a lower-ranked result, it is not a result. */
-export function recallMemory(query: string, botId: string, limit = 12): MemoryHit[] {
-  const match = ftsQuery(query);
+export function recallMemory(query: string, botId: string, limit = 12, mode: SearchMode = "all"): MemoryHit[] {
+  const match = ftsQuery(query, mode);
   if (!match) return [];
   const rows = db()
     .prepare(
@@ -814,6 +861,9 @@ export function recallMemory(query: string, botId: string, limit = 12): MemoryHi
         `snippet(memory_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
         "FROM memory_fts JOIN memory_files f ON f.rowid = memory_fts.rowid " +
         "WHERE memory_fts MATCH ? AND f.bot_id = ? " +
+        // Automatic recall must filter before LIMIT; historical logs can
+        // otherwise crowd all current topic files out of the result set.
+        (mode === "any" ? "AND f.path NOT IN ('MEMORY.md', 'memory/archive.md') AND f.path NOT LIKE 'memory/log/%' " : "") +
         "ORDER BY bm25(memory_fts), f.mtime_ms DESC LIMIT ?",
     )
     // SAFETY: the SELECT names exactly these three columns; snippet() is never null

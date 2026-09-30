@@ -142,6 +142,17 @@ describe("queueDelegation", () => {
     expect(_pendingCount(from.threadId)).toBe(0);
   });
 
+  it("accepts six handoffs per source thread and refuses the seventh", () => {
+    const item = { toBotId: target.id, message: "next task", depth: 0 };
+    for (let index = 0; index < 6; index++) {
+      expect(queueDelegation(commsBus, from, item, 1).result).toBe("ok");
+    }
+    expect(queueDelegation(commsBus, from, item, 1).result).toBe("too_many");
+    expect(_pendingCount(from.threadId)).toBe(6);
+    const sibling = store.createTask(from.id, "Separate work", false)!;
+    expect(queueDelegation(commsBus, from, item, 1, sibling.threadId).result).toBe("ok");
+  });
+
   it("queues, broadcasts, and drops a 'Delegated to @Target' chip on the source thread", () => {
     const result = queueDelegation(commsBus, from, {
       toBotId: target.id,
@@ -1150,6 +1161,47 @@ describe("busy waits and expiry", () => {
     expect(findDelegationReceipt("bulk-3")).toBeNull(); // oldest pruned
   });
 
+  it.each([false, true])("recovers a one-way failure notice after a restart (notice already written: %s)", async (noticeWritten) => {
+    const opened = store.createTask(target.id, "Owned work", false)!;
+    const queued = queueDelegation(commsBus, from, {
+      toBotId: target.id, message: "check this", depth: 0,
+      targetThreadId: opened.threadId, oneWay: true,
+    }, 1);
+    recordDelegationReceipt({
+      id: queued.id!, sourceThreadId: from.threadId, toBotId: target.id,
+      toBotName: target.name, status: "dropped", result: "access revoked",
+    });
+    if (noticeWritten) store.appendMessage(opened.threadId, {
+      role: "bot", kind: "activity",
+      tool: { name: "Send failed — access revoked", ok: false, handoffId: queued.id },
+    });
+    _resetPending();
+    _loadPending();
+    const runTarget = vi.fn();
+    drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => _pendingCount(from.threadId) === 0);
+    expect(runTarget).not.toHaveBeenCalled();
+    expect(store.messagesFor(opened.threadId).filter((message) => message.tool?.handoffId === queued.id)).toHaveLength(1);
+  });
+
+  it("does not treat a persisted inbound line as a completed one-way turn", async () => {
+    const opened = store.createTask(target.id, "Owned work", false)!;
+    const queued = queueDelegation(commsBus, from, {
+      toBotId: target.id, message: "check this", depth: 0,
+      targetThreadId: opened.threadId, oneWay: true,
+    }, 1);
+    store.appendMessage(opened.threadId, {
+      role: "user", kind: "text", text: "check this",
+      peerAsk: { botId: from.id, name: from.name },
+    });
+    _resetPending();
+    _loadPending();
+    const runTarget = vi.fn();
+    drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => runTarget.mock.calls.length === 1);
+    expect(runTarget.mock.calls[0]?.[5]).toBe(queued.id);
+  });
+
   it("writes a dropped receipt for every handoff a failed turn discards", async () => {
     const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "never runs", depth: 0 }, 1);
     const { discardDelegations } = await import("./delegations.ts");
@@ -1523,7 +1575,8 @@ describe("peer wake helpers", () => {
     let now = 1_000_000;
     const budget = new DelegationWakeBudget(() => now);
 
-    for (let i = 0; i < DELEGATION_WAKE_MAX_PER_WINDOW; i++) {
+    expect(DELEGATION_WAKE_MAX_PER_WINDOW).toBe(6);
+    for (let i = 0; i < 6; i++) {
       expect(budget.tryAcquire("t1")).toBe(true);
     }
     // cap reached — no further wakes within the same window

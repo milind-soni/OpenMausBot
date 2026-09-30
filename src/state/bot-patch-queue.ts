@@ -15,6 +15,9 @@ export type BotUpdatePatch = Partial<
     | "mascotExpression"
     | "avatarUrl"
     | "avatarCrop"
+    | "avatarZoom"
+    | "avatarFocusX"
+    | "avatarFocusY"
     | "autoApprove"
     | "approvalMode"
     | "speakReplies"
@@ -29,6 +32,7 @@ export type BotUpdatePatch = Partial<
     | "composio"
     | "browser"
     | "browserProfile"
+    | "memoryUpkeep"
     | "mcpServers"
     | "modelSelection"
   >

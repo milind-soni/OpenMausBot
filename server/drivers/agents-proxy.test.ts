@@ -1610,9 +1610,21 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.isError).toBeFalsy();
   });
 
-  it.each(["box", "cloud"])("maps %s execution to the explicit Box runner without changing stored wire values", async (run_on) => {
+  it("forwards for_bot_id when the action targets another bot's routine", async () => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("propose_routine_action", {
+      action: "pause",
+      routine_id: "routine-morning",
+      for_bot_id: "bot-helper",
+    });
+    expect(lastRoutineRequestBody.forBotId).toBe("bot-helper");
+    expect(lastRoutineRequestBody.routineId).toBe("routine-morning");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it.each(["box", "cloud"])("maps %s execution to the explicit Boat runner without changing stored wire values", async (run_on) => {
     const res = await callTool("propose_routine", {
-      name: "Box check", instructions: "Check explicitly on Box.",
+      name: "Boat check", instructions: "Check explicitly on Boat.",
       schedule: { type: "daily", time: "09:00" }, run_on,
     });
     expect(res.result.isError).toBeFalsy();
@@ -1624,7 +1636,7 @@ describe("agents-proxy MCP surface", () => {
     expect(lastRoutineRequestBody.changes.runOn).toBe("cloud");
   });
 
-  it("advertises VPS-compatible default execution separately from the Box runner", async () => {
+  it("advertises VPS-compatible default execution separately from the Boat runner", async () => {
     const list = await rpc("tools/list");
     const routine = list.result.tools.find((entry: { name: string }) => entry.name === "propose_routine");
     expect(routine.inputSchema.properties.run_on.enum).toEqual(["maus", "box"]);
@@ -2276,11 +2288,11 @@ describe("coordinate_bots arguments (room turn)", () => {
     threadResponse = { threadId: "thread-sent", title: "Ship it", botId: "bot-helper", botName: "Helper", self: false };
     try {
       const result = await roomRpc("tools/call", { name: "send_to_bot", arguments: {
-        bot_id: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.",
+        bot_id: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.", request_key: "ship-it",
       } });
       expect(result.result.isError).toBeFalsy();
       expect(lastThreadBody).toMatchObject({
-        toBotId: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.", oneWay: true,
+        toBotId: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.", requestKey: "ship-it", oneWay: true,
       });
       expect(result.result.content[0].text).toContain("nothing there will resume you");
     } finally {
@@ -2296,7 +2308,7 @@ describe("coordinate_bots arguments (room turn)", () => {
     };
     try {
       const result = await roomRpc("tools/call", { name: "send_to_bot", arguments: {
-        bot_id: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.",
+        bot_id: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.", request_key: "ship-approval",
       } });
       expect(result.result.isError).toBeFalsy();
       expect(result.result.content[0].text).toContain("pending approval");
@@ -2309,7 +2321,7 @@ describe("coordinate_bots arguments (room turn)", () => {
   it("refuses send_to_bot to self without contacting the server", async () => {
     lastThreadBody = null;
     const result = await roomRpc("tools/call", { name: "send_to_bot", arguments: {
-      bot_id: "bot-asker", title: "Separate work", message: "Do it.",
+      bot_id: "bot-asker", title: "Separate work", message: "Do it.", request_key: "separate-work",
     } });
     expect(result.result.isError).toBe(true);
     expect(result.result.content[0].text).toContain("cross-bot only");

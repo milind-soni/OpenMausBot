@@ -33,6 +33,9 @@ vi.mock("react", async (original) => ({
   },
   useEffect: () => {},
 }));
+// Menu animation has its own lifecycle checks; this hook fixture does not
+// emulate React's render-time state retries.
+vi.mock("./MenuMotion", () => ({ useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "" }) }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
@@ -123,6 +126,20 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("ModelPicker with a signed-out or missing Claude", () => {
+  it("keeps an empty ChatGPT plan catalog on the cloud rail so sign-in is reachable", () => {
+    const plan: InstanceInfo = { ...codex, instanceId: "chatgpt", displayName: "ChatGPT plan", snapshot: { state: "available", authenticated: false, chatgptPlan: true }, models: { default: "", options: [] }, authentication: { method: "browser-pkce" }, install: { signInCommand: "codex login" } };
+    fixture.instances = [codex, plan];
+    const forBot = bot("codex", "gpt-5.6");
+    const opened = open(forBot);
+    expect(rail(opened)!.props.instances.map((instance) => instance.instanceId)).toContain("chatgpt");
+    rail(opened)!.props.onSelect(plan);
+    const html = menu(render(forBot).html);
+    expect(html).toContain("Continue with ChatGPT");
+    expect(html).toContain("Available models appear after");
+    expect(html).not.toContain("codex login");
+    expect(html).not.toContain("Local models will appear");
+  });
+
   it("keeps a signed-out Claude on the rail and shows its sign-in card instead of pickable cloud models", () => {
     fixture.instances = [codex, signedOut()];
     const onCodex = bot("codex", "gpt-5.6");

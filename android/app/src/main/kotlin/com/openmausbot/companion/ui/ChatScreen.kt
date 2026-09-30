@@ -63,6 +63,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -173,7 +174,15 @@ fun ChatScreen(
 /** The transcript is on its way. Leaving is still possible while it is. */
 @Composable
 private fun OpeningThread(onBack: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    val latestOnBack by rememberUpdatedState(onBack)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            // The wait answers the swipe too: the reader changed their mind
+            // about this thread, and should not have to wait for it to load
+            // to say so.
+            .horizontalBackSwipe(onBack = { latestOnBack() }),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -771,7 +780,26 @@ private fun LoadedChat(
     BackHandler(enabled = !showingPlus && hudOpen) { closeHud() }
     BackHandler(enabled = !showingPlus && !hudOpen) { leaveToRoster() }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // A swipe across the conversation is the platform's back gesture carried
+    // to the body of the screen — one exit chain, so the pill, the system's
+    // back, and the swipe can never disagree about what leaving means.
+    fun backBySwipe() {
+        when {
+            showingPlus -> showingPlus = false
+            hudOpen -> closeHud()
+            else -> leaveToRoster()
+        }
+    }
+
+    // Live chat state recomposes this scope mid-drag; the latest state-backed
+    // exit decision keeps the detector running without restarting it.
+    val latestBackBySwipe = rememberUpdatedState(::backBySwipe)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .horizontalBackSwipe(onBack = { latestBackBySwipe.value() }),
+    ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
@@ -905,7 +933,7 @@ private fun LoadedChat(
                     unreadElsewhere = remember(state, chat) {
                         (state.unreadCount - if (chat.unread) 1 else 0).coerceAtLeast(0)
                     },
-                    onBack = { leaveToRoster() },
+                    onBack = { backBySwipe() },
                     onOpenThreads = {
                         dictation.stop()
                         focusManager.clearFocus()

@@ -52,7 +52,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
           <span className="sr-only">Search bots</span>
           <Search
             size={13}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-secondary/70"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
             aria-hidden="true"
           />
           <input
@@ -60,7 +60,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
             onChange={(event) => setQuery(event.target.value)}
             type="search"
             placeholder="Search bots"
-            className="h-8 w-full rounded-lg border border-hairline/45 bg-control/55 pl-8 pr-2.5 text-[11.5px] text-ink outline-none placeholder:text-ink-secondary/55 focus:border-accent/60 focus:bg-control"
+            className="h-8 w-full rounded-lg border border-hairline/45 bg-control/55 pl-8 pr-2.5 text-[11.5px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/60 focus:bg-control"
           />
         </label>
 
@@ -83,11 +83,11 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
               <BotAvatar bot={bot} size={27} animated={false} />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[11.5px] font-medium text-ink">{bot.name}</div>
-                <div className="truncate text-[9.5px] text-ink-secondary/75">
+                <div className="truncate text-[9.5px] text-ink-tertiary">
                   {bot.title || "BotAgent"}
                 </div>
               </div>
-              <span className="shrink-0 rounded-full border border-hairline/50 px-1.5 py-0.5 text-[8.5px] text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">
+              <span className="shrink-0 rounded-full border border-hairline/50 px-1.5 py-0.5 text-[8.5px] text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
                 Drag
               </span>
             </div>
@@ -100,7 +100,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
           )}
         </div>
 
-        <p className="mt-2 px-2 text-[9.5px] leading-relaxed text-ink-secondary/65">
+        <p className="mt-2 px-2 text-[9.5px] leading-relaxed text-ink-tertiary">
           Drag a bot onto any time to schedule it.
         </p>
       </section>

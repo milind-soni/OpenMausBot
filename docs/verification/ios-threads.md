@@ -41,11 +41,31 @@ switching check can assert that the body as well as the title changes. The
 bulk-delete UI checks add `-threads-preview-deletion` to update that synthetic
 fleet in memory; `-threads-preview-deletion-fails-weekend` refuses the second
 delete to check partial results. These flags are compiled only in Debug.
+They start from the default compact list (`-reset-list-density` drops a
+density saved by an earlier run), where Pepper's threads open from its **› 3**
+control; the folder-switching and home-search checks also run in comfortable,
+through its Threads row.
+
+`RosterDensityUITests` launches with `-store-preview -roster-preview`.
+`App/RosterPreview.json` is another synthetic, offline fleet: an unsectioned
+Chief of Staff, a pinned bot, Pepper with three threads (one in an Email
+folder, one queued) and a hidden routine run, a bot waiting on you, a working
+bot, groups, a bot-to-bot chat and named sections with their own Chief. It
+checks that compact is the default; that a single-thread bot has no thread
+control but its long-press menu offers **New thread**; that Pepper's **› 3**
+lists its threads in line with its name and ends with **New thread**, with its
+unfiled thread under a **Threads** label that stays when the Email folder
+closes; that
+**Settings → List density** switches to comfortable and is remembered across
+launches; and, in both densities, that the first section title clears the
+header's buttons and the last row, scrolled to the end, sits wholly above the
+floating Updates bar.
 
 Check on iPhone and iPad:
 
-1. Expand Pepper's Threads row and Email folder. Each visible thread opens
-   directly; the routine run is absent. Check working, queued and unread labels.
+1. Expand Pepper's threads (**› 3** in compact, the Threads row in
+   comfortable) and its Email folder. Each visible thread opens directly; the
+   routine run is absent. Check working, queued and unread labels.
 2. Search by folder and thread name, then clear the search.
 3. Enter an unsent draft in Gmail, switch to iCloud through the thread-name
    pill, and return. iCloud must not inherit Gmail's draft; Gmail must retain
@@ -66,10 +86,12 @@ Check on iPhone and iPad:
 
 Keep the `.xcresult` bundle and screenshots as evidence. Shut down and remove
 only the disposable simulators you created.
-The PR's macOS CI runs `scripts/verify-ios-thread-navigation-ci.sh` after the
-simulator build. It creates fresh iPhone and iPad simulators, runs only this
-offline UI fixture, deletes those exact simulators, and uploads both `.xcresult`
-bundles with screenshots as a short-lived artifact.
+The `iOS thread UI` workflow (`.github/workflows/ios-thread-ui.yml`) runs
+`scripts/verify-ios-thread-navigation-ci.sh` nightly, after main pushes that
+touch `ios/`, and by hand from the Actions tab. It creates fresh iPhone and iPad
+simulators, runs only this offline UI fixture, deletes those exact simulators,
+and uploads both `.xcresult` bundles with screenshots as a short-lived artifact.
+PR CI runs the Swift tests and the simulator build only.
 
 The offline UI checks do **not** prove real-device pairing, HTTPS/Tailscale,
 live network reconnects, dictation or attachment uploads. Validate those with

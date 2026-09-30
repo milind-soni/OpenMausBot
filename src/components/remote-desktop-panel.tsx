@@ -257,7 +257,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
             {error}
           </div>
         )}
-        <p className="text-[11px] leading-relaxed text-ink-tertiary">
+        <p className="text-[11px] leading-relaxed text-ink-secondary">
           The host must enable cloud desktop access for this paired device in Settings → Remote access.
         </p>
 

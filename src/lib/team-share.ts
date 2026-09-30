@@ -69,14 +69,14 @@ export interface ShareView {
   preview: ShareResponse | null;
   /** Every skill name on the team's bots, one box each; null until the server first answers. */
   available: string[] | null;
-  /** The boxes ticked until the person changes one (startingTicks). */
+  /** The boats ticked until the person changes one (startingTicks). */
   included: string[] | null;
   error: string;
 }
 
 export const SHARE_VIEW_START: ShareView = { preview: null, available: null, included: null, error: "" };
 
-/** A dry run answered. `all`: it asked for "all" (no box changed yet). */
+/** A dry run answered. `all`: it asked for "all" (no boat changed yet). */
 export function shareAnswered(view: ShareView, result: ShareResponse, all: boolean): ShareView {
   return { preview: result, available: result.choices.skills, included: all ? startingTicks(result) : view.included, error: "" };
 }

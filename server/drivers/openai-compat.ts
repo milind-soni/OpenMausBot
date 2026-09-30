@@ -168,7 +168,14 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       includeUsageInCompleted: true,
       nativeLog: {
         source: "openai-compat.chat.completions",
-        outgoing: (_turn, messages, model) => ({ model, messageCount: messages.length }),
+        // Tool names are the answer to "did the harness send them?" — the
+        // LiteLLM/proxy hop after this point is what drops tools silently,
+        // and until now the tee held no record either side could compare.
+        outgoing: (_turn, messages, model, tools) => ({
+          model,
+          messageCount: messages.length,
+          tools: tools.map(tool => tool.function.name),
+        }),
         incoming: ({ text, reasoning, usage }) => ({
           textLength: text.length,
           reasoningLength: reasoning.length,

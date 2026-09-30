@@ -17,7 +17,7 @@ export interface BeatProps {
 }
 
 export const inputClass =
-  "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
+  "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none";
 
 /** Index for the `.stagger` utility; each sibling arrives 40ms after the last. */
 export function staggerIndex(i: number): CSSProperties {

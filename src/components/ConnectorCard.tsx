@@ -118,7 +118,7 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
                 : connector.description}
             </p>
             {!connected && (
-              <p className="mt-1 text-[11.5px] text-ink-secondary/80">
+              <p className="mt-1 text-[11.5px] text-ink-tertiary">
                 {t("connectors.card.signInHint")}
               </p>
             )}

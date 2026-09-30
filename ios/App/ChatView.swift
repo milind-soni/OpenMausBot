@@ -352,6 +352,11 @@ struct ChatView: View {
         .overlay(alignment: .bottom) { plusSheet }
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
+        // Hiding the bar above also disarms the system edge-swipe back
+        // gesture, which is wired to the bar's navigation controller.
+        // Re-arm it so a rightward swipe from the left edge pops back to
+        // Home, the way the rest of iOS behaves.
+        .background(SwipeBackBridge())
         .navigationDestination(isPresented: $showingComputer) {
             if case let .bot(bot) = current { ComputerView(bot: bot) }
         }

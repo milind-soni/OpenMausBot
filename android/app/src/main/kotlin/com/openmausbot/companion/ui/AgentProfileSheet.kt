@@ -70,6 +70,7 @@ import com.openmausbot.companion.core.AvatarCrop
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.BotProfilePatch
+import com.openmausbot.companion.core.BotOverviewGrant
 import com.openmausbot.companion.core.ConfigStatus
 import com.openmausbot.companion.core.Instance
 import com.openmausbot.companion.core.ModelSelection
@@ -118,6 +119,9 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
     var config by remember { mutableStateOf<ConfigStatus?>(null) }
     var busy by remember { mutableStateOf(false) }
     var switchingEngine by remember { mutableStateOf(false) }
+    // Read-only facts from the overview route; reloads on reopen, so plain
+    // remember — there is nothing here a rotation needs to defend.
+    var grants by remember { mutableStateOf<List<BotOverviewGrant>?>(null) }
 
     // The Model section. The draft survives rotation; the catalog is reloaded.
     var instances by remember { mutableStateOf<List<Instance>>(emptyList()) }
@@ -139,6 +143,12 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
     }
 
     LaunchedEffect(Unit) {
+        // Grants are a supplementary read a connected workspace's overview
+        // route can make slow; it must not stall the config, voice, and
+        // model loads above it. It runs as an independent child — quiet,
+        // because a failed fetch leaves this section absent, not the
+        // profile erroring.
+        launch { grants = session.loadOverview(opened.id, quiet = true)?.grants }
         val loaded = coroutineScope {
             val status = async { session.configStatus() }
             val options = async { session.voiceOptions() }
@@ -223,6 +233,40 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
                         icon = Icons.Filled.Info,
                         onClick = { onOpenOverview(bot.id) },
                     )
+                }
+
+                // Per-bot tool grants ride the overview route, so the sheet
+                // reads the same summary the overview screen does — read-only,
+                // because the editor lives in the desktop app. Nothing draws
+                // on computers that predate grants; an empty record is the
+                // explicit no-tools state and says so.
+                grants?.let { grantList ->
+                    val grantRows = ProfileRules.connectorGrantRows(grantList)
+                    FormSection(
+                        header = ProfileRules.CONNECTED_APPS,
+                        footer = ProfileRules.CONNECTED_APPS_FOOTER,
+                    ) {
+                        if (grantRows.isEmpty()) {
+                            Text(
+                                ProfileRules.GRANTS_NONE_ANY,
+                                fontSize = 15.sp,
+                                color = secondaryTint,
+                            )
+                        } else {
+                            grantRows.forEach { row ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = MIN_TOUCH_TARGET),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(row.service, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                    Text(row.summary, fontSize = 15.sp, color = secondaryTint)
+                                }
+                            }
+                        }
+                    }
                 }
 
                 FormSection(header = "Model", footer = ModelRules.FOOTER) {

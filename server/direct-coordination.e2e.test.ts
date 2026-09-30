@@ -37,10 +37,10 @@ async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessE
 it("sends cross-bot work onward without resuming either sender", () => fixture(async f => {
   const gate = join(f.session.info.dataDir, "sent-work-ready");
   f.plan[f.chief.id] = { steps: [{ tool: "send_to_bot", arguments: {
-    bot_id: f.lead.id, title: "Release owner", message: "Own the release and send final QA to Reviewer.",
+    bot_id: f.lead.id, title: "Release owner", message: "Own the release and send final QA to Reviewer.", request_key: "release-owner",
   } }], reply: "Release sent" };
   f.plan[f.lead.id] = { steps: [{ tool: "send_to_bot", arguments: {
-    bot_id: f.specialist.id, title: "Release QA", message: "Own final release QA.",
+    bot_id: f.specialist.id, title: "Release QA", message: "Own final release QA.", request_key: "release-qa",
   } }], reply: "QA sent onward" };
   f.plan[f.specialist.id] = { gateFile: gate, reply: "Release QA complete" };
 

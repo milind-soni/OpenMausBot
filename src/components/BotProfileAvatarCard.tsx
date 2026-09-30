@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { ImagePlus, Loader2, Trash2 } from "lucide-react";
 
 import { useStore, type Bot } from "@/state/store";
@@ -13,8 +13,13 @@ import {
   type MausState,
 } from "@/lib/mascot";
 import {
+  AVATAR_FOCUS_CENTER,
+  AVATAR_ZOOM_MAX,
+  AVATAR_ZOOM_MIN,
   BOT_AVATAR_CROPS,
   botAvatarUrlFromStoredPath,
+  clampAvatarFocus,
+  clampAvatarZoom,
   type BotAvatarCrop,
 } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
@@ -23,8 +28,95 @@ import { AvatarImageGenerator } from "./AvatarImageGenerator";
 import { useOrganizationBranding } from "@/lib/use-organization-branding";
 
 type AvatarPatch = Partial<
-  Pick<Bot, "avatarCrop" | "avatarUrl" | "color" | "mascotExpression" | "mascotBody">
+  Pick<Bot, "avatarCrop" | "avatarUrl" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "color" | "mascotExpression" | "mascotBody">
 >;
+
+const FRAME_SIZE = 168;
+
+function AvatarFraming({
+  bot,
+  disabled,
+  onPatch,
+}: {
+  bot: Bot;
+  disabled: boolean;
+  onPatch: (patch: AvatarPatch) => void;
+}) {
+  const zoom = clampAvatarZoom(bot.avatarZoom ?? AVATAR_ZOOM_MIN);
+  const focusX = clampAvatarFocus(bot.avatarFocusX ?? AVATAR_FOCUS_CENTER);
+  const focusY = clampAvatarFocus(bot.avatarFocusY ?? AVATAR_FOCUS_CENTER);
+  const framed = zoom !== AVATAR_ZOOM_MIN || focusX !== AVATAR_FOCUS_CENTER || focusY !== AVATAR_FOCUS_CENTER;
+  const drag = useRef<{ x: number; y: number; focusX: number; focusY: number; pointer: number } | null>(null);
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (disabled || event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { x: event.clientX, y: event.clientY, focusX, focusY, pointer: event.pointerId };
+  };
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = drag.current;
+    if (!start || event.pointerId !== start.pointer) return;
+    onPatch({
+      avatarFocusX: clampAvatarFocus(start.focusX - (event.clientX - start.x) / FRAME_SIZE / zoom),
+      avatarFocusY: clampAvatarFocus(start.focusY - (event.clientY - start.y) / FRAME_SIZE / zoom),
+    });
+  };
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (drag.current?.pointer === event.pointerId) drag.current = null;
+  };
+  const onWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (disabled || event.deltaY === 0) return;
+    event.preventDefault();
+    onPatch({ avatarZoom: clampAvatarZoom(zoom + (event.deltaY < 0 ? 0.08 : -0.08)) });
+  };
+
+  return (
+    <div className="py-3">
+      <div
+        className="mx-auto w-fit cursor-grab touch-none active:cursor-grabbing"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onWheel={onWheel}
+      >
+        <BotAvatar bot={bot} size={FRAME_SIZE} animated={false} label={`${bot.name} avatar preview`} />
+      </div>
+      <div className="mb-1.5 mt-4 flex items-baseline justify-between">
+        <span className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">Zoom</span>
+        <span className="tabular-nums text-[12px] text-ink-secondary">{Math.round(zoom * 100)}%</span>
+      </div>
+      <input
+        type="range"
+        min={AVATAR_ZOOM_MIN}
+        max={AVATAR_ZOOM_MAX}
+        step={0.01}
+        value={zoom}
+        disabled={disabled}
+        aria-label="Zoom avatar"
+        aria-valuemin={AVATAR_ZOOM_MIN}
+        aria-valuemax={AVATAR_ZOOM_MAX}
+        aria-valuenow={zoom}
+        aria-valuetext={`${Math.round(zoom * 100)}%`}
+        onChange={(event) => onPatch({ avatarZoom: clampAvatarZoom(Number(event.target.value)) })}
+        className="w-full accent-accent"
+      />
+      <div className="mt-1.5 flex items-center justify-between gap-3 text-[11.5px] text-ink-secondary">
+        <span>Drag the picture to reposition it. Scroll to zoom.</span>
+        {framed && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onPatch({ avatarZoom: AVATAR_ZOOM_MIN, avatarFocusX: AVATAR_FOCUS_CENTER, avatarFocusY: AVATAR_FOCUS_CENTER })}
+            className="shrink-0 rounded-md px-2 py-1 text-ink hover:bg-control disabled:opacity-50"
+          >
+            Reset framing
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const CROP_LABEL = {
   mascot: "Mascot",
@@ -66,7 +158,13 @@ export function BotProfileAvatarCard({
       const avatarUrl = uploadAvatar ? await uploadAvatar(file) : saved ? botAvatarUrlFromStoredPath(saved.path) : null;
       if (!avatarUrl) throw new Error("The uploaded image could not be used as an avatar");
       const latestCrop = cropRef.current;
-      onPatch({ avatarUrl, avatarCrop: latestCrop === "mascot" ? "circle" : latestCrop });
+      onPatch({
+        avatarUrl,
+        avatarCrop: latestCrop === "mascot" ? "circle" : latestCrop,
+        avatarZoom: AVATAR_ZOOM_MIN,
+        avatarFocusX: AVATAR_FOCUS_CENTER,
+        avatarFocusY: AVATAR_FOCUS_CENTER,
+      });
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : String(uploadError));
     } finally {
@@ -77,7 +175,13 @@ export function BotProfileAvatarCard({
 
   const removeImage = () => {
     setError(null);
-    onPatch({ avatarUrl: null, avatarCrop: "mascot" });
+    onPatch({
+      avatarUrl: null,
+      avatarCrop: "mascot",
+      avatarZoom: AVATAR_ZOOM_MIN,
+      avatarFocusX: AVATAR_FOCUS_CENTER,
+      avatarFocusY: AVATAR_FOCUS_CENTER,
+    });
   };
 
   const generate = async (direction: string) => {
@@ -136,15 +240,19 @@ export function BotProfileAvatarCard({
             void upload(new File([bytes], `${icon.id}.png`, { type: "image/png" }));
           }}><img src={icon.image} alt="" className="size-10 rounded-md object-contain" /></button>)}</div>
         </div>}
-        <div className="flex justify-center py-3">
-          <BotAvatar
-            bot={bot}
-            state={activeState}
-            size={112}
-            motion={mascotMotion?.kind ?? "none"}
-            motionKey={mascotMotion?.nonce ?? 0}
-          />
-        </div>
+        {crop !== "mascot" && bot.avatarUrl ? (
+          <AvatarFraming bot={bot} disabled={busy} onPatch={onPatch} />
+        ) : (
+          <div className="flex justify-center py-3">
+            <BotAvatar
+              bot={bot}
+              state={activeState}
+              size={112}
+              motion={mascotMotion?.kind ?? "none"}
+              motionKey={mascotMotion?.nonce ?? 0}
+            />
+          </div>
+        )}
 
         <div className="mt-2 flex gap-2">
           <input

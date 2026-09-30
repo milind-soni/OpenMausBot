@@ -12,3 +12,9 @@ android/app/src/main/kotlin/com/openmausbot/companion/ui/MausBodies.kt text eol=
 # Vendor patch hashes and original notices must survive Windows checkout
 # byte-for-byte. Do not let core.autocrlf rewrite these reviewed inputs.
 third_party/browser/** text eol=lf
+# The live-eval judge prompts are checksummed in their manifest, and the golden
+# scenarios are compared byte for byte with what the redactor writes (LF), in
+# evals/live/live-suite.test.ts and evals/golden/golden.test.ts. A CRLF checkout
+# on Windows fails both for a reason that has nothing to do with the evals.
+evals/live/judge/prompts/** text eol=lf
+evals/golden/**/*.json text eol=lf

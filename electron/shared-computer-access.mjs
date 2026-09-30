@@ -7,9 +7,42 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
+import { lentScreenArguments, lentScreenToolListing } from "./lent-screen-tools.mjs";
 
 const LIMIT = 256 * 1024;
 const PROTECTED = "Desktop credentials and sharing settings cannot be accessed through a shared folder";
+const GIT_INTERNALS = "Files inside .git cannot be changed through a shared folder: git runs commands from its configuration and hooks";
+
+/** Where a person keeps the keys that open a shell or an account (SSH, cloud
+ * and package CLIs, the coding engines, keychains and browser cookie stores)
+ * and the places that run code by themselves (login items, git and shell
+ * configuration, ~/.local/bin). No folder grant reaches these, read-only or
+ * not, however the shared folder around them was chosen. Relative to home;
+ * entries that do not exist on this machine protect nothing. */
+const PERSONAL_SECRETS = [
+  ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".netrc", ".git-credentials", ".npmrc", ".pypirc",
+  ".claude", ".claude.json", ".codex", ".mozilla", ".local/share/keyrings", ".local/bin",
+  ".config/gh", ".config/gcloud", ".config/op", ".config/git", ".config/fish", ".config/autostart", ".config/systemd",
+  ".config/google-chrome", ".config/chromium", ".config/BraveSoftware", ".config/microsoft-edge",
+  "Library/Keychains", "Library/Cookies", "Library/LaunchAgents", "Library/Safari",
+  "Library/Application Support/Google/Chrome", "Library/Application Support/Chromium",
+  "Library/Application Support/BraveSoftware", "Library/Application Support/Microsoft Edge",
+  "Library/Application Support/Firefox", "Library/Application Support/Arc",
+];
+export function personalSecretPaths(home) {
+  return typeof home === "string" && home ? PERSONAL_SECRETS.map(entry => path.join(home, ...entry.split("/"))) : [];
+}
+
+/** The computer-control tools a lent screen offers, and the arguments each
+ * accepts: observing windows and operating apps the way a person at the
+ * keyboard would (electron/lent-screen-tools.mjs). */
+export { LENT_SCREEN_TOOLS } from "./lent-screen-tools.mjs";
+
+/** Any component named .git, compared the way a case-folding, Unicode-
+ * normalizing filesystem compares it: in the requested path, or in the
+ * shared folder itself (someone may have picked a .git directory). */
+const gitComponent = part => part.normalize("NFC").toLowerCase() === ".git";
+const insideGitInternals = (root, relative) => root.split(path.sep).some(gitComponent) || relative.split("/").some(gitComponent);
 const hash = data => createHash("sha256").update(data).digest("hex");
 const absent = error => error.code === "ENOENT" || error.code === "ENOTDIR";
 const identify = async candidate => { const info = await fs.stat(candidate, { bigint: true }); return `${info.dev}:${info.ino}`; };
@@ -164,9 +197,16 @@ export function createSharedCua(connection) {
   return {
     async call(operation, signal) {
       await ready; signal.throwIfAborted();
-      if (operation.action === "computer_tools") return text(await request("tools/list", {}, signal));
+      if (operation.action === "computer_tools") {
+        const listed = await request("tools/list", {}, signal);
+        return text({ ...listed, tools: lentScreenToolListing(listed?.tools) });
+      }
       if (typeof operation.tool_name !== "string" || !operation.tool_name) throw new Error("Choose a tool from computer_tools first");
-      return request("tools/call", { name: operation.tool_name, arguments: operation.arguments ?? {} }, signal);
+      // Tool and every argument checked here, on this computer: nothing the
+      // server sends reaches the driver unless a lent screen accepts it.
+      const lent = lentScreenArguments(operation.tool_name, operation.arguments);
+      if (lent.error) throw new Error(lent.error);
+      return request("tools/call", { name: operation.tool_name, arguments: lent.arguments }, signal);
     },
     close() { lines.close(); fail(new Error("Computer sharing stopped")); },
   };
@@ -192,10 +232,18 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
   signal.throwIfAborted();
   if (operation.action === "list_files") {
     const entries = await fs.readdir(target, { withFileTypes: true });
-    return text({ entries: entries.slice(0, 200).map(entry => ({ name: entry.name, type: entry.isSymbolicLink() ? "blocked-link" : entry.isDirectory() ? "directory" : "file" })), truncated: entries.length > 200 });
+    const shown = await Promise.all(entries.slice(0, 200).map(async entry => {
+      if (entry.isSymbolicLink()) return { name: entry.name, type: "blocked-link" };
+      let identity;
+      try { identity = await identify(path.join(target, entry.name)); } catch { /* vanished meanwhile */ }
+      if (identity !== undefined && protectedRoots.has(identity)) return { name: entry.name, type: "protected" };
+      return { name: entry.name, type: entry.isDirectory() ? "directory" : "file" };
+    }));
+    return text({ entries: shown, truncated: entries.length > 200 });
   }
   const write = operation.action === "write_file";
   if (write && folder.write !== true) throw new Error("This folder is read-only");
+  if (write && insideGitInternals(folder.path, operation.path ?? "")) throw new Error(GIT_INTERNALS);
   let data;
   if (write) {
     if (typeof operation.content !== "string") throw new Error("Give file content to write");

@@ -8,6 +8,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Activity, Check, ChevronDown, FolderInput, Pencil, Pin, PinOff, Plus, Search, Trash2 } from "lucide-react";
 import { useStore, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { formatTaskTokens, headlineTokens, usageDetail } from "@/lib/usage";
@@ -115,6 +116,7 @@ function ConversationTaskPicker({
   onAttentionJump?: (entry: AttentionThread) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const motion = useMenuMotion(open);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
@@ -255,10 +257,10 @@ function ConversationTaskPicker({
         <ChevronDown size={12} className="shrink-0 @max-4xl/chathead:hidden" />
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50">
+      {motion.shown && (
+        <div className={cn("absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50", motion.className)} {...motion.exitProps}>
           <div className="px-2 pb-1 pt-1.5">
-            <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 focus-within:border-accent/60">
+            <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 focus-within:border-focus">
               <Search size={13} className="shrink-0 text-ink-secondary" />
               <input
                 autoFocus
@@ -370,7 +372,7 @@ function ConversationTaskPicker({
                       onClick={() => onPin(task.threadId, task.pinned !== true)}
                       aria-label={task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}
                       title={task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}
-                      className="rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+                      className="rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-70"
                     >
                       {task.pinned === true ? <PinOff size={13} /> : <Pin size={13} />}
                     </button>
@@ -381,12 +383,12 @@ function ConversationTaskPicker({
                       onClick={() => startRename(task)}
                       aria-label={t("task.renameNamed", { title: task.title })}
                       title={t("task.renameTitle")}
-                      className="rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+                      className="rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-70"
                     >
                       <Pencil size={13} />
                     </button>
                   )}
-                  {bot && onMove && (bot.projects?.length ?? 0) > 0 && <label title={t("folder.move")} className="relative rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-within:opacity-100 group-hover:opacity-100">
+                  {bot && onMove && (bot.projects?.length ?? 0) > 0 && <label title={t("folder.move")} className="relative rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-within:opacity-100 group-hover:opacity-100 touch:opacity-70">
                     <FolderInput size={13} />
                     <select aria-label={t("folder.moveNamed", { title: task.title })} value={bot.projects?.some((project) => project.id === task.projectId) ? task.projectId : ""}
                       onFocus={clearDismiss} onChange={(event) => { clearDismiss(); onMove(task.threadId, event.target.value || null); }}
@@ -401,7 +403,7 @@ function ConversationTaskPicker({
                     disabled={Boolean(task.busy) || busy && active}
                     aria-label={t("task.deleteAria")}
                     title={t("task.deleteTitle")}
-                    className="rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-danger group-hover:opacity-100 disabled:opacity-20"
+                    className="rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-20 touch:opacity-70 touch:disabled:opacity-20"
                   >
                     <Trash2 size={13} />
                   </button>

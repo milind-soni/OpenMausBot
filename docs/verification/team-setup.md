@@ -56,7 +56,7 @@ For deletion, ask separately:
 
 `propose_bot_deletion` produces a separate destructive review naming the exact
 bot. Lifecycle guards reject active work. Before removing the bot, the server
-discovers and deletes its exact managed Box, VPS container, and per-bot Local
+discovers and deletes its exact managed Boat, VPS container, and per-bot Local
 VM (including that VM's private workspace). Shared team computers are left
 alone. A provider outage, unresolved ownership, unmanaged name collision, or
 unconfirmed provider deletion keeps the bot so deletion can be retried. Bot

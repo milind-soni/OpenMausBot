@@ -137,7 +137,7 @@ export function VisibilitySection({ bot }: { bot: Bot }) {
             placeholder={t("botSettings.visibility.peoplePlaceholder")}
             rows={4}
             disabled={busy}
-            className="rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            className="rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
         </label>
       )}

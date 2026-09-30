@@ -88,15 +88,17 @@ export function parseGroupGoalDecision(text: string): ParsedGroupGoalDecision {
   return { visibleText, decision: null };
 }
 
-/** Explicit room lead wins. Otherwise prefer an in-room Chief, then the
- * first active member. A goal run never recruits somebody outside the room. */
+/** Explicit room lead (or an Auto room's fallback) wins. Otherwise prefer
+ * an in-room Chief, then the first active member. A goal run never recruits
+ * somebody outside the room. */
 export function selectGroupGoalCoordinator<Member extends GoalRunMember>(
   members: Member[],
   responder: GroupDefaultResponder,
 ): Member | null {
   const active = members.filter((member) => !member.hidden);
-  if (responder.kind === "member") {
-    const explicit = active.find((member) => member.id === responder.botId);
+  const lead = responder.kind === "member" ? responder.botId : responder.kind === "auto" ? responder.fallbackBotId : undefined;
+  if (lead) {
+    const explicit = active.find((member) => member.id === lead);
     if (explicit) return explicit;
   }
   return active.find((member) => member.chiefOfStaff) ?? active[0] ?? null;

@@ -263,11 +263,11 @@ export class ProviderRegistry {
           install: withServerInstall(driver?.install, npmPresent),
           authentication: inst.startAuthentication
             ? {
-                method: inst.getAuthentication && inst.completeAuthentication
+                method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication
                   ? "paste-code" as const // a link to open, then a code pasted back (Claude)
                   : inst.getAuthentication
                     ? "device-code" as const // a code to enter at the provider's page (Codex)
-                    : "browser" as const, // a link and a callback URL (managed engines)
+                    : "browser" as const), // a link and a callback URL (managed engines)
                 // the browser may remove the stored sign-in to switch accounts
                 signOut: inst.signOut !== undefined,
               }

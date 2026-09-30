@@ -70,10 +70,11 @@ export type RoutineRequestChanges =
     timeoutMinutes?: number | null;
   };
 
-/** Another bot in the proposer's section that the routine is scheduled for.
- * Captured (id + display name) when the card is created so the card stays
- * meaningful if the bot is later renamed; authority over the card remains
- * with the proposing conversation. */
+/** Another bot in the proposer's section that this proposal targets: a
+ * routine scheduled for it, or one of its routines being changed. Captured
+ * (id + display name) when the card is created so the card stays meaningful
+ * if the bot is later renamed; authority over the card remains with the
+ * proposing conversation. */
 export interface RoutineRequestTargetBot {
   botId: string;
   name: string;
@@ -81,11 +82,11 @@ export interface RoutineRequestTargetBot {
 
 export type RoutineRequestOperation =
   | { action: "create"; routine: RoutineRequestDefinition; forBot?: RoutineRequestTargetBot }
-  | { action: "update"; routineId: string; expectedUpdatedAt: number; changes: RoutineRequestChanges }
-  | { action: "pause"; routineId: string; expectedUpdatedAt: number }
-  | { action: "resume"; routineId: string; expectedUpdatedAt: number }
-  | { action: "run_now"; routineId: string; expectedUpdatedAt: number }
-  | { action: "delete"; routineId: string; expectedUpdatedAt: number };
+  | { action: "update"; routineId: string; expectedUpdatedAt: number; changes: RoutineRequestChanges; forBot?: RoutineRequestTargetBot }
+  | { action: "pause"; routineId: string; expectedUpdatedAt: number; forBot?: RoutineRequestTargetBot }
+  | { action: "resume"; routineId: string; expectedUpdatedAt: number; forBot?: RoutineRequestTargetBot }
+  | { action: "run_now"; routineId: string; expectedUpdatedAt: number; forBot?: RoutineRequestTargetBot }
+  | { action: "delete"; routineId: string; expectedUpdatedAt: number; forBot?: RoutineRequestTargetBot };
 
 export interface RoutineRequestCardData {
   version: 1;

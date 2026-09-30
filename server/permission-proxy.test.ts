@@ -5,7 +5,7 @@
 //
 // The case that matters most is the CLI's own AskUserQuestion. It arrives
 // through `approve` looking like a permission, and answering it as one is why
-// a multiple-choice question reached users as an Allow/Deny box over a
+// a multiple-choice question reached users as an Allow/Deny boat over a
 // truncated JSON blob. It has to leave here as a question, and come back as
 // the `answers` object the tool documents — a bare allow makes the CLI run
 // the tool, and a headless run has no dialog, so the click is discarded

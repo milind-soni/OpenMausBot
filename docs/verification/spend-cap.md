@@ -12,6 +12,10 @@
 - Count a turn the moment it settles, not when the ledger's append lands or a
   cache expires, however long the turn ran: a booked turn counts from memory
   until its row lands, and never twice once it has.
+- Book memory upkeep's helper calls to the same ledger and check the cap
+  before each capture, organization and contradiction call. Record the helper
+  model rather than the bot's conversational model. Deterministic tidy steps
+  do not spend tokens and still run at the cap.
 - Price turns from the operator's list (`driver/model`, then model, then
   `default`) into a billable column in `/api/usage` and its CSV.
 - Do nothing at all without the `budgets` / `billing` entitlements.
@@ -39,6 +43,8 @@ It also holds an admin and a chat-only event stream open across the two turns
 and checks the admin gets exactly one warning and one cap notice and the
 chat-only device gets neither.
 It prints the fixture's server log path and removes its temporary homes.
+The memory regression also proves that one helper reaching the cap blocks
+the next step in that same upkeep pass, and that raising the cap resumes it.
 
 For the same by hand, launch a fixture with `OMB_ENTERPRISE_DIR` pointing at a
 folder whose `server/index.js` exports such a `register()`, and
@@ -65,6 +71,10 @@ the once-a-month notices surviving a restart.
   equivalent on personal subscriptions) plus list-price estimates for engines
   that report none. A workspace on subscriptions alone can hit a cap without a
   bill, and a turn on a model the list does not know counts nothing.
+- Missing helper token usage stays unpriced unless the provider reports a
+  cost; it is not treated as a known zero-dollar call. Already-started calls
+  may finish above the cap, which stops subsequent calls rather than reserving
+  an unknown future cost.
 - Rows written before estimates existed keep `costUsd: null` and stay
   unpriced; only turns settled after the upgrade are estimated, so the month
   of the upgrade can undercount Codex/OpenRouter spend.

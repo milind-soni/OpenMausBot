@@ -39,7 +39,7 @@ final class StreamingStub: URLProtocol {
 
     private let stopped = Stopped()
 
-    /// A tiny box, because `stopLoading()` may be called from another thread
+    /// A tiny boat, because `stopLoading()` may be called from another thread
     /// than the one delivering chunks.
     final class Stopped {
         private let lock = NSLock()

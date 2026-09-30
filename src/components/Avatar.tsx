@@ -15,7 +15,7 @@ import {
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
-import { botAvatarProfile, type BotAvatarCrop } from "../../shared/bot-avatar";
+import { botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
 
 export const EYE_SCALE = 1.12;
@@ -205,6 +205,9 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
     color: MausColor;
     avatarUrl?: string | null;
     avatarCrop?: BotAvatarCrop;
+    avatarZoom?: number;
+    avatarFocusX?: number;
+    avatarFocusY?: number;
     mascotBody?: MascotBodyId | null;
   };
 };
@@ -270,17 +273,32 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
       : profile.avatarCrop === "rounded"
         ? "22%"
         : "0";
+  const zoom = clampAvatarZoom(bot.avatarZoom ?? 1);
+  const focusX = clampAvatarFocus(bot.avatarFocusX ?? 0.5);
+  const focusY = clampAvatarFocus(bot.avatarFocusY ?? 0.5);
+  const origin = `${focusX * 100}% ${focusY * 100}%`;
   return (
-    <img
-      src={profile.avatarUrl}
-      alt={label ?? (bot.name ? `${bot.name} avatar` : "Bot avatar")}
-      width={size}
-      height={size}
-      draggable={false}
-      onError={() => setImageFailed(true)}
-      className="block shrink-0 bg-raised object-cover"
+    <span
+      className="relative block shrink-0 overflow-hidden bg-raised"
       style={{ width: size, height: size, borderRadius: radius }}
-    />
+    >
+      <img
+        src={profile.avatarUrl}
+        alt={label ?? (bot.name ? `${bot.name} avatar` : "Bot avatar")}
+        width={size}
+        height={size}
+        draggable={false}
+        onError={() => setImageFailed(true)}
+        className="block size-full max-w-none object-cover"
+        style={{
+          width: size,
+          height: size,
+          objectPosition: origin,
+          transform: zoom === 1 ? undefined : `scale(${zoom})`,
+          transformOrigin: origin,
+        }}
+      />
+    </span>
   );
 }
 

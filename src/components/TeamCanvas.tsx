@@ -393,7 +393,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onEdit
               }
             }}>
               <summary aria-label={t("canvas.manageTeam", { name: section.name })} className={cn(iconButton, "cursor-pointer list-none [&::-webkit-details-marker]:hidden")}><MoreHorizontal size={17} /></summary>
-              <div className={cn("absolute right-0 z-30 w-[220px] rounded-xl border border-hairline bg-panel p-1.5 shadow-xl", menuAbove === section.key ? "bottom-10" : "top-10")} onClick={(event) => {
+              <div className={cn("absolute right-0 z-30 w-[220px] animate-pop-in rounded-xl border border-hairline bg-panel p-1.5 shadow-xl", menuAbove === section.key ? "bottom-10" : "top-10")} onClick={(event) => {
                 const menu = event.currentTarget.closest("details");
                 menu?.querySelector("summary")?.focus();
                 menu?.removeAttribute("open");

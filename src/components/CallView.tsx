@@ -21,6 +21,8 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Loader2, Phone, PhoneOff, X } from "lucide-react";
 
 import { useStore, visibleMessages, type Bot } from "@/state/store";
+import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
 import { localSystemVoiceActive } from "@/lib/local-voice";
@@ -28,7 +30,6 @@ import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { BotAvatar } from "./Avatar";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
-import { cn } from "@/lib/cn";
 import { track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp } from "@/lib/call-capability";
@@ -88,6 +89,7 @@ export function CallTargetButton({
   const unavailable = !active && (!capabilitiesReady || !supported || !voiceReady);
   const voiceSetupRequired = capabilitiesReady && supported && !voiceReady;
   const [helpOpen, setHelpOpen] = useState(false);
+  const helpMotion = useMenuMotion(Boolean(unavailable && helpOpen));
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const helpId = useId();
@@ -155,7 +157,7 @@ export function CallTargetButton({
           active
             ? "bg-danger text-white hover:brightness-110"
             : unavailable
-              ? "text-ink-secondary/50 hover:bg-raised hover:text-ink-secondary"
+              ? "text-ink-tertiary hover:bg-raised hover:text-ink-secondary"
               : "text-ink-secondary hover:bg-raised hover:text-ink",
         )}
       >
@@ -165,12 +167,12 @@ export function CallTargetButton({
         )}
       </button>
 
-      {unavailable && helpOpen && (
+      {helpMotion.shown && (
         <div
           id={helpId}
           role="group"
           aria-label="Call unavailable"
-          className="animate-pop-in absolute right-0 z-30 mt-1.5 w-[280px] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl"
+          className={cn("absolute right-0 z-30 mt-1.5 w-[280px] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl", helpMotion.className)} {...helpMotion.exitProps}
         >
           <div className="text-[13px] font-medium text-ink">Call unavailable</div>
           <div className="mt-1 text-[12px] leading-[1.45] text-ink-secondary">{reason}</div>
@@ -407,7 +409,11 @@ function Call({ bot }: { bot: Bot }) {
         setNote(
           reason === "helper-build-failed"
             ? "The dictation helper couldn't be built. Install Apple's Command Line Tools and try again."
-            : "Dictation needs Microphone + Speech Recognition access in System Settings.",
+            : reason === "dictation-disabled"
+              ? "Turn on Dictation in System Settings → Keyboard, then try again."
+              : reason === "speech-not-authorized"
+                ? "Allow Speech Recognition in System Settings → Privacy & Security, then try again."
+                : "Dictation couldn't start. Try again.",
         );
         return;
       }
@@ -614,7 +620,7 @@ function Call({ bot }: { bot: Bot }) {
         </button>
       </div>
 
-      <div className="text-[11.5px] text-ink-secondary/70">
+      <div className="text-[11.5px] text-ink-tertiary">
         Hold Control + Option to talk · Space interrupts · Esc hangs up
       </div>
     </div>

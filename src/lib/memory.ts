@@ -24,6 +24,12 @@ export interface MemoryFileInfo {
 }
 
 export interface MemoryOverview {
+  /** On an OMB Cloud home: this bot's memory changed in a conversation the
+   * owner did not write; its turns cannot use a lent Mac until reviewed.
+   * `changed` names the files (memory, or instruction files in its working
+   * folders); `token` is exactly what was shown, and a review is refused
+   * once anything changes again. */
+  lendingReview?: LendingReview;
   botId: string;
   workspacePath: string;
   index: MemoryCapacity;
@@ -38,7 +44,7 @@ export interface MemoryDoc {
   exists: boolean;
 }
 
-export type MemoryActor = "bot" | "person" | "import";
+export type MemoryActor = "bot" | "person" | "import" | "upkeep";
 
 /** A journal row as the server sends it: no prior text (that stays on
  * the server for the revert), but the chat title when the thread is known. */
@@ -104,6 +110,70 @@ export async function fetchMemoryJournal(botId: string, limit = 50): Promise<Mem
 
 export function revertMemoryChange(botId: string, entryId: string): Promise<MemoryDoc & { overview: MemoryOverview }> {
   return api(`/api/bots/${botId}/memory/journal/${encodeURIComponent(entryId)}/revert`, { method: "POST" });
+}
+
+export interface TidyReport {
+  at: number;
+  expired: number;
+  duplicates: number;
+  superseded: number;
+  deferred: number;
+  organized?: number;
+  contradictionsChecked: boolean;
+  note?: string;
+}
+
+export interface CaptureReport {
+  at: number;
+  /** Facts appended to MEMORY.md. */
+  added: number;
+  /** Facts filed into topic files. */
+  topics?: number;
+  /** Facts added to About me. */
+  aboutMe?: number;
+  note?: string;
+}
+
+export interface UpkeepStatus {
+  enabled: boolean;
+  /** The engine can make the one-shot model call capture and contradictions need. */
+  modelSteps: boolean;
+  lastTidy?: TidyReport;
+  lastCapture?: CaptureReport;
+}
+
+/** "3 facts" noticed last time, across MEMORY.md and topic files. */
+export function noticedCount(report: CaptureReport | undefined): number {
+  return report ? report.added + (report.topics ?? 0) : 0;
+}
+
+export function fetchUpkeepStatus(botId: string): Promise<UpkeepStatus> {
+  return api(`/api/bots/${botId}/memory/upkeep`);
+}
+
+/** The owner accepts this bot's memory as it is now (OMB Cloud home only). */
+export interface LendingReview {
+  token: string;
+  changed: string[];
+}
+
+export function markMemoryReviewed(botId: string, token: string): Promise<{ ok: true; lendingReview: false }> {
+  return api(`/api/bots/${botId}/memory/reviewed`, { method: "POST", body: JSON.stringify({ token }) });
+}
+
+export function tidyMemoryNow(botId: string): Promise<{ report: TidyReport; overview: MemoryOverview }> {
+  return api(`/api/bots/${botId}/memory/tidy`, { method: "POST" });
+}
+
+/** "Archived 1 expired note, merged 2 duplicates" — or "Nothing to tidy". */
+export function tidySummary(report: TidyReport): string {
+  const parts: string[] = [];
+  if (report.expired) parts.push(`archived ${report.expired} expired note${report.expired === 1 ? "" : "s"}`);
+  if (report.duplicates) parts.push(`merged ${report.duplicates} duplicate${report.duplicates === 1 ? "" : "s"}`);
+  if (report.superseded) parts.push(`crossed out ${report.superseded} contradicted note${report.superseded === 1 ? "" : "s"}`);
+  if (report.organized) parts.push(`filed ${report.organized} note${report.organized === 1 ? "" : "s"} into topics`);
+  const head = parts.length ? parts.join(", ") : "nothing to tidy";
+  return head.charAt(0).toUpperCase() + head.slice(1);
 }
 
 export type MemoryOpenTarget = "obsidian" | "folder";
@@ -175,7 +245,7 @@ function fileLabel(path: string): string {
  * "Scout rewrote 3 lines in MEMORY.md". Subject first, in the person's
  * words: what the row means, not which fields it has. */
 export function journalSummary(row: MemoryJournalRow, botName: string): string {
-  const who = row.actor === "bot" ? botName : row.actor === "import" ? "An import" : "You";
+  const who = row.actor === "bot" ? botName : row.actor === "import" ? "An import" : row.actor === "upkeep" ? "Memory upkeep" : "You";
   const file = fileLabel(row.path);
   const isIndex = row.path === MEMORY_INDEX;
   const topic = isIndex ? file : row.path.startsWith("memory/log/") ? file : `the ${file} topic`;
@@ -194,6 +264,9 @@ function plural(count: number, noun: string): string {
 export function journalSource(row: MemoryJournalRow): string | null {
   if (row.via === "revert") return "undo";
   if (row.via === "disk") return "changed outside the app";
+  if (row.via === "tidy") return "tidy-up";
+  if (row.via === "organize") return "filed into topics";
+  if (row.via === "capture") return row.threadTitle ? `noticed in chat “${row.threadTitle}”` : "noticed in a chat";
   if (row.threadTitle) return `from chat “${row.threadTitle}”`;
   if (row.actor === "bot") return "during a task";
   if (row.via === "ui") return "in Settings";

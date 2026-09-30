@@ -871,7 +871,7 @@ export function TeamLibraryPanel({
                           <div className="min-w-0 flex-1">
                             <h3 className="truncate text-[14px] font-medium text-ink">{entry.name}</h3>
                             <p className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{entry.outcome ?? entry.summary}</p>
-                            <p className="mt-1 truncate text-[11.5px] text-ink-secondary/80">
+                            <p className="mt-1 truncate text-[11.5px] text-ink-tertiary">
                               {entry.members} bots · {entry.skills.length} playbooks
                               {entry.requires.apps.length > 0 && ` · ${entry.requires.apps.join(", ")}`}
                               {entry.setupMinutes && ` · ~${entry.setupMinutes} min`}

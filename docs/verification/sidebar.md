@@ -22,7 +22,7 @@ chief labels, role badges, and working/waiting indicators. The interaction check
 above are manual browser verification, not assertions made by those unit tests.
 This fixture covers the sidebar confirmation and bot-row result only; it does
 not exercise Settings > Computers deletion or provider completion polling.
-Those paths are covered by the computer-section and server Box inventory tests.
+Those paths are covered by the computer-section and server Boat inventory tests.
 
 ## Section deletion
 

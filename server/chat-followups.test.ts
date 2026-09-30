@@ -43,16 +43,37 @@ describe("durable accepted follow-ups", () => {
       { queueId: second.id, text: "then summarize" },
     ] });
     const store = storeFor("bot", "thread");
+    // the durable row flips to dispatching before its turn runs; the
+    // expected set changes with each drain below
+    let dispatchingNow: string[] = [];
     const run = vi.fn(() => {
       expect(journal.chatFollowups().filter((row) => row.status === "dispatching").map((row) => row.id))
-        .toEqual([first.id, second.id]);
+        .toEqual(dispatchingNow);
     });
+    // M2: the first line queued as the bot's own unattended work, the
+    // second as a person's words — different provenance never merges, so
+    // the first line starts its own turn alone
+    dispatchingNow = [first.id];
     drainSteeredMessages(store, run);
     // the first waiting line starts the turn, and survived the restart with its sender
     expect(run.mock.calls[0]).toEqual([
-      "bot", "thread", `Reply context\n${text}\n\nthen summarize`, store.messages[1],
-      ["message-0", "message-1"], true,
+      "bot", "thread", `Reply context\n${text}`, store.messages[0],
+      ["message-0"], true,
       { trigger: { kind: "user", email: "ada@example.test", label: "Ada's laptop" }, sender: { name: "ada@example.test" }, peerAsk: undefined },
+    ]);
+    expect(store.messages).toEqual([
+      expect.objectContaining({ text, replyToId: "reply", sendId: "first", queueId: first.id }),
+    ]);
+    // let the first turn's durable row settle before the next drain reads it
+    await Promise.resolve();
+    // the person's line waits for that turn to finish, then runs as its own
+    // attended follow-up with its own receipts
+    dispatchingNow = [second.id];
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls[1]).toEqual([
+      "bot", "thread", "then summarize", store.messages[1],
+      ["message-1"], false,
+      { trigger: undefined, sender: undefined, peerAsk: undefined },
     ]);
     expect(store.messages).toEqual([
       expect.objectContaining({ text, replyToId: "reply", sendId: "first", queueId: first.id }),
@@ -75,14 +96,23 @@ describe("durable accepted follow-ups", () => {
     journal.closeMessageDb();
     restoreChannelMessages();
     const run = vi.fn();
+    // M2: an API send never merges into anyone's burst, so the goal drains
+    // alone — one coalesced item, still carrying its target and provenance
     drainChannelMessages(() => false, run);
     expect(run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      groupId: "group", threadId: "old-thread", id: first.id, text: "continue goal",
-      mode: "goal", via: "api", replyToId: "reply", sendId: "first", trigger: { kind: "user", label: "Ada's phone" },
+      groupId: "group", threadId: "old-thread",
+      items: [expect.objectContaining({
+        id: first.id, text: "continue goal",
+        mode: "goal", via: "api", replyToId: "reply", sendId: "first", trigger: { kind: "user", label: "Ada's phone" },
+        queuedAt: expect.any(Number),
+      })],
     }));
     expect(journal.chatFollowups().find((row) => row.id === first.id)?.status).toBe("dispatching");
     drainChannelMessages(() => false, run);
-    expect(run.mock.calls[1][0]).toMatchObject({ id: second.id, mode: "chat", text: "next" });
+    expect(run.mock.calls[1][0]).toMatchObject({
+      groupId: "group", threadId: "old-thread",
+      items: [expect.objectContaining({ id: second.id, mode: "chat", text: "next", queuedAt: expect.any(Number) })],
+    });
     await Promise.resolve();
     expect(journal.cancelledChatFollowup("channel", "group", "old-thread", "cancelled")).toBe(true);
   });

@@ -11,9 +11,9 @@ export const CREDENTIAL_TARGETS = {
     helpUrl: "https://console.x.ai/",
   },
   boxToken: {
-    label: "Box API key",
-    description: "Gives bots an isolated cloud computer when Box is selected.",
-    placeholder: "Paste your Box API key",
+    label: "Boat API key",
+    description: "Gives bots an isolated cloud computer when Boat is selected.",
+    placeholder: "Paste your Boat API key",
     helpUrl: "https://docs.boat.dev/api-keys",
   },
   opencodeGoApiKey: {
@@ -45,6 +45,7 @@ export const CREDENTIAL_TARGETS = {
 export type CredentialTargetId = keyof typeof CREDENTIAL_TARGETS;
 export type CredentialConfig = {
   xai?: { key?: string };
+  // The persisted config section keeps its historical name: cfg.box.
   box?: { token?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; fishKey?: string };

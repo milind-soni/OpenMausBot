@@ -95,6 +95,27 @@ final class ApprovalClientTests: XCTestCase {
         XCTAssertEqual(object["behavior"], "deny")
     }
 
+    func testRespondReturnsTheOutcomeTheServerReports() async throws {
+        ApprovalRequestStub.responseBody = Data(#"{"ok":true,"outcome":"unavailable"}"#.utf8)
+
+        let outcome = try await client.respond(threadId: "thread-1", requestId: "request-1", behavior: "deny")
+
+        XCTAssertEqual(outcome, "unavailable")
+    }
+
+    func testRespondReadsBodiesWithoutAnOutcomeAsAnswered() async throws {
+        ApprovalRequestStub.responseBody = Data(#"{"resolved":true}"#.utf8)
+
+        let outcome = try await client.respond(
+            threadId: "thread-1",
+            requestId: "request-1",
+            behavior: "answer",
+            message: "Ship it"
+        )
+
+        XCTAssertNil(outcome)
+    }
+
     func testConversationActionsKeepTheCapturedThread() async throws {
         func assertTarget(_ path: String) throws {
             XCTAssertEqual(ApprovalRequestStub.capturedRequest?.url?.path, path)

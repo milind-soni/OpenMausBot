@@ -131,6 +131,34 @@ describe("install from Settings on the server", () => {
 });
 
 describe("server device-code sign-in", () => {
+  it("offers the distinct ChatGPT plan connection without the legacy Codex command", () => {
+    vi.stubGlobal("window", { ogb: { platform: "linux" } });
+    const engine: InstanceInfo = {
+      ...instance({ state: "available", authenticated: false, chatgptPlan: true }),
+      instanceId: "chatgpt", displayName: "ChatGPT plan", driverKind: "codex",
+      authentication: { method: "browser-pkce" }, install: { signInCommand: "codex login" },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
+    expect(markup).toContain("Continue with ChatGPT");
+    expect(markup).toContain("separate from OpenMausBot Pro");
+    expect(markup).not.toContain("codex login");
+    expect(markup).not.toContain("Device-code login");
+  });
+
+  it("explains unavailable hosted plan auth without offering a broken login or install", () => {
+    vi.stubGlobal("window", { ogb: { platform: "linux" } });
+    const engine: InstanceInfo = {
+      ...instance({ state: "unavailable", authenticated: false, chatgptPlan: true, authenticationUnavailableReason: "Hosted ChatGPT plan access requires approval." }),
+      instanceId: "chatgpt", displayName: "ChatGPT plan", driverKind: "codex",
+      authentication: { method: "browser-pkce" }, install: { command: { linux: "npm install -g @openai/codex" }, signInCommand: "codex login" },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
+    expect(markup).toContain("Hosted ChatGPT plan access requires approval.");
+    expect(markup).not.toContain("Continue with ChatGPT");
+    expect(markup).not.toContain("npm install");
+    expect(markup).not.toContain("codex login");
+  });
+
   it("uses the supported browser sign-in flow instead of asking a remote user to run a command", () => {
     vi.stubGlobal("window", { ogb: { platform: "linux" } });
     const engine: InstanceInfo = {

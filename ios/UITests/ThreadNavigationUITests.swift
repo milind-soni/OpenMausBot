@@ -47,7 +47,19 @@ final class ThreadNavigationUITests: XCTestCase {
 
     @MainActor
     func testRosterShowsFolderThreadsAndSwitchesLocally() {
-        let app = launchPreview()
+        rosterShowsFolderThreadsAndSwitchesLocally(density: nil)
+    }
+
+    /// Comfortable is still a choice in Settings: its Threads row and folder
+    /// disclosure get the same check.
+    @MainActor
+    func testRosterShowsFolderThreadsAndSwitchesLocallyInComfortable() {
+        rosterShowsFolderThreadsAndSwitchesLocally(density: "comfortable")
+    }
+
+    @MainActor
+    private func rosterShowsFolderThreadsAndSwitchesLocally(density: String?) {
+        let app = launchPreview(density: density)
         openGmail(in: app)
         assertThread("Triage Gmail", in: app)
         XCTAssertTrue(transcriptContains("I’m reviewing Gmail here", in: app))
@@ -144,7 +156,17 @@ final class ThreadNavigationUITests: XCTestCase {
 
     @MainActor
     func testHomeSearchFindsSiblingTitlesAndFolders() {
-        let app = launchPreview()
+        homeSearchFindsSiblingTitlesAndFolders(density: nil)
+    }
+
+    @MainActor
+    func testHomeSearchFindsSiblingTitlesAndFoldersInComfortable() {
+        homeSearchFindsSiblingTitlesAndFolders(density: "comfortable")
+    }
+
+    @MainActor
+    private func homeSearchFindsSiblingTitlesAndFolders(density: String?) {
+        let app = launchPreview(density: density)
         app.buttons["threads-toggle.preview-pepper"].tap()
         app.buttons["Search"].tap()
         let search = app.textFields["Search threads"]
@@ -264,7 +286,10 @@ final class ThreadNavigationUITests: XCTestCase {
         assertThread("Triage Gmail", in: app)
         XCTAssertTrue(transcriptContains("I’m reviewing Gmail here", in: app))
         app.buttons["Back"].tap()
-        XCTAssertEqual(app.buttons["threads-toggle.preview-pepper"].value as? String, "Expanded, 1 threads")
+        // One thread left is the bot itself: the compact roster drops the
+        // thread control, and the row opens that thread.
+        XCTAssertTrue(app.buttons["chat-row.preview-pepper"].waitForExistence(timeout: 5))
+        assertMissing(app.buttons["threads-toggle.preview-pepper"])
     }
 
     @MainActor
@@ -293,20 +318,26 @@ final class ThreadNavigationUITests: XCTestCase {
         recordScreenshot("Partial bulk deletion keeps the remaining thread selected", in: app)
     }
 
+    /// `density` nil starts from the install default (compact), whatever an
+    /// earlier run saved; otherwise that density for this launch only.
     @MainActor
-    private func launchPreview(extraArguments: [String] = [], islandIntro: String = "never") -> XCUIApplication {
+    private func launchPreview(
+        extraArguments: [String] = [], islandIntro: String = "never", density: String? = nil
+    ) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         // Xcode may prelaunch the app after installing an updated build.
         // Restart it so Session initializes with the offline fixture flags.
         app.terminate()
+        let densityArguments = density.map { ["-companion.prefs.rosterDensity", $0] }
+            ?? ["-reset-list-density"]
         app.launchArguments = [
             "-store-preview", "-threads-preview",
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
             "-companion.prefs.islandIntro", islandIntro,
             "-companion.onboarding.welcomeSeen", "YES",
             "-companion.onboarding.notificationsSeen", "YES"
-        ] + extraArguments
+        ] + densityArguments + extraArguments
         app.launch()
         // Simulator installation can restore an unpaired, prewarmed scene
         // without the preview arguments once. Restart only that wrong route;

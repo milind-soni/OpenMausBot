@@ -24,7 +24,7 @@ The first version includes:
   state.
 - Approvals and questions, including narrow “always allow” grants.
 - Resumable SSE, streamed reply text, reconnect hydration, and an opt-in live
-  Box computer view. The loopback-only VPS SSH viewer remains desktop-only.
+  Boat computer view. The loopback-only VPS SSH viewer remains desktop-only.
 - Markdown rendering and Keychain storage for the phone's pairing trust.
 - Secure completion of supported credential-request cards using iOS Password
   AutoFill and QR-pinned HPKE encryption. Apple Passwords/iCloud Keychain is

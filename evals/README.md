@@ -58,3 +58,11 @@ Live-model runs never execute by default: `pnpm eval --live` prints one skip lin
     OMB_EVAL_LIVE=1 OMB_EVAL_LIVE_CONFIG=/path/to/instance.json pnpm eval --live
 
 The instance file (or inline `OMB_EVAL_LIVE_INSTANCE` JSON) uses the product's own instance shape — `instanceId`, `driver`, `model`, optional `config` and `environmentFrom` — so credential variables are copied from the launching shell (`OMB_EVAL_LIVE_PASS_ENV` lists names to forward) and never inlined. Thresholds live in the committed `evals/live/config.json`: minimum suite score, maximum drift from the last recorded baseline, and turn and judge timeouts. Scenarios run cheap real models with state-based waits, deterministic checks (`botReplied`, tool traces), and a versioned judge whose prompt files are pinned by sha256 in a manifest; drift against the gitignored `evals/live/baselines/` baseline fails the suite.
+
+## Skill bench (alpha)
+
+The skill bench measures one fixture skill against its own prompts through the same scripted machinery as tier 1. Each prompt runs twice — with the skill installed as a user skill under the booted server's data dir and without it — so the contrast covers the real seams: trigger-term selection, the `<openmaus-skill>` block riding the system prompt, and the scripted follower's behavior against a no-skill baseline. It evaluates the harness, never a model.
+
+    node --experimental-strip-types evals/runners/run-skill-bench.ts [--fixture bench-triage-handoff] [--replicates 2]
+
+The alpha report gives per-arm pass rates, duration and estimated tokens (chars/4 over evidence turns; the scripted provider makes no API calls) with mean and standard deviation, a delta-per-assertion table, and two flags: non-discriminating assertions (identical verdicts in both arms — controls, not effects) and high-variance assertions (verdicts that flip across replicates of the same prompt and arm, assessable from two replicates on). `evals/skill-bench/fixtures/` holds bench fixtures; `evals/skill-bench/triggers/` holds the trigger-eval sets (should-trigger / should-not-trigger with train and held-out splits, plus near misses) that a later router slice validates against — data only, no router code.

@@ -48,6 +48,10 @@
 //                   | stall-after-tool (finish a tool call, then go fully
 //                     silent forever: the guard must still fire once no tool
 //                     is running)
+//                   | lend-question (call list_shared_computers through the
+//                     injected agents MCP, ask a question card, call it again
+//                     once the card is answered, and reply
+//                     "before: <first> | after: <second>" — the lent-Mac e2e)
 //   FAKE_ACP_MCP_TRANSPORTS  comma list of remote MCP transports the agent
 //                       advertises in initialize (mcpCapabilities), e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS JSON options override in permission mode
@@ -89,6 +93,19 @@ import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
+
+// Follow the spawning server down, including on Windows where ppid does
+// not change after parent exit. Inline: fakes must stay self-contained.
+{
+  const spawner = process.ppid;
+  const orphanWatch = setInterval(() => {
+    if (process.ppid !== spawner) process.exit(0);
+    try { process.kill(spawner, 0); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") process.exit(0);
+    }
+  }, 500);
+  orphanWatch.unref();
+}
 const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 // opencode-shaped surface: the session carries its own model catalog and the
 // model is chosen with session/set_config_option, because `opencode acp` takes
@@ -1017,6 +1034,25 @@ function handle(msg: any) {
             ],
           },
         });
+        return;
+      }
+      if (mode === "lend-question" && agentsMcp) {
+        const entry = agentsMcp;
+        const list = () => driveMcp(entry, [{ name: "list_shared_computers", args: () => ({}) }]).catch((e) => `error ${(e as Error).message}`);
+        void (async () => {
+          const before = await list();
+          pendingPermissionId = 9003;
+          onPermissionAnswered = () => {
+            void list().then((after) => {
+              out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `before: ${before} | after: ${after}` } } } });
+              complete();
+            });
+          };
+          out({ jsonrpc: "2.0", id: pendingPermissionId, method: "session/request_permission", params: {
+            toolCall: { toolCallId: "interaction_folder", kind: "other", title: "Which folder should I read?" },
+            options: [{ optionId: "docs-id", kind: "allow_once", name: "Docs" }, { optionId: "other-id", kind: "allow_once", name: "Other" }],
+          } });
+        })();
         return;
       }
       if (mode === "question") {

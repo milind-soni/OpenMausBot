@@ -10,7 +10,13 @@
 // client already splits text into utterances and fetches the next while the
 // current one plays, which gets the same perceived latency with far fewer
 // moving parts — and no socket to leak when a turn is interrupted.
-const API = process.env.OMB_ELEVENLABS_API || "https://api.elevenlabs.io/v1";
+//
+// The base URL is the caller's: ElevenLabs itself for the person's own key
+// (OMB_ELEVENLABS_API overrides it for dev and tests), Cloud Pro's relay for
+// its included token (included-services.ts). Only a key being saved is
+// verified, and that is always an own key.
+import { elevenLabsProviderApi } from "../included-services.ts";
+
 const MODEL = "eleven_flash_v2_5";
 // 64kbps mono is indistinguishable for speech and a third of the bytes
 const FORMAT = "mp3_44100_64";
@@ -37,7 +43,7 @@ async function safeJson(res: Response): Promise<any> {
 }
 
 /** Prefer ElevenLabs' own words over anything we can invent — it knows the
- * plan, the quota and the model name. Mirrors box.boxErrorMessage. */
+ * plan, the quota and the model name. Mirrors boat.boatErrorMessage. */
 function message(status: number, what: string, body: any): string {
   const theirs =
     (typeof body?.detail === "string" && body.detail.trim()) ||
@@ -65,7 +71,7 @@ function message(status: number, what: string, body: any): string {
  * picker needs next, so it tests exactly the capability that matters. */
 export async function verifyKey(key: string): Promise<VerifyResult> {
   try {
-    const res = await fetch(`${API}/voices`, {
+    const res = await fetch(`${elevenLabsProviderApi()}/voices`, {
       headers: { "xi-api-key": key },
       signal: AbortSignal.timeout(20_000),
     });
@@ -76,8 +82,8 @@ export async function verifyKey(key: string): Promise<VerifyResult> {
   }
 }
 
-export async function listVoices(key: string): Promise<Voice[]> {
-  const res = await fetch(`${API}/voices`, {
+export async function listVoices(key: string, api: string): Promise<Voice[]> {
+  const res = await fetch(`${api}/voices`, {
     headers: { "xi-api-key": key },
     signal: AbortSignal.timeout(20_000),
   });
@@ -92,8 +98,8 @@ export async function listVoices(key: string): Promise<Voice[]> {
     .filter((v: Voice) => v.id);
 }
 
-export async function synthesize(text: string, voiceId: string, key: string): Promise<Audio> {
-  const res = await fetch(`${API}/text-to-speech/${encodeURIComponent(voiceId)}?output_format=${FORMAT}`, {
+export async function synthesize(text: string, voiceId: string, key: string, api: string): Promise<Audio> {
+  const res = await fetch(`${api}/text-to-speech/${encodeURIComponent(voiceId)}?output_format=${FORMAT}`, {
     method: "POST",
     headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" },
     body: JSON.stringify({ text, model_id: MODEL }),

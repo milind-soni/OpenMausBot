@@ -27,6 +27,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /** The one JSON configuration used for every sidecar payload. */
@@ -1248,14 +1249,143 @@ data class BotOverviewWho(val name: String, val title: String, val blurb: String
 @Serializable
 data class BotOverviewRecent(val at: Double, val summary: String)
 
+/**
+ * One service's grant level, the same three the web grant editor and both
+ * phones render. A level string this build does not know falls back to
+ * [Partial] — the row stays honest ("some tools") without costing the
+ * reader the whole overview, matching the iOS decode.
+ */
+@Serializable(with = BotOverviewGrantLevelSerializer::class)
+sealed interface BotOverviewGrantLevel {
+    /** `tools: "*"` on the computer: the whole service is granted. */
+    data object All : BotOverviewGrantLevel
+
+    /** An exact tool allowlist; the overview carries only its size. */
+    data object Partial : BotOverviewGrantLevel
+
+    /** The service is granted nothing. */
+    data object None : BotOverviewGrantLevel
+}
+
+object BotOverviewGrantLevelSerializer : KSerializer<BotOverviewGrantLevel> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("BotOverviewGrantLevel", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): BotOverviewGrantLevel {
+        val input = decoder as? JsonDecoder
+            ?: throw SerializationException("BotOverviewGrantLevel can only be decoded from JSON")
+        val level = (input.decodeJsonElement() as? JsonPrimitive)?.takeIf { it.isString }
+            ?: throw SerializationException("BotOverviewGrantLevel must be a string")
+        return when (level.content) {
+            "all" -> BotOverviewGrantLevel.All
+            "none" -> BotOverviewGrantLevel.None
+            // "partial", plus any level a newer computer adds.
+            else -> BotOverviewGrantLevel.Partial
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: BotOverviewGrantLevel) {
+        val output = encoder as? JsonEncoder
+            ?: throw SerializationException("BotOverviewGrantLevel can only be encoded as JSON")
+        output.encodeString(
+            when (value) {
+                BotOverviewGrantLevel.All -> "all"
+                BotOverviewGrantLevel.Partial -> "partial"
+                BotOverviewGrantLevel.None -> "none"
+            },
+        )
+    }
+}
+
+/** One connected-app service's tool grants, as the overview summarizes them. */
 @Serializable
+data class BotOverviewGrant(
+    val slug: String,
+    val level: BotOverviewGrantLevel,
+    /** Granted tool count; 0 unless the level is [BotOverviewGrantLevel.Partial]. */
+    val toolCount: Int,
+)
+
+/**
+ * Grants ride the overview lossily: one malformed entry — or a whole
+ * malformed container — is dropped rather than costing the overview, the
+ * same policy pairing endpoints already follow.
+ */
+@Serializable(with = BotOverviewSerializer::class)
 data class BotOverview(
     val who: BotOverviewWho,
     val does: List<String> = emptyList(),
     val reaches: List<String> = emptyList(),
     val wont: List<String> = emptyList(),
     val recent: List<BotOverviewRecent> = emptyList(),
+    /**
+     * Per-service connector tool grants, sorted by slug. Absent on
+     * computers older than per-bot grants — the legacy all-or-nothing
+     * `composio` behavior stands and nothing new is drawn. An empty list
+     * is an explicit no-tools record and does draw.
+     */
+    val grants: List<BotOverviewGrant>? = null,
 )
+
+object BotOverviewSerializer : KSerializer<BotOverview> {
+    override val descriptor: SerialDescriptor = JsonObject.serializer().descriptor
+
+    override fun deserialize(decoder: Decoder): BotOverview {
+        val input = decoder as? JsonDecoder
+            ?: throw SerializationException("BotOverview can only be decoded from JSON")
+        val value = input.decodeJsonElement() as? JsonObject
+            ?: throw SerializationException("BotOverview must be a JSON object")
+        val json = input.json
+
+        fun strings(name: String): List<String> =
+            runCatching { value[name]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList() }
+                .getOrDefault(emptyList())
+
+        return BotOverview(
+            who = json.decodeFromJsonElement(
+                value["who"] ?: throw SerializationException("BotOverview.who is required"),
+            ),
+            does = strings("does"),
+            reaches = strings("reaches"),
+            wont = strings("wont"),
+            recent = runCatching {
+                value["recent"]?.jsonArray?.mapNotNull { entry ->
+                    runCatching { json.decodeFromJsonElement<BotOverviewRecent>(entry) }.getOrNull()
+                } ?: emptyList()
+            }.getOrDefault(emptyList()),
+            grants = when (val element = value["grants"]) {
+                null, is JsonNull -> null
+                is JsonArray -> element.mapNotNull { entry ->
+                    runCatching { json.decodeFromJsonElement<BotOverviewGrant>(entry) }.getOrNull()
+                }
+                // A malformed container reads as absent — an explicit
+                // no-tools record is an empty array, never this.
+                else -> null
+            },
+        )
+    }
+
+    override fun serialize(encoder: Encoder, value: BotOverview) {
+        val output = encoder as? JsonEncoder
+            ?: throw SerializationException("BotOverview can only be encoded as JSON")
+        output.encodeJsonElement(buildJsonObject {
+            put("who", output.json.encodeToJsonElement(BotOverviewWho.serializer(), value.who))
+            put("does", JsonArray(value.does.map(::JsonPrimitive)))
+            put("reaches", JsonArray(value.reaches.map(::JsonPrimitive)))
+            put("wont", JsonArray(value.wont.map(::JsonPrimitive)))
+            put(
+                "recent",
+                JsonArray(value.recent.map { output.json.encodeToJsonElement(BotOverviewRecent.serializer(), it) }),
+            )
+            value.grants?.let { grants ->
+                put(
+                    "grants",
+                    JsonArray(grants.map { output.json.encodeToJsonElement(BotOverviewGrant.serializer(), it) }),
+                )
+            }
+        })
+    }
+}
 
 /** Native server sessions returned by POST /api/auth/pair. */
 @Serializable

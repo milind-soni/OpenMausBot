@@ -289,12 +289,12 @@ object RosterLayout {
         SearchPolicy.filter(summaries, query)
 
     /**
-     * Whether the unsearched roster has any row at all. Rooms live in the strip
-     * and tiles are not rows, so "no bots yet" is about bots — which is also
-     * what the empty state says.
+     * Whether the unsearched roster lists anything at all: a bot, or a group —
+     * a row in compact, a tile in comfortable. Only when there is neither does
+     * "No bots yet" show; drawn over group rows, it would sit on top of them.
+     * The iPhone asks the same question.
      */
-    fun listsAnyBot(summaries: List<ChatSummary>): Boolean =
-        summaries.any { it.chat is Chat.BotChat }
+    fun listsAnyChat(summaries: List<ChatSummary>): Boolean = summaries.isNotEmpty()
 
     /** The strip is part of the roster, not of a search result. */
     fun showsGroups(query: String): Boolean = query.isEmpty()

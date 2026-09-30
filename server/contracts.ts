@@ -116,6 +116,11 @@ export interface SendTurnInput {
   /** Per-bot approval policy, reasserted by providers on every turn so a
    * resumed native session cannot retain a stale, more permissive mode. */
   approvalMode?: ApprovalMode;
+  /** A guest drives this turn on an OMB Cloud home: it runs with no shell
+   * or command execution and reads nothing outside its own folder. Sent
+   * only to a driver whose capabilities.guestTurns is "confined"; the harness
+   * refuses the turn for any other (docs/cloud-pro.md). */
+  guestConfined?: boolean;
   /** Images attached to this user turn only. They are deliberately kept out
    * of replay transcripts: the provider's native session owns earlier image
    * context, while a fresh replay retains the visible attachment marker. */
@@ -171,9 +176,10 @@ export interface SendTurnInput {
      * bridge harness-controlled lets it turn connection requests into trusted
      * chat cards consistently across provider CLIs. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
-    /** Box's native runner or an explicitly capable driver consumes this
+    /** Boat's native runner or an explicitly capable driver consumes this
      * leased descriptor. Other computers use the stdio descriptor below. */
     computer?: {
+      // kind "box" and field boxId keep their historical names (leased-wire contract).
       kind?: "box";
       boxId: string;
       token: string;
@@ -262,18 +268,18 @@ export interface ProviderAdapter {
      * told it has a computer whose tools its driver cannot mount — it
      * burns turns hunting for tools that aren't there. */
     computerMcp?: boolean;
-    /** Consumes the leased Box descriptor without switching to Box's model. */
+    /** Consumes the leased Boat descriptor without switching to Boat's model. */
     cloudComputerMcp?: boolean;
-    /** True when the whole turn executes on the cloud computer (the Box native
+    /** True when the whole turn executes on the cloud computer (the Boat native
      * agent — POST /boxes/{id}/prompt) instead of in the host harness. Such a
-     * driver claims the box exclusively, cannot use host or Local VM surfaces,
+     * driver claims the boat exclusively, cannot use host or Local VM surfaces,
      * and every tool call acts on that machine's screen (screen pollers start
      * with screenIsTheWork). Implies a cloud-computer turn even though the
      * driver mounts no computer descriptor — cloudComputerMcp stays false. */
     remoteAgent?: boolean;
     /** True when this driver's turn can run against a cloud computer — natively
-     * (remoteAgent) or by mounting the leased Box descriptor (cloudComputerMcp).
-     * Gates every cloud attach path (attachBotBox / attachTeamBox canMount). */
+     * (remoteAgent) or by mounting the leased Boat descriptor (cloudComputerMcp).
+     * Gates every cloud attach path (attachBotBoat / attachTeamBoat canMount). */
     usesCloudComputer?: boolean;
     /** True when the driver mounts turn.integrations.composio (the user's
      * connected apps). Same rule again: a key in the config says the user
@@ -323,6 +329,11 @@ export interface ProviderAdapter {
      * engine (integrations.hooks). Only Claude Code today; other engines
      * deliver the same information through their protocols. */
     hooks?: boolean;
+    /** How a guest-driven turn on an OMB Cloud home can run on this engine:
+     * "confined" = sendTurn honours `guestConfined` (no shell or command
+     * execution, no reads outside its folder). Absent: such a turn is
+     * refused. */
+    guestTurns?: "confined";
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
@@ -366,6 +377,9 @@ export type SteerOutcome = "steered" | "refused" | "indeterminate";
 
 // ── provider snapshot (upstream ServerProviderShape, reduced) ────────────
 export interface ProviderSnapshot {
+  /** Separate, explicitly authorized ChatGPT-plan billing (not Codex login). */
+  chatgptPlan?: boolean;
+  authenticationUnavailableReason?: string;
   state: "available" | "unavailable";
   reason?: string;
   authenticated?: boolean;
@@ -502,6 +516,19 @@ export interface DriverCreateInput<Config> {
   config: Config;
 }
 
+export interface TextGenerationUsage {
+  model: string;
+  input?: number;
+  output?: number;
+  cachedInput?: number;
+  costUsd?: number;
+}
+
+export interface TextGenerationOptions {
+  signal?: AbortSignal;
+  onUsage?: (usage: TextGenerationUsage) => void;
+}
+
 export interface ProviderInstance {
   readonly instanceId: InstanceId;
   readonly driverKind: DriverKind;
@@ -513,6 +540,7 @@ export interface ProviderInstance {
   /** Optional first-party runtime installation and account setup. */
   readonly installRuntime?: () => Promise<void>;
   readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;
+  readonly authenticationMethod?: "browser-pkce";
   readonly getAuthentication?: (flowId: string) => Promise<ProviderAuthenticationStatus>;
   readonly completeAuthentication?: (flowId: string, callbackUrl: string) => Promise<void>;
   readonly cancelAuthentication?: () => Promise<void>;
@@ -524,7 +552,7 @@ export interface ProviderInstance {
   /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries.
    * The signal is a best-effort cap: drivers that can honor it abort the
    * underlying provider call; the rest keep their own timeout. */
-  generateText?(prompt: string, options?: { signal?: AbortSignal }): Promise<string>;
+  generateText?(prompt: string, options?: TextGenerationOptions): Promise<string>;
   /** Isolated, tool-free permission review on this same provider. Kept
    * separate from generateText so the UI never infers a security capability
    * from a generic helper that may expose prompts in argv or lack approvals. */

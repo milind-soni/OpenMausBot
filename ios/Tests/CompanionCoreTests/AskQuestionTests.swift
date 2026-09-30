@@ -52,7 +52,7 @@ final class AskQuestionTests: XCTestCase {
         XCTAssertNil(card.questions.first?.options.last?.detail)
         XCTAssertFalse(card.questions[0].allowsMultiple)
         XCTAssertTrue(card.questions[1].allowsMultiple)
-        // A tool-call ask leaves origin unset; only the BoxAgent transport
+        // A tool-call ask leaves origin unset; only the BoatAgent transport
         // sets it, and unknown fields must never fail the transcript decode.
         XCTAssertNil(card.questionRequest?.origin)
     }

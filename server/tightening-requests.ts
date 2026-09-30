@@ -17,6 +17,7 @@ import {
   type TighteningState,
 } from "../shared/tightening-request.ts";
 import { newId } from "./contracts.ts";
+import { recordAuthorityChange } from "./profile-versions.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { OptionCardLike } from "./profile-requests.ts";
 import type { BotRecord } from "./store.ts";
@@ -202,18 +203,33 @@ export function tighteningCardCopy(
   intents: TighteningIntents,
   reason: string,
 ): TighteningCardCopy {
+  const checked = validateTightening(before, intents);
+  const after = checked.ok ? checked.after : before;
   const title = target.crossBot ? `Tighten @${target.name}'s permissions?` : `Tighten ${target.name}'s permissions?`;
   const lines: string[] = target.crossBot ? [`Whose permissions: @${target.name}`, `Why: ${reason}`] : [`Why: ${reason}`];
   if (intents.approvalMode !== undefined) lines.push(`Approvals: ${before.approvalMode} → ${intents.approvalMode}`);
   if (intents.composio !== undefined) lines.push("Connected apps: on → off");
   if (intents.browser !== undefined) lines.push("Browser: on → off");
   if (intents.approvePeerComms !== undefined) lines.push("Peer contact: no approval → ask first");
-  if (intents.alwaysAllow?.length) lines.push(`Always-allow grants: remove ${intents.alwaysAllow.join(", ")}`);
-  if (intents.mcpServers?.length) lines.push(`MCP servers: unmount ${intents.mcpServers.join(", ")}`);
-  if (intents.skills?.length) lines.push(`Skills: disable ${intents.skills.join(", ")}`);
-  lines.push(`This reduces ${target.name}'s authority. Only the owner can grant it back.`);
+  if (intents.alwaysAllow?.length) lines.push(removalLine("Always-allow grants", "removed", before.alwaysAllow, after.alwaysAllow));
+  if (intents.mcpServers?.length) lines.push(removalLine("MCP servers", "unmounted", before.mcpServers, after.mcpServers));
+  if (intents.skills?.length) lines.push(removalLine("Skills", "disabled", before.skills, after.skills));
+  lines.push(`This reduces ${target.name}'s authority, and the reverse cannot be proposed back.`);
   const fields = INTENT_KEYS.filter((key) => intents[key] !== undefined);
   return { title, summary: `${title} · ${fields.join(", ")}`, detail: lines.join("\n") };
+}
+
+const REMOVED_NAME_CAP = 5;
+
+/** One line per list field with the counts on both sides and the exact
+ * names that go away, capped with a count so a wide card still reads in
+ * one pass while the human approves precisely what disappears. */
+function removalLine(label: string, verb: string, before: readonly string[], after: readonly string[]): string {
+  const removed = before.filter((name) => !after.includes(name));
+  const shown = removed.slice(0, REMOVED_NAME_CAP);
+  const more = removed.length - shown.length;
+  const names = shown.join(", ") + (more > 0 ? ` (+${more} more)` : "");
+  return `${label}: ${before.length} → ${after.length} — ${verb}: ${names}`;
 }
 
 export class TighteningRequestService {
@@ -390,6 +406,18 @@ export class TighteningRequestService {
           card: { ...card, answered: "allow", held: undefined, tighteningRequest: { ...payload, appliedAt: payload.appliedAt ?? this.now() } },
         });
         if (!settled) throw new TighteningRequestError("This tightening confirmation card is no longer available", 409);
+        // The first attempt committed the authority change and the durable
+        // receipt, then died before it could settle the card or record
+        // history. This retry settles the card, so it also writes the row
+        // that attempt never reached — from the card's own frozen inputs,
+        // never the live bot: the revision guard proved live state equaled
+        // payload.before at apply, so the validated post-card state is the
+        // committed change, while a live snapshot could fold in later owner
+        // edits and attribute them to this card.
+        const recorded = validateTightening(payload.before, payload.intents);
+        if (recorded.ok) {
+          recordAuthorityChange(payload.targetBotId, "bot", `card:${message.id}`, payload.before, recorded.after);
+        }
         return { claimed: true, state: "already_settled", behavior: "allow" };
       }
       if (args.behavior === "deny") {
@@ -457,6 +485,10 @@ export class TighteningRequestService {
         card: { ...card, answered: "allow", held: undefined, tighteningRequest: { ...payload, appliedAt } },
       });
       if (!settled) throw new TighteningRequestError("This tightening confirmation card is no longer available", 409);
+      // Same audit trail as a profile card: the proposing bot is the actor,
+      // the card id is the via, and the rows land in the one History section
+      // manual edits already write to. Fire-and-forget like every history row.
+      recordAuthorityChange(payload.targetBotId, "bot", `card:${message.id}`, current, checked.after);
       const fields = INTENT_KEYS.filter((key) => payload.intents[key] !== undefined);
       return { claimed: true, state: "applied", targetBotId: target.id, fields, ...(emergency ? { emergencyStop: true } : {}) };
     } catch (error) {

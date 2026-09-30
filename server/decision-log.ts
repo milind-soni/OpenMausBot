@@ -98,7 +98,7 @@ export interface DecisionRow {
   /** who answered, on rows a person's answer produced */
   actor?: DecisionActor;
   /** how the ask reached the fold: a tool call (absent) or a block parsed
-   * out of model-authored output ("output", the BoxAgent transport).
+   * out of model-authored output ("output", the BoatAgent transport).
    * Question cards only. */
   origin?: "output";
 }

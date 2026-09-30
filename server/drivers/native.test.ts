@@ -24,7 +24,7 @@ describe("appendNative", () => {
             {
               name: "computer",
               env: [
-                { name: "OGB_BOX_ID", value: "box-7" },
+                { name: "OGB_BOX_ID", value: "boat-7" },
                 { name: "OGB_BOX_TOKEN", value: "box_live_dontlogme" },
               ],
             },
@@ -38,7 +38,7 @@ describe("appendNative", () => {
     // the shape a debugger needs is still there: which server, which var
     expect(log).toContain("session/new");
     expect(log).toContain("OGB_BOX_TOKEN");
-    expect(log).toContain("box-7");
+    expect(log).toContain("boat-7");
   });
 
   it("writes the log private to the user", () => {

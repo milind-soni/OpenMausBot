@@ -223,14 +223,14 @@ test("official-style MCP transport preserves session state and image content; it
   const script = path.join(dir, "cua-fixture.mjs");
   await writeFile(script, `import readline from 'node:readline'; let count=0;
 readline.createInterface({input:process.stdin}).on('line', line => { const m=JSON.parse(line); if(!m.id)return;
-const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}}}:m.method==='tools/list'?{tools:[{name:'observe'}]}:{content:[{type:'text',text:String(++count)},{type:'image',data:'aGVsbG8=',mimeType:'image/png'}]};
+const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}}}:m.method==='tools/list'?{tools:[{name:'get_window_state'}]}:{content:[{type:'text',text:String(++count)},{type:'image',data:'aGVsbG8=',mimeType:'image/png'}]};
 process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`);
   const cua = createSharedCua({ mcpCommand: process.execPath, mcpArgs: [script] });
   t.after(() => cua.close());
   const signal = new AbortController().signal;
-  assert.equal(payload(await cua.call({ action: "computer_tools" }, signal)).tools[0].name, "observe");
-  assert.equal((await cua.call({ action: "computer_call", tool_name: "observe" }, signal)).content[0].text, "1");
-  const next = await cua.call({ action: "computer_call", tool_name: "observe" }, signal);
+  assert.equal(payload(await cua.call({ action: "computer_tools" }, signal)).tools[0].name, "get_window_state");
+  assert.equal((await cua.call({ action: "computer_call", tool_name: "get_window_state" }, signal)).content[0].text, "1");
+  const next = await cua.call({ action: "computer_call", tool_name: "get_window_state" }, signal);
   assert.equal(next.content[0].text, "2"); assert.equal(next.content[1].type, "image");
   cua.close();
   await assert.rejects(cua.call({ action: "computer_tools" }, signal), /disconnected/);

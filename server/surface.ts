@@ -1,12 +1,12 @@
 // Where a bot's hands land — and therefore where the person goes when it
 // needs them. A turn can mount two places at once (a computer plus the
 // built-in browser), which is exactly what confused people: "do this on the
-// web" landed in the cloud box's Chrome one turn and in the Browser tab the
+// web" landed in the cloud boat's Chrome one turn and in the Browser tab the
 // next, and the "needs your hands" plea never said which. Everything that
 // decides or describes a surface lives here, so the picker, the dispatch,
 // the system prompt and the notification cannot drift apart.
 
-/** A place a bot can act. `cloud` covers both the Box and VPS backends —
+/** A place a bot can act. `cloud` covers both the Boat and VPS backends —
  * from the person's seat they are the same "cloud computer" panel. */
 import type { Surface } from "../shared/wire.ts";
 export type { Surface };
@@ -131,12 +131,23 @@ const RESTATE_SENTENCE =
 const SURFACE_AUTHORITY =
   " For browser and computer tasks, use OpenMausBot's mounted browser/computer tools first: inspect the target, perform the action, and verify its result before claiming success. Discover deferred tools by their server/name when needed. Do not substitute the provider's own desktop, a shell-launched browser, or another automation path for the selected OpenMausBot surface. Ordinary code and file tasks may still use their normal tools. Announcing an action is not performing it. A request naming another place does not move these tools: this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser. If the requested place differs from the mounted one, explain the mismatch and ask the user to change the conversation's computer selector; never act on a different computer or describe a host window as a VM.";
 
+/** A Cloud home offers neither this computer nor a Local VM
+ * (server/cloud-home.ts), so its bots are told only about the places it has.
+ * Each pair rewrites one phrase of the desktop wording above. */
+const CLOUD_HOME_WORDING: ReadonlyArray<readonly [string, string]> = [
+  ["this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser",
+    "the cloud computer is remote, the built-in browser is a separate browser, and the user's own computer cannot be reached from here"],
+  [" or describe a host window as a VM", ""],
+  ["select an available Local VM without asking", "select an available cloud computer without asking"],
+  [" Never silently replace an explicitly requested VM with the host desktop.", ""],
+];
+
 /** The one paragraph that says where this turn's work happens. Assembled
  * from what was actually mounted, never from the setting, so the model is
  * only ever told about tools it can call. */
 export function surfacePrompt(
   mounted: MountedSurfaces,
-  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean } = {},
+  opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; cloudHome?: boolean } = {},
 ): string {
   const computer = mounted.computer ? surfaceLabel(mounted.computer) : null;
   let text = "";
@@ -163,6 +174,7 @@ export function surfacePrompt(
   if (opts.canSelect) text += " If no suitable computer is running but its provider is configured, select_computer can provision one for this computer task; reuse existing resources first. Do not provision merely for ordinary chat or inspection.";
   if (opts.canSelect && !computer && !mounted.browser) text += " No computer or browser tools are mounted yet; select_computer is the way to connect them before screen work, not a reason to claim you already performed it.";
   if (computer || mounted.browser) text += " For online research, use the selected OpenMausBot browser when a search service is unavailable. A failed tool proves only that this attempt failed, not that every browser is unavailable. Inspect the current page after navigation; report a sign-in page, redirect or error as such. A completed model turn is not proof that the user's task succeeded.";
+  if (opts.cloudHome) for (const [desktop, cloudHome] of CLOUD_HOME_WORDING) text = text.replace(desktop, cloudHome);
   return text + (opts.note ?? "");
 }
 

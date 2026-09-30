@@ -13,7 +13,7 @@ import { ACTIVITY_WHATS, activityQuery, describeEntry, formatValue, whoLabel, ty
 import type { LocaleKey } from "@/locales";
 import { Card } from "./SettingsPrimitives";
 
-const inputClass = "rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none [color-scheme:dark]";
+const inputClass = "rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none [color-scheme:dark]";
 
 /** One row: when, who, what happened; a changed setting opens to its values. */
 export function ActivityRow({ entry }: { entry: ActivityEntry }) {

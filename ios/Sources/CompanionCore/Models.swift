@@ -477,6 +477,11 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     public var modelSelection: ModelSelection
     public var createdAt: Double
     public var busy: Bool?
+    /// What the bot is doing on its current thread: "working",
+    /// "waiting-on-you", "idle", "no-signal" or "dead". Transient on the
+    /// computer, and older computers omit it; a thread's own `activity`
+    /// outranks it.
+    public var activity: String?
     /// A dispatched teammate has not settled yet; the bot itself is waiting
     /// on it rather than working (#1223). Carries the active thread's wait;
     /// per-thread waits live on the task.
@@ -493,7 +498,7 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     public var alwaysAllow: [String]?
     public var computer: String?
     /// Which cloud computer backs `computer == "cloud"`. Absent (older
-    /// harnesses included) means the hosted Box; "vps" means the user's own
+    /// harnesses included) means the hosted Boat; "vps" means the user's own
     /// server, which has no interactive desktop to offer a phone.
     public var cloudBackend: String?
     public var speakReplies: Bool?
@@ -533,6 +538,7 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
         view.threadId = selectedThreadId
         view.modelSelection = task?.modelSelection ?? modelSelection
         view.busy = task?.busy ?? (selectedThreadId == threadId ? busy : false)
+        view.activity = task?.activity ?? (selectedThreadId == threadId ? activity : nil)
         view.waitingOnTeammate = task?.waitingOnTeammate ?? (selectedThreadId == threadId ? waitingOnTeammate : false)
         view.unread = task?.unread ?? (selectedThreadId == threadId ? unread : false)
         view.approvalMode = task?.approvalMode ?? task?.autoApprove.map { $0 ? "auto" : "ask" } ?? approvalMode
@@ -1231,7 +1237,7 @@ public enum RoutineRunLocation: String, CaseIterable, Codable, Hashable, Sendabl
 
 /// Desktop-equivalent run-location availability, derived only from paired-safe
 /// status endpoints. Selecting Cloud VM requires both the host credential and
-/// an available Box agent. An existing cloud routine remains editable without
+/// an available Boat agent. An existing cloud routine remains editable without
 /// silently changing where it runs if that VM is temporarily unavailable.
 public struct RoutineRunAvailability: Equatable, Sendable {
     public var cloudConfigured: Bool

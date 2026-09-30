@@ -35,11 +35,14 @@ class RosterLayoutTest {
     }
 
     @Test
-    fun `no bots yet is about bots, because rooms live in the strip`() {
-        // What the empty state under an unsearched roster asks.
-        assertTrue(RosterLayout.listsAnyBot(listOf(botSummary(), roomSummary())))
-        assertFalse(RosterLayout.listsAnyBot(listOf(roomSummary())))
-        assertFalse(RosterLayout.listsAnyBot(emptyList()))
+    fun `No bots yet waits until there is neither a bot nor a group`() {
+        // What the empty state under an unsearched roster asks. Groups are rows
+        // in compact and tiles in comfortable; the empty state must not sit on
+        // top of them.
+        assertTrue(RosterLayout.listsAnyChat(listOf(botSummary(), roomSummary())))
+        assertTrue(RosterLayout.listsAnyChat(listOf(roomSummary())))
+        assertTrue(RosterLayout.listsAnyChat(listOf(botSummary())))
+        assertFalse(RosterLayout.listsAnyChat(emptyList()))
     }
 
     @Test

@@ -2,13 +2,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Message } from "@/state/store";
+import { StoreProvider, type Group, type Message } from "@/state/store";
 
+// Replaced whole: its context default reads window.ogb at import time. An
+// empty caption chrome is the non-Windows layout.
 vi.mock("./DesktopCapabilities", () => ({
-  useDesktopCapabilities: () => ({}),
+  useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false } } }),
+  useCaptionChrome: () => ({}),
 }));
 
-import { RoomToolChip } from "./GroupView";
+import { GroupView, RoomToolChip } from "./GroupView";
 
 const chip = (patch: Partial<Message> = {}): Message => ({
   id: "chip",
@@ -58,5 +61,37 @@ describe("RoomToolChip", () => {
     expect(markup).toContain("Sent to Eli");
     expect(markup).toContain('aria-label="Eli"');
     expect(markup).not.toContain("<button");
+  });
+});
+
+describe("room header", () => {
+  const room: Group = {
+    id: "room", threadId: "room-thread", name: "Launch planning", memberIds: [],
+    defaultResponder: { kind: "member", botId: "atlas" }, bulletin: "", unread: false,
+    createdAt: 1, setupCompletedAt: 1, messages: [],
+  };
+
+  it("wraps into a name line and a control line when the column is narrow", () => {
+    // On a phone, or with a panel beside the room, the control row cannot
+    // shrink: the room name truncated to nothing. Narrow, the header wraps
+    // instead, as the 1:1 chat header does; the room's controls never fold
+    // to icons, so it wraps below 48rem. The query lives on the
+    // container's child row: a container query never matches the container
+    // element itself.
+    vi.stubGlobal("window", { ogb: undefined });
+    let markup: string;
+    try {
+      markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupView, { group: room })));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(markup).toContain("@container/roomhead");
+    const row = /data-roomhead-row="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(row[1].split(" ")).toContain("@max-3xl/roomhead:flex-wrap");
+    const identity = /data-roomhead-identity="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(identity[1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "@max-3xl/roomhead:basis-full"]));
+    const controls = /data-roomhead-controls="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(controls[1].split(" ")).toEqual(expect.arrayContaining(["@max-3xl/roomhead:ml-auto", "@max-3xl/roomhead:flex-wrap"]));
+    expect(markup).toContain("Launch planning");
   });
 });

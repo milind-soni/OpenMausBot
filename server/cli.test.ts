@@ -10,6 +10,7 @@ import { readAdminActivityRange } from "./admin-activity.ts";
 import { SetupCancelled } from "./cli-prompts.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startControlPlaneStub } from "./testing/control-plane-stub.ts";
+import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const setup = vi.hoisted(() => ({ runSetup: vi.fn(), isSetupComplete: vi.fn(), readCliStartup: vi.fn(), saveCliStartup: vi.fn() }));
@@ -418,8 +419,8 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
     const stub = await startControlPlaneStub();
     const fake = join(home, "cloudflared");
     writeFileSync(fake, "#!/bin/sh\nexec sleep 300\n", { mode: 0o755 });
-    const port = 21000 + Math.floor(Math.random() * 9000);
-    const originPort = 31000 + Math.floor(Math.random() * 9000);
+    const port = await freePortBlock([0, 1, 10_000]);
+    const originPort = port + 10_000;
     const fleetEnv = {
       HOME: home,
       USERPROFILE: home,
@@ -484,8 +485,8 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
     const quiet = { log: () => undefined, error: () => undefined, ask: async () => stub.otp };
     expect(await runLogin({ command: "login", port: 1, dataDir, tailscale: false, tunnel: false, client: false, pair: true, json: false, email: "cli@example.test" }, quiet)).toBe(0);
     vi.unstubAllEnvs();
-    const port = 21000 + Math.floor(Math.random() * 9000);
-    const originPort = 31000 + Math.floor(Math.random() * 9000);
+    const port = await freePortBlock([0, 1, 10_000]);
+    const originPort = port + 10_000;
     const child = cli(["serve", "--tunnel", "--port", String(port), "--data-dir", dataDir, "--label", "tunnel test"], {
       HOME: home,
       USERPROFILE: home,
@@ -519,7 +520,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
         }
         await new Promise((r) => setTimeout(r, 250));
       }
-      expect(descriptor?.status).toBe(200);
+      expect(descriptor?.status, out.match(/^tunnel:.*$/gm)?.join("\n")).toBe(200);
       // ...but a request with no headers at all, which the loopback listener would take as the owner, is a stranger here
       const stranger = await fetch(`${gateway}/api/bots`);
       expect(stranger.status).toBe(403);

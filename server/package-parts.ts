@@ -84,7 +84,9 @@ export const roomReleaseValues = (room: PackageRoom): Record<RoomPart, unknown> 
   members: [...room.members].sort(),
   defaultResponder: room.defaultResponder.kind === "agent"
     ? { kind: "agent", agent: room.defaultResponder.agent }
-    : { kind: room.defaultResponder.kind },
+    : room.defaultResponder.kind === "auto" && room.defaultResponder.agent
+      ? { kind: "auto", agent: room.defaultResponder.agent }
+      : { kind: room.defaultResponder.kind },
 });
 
 /** One normal form for a routine's timing on both sides, so an untouched

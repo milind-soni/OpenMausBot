@@ -8,7 +8,7 @@ export function isRemoteScreenshotContention(error: { status: number; message: s
     "this bot's cloud computer is being changed — wait for it to finish",
     "the VPS is being prepared — try again shortly",
     "VPS connection settings are being updated — wait for them to finish",
-    "Box account settings are being updated — wait for them to finish",
+    "Boat account settings are being updated — wait for them to finish",
   ].includes(error.message);
 }
 
@@ -31,7 +31,7 @@ export function remoteScreenshotSource(raw: unknown): string | null {
   return `data:${frame.format === "jpeg" ? "image/jpeg" : "image/png"};base64,${frame.png}`;
 }
 
-/** Match the server: selected bridge-capable engine, otherwise the Box runner. */
+/** Match the server: selected bridge-capable engine, otherwise the Boat runner. */
 export function cloudRunner(instances: readonly InstanceInfo[], selectedId?: string): InstanceInfo | undefined {
   if (!selectedId) return undefined;
   const selected = instances.find(instance => instance.instanceId === selectedId);

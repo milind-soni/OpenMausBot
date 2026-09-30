@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { ensureDirs } from "./config.ts";
-import { BoxAgentDriver } from "./drivers/boxagent.ts";
+import { BoatAgentDriver } from "./drivers/boatagent.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -629,6 +629,17 @@ describe("persistent routine results destinations", () => {
     expect(second.resultsThreadId).toBe("results-1");
     expect(h.manager.listRuns().find((run) => run.id === first.id)).toMatchObject({ status: "running", resultsThreadId: "chosen" });
     expect(h.manager.listRoutines()[0]?.resultsThreadId).toBe("results-1");
+  });
+
+  it("runs a bot routine inside the conversation it reports to when asked", async () => {
+    const h = resultsHarness();
+    h.options.joinConversation = (run) => run.resultsThreadId === "chosen" ? "chosen" : null;
+    const routine = h.manager.create({ ...input(), resultsThreadId: "chosen" });
+    h.manager.runNow(routine.id);
+    await h.manager.tick();
+    expect(h.taskActivations).toEqual([]);
+    expect(h.started).toEqual([expect.objectContaining({ botId: "maus-1", threadId: "chosen" })]);
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", threadId: "chosen" });
   });
 
   it("does not route webhook or room-goal executions through bot results tasks", async () => {
@@ -2890,12 +2901,12 @@ describe("routine continuity", () => {
   });
 });
 
-describe("routine runs × turn-held BoxAgent asks", () => {
+describe("routine runs × turn-held BoatAgent asks", () => {
   const start = Date.parse("2026-09-13T08:00:00Z");
 
-  /** The slice of the Box HTTP fake this integration needs (the full one
-   * lives in server/drivers/boxagent.test.ts). */
-  function installFakeBox(script: Array<{ events: unknown[]; status?: { promptRun: { status: string; result?: string } } }>, prompts: string[]) {
+  /** The slice of the Boat HTTP fake this integration needs (the full one
+   * lives in server/drivers/boatagent.test.ts). */
+  function installFakeBoat(script: Array<{ events: unknown[]; status?: { promptRun: { status: string; result?: string } } }>, prompts: string[]) {
     let i = 0;
     const previous = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
@@ -2921,7 +2932,7 @@ describe("routine runs × turn-held BoxAgent asks", () => {
     };
   }
 
-  // The exact case both plan reviews flagged: a BoxAgent ask arrives at the
+  // The exact case both plan reviews flagged: a BoatAgent ask arrives at the
   // run's settle. Holding the OMB turn open is what keeps the routine run in
   // waiting until the answer instead of completing out from under the card.
   it("holds the run in waiting until the person answers, then completes it", async () => {
@@ -2930,16 +2941,16 @@ describe("routine runs × turn-held BoxAgent asks", () => {
     const askText = "```omb-ask\n" + JSON.stringify({
       questions: [{ question: "Ship the release?", options: [{ label: "Ship now" }, { label: "Wait" }] }],
     }) + "\n```";
-    const restoreFetch = installFakeBox([
+    const restoreFetch = installFakeBoat([
       { events: [{ id: "e1", type: "response", text: askText }], status: { promptRun: { status: "running" } } },
       { events: [{ id: "e1", type: "response", text: askText }], status: { promptRun: { status: "finished", result: askText } } },
       { events: [{ id: "c1", type: "response", text: "Shipped." }], status: { promptRun: { status: "finished", result: "Shipped." } } },
     ], prompts);
     ensureDirs();
-    const instance = await BoxAgentDriver.create({
+    const instance = await BoatAgentDriver.create({
       instanceId: "box-routines",
-      displayName: "Box Routines",
-      environment: { BOX_TOKEN: "box-test-token" },
+      displayName: "Boat Routines",
+      environment: { BOX_TOKEN: "boat-test-token" },
       enabled: true,
       config: { pollMs: 0 },
     });
@@ -2950,10 +2961,10 @@ describe("routine runs × turn-held BoxAgent asks", () => {
         h.manager.handleRuntimeEvent(event);
       });
       h.options.startTurn = async (_botId, threadId) => {
-        await instance.adapter.sendTurn({ threadId, text: "sweep", integrations: { computer: { boxId: "box-1", token: "box-test-token" } } });
+        await instance.adapter.sendTurn({ threadId, text: "sweep", integrations: { computer: { boxId: "boat-1", token: "boat-test-token" } } });
       };
       const routine = h.manager.create({
-        name: "Box sweep",
+        name: "Boat sweep",
         prompt: "Sweep the box",
         botId: "maus-1",
         schedule: { type: "interval", everyMinutes: 5, anchorAt: start },

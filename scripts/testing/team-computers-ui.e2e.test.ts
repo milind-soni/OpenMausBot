@@ -14,7 +14,7 @@ const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.e
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(binary);
 if (!enabled) console.info("skipping team computers UI e2e: set OMB_UI_E2E=1 to install the pinned browser");
 
-type Info = { ui: string; url: string; botId: string; dataDir: string; logPath: string; boxFixtureApi: string };
+type Info = { ui: string; url: string; botId: string; dataDir: string; logPath: string; boatFixtureApi: string };
 type Computer = { id: string; name: string; section: string | null; state: string; problem?: string; held?: boolean };
 
 (enabled ? it : it.skip)("creates and assigns a shared computer only after explicit UI actions", async () => {
@@ -35,7 +35,7 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     }, { timeout: binary ? 180_000 : 600_000, interval: 250 }).toBe(true);
     const fixture = info!;
     const api = fixtureApi(fixture.url);
-    const provider = fixtureApi(fixture.boxFixtureApi);
+    const provider = fixtureApi(fixture.boatFixtureApi);
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", fixture.ui, ...args]) as Promise<Record<string, any>>;
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const snapshot = async () => (await ui("snapshot")).snapshot as string;
@@ -68,13 +68,13 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     // Native <summary> appears in AX but agent-browser does not assign a ref.
     await evaluate("document.querySelector('summary[aria-label=\"Add to team map\"]').focus(); true");
     await ui("press", "--keys", "Enter");
-    await click("Box computer");
+    await click("Boat computer");
     await expect.poll(() => evaluate("document.activeElement?.id")).toBe("canvas-computer-name");
-    expect(await snapshot()).toContain("Your Box plan and usage charges apply");
-    expect(await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Create Box')?.disabled")).toBe(true);
-    await ui("type", "--ref", await ref("New Box computer", "textbox"), "--text", "Engineering desktop");
+    expect(await snapshot()).toContain("Your Boat plan and usage charges apply");
+    expect(await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Create Boat')?.disabled")).toBe(true);
+    await ui("type", "--ref", await ref("New Boat computer", "textbox"), "--text", "Engineering desktop");
     expect((await receipts()).calls.every((call: { method: string }) => call.method === "GET")).toBe(true);
-    await click("Create Box");
+    await click("Create Boat");
     await expect.poll(async () => (await computers()).length, { timeout: 30_000 }).toBe(1);
     const machine = (await computers())[0];
     await expect.poll(async () => (await record(machine.id))?.state).toBe("idle");
@@ -173,20 +173,20 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     await click("Sleep");
     await expect.poll(async () => (await record(machine.id))?.state).toBe("archived");
     await provider("POST", "/__fixture", { refuseCreate: true });
-    await click("New Box computer");
-    await ui("type", "--ref", await ref("New Box computer", "textbox"), "--text", "Retry desktop");
-    await click("Create Box");
+    await click("New Boat computer");
+    await ui("type", "--ref", await ref("New Boat computer", "textbox"), "--text", "Retry desktop");
+    await click("Create Boat");
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("Fixture account is rate-limited");
     const retry = (await computers()).find(computer => computer.name === "Retry desktop")!;
     expect(retry).toBeDefined();
     expect(retry.section).toBeNull();
     await provider("POST", "/__fixture", { refuseCreate: false });
     // Reusing the still-open creation form retries the durable request ID.
-    await click("Create Box");
+    await click("Create Boat");
     await expect.poll(async () => (await record(retry.id))?.state, { timeout: 30_000 }).toBe("idle");
     expect(await computers()).toHaveLength(2);
     const providerResult = await receipts();
-    expect(providerResult.boxes).toHaveLength(2);
+    expect(providerResult.boats).toHaveLength(2);
     expect(providerResult.calls.some((call: { method: string }) => call.method === "DELETE")).toBe(false);
     Object.assign(evidence, { computers: await computers(), provider: providerResult, finalSnapshot: await snapshot() });
     await ui("screenshot", "--out", `${fixture.logPath}.team-computers.png`);

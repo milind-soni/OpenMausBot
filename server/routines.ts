@@ -49,7 +49,7 @@ export type RoutineScheduleInput =
   | Exclude<RoutineSchedule, RoutineIntervalSchedule>
   | RoutineIntervalScheduleInput;
 
-/** `cloud` runs the agent itself inside the bot's Box VM. `maus` keeps
+/** `cloud` runs the agent itself inside the bot's Boat VM. `maus` keeps
  * using the provider selected on the MAUS and only borrows its configured
  * computer tools, if any. */
 export type RoutineRunOn = "maus" | "cloud";
@@ -282,6 +282,9 @@ export interface RoutineManagerOptions {
   botState: (botId: string) => "ready" | "busy" | "missing";
   goalState?: (groupId: string, coordinatorBotId: string) => "ready" | "busy" | "missing";
   createTask: (botId: string, title: string, activate?: boolean) => { threadId: string } | null;
+  /** When set, run this bot's routine in that existing conversation instead of
+   * a new hidden task. Room goals never use it. */
+  joinConversation?: (run: RoutineRun) => string | null;
   createGoalTask?: (groupId: string, title: string) => { threadId: string } | null;
   isResultsThread?: (botId: string, threadId: string) => boolean;
   /** Reuse routine.resultsThreadId, keep a trusted chat source, or allocate a new ID. */
@@ -1575,8 +1578,12 @@ export class RoutineManager {
           continue;
         }
         // A webhook is an incoming message, so make its task the bot's live
-        // chat immediately. Scheduled work remains detached and unobtrusive.
-        const task = run.target === "room-goal"
+        // chat immediately. Scheduled work stays in its own task unless the
+        // workspace has asked for runs to join the conversation they report to.
+        const joined = run.target === "room-goal" ? null : this.options.joinConversation?.(run) || null;
+        const task = joined
+          ? { threadId: joined }
+          : run.target === "room-goal"
           ? run.groupId
             ? this.options.createGoalTask?.(run.groupId, run.routineName) ?? null
             : null

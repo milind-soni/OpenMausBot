@@ -11,10 +11,11 @@ import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
 import { ProviderIconPicker } from "./ProviderIconPicker";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSetup";
 import { AddClaudeAccount, ClaudeAccountSettings } from "./ClaudeAccountSettings";
-import { CodexAccountSettings } from "./CodexAccountSettings";
+import { AddChatGptAccount, CodexAccountSettings } from "./CodexAccountSettings";
 
 interface ProbeResult {
   ok: boolean;
@@ -119,7 +120,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
             }}
             aria-label={t("engines.detectedAria", { name: instance.displayName })}
             disabled={busy}
-            className="w-full appearance-none rounded-lg border border-hairline/40 bg-inset px-3 py-2 pr-8 font-mono text-[12px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
+            className="w-full appearance-none rounded-lg border border-hairline/40 bg-inset px-3 py-2 pr-8 font-mono text-[12px] text-ink focus:outline-none disabled:opacity-50"
           >
             <option value="">{t("engines.selectBinary")}</option>
             {candidates.map((p) => (
@@ -143,7 +144,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
         aria-label={t("engines.customAria", { name: instance.displayName })}
         spellCheck={false}
         disabled={busy}
-        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink placeholder:font-sans placeholder:text-ink-secondary focus:border-hairline focus:outline-none disabled:opacity-50"
+        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink placeholder:font-sans placeholder:text-ink-secondary focus:outline-none disabled:opacity-50"
       />
       {probe && !probe.ok && probe.message && (
         <div role="alert" className="flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2.5 py-2 text-[12px] leading-relaxed text-warning">
@@ -201,6 +202,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
 function EngineRow({ instance }: { instance: InstanceInfo }) {
   const { refreshInstances } = useStore();
   const [open, setOpen] = useState(false);
+  const cliMotion = useMenuMotion(open);
   const [switching, setSwitching] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updatedVersion, setUpdatedVersion] = useState<string | null>(null);
@@ -268,7 +270,7 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
       {instance.snapshot.warning && <EngineWarningNotice warning={instance.snapshot.warning} className="mt-3" />}
       {instance.claudeAccount && <ClaudeAccountSettings instance={instance} />}
       {engineReady(instance) && instance.snapshot.authenticated === true && (
-        instance.authentication?.method === "device-code"
+        instance.authentication?.method === "device-code" || instance.authentication?.method === "browser-pkce"
           ? <CodexAccountSettings instance={instance} />
           : instance.authentication?.method === "paste-code" && !instance.claudeAccount && (
             <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t("engineSetup.claude.connectedAccount")}</p>
@@ -329,13 +331,15 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
           <div role="status" className="mt-1 text-[12px] text-success">{t("engines.claudeUpdated", { version: updatedVersion })}</div>
         )}
         {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
-        {open && (
-          <CustomPicker
-            instance={instance}
-            cliDefault={instance.cliDefault}
-            onClose={() => setOpen(false)}
-            onSaved={refreshInstances}
-          />
+        {cliMotion.shown && (
+          <div className={cliMotion.className} {...cliMotion.exitProps}>
+            <CustomPicker
+              instance={instance}
+              cliDefault={instance.cliDefault}
+              onClose={() => setOpen(false)}
+              onSaved={refreshInstances}
+            />
+          </div>
         )}
       </details>
     </EngineCard>
@@ -359,7 +363,10 @@ export function EnginesSettings() {
         <RefreshEngines />
       </div>
       <EngineSections instances={rows} renderEngine={(instance) => <EngineRow instance={instance} />} />
-      <div className="border-t border-hairline/40 pt-4"><AddClaudeAccount /></div>
+      <div className="space-y-3 border-t border-hairline/40 pt-4">
+        <AddClaudeAccount />
+        {state.instances.some((instance) => instance.snapshot.chatgptPlan && !instance.readOnly && !instance.snapshot.authenticationUnavailableReason) && <AddChatGptAccount />}
+      </div>
     </div>
   );
 }

@@ -546,7 +546,7 @@ export function AttachmentThumbnail({
     >
       {state === "loading" && (
         <span className="absolute inset-0 flex animate-pulse items-center justify-center bg-raised/65" role="status">
-          <LoaderCircle size={17} className="animate-spin text-ink-secondary/65" />
+          <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />
           <span className="sr-only">Loading {image.name}</span>
         </span>
       )}
@@ -743,7 +743,7 @@ export function MarkdownImagePreview({
           <AttachmentThumbnail key={image.src} image={image} onPreview={() => setOpen(true)} className="max-h-96" eager />
         ) : (
           <span className="flex aspect-[4/3] max-h-96 animate-pulse items-center justify-center rounded-xl border border-hairline/40 bg-inset" role="status">
-            <LoaderCircle size={17} className="animate-spin text-ink-secondary/65" />
+            <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />
             <span className="sr-only">Loading {name}</span>
           </span>
         )}

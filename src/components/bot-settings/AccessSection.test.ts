@@ -2,13 +2,13 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Bot } from "@/state/store";
+import { StoreProvider, type Bot, type ConfigStatus } from "@/state/store";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), mcpError: false, servers: null as null | Array<{ name: string; enabled: boolean }> }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), mcpError: false, servers: null as null | Array<{ name: string; enabled: boolean }>, config: null as unknown }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: original.initialState, dispatch: fixture.dispatch }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config ?? original.initialState.config }, dispatch: fixture.dispatch }) };
 });
 vi.mock("@/lib/mcp-servers", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/mcp-servers")>(),
@@ -27,7 +27,7 @@ const { AccessSection } = await import("./AccessSection");
 // WorkingFolder (moved into this file) reads window.ogb?.pickFolder directly
 // at render time, same "node" environment gap as above — stub per test, the
 // way desktop.test.ts and EngineUpdateNotice.test.ts do.
-beforeEach(() => { vi.stubGlobal("window", {}); fixture.dispatch.mockReset(); fixture.mcpError = false; fixture.servers = null; });
+beforeEach(() => { vi.stubGlobal("window", {}); fixture.dispatch.mockReset(); fixture.mcpError = false; fixture.servers = null; fixture.config = null; });
 afterEach(() => vi.unstubAllGlobals());
 
 function makeBot(overrides: Partial<Bot> = {}): Bot {
@@ -136,5 +136,20 @@ describe("AccessSection always-allowed list", () => {
     expect(markup).toContain('aria-label="Remove shell.run from always allowed"');
     expect(markup).toContain('aria-label="Remove fs.write from always allowed"');
     expect(markup).not.toContain("Nothing standing yet.");
+  });
+});
+
+describe("AccessSection Works on", () => {
+  const places = (markup: string) => [...markup.matchAll(/>(Auto|Cloud|Local VM|This computer|Browser|Off)<\/button>/g)].map((match) => match[1]);
+
+  it("offers this computer and a Local VM on a desktop or self-hosted server", () => {
+    expect(places(render(makeBot()))).toEqual(["Auto", "Cloud", "Local VM", "This computer", "Browser", "Off"]);
+    fixture.config = { cloudHome: false } as Partial<ConfigStatus>;
+    expect(places(render(makeBot()))).toEqual(["Auto", "Cloud", "Local VM", "This computer", "Browser", "Off"]);
+  });
+
+  it("never offers them on an OMB Cloud home", () => {
+    fixture.config = { cloudHome: true } as Partial<ConfigStatus>;
+    expect(places(render(makeBot()))).toEqual(["Auto", "Cloud", "Browser", "Off"]);
   });
 });

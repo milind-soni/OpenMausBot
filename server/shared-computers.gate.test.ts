@@ -124,6 +124,8 @@ it("answers every shared-computer route the way a route this build never had ans
     // "disabled", "not enabled", or "pair this desktop first".
     expect(gated.body, path).toEqual({ error: `no route: POST ${path}` });
   }
+  // The owner-scoped status read, too.
+  expect(await api("GET", "/api/shared-computers")).toEqual({ status: 404, body: { error: "no route: GET /api/shared-computers" } });
 });
 
 it("hides the bot-facing route behind the same unknown-endpoint answer", async () => {
@@ -157,6 +159,8 @@ it("brings the whole surface back when features.sharedComputers is turned on", a
   const listed = await internal("GET", "/api/internal/shared-computers");
   expect(listed.status).toBe(200);
   expect(listed.body).toEqual({ computers: [] });
+  // Loopback lends nothing and is nobody's computer here.
+  expect(await api("GET", "/api/shared-computers")).toEqual({ status: 200, body: { computers: [] } });
 
   expect(await descriptorCapabilities()).toMatchObject({ sharedComputers: true });
 });

@@ -4,6 +4,7 @@ import { useStore, visibleMessages, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { parseChoices } from "../../shared/ask-question";
+import { ExpandableText } from "./ExpandableText";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
@@ -59,9 +60,9 @@ export function OptionCard({
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[16px] font-semibold text-ink">{title}</div>
-          <div className="mt-0.5 text-[14px] text-ink-secondary">
-            {subtitle}
-          </div>
+          {subtitle && (
+            <ExpandableText text={subtitle} className="mt-0.5 text-[14px] text-ink-secondary" />
+          )}
         </div>
         <button
           onClick={() =>
@@ -109,7 +110,7 @@ export function OptionCard({
           onChange={(e) => setCustom(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && answer(custom)}
           placeholder={t("onboarding.card.custom")}
-          className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline"
+          className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none"
         />
       )}
     </div>

@@ -132,7 +132,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
   if (canManage === false) return <p className="text-[12px] text-ink-secondary">{t("settings.profiles.ownerOnly")}</p>;
 
   const inputClass = "min-w-0 flex-1 rounded-md border border-hairline/40 bg-inset px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent disabled:opacity-50";
-  const buttonClass = "shrink-0 rounded-md bg-control px-2.5 py-2 text-[12px] text-ink hover:bg-control-hover disabled:opacity-50";
+  const buttonClass = "shrink-0 rounded-md bg-control px-2.5 py-2 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50";
   const selected = currentBot?.browserProfile ?? "";
   return (
     <div className="flex min-w-0 flex-col gap-3" aria-busy={busy}>

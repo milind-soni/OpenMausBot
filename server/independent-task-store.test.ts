@@ -55,6 +55,41 @@ describe("independent bot task state", () => {
     } finally { save.mockRestore(); }
   });
 
+  it("does not let a hidden routine execution hold the bot unread", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const visible = bot.threadId;
+    const execution = store.createTask(bot.id, "Execution", false)!;
+    store.patchTask(bot.id, execution.threadId, { routineRunId: "run-1", unread: true });
+    expect(store.taskByThread(bot.id, execution.threadId)).toMatchObject({ routineRunId: "run-1", unread: false });
+    expect(store.taskByThread(bot.id, visible)?.unread).toBe(false);
+    expect(bot.unread).toBe(false);
+
+    store.patchTask(bot.id, execution.threadId, { routineRunId: undefined, unread: true });
+    expect(store.taskByThread(bot.id, execution.threadId)?.routineRunId).toBeUndefined();
+    expect(store.taskByThread(bot.id, execution.threadId)?.unread).toBe(true);
+    expect(bot.unread).toBe(true);
+  });
+
+  it("heals a saved hidden routine execution that was left unread", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const execution = store.createTask(bot.id, "Execution", false)!;
+    store.patchTask(bot.id, execution.threadId, { routineRunId: "run-1" });
+    const raw = savedBots();
+    const saved = raw.find((row) => row.id === bot.id)!;
+    const hidden = saved.tasks!.find((task) => task.threadId === execution.threadId)!;
+    hidden.unread = true;
+    saved.unread = true;
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(raw));
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, execution.threadId)).toMatchObject({ routineRunId: "run-1", unread: false });
+    expect(reloaded.bot(bot.id)?.unread).toBe(false);
+    const persisted = savedBots().find((row) => row.id === bot.id)!;
+    expect(persisted.unread).toBe(false);
+    expect(persisted.tasks!.find((task) => task.threadId === execution.threadId)?.unread).toBe(false);
+  });
+
   it("persists routine execution identity without sharing context or approval settings", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });

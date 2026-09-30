@@ -14,6 +14,7 @@ struct CompanionApp: App {
     @StateObject private var session = Session()
     @Environment(\.scenePhase) private var scenePhase
     @State private var liveActivities = LiveActivityBridge()
+    @State private var widgetSync = WidgetSyncBridge.makeAppGroupBridge()
     @AppStorage(PrefKey.language) private var language = AppLanguage.system.rawValue
 
     var body: some Scene {
@@ -42,15 +43,18 @@ struct CompanionApp: App {
                     OpenMausSharedInbox.removeDirectories(olderThan: 60 * 60)
                     session.connect()
                     liveActivities.attach(to: session)
+                    widgetSync.attach(to: session)
                 }
-                .onOpenURL { session.receivePairingURL($0) }
+                .onOpenURL { session.receiveURL($0) }
                 .onValueChange(of: scenePhase) { phase in
                     switch phase {
                     case .active:
                         OpenMausSharedInbox.removeDirectories(olderThan: 60 * 60)
                         session.connect()
                         Task { await session.refreshNotificationAuthorization() }
-                    case .background: session.linger()
+                    case .background:
+                        session.linger()
+                        widgetSync.flush(session.state, connectionID: session.connection?.id)
                     case .inactive: break
                     @unknown default: break
                     }

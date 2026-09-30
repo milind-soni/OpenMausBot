@@ -62,38 +62,38 @@ export function localComputerDisabledReason({
 }
 
 export function linuxAutoDescription(): string {
-  return "Auto reuses an existing cloud box; otherwise computer use stays off.";
+  return "Auto reuses an existing Boat cloud computer; otherwise computer use stays off.";
 }
 
-export type BoxPanelAction =
-  | "ensure-box"
-  | "attach-ready-box"
-  | "busy-box"
-  | "team-box"
-  | "show-ready-box"
-  | "show-sleeping-box"
-  | "show-pending-box"
+export type BoatPanelAction =
+  | "ensure-boat"
+  | "attach-ready-boat"
+  | "busy-boat"
+  | "team-boat"
+  | "show-ready-boat"
+  | "show-sleeping-boat"
+  | "show-pending-boat"
   | "local"
   | "unconfigured"
   | "auto-unavailable";
 
-const READY_BOX_STATES = new Set(["idle", "ready", "running"]);
+const READY_BOAT_STATES = new Set(["idle", "ready", "running"]);
 
-/** A Box state the panel can attach to and poll. */
-export function isReadyBoxState(state: string | null | undefined): boolean {
-  return typeof state === "string" && READY_BOX_STATES.has(state);
+/** A Boat state the panel can attach to and poll. */
+export function isReadyBoatState(state: string | null | undefined): boolean {
+  return typeof state === "string" && READY_BOAT_STATES.has(state);
 }
-const SLEEPING_BOX_STATES = new Set(["archived", "stopped"]);
+const SLEEPING_BOAT_STATES = new Set(["archived", "stopped"]);
 
-/** Mirror the turn router's Box choice without letting a passive panel open
- * mutate infrastructure. Auto only reports an existing Box's current state;
+/** Mirror the turn router's Boat choice without letting a passive panel open
+ * mutate infrastructure. Auto only reports an existing Boat's current state;
  * it never creates, wakes, bootstraps, or opens one. This is deliberately
- * independent of the engine: even the box-native Computer engine needs an
+ * independent of the engine: even the boat-native Computer engine needs an
  * explicit Cloud choice before the panel may provision. */
-export function resolveBoxPanelAction({
+export function resolveBoatPanelAction({
   computer,
   configured,
-  boxState,
+  boatState,
   canUseCloud,
   autoLocal,
   teamComputer = false,
@@ -101,18 +101,18 @@ export function resolveBoxPanelAction({
 }: {
   computer: Bot["computer"];
   configured: boolean;
-  boxState: string | null;
+  boatState: string | null;
   canUseCloud: boolean;
   autoLocal: boolean;
   teamComputer?: boolean;
   /** A turn is running on this bot: the server refuses provision/sleep
-   * with 409 while the turn owns the box, and the turn itself creates or
-   * wakes the box it needs. */
+   * with 409 while the turn owns the boat, and the turn itself creates or
+   * wakes the boat it needs. */
   busy?: boolean;
-}): BoxPanelAction {
-  // A team's explicit grant wins over Auto's private-Box/local fallback.
+}): BoatPanelAction {
+  // A team's explicit grant wins over Auto's private-Boat/local fallback.
   // This panel reports it; paid lifecycle and shared access stay in Team map.
-  if (computer === undefined && teamComputer) return "team-box";
+  if (computer === undefined && teamComputer) return "team-boat";
   const explicitCloud = computer === "cloud";
 
   if (!configured) {
@@ -121,15 +121,15 @@ export function resolveBoxPanelAction({
   }
   if (explicitCloud) {
     if (!canUseCloud) return "auto-unavailable";
-    // Mid-turn the panel only watches: a ready box is shown as-is (its
+    // Mid-turn the panel only watches: a ready boat is shown as-is (its
     // frames already stream in), anything else is left to the turn.
-    if (busy) return boxState && READY_BOX_STATES.has(boxState) ? "attach-ready-box" : "busy-box";
-    return "ensure-box";
+    if (busy) return boatState && READY_BOAT_STATES.has(boatState) ? "attach-ready-boat" : "busy-boat";
+    return "ensure-boat";
   }
-  if (canUseCloud && boxState) {
-    if (READY_BOX_STATES.has(boxState)) return "show-ready-box";
-    if (SLEEPING_BOX_STATES.has(boxState)) return "show-sleeping-box";
-    return "show-pending-box";
+  if (canUseCloud && boatState) {
+    if (READY_BOAT_STATES.has(boatState)) return "show-ready-boat";
+    if (SLEEPING_BOAT_STATES.has(boatState)) return "show-sleeping-boat";
+    return "show-pending-boat";
   }
   return autoLocal ? "local" : "auto-unavailable";
 }

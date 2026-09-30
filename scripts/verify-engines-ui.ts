@@ -47,6 +47,13 @@ instances[5].install!.server = { package: "kimi-fixture" };
 instances[3].install!.server = { package: "opencode-fixture" };
 instances[3].snapshot.update = { title: "OpenCode update available", message: "A sample update for this isolated preview.", command: "echo 'Preview only'" };
 instances.push({ ...instances[0], instanceId: "claude-local", displayName: "Claude · Local", access: "custom", claudeAccount: undefined, snapshot: { state: "available", authenticated: false } });
+const chatgptPlan: InstanceInfo = {
+  instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT plan", cliDefault: "codex", access: "subscription",
+  snapshot: { state: "available", authenticated: false, chatgptPlan: true },
+  models: { default: "", options: [] }, authentication: { method: "browser-pkce", signOut: true },
+  install: { docsUrl: "https://developers.openai.com/siwc/token-sharing-open-source" },
+};
+instances.push(chatgptPlan);
 const controller = new AbortController();
 const cancel = () => controller.abort();
 process.once("SIGINT", cancel);
@@ -88,6 +95,13 @@ try {
         }
         if (path === "/__fixture/connect" && req.method === "POST") {
           instances[4].snapshot.authenticated = !instances[4].snapshot.authenticated;
+          return json({ ok: true });
+        }
+        if (path === "/__fixture/chatgpt" && req.method === "POST") {
+          const connected = !chatgptPlan.snapshot.authenticated;
+          chatgptPlan.snapshot.authenticated = connected;
+          chatgptPlan.snapshot.account = connected ? { email: "preview@example.test", method: "login" } : undefined;
+          chatgptPlan.models = connected ? { default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] } : { default: "", options: [] };
           return json({ ok: true });
         }
         if (path === "/api/cli-candidates") return json({ candidates: ["/preview/bin/claude"] });

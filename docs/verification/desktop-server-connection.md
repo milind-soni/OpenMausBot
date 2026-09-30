@@ -89,7 +89,9 @@ connections or directly invoke switching, forgetting, or host-only controls.
 
 ## Optional computer sharing
 
-**Computer sharing is disabled by default pending security hardening.**
+**Computer sharing is disabled by default.** The exception is lending a Mac
+to the person's own OMB Cloud home, which has its own switch and gate; see
+`docs/cloud-pro.md`, "Let my Cloud use this Mac".
 Connecting and switching hosted workspaces still works, but does not offer
 local file, terminal, or screen access. The flow below is maintainer-only
 verification with `features.sharedComputers: true` on both servers, not a
@@ -119,9 +121,53 @@ Older servers need updating before they advertise this capability.
   Between calls, another actor can change the screen: observe again before acting.
 
 Saving requires a native confirmation naming the exact HTTPS workspace and
-permissions. Grants belong to the workspace's bots, not a single bot. Shared
-content may reach that server's model provider. Nothing is granted merely by
-connecting the workspace.
+permissions. Shared content may reach that server's model provider. Nothing is
+granted merely by connecting the workspace.
+
+**Whose bots can use it.** A lent computer belongs to the person whose paired
+session registered it. On that server, only a conversation that person started
+(their own message, from a signed-in or paired session, started the turn) can
+list or use it; continuations of that same request keep it. Another person's
+conversation, a routine, a webhook, a room, a bot's delegated or peer turn and
+the machine's own owner at loopback see no computers, and a known computer id
+answers exactly like an unknown one. Entries are keyed by the registering
+session, so no other session can take over or squat an id. The server also
+refuses any operation outside the scopes the desktop registered, before
+queuing it; the desktop still checks every operation against its own grant.
+A bot whose **Computer** setting is off cannot use lent apps and screen.
+
+**What folder access never reaches.** Besides the desktop's own data and grant
+store, no folder operation (read, list or write) reaches the person's keys and
+sign-in stores or places that run code by themselves, however the folder
+around them was chosen: `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.kube`,
+`~/.docker`, `~/.netrc`, `~/.git-credentials`, `~/.npmrc`, `~/.pypirc`,
+`~/.claude`, `~/.claude.json`, `~/.codex`, `~/.config/{gh,gcloud,op,git,fish,
+autostart,systemd}`, browser profiles, `~/Library/{Keychains,Cookies,
+LaunchAgents,Safari}` and `~/.local/bin` (the list is
+`PERSONAL_SECRETS` in `electron/shared-computer-access.mjs`). A listing shows
+them as `protected`. Writes are refused inside any `.git` directory, because
+git runs commands from its configuration and hooks. Other files that programs
+later run (scripts, build files) can still be edited in a writable folder.
+
+**Computer control** offers only on-screen tools and, for each, only the
+arguments that observe or operate the screen (`LENT_SCREEN_ARGUMENTS` in
+`electron/lent-screen-tools.mjs`, derived from the driver's own schemas and
+checked against a snapshot of them in `electron/fixtures`). The local driver's
+other tools (uploading a local file into a page by path, recording or
+replaying to a path, changing or updating its configuration, installing a
+binary, opening a DevTools port, killing a process, raising permission
+prompts) are refused and hidden, and so is every argument that names a file
+(`screenshot_out_file`, `debug_image_out`, `image_path`, a path as a cursor
+icon or as a URL to open), a command line or a port. Unknown arguments are
+refused, never forwarded.
+
+**Activity log.** The desktop records every request it receives (time, server,
+action, folder name and relative path, tool name or command text, and whether
+it ran or was refused) in `lending-activity.jsonl` next to the grants, owner
+only. It only ever appends (never through a link); a full file of 500 entries
+is moved aside intact as `lending-activity.jsonl.1`. It never records file
+contents, output or typed text.
+**Computer access** shows the recent entries for that server.
 
 The connector runs in Electron main, outbound to the paired server; there is
 no exposed local listener. Every request needs the live paired session plus a
@@ -153,7 +199,7 @@ and a native operation already admitted may have completed.
 
 ```sh
 pnpm exec vitest run server/shared-computers.test.ts server/shared-computers.e2e.test.ts server/shared-computers.gate.test.ts
-node --test electron/shared-computer-access.node-test.mjs
+node --test electron/shared-computer-access.node-test.mjs electron/lending-guards.node-test.mjs
 ```
 
 The **Shared terminal smoke** workflow runs the native terminal tests and this
