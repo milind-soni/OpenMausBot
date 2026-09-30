@@ -7824,7 +7824,7 @@ function finalizeDelegationWatch(
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
-        tool: { name: `Send failed — ${failureName}`, ok: false },
+        tool: { name: `Send failed — ${failureName}`, ok: false, ...(watched.taskId ? { handoffId: watched.taskId } : {}) },
       });
     }
     return true;

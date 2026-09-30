@@ -65,6 +65,24 @@ it("sends cross-bot work onward without resuming either sender", () => fixture(a
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text?.includes("QA sent") || message.text?.includes("Release QA complete"))).toBe(false);
 }), 60_000);
 
+it("marks a failed one-way send so restart recovery cannot duplicate its notice", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ tool: "send_to_bot", arguments: {
+    bot_id: f.lead.id, title: "Failing work", message: "Try the task", request_key: "failed-send",
+  } }], reply: "Sent" };
+  f.plan[f.lead.id] = { fail: true };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const failureNotice = async () => {
+    const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
+    const task = lead?.tasks.find((item: any) => item.title === "Failing work");
+    if (!task) return null;
+    const messages = await f.messages(task.threadId);
+    return messages.find((message: any) => message.tool?.name?.startsWith("Send failed")) ?? null;
+  };
+  await expect.poll(failureNotice, { timeout: 15_000 }).toBeTruthy();
+  expect((await failureNotice())?.tool?.handoffId).toEqual(expect.any(String));
+}), 45_000);
+
 it("does not grant a specialist direct access to its supervising Chief", () => fixture(async f => {
   f.plan[f.lead.id] = {
     steps: [{ expectError: true, arguments: { bot_ids: [f.chief.id], request_key: "supervisor", message: "Contact the Chief without a shared room" } }],
