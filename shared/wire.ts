@@ -353,7 +353,10 @@ export interface ResolvedSender {
  * owner on this machine, or a session-less local caller on a shared server
  * (`worker`: the Slack worker, or any other process on that machine). */
 export type CardAnswerer =
-  | { kind: "session"; name: string }
+  /** `person`: the answering session's opaque person key, recorded on an OMB
+   * Cloud home only, where it decides whether an answer came from the owner
+   * (server/cloud-lending.ts). */
+  | { kind: "session"; name: string; person?: string }
   | { kind: "loopback" }
   | { kind: "worker" };
 
@@ -448,6 +451,10 @@ export interface WireMessage {
   from?: { botId: string; name: string; color: string };
   /** Set on a room message a bot pushed in with post_to_room. */
   peerPost?: { unattended?: boolean };
+  /** A room reply whose speaker the decision model picked (an Auto room),
+   * with how sure it was. Absent on every other message; clients that do
+   * not know it ignore it. */
+  routedBy?: { provider: "jev"; probability: number };
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (ask_bot, start_thread). */
   peerAsk?: { botId: string; name: string; unattended?: boolean };
@@ -542,10 +549,15 @@ export interface SecretRequestCardData {
   error?: string;
 }
 
+/** Who answers a room message nobody was @mentioned in. `auto` asks the
+ * decision model (server/decider/room-routing.ts) and falls back to
+ * `fallbackBotId` (else the first member) whenever it is off or unsure.
+ * Readers must treat any kind they do not know as the default lead. */
 export type GroupDefaultResponder =
   | { kind: "member"; botId: string }
   | { kind: "everyone" }
-  | { kind: "mentions" };
+  | { kind: "mentions" }
+  | { kind: "auto"; fallbackBotId?: string };
 
 /** One independent conversation inside a user-created channel. */
 export interface GroupTask {

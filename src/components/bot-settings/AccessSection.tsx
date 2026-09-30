@@ -14,6 +14,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
+import { placeOffered } from "@/lib/place";
 import { shortPath } from "@/lib/short-path";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
@@ -570,7 +571,7 @@ export function AccessSection({
             ["local", "This computer"],
             ["browser", "Browser"],
             ["off", "Off"],
-          ] as const).map(([mode, label], i) => (
+          ] as const).filter(([mode]) => mode === null || mode === "off" || placeOffered(mode, state.config)).map(([mode, label], i) => (
             <button
               key={mode ?? "auto"}
               disabled={(mode === "local" && !localSelectable) || (mode === "browser" && !browserSelectable)}

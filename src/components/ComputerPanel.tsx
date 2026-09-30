@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { api, ApiError, currentTaskBot, useStore, type Bot } from "@/state/store";
-import { effectivePlace, isComputerPlace, placeLabelKey } from "@/lib/place";
+import { effectivePlace, isComputerPlace, placeLabelKey, placeOffered } from "@/lib/place";
 import type { CloudBackend } from "../../shared/wire";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
@@ -248,7 +248,8 @@ export function ComputerPanel({
   const localAvailable = capabilities.localComputer.available;
   const isLinux = capabilities.host.platform === "linux";
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
-  const localSelectable = localComputerSelectable({ capabilities, providerSupportsLocal });
+  // An OMB Cloud home never offers this computer (shared/cloud-home.ts).
+  const localSelectable = placeOffered("local", state.config) && localComputerSelectable({ capabilities, providerSupportsLocal });
   const [localAutoWarningTarget, setLocalAutoWarningTarget] = useState<string | null>(null);
   const localDisabledReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
   const [phase, setPhase] = useState<Phase>("checking");
@@ -1683,7 +1684,7 @@ export function ComputerPanel({
           <div className="mt-4 rounded-xl bg-card p-4">
             <div className="text-[15px] font-medium text-ink">{t("computer.worksOn")}</div>
             <p className="mt-1 text-[12px] leading-5 text-ink-secondary">
-              {t("computer.worksOnHint")}
+              {t(state.config?.cloudHome ? "computer.worksOnHintCloudHome" : "computer.worksOnHint")}
             </p>
           <div role="group" aria-label={t("computer.destinationAria")} className="mt-3 grid auto-rows-fr grid-cols-2 gap-2">
             {([
@@ -1693,7 +1694,7 @@ export function ComputerPanel({
               ["local", "vm.dest.local", "computer.dest.localDesc", Monitor],
               ["browser", "vm.dest.browser", "computer.dest.browserDesc", Globe],
               ["off", "vm.dest.off", "computer.dest.offDesc", Power],
-            ] as const).map(([mode, labelKey, descriptionKey, Icon]) => {
+            ] as const).filter(([mode]) => mode === null || mode === "off" || placeOffered(mode, state.config)).map(([mode, labelKey, descriptionKey, Icon]) => {
                 const selected = mode === null ? !profileBot.computer : profileBot.computer === mode;
                 // A place the enrolled organisation disallows is not offered.
                 const managedPolicy = state.config?.managedPolicy;

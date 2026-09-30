@@ -104,6 +104,18 @@ export function computerPrompt(kind: ComputerPromptKind | null): string {
   return COMPUTER_PARAGRAPH[kind] + SIGN_IN_PROMPT;
 }
 
+/** Every turn on a Cloud home (server/cloud-home.ts). The bot runs in the
+ * cloud, so asked about the person's own computer it says what is true instead
+ * of sending them to set up places that cannot exist there. Their Mac is
+ * reachable only when they lend it (docs/cloud-pro.md), through the
+ * shared-computer tools, so only a turn that has those tools is told to use them. */
+export function cloudHomePrompt(sharedComputerTools: boolean): string {
+  return " You run on the user's OMB Cloud, a server in the cloud, not on their own computer." + (sharedComputerTools
+    ? " If they ask for something on their own Mac or PC, check list_shared_computers: a Mac they lend to their Cloud is reachable through shared_computer, within the folders and apps it allows. If none is lent and online, say so in one sentence: they can turn on Let my Cloud use this Mac under Settings → OMB Cloud in the desktop app on that Mac."
+    : " You cannot see or use their Mac or PC, its screen or its files from here. If they ask for something on it, say so in one sentence.")
+    + " Offer what works here: the built-in browser and cloud computers. Never ask them to set up this computer or a Local VM; neither exists here.";
+}
+
 export const COMPOSIO_PROMPT =
   " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service.";
 

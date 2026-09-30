@@ -330,7 +330,25 @@ export const CLAUDE_FLAG_FLOORS = {
   // 2.1.267 is the first CLI that accepts it; below that the recorded prompt
   // simply is not refreshed, which is the pre-existing behaviour.
   "--system-prompt-snapshot": [2, 1, 267],
+  // A guest's turn on a Cloud home (GUEST_CLAUDE_TOOLS): 2.1.248 takes
+  // --restricted, 2.1.257 honours blockReadsOutsideWorkingDirectories.
+  "--restricted": [2, 1, 257],
 } as const satisfies Record<string, ClaudeCliVersion>;
+
+/** The only built-in tools a guest's turn on a Cloud home gets
+ * (SendTurnInput.guestConfined): no Bash, PowerShell or WebFetch, so nothing
+ * runs a command, and with --restricted plus the settings below every read
+ * outside its own folder is refused outright, never asked. Probed against
+ * Claude Code 2.1.284 in `default` mode: without this, a built-in list of
+ * "read-only" Bash commands runs unasked, and `xargs head` reads any file. */
+export const GUEST_CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "WebSearch"] as const;
+/** Tools a guest's session must never report in its init frame. */
+const GUEST_FORBIDDEN_TOOLS = new Set(["Bash", "PowerShell", "WebFetch", "BashOutput", "KillShell", "KillBash", "NotebookEdit", "Task", "Agent"]);
+/** The permission block a guest's session runs under, as a second layer. */
+export const GUEST_CLAUDE_PERMISSIONS = {
+  blockReadsOutsideWorkingDirectories: true,
+  deny: ["Bash", "PowerShell", "WebFetch", "Read(//proc/**)"],
+} as const;
 
 export type ClaudeCliVersion = readonly [number, number, number];
 
@@ -402,6 +420,7 @@ export const STATIC_CLAUDE_MODELS: ModelCatalog = {
     { id: "claude-fable-5", label: "Claude Fable 5" },
     { id: "claude-opus-5-5", label: "Claude Opus 5.5", contextWindow: 1_000_000 },
     { id: "claude-opus-5", label: "Claude Opus 5" },
+    { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", contextWindow: 1_000_000 },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
   ],
@@ -1261,17 +1280,26 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         "--include-partial-messages",
         "--permission-mode", permissionMode,
       ];
-      if (config.tools !== undefined) args.push("--tools", config.tools.join(","));
+      // A guest's turn: no command-running tool at all, and no read outside
+      // its own folder (GUEST_CLAUDE_TOOLS). It only ever runs in Ask.
+      if (turn.guestConfined && permissionMode !== "default") {
+        throw new Error("A guest's turn on this Cloud runs only in Ask.");
+      }
+      if (turn.guestConfined) args.push("--restricted", "--tools", GUEST_CLAUDE_TOOLS.join(","));
+      else if (config.tools !== undefined) args.push("--tools", config.tools.join(","));
       if (config.disallowedTools?.length) {
         args.push("--disallowedTools", config.disallowedTools.join(","));
       }
       const turnEnvironment = environment();
-      if (turn.refreshSystemPrompt && !cliVersionChecked) {
+      if ((turn.refreshSystemPrompt || turn.guestConfined) && !cliVersionChecked) {
         const version = await readCliVersion(turnEnvironment);
         if (version) {
           cliVersion = parseClaudeCliVersion(version);
           cliVersionChecked = true;
         }
+      }
+      if (turn.guestConfined && !claudeCliSupports(cliVersion, "--restricted")) {
+        throw new Error("This Claude Code is too old to take a guest's request on this Cloud without a shell. Update Claude Code.");
       }
       const isolated = !inheritsUserConfig(turnEnvironment);
       if (isolated) {
@@ -1386,7 +1414,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // of MCP servers, so a server the bot's OWN project declares would
       // otherwise vanish with the machine's. Merge it last: a project file
       // can add servers but never shadow a harness-owned mount.
-      if (isolated && turn.cwd) {
+      // Never for a guest's turn: its folder is its own to write, and a
+      // server declared there would run a command.
+      if (isolated && turn.cwd && !turn.guestConfined) {
         for (const [name, server] of Object.entries(projectMcpServers(turn.cwd))) {
           if (Object.hasOwn(mcpServers, name)) continue;
           mcpServers[name] = server;
@@ -1414,6 +1444,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG }, alwaysLoad: true };
       allowed.push("mcp__ogb");
+      // A guest's turn pre-allows only the harness's own tools: anything
+      // else (the browser can open a file: address) asks the owner first.
+      if (turn.guestConfined) allowed.splice(0, allowed.length, ...allowed.filter((name) => name === "mcp__ogb" || name === "mcp__agents"));
       // The MCP config carries credentials — a Composio consumer key in a
       // header, the boat token in the computer proxy's env, the comms token in
       // the agents proxy's env. On argv every one of those is world-readable
@@ -1449,6 +1482,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       const settings: Record<string, unknown> = { ...authSettings };
       if (hooks) settings.hooks = claudeHookSettings(HOOK_HELPER_PATH);
+      if (turn.guestConfined) settings.permissions = GUEST_CLAUDE_PERMISSIONS;
       const authSettingsPath = mcpConfigPath && Object.keys(settings).length
         ? join(dirname(mcpConfigPath), "auth-settings.json") : null;
       if (authSettingsPath) args.push("--settings", authSettingsPath);
@@ -1743,6 +1777,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         switch (o.type) {
           case "system":
             if (o.subtype === "init") {
+              // A guest's session proves its tool set before it does anything:
+              // a CLI that kept a command-running tool is stopped here.
+              const tools: unknown[] = Array.isArray(o.tools) ? o.tools : [];
+              if (session.turn?.input.guestConfined && (o.permissionMode !== "default" || tools.some((tool) => typeof tool === "string" && GUEST_FORBIDDEN_TOOLS.has(tool)))) {
+                emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: "This Claude Code kept its shell, so it can't take a guest's request on this Cloud. Update Claude Code." });
+                session.closing = true;
+                stopSession(session);
+                break;
+              }
               session.sawInit = true;
               session.nativePermissionMode = typeof o.permissionMode === "string" ? o.permissionMode : null;
               if (typeof o.session_id === "string") session.sessionId = o.session_id;
@@ -2249,6 +2292,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         provider: DRIVER_KIND,
         capabilities: {
           sessionModelSwitch: "in-session",
+          // A guest's turn runs with no command-running tool and no read
+          // outside its folder (guestConfined, GUEST_CLAUDE_TOOLS).
+          guestTurns: "confined",
           agentsMcp: true,
         customMcp: true,
           computerMcp: true,

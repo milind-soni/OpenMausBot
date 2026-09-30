@@ -115,6 +115,9 @@ export class ManagedDesktopProviders {
    * that happens to be named company.* is never treated as managed. */
   private readonly known = new Set<string>();
   owns(instanceId: string): boolean { return this.known.has(instanceId); }
+  /** Whether an organisation manages this desktop right now (a connection
+   * has been applied and not revoked), whatever its licence state. */
+  enrolled(): boolean { return this.connection !== null; }
 
   apply(raw: unknown, force = false): Promise<void> {
     const connection = parseManagedDesktopConnection(raw, this.now()), nextSignature = instanceSignature(connection);

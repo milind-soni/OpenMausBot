@@ -9,6 +9,7 @@ import { api, useStore, type Bot } from "@/state/store";
 import type { BotOverview } from "@/lib/bot-overview-types";
 import { cn } from "@/lib/cn";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { useCaptionChrome } from "./DesktopCapabilities";
 import { BOT_SECTIONS } from "./bot-settings/sections";
 import { useBotSettingsDerived } from "./bot-settings/useBotSettingsDerived";
 import { OverviewSection } from "./bot-settings/OverviewSection";
@@ -42,6 +43,9 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
   const section = state.botSettingsSection;
   const derived = useBotSettingsDerived(bot);
   const dialogRef = useRef<HTMLElement | null>(null);
+  // Windows draws its caption buttons over the top-right corner, where this
+  // panel's close button sits; drop the header below them.
+  const { padClass } = useCaptionChrome();
   const [query, setQuery] = useState("");
   // Keep expansion in the store too: header deep links can arrive while
   // this panel is already mounted, including after collapsing the same row.
@@ -324,7 +328,7 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
         tabIndex={-1}
         className="animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel outline-none lg:static lg:z-auto lg:w-[min(420px,42vw)] lg:shrink-0"
       >
-        <div className="flex shrink-0 items-center justify-between px-4 py-3">
+        <div className={cn("flex shrink-0 items-center justify-between px-4 py-3", padClass)}>
           <span id="bot-settings-title" className="truncate text-[15px] font-semibold text-ink">
             {bot.name}
           </span>

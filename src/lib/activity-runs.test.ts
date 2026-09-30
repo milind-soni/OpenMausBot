@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeRun, groupActivityRuns, groupTranscript, isRecoveryActivity } from "./activity-runs";
+import { describeRun, groupActivityRuns, groupTranscript, isRecoveryActivity, statusActivity } from "./activity-runs";
 import type { Message } from "@/state/store";
 
 let seq = 0;
@@ -57,6 +57,21 @@ describe("groupActivityRuns", () => {
       const items = group(messages);
       expect(items.map(item => item.kind)).toEqual(["run", "message", "run"]);
       expect(items[1]).toEqual({ kind: "message", message: recovery });
+    }
+  });
+
+  it("keeps a model notice visible between successful tool runs", () => {
+    const notice = tool("notice: OpenCode no longer offers opencode/x, so this conversation uses opencode/big-pickle.");
+    const messages = [tool("Read"), tool("Edit"), notice, tool("Bash"), tool("Write")];
+    expect(statusActivity(notice)).toEqual({
+      kind: "notice", text: "OpenCode no longer offers opencode/x, so this conversation uses opencode/big-pickle.",
+    });
+    expect(isRecoveryActivity(notice)).toBe(false);
+    expect(statusActivity(text("notice: ordinary text"))).toBeNull();
+    for (const group of [groupActivityRuns, groupTranscript]) {
+      const items = group(messages);
+      expect(items.map(item => item.kind)).toEqual(["run", "message", "run"]);
+      expect(items[1]).toEqual({ kind: "message", message: notice });
     }
   });
 

@@ -1,10 +1,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
-import { readSessionState, SERVICE_TRUST_REASON, takePairingCodeFromLocation, takeInvitedEmailFromLocation } from "./lib/session";
+import {
+  BROWSER_SIGN_IN_FAILED, previewBrowserSignIn, readSessionState, SERVICE_TRUST_REASON, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
+} from "./lib/session";
 import { bootstrapBrand } from "./lib/brand";
 import { applySkin, readSkin } from "./lib/skins";
 import { applyFont, readFont } from "./lib/fonts";
+import { BrowserSignInPage } from "./pair/BrowserSignInPage";
 import { PairPage } from "./pair/PairPage";
 import "katex/dist/katex.min.css";
 import "./styles.css";
@@ -21,7 +24,15 @@ applyFont(readFont());
  * device"; on the owner's own machine the server trusts loopback and this
  * check is a single fast request. */
 async function chooseRoot(): Promise<React.ReactNode> {
-  if (location.pathname === "/pair") return <PairPage initialCode={takePairingCodeFromLocation()} initialEmail={takeInvitedEmailFromLocation()} />;
+  if (location.pathname === "/pair") {
+    // The OMB Cloud page's "Use in your browser": whose Cloud it is, then one Continue.
+    const signIn = takeBrowserSignInFromLocation();
+    if (signIn) {
+      const preview = await previewBrowserSignIn(signIn);
+      return preview ? <BrowserSignInPage credential={signIn} owner={preview.owner} /> : <PairPage initialCode={null} reason={BROWSER_SIGN_IN_FAILED} />;
+    }
+    return <PairPage initialCode={takePairingCodeFromLocation()} initialEmail={takeInvitedEmailFromLocation()} />;
+  }
   const session = await readSessionState();
   if (session.kind === "unauthenticated") return <PairPage initialCode={null} reason={session.error} />;
   // A service-trust server answers this machine's requests without a session

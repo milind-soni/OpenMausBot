@@ -5,6 +5,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
@@ -14,13 +15,23 @@ export type TestableProvider = "anthropic" | "openaiCompat" | "xai" | "mistral";
 
 const SECTIONS: Record<
   ConfigSection,
-  { body: (value: string) => unknown; flag: (config: ConfigStatus) => boolean }
+  {
+    body: (value: string) => unknown;
+    /** A key is saved. */
+    flag: (config: ConfigStatus) => boolean;
+    /** Works with no saved key: Cloud Pro includes it. */
+    included?: (config: ConfigStatus) => boolean;
+  }
 > = {
   composio: {
     body: (v) => ({ composio: { apiKey: v } }),
     flag: (c) => c.composio.configured,
   },
-  box: { body: (v) => ({ box: { token: v } }), flag: (c) => c.box.configured },
+  box: {
+    body: (v) => ({ box: { token: v } }),
+    flag: (c) => c.box.configured && c.box.included !== true,
+    included: (c) => c.box.included === true,
+  },
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
   anthropic: { body: (v) => ({ anthropic: { key: v } }), flag: (c) => c.anthropic?.configured ?? false },
   openaiCompat: { body: (v) => ({ openaiCompat: { key: v } }), flag: (c) => c.openaiCompat?.configured ?? false },
@@ -125,6 +136,7 @@ function credentialCopy(section: ConfigSection) {
 function CredentialHelp({ section }: { section: ConfigSection }) {
   const credential = credentialCopy(section);
   const [open, setOpen] = useState(false);
+  const motion = useMenuMotion(open);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverId = useId();
@@ -162,12 +174,12 @@ function CredentialHelp({ section }: { section: ConfigSection }) {
       >
         <CircleHelp size={14} aria-hidden="true" />
       </button>
-      {open && (
+      {motion.shown && (
         <div
           id={popoverId}
           role="group"
           aria-label={t("keys.helpAria", { label: credential.label })}
-          className="animate-pop-in absolute right-0 z-30 mt-1.5 w-[270px] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl"
+          className={cn("absolute right-0 z-30 mt-1.5 w-[270px] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl", motion.className)} {...motion.exitProps}
         >
           <div className="text-[12px] leading-[1.45] text-ink-secondary">{credential.description}</div>
           {credential.warning && (
@@ -218,6 +230,7 @@ export function ApiKeyRow({
   }, [state.config]);
 
   const configured = state.config ? SECTIONS[section].flag(state.config) : false;
+  const included = state.config ? SECTIONS[section].included?.(state.config) === true : false;
   const clearing = !value.trim() && configured;
   const emptyDraft = edited && !value.trim();
   const credential = credentialCopy(section);
@@ -275,7 +288,7 @@ export function ApiKeyRow({
   return (
     <div>
       <div className="mb-1.5 flex items-center gap-2 text-[13px] text-ink-secondary">
-        <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
+        <span className={cn("size-1.5 rounded-full", configured || included ? "bg-success" : "bg-raised-hover")} />
         <span>{credential.label}</span>
         {credential.optional && (
           <span className="rounded bg-control px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
@@ -283,6 +296,7 @@ export function ApiKeyRow({
           </span>
         )}
         {configured && <span className="text-[11px] text-ink-secondary">{t("keys.configured")}</span>}
+        {included && <span className="text-[11px] text-ink-secondary">{t("keys.includedWithCloudPro")}</span>}
         <CredentialHelp section={section} />
       </div>
       <div className="flex gap-2">

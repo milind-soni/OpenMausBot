@@ -15,14 +15,17 @@ ipcRenderer.on("package:install", (_event, url) => {
 });
 
 // Main can finish loading the document before React subscribes. Retain only
-// the fixed Organisation action, never a destination supplied by a renderer.
-let pendingOrganizationSettings = false;
+// the fixed actions (Organisation, the openmausbot://cloud link, and plain
+// Settings → OMB Cloud from the lending menu-bar item), never a destination
+// supplied by a renderer.
+const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings"]);
+let pendingSettingsAction = null;
 const appSettingsListeners = new Set();
 ipcRenderer.on("app:open-settings", (_event, section) => {
-  const fixedSection = section === "organization" ? "organization" : undefined;
-  if (fixedSection && !appSettingsListeners.size) pendingOrganizationSettings = true;
+  const fixedSection = FIXED_SETTINGS_ACTIONS.has(section) ? section : undefined;
+  if (fixedSection && !appSettingsListeners.size) pendingSettingsAction = fixedSection;
   if (!appSettingsListeners.size) return;
-  pendingOrganizationSettings = false;
+  pendingSettingsAction = null;
   for (const listener of appSettingsListeners) listener(fixedSection);
 });
 
@@ -32,7 +35,10 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 // helpers here. Main enforces the same rule on the sensitive channels.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces"]);
+// cloudMove and cloudLending: main answers them on a remote page only when
+// that page is the person's own verified Cloud in this window (Move to
+// Cloud's card and the Cloud's setup checklist).
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending"]);
 
 // Sandboxed preload cannot import TS or sibling modules. Keep this list in
 // parity with shared/workspace-backup-client.ts (covered by the preload test).
@@ -155,9 +161,10 @@ const bridge = {
   onOpenAppSettings: (cb) => {
     appSettingsListeners.add(cb);
     queueMicrotask(() => {
-      if (!pendingOrganizationSettings || !appSettingsListeners.size) return;
-      pendingOrganizationSettings = false;
-      for (const listener of appSettingsListeners) listener("organization");
+      const section = pendingSettingsAction;
+      if (!section || !appSettingsListeners.size) return;
+      pendingSettingsAction = null;
+      for (const listener of appSettingsListeners) listener(section);
     });
     return () => appSettingsListeners.delete(cb);
   },
@@ -299,6 +306,35 @@ const bridge = {
       ipcRenderer.on("cloud-account:state-changed", handler);
       return () => ipcRenderer.removeListener("cloud-account:state-changed", handler);
     },
+    // "Let my Cloud use this Mac": main decides the Cloud; no argument names it.
+    lending: {
+      state: () => ipcRenderer.invoke("lending:state"),
+      chooseFolder: () => ipcRenderer.invoke("lending:folder"),
+      save: input => ipcRenderer.invoke("lending:save", input),
+      stop: () => ipcRenderer.invoke("lending:stop"),
+    },
+  } : undefined,
+  /** Move to Cloud: this computer's workspace to the person's Cloud home.
+   * No arguments reach main. A remote page may start a move only from the
+   * person's own click. */
+  cloudMove: process.argv.includes("--omb-company-desktop=1") ? {
+    state: () => ipcRenderer.invoke("cloud-move:state"),
+    start: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-move:start") : Promise.reject(new Error("Choose Move to start moving.")),
+    cancel: () => ipcRenderer.invoke("cloud-move:cancel"),
+    restorePrevious: () => ipcRenderer.invoke("cloud-move:restore-previous"),
+    dismiss: () => ipcRenderer.invoke("cloud-move:dismiss"),
+    onState: cb => {
+      const handler = (_event, state) => cb(state);
+      ipcRenderer.on("cloud-move:state-changed", handler);
+      return () => ipcRenderer.removeListener("cloud-move:state-changed", handler);
+    },
+  } : undefined,
+  /** The Cloud's setup checklist: "Let your Cloud use this Mac" opens the
+   * lending switch in this app's own Settings → OMB Cloud. No arguments; it
+   * shows the switch and changes nothing. */
+  cloudLending: process.argv.includes("--omb-company-desktop=1") ? {
+    open: () => ipcRenderer.invoke("cloud-lending:open"),
   } : undefined,
   organization: process.argv.includes("--omb-company-desktop=1") ? {
     settingsOpened: () => ipcRenderer.invoke("organization:settings-opened"),
@@ -334,6 +370,7 @@ const bridge = {
     chooseFolder: () => ipcRenderer.invoke("sharing:folder"),
     save: (id, grant) => ipcRenderer.invoke("sharing:save", id, grant),
     revoke: id => ipcRenderer.invoke("sharing:revoke", id),
+    activity: id => ipcRenderer.invoke("sharing:activity", id),
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),
 };

@@ -5,11 +5,12 @@ import { setLocale } from "@/lib/i18n";
 import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, SidebarThreadRow, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 // The More menu lives behind component state and a portal, which a static
-// render never reaches. SidebarThreadRow uses exactly useState, useRef and
-// useEffect; stubbing those three (initial values first, state kept across a
-// re-render) lets this suite render the row directly, click the real action
-// button, and see the menu the click opened — the same extract-and-call
-// approach the ThreadRefs tests use for onClick props.
+// render never reaches. SidebarThreadRow uses exactly useState, useRef,
+// useEffect and (through its menu motion) useLayoutEffect; stubbing those four
+// (initial values first, state kept across a re-render, effects never run)
+// lets this suite render the row directly, click the real action button, and
+// see the menu the click opened — the same extract-and-call approach the
+// ThreadRefs tests use for onClick props.
 const rowHooks = vi.hoisted(() => {
   const slots: unknown[] = [];
   let cursor = 0;
@@ -35,6 +36,7 @@ vi.mock("react", async (importOriginal) => {
     useState: rowHooks.useState as unknown as typeof actual.useState,
     useRef: ((initial: unknown) => ({ current: initial })) as unknown as typeof actual.useRef,
     useEffect: (() => undefined) as unknown as typeof actual.useEffect,
+    useLayoutEffect: (() => undefined) as unknown as typeof actual.useLayoutEffect,
   };
 });
 

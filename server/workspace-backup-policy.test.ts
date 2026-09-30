@@ -25,6 +25,14 @@ describe("workspace backup data boundary", () => {
     expect(restored.instances).toBe(connections.instances);
   });
 
+  it("keeps the destination's own computer-sharing switch, whatever the backup says", () => {
+    const portable = portableWorkspaceConfig({ features: { browser: true, sharedComputers: true } });
+    expect(restoredWorkspaceConfig(portable, { features: { sharedComputers: false } }).features).toEqual({ browser: true, sharedComputers: false });
+    expect(restoredWorkspaceConfig(portable, {}).features).toEqual({ browser: true });
+    expect(restoredWorkspaceConfig(portableWorkspaceConfig({ features: { sharedComputers: true } }), {})).not.toHaveProperty("features");
+    expect(restoredWorkspaceConfig({}, { features: { sharedComputers: true, browser: true } }).features).toEqual({ sharedComputers: true });
+  });
+
   it.each([
     "providers/account/.credentials.json", "providers/antigravity/profile/antigravity-acp/acp_token.json",
     "workspace-credentials.json", "browser-engine-key", "caddy/data/certificates/private.key",
@@ -39,8 +47,8 @@ describe("workspace backup data boundary", () => {
   });
 
   it("never exports the per-turn hook token directory, and only that directory", () => {
-    for (const path of ["hook-tokens", "hook-tokens/0123456789abcdef01234567.token"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(true);
-    for (const path of ["hook-tokens.md", "workspaces/bot/hook-tokens/notes.md", "attachments/api.token"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(false);
+    for (const path of ["hook-tokens", "hook-tokens/0123456789abcdef01234567.token", "sessions.json.open"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(true);
+    for (const path of ["hook-tokens.md", "workspaces/bot/hook-tokens/notes.md", "attachments/api.token", "sessions.json.opened", "workspaces/bot/sessions.json.open"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(false);
   });
 
   it("leaves out only the Organization library files Electron main downloads again", () => {

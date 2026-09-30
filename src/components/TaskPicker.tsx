@@ -8,6 +8,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Activity, Check, ChevronDown, FolderInput, Pencil, Pin, PinOff, Plus, Search, Trash2 } from "lucide-react";
 import { useStore, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { formatTaskTokens, headlineTokens, usageDetail } from "@/lib/usage";
@@ -115,6 +116,7 @@ function ConversationTaskPicker({
   onAttentionJump?: (entry: AttentionThread) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const motion = useMenuMotion(open);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
@@ -255,8 +257,8 @@ function ConversationTaskPicker({
         <ChevronDown size={12} className="shrink-0 @max-4xl/chathead:hidden" />
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50">
+      {motion.shown && (
+        <div className={cn("absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50", motion.className)} {...motion.exitProps}>
           <div className="px-2 pb-1 pt-1.5">
             <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 focus-within:border-focus">
               <Search size={13} className="shrink-0 text-ink-secondary" />

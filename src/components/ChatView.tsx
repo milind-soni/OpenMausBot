@@ -38,6 +38,8 @@ import {
   type Message,
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
+import { CHATGPT_USAGE_URL } from "./ChatGptPlanStatus";
+import { openExternalLink } from "@/lib/app-links";
 import { ClaudeUpdatePrompt } from "./ClaudeUpdatePrompt";
 import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
 import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
@@ -81,7 +83,8 @@ import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { useFocusMessage } from "@/lib/focus-message";
-import { groupTranscript, isRecoveryActivity } from "@/lib/activity-runs";
+import { groupTranscript, isStatusActivity } from "@/lib/activity-runs";
+import { StatusActivityRow } from "@/components/StatusActivityRow";
 import { ActivityRun } from "./ActivityRun";
 import { TurnNarrationRun } from "./TurnNarrationRun";
 import { webhookMessageView } from "@/lib/webhook-message";
@@ -96,6 +99,7 @@ import {
   tailWindowStart,
 } from "@/lib/transcript-window";
 import { appendComposerDraft, useReplyDraft } from "@/lib/drafts";
+import { useCanWriteIn } from "@/lib/cloud-guest";
 import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
@@ -186,7 +190,11 @@ export function ErrorRow({
         {macCuaReason && <details className="mt-2 text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("computer.mac.permission.driverDetail")}</summary><p className="mt-1 break-words">{message}</p></details>}
         {macCuaReason &&
           <MacCuaRecoveryActions reason={message} />}
-        {claudeUpdateInstance ? (
+        {message.includes("subscription_sharing_usage_limit_exceeded") ? (
+          <a href={CHATGPT_USAGE_URL} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-app" onClick={(event) => {
+            if (window.ogb?.openExternal) { event.preventDefault(); void openExternalLink(CHATGPT_USAGE_URL); }
+          }}>{t("engineSetup.chatgpt.manageUsage")}</a>
+        ) : claudeUpdateInstance ? (
           <ClaudeUpdatePrompt instance={claudeUpdateInstance} onRetry={onRetry} />
         ) : isProviderSafetyBlock(message) ? (
           <p className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">
@@ -815,14 +823,7 @@ const MessagesList = memo(function MessagesList({
               );
             }
             case "activity": {
-              if (isRecoveryActivity(m)) {
-                return (
-                  <div role="status" className="flex w-fit max-w-full items-start gap-2 rounded-xl border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink-secondary">
-                    <RefreshCw size={13} aria-hidden="true" className="mt-0.5 shrink-0" />
-                    <span className="min-w-0 break-words">{m.tool?.name.slice(9).trim()}</span>
-                  </div>
-                );
-              }
+              if (isStatusActivity(m)) return <StatusActivityRow message={m} />;
               // a failed turn is an error, not a tool run — render it as one.
               // bot⇄bot comm chips and opened-thread chips stay because they
               // link to another conversation.
@@ -938,6 +939,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
+  // A guest on an OMB Cloud home writes only in conversations it opened.
+  const canWrite = useCanWriteIn(bot.threadId);
 
   const stream = useStreaming();
   const streaming = stream.streaming[bot.threadId];
@@ -1565,6 +1568,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           />
         </div>
       )}
+      {canWrite === false ? (
+        <NewConversationInstead onNew={() => dispatch({ type: "newTask", botId: bot.id })} />
+      ) : (
       <Composer
         key={bot.threadId}
         bot={profile}
@@ -1576,10 +1582,25 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           ? () => setEditingId(lastUserMessage.id)
           : undefined}
       />
+      )}
       </div>
       </div>
 
     </main>
+  );
+}
+
+/** In place of the composer, for a guest on an OMB Cloud home in a
+ * conversation it did not open: it can only start its own. One click, no
+ * dialog. */
+export function NewConversationInstead({ onNew }: { onNew: () => void }) {
+  return (
+    <div className="pointer-events-auto mx-5 mb-4 flex items-center justify-between gap-3 rounded-2xl border border-hairline/60 bg-raised px-4 py-3" data-testid="cloud-guest-composer">
+      <p className="text-[13px] text-ink-secondary">{t("chat.cloudGuest.notYours")}</p>
+      <button type="button" onClick={onNew} className="shrink-0 rounded-full bg-accent px-3 py-1 text-[13px] font-medium text-white">
+        {t("chat.cloudGuest.newConversation")}
+      </button>
+    </div>
   );
 }
 

@@ -18,6 +18,13 @@ describe("roomActivityVisible", () => {
     expect(roomActivityVisible(chip({}), true)).toBe(true);
   });
 
+  // an engine running another model than the saved one says so; with tool
+  // calls off (the default) that notice used to vanish with the tool steps
+  it("always shows a model notice and a recovery row", () => {
+    expect(roomActivityVisible(chip({ tool: { name: "notice: OpenCode no longer offers a, so this conversation uses b.", ok: true } }), false)).toBe(true);
+    expect(roomActivityVisible(chip({ tool: { name: "recovery: Automatic recovery: trying a backup once.", ok: true } }), false)).toBe(true);
+  });
+
   it("always shows a failure", () => {
     expect(roomActivityVisible(chip({ tool: { name: "Ran a command", ok: false } }), false)).toBe(true);
     expect(roomActivityVisible(chip({ tool: { name: "error: engine missing" } }), false)).toBe(true);

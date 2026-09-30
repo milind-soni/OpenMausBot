@@ -93,9 +93,9 @@ export function recentWorkLines(threads: readonly BotThread[], latest: readonly 
 export function recentWork(
   store: RecentWorkStore,
   bot: Pick<BotRecord, "id" | "threadId" | "tasks">,
-  opts: { userName: string; currentThreadId?: string; now?: number; windowMs?: number },
+  opts: { userName: string; currentThreadId?: string; now?: number; windowMs?: number; include?: (threadId: string) => boolean },
 ): RecentWorkLine[] {
-  const threads = botThreads(store, bot, opts.userName).filter((thread) => thread.threadId !== opts.currentThreadId);
+  const threads = botThreads(store, bot, opts.userName).filter((thread) => thread.threadId !== opts.currentThreadId && (!opts.include || opts.include(thread.threadId)));
   if (!threads.length) return [];
   const since = (opts.now ?? Date.now()) - (opts.windowMs ?? RECENT_WORK_WINDOW_MS);
   return recentWorkLines(threads, latestSaidByBot(threads.map((thread) => thread.threadId), bot.id, since, RECENT_WORK_MAX_LINES));

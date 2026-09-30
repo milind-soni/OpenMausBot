@@ -66,6 +66,7 @@ const OFFICIAL_SLUGS = [
   "claude-sonnet-5",
   "claude-opus-5",
   "claude-opus-5-5",
+  "claude-sonnet-5-5",
   "grok-4.6",
   "grok-4.5",
   "kimi-code/k3",

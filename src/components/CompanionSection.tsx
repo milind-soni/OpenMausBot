@@ -184,7 +184,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
   return (
     <div className="flex flex-col gap-4">
       {remoteBlocked && <p role="status" className="text-[13px] leading-relaxed text-ink-secondary">{remoteBlocked}</p>}
-      <div ref={pairingFlow} tabIndex={-1} className="scroll-mt-4 focus:outline-none">
+      <div ref={pairingFlow} tabIndex={-1} className="scroll-mt-4 rounded-xl ring-1 ring-accent/40 focus:outline-none">
         <Card title={pairingCopy.title} subtitle={pairingCopy.subtitle}>
           {(panelStatus || (pairedCount > 0 && c.hostedReady)) && (
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -209,102 +209,6 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
         </Card>
       </div>
 
-      <Card
-        title={t("remote.pairing.tailscale.title")}
-        subtitle={t("remote.tailscaleCard.subtitle")}
-      >
-        <div className="rounded-xl bg-inset px-3 py-3" aria-live="polite">
-          <div className="flex items-start gap-2.5">
-            <ShieldCheck
-              size={16}
-              className={`mt-0.5 shrink-0 ${tailscaleStatus.kind === "ready" ? "text-success" : "text-ink-secondary"}`}
-            />
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-ink">{tailscaleStatus.title}</div>
-              <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">
-                {tailscaleStatus.detail}
-              </div>
-            </div>
-          </div>
-        </div>
-        {tailscaleStatus.kind === "ready" ? (
-          <button
-            disabled={c.busy || c.accountBusy || Boolean(managedBy)}
-            title={managedBy ?? undefined}
-            onClick={() => {
-              c.useTailscale();
-              window.requestAnimationFrame(() => {
-                pairingFlow.current?.scrollIntoView({ block: "start" });
-                pairingFlow.current?.focus({ preventScroll: true });
-              });
-            }}
-            className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
-          >
-            {t("remote.pairOverTailscale")}
-          </button>
-        ) : (
-          <button
-            disabled={c.busy || c.accountBusy || (Boolean(managedBy) && !state.enabled)}
-            title={managedBy ?? undefined}
-            onClick={c.refreshTailscale}
-            className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
-          >
-            {c.busy ? t("common.checking") : managedBy && !state.enabled ? managedBy : state.enabled ? t("remote.checkAgain") : t("remote.turnOnAndCheck")}
-          </button>
-        )}
-      </Card>
-
-      <Card
-        title={t("remote.devices.title")}
-        subtitle={
-          pairedCount
-            ? t("remote.devices.subtitle", { app: brand().name })
-            : t("remote.devices.empty")
-        }
-      >
-        {pairedCount > 0 && (
-          <ul className="flex flex-col gap-2">
-            {state.devices.map((device) => (
-              <li key={device.id} className="rounded-xl bg-inset px-3 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-control text-ink-secondary">
-                    <Smartphone size={15} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13.5px] font-medium text-ink">{device.name}</div>
-                    <div className="text-[11.5px] text-ink-secondary">{t("remote.devices.lastSeen", { when: relative(device.lastSeenAt) })}</div>
-                  </div>
-                  <button
-                    disabled={c.busy}
-                    onClick={() => void c.act((companion) => companion.revoke(device.id))}
-                    aria-label={t("remote.devices.remove", { name: device.name })}
-                    className="shrink-0 rounded p-1.5 text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-40"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-                <div className="mt-3 flex items-center justify-between gap-3 border-t border-hairline/30 pt-3">
-                  <div>
-                    <div className="text-[12px] text-ink">{t("remote.devices.allowView")}</div>
-                    <div className="mt-0.5 text-[11px] text-ink-secondary">{t("remote.devices.allowViewDetail")}</div>
-                  </div>
-                  <Switch
-                    checked={device.cloudDesktopAccess}
-                    aria-label={t("remote.devices.viewAria", { name: device.name })}
-                    disabled={c.busy}
-                    onClick={() =>
-                      void c.act((companion) =>
-                        companion.cloudDesktop(device.id, !device.cloudDesktopAccess),
-                      )
-                    }
-                  />
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
       <details className="rounded-xl border border-hairline/40 bg-card">
         <summary className="cursor-pointer px-4 py-3.5 text-[13px] font-medium text-ink">
           {t("remote.advanced")}
@@ -323,6 +227,100 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
               disabled={c.busy || (Boolean(remoteBlocked) && !state.enabled)}
               onClick={() => void c.act((companion) => (state.enabled ? companion.stop() : companion.start()))}
             />
+          </div>
+
+          <div className="border-t border-hairline/30 pt-4">
+            <div className="text-[13px] text-ink">{t("remote.devices.title")}</div>
+            <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">{pairedCount ? t("remote.devices.subtitle", { app: brand().name }) : t("remote.devices.empty")}</div>
+            <div className="mt-3">
+              {pairedCount > 0 && (
+                <ul className="flex flex-col gap-2">
+                  {state.devices.map((device) => (
+                    <li key={device.id} className="rounded-xl bg-inset px-3 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-control text-ink-secondary">
+                          <Smartphone size={15} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[13.5px] font-medium text-ink">{device.name}</div>
+                          <div className="text-[11.5px] text-ink-secondary">{t("remote.devices.lastSeen", { when: relative(device.lastSeenAt) })}</div>
+                        </div>
+                        <button
+                          disabled={c.busy}
+                          onClick={() => void c.act((companion) => companion.revoke(device.id))}
+                          aria-label={t("remote.devices.remove", { name: device.name })}
+                          className="shrink-0 rounded p-1.5 text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-40"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-3 border-t border-hairline/30 pt-3">
+                        <div>
+                          <div className="text-[12px] text-ink">{t("remote.devices.allowView")}</div>
+                          <div className="mt-0.5 text-[11px] text-ink-secondary">{t("remote.devices.allowViewDetail")}</div>
+                        </div>
+                        <Switch
+                          checked={device.cloudDesktopAccess}
+                          aria-label={t("remote.devices.viewAria", { name: device.name })}
+                          disabled={c.busy}
+                          onClick={() =>
+                            void c.act((companion) =>
+                              companion.cloudDesktop(device.id, !device.cloudDesktopAccess),
+                            )
+                          }
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-hairline/30 pt-4">
+            <div className="text-[13px] text-ink">{t("remote.pairing.tailscale.title")}</div>
+            <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">{t("remote.tailscaleCard.subtitle")}</div>
+            <div className="mt-3">
+              <div className="rounded-xl bg-inset px-3 py-3" aria-live="polite">
+                <div className="flex items-start gap-2.5">
+                  <ShieldCheck
+                    size={16}
+                    className={`mt-0.5 shrink-0 ${tailscaleStatus.kind === "ready" ? "text-success" : "text-ink-secondary"}`}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-medium text-ink">{tailscaleStatus.title}</div>
+                    <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">
+                      {tailscaleStatus.detail}
+                    </div>
+                  </div>
+            </div>
+          </div>
+          {tailscaleStatus.kind === "ready" ? (
+            <button
+              disabled={c.busy || c.accountBusy || Boolean(managedBy)}
+              title={managedBy ?? undefined}
+              onClick={() => {
+                c.useTailscale();
+                window.requestAnimationFrame(() => {
+                  pairingFlow.current?.scrollIntoView({ block: "start" });
+                  pairingFlow.current?.focus({ preventScroll: true });
+                });
+              }}
+              className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
+            >
+              {t("remote.pairOverTailscale")}
+            </button>
+          ) : (
+            <button
+              disabled={c.busy || c.accountBusy || (Boolean(managedBy) && !state.enabled)}
+              title={managedBy ?? undefined}
+              onClick={c.refreshTailscale}
+              className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
+            >
+              {c.busy ? t("common.checking") : managedBy && !state.enabled ? managedBy : state.enabled ? t("remote.checkAgain") : t("remote.turnOnAndCheck")}
+            </button>
+          )}
+            </div>
           </div>
 
           <div className="flex items-center justify-between gap-4 border-t border-hairline/30 pt-4">

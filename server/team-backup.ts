@@ -92,7 +92,9 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       key: group.id, name: group.name, section: group.section, dm: Boolean(group.dm) && memberIds.length === 2,
       bulletin: group.bulletin, memberIds,
       defaultResponder: group.defaultResponder.kind === "member" && !memberIds.includes(group.defaultResponder.botId)
-        ? { kind: "mentions" as const } : group.defaultResponder,
+        ? { kind: "mentions" as const }
+        : group.defaultResponder.kind === "auto" && group.defaultResponder.fallbackBotId && !memberIds.includes(group.defaultResponder.fallbackBotId)
+          ? { kind: "auto" as const } : group.defaultResponder,
       activeTask: group.threadId, tasks: history(group),
     };
   });
@@ -220,7 +222,9 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       groupIds.set(source.key, group.id);
       const responder = source.defaultResponder;
       store.patchGroup(group.id, { bulletin: source.bulletin, setupCompletedAt: Date.now(), defaultResponder:
-        responder.kind === "member" ? { kind: "member", botId: botIds.get(responder.botId)! } : responder });
+        responder.kind === "member" ? { kind: "member", botId: botIds.get(responder.botId)! }
+          : responder.kind === "auto" ? { kind: "auto", ...(responder.fallbackBotId ? { fallbackBotId: botIds.get(responder.fallbackBotId)! } : {}) }
+            : responder });
       // Use the existing task APIs for rooms; direct-message rooms have one.
       const threads = source.tasks.map((task, i) => {
         if (i === 0) {

@@ -148,6 +148,12 @@ Keep Work, Personal, and each project in separate channels without cloning your 
 its own transcript, shared instructions, working folder, responder rules, and editable bot roster. File a
 channel and its bots under a named context, then rename it or change its members whenever the team changes.
 
+### ⚡ Fast decisions with Jev
+
+Add a TypeSafe Jev key in **Settings → Decision model** and rooms set to **Auto** pick the bot that fits each
+un-mentioned message in a few hundred milliseconds, falling back to the room's lead whenever Jev is off or unsure.
+See [docs/decision-model.md](docs/decision-model.md).
+
 ### 📦 Install a complete team from one Markdown file
 
 Browse outcome-driven teams on [BotMRR](https://botmrr.io), then choose **Add to OpenMausBot**. The app

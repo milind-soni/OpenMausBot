@@ -1,4 +1,5 @@
 import { CURSOR_STATES, type CursorState } from "@/components/CursorAvatar";
+import { botShowsUnread } from "./bot-unread";
 import { lastNonReceipt } from "./receipts";
 
 /** The mascot's behaviour vocabulary — CursorAvatar's 39 states, under the
@@ -161,6 +162,7 @@ export type MascotBotProfile = {
   mascotExpression?: string | null;
   busy?: boolean;
   unread?: boolean;
+  tasks?: Array<{ unread?: boolean; routineRunId?: string }> | null;
   messages?: MascotMessage[];
 };
 
@@ -179,7 +181,7 @@ export function stateForBot(bot: MascotBotProfile): MausState {
 
   if (last?.kind === "activity" && last.tool?.ok === false) return "alerting";
   if (bot.busy) return "working";
-  if (bot.unread) return "notifying";
+  if (botShowsUnread(bot)) return "notifying";
   if (last?.kind === "options") return "curious";
 
   const profile = `${bot.name} ${bot.title ?? ""} ${bot.description ?? ""}`.toLowerCase();

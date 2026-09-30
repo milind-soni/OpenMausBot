@@ -3,6 +3,7 @@ import { Check, FilePen, Hand, ListChecks, Settings, ShieldAlert, ShieldCheck } 
 
 import { approvalModeFor, hasNativeAutoReview, supportsApprovalMode, type ApprovalMode } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { APPROVAL_LEVELS_URL, openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
@@ -109,6 +110,7 @@ export function ApprovalModeSelector({
   onManageCommandAllowlist?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const motion = useMenuMotion(open);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const savedMode = approvalModeFor({ approvalMode, autoApprove });
@@ -189,15 +191,17 @@ export function ApprovalModeSelector({
         {wide && <span aria-hidden className="text-[11px] text-ink-secondary">⌄</span>}
       </button>
 
-      {open && (
+      {motion.shown && (
         <div
           role="menu"
           aria-label={t("approvalMode.menuAria", { provider: providerName })}
+          {...motion.exitProps}
           className={cn(
             "absolute z-40 w-[340px] overflow-hidden rounded-2xl border border-hairline/40 bg-raised shadow-2xl",
             menuDirection === "up" ? "bottom-full mb-2" : "top-full mt-2",
             align === "right" ? "right-0" : "left-0",
             wide && "w-full min-w-[340px]",
+            motion.className,
           )}
         >
           <div className="border-b border-hairline/20 px-4 py-3">

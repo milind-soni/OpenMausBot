@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Bot, Group, GroupTask, Task } from "@/state/store";
+import { botShowsUnread } from "@/lib/bot-unread";
 import { attentionJumpAction, attentionOwnerName, crossBotAttentionThreads, sidebarGroupActivityTasks } from "./SidebarBotActivity";
 
 const task = (threadId: string, title: string, extra: Partial<Task>): Task =>
@@ -8,6 +9,27 @@ const bot = (id: string, name: string, threadId: string, tasks?: Task[], extra: 
   ({ id, name, threadId, tasks, ...extra }) as unknown as Bot;
 const group = (id: string, name: string, threadId: string, extra: Partial<Group> = {}): Group =>
   ({ id, name, threadId, memberIds: [], bulletin: "", unread: false, createdAt: 0, messages: [], ...extra }) as unknown as Group;
+
+describe("botShowsUnread", () => {
+  it("keeps the bot flag when there is no task list", () => {
+    expect(botShowsUnread(bot("s", "Solo", "s0", undefined, { unread: true }))).toBe(true);
+    expect(botShowsUnread(bot("s", "Solo", "s0", undefined))).toBe(false);
+    expect(botShowsUnread(bot("s", "Solo", "s0", [], { unread: true }))).toBe(true);
+  });
+
+  it("ignores a hidden routine execution and counts a visible unread thread", () => {
+    const hiddenOnly = bot("r", "Runner", "r0", [
+      task("r0", "Read chat", {}),
+      task("r1", "Failed run", { routineRunId: "run-1", unread: true }),
+    ], { unread: true });
+    expect(botShowsUnread(hiddenOnly)).toBe(false);
+    const visible = bot("p", "Plain", "p0", [
+      task("p0", "Unread chat", { unread: true }),
+      task("p1", "Failed run", { routineRunId: "run-1", unread: true }),
+    ]);
+    expect(botShowsUnread(visible)).toBe(true);
+  });
+});
 
 describe("cross-bot attention", () => {
   it("collects only attention threads from every other bot, waiting first across bots", () => {

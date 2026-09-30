@@ -11180,6 +11180,9 @@ describe("bot memory API", () => {
       });
       expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("soul");
       expect(before.body.sections.map((s: { id: string }) => s.id)).toContain("memory");
+      // Only an OMB Cloud home tells its bots they run in the cloud.
+      expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("cloud-home");
+      expect((await api("GET", "/api/config")).body).not.toHaveProperty("cloudHome");
       expect(before.body.totalBytes).toBe(
         before.body.sections.reduce((n: number, s: { bytes: number }) => n + s.bytes, 0),
       );
@@ -11197,6 +11200,7 @@ describe("bot memory API", () => {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
       })).status).toBe(200);
       const withComputer = await api("GET", `/api/bots/${bot.id}/system-prompt`);
+      expect(withComputer.body.sections.find((section: { id: string }) => section.id === "plan").text).toContain("Local VM is an isolated desktop");
       const computerSection = withComputer.body.sections.find((section: { id: string }) => section.id === "computer");
       expect(computerSection.text).toContain(SIGN_IN_PROMPT);
       expect(computerSection.text).not.toMatch(/never type their (?:credentials|password)/i);

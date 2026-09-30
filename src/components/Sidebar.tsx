@@ -40,6 +40,7 @@ import { liveActivityLabel } from "@/lib/live-activity";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
+import { useHeldMenuMotion, useMenuMotion } from "./MenuMotion";
 import { lastNonReceipt } from "@/lib/receipts";
 import { t } from "@/lib/i18n";
 import { isRoutineProblemRun } from "@/lib/routines";
@@ -95,9 +96,11 @@ import { botListItemPointerIntent } from "@/lib/sidebar-selection";
 import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
 import { SidebarMoreMenu } from "./SidebarMoreMenu";
 import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
+import { useCloudOwner } from "./CloudOwner";
 import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { botShowsUnread } from "@/lib/bot-unread";
 import { attentionJumpAction, AttentionThreadRows, crossBotAttentionThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { ShortcutHint } from "./ShortcutHint";
@@ -318,17 +321,25 @@ function RoomContextMenu({
   onClose,
   onMoveToSection,
 }: {
-  menu: { groupId: string; x: number; y: number };
+  menu: { groupId: string; x: number; y: number } | null;
   onClose: () => void;
   onMoveToSection: (groupId: string) => void;
 }) {
+  const motion = useHeldMenuMotion(menu);
+  const shown = motion.value;
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  const group = state.groups.find((g) => g.id === menu.groupId);
+  const group = shown ? state.groups.find((g) => g.id === shown.groupId) : undefined;
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(group?.name ?? "");
 
   useEffect(() => {
+    if (!menu) return;
+    setDraft(state.groups.find((g) => g.id === menu.groupId)?.name ?? "");
+    setRenaming(false);
+  }, [menu]);
+  useEffect(() => {
+    if (!menu) return;
     const onDown = (e: MouseEvent) => {
       if (!(e.target instanceof Element) || !e.target.closest("[data-room-menu]")) onClose();
     };
@@ -341,23 +352,23 @@ function RoomContextMenu({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", onClose);
     };
-  }, [onClose]);
+  }, [menu, onClose]);
 
-  if (!group) return null;
+  if (!motion.shown || !group || !shown) return null;
   const isBotChat = Boolean(group.dm);
   const saveRename = () => {
     const name = nextRename(group.name, draft);
     if (name) dispatch({ type: "patchGroup", groupId: group.id, patch: { name } });
     onClose();
   };
-  const top = Math.min(menu.y, window.innerHeight - 204);
-  const left = Math.min(menu.x, window.innerWidth - 240);
+  const top = Math.min(shown.y, window.innerHeight - 204);
+  const left = Math.min(shown.x, window.innerWidth - 240);
   return createPortal(
     <div
       data-room-menu
       data-sidebar
       style={{ top, left }}
-      className="fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60"
+      className={cn("fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
     >
       {!remoteClient && (renaming ? (
         <div className="flex items-center gap-1 px-2 py-1">
@@ -538,16 +549,21 @@ function SectionPicker({
 }: {
   /** the target's current section; undefined = none */
   current: string | undefined;
-  anchor: { x: number; y: number };
+  anchor: { x: number; y: number } | null;
   onClose: () => void;
   /** "" clears — the server drops an empty section */
   onAssign: (section: string) => void;
 }) {
   const { state } = useStore();
   const [name, setName] = useState("");
+  const motion = useHeldMenuMotion(anchor);
+  const shown = motion.value;
+  const heldCurrent = useRef(current);
+  if (anchor) heldCurrent.current = current;
   const trimmed = name.trim();
 
   useEffect(() => {
+    if (!anchor) return;
     const onDown = (e: MouseEvent) => {
       if (!(e.target instanceof Element) || !e.target.closest("[data-section-picker]")) onClose();
     };
@@ -560,7 +576,7 @@ function SectionPicker({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", onClose);
     };
-  }, [onClose]);
+  }, [anchor, onClose]);
 
   // Hidden bots can carry a stale assignment; don't offer it as a context.
   // Channels and bots share one namespace, so Work or Personal can hold both.
@@ -577,14 +593,16 @@ function SectionPicker({
     onClose();
   };
 
-  const top = Math.max(8, Math.min(anchor.y, window.innerHeight - 300));
-  const left = Math.min(anchor.x, window.innerWidth - 260);
+  if (!motion.shown || !shown) return null;
+  const sectionCurrent = heldCurrent.current;
+  const top = Math.max(8, Math.min(shown.y, window.innerHeight - 300));
+  const left = Math.min(shown.x, window.innerWidth - 260);
 
   return (
     <div
       data-section-picker
       style={{ top, left }}
-      className="fixed z-40 w-[236px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-2 shadow-2xl shadow-black/60"
+      className={cn("fixed z-40 w-[236px] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-2 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
     >
       <div className="px-3.5 pb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
         {t("sidebar.section.moveToContext")}
@@ -597,11 +615,11 @@ function SectionPicker({
               onClick={() => assign(section)}
               className={cn(
                 "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px]",
-                section === current ? "bg-raised text-ink" : "text-ink hover:bg-raised/70",
+                section === sectionCurrent ? "bg-raised text-ink" : "text-ink hover:bg-raised/70",
               )}
             >
               <span className="truncate">{section}</span>
-              {section === current && <Check size={14} className="shrink-0 text-accent" />}
+              {section === sectionCurrent && <Check size={14} className="shrink-0 text-accent" />}
             </button>
           ))}
         </div>
@@ -634,7 +652,7 @@ function SectionPicker({
           {t("common.add")}
         </button>
       </form>
-      {current && (
+      {sectionCurrent && (
         <>
           <div className="mx-2 my-1 border-t border-hairline/40" />
           <button
@@ -658,25 +676,27 @@ export function BotContextMenu({
   onMoveToSection,
   onNewFolder,
 }: {
-  menu: MenuState;
+  menu: MenuState | null;
   onClose: () => void;
   onArchive: (bot: Bot) => void;
   onDelete: (bot: Bot) => void;
   onMoveToSection: (botId: string) => void;
   onNewFolder: (botId: string) => void;
 }) {
+  const motion = useHeldMenuMotion(menu);
+  const shown = motion.value;
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  const bot = state.bots.find((b) => b.id === menu.botId);
+  const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
   const menuRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = menuRef.current;
-    if (!element) return;
+    if (!element || !shown) return;
     const place = () => {
       const { width, height } = element.getBoundingClientRect();
-      element.style.top = `${Math.max(8, Math.min(menu.y, window.innerHeight - height - 8))}px`;
-      element.style.left = `${Math.max(8, Math.min(menu.x, window.innerWidth - width - 8))}px`;
+      element.style.top = `${Math.max(8, Math.min(shown.y, window.innerHeight - height - 8))}px`;
+      element.style.left = `${Math.max(8, Math.min(shown.x, window.innerWidth - width - 8))}px`;
     };
     // Menu length changes with thread settings, permissions, and locale.
     // Measure after every render; the viewport cap handles short windows.
@@ -684,13 +704,17 @@ export function BotContextMenu({
     window.addEventListener("resize", place);
     return () => window.removeEventListener("resize", place);
   });
+  // Focus moves in once per open and back out on close. It stays apart from
+  // the listeners below: Sidebar passes a fresh onClose every render, and
+  // re-running this with them would pull focus back to the first item.
   useEffect(() => {
+    if (!menu) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     menuRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
     return () => { if (opener?.isConnected) opener.focus(); };
-  }, []);
-
+  }, [menu]);
   useEffect(() => {
+    if (!menu) return;
     const onDown = (e: MouseEvent) => {
       if (!(e.target instanceof Element) || !e.target.closest("[data-bot-menu]")) onClose();
     };
@@ -703,9 +727,9 @@ export function BotContextMenu({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", onClose);
     };
-  }, [onClose]);
+  }, [menu, onClose]);
 
-  if (!bot) return null;
+  if (!motion.shown || !bot || !shown) return null;
   const deleting = state.deletingBots[bot.id] === true;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
@@ -752,8 +776,8 @@ export function BotContextMenu({
       role="menu"
       aria-label={t("sidebar.bot.actions", { name: bot.name })}
       onKeyDown={navigateThreadMenu}
-      style={{ top: menu.y, left: menu.x }}
-      className="fixed z-40 max-h-[calc(100dvh-16px)] w-[228px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60"
+      style={{ top: shown.y, left: shown.x }}
+      className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-[228px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
     >
       {showThreads && <>
         {item(<Plus size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
@@ -1118,7 +1142,7 @@ export function BotListItem({
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
   const teammateWait = !waiting && !working && (Boolean(bot.waitingForTeammates) || activityTasks.some((task) => Boolean(task.waitingForTeammates)));
   const queued = activityTasks.some((task) => task.queued);
-  const unread = bot.unread || activityTasks.some((task) => task.unread);
+  const unread = botShowsUnread(bot);
   // quiet rows drop the last-message preview but keep a line that reports
   // something happening now; an idle bot is just its name
   const statusLine = deleting || working || waiting || teammateWait || queued;
@@ -1137,7 +1161,7 @@ export function BotListItem({
           // pose — N idle rows bobbing at display rate was most of the app's
           // visible-idle CPU (states are keyword-derived, so "working" can be
           // decorative; working/unread/motion are the real signals).
-          animated={working || Boolean(bot.unread) || (mascotMotion?.kind ?? "none") !== "none"}
+          animated={working || unread || (mascotMotion?.kind ?? "none") !== "none"}
         />
         {working && (
           // presence dot: green while the bot is working, ringed in the row's
@@ -1550,6 +1574,7 @@ export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete }: {
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { state, dispatch } = useStore();
+  const cloudOwner = useCloudOwner(state.config?.cloudHome === true);
   const showThreads = useShowThreads();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const { capabilities } = useDesktopCapabilities();
@@ -1561,6 +1586,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [sectionPicker, setSectionPicker] = useState<MenuState | null>(null);
   const [newTeam, setNewTeam] = useState(false);
   const [teamMenu, setTeamMenu] = useState<{ name: string; x: number; y: number } | null>(null);
+  const teamMotion = useHeldMenuMotion(teamMenu);
   const teamMenuReturn = useRef<HTMLElement | null>(null);
   const closeTeamMenu = () => {
     (teamMenuReturn.current?.isConnected ? teamMenuReturn.current : sidebarRef.current)?.focus();
@@ -1585,7 +1611,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
+  const plusMotion = useMenuMotion(plusOpen);
   const [attentionOpen, setAttentionOpen] = useState(false);
+  const attentionMotion = useMenuMotion(attentionOpen);
   const [attentionPinned, setAttentionPinnedState] = useState(() => loadSidebarAttentionPinned());
   const setAttentionPinned = (pinned: boolean) => {
     setAttentionPinnedState(pinned);
@@ -1608,6 +1636,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     return saved === "icons" ? "comfortable" : saved;
   });
   const [densityOpen, setDensityOpen] = useState(false);
+  const densityMotion = useMenuMotion(densityOpen);
   // Compact is the quiet sidebar: a row is its name and its status, nothing
   // else (see the `quiet` prop on BotListItem and GroupListItem).
   const quietRows = density === "compact";
@@ -1929,13 +1958,14 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 <span className="h-px w-3.5 rounded-full bg-current" />
               </span>
             </button>
-            {densityOpen && (
+            {densityMotion.shown && (
               <>
-                <div className="fixed inset-0 z-30" onMouseDown={() => setDensityOpen(false)} />
+                <div className={cn("fixed inset-0 z-30", densityMotion.closing && "pointer-events-none")} onMouseDown={() => setDensityOpen(false)} />
                 <div className={cn(
                   "absolute top-full z-40 mt-1 w-40 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
                   density === "icons" ? "left-0" : "right-0",
-                )}>
+                  densityMotion.className,
+                )} {...densityMotion.exitProps}>
                   {(["comfortable", "compact", "icons"] as const).map((option) => (
                     <button
                       key={option}
@@ -1971,14 +2001,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 <span className="absolute right-1 top-1 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
               )}
             </button>
-            {attentionOpen && (
+            {attentionMotion.shown && (
               <>
-                <div className="fixed inset-0 z-30" onMouseDown={() => setAttentionOpen(false)} />
+                <div className={cn("fixed inset-0 z-30", attentionMotion.closing && "pointer-events-none")} onMouseDown={() => setAttentionOpen(false)} />
                 <div className={cn(
                   "absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
                   density === "icons" ? "left-0" : "right-0",
                   density === "compact" ? "w-60" : "w-72",
-                )}>
+                  attentionMotion.className,
+                )} {...attentionMotion.exitProps}>
                   <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
                     <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
                     <button
@@ -2009,13 +2040,14 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           >
             <Plus size={20} strokeWidth={2} />
           </button>
-          {plusOpen && (
+          {plusMotion.shown && (
             <>
-              <div className="fixed inset-0 z-30" onMouseDown={() => setPlusOpen(false)} />
+              <div className={cn("fixed inset-0 z-30", plusMotion.closing && "pointer-events-none")} onMouseDown={() => setPlusOpen(false)} />
               <div className={cn(
                 "absolute top-full z-40 mt-1 w-52 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
                 density === "icons" ? "left-0" : "right-0",
-              )}>
+                plusMotion.className,
+              )} {...plusMotion.exitProps}>
                 <button
                   onClick={() => {
                     setPlusOpen(false);
@@ -2074,7 +2106,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
       </div>
 
-      <DesktopWorkspaceSwitcher compact={density === "icons"} />
+      <DesktopWorkspaceSwitcher compact={density === "icons"} cloudHome={state.config?.cloudHome === true} owner={cloudOwner} />
       <OrganizationIdentity compact={density === "icons"} />
       {/* Search */}
       <div className={cn("pt-1 pb-3", density === "icons" ? "hidden" : "px-3")}>
@@ -2349,16 +2381,17 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         )}
       </div>
 
-      {menu && (
-        <BotContextMenu
+      <BotContextMenu
           menu={menu}
           onClose={() => setMenu(null)}
           onArchive={requestArchive}
           onDelete={(bot) => setConfirm({ kind: "delete", bot })}
-          onMoveToSection={(botId) => setSectionPicker({ botId, x: menu.x, y: menu.y })}
+          onMoveToSection={(botId) => {
+            if (!menu) return;
+            setSectionPicker({ botId, x: menu.x, y: menu.y });
+          }}
           onNewFolder={setNewFolderBotId}
         />
-      )}
       {showThreads && newFolderBotId && state.bots.find((bot) => bot.id === newFolderBotId) && <BotProjectDialog bot={state.bots.find((bot) => bot.id === newFolderBotId)!} onClose={() => setNewFolderBotId(null)} />}
       <ConfirmDialog
         open={confirm !== null}
@@ -2376,18 +2409,18 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       />
       {newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}
       {renameTeam && <TeamDialog section={renameTeam} rename onRenamed={renamedTeam} onClose={() => setRenameTeam(null)} />}
-      {teamMenu && createPortal(<div className="fixed inset-0 z-40" onMouseDown={closeTeamMenu}>
-        <div role="menu" aria-label={teamMenu.name} style={{ left: teamMenu.x, top: teamMenu.y }}
-          className="absolute w-[220px] rounded-xl border border-hairline/50 bg-menu p-1.5 text-ink shadow-xl"
+      {teamMotion.shown && teamMotion.value && createPortal(<div className={cn("fixed inset-0 z-40", teamMotion.closing && "pointer-events-none")} onMouseDown={closeTeamMenu}>
+        <div role="menu" aria-label={teamMotion.value.name} style={{ left: teamMotion.value.x, top: teamMotion.value.y }}
+          className={cn("absolute w-[220px] rounded-xl border border-hairline/50 bg-menu p-1.5 text-ink shadow-xl", teamMotion.className)} {...teamMotion.exitProps}
           onMouseDown={event => event.stopPropagation()} onKeyDown={event => {
             if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); event.stopPropagation(); closeTeamMenu(); return; }
             navigateThreadMenu(event);
           }}>
           <TeamMenuItems
-            onAddBots={() => { closeTeamMenu(); setMoveToTeam(teamMenu.name); }}
-            onRename={() => { closeTeamMenu(); setRenameTeam(teamMenu.name); }}
-            onShare={() => { closeTeamMenu(); setShareTeam(teamMenu.name); }}
-            onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMenu.name); }}
+            onAddBots={() => { closeTeamMenu(); setMoveToTeam(teamMotion.value!.name); }}
+            onRename={() => { closeTeamMenu(); setRenameTeam(teamMotion.value!.name); }}
+            onShare={() => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
+            onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMotion.value!.name); }}
           />
         </div>
       </div>, document.body)}
@@ -2406,12 +2439,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         }} />
       {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
       {shareTeam !== null && <ShareTeamDialog team={shareTeam} onClose={() => setShareTeam(null)} />}
-      {sectionPicker && (
-        <SectionPicker
-          current={state.bots.find((b) => b.id === sectionPicker.botId)?.section}
+      <SectionPicker
+          current={sectionPicker ? state.bots.find((b) => b.id === sectionPicker.botId)?.section : undefined}
           anchor={sectionPicker}
           onClose={() => setSectionPicker(null)}
           onAssign={(section) => {
+            if (!sectionPicker) return;
             if (!remoteClient) {
               dispatch({ type: "updateBot", botId: sectionPicker.botId, patch: { section } });
               return;
@@ -2424,25 +2457,23 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               .catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
           }}
         />
-      )}
-      {roomMenu && (
-        <RoomContextMenu
-          key={roomMenu.groupId}
+      <RoomContextMenu
           menu={roomMenu}
           onClose={() => setRoomMenu(null)}
-          onMoveToSection={(groupId) => setRoomSectionPicker({ groupId, x: roomMenu.x, y: roomMenu.y })}
+          onMoveToSection={(groupId) => {
+            if (!roomMenu) return;
+            setRoomSectionPicker({ groupId, x: roomMenu.x, y: roomMenu.y });
+          }}
         />
-      )}
-      {roomSectionPicker && (
-        <SectionPicker
-          current={state.groups.find((g) => g.id === roomSectionPicker.groupId)?.section}
+      <SectionPicker
+          current={roomSectionPicker ? state.groups.find((g) => g.id === roomSectionPicker.groupId)?.section : undefined}
           anchor={roomSectionPicker}
           onClose={() => setRoomSectionPicker(null)}
-          onAssign={(section) =>
-            dispatch({ type: "patchGroup", groupId: roomSectionPicker.groupId, patch: { section } })
-          }
+          onAssign={(section) => {
+            if (!roomSectionPicker) return;
+            dispatch({ type: "patchGroup", groupId: roomSectionPicker.groupId, patch: { section } });
+          }}
         />
-      )}
       {newRoom && <NewRoomPanel onClose={() => setNewRoom(false)} />}
       {!remoteClient && archivedBotsOpen && (
         <ArchivedBotsPanel

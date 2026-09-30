@@ -4,7 +4,8 @@ import path from "node:path";
 import os from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { createSharedCua, executeSharedOperation, sharedComputerError } from "./shared-computer-access.mjs";
+import { createSharedCua, executeSharedOperation, personalSecretPaths, sharedComputerError } from "./shared-computer-access.mjs";
+import { createLendingActivity, describeSharedOperation } from "./lending-activity.mjs";
 
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const DATA_VOLUME = "/System/Volumes/Data";
@@ -73,13 +74,58 @@ export async function validateSharedFolders(folders) {
   return result;
 }
 
+const JOB_KEYS = new Set(["computer_id", "action", "folder_id", "path", "content", "encoding", "expected_sha256", "command", "tool_name", "arguments"]);
+const JOB_ACTIONS = new Set(["list_files", "read_file", "write_file", "run_command", "computer_tools", "computer_call"]);
+const optionalText = (value, max) => value === undefined || (typeof value === "string" && value.length <= max);
+/** The server's job, checked against the same shape the server accepts
+ * before anything on this computer looks at it. The grant still decides
+ * whether the operation is allowed; this only refuses malformed input. */
+export function validSharedOperation(operation, computerId) {
+  return Boolean(operation) && typeof operation === "object" && !Array.isArray(operation) &&
+    Object.keys(operation).every(key => JOB_KEYS.has(key)) &&
+    operation.computer_id === computerId && JOB_ACTIONS.has(operation.action) &&
+    (operation.folder_id === undefined || uuid(operation.folder_id)) &&
+    optionalText(operation.path, 2048) && optionalText(operation.content, 350_000) &&
+    (operation.encoding === undefined || operation.encoding === "utf8" || operation.encoding === "base64") &&
+    (operation.expected_sha256 === undefined || (typeof operation.expected_sha256 === "string" && /^[a-f0-9]{64}$/.test(operation.expected_sha256))) &&
+    optionalText(operation.command, 8000) && optionalText(operation.tool_name, 100) &&
+    (operation.arguments === undefined || (Boolean(operation.arguments) && typeof operation.arguments === "object" && !Array.isArray(operation.arguments)));
+}
+
+/** Whether a Cloud grant may run right now. Lending to the person's Cloud is
+ * bound to the Cloud account that turned it on and to that account's machine:
+ * signing out, another account, or a different machine ends it (the grant is
+ * switched off, so resuming is the person's choice). A Cloud sign-in that
+ * needs renewing, or one that cannot be read right now, pauses it; a brief
+ * re-verification or an unreachable Admin (still this account) does not.
+ * `current` is the native Cloud snapshot: { status, accountId, origin }
+ * (origin only while the machine is verified). */
+export function cloudLendingVerdict(binding, current, env) {
+  if (!binding || current?.status === "signed-out") return { stop: "signed-out" };
+  if (current?.accountId && current.accountId !== binding.accountId) return { stop: "account-changed" };
+  if (env?.origin !== binding.origin || (current?.origin && current.origin !== binding.origin)) return { stop: "machine-changed" };
+  if (!current?.accountId) return { pause: "unverified" };
+  if (current.status !== "connected" && current.status !== "unavailable") return { pause: current.status };
+  return { allow: true };
+}
+
+class Paused extends Error {}
+
 /** Outbound HTTPS only; no local listening port and no host credentials in
- * the renderer. Pairing cookies and a connector secret remain in Electron. */
-export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, protectedPaths = [], enabled = async () => false }) {
+ * the renderer. Pairing cookies and a connector secret remain in Electron.
+ *
+ * Two kinds of grant share this connector. A maintainer grant (any server,
+ * behind the local `features.sharedComputers` flag, exactly as before). A
+ * Cloud grant (`cloud: { accountId, origin }`): the person's own Mac lent to
+ * their own OMB Cloud home, gated by their Cloud sign-in (`cloud()`), never
+ * by the maintainer flag. */
+export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile, cloud = () => null, onChange = () => {} }) {
   // The grant store's own directory plus whatever the desktop shell names —
-  // the server data directory holds provider API keys and sessions.json. This
-  // module never imports electron, so those roots arrive from the caller.
-  const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry)];
+  // the server data directory holds provider API keys and sessions.json —
+  // plus the person's own credential and autostart locations. This module
+  // never imports electron, so those roots arrive from the caller.
+  const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry), ...personalSecretPaths(home)];
+  const activity = createLendingActivity(activityFile ?? path.join(path.dirname(file), "lending-activity.jsonl"));
   let records = {};
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -87,17 +133,44 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   } catch { /* missing/corrupt grants never create authority */ }
   const running = new Map();
   const status = new Map();
-  let disposed = false;
-  let executing = false;
+  let closed = false;
+  let maintainerOff = false;
+  let executing = null;
+  const changed = () => { if (!closed) try { onChange(summary()); } catch { /* an indicator never stops lending */ } };
+  const summary = () => ({
+    lending: environments().filter(env => records[env.id]?.cloud && records[env.id]?.enabled === true).map(env => env.id),
+    busy: executing,
+  });
   // The remote workspace's capability is not authority over this desktop.
   // Recheck the local feature gate even for persisted grants and live jobs.
+  // A maintainer grant only: Cloud grants never read the maintainer flag.
   const requireEnabled = async () => {
-    const allowed = !disposed && await enabled().catch(() => false);
-    if (allowed && !disposed) return;
-    disposed = true;
-    for (const env of environments()) if (running.has(env.id) && status.get(env.id)?.connected) disconnect(env, records[env.id]);
-    for (const id of running.keys()) stop(id);
+    const allowed = !closed && !maintainerOff && await enabled().catch(() => false);
+    if (allowed && !closed && !maintainerOff) return;
+    maintainerOff = true;
+    for (const env of environments()) {
+      if (records[env.id]?.cloud || !running.has(env.id)) continue;
+      if (status.get(env.id)?.connected) disconnect(env, records[env.id]); else stop(env.id);
+    }
     throw new Error("Computer sharing is turned off on this computer. Restart the desktop after enabling it.");
+  };
+  /** Ends a Cloud grant for good: disconnect, cancel in-flight work, and
+   * switch it off so only the person can turn it back on. */
+  const endCloud = (env, reason) => {
+    disconnect(env, records[env.id]);
+    if (records[env.id]?.enabled) store({ ...records, [env.id]: { ...records[env.id], enabled: false } });
+    status.set(env.id, { connected: false, problem: reason });
+    changed();
+  };
+  const requireGrant = async (env, grant) => {
+    if (!grant.cloud) return requireEnabled();
+    // Quitting the app only pauses: a check still in flight when it closes
+    // must never switch the person's lending off for the next launch.
+    if (closed) throw new Paused("This app is closing.");
+    const verdict = cloudLendingVerdict(grant.cloud, cloud(), env);
+    if (verdict.allow) return;
+    if (verdict.stop) { endCloud(env, verdict.stop); throw new Error("Lending to your Cloud stopped."); }
+    throw new Paused("Waiting for your Cloud sign-in.");
   };
   const store = next => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -121,16 +194,27 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       chunks.push(Buffer.from(chunk));
     }
     let json; try { json = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new Error("This server does not support computer sharing. Update its OpenMausBot installation."); }
-    if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? "Pair this desktop again before sharing computer access." : `Server request failed (${response.status}). Update the server if needed.`);
+    if (!response.ok) throw Object.assign(new Error(response.status === 401 || response.status === 403 ? "Pair this desktop again before sharing computer access." : `Server request failed (${response.status}). Update the server if needed.`), { status: response.status });
     return json;
+  };
+  const describe = async env => {
+    const [auth, descriptor] = await Promise.all([request(env, "/api/auth/session"), request(env, "/.well-known/openmausbot/environment")])
+      .catch(error => { throw error.status === 401 || error.status === 403 ? Object.assign(error, { problem: "connect-first" }) : error; });
+    if (auth.kind !== "session" || !uuid(auth.id) || !uuid(descriptor.environmentId)) throw Object.assign(new Error("Complete server pairing or sign-in first"), { problem: "connect-first" });
+    if (descriptor.capabilities?.sharedComputers !== true) throw new Error("Update this server to enable computer sharing");
+    return { auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId } };
   };
   const identity = async env => {
     await requireEnabled();
-    const [auth, descriptor] = await Promise.all([request(env, "/api/auth/session"), request(env, "/.well-known/openmausbot/environment")]);
+    const { info } = await describe(env);
     await requireEnabled();
-    if (auth.kind !== "session" || !uuid(auth.id) || !uuid(descriptor.environmentId)) throw new Error("Complete server pairing or sign-in first");
-    if (descriptor.capabilities?.sharedComputers !== true) throw new Error("Update this server to enable computer sharing");
-    return { sessionId: auth.id, environmentId: descriptor.environmentId };
+    return info;
+  };
+  /** The person's Cloud home, signed in as one of their own admin devices. */
+  const cloudIdentity = async env => {
+    const { auth, info } = await describe(env);
+    if (auth.cloudHome !== true || !Array.isArray(auth.scopes) || !auth.scopes.includes("admin")) throw Object.assign(new Error("This server is not your Cloud"), { problem: "not-cloud" });
+    return info;
   };
   const matches = (grant, info) => grant?.sessionId === info.sessionId && grant?.environmentId === info.environmentId;
   const stop = id => {
@@ -140,32 +224,51 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   };
   const run = (env, grant) => {
     stop(env.id);
-    if (disposed || !grant.enabled) return;
+    if (closed || !grant.enabled || (!grant.cloud && maintainerOff)) return;
     const live = { abort: new AbortController(), cua: null };
     running.set(env.id, live);
     const signal = live.abort.signal;
     const call = (action, body = {}) => request(env, `/api/shared-computers/${grant.id}/${action}`, body, signal, grant.secret);
+    const gate = () => requireGrant(env, grant);
     void (async () => {
       while (!signal.aborted) {
         try {
-          if (!matches(grant, await identity(env))) throw new Error("Server sign-in changed. Review computer access again in Settings.");
+          await gate();
+          if (grant.cloud) {
+            // Bound to the account and machine above. A new pairing of this
+            // same desktop (a new session) keeps lending; another server
+            // behind that address (a new environment) does not.
+            const info = await cloudIdentity(env);
+            if (grant.environmentId && grant.environmentId !== info.environmentId) { endCloud(env, "machine-changed"); break; }
+            if (grant.environmentId !== info.environmentId || grant.sessionId !== info.sessionId) {
+              grant = { ...grant, ...info };
+              if (records[env.id]?.id === grant.id) store({ ...records, [env.id]: grant });
+            }
+          } else if (!matches(grant, await identity(env))) throw new Error("Server sign-in changed. Review computer access again in Settings.");
           await validateSharedFolders(grant.folders);
           const effectiveGrant = { ...grant, protectedPaths: protectedRoots };
-          await requireEnabled();
+          await gate();
           await request(env, "/api/shared-computers/connect", {
             id: grant.id, name: os.hostname().slice(0, 120), environmentId: grant.environmentId,
             folders: grant.folders.map(({ id, name, write }) => ({ id, name, write })), terminal: grant.terminal, computer: grant.computer,
           }, signal, grant.secret);
           if (signal.aborted) break;
           status.set(env.id, { connected: true });
+          changed();
           while (!signal.aborted) {
-            await requireEnabled();
+            await gate();
             const { job } = await call("poll");
-            await requireEnabled();
+            await gate();
             if (!job) continue;
-            if (!uuid(job.id) || typeof job.operation !== "object" || job.operation?.computer_id !== grant.id) throw new Error("Invalid computer request");
+            if (!uuid(job.id)) throw new Error("Invalid computer request");
+            if (!validSharedOperation(job.operation, grant.id)) {
+              activity.record({ env, action: "invalid", detail: "", ok: false, error: "Refused a malformed request" });
+              await call("result", { jobId: job.id, result: sharedComputerError(new Error("Invalid computer request")) });
+              continue;
+            }
             if (executing) { await call("result", { jobId: job.id, result: sharedComputerError(new Error("This computer is busy with another server")) }); continue; }
-            executing = true;
+            executing = { env: env.id, action: job.operation.action };
+            changed();
             const jobAbort = new AbortController();
             const jobSignal = AbortSignal.any([signal, jobAbort.signal]);
             let leasing = false;
@@ -174,7 +277,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
               if (leasing) return;
               leasing = true;
               try {
-                await requireEnabled();
+                await gate();
                 if (!(await call("lease", { jobId: job.id })).active) jobAbort.abort();
                 await control?.renew();
               } catch { jobAbort.abort(); }
@@ -199,12 +302,27 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
                 return live.cua;
               });
             } catch (error) { result = sharedComputerError(error); live.cua?.close(); live.cua = null; }
-            finally { clearInterval(heartbeat); await control?.release().catch(() => {}); executing = false; }
+            finally { clearInterval(heartbeat); await control?.release().catch(() => {}); executing = null; changed(); }
+            activity.record({
+              env, action: job.operation.action, detail: describeSharedOperation(grant, job.operation), ok: result?.isError !== true,
+              error: result?.isError === true ? result?.content?.[0]?.text : undefined,
+            });
             // Never retry an action if the result delivery fails.
             await call("result", { jobId: job.id, result });
           }
         } catch (error) {
-          if (!signal.aborted) status.set(env.id, { connected: false, error: error.message });
+          if (error instanceof Paused) {
+            // Nothing is served while the Cloud sign-in cannot be verified;
+            // cloudChanged() starts this grant again once it can.
+            if (running.get(env.id) === live) disconnect(env, grant);
+            status.set(env.id, { connected: false, problem: "paused" });
+            changed();
+            break;
+          }
+          // A Cloud home this desktop is not (or no longer) signed in to
+          // needs Connect to my Cloud; anything else is waiting for it.
+          if (!signal.aborted) status.set(env.id, { connected: false, error: error.message, ...(grant.cloud ? { problem: error.problem ?? (error.status === 401 || error.status === 403 ? "connect-first" : "waiting") } : {}) });
+          changed();
         }
         try { await delay(5000, undefined, { signal }); } catch { break; }
       }
@@ -218,8 +336,29 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     stop(env.id);
     if (grant?.secret) void request(env, `/api/shared-computers/${grant.id}/disconnect`, {}, undefined, grant.secret).catch(() => {});
   };
+  const cloudState = env => {
+    const grant = env ? records[env.id] : undefined;
+    const lent = grant?.cloud ? grant : null;
+    return {
+      enabled: lent?.enabled === true,
+      folders: lent && Array.isArray(lent.folders) ? lent.folders : [],
+      screen: lent?.computer === true,
+      busy: Boolean(env && executing?.env === env.id),
+      ...(env ? status.get(env.id) : {}),
+    };
+  };
+  const validRecord = grant => grant?.enabled === true && uuid(grant.id) && /^[a-f0-9]{64}$/.test(grant.secret) && Array.isArray(grant.folders) &&
+    (grant.cloud
+      ? typeof grant.cloud.accountId === "string" && typeof grant.cloud.origin === "string" && (grant.environmentId === null || uuid(grant.environmentId))
+      : uuid(grant.sessionId) && uuid(grant.environmentId));
   return {
     state, identity,
+    /** What servers' bots did here, newest first (optionally one server's). */
+    activity(id, limit) {
+      const env = id === undefined ? null : environments().find(entry => entry.id === id);
+      const entries = activity.list(env ? 500 : limit);
+      return (env ? entries.filter(entry => entry.origin === env.origin) : entries).slice(0, limit ?? 100);
+    },
     async observe(env) {
       const info = await identity(env);
       if (matches(records[env.id], info)) return null;
@@ -235,20 +374,60 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       const grant = { ...fresh, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders, terminal: input.terminal === true, computer: input.computer === true };
       if (!folders.length && !grant.terminal && !grant.computer) throw new Error("Choose at least one folder or capability to share");
       disconnect(env, records[env.id]);
-      store({ ...records, [env.id]: grant }); run(env, grant); return state(env.id);
+      store({ ...records, [env.id]: grant }); run(env, grant); changed(); return state(env.id);
+    },
+    /** What this Mac lends to the person's Cloud, for Settings → OMB Cloud. */
+    cloudState,
+    /** Lend this Mac to the person's own Cloud: chosen folders (read-only or
+     * editable) and optionally apps and screen. Never a terminal. The Cloud
+     * account and its machine must be verified right now; the Cloud home's
+     * identity is bound on first contact if this desktop is not signed in
+     * there yet (Connect to my Cloud does that). */
+    async saveCloud(env, input) {
+      if (closed) throw new Error("Lending is unavailable while the app is closing.");
+      const current = cloud();
+      if (current?.status !== "connected" || !current.accountId || current.origin !== env.origin) throw Object.assign(new Error("Connect to your Cloud first."), { problem: "connect-first" });
+      const folders = await validateSharedFolders(input?.folders);
+      if (!folders.length && input?.screen !== true) throw new Error("Choose at least one folder, or apps and screen.");
+      let info = { sessionId: null, environmentId: null };
+      try { info = await cloudIdentity(env); } catch (error) { if (error.problem !== "connect-first") throw error; }
+      const grant = { ...info, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders, terminal: false, computer: input.screen === true,
+        cloud: { accountId: current.accountId, origin: env.origin } };
+      disconnect(env, records[env.id]);
+      store({ ...records, [env.id]: grant }); run(env, grant); changed();
+      return cloudState(env);
     },
     revoke(env) {
       disconnect(env, records[env.id]);
       if (records[env.id]) store({ ...records, [env.id]: { ...records[env.id], enabled: false } });
+      changed();
       return state(env.id);
     },
-    forget(env) { disconnect(env, records[env.id]); const next = { ...records }; delete next[env.id]; store(next); },
-    start() {
+    forget(env) { disconnect(env, records[env.id]); const next = { ...records }; delete next[env.id]; store(next); changed(); },
+    /** Resume saved grants. Maintainer grants only when the local flag is on
+     * (the caller checked it); Cloud grants whenever the Cloud sign-in allows. */
+    start({ maintainer = true } = {}) {
       for (const env of environments()) {
         const grant = records[env.id];
-        if (grant?.enabled === true && uuid(grant.id) && uuid(grant.sessionId) && uuid(grant.environmentId) && /^[a-f0-9]{64}$/.test(grant.secret) && Array.isArray(grant.folders)) run(env, grant);
+        if (!validRecord(grant)) continue;
+        if (grant.cloud) { if (cloudLendingVerdict(grant.cloud, cloud(), env).allow) run(env, grant); }
+        else if (maintainer && !maintainerOff) run(env, grant);
+      }
+      changed();
+    },
+    /** The Cloud sign-in changed (or was re-verified): end, pause or resume
+     * each Cloud grant at once. Ending cancels in-flight work. */
+    cloudChanged() {
+      if (closed) return;
+      for (const env of environments()) {
+        const grant = records[env.id];
+        if (!grant?.cloud || grant.enabled !== true) continue;
+        const verdict = cloudLendingVerdict(grant.cloud, cloud(), env);
+        if (verdict.stop) endCloud(env, verdict.stop);
+        else if (verdict.pause) { if (running.has(env.id)) { disconnect(env, grant); status.set(env.id, { connected: false, problem: "paused" }); changed(); } }
+        else if (!running.has(env.id) && validRecord(grant)) run(env, grant);
       }
     },
-    close() { disposed = true; for (const id of running.keys()) stop(id); },
+    close() { closed = true; for (const id of running.keys()) stop(id); },
   };
 }

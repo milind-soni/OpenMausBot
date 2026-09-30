@@ -7,8 +7,9 @@ import { browserAvailable, type FeatureFlagConfig } from "@/lib/feature-flags";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("document", { visibilityState: "visible" });
-  vi.stubGlobal("localStorage", { getItem: () => "browser" });
-  return { config: {} as FeatureFlagConfig };
+  const view = { current: "browser" };
+  vi.stubGlobal("localStorage", { getItem: () => view.current });
+  return { config: {} as FeatureFlagConfig & { cloudHome?: boolean }, view };
 });
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
@@ -22,7 +23,7 @@ import { ComputerPanel } from "./ComputerPanel";
 
 afterAll(() => vi.unstubAllGlobals());
 const bot = { id: "browser-fixture", name: "Browser fixture", modelSelection: { instanceId: "fixture" } } as Bot;
-const render = (config: FeatureFlagConfig, browser?: boolean) => {
+const render = (config: FeatureFlagConfig & { cloudHome?: boolean }, browser?: boolean) => {
   fixture.config = config;
   return renderToStaticMarkup(createElement(ComputerPanel, { bot: { ...bot, browser } }));
 };
@@ -72,5 +73,25 @@ describe("Computer panel on a narrow screen", () => {
     // Nothing to drag against when the panel is the whole window.
     const separator = /<div role="separator"[^>]*class="([^"]*)"/.exec(markup)!;
     expect(separator[1].split(" ")).toContain("max-md:hidden");
+  });
+});
+
+describe("Computer panel Works on", () => {
+  const places = (markup: string) => [...markup.matchAll(/<span>(Auto|Cloud|Local VM|This computer|Browser|Off)<\/span>/g)].map((match) => match[1]);
+  const computerTab = (config: FeatureFlagConfig & { cloudHome?: boolean }) => {
+    fixture.view.current = "computer";
+    try { return render(config); } finally { fixture.view.current = "browser"; }
+  };
+
+  it("lists this computer and a Local VM on a desktop or self-hosted server", () => {
+    const markup = computerTab({});
+    expect(places(markup)).toEqual(["Auto", "Cloud", "Local VM", "This computer", "Browser", "Off"]);
+    expect(markup).toContain("Choose where this bot can use a computer.</p>");
+  });
+
+  it("lists neither on an OMB Cloud home, and says why", () => {
+    const markup = computerTab({ cloudHome: true });
+    expect(places(markup)).toEqual(["Auto", "Cloud", "Browser", "Off"]);
+    expect(markup).toContain("Bots on your OMB Cloud work in the cloud; to let them use your Mac, turn on Let my Cloud use this Mac");
   });
 });

@@ -68,6 +68,22 @@ function renderEffort(instances: InstanceInfo[], effort?: EffortLevel): string {
 }
 
 describe("EffortRow", () => {
+  it("uses a compact dropdown without changing scope or conflating None with Default", () => {
+    fixture.instances = [engine(["none", "low", "high"])];
+    const row = EffortRow({ bot: bot("high"), threadId: "independent-thread", updateBotDefault: true, compact: true })!;
+    const select = Children.toArray(row.props.children).at(-1) as ReactElement<{ value: string; onChange: (event: ChangeEvent<HTMLSelectElement>) => void }>;
+    expect(select.type).toBe("select");
+    expect(select.props.value).toBe("high");
+    for (const value of ["none", ""]) {
+      select.props.onChange({ target: { value } } as ChangeEvent<HTMLSelectElement>);
+      expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "setModel", botId: "atlas", threadId: "independent-thread", updateBotDefault: true,
+        selection: { instanceId: "codex", model: "gpt-5.6", effort: value || undefined } });
+    }
+    const markup = renderToStaticMarkup(createElement(EffortRow, { bot: bot(), compact: true }));
+    expect(markup).toContain('aria-label="Reasoning effort"');
+    expect(markup).not.toContain("<button");
+    expect([...markup.matchAll(/<option[^>]*>([^<]+)</g)].map((match) => match[1])).toEqual(["Default", "None", "Low", "High"]);
+  });
   it("can apply effort to the pinned thread and bot default together", () => {
     fixture.instances = [engine(["high"])];
     const row = EffortRow({ bot: bot(), threadId: "thread-atlas", updateBotDefault: true })!;
@@ -131,6 +147,22 @@ describe("OpenCode model variants", () => {
   const selected = (variant?: string): Bot => ({ ...bot(), modelSelection: { instanceId: "opencode", model: "provider/model", ...(variant !== undefined ? { variant } : {}) } });
   beforeEach(() => { fixture.instances = [opencode()]; fixture.modelVariantSessions = {}; fixture.dispatch.mockClear(); });
   const render = (variant?: string) => renderToStaticMarkup(createElement(ModelVariantRow, { bot: selected(variant), threadId: "thread-atlas" }));
+
+  it("keeps opaque variant ids and omission distinct in the compact dropdown", () => {
+    const row = ModelVariantRow({ bot: selected("default"), threadId: "thread-atlas", compact: true })!;
+    const label = Children.toArray(row.props.children)[0] as ReactElement<{ children: ReactNode }>;
+    const select = Children.toArray(label.props.children).at(-1) as ReactElement<{ value: string; onChange: (event: ChangeEvent<HTMLSelectElement>) => void }>;
+    expect(select.props.value).toBe("2");
+    for (const [value, variant] of [["3", "deep/custom"], ["unset", undefined]]) {
+      select.props.onChange({ target: { value } } as ChangeEvent<HTMLSelectElement>);
+      expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "setModel", botId: "atlas", threadId: "thread-atlas",
+        selection: { instanceId: "opencode", model: "provider/model", ...(variant !== undefined ? { variant } : {}) } });
+    }
+    const markup = renderToStaticMarkup(createElement(ModelVariantRow, { bot: { ...selected("removed"), busy: true }, compact: true }));
+    expect(markup).toContain('disabled=""');
+    expect(markup).toContain("removed (unverified)");
+    expect(markup).toContain("Use session setting");
+  });
 
   it("offers exact advertised ids without assuming that omission means none or default", () => {
     const markup = render();

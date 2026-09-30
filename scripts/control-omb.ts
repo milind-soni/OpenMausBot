@@ -331,8 +331,8 @@ export interface VerificationServer {
 
 /** The environment of a verification server child: a temporary home in
  * `dataDir`, the fake engine's knobs from `parentEnv`, node on PATH, and
- * nothing else from the parent shell. A test that restarts its own fixture
- * server on the same data uses this too. */
+ * nothing else from the parent shell or this machine's installed CLIs. A
+ * test that restarts its own fixture server on the same data uses this too. */
 export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, dataDir: string, port: number): NodeJS.ProcessEnv {
   const childEnv: NodeJS.ProcessEnv = {};
   const platformKeys = new Set(["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"]);
@@ -366,6 +366,11 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     // fake CLI's `#!/usr/bin/env node` shebang. Windows resolves that same
     // fixture through spawnCli without a shell.
     PATH: dirname(process.execPath),
+    // ...and keep engine discovery to that PATH and this home. Without it the
+    // server also scans /opt/homebrew/bin, /usr/local/bin and the login
+    // shell's PATH, so a developer's own `codex` (or any engine CLI) becomes
+    // an "available" engine that CI never has (#2035).
+    OMB_TEST_SEALED_PATH: "1",
   });
   // The fake engine's own knobs (mode, replies, tool calls) are the one thing
   // a caller may script into the child: FAKE_CLAUDE_* crosses, nothing else.
@@ -503,7 +508,9 @@ export async function launchVerificationServer(
   // deterministic for every suite built on this launcher; identity remains
   // the honest comparison in tests either way.
   try {
-    const timeout = AbortSignal.timeout(1_000);
+    // Seeding is part of launch, not a one-second health probe. First-run
+    // filesystem work can exceed a second on Windows; keep the launch deadline.
+    const timeout = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
     const list = await fetch(`${url}/api/bots`, {
       headers: { origin: url },
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
@@ -513,10 +520,7 @@ export async function launchVerificationServer(
     if (!Array.isArray(seeded) || seeded.length !== 1) {
       throw new Error(`verification fixture did not seed exactly one starter bot; see ${logPath}`);
     }
-    // The list request may consume most of its own budget, so the rename
-    // gets a fresh timeout; sharing one signal could abort a healthy PATCH
-    // and terminate the whole fixture over a slow first request.
-    const renameTimeout = AbortSignal.timeout(1_000);
+    const renameTimeout = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
     const rename = await fetch(`${url}/api/bots/${seeded[0].id}/profile`, {
       method: "PATCH",
       headers: { "content-type": "application/json", origin: url },

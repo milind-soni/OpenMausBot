@@ -184,7 +184,15 @@ SFSpeechRecognizer.requestAuthorization { status in
       emit(["partial": !result.isFinal, "text": text])
       if result.isFinal { exit(0) }
     }
-    if error != nil { fail("recognition-error") }
+    if let error {
+      let nsError = error as NSError
+      // macOS can authorize this helper while system Dictation is disabled.
+      // Preserve that distinction so the UI points to the right setting.
+      if nsError.domain == "kLSRErrorDomain" && nsError.code == 201 {
+        fail("dictation-disabled")
+      }
+      fail("recognition-error")
+    }
   }
 }
 

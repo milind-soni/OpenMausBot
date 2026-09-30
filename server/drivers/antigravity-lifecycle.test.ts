@@ -1,12 +1,15 @@
 import { EventEmitter } from "node:events";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DATA_DIR } from "../config.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { AntigravityAcpClient, validateAntigravityRuntime } from "./antigravity-acp.ts";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
+import { VERIFICATION_TEMP_KEY, antigravityTempDir } from "./antigravity-temp.ts";
 
 const scratch = vi.hoisted(() => [] as string[]);
 vi.mock("../procs.ts", () => ({ spawnCli: vi.fn(), killCliTree: vi.fn() }));
@@ -37,17 +40,29 @@ const initialized = {
   authMethods: [{ id: "oauth-personal" }],
 };
 
-function fakeChild(reply: object | null = { result: initialized }) {
+/** Like the real runtime, the fake exits by itself once its input ends,
+ * unless `exitsOnEof` is false: a runtime that has to be stopped by force. */
+function fakeChild(reply: object | null = { result: initialized }, { exitsOnEof = true } = {}) {
   const child = Object.assign(new EventEmitter(), {
     stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+    closed: false,
   });
+  child.once("close", () => { child.closed = true; });
   child.stdin.on("data", (line) => {
     if (reply === null) return;
     const request = JSON.parse(String(line));
     child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, ...reply })}\n`);
   });
+  child.stdin.on("end", () => { if (exitsOnEof) child.emit("close", 0); });
   vi.mocked(spawnCli).mockReturnValue(child as unknown as ReturnType<typeof spawnCli>);
   return child;
+}
+
+/** A closed client waits five seconds for the runtime to exit by itself
+ * before stopping it by force. Let that grace run out. */
+async function afterExitGrace(child: ReturnType<typeof fakeChild>) {
+  if (!child.stdin.writableFinished) await new Promise((resolve) => child.stdin.once("finish", resolve));
+  await vi.advanceTimersByTimeAsync(5_000);
 }
 
 function client() {
@@ -58,9 +73,10 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.mocked(spawnCli).mockReset();
-  vi.mocked(killCliTree).mockReset().mockImplementation((child) => new Promise((resolve) => {
-    child.once("close", () => resolve(true));
-  }));
+  // Like the real one: a process that has already closed is stopped.
+  vi.mocked(killCliTree).mockReset().mockImplementation((child) => (child as unknown as { closed: boolean }).closed
+    ? Promise.resolve(true)
+    : new Promise((resolve) => { child.once("close", () => resolve(true)); }));
   vi.mocked(rm).mockReset().mockImplementation(realRm);
 });
 
@@ -139,21 +155,60 @@ describe("Antigravity validation shutdown", () => {
     expect(existsSync(scratch[0])).toBe(true);
   });
 
-  it("contains Windows one-file extraction in the owned verification profile", async () => {
-    const child = fakeChild();
-    vi.mocked(killCliTree).mockImplementation(async () => { child.emit("close", 0); return true; });
-    await validateAntigravityRuntime(runtime, "1.1.1");
-    const environment = vi.mocked(spawnCli).mock.calls[0][2].env!;
-    if (process.platform === "win32") {
-      expect(environment.TEMP).toBe(scratch[0]);
-      expect(environment.TMP).toBe(scratch[0]);
+  it("unpacks the Windows verification run into one shared, swept folder and clears it after close", async () => {
+    fakeChild();
+    const shared = antigravityTempDir(DATA_DIR, VERIFICATION_TEMP_KEY);
+    // Left by an earlier verification whose runtime would not stop, and
+    // since gone (an ID no process can have); and one still running.
+    const abandoned = join(shared, "_MEI7ffffff02");
+    const running = join(shared, `_MEI${process.pid.toString(16).padStart(8, "0")}2`);
+    for (const folder of [abandoned, running]) mkdirSync(join(folder, "google3"), { recursive: true });
+    // Nothing is spawned here (spawnCli is a fake), so the Windows branch can
+    // run on every OS.
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    try {
+      await validateAntigravityRuntime(runtime, "1.1.1");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
     }
+    const environment = vi.mocked(spawnCli).mock.calls[0][2].env!;
+    // One fixed folder for every verification, so nothing a run leaves is
+    // orphaned under a name no later sweep looks at.
+    expect(environment.TEMP).toBe(shared);
+    expect(environment.TMP).toBe(shared);
     expect(environment.GEMINI_HOME).toBe(scratch[0]);
     expect(existsSync(scratch[0])).toBe(false);
+    expect(existsSync(abandoned)).toBe(false);
+    expect(existsSync(running)).toBe(true);
+    rmSync(shared, { recursive: true, force: true });
+  });
+
+  it("ends the runtime's input first and stops it by force only after five seconds", async () => {
+    const child = fakeChild(undefined, { exitsOnEof: false });
+    const acp = client();
+    await acp.initialize();
+    acp.close();
+    expect(child.stdin.writableEnded).toBe(true);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(killCliTree).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(killCliTree).toHaveBeenCalledWith(child);
+    child.emit("close", 1);
+    await expect(acp.closeAndWait(100)).resolves.toBe(true);
+  });
+
+  it("stops at once when the runtime exits by itself", async () => {
+    const child = fakeChild();
+    const acp = client();
+    await acp.initialize();
+    await expect(acp.closeAndWait(100)).resolves.toBe(true);
+    // Still asked to reap any helper left in the process group.
+    expect(killCliTree).toHaveBeenCalledWith(child);
   });
 
   it.each(["kill EPERM", "spawn ENOENT"])("does not treat %s as close", async (message) => {
-    const child = fakeChild(null);
+    const child = fakeChild(null, { exitsOnEof: false });
     const acp = client();
     let exited = false;
     void acp.exited.then(() => { exited = true; });
@@ -172,7 +227,7 @@ describe("Antigravity validation shutdown", () => {
   });
 
   it("times out without close and still observes a later close", async () => {
-    const child = fakeChild();
+    const child = fakeChild(undefined, { exitsOnEof: false });
     const acp = client();
     const stopping = acp.closeAndWait(100);
     await vi.advanceTimersByTimeAsync(100);
@@ -183,12 +238,13 @@ describe("Antigravity validation shutdown", () => {
   });
 
   it("rejects a validated runtime that does not stop, leaving its profile intact", async () => {
-    fakeChild();
+    const child = fakeChild(undefined, { exitsOnEof: false });
     let killed!: () => void;
     const stopping = new Promise<void>((resolve) => { killed = resolve; });
     vi.mocked(killCliTree).mockImplementation(async () => { killed(); return false; });
     const validation = validateAntigravityRuntime(runtime, "1.1.1");
     const rejected = expect(validation).rejects.toThrow("did not shut down");
+    await afterExitGrace(child);
     await stopping;
     await vi.advanceTimersByTimeAsync(5_000);
     await rejected;
@@ -200,11 +256,12 @@ describe("Antigravity validation shutdown", () => {
     { reply: { error: { message: "initialize failed" } }, error: "initialize failed" },
     { reply: { result: {} }, error: "did not identify" },
   ])("preserves $error when shutdown times out", async ({ reply, error }) => {
-    fakeChild(reply);
+    const child = fakeChild(reply, { exitsOnEof: false });
     let killed!: () => void;
     const stopping = new Promise<void>((resolve) => { killed = resolve; });
     vi.mocked(killCliTree).mockImplementation(async () => { killed(); return false; });
     const rejected = expect(validateAntigravityRuntime(runtime, "1.1.1")).rejects.toThrow(error);
+    await afterExitGrace(child);
     await stopping;
     await vi.advanceTimersByTimeAsync(5_000);
     await rejected;
@@ -230,6 +287,6 @@ describe("Antigravity validation shutdown", () => {
     vi.mocked(rm).mockRejectedValueOnce(Object.assign(new Error("cleanup EPERM"), { code: "EPERM" }));
     await expect(validateAntigravityRuntime(runtime, "1.1.1")).resolves.toBeUndefined();
     expect(rm).toHaveBeenCalledWith(scratch[0], { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(`verification profile ${scratch[0]}: cleanup EPERM`));
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(`verification files ${scratch[0]}: cleanup EPERM`));
   });
 });

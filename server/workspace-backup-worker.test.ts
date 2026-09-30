@@ -16,6 +16,10 @@ vi.mock("node:worker_threads", async importOriginal => {
   } };
 });
 
+// Real encrypted backups of 800+ files: about 3 s on Linux and macOS but about
+// 25 s on the Windows runners, so a 30 s limit there timed out under load.
+const TIMEOUT_MS = 120_000;
+
 it("keeps the request loop running during the snapshot copy, not just encryption", async () => {
   const directory = mkdtempSync(join(tmpdir(), "omb-backup-worker-"));
   const first = "file-0000.txt", last = "file-0319.txt";
@@ -38,7 +42,7 @@ it("keeps the request loop running during the snapshot copy, not just encryption
     clearInterval(timer);
     rmSync(directory, { recursive: true, force: true });
   }
-}, 30_000);
+}, TIMEOUT_MS);
 
 it("removes only the failed worker's partial snapshot after an abrupt exit", async () => {
   const directory = mkdtempSync(join(tmpdir(), "omb-backup-worker-exit-"));
@@ -64,4 +68,4 @@ it("removes only the failed worker's partial snapshot after an abrupt exit", asy
     await pending;
     rmSync(directory, { recursive: true, force: true });
   }
-}, 30_000);
+}, TIMEOUT_MS);

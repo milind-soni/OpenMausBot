@@ -16,7 +16,7 @@ import type { InstanceInfo } from "@/state/store";
 export function configuredModelInstances(instances: readonly InstanceInfo[], selectedInstanceId?: string): InstanceInfo[] {
   return instances.filter((instance) =>
     instance.instanceId === selectedInstanceId
-      || (instance.snapshot.state === "available" && instance.models.options.length > 0));
+      || (instance.snapshot.state === "available" && (instance.models.options.length > 0 || instance.snapshot.chatgptPlan === true)));
 }
 
 export function isCustomOnly(instance: { access?: InstanceInfo["access"] } | undefined): boolean {

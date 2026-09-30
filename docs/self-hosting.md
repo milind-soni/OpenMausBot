@@ -311,6 +311,20 @@ that makes one read-only request to the provider from the server.
   always uses a personal ChatGPT login.
 - **xAI API key**: the Grok API engine and xAI image generation.
 
+A saved key goes only to its own engine and only to the workspace's endpoint:
+an engine instance in `config.json` with its own base URL or its own key (a
+router or proxy) never receives it.
+
+**OpenCode is the exception to "the server's own environment is ignored".**
+Like `opencode` in a terminal, it reads provider keys from its environment
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`,
+`KIMI_API_KEY`, `MOONSHOT_API_KEY`, `MINIMAX_API_KEY`) and offers those
+providers' models, billed to that key. It does so only where the server's
+environment is one person's own: never on an OMB Cloud home, a hosted team
+workspace, an organisation-managed desktop, or a server whose sign-in list
+lets other people in (members, more than one admin, or a whole domain).
+Providers added with `opencode auth login` work everywhere.
+
 ## Many client workspaces on one server
 
 `openmausbot fleet` runs one workspace per client on a single Linux server,
@@ -424,6 +438,12 @@ Folder transfers are limited to 256 KiB per file and do not follow links or
 delete files. Local screen control also needs OS permissions and a supported
 desktop driver. Microphone access is not included.
 
+Only conversations you start yourself on that server can use what you share;
+other people's bots, routines and webhooks there cannot. Keys and sign-in
+stores (`~/.ssh`, cloud CLIs, browser profiles, keychains) and `.git`
+internals stay out of reach of any shared folder, and the desktop keeps a log
+of every request under **Computer access**.
+
 Sharing works while this desktop is awake and running, including when viewing
 another workspace. **Stop sharing** revokes access; closing the app stops the
 connector. An action already sent to a local app may still finish. **Forget**
@@ -494,7 +514,8 @@ Set `OMB_LOOPBACK_TRUST=service` on a self-hosted server people share (with
 an email sign-in list, say), or `OMB_LOOPBACK_TRUST=owner` to opt a hosted
 workspace back into the old behaviour (the log then warns). Any other value
 means `service`. The desktop app ignores the setting: its local changes
-already need the app's own per-launch capability.
+already need the app's own per-launch capability. An OMB Cloud home ignores
+it too and is always `service` (docs/cloud-pro.md).
 
 With `service` on a self-hosted server:
 

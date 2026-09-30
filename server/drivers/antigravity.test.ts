@@ -1,11 +1,11 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ensureDirs } from "../config.ts";
-import type { ProviderInstance } from "../contracts.ts";
+import { DATA_DIR, ensureDirs } from "../config.ts";
+import { TurnNotStartedError, type ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
@@ -32,6 +32,8 @@ import {
   type AntigravityReleaseAsset,
 } from "./antigravity-release.ts";
 import { installAntigravityRuntime, resolveAntigravityRuntime } from "./antigravity-runtime.ts";
+import * as antigravityTemp from "./antigravity-temp.ts";
+import { VERIFICATION_TEMP_KEY, antigravityTempDir, sweepAntigravityTemp } from "./antigravity-temp.ts";
 import {
   AntigravityDriver,
   STATIC_ANTIGRAVITY_MODELS,
@@ -207,9 +209,10 @@ createInterface({ input: process.stdin }).on('line', line => {
 });
 
 describe("stopping the runtime before touching its files", () => {
-  it.skipIf(process.platform === "win32")("waits through forced shutdown when the verified runtime ignores TERM", async () => {
+  it.skipIf(process.platform === "win32")("waits through forced shutdown when the verified runtime ignores EOF and TERM", async () => {
     const fake = fakeRuntime();
-    writeFileSync(fake.executable, `#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nawait import(${JSON.stringify(pathToFileURL(FAKE_ACP).href)});\n`);
+    // Stays up after its input ends, so close() must go on to force it.
+    writeFileSync(fake.executable, `#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nsetInterval(() => {}, 1 << 30);\nawait import(${JSON.stringify(pathToFileURL(FAKE_ACP).href)});\n`);
     const runtime = await resolveAntigravityRuntime(fake.executable);
     vi.stubEnv("FAKE_ACP_AGENT_NAME", "Google Antigravity");
     vi.stubEnv("FAKE_ACP_AGENT_VERSION", "1.1.1");
@@ -221,7 +224,25 @@ describe("stopping the runtime before touching its files", () => {
     } finally {
       await Promise.all(spawned.mock.results.map(({ value }) => procs.killCliTree(value, 0)));
     }
-  }, 10_000);
+  }, 20_000);
+
+  it("ends the runtime's input and lets it exit by itself before any forced stop", async () => {
+    // On Windows a forced stop skips the runtime's own cleanup of the
+    // 0.34-1.26 GB it unpacked. An exit of its own removes them.
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profile = await prepareAntigravityProfile({ instanceId: "graceful-close", runtime, baseDir: fake.directory });
+    const client = new AntigravityAcpClient(runtime, profile, fake.directory);
+    await client.initialize();
+    const kill = vi.spyOn(procs, "killCliTree");
+    client.close();
+    expect(client.child.stdin?.writableEnded).toBe(true);
+    expect(kill).not.toHaveBeenCalled();
+    expect(await client.closeAndWait()).toBe(true);
+    // Exit code 0 and no signal: not SIGTERM (POSIX) and not taskkill's 1.
+    expect(client.child.exitCode).toBe(0);
+    expect(client.child.signalCode).toBeNull();
+  });
 
   it("validates a real fake runtime and waits for its process to close before returning", async () => {
     const fake = fakeRuntime();
@@ -544,6 +565,78 @@ describe("official Antigravity runtime", () => {
     expect(first.environment.ANTIGRAVITY_HARNESS_PATH).toBe(fake.harness);
   });
 
+  it("points TEMP on Windows at one stable folder per instance under DATA_DIR/tmp", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const input = {
+      instanceId: "work",
+      runtime,
+      baseDir: fake.directory,
+      platform: "win32" as const,
+      baseEnv: { Temp: "C:\\Users\\ada\\AppData\\Local\\Temp", tmp: "C:\\Temp", PATH: process.env.PATH },
+    };
+    const first = await prepareAntigravityProfile(input);
+    const again = await prepareAntigravityProfile(input);
+    const expected = antigravityTempDir(fake.directory, "work");
+    expect(first.tempDirectory).toBe(expected);
+    expect(first.environment.TEMP).toBe(expected);
+    expect(first.environment.TMP).toBe(expected);
+    expect(Object.keys(first.environment).filter((key) => /^(?:temp|tmp)$/iu.test(key)).sort()).toEqual(["TEMP", "TMP"]);
+    expect(statSync(expected).isDirectory()).toBe(true);
+    // Stable across launches: the pool's spawn contract hashes this environment.
+    expect(again.environment).toEqual(first.environment);
+    // Beside the profile, never inside it (Windows paths stop at 260 characters).
+    expect(expected.startsWith(join(fake.directory, "tmp", "agy"))).toBe(true);
+    expect(expected.startsWith(first.directory)).toBe(false);
+    const other = await prepareAntigravityProfile({ ...input, instanceId: "personal" });
+    expect(other.environment.TEMP).not.toBe(expected);
+  });
+
+  it("leaves TEMP alone on macOS and Linux", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    for (const platform of ["darwin", "linux"] as const) {
+      const profile = await prepareAntigravityProfile({
+        instanceId: "work", runtime, baseDir: fake.directory, platform, baseEnv: { TEMP: "/inherited", TMPDIR: "/inherited-dir" },
+      });
+      expect(profile.tempDirectory).toBeUndefined();
+      expect(profile.environment.TEMP).toBe("/inherited");
+      expect(profile.environment.TMPDIR).toBe("/inherited-dir");
+    }
+    expect(existsSync(join(fake.directory, "tmp"))).toBe(false);
+  });
+
+  it("clears what an earlier run of this instance left behind when the driver starts", async () => {
+    ensureDirs();
+    const instanceId = "antigravity-leftovers";
+    // Owned by an ID no process can have, so it is certainly abandoned.
+    const abandoned = join(antigravityTempDir(DATA_DIR, instanceId), `_MEI7ffffff02`);
+    // And one a runtime verification left when its runtime would not stop.
+    const verification = join(antigravityTempDir(DATA_DIR, VERIFICATION_TEMP_KEY), `_MEI7ffffff03`);
+    for (const folder of [abandoned, verification]) {
+      mkdirSync(join(folder, "google3"), { recursive: true });
+      writeFileSync(join(folder, "google3", "payload.bin"), "unpacked");
+    }
+    const scheduled = vi.spyOn(antigravityTemp, "scheduleAntigravityTempSweep");
+    const instance = await AntigravityDriver.create({
+      instanceId,
+      displayName: "Antigravity fixture",
+      enabled: true,
+      config: { cli: join(DATA_DIR, "not-installed"), fullAuto: false },
+      environment: {},
+    });
+    try {
+      expect(scheduled).toHaveBeenCalledWith(instanceId);
+      expect(scheduled).toHaveBeenCalledWith(VERIFICATION_TEMP_KEY);
+      await sweepAntigravityTemp(instanceId);
+      await sweepAntigravityTemp(VERIFICATION_TEMP_KEY);
+      expect(existsSync(abandoned)).toBe(false);
+      expect(existsSync(verification)).toBe(false);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
   it("bounds model discovery with one deadline", async () => {
     const fake = fakeRuntime();
     const runtime = await resolveAntigravityRuntime(fake.executable);
@@ -641,6 +734,9 @@ describe("Antigravity driver over shared ACP", () => {
         FAKE_ACP_MODELS: "gemini-3.8-flash-high,gemini-3.8-flash-low",
         FAKE_ACP_MODES: "default,yolo,auto_edit",
         FAKE_ACP_DUMP: dump,
+        // Inherited temp folders: replaced on Windows, passed through elsewhere.
+        TEMP: fake.directory,
+        TMP: fake.directory,
       },
       enabled: true,
       config: { cli: fake.executable, fullAuto: false },
@@ -666,6 +762,9 @@ describe("Antigravity driver over shared ACP", () => {
     expect(dumpState.env.GEMINI_HOME).toBe(antigravityProfileDirectory(instanceId));
     expect(dumpState.env.GEMINI_API_KEY).toBeUndefined();
     expect(dumpState.env.GOOGLE_API_KEY).toBeUndefined();
+    // Nothing yet says this account offers the model, so the session is
+    // not started on it: the switch is what checks it.
+    expect(dumpState.env.AGY_ACP_DEFAULT_MODEL).toBeUndefined();
     const calls = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
     expect(calls).toEqual([
       { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "model", value: "gemini-3.8-flash-low" } },
@@ -673,6 +772,103 @@ describe("Antigravity driver over shared ACP", () => {
     ]);
     const mcp = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
     expect(mcp).toEqual([{ name: "docs", command: "docs-mcp", args: ["serve"], env: [{ name: "TOKEN", value: "scoped" }] }]);
+    // The real launch path on Windows unpacks into OMB's own folder. Checked
+    // on every OS, so the macOS and Linux runs prove the dump carries TEMP.
+    const expectedTemp = process.platform === "win32" ? antigravityTempDir(DATA_DIR, instanceId) : fake.directory;
+    expect([dumpState.env.TEMP, dumpState.env.TMP]).toEqual([expectedTemp, expectedTemp]);
+  });
+
+  // Google's server reads AGY_ACP_DEFAULT_MODEL for a new session (checked
+  // against agy_acp_server 1.1.1). Without it every new conversation paid a
+  // model switch that re-fetches the account's models: 1.3-1.8 s measured.
+  // An approval change used to respawn the process: 7-10 s on a Mac.
+  it("keeps one process across approval and model changes, starting on OMB's model", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const dump = join(fake.directory, "dump.json");
+    const launches = join(fake.directory, "launches");
+    const instanceId = "antigravity-pooled";
+    const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+    mkdirSync(tokenDirectory, { recursive: true });
+    writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    instance = await AntigravityDriver.create({
+      instanceId,
+      displayName: "Antigravity",
+      environment: {
+        AGY_ACP_DEFAULT_MODEL: "ambient-must-not-win",
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-3.7-flash-high,gemini-3.8-flash-high,gemini-3.8-flash-low",
+        FAKE_ACP_MODES: "default,yolo,auto_edit",
+        FAKE_ACP_DUMP: dump,
+        FAKE_ACP_LAUNCH_COUNT_FILE: launches,
+      },
+      enabled: true,
+      config: { cli: fake.executable, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+    const run = async (approvalMode: "ask" | "full" | "edits", model: string, threadId = "thread-pooled") => {
+      const { turnId } = await instance!.adapter.sendTurn({
+        threadId, text: "hello", approvalMode, model, cwd: fake.directory,
+      });
+      expect(await recorder!.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+    };
+    // An earlier conversation's session lists the models this account offers.
+    await run("ask", "gemini-3.8-flash-high", "thread-earlier");
+    await run("ask", "gemini-3.8-flash-high");
+    await run("full", "gemini-3.8-flash-high");
+    await run("edits", "gemini-3.8-flash-low");
+    expect(Number(readFileSync(launches, "utf8"))).toBe(2);
+    expect(JSON.parse(readFileSync(dump, "utf8")).env.AGY_ACP_DEFAULT_MODEL).toBe("gemini-3.8-flash-high");
+    expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8")).map((call: any) => [call.params.configId, call.params.value])).toEqual([
+      ["mode", "default"],
+      ["mode", "yolo"],
+      ["model", "gemini-3.8-flash-low"],
+      ["mode", "auto_edit"],
+    ]);
+  });
+
+  // Measured on agy_acp_server 1.1.1: any id in AGY_ACP_DEFAULT_MODEL is
+  // taken unchecked (even "bogus-model-xyz"), while the model switch refuses
+  // one the account cannot use with -32602. Starting sessions on a saved
+  // model the account never offered skipped that check.
+  it("never starts a session on a model this account has not offered", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const dump = join(fake.directory, "dump.json");
+    const instanceId = "antigravity-unavailable";
+    const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+    mkdirSync(tokenDirectory, { recursive: true });
+    writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    instance = await AntigravityDriver.create({
+      instanceId,
+      displayName: "Antigravity",
+      environment: {
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-3.7-flash-high,gemini-3.8-flash-low",
+        FAKE_ACP_MODES: "default,yolo,auto_edit",
+        FAKE_ACP_DUMP: dump,
+      },
+      enabled: true,
+      config: { cli: fake.executable, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+    const run = async (threadId: string, model: string) => {
+      const { turnId } = await instance!.adapter.sendTurn({ threadId, text: "hello", approvalMode: "ask", model, cwd: fake.directory });
+      const done = await recorder!.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return { done, events: recorder!.events.filter((event) => event.turnId === turnId) };
+    };
+    expect((await run("thread-known", "gemini-3.8-flash-low")).done).toMatchObject({ ok: true });
+    // a tier-locked model, and OMB's static default the account lacks
+    for (const [index, model] of ["gemini-3.8-pro-high", STATIC_ANTIGRAVITY_MODELS.default].entries()) {
+      const { done, events } = await run(`thread-unavailable-${index}`, model);
+      expect(done).toMatchObject({ ok: false });
+      expect(JSON.parse(readFileSync(dump, "utf8")).env.AGY_ACP_DEFAULT_MODEL).toBeUndefined();
+      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining(model) });
+      expect(events.some((event) => event.type === "item.completed" && event.itemType === "assistant_text")).toBe(false);
+    }
+    // an offered one still starts on the session's own model
+    expect((await run("thread-offered", "gemini-3.8-flash-low")).done).toMatchObject({ ok: true });
+    expect(JSON.parse(readFileSync(dump, "utf8")).env.AGY_ACP_DEFAULT_MODEL).toBe("gemini-3.8-flash-low");
   });
 
   it("fails closed when Antigravity does not confirm its permission mode", async () => {
@@ -707,6 +903,132 @@ describe("Antigravity driver over shared ACP", () => {
       (event) => event.type === "runtime.error" && /did not apply yolo permission mode/u.test(event.message),
     )).toBe(true);
   });
+
+  // An approval change keeps the pooled process (sessionScopedApproval), so
+  // the permission mode has to come from each turn: a resumed session must
+  // never run under a looser mode an earlier turn left on it. The fake
+  // records the mode each prompt actually ran under.
+  it("runs each turn of a pooled, resumed session under that turn's own permission mode", async () => {
+    ensureDirs();
+    const fake = fakeRuntime();
+    const dump = join(fake.directory, "dump.json");
+    const rpcDump = join(fake.directory, "rpc.json");
+    const launches = join(fake.directory, "launches");
+    const instanceId = "antigravity-mode-per-turn";
+    const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+    mkdirSync(tokenDirectory, { recursive: true });
+    writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+    instance = await AntigravityDriver.create({
+      instanceId,
+      displayName: "Antigravity",
+      environment: {
+        FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-3.8-flash-high",
+        FAKE_ACP_MODES: "default,yolo,auto_edit",
+        FAKE_ACP_DUMP: dump,
+        FAKE_ACP_RPC_DUMP: rpcDump,
+        FAKE_ACP_LAUNCH_COUNT_FILE: launches,
+      },
+      enabled: true,
+      // the legacy instance flag must never outrank a turn's own mode
+      config: { cli: fake.executable, fullAuto: true },
+    });
+    recorder = recordEvents(instance.adapter);
+    const promptModes = () => readFileSync(`${dump}.prompts.jsonl`, "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line).mode as string);
+    const sequence = [
+      ["full", "yolo"], ["full", "yolo"], ["ask", "default"], ["auto", "default"],
+      ["ask", "default"], ["full", "yolo"], ["edits", "auto_edit"], ["ask", "default"],
+    ] as const;
+    for (const [index, [approvalMode, native]] of sequence.entries()) {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "thread-mode-per-turn",
+        text: `turn ${index}`,
+        approvalMode,
+        model: "gemini-3.8-flash-high",
+        cwd: fake.directory,
+        // The harness mints fresh MCP credentials every turn, so each later
+        // turn resumes the recorded session on the pooled process.
+        ...(index ? { resumeCursor: "fake-acp-session" } : {}),
+        integrations: { agents: { command: "agents-mcp", args: [], env: { TOKEN: `turn-${index}` } } },
+      });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+      expect(promptModes()).toHaveLength(index + 1);
+      expect([approvalMode, promptModes().at(-1)]).toEqual([approvalMode, native]);
+    }
+    // one process throughout, each later turn resumed on it
+    expect(Number(readFileSync(launches, "utf8"))).toBe(1);
+    expect((JSON.parse(readFileSync(rpcDump, "utf8")) as string[]).filter((method) => method === "session/resume"))
+      .toHaveLength(sequence.length - 1);
+  });
+
+  it.each(["empty", "error"] as const)(
+    "never prompts a pooled session whose stricter mode was not confirmed (%s answer), and replaces its process",
+    async (answer) => {
+      ensureDirs();
+      const fake = fakeRuntime();
+      const dump = join(fake.directory, "dump.json");
+      const launches = join(fake.directory, "launches");
+      const modeAck = join(fake.directory, "mode-ack");
+      const instanceId = `antigravity-unconfirmed-downgrade-${answer}`;
+      const tokenDirectory = join(antigravityProfileDirectory(instanceId), "antigravity-acp");
+      mkdirSync(tokenDirectory, { recursive: true });
+      writeFileSync(join(tokenDirectory, "acp_token.json"), "{}", { mode: 0o600 });
+      instance = await AntigravityDriver.create({
+        instanceId,
+        displayName: "Antigravity",
+        environment: {
+          FAKE_ACP_AUTH_METHOD: "oauth-personal",
+          FAKE_ACP_MODELS: "gemini-3.8-flash-high",
+          FAKE_ACP_MODES: "default,yolo",
+          FAKE_ACP_DUMP: dump,
+          FAKE_ACP_LAUNCH_COUNT_FILE: launches,
+          FAKE_ACP_MODE_ACK_FILE: modeAck,
+        },
+        enabled: true,
+        config: { cli: fake.executable, fullAuto: false },
+      });
+      recorder = recordEvents(instance.adapter);
+      const promptModes = () => existsSync(`${dump}.prompts.jsonl`)
+        ? readFileSync(`${dump}.prompts.jsonl`, "utf8").trim().split("\n").map((line) => JSON.parse(line).mode as string)
+        : [];
+      const turn = (approvalMode: "full" | "ask", index: number, startupRecovery = false) => instance!.adapter.sendTurn({
+        threadId: "thread-unconfirmed-downgrade",
+        text: `turn ${index}`,
+        approvalMode,
+        model: "gemini-3.8-flash-high",
+        cwd: fake.directory,
+        ...(index ? { resumeCursor: "fake-acp-session" } : {}),
+        ...(startupRecovery ? { startupRecovery } : {}),
+      });
+      const run = async (approvalMode: "full" | "ask", index: number) => {
+        const { turnId } = await turn(approvalMode, index);
+        return recorder!.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      };
+      expect(await run("full", 0)).toMatchObject({ ok: true });
+      expect(promptModes()).toEqual(["yolo"]);
+      // The owner switches to Ask; the runtime does not confirm the switch.
+      writeFileSync(modeAck, answer);
+      expect(await run("ask", 1)).toMatchObject({ ok: false });
+      // nothing ran under the looser mode the session still holds
+      expect(promptModes()).toEqual(["yolo"]);
+      writeFileSync(modeAck, "");
+      // and that process is gone: the next turn gets a fresh one
+      expect(await run("ask", 2)).toMatchObject({ ok: true });
+      expect(promptModes()).toEqual(["yolo", "default"]);
+      expect(Number(readFileSync(launches, "utf8"))).toBe(2);
+      // With automatic recovery on, the harness gets the turn back unstarted
+      // and retries it on a fresh process instead of a failed reply.
+      expect(await run("full", 3)).toMatchObject({ ok: true });
+      writeFileSync(modeAck, answer);
+      await expect(turn("ask", 4, true)).rejects.toBeInstanceOf(TurnNotStartedError);
+      expect(promptModes()).toEqual(["yolo", "default", "yolo"]);
+      writeFileSync(modeAck, "");
+      expect(await run("ask", 5)).toMatchObject({ ok: true });
+      expect(promptModes()).toEqual(["yolo", "default", "yolo", "default"]);
+      expect(Number(readFileSync(launches, "utf8"))).toBe(3);
+    },
+  );
 
   it.each([
     ["question", undefined],

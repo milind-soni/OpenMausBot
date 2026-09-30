@@ -4,14 +4,16 @@ import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import { afterEach, expect, it } from "vitest";
 import {
-  CLOUD_HOME_MARKER, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_MAX_TTL_S, CLOUD_PAIRING_NONCE_MS, CLOUD_PAIRING_SKEW_S, cloudHomeConfiguration, cloudHomeConfigured,
-  cloudHomeHost, cloudPairingSignature, createCloudPairing, prepareCloudHomeVolume, withoutIgnoredCloudKeys,
+  CLOUD_BROWSER_SIGN_IN_MAX_TTL_S, CLOUD_HOME_MARKER, CLOUD_HOME_RESTART_EXIT_CODE, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_MAX_TTL_S, CLOUD_PAIRING_NONCE_MS, CLOUD_PAIRING_SKEW_S, cloudHomeConfiguration, cloudHomeConfigured,
+  boatNotConfiguredMessage, cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
+  withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
-import { cloudHomeChildEnvironments, passwdIds } from "./cloud-home-start.ts";
+import { cloudHomeChildEnvironments, codeTrustProblem, passwdIds, serverExitAction, spawnWithSecrets } from "./cloud-home-start.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { portableWorkspaceConfig, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await removeTempDir(directory); });
@@ -93,6 +95,31 @@ it("never echoes a secret or token in its refusal", () => {
   }
 });
 
+// ── places ──────────────────────────────────────────────────────────────────
+
+it("offers the built-in browser and cloud computers, never this computer or a Local VM", () => {
+  expect((["cloud", "vm", "local", "browser"] as const).filter(cloudHomeOffersPlace)).toEqual(["cloud", "browser"]);
+  expect(cloudHomePlaceRefusal("cloud")).toBeUndefined();
+  expect(cloudHomePlaceRefusal("browser")).toBeUndefined();
+});
+
+it("refuses the places it never offers with what is true there, not a setup step", () => {
+  const local = cloudHomePlaceRefusal("local")!, vm = cloudHomePlaceRefusal("vm")!;
+  expect(local).toBe("This computer isn't a place on your OMB Cloud: its bots run in the cloud. Set Works on to Auto, Cloud or Browser, or lend your Mac under Settings → OMB Cloud.");
+  expect(vm).toBe("Bots on your OMB Cloud can't use a Local VM: the cloud machine has no container runtime. Set Works on to Auto, Cloud or Browser.");
+  for (const text of [local, vm]) {
+    expect(text).not.toMatch(/configure|Computer panel|install|set (?:it|one) up/i);
+    // A failed turn shows the first 160 characters of its error.
+    expect(text.length).toBeLessThanOrEqual(160);
+  }
+});
+
+it("suggests the browser, not a Local VM, when Cloud has no Boat account on a Cloud home", () => {
+  expect(boatNotConfiguredMessage(true)).toBe("Cloud Boat is not configured — add a Boat API key or choose Browser");
+  // Every other server keeps its words.
+  expect(boatNotConfiguredMessage(false)).toBe("Cloud Boat is not configured — add a Boat API key or choose Local VM");
+});
+
 // ── the Admin's signed pairing request ───────────────────────────────────────
 
 function fixture() {
@@ -106,7 +133,7 @@ function fixture() {
     return { timestamp, nonce, signature: `v1=${cloudPairingSignature(options.key ?? secret, timestamp, nonce, body)}`, body: Buffer.from(body) };
   };
   const mint = (request = sign(), source = "203.0.113.9") => pairing.handle({ ...request, source });
-  const exchange = (code: string, source = "198.51.100.4") => sessions.exchange({ code, label: "", source });
+  const exchange = (code: string, source = "198.51.100.4", browser = false) => sessions.exchange({ code, label: "", source, browser });
   return { sessions, sign, mint, exchange, advance: (ms: number) => { now += ms; }, now: () => now };
 }
 
@@ -190,10 +217,45 @@ it("keeps every window single use and short lived, capping what the Admin asks f
   expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: "OMB Cloud" } });
 });
 
+it("opens a browser sign-in only a browser redeems, by credential alone, for at most two minutes", () => {
+  const f = fixture();
+  const granted = f.mint(f.sign(JSON.stringify({ label: "Web browser (Cloud page)", ttlSeconds: 120, purpose: "browser", owner: "ada@example.test" })));
+  expect(f.mint(f.sign(JSON.stringify({ purpose: "browser", owner: "ada.o'neil+cloud@example-mail.test" }))).status).toBe(200);
+  expect(granted.status).toBe(200);
+  // No code to type, and `purpose` said back so the Admin knows this machine made one.
+  expect(Object.keys(granted.body).sort()).toEqual(["credential", "expiresAt", "purpose"]);
+  expect(granted.body).toMatchObject({ credential: expect.stringMatching(/^omb_pair_[A-Za-z0-9_-]{43}$/), expiresAt: f.now() + 120_000, purpose: "browser" });
+  const credential = granted.body.credential as string;
+  // The sign-in page can show whose Cloud this is before anything is redeemed.
+  expect(f.sessions.previewBrowserSignIn(credential)).toEqual({ owner: "ada@example.test", expiresAt: f.now() + 120_000 });
+  // An app, or anything that is not a browser sign-in, cannot use it.
+  expect(f.exchange(credential).ok).toBe(false);
+  expect(f.exchange(credential, "198.51.100.4", true)).toMatchObject({ ok: true, session: { scopes: ["admin", "client"], owner: "ada@example.test" } });
+  expect(f.sessions.previewBrowserSignIn(credential)).toBeNull();
+  expect(f.exchange(credential, "198.51.100.5", true).ok).toBe(false);
+  // Capped at two minutes whatever is asked, and two minutes when nothing is.
+  const long = f.mint(f.sign(JSON.stringify({ ttlSeconds: 600, purpose: "browser", owner: "ada@example.test" })));
+  expect(long.body.expiresAt).toBe(f.now() + CLOUD_BROWSER_SIGN_IN_MAX_TTL_S * 1000);
+  expect(f.mint(f.sign(JSON.stringify({ purpose: "browser", owner: "ada@example.test" }))).body.expiresAt).toBe(f.now() + CLOUD_BROWSER_SIGN_IN_MAX_TTL_S * 1000);
+  f.advance(CLOUD_BROWSER_SIGN_IN_MAX_TTL_S * 1000);
+  expect(f.exchange(long.body.credential as string, "198.51.100.4", true).ok).toBe(false);
+  // An ordinary window is never a browser sign-in.
+  const ordinary = f.mint();
+  expect(f.exchange(ordinary.body.credential as string, "198.51.100.4", true).ok).toBe(false);
+  expect(f.exchange(ordinary.body.code as string).ok).toBe(true);
+});
+
 it("refuses a body that is not the expected JSON", () => {
   const f = fixture();
   for (const body of ["[]", "not json", JSON.stringify({ label: "tab\there" }), JSON.stringify({ label: "x".repeat(81) }),
-    JSON.stringify({ ttlSeconds: 0 }), JSON.stringify({ ttlSeconds: 1.5 }), JSON.stringify({ ttlSeconds: "300" })]) {
+    JSON.stringify({ ttlSeconds: 0 }), JSON.stringify({ ttlSeconds: 1.5 }), JSON.stringify({ ttlSeconds: "300" }),
+    JSON.stringify({ purpose: "app" }), JSON.stringify({ purpose: true }),
+    // A browser sign-in must name its owner, as one plain address.
+    ...[undefined, "", "ada", "ada@", 7, "ada@example.test\u202Eevil", "ada@exa mple.test", "a\nb@example.test", `${"a".repeat(250)}@example.test`,
+      // Printable ASCII only, one @, no angle brackets: what the Admin's email schemas accept.
+      "adé@example.test", "ada@exämple.test", "<ada@example.test", "ada@example.test>", "ada@team@example.test", "ada\t@example.test", "ada@example.test\u00a0"]
+      .map((owner) => JSON.stringify({ purpose: "browser", owner })),
+    JSON.stringify({ owner: "not an address" })]) {
     expect(f.mint(f.sign(body)).status).toBe(400);
   }
   expect(f.sessions.openPairings()).toHaveLength(0);
@@ -232,18 +294,57 @@ it("binds a fresh volume to its machine and refuses anyone else's data", () => {
   expect(readFileSync(join(unmarked, "notes.txt"), "utf8")).toBe("someone's data");
 });
 
-it("gives the edge only its routing name and the server the contract, never a gateway's settings", () => {
+it("gives the edge only its routing name and the server the contract, never a gateway's settings or a secret", () => {
+  const relay = { OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_VOICE_TOKEN: `omb_voice_${"v".repeat(43)}`, OMB_CLOUD_DECIDER_TOKEN: `omb_decide_${"d".repeat(43)}` };
   const config = cloudHomeConfiguration(withGateway())!;
-  const { server, edge } = cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin" }, "/data");
+  const { server, edge, secrets } = cloudHomeChildEnvironments(config, { ...withGateway(), ...relay, PATH: "/usr/bin" }, "/data");
   expect(server).toMatchObject({ HOME: "/data", OMB_DATA_DIR: "/data/.openmausbot", OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800",
-    OMB_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_WEBHOOK_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_CLOUD_BOOTSTRAP_SECRET: secret });
+    OMB_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_WEBHOOK_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_CLOUD_SECRETS_FD: "3" });
   for (const key of CLOUD_IGNORED_KEYS) expect(server).not.toHaveProperty(key);
   expect(JSON.stringify(server)).not.toContain(token);
+  // The secrets go over the pipe, never in the server's environment.
+  expect(secrets).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, ...relay });
+  for (const value of Object.values(secrets)) {
+    expect(JSON.stringify(server)).not.toContain(value);
+    expect(JSON.stringify(edge)).not.toContain(value);
+  }
   expect(edge.OMB_CLOUD_PUBLIC_HOST).toBe(cloudHomeHost(config));
   expect(JSON.stringify(edge)).not.toContain(token);
   expect(JSON.stringify(edge)).not.toContain(secret);
   expect(passwdIds("root:x:0:0::/root:/bin/sh\nmaus:x:1001:1002::/data:/bin/bash\n", "maus")).toEqual({ uid: 1001, gid: 1002 });
   expect(passwdIds("root:x:0:0::/root:/bin/sh\n", "maus")).toBeNull();
+});
+
+it("gives the server only an allow-listed environment: a secret added later, a test's key or anything unknown never reaches it", () => {
+  const config = cloudHomeConfiguration(contract())!;
+  const env = { ...contract(), PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",
+    OMB_CLOUD_BOAT_URL: "https://cloud.example.test/boat", OMB_TTS_DEFAULT_VOICE: "alloy",
+    OMB_CLOUD_FUTURE_SECRET: "later", OMB_TEST_CLOUD_LEFT_BEHIND_KEY: "k".repeat(43), FLY_API_TOKEN: "fly", SOME_TOKEN: "t", HOME: "/root" };
+  const { server, dropped } = cloudHomeChildEnvironments(config, env, "/data");
+  expect(server).toMatchObject({ PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",
+    OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: machineId, OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
+    OMB_CLOUD_BOAT_URL: "https://cloud.example.test/boat", OMB_TTS_DEFAULT_VOICE: "alloy", HOME: "/data" });
+  for (const name of ["OMB_CLOUD_FUTURE_SECRET", "OMB_TEST_CLOUD_LEFT_BEHIND_KEY", "FLY_API_TOKEN", "SOME_TOKEN"]) {
+    expect(server).not.toHaveProperty(name);
+    expect(dropped).toContain(name);
+  }
+  // A secret is never even named as dropped: it goes over the pipe.
+  expect(dropped).not.toContain("OMB_CLOUD_BOOTSTRAP_SECRET");
+});
+
+it("the root supervisor runs and trusts only root's code, never the volume's or anything maus could rewrite", () => {
+  const files = ["/usr/local/bin/node", "/app/dist-server/cloud-home-start.js", "/app/dist-server/index.js", "/usr/local/bin/caddy", "/app/cloud/Caddyfile"];
+  const image = (overrides: Record<string, { uid: number; mode: number }> = {}) => (path: string) =>
+    overrides[path] ?? { uid: 0, mode: path.includes(".") || path.endsWith("node") || path.endsWith("caddy") ? 0o100755 : 0o40755 };
+  expect(codeTrustProblem(files, "/data", image())).toBeNull();
+  expect(codeTrustProblem(files, "/data", image({ "/app/dist-server/index.js": { uid: 1001, mode: 0o100644 } }))).toBe("/app/dist-server/index.js is not root's");
+  expect(codeTrustProblem(files, "/data", image({ "/app/dist-server/cloud-home-start.js": { uid: 0, mode: 0o100666 } }))).toBe("/app/dist-server/cloud-home-start.js is writable by others than root");
+  expect(codeTrustProblem(files, "/data", image({ "/app/dist-server": { uid: 1001, mode: 0o40755 } }))).toBe("/app/dist-server is not root's");
+  expect(codeTrustProblem(files, "/data", image({ "/app": { uid: 0, mode: 0o40777 } }))).toBe("/app is writable by others than root");
+  // A sticky folder (/tmp) does not let anyone replace root's file in it.
+  expect(codeTrustProblem(["/tmp/caddy"], "/data", image({ "/tmp": { uid: 0, mode: 0o41777 } }))).toBeNull();
+  expect(codeTrustProblem([...files, "/data/.local/bin/caddy"], "/data", image())).toBe("/data/.local/bin/caddy is on the volume");
+  expect(codeTrustProblem(files, "/data", () => { throw new Error("ENOENT"); })).toBe("/usr/local/bin/node cannot be checked");
 });
 
 it("ships an edge and a Fly template that keep the server private", () => {
@@ -253,6 +354,11 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(new Set(upstreams)).toEqual(new Set(["127.0.0.1:8799", "127.0.0.1:8800"]));
   // every forwarded request is marked as proxied
   expect(caddy.match(/header_up X-Forwarded-For \{client_ip\}/g)).toHaveLength(upstreams.length);
+  // The root supervisor's code is root's: maus owns only the volume.
+  const image = readFileSync(join(import.meta.dirname, "../deploy/fly/Dockerfile"), "utf8");
+  expect(image).toMatch(/chown -R root:root \/app\b/);
+  expect(image).toMatch(/chmod -R go-w \/app\b/);
+  expect(image.indexOf("chmod -R go-w /app")).toBeLessThan(image.indexOf("CMD ["));
   const fly = readFileSync(join(import.meta.dirname, "../deploy/fly/fly.toml"), "utf8");
   expect(fly).toMatch(/internal_port = 8080/);
   expect(fly).toMatch(/destination = "\/data"/);
@@ -261,4 +367,70 @@ it("ships an edge and a Fly template that keep the server private", () => {
   for (const secretKey of ["OMB_CLOUD_BOOTSTRAP_SECRET", "OMB_CLOUD_ADMIN_URL"]) expect(env).not.toMatch(new RegExp(`^\\s*${secretKey}\\s*=`, "m"));
   // Cloud Pro includes no AI: the template sets no gateway.
   expect(fly).not.toContain("OMB_HOSTED_");
+});
+
+it("starts the server again only when it asks to after a restore, and only a few times in a row", () => {
+  expect(serverExitAction(CLOUD_HOME_RESTART_EXIT_CODE, false, 0)).toBe("restart");
+  expect(serverExitAction(CLOUD_HOME_RESTART_EXIT_CODE, false, 4)).toBe("restart");
+  for (const code of [0, 1, null]) expect(serverExitAction(code, false, 0)).toBe("stop");
+  // Stopping for good (Fly asked, or the edge died), or restarting in a loop.
+  expect(serverExitAction(CLOUD_HOME_RESTART_EXIT_CODE, true, 0)).toBe("stop");
+  expect(serverExitAction(CLOUD_HOME_RESTART_EXIT_CODE, false, 5)).toBe("stop");
+});
+
+it("records the first finished bot turn once, on a Cloud home only, and a moved workspace never brings its own", () => {
+  const now = new Date("2026-09-30T08:00:00.000Z");
+  const turn = { cloudHome: true, recorded: undefined, ok: true, known: true, now };
+  expect(firstCloudTurnPatch(turn)).toEqual({ onboarding: { firstTurnAt: "2026-09-30T08:00:00.000Z" } });
+  // Anywhere else, once recorded, a failed or stopped turn, or a thread that is
+  // no bot's conversation or room: nothing to write.
+  expect(firstCloudTurnPatch({ ...turn, cloudHome: false })).toBeNull();
+  expect(firstCloudTurnPatch({ ...turn, recorded: "2026-09-29T08:00:00.000Z" })).toBeNull();
+  expect(firstCloudTurnPatch({ ...turn, ok: false })).toBeNull();
+  expect(firstCloudTurnPatch({ ...turn, known: false })).toBeNull();
+  // Move to Cloud restores a Mac's settings onto the Cloud; the onboarding
+  // record is not among them, so the Cloud's own answer survives, and a Mac's
+  // turns never tick the Cloud's step.
+  const mac = { language: "en", onboarding: { completedAt: "2026-09-01T00:00:00.000Z", version: 1, firstTurnAt: "2026-08-01T00:00:00.000Z" } };
+  expect(restoredWorkspaceConfig(portableWorkspaceConfig(mac), { onboarding: { hintsSeen: ["cloud-setup-hidden"] } }).onboarding)
+    .toEqual({ hintsSeen: ["cloud-setup-hidden"] });
+  expect(restoredWorkspaceConfig(portableWorkspaceConfig(mac), {}).onboarding).toBeUndefined();
+});
+
+// The launcher only runs on Linux (the image); Windows passes descriptors differently.
+it.skipIf(process.platform === "win32")("hands the server its secrets over a pipe it reads once: never its environment, never a grandchild's", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omb-cloud-secrets-"));
+  try {
+    const script = join(dir, "server.mjs");
+    const out = join(dir, "out.json");
+    // What a server does at startup (takeCloudSecrets), then what an engine
+    // it starts could see: its own environment and its parent's starting one.
+    writeFileSync(script, `
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+const { takeCloudSecrets } = await import(${JSON.stringify(join(import.meta.dirname, "cloud-home.ts"))});
+const secrets = takeCloudSecrets();
+const parentEnviron = (pid) => process.platform === "linux"
+  ? readFileSync("/proc/" + pid + "/environ", "utf8")
+  : execFileSync("ps", ["eww", "-p", String(pid), "-o", "command="]).toString();
+const child = spawnSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(process.env))"], { encoding: "utf8" });
+writeFileSync(${JSON.stringify(out)}, JSON.stringify({ secrets, env: process.env, own: parentEnviron(process.pid), child: child.stdout }));
+`);
+    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), OMB_CLOUD_SECRETS_FD: "3", VISIBLE_PROBE: "visible" };
+    const child = spawnWithSecrets(process.execPath, [script], env, { OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: "box_omb_probe-token" });
+    await new Promise((resolve) => child.once("exit", resolve));
+    const seen = JSON.parse(readFileSync(out, "utf8"));
+    expect(seen.secrets).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: "box_omb_probe-token" });
+    // The probe works: it sees an ordinary variable…
+    if (process.platform !== "win32") expect(seen.own).toContain("VISIBLE_PROBE=visible");
+    // …and no secret, in the server's own starting environment, its live one or its child's.
+    for (const where of [seen.own, JSON.stringify(seen.env), seen.child]) {
+      expect(where).not.toContain(secret);
+      expect(where).not.toContain("box_omb_probe-token");
+    }
+    // Nor does a child learn the pipe exists.
+    expect(seen.child).not.toContain("OMB_CLOUD_SECRETS_FD");
+  } finally {
+    await removeTempDir(dir);
+  }
 });

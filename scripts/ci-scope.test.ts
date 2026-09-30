@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { selectCiScope } from "./ci-scope.mjs";
 
 const script = fileURLToPath(new URL("./ci-scope.mjs", import.meta.url));
+const ALL_OS = JSON.stringify(["macos-latest", "ubuntu-latest", "windows-latest"]);
+const PR_OS = JSON.stringify(["ubuntu-latest", "windows-latest"]);
 const temporaryDirectories: string[] = [];
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -59,13 +61,18 @@ describe("CI path scope", () => {
   });
 
   it.each([
-    [], [""], ["docs/../server/file.md"], ["server/index.ts"], ["shared/types.ts"],
-    ["electron/main.mjs"], ["companion/src/index.ts"], ["ios/Fixtures/chat.json"],
-    ["android/app/build.gradle.kts"], ["package.json"], ["pnpm-lock.yaml"],
-    ["vite.config.ts"], [".github/workflows/ci.yml"], ["docs/fixture.json"],
-    ["unknown/file"], ["src/App.tsx", "server/index.ts"],
+    [], [""], ["docs/../server/file.md"], ["ios/Fixtures/chat.json"], ["android/app/build.gradle.kts"],
+    [".github/workflows/ci.yml"], ["scripts/ci-scope.mjs"], [".gitattributes"], ["server/index.ts", "ios/App/App.swift"],
   ])("runs everything conservatively for %j", (...files) => {
     expect(selectCiScope(files)).toEqual({ runtime: true, mobile: true });
+  });
+
+  it.each([
+    ["server/index.ts"], ["shared/types.ts"], ["electron/main.mjs"], ["companion/src/index.ts"],
+    ["package.json"], ["pnpm-lock.yaml"], ["vite.config.ts"], [".github/workflows/release.yml"],
+    ["docs/fixture.json"], ["unknown/file"], ["src/App.tsx", "server/index.ts"], ["scripts/capture-companion-fixtures.mjs"],
+  ])("runs the runtime suite without native mobile builds for %j", (...files) => {
+    expect(selectCiScope(files)).toEqual({ runtime: true, mobile: false });
   });
 });
 
@@ -77,7 +84,7 @@ describe("CI scope CLI", () => {
     const { output, stderr } = run(directory, "pull_request", {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
-    expect(output).toBe("runtime=false\nmobile=false\n");
+    expect(output).toBe(`runtime=false\nmobile=false\nvitest_os=${PR_OS}\n`);
     expect(stderr).toBe("");
   });
 
@@ -93,7 +100,7 @@ describe("CI scope CLI", () => {
     const { output, stderr } = run(directory, "pull_request", {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
-    expect(output).toBe("runtime=false\nmobile=false\n");
+    expect(output).toBe(`runtime=false\nmobile=false\nvitest_os=${PR_OS}\n`);
     expect(stderr).toBe("");
   });
 
@@ -106,7 +113,7 @@ describe("CI scope CLI", () => {
     const { output, stderr } = run(directory, "pull_request", {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
-    expect(output).toBe("runtime=true\nmobile=true\n");
+    expect(output).toBe(`runtime=true\nmobile=false\nvitest_os=${PR_OS}\n`);
     expect(stderr).toBe("");
   });
 
@@ -118,7 +125,7 @@ describe("CI scope CLI", () => {
     const { output } = run(directory, "pull_request", {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
-    expect(output).toBe("runtime=true\nmobile=false\n");
+    expect(output).toBe(`runtime=true\nmobile=false\nvitest_os=${PR_OS}\n`);
   });
 
   it.each(["missing", "invalid", "unavailable", "empty"])("falls back loudly for a %s diff", (kind) => {
@@ -127,12 +134,12 @@ describe("CI scope CLI", () => {
       pull_request: { base: { sha: base }, head: { sha: kind === "invalid" ? "--help" : kind === "unavailable" ? "f".repeat(40) : base } },
     };
     const { output, stderr } = run(directory, "pull_request", payload);
-    expect(output).toBe("runtime=true\nmobile=true\n");
+    expect(output).toBe(`runtime=true\nmobile=true\nvitest_os=${ALL_OS}\n`);
     expect(stderr).toContain("using all checks");
   });
 
   it.each(["push", "merge_group", "workflow_dispatch"])("runs everything for %s", (event) => {
     const { directory } = fixture();
-    expect(run(directory, event, {}).output).toBe("runtime=true\nmobile=true\n");
+    expect(run(directory, event, {}).output).toBe(`runtime=true\nmobile=true\nvitest_os=${ALL_OS}\n`);
   });
 });

@@ -17,10 +17,13 @@ permissions:
   contents: read
 
 concurrency:
-  # New main/PR pushes supersede older checks on the same ref, including
-  # queued summary jobs. Keep merge-queue runs protected on their own refs.
-  group: ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+  # A new PR push supersedes that PR's older checks. Every main commit gets
+  # its own group and finishes: when main pushes cancelled each other, no
+  # main run completed for a day and a release shipped with no verdict
+  # (release.yml now waits for this workflow's `CI` check on its commit).
+  # Merge-queue runs stay protected on their own refs.
+  group: ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ── The test leg, in pieces ──────────────────────────────────────────────
@@ -40,6 +43,7 @@ jobs:
     outputs:
       runtime: ${{ steps.scope.outputs.runtime }}
       mobile: ${{ steps.scope.outputs.mobile }}
+      vitest_os: ${{ steps.scope.outputs.vitest_os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,7 +84,10 @@ jobs:
       matrix:
         # The harness and pure desktop capabilities stay portable across all
         # supported host platforms. POSIX-only process tests self-skip.
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        # scripts/ci-scope.mjs picks the platforms: PRs run Linux and Windows
+        # (the account runs only five macOS jobs at a time, and a PR used to
+        # queue seven), main pushes, merge groups and manual runs add macOS.
+        os: ${{ fromJSON(needs.static.outputs.vitest_os) }}
         shard: [1, 2, 3, 4]
     runs-on: ${{ matrix.os }}
     # vitest splits by file count, not by duration, so the shard holding the
@@ -161,12 +168,14 @@ jobs:
     needs: static
     if: needs.static.outputs.runtime == 'true'
     # `pnpm build:server`, then the bundle is copied out of the repo and run
-    # with no node_modules in reach: every bare import must be inlined.
+    # with no node_modules in reach: every bare import must be inlined. The
+    # macOS copy runs inside the macOS smokes job, so it takes no extra
+    # macOS runner.
     name: packaged server smoke (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -201,8 +210,10 @@ jobs:
     needs: static
     if: needs.static.outputs.runtime == 'true'
     # Real Electron utility processes against disposable homes and fake CLIs.
-    # Never the live app. Each script prints its own evidence lines.
-    name: Electron smokes (macOS)
+    # Never the live app. Each script prints its own evidence lines. Every
+    # PR's macOS checks live in this one job: macOS runners are the scarce
+    # ones, and each extra job pays its own queue wait and install.
+    name: macOS smokes (packaged server + Electron)
     runs-on: macos-latest
     timeout-minutes: 25
     steps:
@@ -215,14 +226,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Prepare Electron test runtime
         run: node --input-type=commonjs -e "require('electron')"
+      - name: Packaged server smoke (macOS)
+        # Builds dist-server/ and runs a copy of it outside the repo; the
+        # phone-relay smoke below forks the same dist-server/index.js.
+        run: pnpm test:packaged-server
       - name: Verify native approval mode transitions
         run: pnpm exec electron scripts/smoke-approval-modes.cjs
       - name: Verify app permissions and guarded display capture
         run: node scripts/smoke-app-permissions.mjs
       - name: Verify paired phone authorization against packaged harness
-        # Forks dist-server/index.js: the bundle the packaged-server job
-        # builds in ITS checkout. This job builds its own copy.
-        run: pnpm build:server && pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs
+        # Forks dist-server/index.js, built by the packaged server step.
+        run: pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs
 
   gate:
     # One aggregation, not three queued runners doing the same check.
@@ -441,9 +455,12 @@ jobs:
   ios:
     needs: static
     if: needs.static.outputs.mobile == 'true'
-    name: Swift tests + iOS build + thread UI
+    # The simulator UI suite (about 90 minutes of iPhone + iPad runs) lives in
+    # ios-thread-ui.yml: nightly, on main pushes that touch ios/, and by hand.
+    # Here it held three of the account's five macOS runners at a time.
+    name: Swift tests + iOS build
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Swift package tests
@@ -463,20 +480,9 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
-      - name: Verify thread navigation on disposable iPhone and iPad simulators
-        run: bash scripts/verify-ios-thread-navigation-ci.sh
-      - name: Keep native thread test results and screenshots
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ios-thread-ui-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/omb-ios-threads-*.xcresult
-          if-no-files-found: warn
-          include-hidden-files: true
-          retention-days: 7
 
-  # Selection includes shared/server changes AND ios/**: :core's fixtures
-  # come from ios/Tests/CompanionCoreTests/Fixtures, not just android/**.
+  # Selection includes ios/** as well as android/**: :core's fixtures come
+  # from ios/Tests/CompanionCoreTests/Fixtures.
   android:
     needs: static
     if: needs.static.outputs.mobile == 'true'

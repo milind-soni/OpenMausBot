@@ -80,6 +80,25 @@ describe("managed engine setup errors", () => {
   });
 });
 
+describe("engines set up with a key in Settings", () => {
+  it("opens Settings → Connections instead of offering a terminal command", () => {
+    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    const reason = "No API key — open Settings → Connections and add an OpenAI-compatible key (OpenRouter, Groq, or your own router) and its base URL.";
+    const engine: InstanceInfo = {
+      ...instance({ state: "unavailable", reason }),
+      instanceId: "openaiCompat",
+      driverKind: "openai-compat",
+      displayName: "OpenAI-compatible (OpenRouter / Groq)",
+      install: { docsUrl: "https://openrouter.ai/keys", settings: "connections" },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
+    expect(markup).toContain(reason);
+    expect(markup).toContain("Open Settings → Connections");
+    expect(markup).not.toContain("Open install in Terminal");
+    expect(markup).not.toContain("config.json");
+  });
+});
+
 describe("install from Settings on the server", () => {
   function npmEngine(snapshot: InstanceInfo["snapshot"], server = true): InstanceInfo {
     return {
@@ -131,6 +150,34 @@ describe("install from Settings on the server", () => {
 });
 
 describe("server device-code sign-in", () => {
+  it("offers the distinct ChatGPT plan connection without the legacy Codex command", () => {
+    vi.stubGlobal("window", { ogb: { platform: "linux" } });
+    const engine: InstanceInfo = {
+      ...instance({ state: "available", authenticated: false, chatgptPlan: true }),
+      instanceId: "chatgpt", displayName: "ChatGPT plan", driverKind: "codex",
+      authentication: { method: "browser-pkce" }, install: { signInCommand: "codex login" },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
+    expect(markup).toContain("Continue with ChatGPT");
+    expect(markup).toContain("separate from OpenMausBot Pro");
+    expect(markup).not.toContain("codex login");
+    expect(markup).not.toContain("Device-code login");
+  });
+
+  it("explains unavailable hosted plan auth without offering a broken login or install", () => {
+    vi.stubGlobal("window", { ogb: { platform: "linux" } });
+    const engine: InstanceInfo = {
+      ...instance({ state: "unavailable", authenticated: false, chatgptPlan: true, authenticationUnavailableReason: "Hosted ChatGPT plan access requires approval." }),
+      instanceId: "chatgpt", displayName: "ChatGPT plan", driverKind: "codex",
+      authentication: { method: "browser-pkce" }, install: { command: { linux: "npm install -g @openai/codex" }, signInCommand: "codex login" },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
+    expect(markup).toContain("Hosted ChatGPT plan access requires approval.");
+    expect(markup).not.toContain("Continue with ChatGPT");
+    expect(markup).not.toContain("npm install");
+    expect(markup).not.toContain("codex login");
+  });
+
   it("uses the supported browser sign-in flow instead of asking a remote user to run a command", () => {
     vi.stubGlobal("window", { ogb: { platform: "linux" } });
     const engine: InstanceInfo = {

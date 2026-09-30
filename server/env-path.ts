@@ -28,6 +28,16 @@ function nvmBinDirs(): string[] {
   }
 }
 
+/** A sealed test fixture finds CLIs only where it was granted them: its own
+ * PATH, OMB_EXTRA_PATH, app-managed dirs, and install dirs under its own
+ * temporary home. The machine-wide install dirs and the login shell's PATH
+ * would hand it this computer's real CLIs — a Homebrew `codex` made the
+ * fixture's ChatGPT plan engine "available" on a developer Mac (#2035).
+ * Only the verification launcher (scripts/control-omb.ts) sets it. */
+function sealedFixture(): boolean {
+  return process.env.OMB_TEST_SEALED_PATH === "1";
+}
+
 function knownDirs(): string[] {
   const home = homedir();
   return [
@@ -37,8 +47,11 @@ function knownDirs(): string[] {
     join(home, ".grok", "bin"), // x.ai installer
     join(home, ".opencode", "bin"), // opencode installer
     join(home, ".claude", "local"), // claude "local install"
-    "/opt/homebrew/bin", // brew, Apple silicon
-    "/usr/local/bin", // brew Intel / classic installs
+    // Machine-wide rather than under the (possibly temporary) home.
+    ...(sealedFixture() ? [] : [
+      "/opt/homebrew/bin", // brew, Apple silicon
+      "/usr/local/bin", // brew Intel / classic installs
+    ]),
     join(home, ".volta", "bin"),
     join(home, ".bun", "bin"),
     join(home, ".asdf", "shims"),
@@ -121,7 +134,7 @@ export function augmentedPath(): string {
   // belt-and-braces: fold in the login shell's PATH once, in the
   // background — catches anything the known-dirs list doesn't (custom
   // rc exports). Never blocks a spawn; the next one benefits.
-  if (!probed && !process.env.VITEST && process.platform !== "win32") {
+  if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32") {
     probed = true;
     probeLoginShellPath();
   }

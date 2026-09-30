@@ -8,7 +8,7 @@
 // memory/ holds topic files the bot reads on demand with its ordinary
 // file tools. Plain markdown on purpose — the user can open, edit, or
 // delete anything the bot believes.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
@@ -67,6 +67,52 @@ export function workspaceDir(botId: string): string {
   return join(WORKSPACES_DIR, botId);
 }
 
+/** On an OMB Cloud home a bot's memory is read only from regular files,
+ * never through a link: server/lending-memory.ts judges a link by where it
+ * points, not by what is there, so a turn must never read through one.
+ * Elsewhere memory reads exactly as it always did. */
+let regularMemoryFilesOnly = false;
+export function readMemoryOnlyFromRegularFiles(): void {
+  regularMemoryFilesOnly = true;
+}
+
+/** A memory file's text. Throws like readFileSync when it cannot be read,
+ * and, on a Cloud home, when it is not a regular file. */
+export function readMemoryText(path: string): string {
+  if (!regularMemoryFilesOnly) return readFileSync(path, "utf8");
+  // O_NOFOLLOW refuses a link at open where there is one; Windows has none
+  // (and opens what a link points at), so the entry is looked at first too.
+  if (!lstatSync(path).isFile()) throw Object.assign(new Error(`not a regular file: ${path}`), { code: "EINVAL" });
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    if (!fstatSync(fd).isFile()) throw Object.assign(new Error(`not a regular file: ${path}`), { code: "EINVAL" });
+    return readFileSync(fd, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** A memory folder's entries; on a Cloud home, none when the folder itself
+ * is a link. */
+function memoryFolderEntries(dir: string): string[] {
+  if (regularMemoryFilesOnly && !lstatSync(dir).isDirectory()) return [];
+  return readdirSync(dir);
+}
+
+function regularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** The stat a listing trusts: on a Cloud home, the entry's own (a link is
+ * not a file); elsewhere what it points at, as before. */
+function memoryEntryStat(path: string) {
+  return regularMemoryFilesOnly ? lstatSync(path) : statSync(path);
+}
+
 /** File locations, not file contents or wider tool permissions. Threads keep
  * independent working directories; the same bot can find its earlier output
  * without assuming that a file absent from the current directory was lost. */
@@ -101,7 +147,7 @@ export function memoryOverBudget(text: string): boolean {
 export function loadMemory(botId: string, opts: { now?: Date } = {}): { text: string; truncated: boolean; lines: number; bytes: number; expired: number } | null {
   let raw: string;
   try {
-    raw = readFileSync(join(workspaceDir(botId), "MEMORY.md"), "utf8");
+    raw = readMemoryText(join(workspaceDir(botId), "MEMORY.md"));
   } catch {
     return null;
   }
@@ -140,7 +186,7 @@ export const MEMORY_FILE_MAX_BYTES = 256 * 1024;
 export function readMemoryFile(botId: string) {
   let raw: string;
   try {
-    raw = readFileSync(join(workspaceDir(botId), "MEMORY.md"), "utf8");
+    raw = readMemoryText(join(workspaceDir(botId), "MEMORY.md"));
   } catch {
     return { text: "", truncated: false };
   }
@@ -171,7 +217,7 @@ function indexWrittenMemoryFile(botId: string, relativePath: string): void {
   try {
     const path = join(workspaceDir(botId), relativePath);
     const stat = statSync(path);
-    indexMemoryFile(botId, relativePath, searchableMemoryText(relativePath, readFileSync(path, "utf8")), { mtimeMs: stat.mtimeMs, bytes: stat.size });
+    indexMemoryFile(botId, relativePath, searchableMemoryText(relativePath, readMemoryText(path)), { mtimeMs: stat.mtimeMs, bytes: stat.size });
   } catch {
     // the next search's sync pass picks it up
   }
@@ -188,7 +234,7 @@ function memoryFilesOnDisk(botId: string): Array<{ path: string; mtimeMs: number
   ];
   return names.flatMap((relativePath) => {
     try {
-      const stat = statSync(join(dir, relativePath));
+      const stat = memoryEntryStat(join(dir, relativePath));
       return stat.isFile() ? [{ path: relativePath, mtimeMs: stat.mtimeMs, bytes: stat.size }] : [];
     } catch {
       return [];
@@ -217,7 +263,7 @@ export function syncMemoryIndex(botId: string): void {
     indexed.delete(file.path);
     if (!dateChanged && known && known.bytes === file.bytes && known.mtimeMs === Math.trunc(file.mtimeMs)) continue;
     try {
-      const text = readFileSync(join(workspaceDir(botId), file.path), "utf8");
+      const text = readMemoryText(join(workspaceDir(botId), file.path));
       indexMemoryFile(botId, file.path, searchableMemoryText(file.path, text), file);
     } catch {
       // vanished between the listing and the read: dropped below next time
@@ -376,7 +422,7 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
   const dir = ensureWorkspace(botId);
   // Do not use readMemoryFile's editor-friendly missing/read-error fallback:
   // a failed read must never turn into a successful overwrite of old notes.
-  const raw = readFileSync(join(dir, "MEMORY.md"), "utf8");
+  const raw = readMemoryText(join(dir, "MEMORY.md"));
   const current = raw === MEMORY_SEED ? "" : raw;
   const today = memoryDate(opts.now);
   // Every appended entry ends its own line; a file the person left without
@@ -479,7 +525,7 @@ export function appendMemoryLog(botId: string, text: string, opts: MemoryUpdateO
   const path = join(dir, file);
   let current = "";
   try {
-    current = readFileSync(path, "utf8");
+    current = readMemoryText(path);
   } catch {
     // first line of the day
   }
@@ -502,7 +548,8 @@ export function writeMemoryLog(botId: string, name: string, text: string): void 
 /** The bot's daily log files, oldest first, by day name. */
 export function listMemoryLogs(botId: string): string[] {
   try {
-    return readdirSync(join(workspaceDir(botId), "memory", MEMORY_LOG_DIR)).filter((name) => LOG_FILE_NAME.test(name)).sort();
+    const dir = join(workspaceDir(botId), "memory", MEMORY_LOG_DIR);
+    return memoryFolderEntries(dir).filter((name) => LOG_FILE_NAME.test(name) && (!regularMemoryFilesOnly || regularFile(join(dir, name)))).sort();
   } catch {
     return [];
   }
@@ -512,7 +559,7 @@ export function listMemoryLogs(botId: string): string[] {
 export function readMemoryLog(botId: string, name: string): string | null {
   if (!LOG_FILE_NAME.test(name)) return null;
   try {
-    return readFileSync(join(workspaceDir(botId), "memory", MEMORY_LOG_DIR, name), "utf8");
+    return readMemoryText(join(workspaceDir(botId), "memory", MEMORY_LOG_DIR, name));
   } catch {
     return null;
   }
@@ -533,7 +580,7 @@ export function isMemoryTopicName(name: string): boolean {
 export function listMemoryTopics(botId: string): Array<{ name: string; bytes: number }> {
   let entries: string[];
   try {
-    entries = readdirSync(join(workspaceDir(botId), "memory"));
+    entries = memoryFolderEntries(join(workspaceDir(botId), "memory"));
   } catch {
     return [];
   }
@@ -541,7 +588,7 @@ export function listMemoryTopics(botId: string): Array<{ name: string; bytes: nu
     .filter(isMemoryTopicName)
     .flatMap((name) => {
       try {
-        const stat = statSync(join(workspaceDir(botId), "memory", name));
+        const stat = memoryEntryStat(join(workspaceDir(botId), "memory", name));
         return stat.isFile() ? [{ name, bytes: stat.size }] : [];
       } catch {
         return [];
@@ -566,7 +613,7 @@ export function writeMemoryTopic(botId: string, name: string, text: string): voi
 export function readMemoryTopic(botId: string, name: string): string | null {
   if (!isMemoryTopicName(name)) return null;
   try {
-    return readFileSync(join(workspaceDir(botId), "memory", name), "utf8");
+    return readMemoryText(join(workspaceDir(botId), "memory", name));
   } catch {
     return null;
   }

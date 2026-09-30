@@ -50,6 +50,7 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
   models: DEFAULT_MODELS,
   install: {
     docsUrl: "https://console.mistral.ai/api-keys",
+    settings: "connections",
     signInCommand: "Save a Mistral API key in Settings → Connections, or set MISTRAL_API_KEY on the server.",
   },
   decodeConfig,

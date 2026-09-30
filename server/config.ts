@@ -16,6 +16,7 @@ import type { McpServerSpec } from "./contracts.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { CLOUD_SEAT_IDLE_STOP_MS } from "./cloud-overflow.ts";
+import { cloudHomeConfigured } from "./cloud-home.ts";
 
 const optionalText = z.string().optional();
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
@@ -327,6 +328,10 @@ const onboardingConfigSchema = z.object({
   version: z.number().int().min(0).max(1000).optional(),
   reelSeen: z.boolean().optional(),
   hintsSeen: z.array(z.string().trim().min(1).max(60)).max(100).optional(),
+  /** OMB Cloud home only: when a bot's turn first finished on this machine
+   * (cloud-home.ts firstCloudTurnPatch). Written by the server, read by the
+   * Cloud's setup checklist. */
+  firstTurnAt: z.string().trim().max(40).optional(),
 }).strict();
 const instanceConfigSchema = z.object({
   driver: z.string().min(1),
@@ -460,6 +465,24 @@ const appConfigSchema = z.object({
       .optional(),
     model: optionalText,
   }).optional(),
+  /** The decision model (server/decider): a fast classifier that picks
+   * things for bots, starting with who answers a room message. `key` is
+   * write-only like every credential; `baseUrl` points at a Jev-compatible
+   * server instead of TypeSafe's (an operator setting with no UI); `jobs`
+   * switches each decision on or off. Not `decisions`: that section is the
+   * authorization log's retention. */
+  decider: z.object({
+    enabled: z.boolean().optional(),
+    provider: z.enum(["jev", "off"]).optional(),
+    key: optionalText,
+    baseUrl: z
+      .string()
+      .trim()
+      .max(2048)
+      .refine((value) => !value || /^https?:\/\//i.test(value), "the decision model address must start with http:// or https://")
+      .optional(),
+    jobs: z.object({ roomRouting: z.boolean().optional() }).optional(),
+  }).optional(),
   /** Avatar provider credentials stay separate; choosing a router never reuses a cloud key. */
   imageGen: z.object({
     provider: z.enum(["openai", "xai", "custom"]).optional(),
@@ -560,6 +583,8 @@ export interface AppConfig {
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string };
+  /** The decision model; see the schema above and server/decider. */
+  decider?: { enabled?: boolean; provider?: "jev" | "off"; key?: string; baseUrl?: string; jobs?: { roomRouting?: boolean } };
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string; aboutMe?: string };
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
@@ -576,7 +601,7 @@ export interface AppConfig {
    * the operator's own per-second rate; unset keeps the feature inert. */
   cloudOverflow?: { perSecondCostUsd?: number; idleStopMs?: number; allowlistedThreads?: string[] };
   /** First-run progress; see onboardingConfigSchema. */
-  onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[] };
+  onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
   /** CDP target of a Chrome the operator already has running (a bare port,
@@ -785,9 +810,13 @@ export function routinesInConversationEnabled(cfg: AppConfig): boolean {
 }
 
 /** Workspace-level gate for the experimental built-in browser. A bot's own
- * switch sits under it, so either can withhold the browser. */
-export function builtInBrowserEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.browser === true;
+ * switch sits under it, so either can withhold the browser. Off until the
+ * desktop's first-run welcome turns it on. A Cloud home (cloud-home.ts)
+ * skips that welcome, ships the browser in its image and has no other screen
+ * of its own, so there it is on unless the person switched it off. */
+export function builtInBrowserEnabled(cfg: AppConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  const chosen = cfg.features?.browser;
+  return chosen === undefined ? cloudHomeConfigured(env) : chosen === true;
 }
 
 /** Opt-in computer sharing: the routes, the agent tools, the advertised
@@ -872,6 +901,8 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "profile",
   "language",
   "tts",
+  // no engine reads it: the harness asks it before a turn starts
+  "decider",
   "imageGen",
   "vps",
   "rooms",
@@ -997,7 +1028,13 @@ export function loadConfig(): AppConfig {
   if (process.env.OPENCODE_API_KEY !== undefined) cfg.opencodeGo.apiKey = process.env.OPENCODE_API_KEY;
   cfg.tts = { ...cfg.tts };
   if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
+  // A preset ElevenLabs voice (Cloud Pro sets one) is only a default: a voice or
+  // another speech provider the person picked in Settings always wins.
+  const presetVoice = process.env.OMB_TTS_DEFAULT_VOICE?.trim();
+  if (presetVoice && !cfg.tts.voice?.trim() && (cfg.tts.provider ?? "elevenlabs") === "elevenlabs") cfg.tts.voice = presetVoice;
   if (process.env.OMB_FISH_AUDIO_API_KEY !== undefined) cfg.tts.fishKey = process.env.OMB_FISH_AUDIO_API_KEY;
+  cfg.decider = { ...cfg.decider };
+  if (process.env.OMB_JEV_API_KEY !== undefined) cfg.decider.key = process.env.OMB_JEV_API_KEY;
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
   if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
@@ -1030,6 +1067,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
+    [patch.decider?.key, "OMB_JEV_API_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
   ];
@@ -1071,10 +1109,17 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OPENCODE_API_KEY",
   "OMB_TTS_KEY",
   "OMB_FISH_AUDIO_API_KEY",
+  "OMB_JEV_API_KEY",
   "OMB_OPENAI_IMAGE_KEY",
   "OMB_CUSTOM_IMAGE_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
+  // Cloud Pro's included Boat, voice and decision relay tokens
+  // (included-services.ts), used only in-process by the Boat, voice and
+  // decider modules.
+  "OMB_CLOUD_BOAT_TOKEN",
+  "OMB_CLOUD_VOICE_TOKEN",
+  "OMB_CLOUD_DECIDER_TOKEN",
   // Harness-private filesystem hints are not credentials themselves, but
   // exposing them to a shell-capable agent points straight at app-owned
   // state. The built-in browser master is delivered privately in memory.
@@ -1164,7 +1209,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "memory", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "profile", "rooms", "threads", "context", "memory", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -1348,6 +1393,58 @@ interface InstanceCliUpdate {
   config: AppConfig;
 }
 
+/** Claude Code variables that choose where a turn goes and how it signs in.
+ * An instance that sets any of them (a router, a gateway, a cloud platform)
+ * owns that routing and credential pair outright. */
+const CLAUDE_ROUTING_ENV = [
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_CUSTOM_HEADERS",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+] as const;
+
+/** Whether a Claude instance brings its own endpoint or credential. The
+ * workspace Anthropic key must never reach it: the key would be sent as
+ * x-api-key to that instance's host (a third-party router), or would
+ * silently re-route its turns to the workspace URL. */
+export function claudeInstanceOwnsRouting(environment: Record<string, string> | undefined): boolean {
+  return CLAUDE_ROUTING_ENV.some((key) => typeof environment?.[key] === "string" && environment[key] !== "");
+}
+
+const sameUrl = (a: string, b: string) => a.trim().replace(/\/+$/u, "") === b.trim().replace(/\/+$/u, "");
+
+/** Whether an instance brings its own endpoint or credential, so the
+ * workspace key for its driver must never reach it: that key would be sent
+ * to the instance's own host (a third-party router or proxy). The same rule
+ * as a Claude router instance, for the API-key engines. An instance on the
+ * workspace's own endpoint with nothing of its own still gets the key. */
+export function instanceOwnsRouting(cfg: AppConfig, entry: { driver: string; config?: unknown; environment?: Record<string, string> }): boolean {
+  const config = typeof entry.config === "object" && entry.config !== null && !Array.isArray(entry.config)
+    ? entry.config as Record<string, unknown>
+    : {};
+  const own = (value: unknown) => typeof value === "string" && value.trim() !== "";
+  const ownUrl = (...workspace: Array<string | undefined>) => own(config.url)
+    && !workspace.some((url) => url !== undefined && sameUrl(config.url as string, url));
+  switch (entry.driver) {
+    case "claudeAgent":
+      return claudeInstanceOwnsRouting(entry.environment);
+    case "openai-compat":
+      return own(config.key) || own(entry.environment?.OPENAI_COMPAT_API_KEY)
+        || (own(config.apiKeyEnv) && config.apiKeyEnv !== "OPENAI_COMPAT_API_KEY")
+        || ownUrl(cfg.openaiCompat?.url || process.env.OPENAI_COMPAT_URL || "https://openrouter.ai/api/v1");
+    case "mistral":
+      return own(entry.environment?.MISTRAL_API_KEY) || ownUrl("https://api.mistral.ai/v1");
+    case "grok":
+      return own(entry.environment?.XAI_API_KEY) || (own(config.apiKeyEnv) && config.apiKeyEnv !== "XAI_API_KEY")
+        || ownUrl("https://api.x.ai/v1", cfg.xai?.url);
+    default:
+      return false;
+  }
+}
+
 /** The credential env instanceConfigs() injects for one driver at runtime.
  * Each secret goes only to the driver that actually reads it: the API-key
  * Grok driver reads XAI_API_KEY, the Computer driver reads BOX_TOKEN, and
@@ -1368,6 +1465,8 @@ function injectedEnvironment(cfg: AppConfig, driver: string): Map<string, string
   if (driver === "openai-compat" && cfg.openaiCompat?.url)
     environment.set("OPENAI_COMPAT_URL", cfg.openaiCompat.url);
   // driverKind "boxAgent" and env BOX_TOKEN keep their historical names.
+  // Only the person's own token: without one the driver itself falls back
+  // to Cloud Pro's included token, which never enters an environment map.
   if (driver === "boxAgent" && cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
   if (driver === "opencodeGo" && cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
   return environment;
@@ -1400,6 +1499,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     cursor: { driver: "cursorAgent" },
     claude: { driver: "claudeAgent" },
     codex: { driver: "codex" },
+    chatgpt: { driver: "codex", displayName: "ChatGPT plan", config: { authMode: "chatgpt-plan" } },
     antigravity: { driver: "antigravityAgent" },
     opencodeGo: { driver: "opencodeGo" },
     computer: { driver: "boxAgent" },
@@ -1418,6 +1518,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   // never see. Custom-only engines stay in CUSTOM_ONLY so a one-off test map
   // is not expanded, matching the claude/grok/codex product-fleet probe.
   const PRODUCT_FLEET_ADDITIONS = {
+    chatgpt: { driver: "codex", displayName: "ChatGPT plan", config: { authMode: "chatgpt-plan" } },
     cursor: { driver: "cursorAgent" },
     openaiCompat: { driver: "openai-compat" },
     mistral: { driver: "mistral" },
@@ -1435,6 +1536,10 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
       if (!Object.hasOwn(map, id)) map[id] = { ...entry };
     }
   }
+  if (map.chatgpt?.driver === "codex" && !(map.chatgpt.config as { cli?: unknown } | undefined)?.cli) {
+    const cli = (map.codex?.config as { cli?: unknown } | undefined)?.cli;
+    if (typeof cli === "string" && cli) map.chatgpt = { ...map.chatgpt, config: { ...map.chatgpt.config as object, cli } };
+  }
   for (const [id, sourceEntry] of Object.entries(map)) {
     // instanceConfigs() builds a transient runtime map. Never mutate the
     // caller's persisted entries while injecting workspace defaults: doing so
@@ -1442,7 +1547,10 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     const entry = { ...sourceEntry };
     map[id] = entry;
     const environment = { ...entry.environment };
-    for (const [key, value] of injectedEnvironment(cfg, entry.driver)) environment[key] = value;
+    const ownsRouting = instanceOwnsRouting(cfg, entry);
+    if (!ownsRouting) {
+      for (const [key, value] of injectedEnvironment(cfg, entry.driver)) environment[key] = value;
+    }
     entry.environment = environment;
     // The driver URL is configuration, not a credential. Environment is
     // intentionally not consulted by ProviderRegistry when it decodes a

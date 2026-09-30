@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { CloudAccountState } from "../../electron/cloud-account.mjs";
+import type { CloudAccountBridge, CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { CloudMachine } from "../../electron/cloud-home.mjs";
+import { CloudMoveSettings } from "./CloudMove";
 import { t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
+import { CloudLending } from "./CloudLending";
 
 const MACHINE_TEXT = {
   provisioning: "cloudHome.provisioning",
@@ -15,7 +17,7 @@ const MACHINE_TEXT = {
 /** The person's Cloud machine: where it stands, and one way in. Status and
  * address come only from the verified native snapshot; the pairing code
  * never reaches this page. A render helper (no hooks), part of the card. */
-function cloudHomeCard({ machine, busy, failed, onConnect }: { machine: CloudMachine; busy: boolean; failed: boolean; onConnect: () => void }) {
+function cloudHomeCard({ machine, busy, failed, onConnect, lending }: { machine: CloudMachine; busy: boolean; failed: boolean; onConnect: () => void; lending?: CloudAccountBridge["lending"] }) {
   const connectable = machine.status === "ready";
   return <Card title={t("cloudHome.title")}>
     <div data-cloud-home={machine.status} className="flex flex-col items-start gap-3">
@@ -25,17 +27,31 @@ function cloudHomeCard({ machine, busy, failed, onConnect }: { machine: CloudMac
         <p className="text-[12px] text-ink-secondary">{t("cloudHome.connectHelp")}</p>
       </>}
       {failed && <p role="alert" className="text-[13px] text-danger">{t("cloudHome.connectFailed")}</p>}
+      {/* Part of connecting: lend this Mac to the Cloud, or not. A switch, never a dialog. */}
+      {lending && <CloudLending bridge={lending} />}
     </div>
   </Card>;
 }
 
-/** The public native snapshot carries no credential and cannot activate Pro. */
-export function CloudAccountSettings() {
+/** What this view does by itself when the Cloud page's "Open in the app"
+ * (openmausbot://cloud) opened it. `arrived`: the first snapshot since that
+ * link. Only then does signed out mean "sign me in"; a later sign-out is the
+ * person's own choice. A Ready Cloud is connected to once per link. */
+export function cloudLinkAction(account: CloudAccountState, link: { arrived: boolean; connected: boolean }): "sign-in" | "connect" | null {
+  if (link.arrived && account.status === "signed-out") return "sign-in";
+  if (!link.connected && account.status === "connected" && account.machine?.status === "ready") return "connect";
+  return null;
+}
+
+/** The public native snapshot carries no credential and cannot activate Pro.
+ * `linkRequest` is non-zero only while openmausbot://cloud has this open. */
+export function CloudAccountSettings({ linkRequest = 0 }: { linkRequest?: number } = {}) {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
   const [account, setAccount] = useState<CloudAccountState | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(false), [confirm, setConfirm] = useState(false);
   const [homeFailed, setHomeFailed] = useState(false);
   const generation = useRef(0), revision = useRef(0), pending = useRef(false);
+  const link = useRef({ request: 0, arrived: false, connected: false });
   useEffect(() => {
     const current = ++generation.current, initial = revision.current;
     const accept = (next: CloudAccountState) => {
@@ -57,6 +73,23 @@ export function CloudAccountSettings() {
     catch { if (generation.current === current && revision.current === started) setError(true); }
     finally { pending.current = false; if (generation.current === current) setBusy(false); }
   };
+  const connectHome = () => {
+    if (!bridge) return;
+    setHomeFailed(false);
+    void perform(async () => {
+      try { return await bridge.connectHome(); } catch { setHomeFailed(true); return bridge.state(); }
+    });
+  };
+  // A normal visit (linkRequest 0) never signs in or connects by itself.
+  useEffect(() => {
+    if (!linkRequest) link.current.request = 0;
+    if (!bridge || !linkRequest || !account || pending.current) return;
+    if (link.current.request !== linkRequest) link.current = { request: linkRequest, arrived: true, connected: false };
+    const action = cloudLinkAction(account, link.current);
+    link.current.arrived = false;
+    if (action === "sign-in") void perform(() => bridge.begin());
+    if (action === "connect") { link.current.connected = true; connectHome(); }
+  }, [bridge, linkRequest, account, busy]);
   if (!bridge) return <p className="text-[13px] text-ink-secondary">{t("cloudAccount.desktopOnly")}</p>;
   const signed = account && ["connected", "unavailable", "reauth-required"].includes(account.status);
   // Status comes only from the server-verified native snapshot; checkout never sets it.
@@ -97,9 +130,7 @@ export function CloudAccountSettings() {
       {error && <p role="alert" className="mt-3 text-[13px] text-danger">{t("cloudAccount.actionFailed")}</p>}
       {!account && <button type="button" disabled={busy} className="ui-button mt-3" onClick={() => void perform(() => bridge.state())}>{t("organization.refresh")}</button>}
     </Card>
-    {account?.status === "connected" && account.machine && cloudHomeCard({ machine: account.machine, busy, failed: homeFailed,
-      onConnect: () => { setHomeFailed(false); void perform(async () => {
-        try { return await bridge.connectHome(); } catch { setHomeFailed(true); return bridge.state(); }
-      }); } })}
+    {account?.status === "connected" && account.machine && cloudHomeCard({ machine: account.machine, busy, failed: homeFailed, onConnect: connectHome, lending: bridge.lending })}
+    {account?.status === "connected" && account.machine?.status === "ready" && <CloudMoveSettings />}
   </>;
 }

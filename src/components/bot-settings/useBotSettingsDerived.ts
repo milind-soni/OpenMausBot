@@ -7,6 +7,7 @@ import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
 import { stateForBot } from "@/lib/mascot";
+import { placeOffered } from "@/lib/place";
 import { useStore, type Bot } from "@/state/store";
 import { approvalModeFor } from "../../../shared/approval-mode";
 import { connectorGrantsState, type ConnectorGrantsState } from "@/lib/connector-grants";
@@ -56,7 +57,8 @@ export function useBotSettingsDerived(bot: Bot) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
-  const localSelectable = localComputerSelectable({ capabilities, providerSupportsLocal });
+  // An OMB Cloud home never offers this computer (shared/cloud-home.ts).
+  const localSelectable = placeOffered("local", state.config) && localComputerSelectable({ capabilities, providerSupportsLocal });
   const localDisabledReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
   const patch = (p: BotPatch) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
   const activeState = stateForBot(bot);

@@ -27,6 +27,8 @@ export type ProviderErrorCode =
   | "missing_cli"
   | "invalid_credentials"
   | "inactive_subscription"
+  /** The account has no credit left for a pay-as-you-go model. */
+  | "insufficient_funds"
   | "quota_or_region_restriction"
   | "upstream_outage"
   | "model_catalog_outage";
@@ -116,6 +118,11 @@ export interface SendTurnInput {
   /** Per-bot approval policy, reasserted by providers on every turn so a
    * resumed native session cannot retain a stale, more permissive mode. */
   approvalMode?: ApprovalMode;
+  /** A guest drives this turn on an OMB Cloud home: it runs with no shell
+   * or command execution and reads nothing outside its own folder. Sent
+   * only to a driver whose capabilities.guestTurns is "confined"; the harness
+   * refuses the turn for any other (docs/cloud-pro.md). */
+  guestConfined?: boolean;
   /** Images attached to this user turn only. They are deliberately kept out
    * of replay transcripts: the provider's native session owns earlier image
    * context, while a fresh replay retains the visible attachment marker. */
@@ -324,6 +331,11 @@ export interface ProviderAdapter {
      * engine (integrations.hooks). Only Claude Code today; other engines
      * deliver the same information through their protocols. */
     hooks?: boolean;
+    /** How a guest-driven turn on an OMB Cloud home can run on this engine:
+     * "confined" = sendTurn honours `guestConfined` (no shell or command
+     * execution, no reads outside its folder). Absent: such a turn is
+     * refused. */
+    guestTurns?: "confined";
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
@@ -367,6 +379,9 @@ export type SteerOutcome = "steered" | "refused" | "indeterminate";
 
 // ── provider snapshot (upstream ServerProviderShape, reduced) ────────────
 export interface ProviderSnapshot {
+  /** Separate, explicitly authorized ChatGPT-plan billing (not Codex login). */
+  chatgptPlan?: boolean;
+  authenticationUnavailableReason?: string;
   state: "available" | "unavailable";
   reason?: string;
   authenticated?: boolean;
@@ -419,6 +434,9 @@ export interface EngineInstall {
     label: string;
     downloadBytes: number;
   };
+  /** Set up inside the app rather than in a terminal: the engine needs a key
+   * saved under Settings → Connections, and the setup card links there. */
+  settings?: "connections";
   /** Settings can install or update this engine on the machine running the
    * server, as the server's own user, into a directory the app owns. Set by
    * the registry when the install one-liner is an npm package and npm is on
@@ -527,6 +545,7 @@ export interface ProviderInstance {
   /** Optional first-party runtime installation and account setup. */
   readonly installRuntime?: () => Promise<void>;
   readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;
+  readonly authenticationMethod?: "browser-pkce";
   readonly getAuthentication?: (flowId: string) => Promise<ProviderAuthenticationStatus>;
   readonly completeAuthentication?: (flowId: string, callbackUrl: string) => Promise<void>;
   readonly cancelAuthentication?: () => Promise<void>;

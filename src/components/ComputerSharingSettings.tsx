@@ -3,6 +3,7 @@ import { FolderPlus, X } from "lucide-react";
 import { Card } from "./SettingsPrimitives";
 import { useStore } from "@/state/store";
 import { sharedComputersEnabled } from "@/lib/feature-flags";
+import { LendingActivityList } from "./LendingActivity";
 
 /** Grants are edited locally and confirmed by a native dialog, never by the hosted page. */
 export function ComputerSharingSettings({ workspace, onClose }: { workspace: { id: string; name: string; origin: string }; onClose: () => void }) {
@@ -17,6 +18,7 @@ export function ComputerSharingSettings({ workspace, onClose }: { workspace: { i
   const [computer, setComputer] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [activity, setActivity] = useState<DesktopLendingActivity[] | null>(null);
   const mounted = useRef(false);
   const pending = useRef(false);
   const panel = useRef<HTMLDivElement>(null);
@@ -28,10 +30,14 @@ export function ComputerSharingSettings({ workspace, onClose }: { workspace: { i
     panel.current?.scrollIntoView({ block: "start" });
     void bridge?.state(workspace.id).then(next => { if (mounted.current) apply(next); })
       .catch(() => { if (mounted.current) setError("Could not load computer access. Reopen this page to try again."); });
-    // Connection status changes independently of an unsaved permissions draft.
-    const timer = setInterval(() => {
+    // Connection status and the activity log change independently of an
+    // unsaved permissions draft.
+    const refresh = () => {
       void bridge?.state(workspace.id).then(next => { if (mounted.current) setState(next); }).catch(() => {});
-    }, 3000);
+      void bridge?.activity?.(workspace.id).then(next => { if (mounted.current) setActivity(next); }).catch(() => {});
+    };
+    refresh();
+    const timer = setInterval(refresh, 3000);
     return () => { mounted.current = false; clearInterval(timer); };
   }, [bridge, workspace.id]);
   const perform = async (action: () => Promise<void>) => {
@@ -79,6 +85,7 @@ export function ComputerSharingSettings({ workspace, onClose }: { workspace: { i
         })} className="rounded-lg border border-hairline/40 px-3 py-2 text-danger disabled:opacity-50">Stop sharing</button>}
       </div>
       {state?.enabled && <p className="text-[12px] text-ink-secondary">Stopping blocks new requests and cancels running work where possible. An action already sent to an app may still finish.</p>}
+      <div className="border-t border-hairline/40 pt-3"><LendingActivityList entries={activity} /></div>
     </div>
   </Card></div>;
 }

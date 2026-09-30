@@ -1,6 +1,12 @@
-import type { Bot, Group, GroupDefaultResponder } from "@/state/store";
+import type { Bot, ConfigStatus, Group, GroupDefaultResponder } from "@/state/store";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 import { t } from "./i18n";
+
+/** Whether an Auto room asks the decision model right now: the master switch
+ * (off while no key is saved) and the room job both on. */
+export function jevRoomRoutingOn(config: ConfigStatus | null | undefined): boolean {
+  return Boolean(config?.decider?.enabled && config.decider.jobs.roomRouting);
+}
 
 /** Be defensive around rooms loaded while an older server is still running,
  * and around a lead removed by another client before the group patch arrives. */
@@ -11,29 +17,40 @@ export function effectiveDefaultResponder(
   const value = group.defaultResponder;
   if (value?.kind === "everyone" || value?.kind === "mentions") return value;
   if (value?.kind === "member" && members.some((member) => member.id === value.botId)) return value;
+  // Auto keeps its fallback only while that bot is still in the room.
+  if (value?.kind === "auto") {
+    return value.fallbackBotId && members.some((member) => member.id === value.fallbackBotId) ? value : { kind: "auto" };
+  }
   return members[0] ? { kind: "member", botId: members[0].id } : { kind: "mentions" };
 }
 
+/** The member who answers a plain message: the lead, or an Auto room's
+ * fallback (its chosen fallback, else the first member). */
 export function defaultResponderName(group: Group, members: Bot[]): string | null {
   const value = effectiveDefaultResponder(group, members);
+  if (value.kind === "auto") return (members.find((member) => member.id === value.fallbackBotId) ?? members[0])?.name ?? null;
   if (value.kind !== "member") return null;
   return members.find((member) => member.id === value.botId)?.name ?? null;
 }
 
-export function groupResponseHint(group: Group, members: Bot[]): string {
+/** `jevOn`: whether the decision model is on for rooms. An Auto room with it
+ * off answers exactly like lead mode, so it reads like lead mode. */
+export function groupResponseHint(group: Group, members: Bot[], { jevOn = true }: { jevOn?: boolean } = {}): string {
   if (group.dm) return t("room.hint.dm");
   const value = effectiveDefaultResponder(group, members);
   if (value.kind === "everyone") return t("room.hint.everyone");
   if (value.kind === "mentions") return t("room.hint.mentions");
+  if (value.kind === "auto" && jevOn) return t("room.hint.auto");
   const name = defaultResponderName(group, members) ?? t("room.hint.leadFallback");
   return t("room.hint.lead", { name });
 }
 
-export function groupComposerHint(group: Group, members: Bot[]): string {
+export function groupComposerHint(group: Group, members: Bot[], { jevOn = true }: { jevOn?: boolean } = {}): string {
   if (group.dm) return t("composer.hint.dm");
   const value = effectiveDefaultResponder(group, members);
   if (value.kind === "everyone") return t("composer.hint.everyone");
   if (value.kind === "mentions") return t("composer.hint.mentions");
+  if (value.kind === "auto" && jevOn) return t("composer.hint.auto");
   return t("composer.hint.responder", {
     name: defaultResponderName(group, members) ?? t("composer.hint.lead"),
   });
@@ -63,6 +80,8 @@ export function roomRespondersForComposer<T extends { id: string; name: string; 
   if (mentioned.length) return mentioned;
   const fallback = effectiveDefaultResponder(group, available);
   if (fallback.kind === "everyone") return available;
+  // Any member may be picked, so image support is judged for all of them.
+  if (fallback.kind === "auto") return available;
   if (fallback.kind === "member") {
     const lead = available.find((member) => member.id === fallback.botId);
     return lead ? [lead] : [];
@@ -88,8 +107,10 @@ export function goalCoordinatorForComposer<
   )[0];
   if (explicitlyMentioned) return explicitlyMentioned;
   const configuredResponder = group.defaultResponder;
-  if (configuredResponder?.kind === "member") {
-    const configured = available.find((member) => member.id === configuredResponder.botId);
+  const lead = configuredResponder?.kind === "member" ? configuredResponder.botId
+    : configuredResponder?.kind === "auto" ? configuredResponder.fallbackBotId : undefined;
+  if (lead) {
+    const configured = available.find((member) => member.id === lead);
     if (configured) return configured;
   }
   return available.find((member) => member.chiefOfStaff) ?? available[0] ?? null;

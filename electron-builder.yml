@@ -66,6 +66,11 @@ extraResources:
     to: licenses/hpke-core-LICENSE.txt
   - from: third_party/hpke-js/common-LICENSE.txt
     to: licenses/hpke-common-LICENSE.txt
+  # The model provider catalog: models.dev data and OpenCode's refresh logic.
+  - from: third_party/models-dev/LICENSE
+    to: licenses/models-dev-LICENSE.txt
+  - from: third_party/opencode/LICENSE
+    to: licenses/opencode-LICENSE.txt
   - from: dist
     to: ui
   - from: dist-server

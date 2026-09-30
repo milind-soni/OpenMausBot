@@ -281,6 +281,30 @@ describe("control-omb isolated verification loop", () => {
     expect(existsSync(session.info.logPath)).toBe(true);
   }, 30_000);
 
+  it("allows slow starter reads and renames within the fixture launch deadline", async () => {
+    const fetch = globalThis.fetch;
+    const delayed: string[] = [];
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/bots" || path.endsWith("/profile")) {
+        delayed.push(path);
+        await new Promise(resolve => setTimeout(resolve, 1_100));
+      }
+      return fetch(input, init);
+    });
+    let session: Awaited<ReturnType<typeof launchVerificationServer>> | undefined;
+    try {
+      session = await launchVerificationServer();
+      expect(delayed).toEqual(["/api/bots", expect.stringMatching(/^\/api\/bots\/[^/]+\/profile$/)]);
+      const response = await fetch(`${session.info.url}/api/bots`);
+      const body = await response.json() as { bots: Array<{ name: string }> };
+      expect(body.bots[0].name).toBe("Fixture Starter");
+    } finally {
+      spy.mockRestore();
+      await session?.close();
+    }
+  }, 30_000);
+
   it("scripts the fake engine's tool calls from the launcher's environment", async () => {
     const session = await launchVerificationServer({
       ...process.env,

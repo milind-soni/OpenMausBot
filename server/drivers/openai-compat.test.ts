@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordEvents } from "../testing/events.ts";
 import { buildTurnContext, NATIVELY_REPLAYING_DRIVER_KINDS } from "../turn-context.ts";
+import { instanceConfigs } from "../config.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
 describe("OpenAICompatDriver", () => {
@@ -64,6 +65,53 @@ describe("OpenAICompatDriver", () => {
     });
     const snap = await inst.snapshot();
     expect(snap.state).toBe("unavailable");
+    await inst.dispose();
+  });
+
+  // The setup card used to show a config.json sentence as an "Open install
+  // in Terminal" command. The key is saved in the app.
+  it("sends setup to Settings → Connections instead of a terminal", async () => {
+    expect(OpenAICompatDriver.install?.command).toBeUndefined();
+    expect(OpenAICompatDriver.install?.settings).toBe("connections");
+    expect(OpenAICompatDriver.install?.signInCommand).toContain("Settings → Connections");
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-setup", displayName: "Router", enabled: true,
+      config: { url: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENAI_COMPAT_API_KEY" }, environment: {},
+    });
+    const snap = await inst.snapshot();
+    expect(snap).toMatchObject({ state: "unavailable", reason: expect.stringContaining("Settings → Connections") });
+    expect(JSON.stringify(snap)).not.toContain("config.json");
+    await inst.dispose();
+  });
+
+  // Security: before, a hand-edited instance with its own URL and no key of
+  // its own received the workspace key and sent it to that host
+  // (verified: GET https://third-party.example.test/v1/models with
+  // "Bearer sk-or-WORKSPACE").
+  // An instance naming its own key variable reads only that variable, not
+  // the server's OPENAI_COMPAT_API_KEY either.
+  it.each([
+    ["its own URL", { url: "https://third-party.example.test/v1" }, ["WORKSPACE"]],
+    ["its own key variable", { url: "https://third-party.example.test/v1", apiKeyEnv: "THIRD_PARTY_KEY" }, ["WORKSPACE", "OPERATOR"]],
+  ])("sends the workspace key nowhere near an instance with %s", async (_label, config, absent) => {
+    process.env.OPENAI_COMPAT_API_KEY = "sk-or-OPERATOR";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      seen.push(JSON.stringify(init?.headers ?? {}));
+      return new Response('{"data":[]}', { headers: { "content-type": "application/json" } });
+    }));
+    const map = instanceConfigs({
+      openaiCompat: { key: "sk-or-WORKSPACE" },
+      instances: { claude: { driver: "claudeAgent" }, router: { driver: "openai-compat", config } },
+    });
+    const entry = map.router!;
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "router", displayName: "Router", enabled: true,
+      config: OpenAICompatDriver.decodeConfig(entry.config), environment: entry.environment as Record<string, string>,
+    });
+    await inst.refreshModels?.();
+    await inst.snapshot();
+    for (const secret of absent) expect(JSON.stringify(seen)).not.toContain(secret);
     await inst.dispose();
   });
 

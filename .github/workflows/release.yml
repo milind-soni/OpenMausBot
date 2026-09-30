@@ -32,6 +32,11 @@ on:
         required: false
         type: boolean
         default: false
+      ship_without_ci:
+        description: "Emergency only: skip waiting for the commit's passing CI check"
+        required: false
+        type: boolean
+        default: false
   push:
     branches:
       - main
@@ -97,6 +102,51 @@ jobs:
             echo "::error::$v is already published on the legacy mirror — recover the canonical draft instead of rebuilding bytes"
             exit 1
           fi
+
+  ci:
+    # Ship only a commit whose own `CI` check (ci.yml's gate) passed. The wait
+    # overlaps the platform builds, so a green commit costs no time; a red,
+    # cancelled or missing check stops the release before any draft exists.
+    # 0.1.79 and 0.1.90 shipped commits whose main runs never finished.
+    name: CI passed on the release commit
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      actions: read
+    steps:
+      - name: Wait for the CI check on the pinned commit
+        if: ${{ !inputs.ship_without_ci }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          # push = a merge on main; merge_group = the queue's commit that
+          # becomes main; workflow_dispatch = a manual CI run of this commit.
+          # A pull_request run tests a merge ref, not this exact commit.
+          started=$SECONDS
+          while :; do
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=50" \
+              --jq '[.workflow_runs[] | select(.event == "push" or .event == "merge_group" or .event == "workflow_dispatch")] | sort_by(.created_at) | last | select(. != null) | "\(.id) \(.status)"')
+            if [ -z "$run" ]; then
+              if [ $((SECONDS - started)) -gt 900 ]; then
+                echo "::error::No CI run exists for $SHA. Run CI on it (Actions → CI → Run workflow on main while main is at this commit), then re-run this job."
+                exit 1
+              fi
+            else
+              set -- $run
+              if [ "$2" = completed ]; then
+                gate=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" --jq '.jobs[] | select(.name == "CI") | .conclusion')
+                echo "CI run $1 on $SHA: gate ${gate:-missing}"
+                [ "$gate" = success ] && exit 0
+                echo "::error::The CI check on $SHA did not pass (${gate:-no gate job}). Fix main or re-run CI ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$1), then re-run this job."
+                exit 1
+              fi
+              echo "CI run $1 on $SHA is $2; waiting"
+            fi
+            sleep 60
+          done
 
   mac:
     name: macOS arm64 + x64 (sign, notarize, staple)
@@ -430,7 +480,7 @@ jobs:
 
   assemble:
     name: Assemble the draft and verify every feed
-    needs: [prepare, mac, windows, linux]
+    needs: [prepare, ci, mac, windows, linux]
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30

@@ -72,7 +72,7 @@ function providerError(json: CompletionJson): string | null {
 
 interface NativeLog {
   source: string;
-  outgoing(turn: SendTurnInput, messages: OpenAIChatMessage[], model: string): unknown;
+  outgoing(turn: SendTurnInput, messages: OpenAIChatMessage[], model: string, tools: ChatToolDefinition[]): unknown;
   incoming(completion: Completion): unknown;
 }
 
@@ -449,7 +449,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           // batch) and the provider sees it as the newest input.
           const parked = turnEntry.asides.splice(0);
           if (parked.length) messages.push({ role: "user", content: parked.join("\n\n") });
-          native("out", options.nativeLog.outgoing(turn, messages, model));
+          native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
           let attempt = 0;
           let completion: Completion;
           for (;;) {
@@ -672,7 +672,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false,
         // The runtime owns the whole tool loop, so it can always take a
         // user message mid-turn: park it, deliver before the next completion.
-        queueing: true },
+        queueing: true,
+        // No shell and no file tool on the host at all: only MCP tools, each
+        // call a card in Ask (the Boat's `exec` runs on the Boat). A guest's
+        // turn is as confined as it gets.
+        guestTurns: "confined" },
       sendTurn,
       interruptTurn: async (threadId, turnId) => {
         const turn = active.get(threadId);

@@ -13,7 +13,9 @@ export interface EnvironmentDescriptor {
 export type SessionState =
   // `service`: a shared server that does not treat this machine as its owner
   | { kind: "loopback"; trust?: "service" }
-  | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number }
+  // `cloudGuest`: on an OMB Cloud home, a device that is not one of the
+  // owner's own; it writes only in `openedThreads`, the conversations it opened.
+  | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[] }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
 
@@ -39,6 +41,10 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       label: typeof record.label === "string" ? record.label : "",
       scopes: Array.isArray(record.scopes) ? record.scopes.filter((s): s is string => typeof s === "string") : [],
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
+      ...(record.cloudGuest === true ? {
+        cloudGuest: true as const,
+        openedThreads: Array.isArray(record.openedThreads) ? record.openedThreads.filter((id): id is string => typeof id === "string") : [],
+      } : {}),
     };
   }
   return record.trust === "service" ? { kind: "loopback", trust: "service" } : { kind: "loopback" };
@@ -68,6 +74,20 @@ export function takePairingCodeFromLocation(): string | null {
   return decodeURIComponent(m[1]);
 }
 
+/** The OMB Cloud page's "Use in your browser" link, `/pair#signin=omb_pair_…`:
+ * a single-use browser sign-in the Cloud's Admin opened on this machine. Taken
+ * off the address bar and out of this tab's history entry before anything
+ * renders, and never shown. */
+export function takeBrowserSignInFromLocation(): string | null {
+  if (!/[#&]signin=/.test(location.hash)) return null;
+  const m = /[#&]signin=(omb_pair_[A-Za-z0-9_-]{43})(?:&|$)/.exec(location.hash);
+  history.replaceState(null, "", location.pathname + location.search);
+  return m ? m[1] : null;
+}
+
+/** What the pair page says when that sign-in could not be used. */
+export const BROWSER_SIGN_IN_FAILED = "This sign-in link has expired or was already used. On My Cloud, choose “Use in your browser” again.";
+
 /** The invited address carried on a pair link (`/pair?email=…`): prefilled
  * on the sign-in page and dropped from the address bar. Never trusted on
  * its own; the one-time code still goes to the address itself. */
@@ -96,7 +116,7 @@ export function newAttemptId(): string {
 }
 
 export async function pairWithCode(
-  input: { code: string; label: string; attemptId?: string },
+  input: { code: string; label: string; attemptId?: string; browser?: boolean },
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   let res: Response;
@@ -105,7 +125,7 @@ export async function pairWithCode(
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code: input.code, label: input.label, cookie: true, attemptId: input.attemptId ?? newAttemptId() }),
+      body: JSON.stringify({ code: input.code, label: input.label, cookie: true, attemptId: input.attemptId ?? newAttemptId(), ...(input.browser ? { browser: true } : {}) }),
     });
   } catch (error) {
     return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };
@@ -114,6 +134,39 @@ export async function pairWithCode(
   if (res.ok) return { ok: true };
   const error = Reflect.get(Object(body), "error");
   return { ok: false, error: typeof error === "string" ? error : `${res.status} ${res.statusText}` };
+}
+
+/** Whose Cloud a browser sign-in (takeBrowserSignInFromLocation) signs in
+ * to, as the machine recorded it; the page shows this before the person
+ * continues. Asking redeems nothing. Null when it is spent, expired or not
+ * one at all. */
+export async function previewBrowserSignIn(credential: string, fetchImpl: typeof fetch = fetch): Promise<{ owner: string } | null> {
+  try {
+    const res = await fetchImpl("/api/auth/pair", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: credential, browser: true, preview: true }),
+    });
+    const owner: unknown = Reflect.get(Object(await res.json().catch(() => ({}))), "owner");
+    return res.ok && typeof owner === "string" && owner ? { owner } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Continue on that page: redeem it for this browser's session cookie,
+ * replacing any session this browser already had here. The same attempt id
+ * on a retry after a lost answer returns the same session. */
+export function signInWithBrowserGrant(credential: string, attemptId: string, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+  return pairWithCode({ code: credential, label: defaultDeviceLabel(), attemptId, browser: true }, fetchImpl);
+}
+
+/** Whose OMB Cloud this browser signed in to, from `GET /api/auth/session`:
+ * only a browser sign-in's session on a Cloud home says. */
+export function cloudOwnerOf(session: unknown): string | null {
+  const record = Object(session) as { cloudHome?: unknown; owner?: unknown }; // SAFETY: read with typeof checks below
+  return record.cloudHome === true && typeof record.owner === "string" && record.owner ? record.owner : null;
 }
 
 /** Server-side JSON exchanges that end in a session cookie. */

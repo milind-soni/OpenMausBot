@@ -49,6 +49,28 @@ describe("provider key rows", () => {
     expect(render(createElement(ApiKeyRow, { section: "xai", testProvider: "xai" }))).toContain("xAI API key");
   });
 
+  it("shows Cloud Pro's included computers as included, not as a saved key the person could clear", () => {
+    const withBox = (box: store.ConfigStatus["box"]) => vi.spyOn(store, "useStore").mockReturnValue({
+      state: { ...store.initialState, config: { ...store.initialState.config, box } as store.ConfigStatus },
+      dispatch: vi.fn(),
+      flushBotPatches: vi.fn(),
+      refreshInstances: vi.fn(),
+      refreshModels: vi.fn(),
+    });
+    withBox({ configured: true, included: true });
+    const included = render(createElement(ApiKeyRow, { section: "box" }));
+    expect(included).toContain("Included with Cloud Pro");
+    expect(included).not.toContain("Configured");
+    // an own key can still be added, and there is nothing to remove
+    expect(included).toContain('placeholder="Paste your Boat API key"');
+    expect(included).not.toContain("Remove the saved key");
+
+    withBox({ configured: true });
+    const own = render(createElement(ApiKeyRow, { section: "box" }));
+    expect(own).toContain("Configured");
+    expect(own).not.toContain("Included with Cloud Pro");
+  });
+
   it("offers the base URL as a setting next to the key", () => {
     const html = render(createElement(OpenAiCompatUrl));
     expect(html).toContain("OpenAI-compatible base URL");

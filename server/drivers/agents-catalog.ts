@@ -29,6 +29,9 @@ export interface CatalogProfile {
   sharedComputers: boolean;
   /** A voice is actually configured for this bot (tts voiceReady). */
   voiceNotes: boolean;
+  /** The server is a Cloud home (server/cloud-home.ts): no "this computer"
+   * of the person's and no Local VM to offer. */
+  cloudHome: boolean;
   /** Written into start_thread's schema in a coordinating turn. */
   botId: string;
 }
@@ -44,6 +47,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     skillAuthoring: env.OMB_SKILL_AUTHORING_ENABLED === "1",
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
     voiceNotes: env.OMB_VOICE_NOTES === "1",
+    cloudHome: env.OMB_CLOUD_HOME === "1",
     botId: env.OMB_BOT_ID ?? "",
   };
 }
@@ -824,8 +828,25 @@ const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegatio
 const EXTERNAL_TOOL_NAMES = new Set(["list_bots", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
+// A Cloud home never offers this computer or a Local VM, so its bots are not
+// shown them as choices, nor a VM shell they could never have.
+const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
+const CLOUD_HOME_SURFACE = {
+  type: "string", enum: ["auto", "cloud", "browser"],
+  description: "auto = suitable configured computer, cloud = remote Boat/VPS, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",
+};
+
 /** The tools one turn is shown, exactly as tools/list serializes them. */
 export function availableTools(profile: CatalogProfile) {
+  const tools = catalogTools(profile);
+  return profile.cloudHome
+    ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
+      ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: CLOUD_HOME_SURFACE } } }
+      : tool)
+    : tools;
+}
+
+function catalogTools(profile: CatalogProfile) {
   const TOOLS = toolDefinitions(profile.externalRuntime);
   const BOT_SCOPED_TOOLS = profile.botId === WATCHER_OPTIONS_CARD_BOT_ID
     ? TOOLS

@@ -71,31 +71,36 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     access: "custom",
   },
   models: DEFAULT_MODELS,
+  // Nothing to install: the key and base URL are saved in the app. The old
+  // descriptor offered a config.json sentence as an "Open install in
+  // Terminal" command.
   install: {
     docsUrl: "https://openrouter.ai/keys",
+    settings: "connections",
     signInCommand:
-      "add {\"openaiCompat\":{\"key\":\"sk-or-v1-…\"}} to ~/.openmausbot/config.json (or set OPENAI_COMPAT_API_KEY)",
-    command: {
-      darwin:
-        "Get a free key at https://openrouter.ai/keys (or https://console.groq.com) then add it to ~/.openmausbot/config.json under openaiCompat.key",
-      linux:
-        "Get a free key at https://openrouter.ai/keys (or https://console.groq.com) then add it to ~/.openmausbot/config.json under openaiCompat.key",
-      win32:
-        "Get a free key at https://openrouter.ai/keys (or https://console.groq.com) then add it to %USERPROFILE%\\.openmausbot\\config.json under openaiCompat.key",
-    },
+      "Save an OpenAI-compatible API key (OpenRouter, Groq, or your own router) and its base URL in Settings → Connections, or set OPENAI_COMPAT_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
 
   async create(input) {
     const { config } = input;
+    // An instance that names its own key variable reads only that one: the
+    // workspace key (OPENAI_COMPAT_API_KEY) belongs to the workspace's
+    // endpoint and must not reach this instance's host.
+    const ownKeyVariable = config.apiKeyEnv !== "OPENAI_COMPAT_API_KEY";
     const apiKey =
       config.key ??
       input.environment[config.apiKeyEnv] ??
-      input.environment.OPENAI_COMPAT_API_KEY ??
+      (ownKeyVariable ? undefined : input.environment.OPENAI_COMPAT_API_KEY) ??
       process.env[config.apiKeyEnv] ??
-      process.env.OPENAI_COMPAT_API_KEY ??
+      (ownKeyVariable ? undefined : process.env.OPENAI_COMPAT_API_KEY) ??
       "";
+    // The default key variable is the one Settings → Connections saves; an
+    // instance with its own variable is configured where it was written.
+    const missingKey = config.apiKeyEnv === "OPENAI_COMPAT_API_KEY"
+      ? "No API key — open Settings → Connections and add an OpenAI-compatible key (OpenRouter, Groq, or your own router) and its base URL."
+      : `no API key — set ${config.apiKeyEnv} or add it to the instance config`;
     let catalog: ModelCatalog = config.managedModels
       ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
       : config.model
@@ -160,15 +165,22 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           : {}),
       }),
       httpErrorLabel: "upstream",
-      missingKeyError: `no API key — set ${config.apiKeyEnv} or add it to the instance config`,
-      unavailableReason: `no API key — set ${config.apiKeyEnv} or add it to the instance config`,
+      missingKeyError: missingKey,
+      unavailableReason: missingKey,
       timeoutMs: idleTimeoutMs(),
       reasoning: true,
       billing: "metered",
       includeUsageInCompleted: true,
       nativeLog: {
         source: "openai-compat.chat.completions",
-        outgoing: (_turn, messages, model) => ({ model, messageCount: messages.length }),
+        // Tool names are the answer to "did the harness send them?" — the
+        // LiteLLM/proxy hop after this point is what drops tools silently,
+        // and until now the tee held no record either side could compare.
+        outgoing: (_turn, messages, model, tools) => ({
+          model,
+          messageCount: messages.length,
+          tools: tools.map(tool => tool.function.name),
+        }),
         incoming: ({ text, reasoning, usage }) => ({
           textLength: text.length,
           reasoningLength: reasoning.length,

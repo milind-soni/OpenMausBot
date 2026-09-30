@@ -26,7 +26,7 @@ import { mergeTopicText } from "./memory-topics.ts";
 import { applyMoves, MAX_MOVES, organizeCandidates, organizePrompt, parseMoves } from "./memory-organize.ts";
 import { recordMemoryChange } from "./memory-journal.ts";
 import { applyTidy, contradictionCandidates, contradictionPrompt, parseContradictions, planChanges, planTidy, type Contradiction } from "./memory-tidy.ts";
-import { ensureWorkspace, listMemoryTopics, memoryDate, memoryEntry, memoryTopicIndex, updateMemory, workspaceDir, writeMemoryFile, writeMemoryTopic } from "./workspace.ts";
+import { ensureWorkspace, listMemoryTopics, memoryDate, memoryEntry, memoryTopicIndex, readMemoryText, updateMemory, workspaceDir, writeMemoryFile, writeMemoryTopic } from "./workspace.ts";
 
 export const CAPTURE_MAX_TURNS = 6;
 export const MODEL_TIMEOUT_MS = 60_000;
@@ -65,6 +65,10 @@ export interface UpkeepDeps {
   sourceLabel: (botId: string, threadId: string) => string;
   quietMs: () => number;
   tidyHour: () => number;
+  /** Wraps each synchronous burst of writes this makes to one bot's memory
+   * (capture, organize, tidy), so the host can tell them from writes made
+   * elsewhere (an OMB Cloud home: server/lending-memory.ts). */
+  writing?: <T>(botId: string, write: () => T) => T;
   now?: () => Date;
   log?: (line: string) => void;
 }
@@ -127,7 +131,7 @@ function saveState(state: UpkeepState): void {
 
 function readRaw(botId: string, relative: string): string | null {
   try {
-    return readFileSync(join(workspaceDir(botId), relative), "utf8");
+    return readMemoryText(join(workspaceDir(botId), relative));
   } catch {
     return null;
   }
@@ -194,6 +198,8 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     return promise;
   };
 
+  const writing = deps.writing ?? (<T>(_botId: string, write: () => T): T => write());
+
   async function capture(batch: CaptureBatch): Promise<CaptureReport> {
     const bot = deps.bot(batch.botId);
     const at = now().getTime();
@@ -227,48 +233,51 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     // Re-read after the await: the bot or the person may have written since.
     // From here to the journal rows there is no await, so no write interleaves.
     if (!upkeepEnabled(deps.bot(bot.id))) return off;
-    const before = readRaw(bot.id, "MEMORY.md");
-    const parsed = parseCandidates(answer, today);
-    const fresh = newCandidates(parsed, before ?? "");
-    const source = `${deps.sourceLabel(bot.id, batch.threadId)} (noticed)`;
-    let added = 0;
-    let full = false;
-    const byTopic = new Map<string, Candidate[]>();
-    for (const candidate of fresh) {
-      if (candidate.topic) {
-        byTopic.set(candidate.topic, [...(byTopic.get(candidate.topic) ?? []), candidate]);
-        continue;
+    const { parsed, added, topics, full } = writing(bot.id, () => {
+      const before = readRaw(bot.id, "MEMORY.md");
+      const parsed = parseCandidates(answer, today);
+      const fresh = newCandidates(parsed, before ?? "");
+      const source = `${deps.sourceLabel(bot.id, batch.threadId)} (noticed)`;
+      let added = 0;
+      let full = false;
+      const byTopic = new Map<string, Candidate[]>();
+      for (const candidate of fresh) {
+        if (candidate.topic) {
+          byTopic.set(candidate.topic, [...(byTopic.get(candidate.topic) ?? []), candidate]);
+          continue;
+        }
+        const result = updateMemory(bot.id, { action: "append", text: candidate.text, ...(candidate.until ? { until: candidate.until } : {}) }, { source, now: now() });
+        if (result.ok) added += 1;
+        else if (result.code === "over-budget") full = true;
       }
-      const result = updateMemory(bot.id, { action: "append", text: candidate.text, ...(candidate.until ? { until: candidate.until } : {}) }, { source, now: now() });
-      if (result.ok) added += 1;
-      else if (result.code === "over-budget") full = true;
-    }
-    if (added) recordMemoryChange(bot.id, { path: "MEMORY.md", actor: "upkeep", via: "capture", threadId: batch.threadId, before, after: readRaw(bot.id, "MEMORY.md") });
-    // Detail goes to a topic file the bot keeps for that subject, created
-    // with a header (title and other words for it) the first time.
-    const existing = new Map(listMemoryTopics(bot.id).map((topic) => [topic.name.toLowerCase(), topic.name]));
-    let topics = 0;
-    for (const [wanted, candidates] of byTopic) {
-      const name = existing.get(wanted) ?? wanted;
-      const path = `memory/${name}`;
-      const current = readRaw(bot.id, path);
-      if (current !== null && Buffer.byteLength(current, "utf8") > TOPIC_MAX_BYTES) continue;
-      const seen = notebookIdentities(current ?? "");
-      const lines = candidates
-        .filter((candidate) => !seen.has(factIdentity(candidate.text)))
-        .map((candidate) => memoryEntry(candidate.text, { source, now: now(), ...(candidate.until ? { until: candidate.until } : {}) }));
-      if (!lines.length) continue;
-      const title = name.replace(/\.md$/, "").replace(/-/g, " ");
-      const aliases = [...new Set(candidates.flatMap((candidate) => candidate.topicAliases ?? []))];
-      try {
-        writeMemoryTopic(bot.id, name, mergeTopicText(current, { title, aliases, lines }));
-      } catch {
-        continue;
+      if (added) recordMemoryChange(bot.id, { path: "MEMORY.md", actor: "upkeep", via: "capture", threadId: batch.threadId, before, after: readRaw(bot.id, "MEMORY.md") });
+      // Detail goes to a topic file the bot keeps for that subject, created
+      // with a header (title and other words for it) the first time.
+      const existing = new Map(listMemoryTopics(bot.id).map((topic) => [topic.name.toLowerCase(), topic.name]));
+      let topics = 0;
+      for (const [wanted, candidates] of byTopic) {
+        const name = existing.get(wanted) ?? wanted;
+        const path = `memory/${name}`;
+        const current = readRaw(bot.id, path);
+        if (current !== null && Buffer.byteLength(current, "utf8") > TOPIC_MAX_BYTES) continue;
+        const seen = notebookIdentities(current ?? "");
+        const lines = candidates
+          .filter((candidate) => !seen.has(factIdentity(candidate.text)))
+          .map((candidate) => memoryEntry(candidate.text, { source, now: now(), ...(candidate.until ? { until: candidate.until } : {}) }));
+        if (!lines.length) continue;
+        const title = name.replace(/\.md$/, "").replace(/-/g, " ");
+        const aliases = [...new Set(candidates.flatMap((candidate) => candidate.topicAliases ?? []))];
+        try {
+          writeMemoryTopic(bot.id, name, mergeTopicText(current, { title, aliases, lines }));
+        } catch {
+          continue;
+        }
+        recordMemoryChange(bot.id, { path, actor: "upkeep", via: "capture", threadId: batch.threadId, before: current, after: readRaw(bot.id, path) });
+        existing.set(name.toLowerCase(), name);
+        topics += lines.length;
       }
-      recordMemoryChange(bot.id, { path, actor: "upkeep", via: "capture", threadId: batch.threadId, before: current, after: readRaw(bot.id, path) });
-      existing.set(name.toLowerCase(), name);
-      topics += lines.length;
-    }
+      return { parsed, added, topics, full };
+    });
     // Only the owner's own words reach About me: on a shared workspace
     // another person's facts are not the owner's profile. Every parsed fact
     // counts, not only new ones — the bot may already have noted it in its
@@ -323,35 +332,37 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     saved.bots[botId] = { ...saved.bots[botId], core: [...new Set([...(saved.bots[botId]?.core ?? []), ...judgedCore])].slice(-MAX_CORE) };
     saveState(saved);
     if (!moves.length) return 0;
-    const { byTopic } = applyMoves(before, moves);
-    const written = new Set<string>();
-    const existing = new Map(listMemoryTopics(botId).map((topic) => [topic.name.toLowerCase(), topic.name]));
-    let count = 0;
-    for (const [wanted, group] of byTopic) {
-      const name = existing.get(wanted) ?? wanted;
-      const path = `memory/${name}`;
-      const current = readRaw(botId, path);
-      const seen = notebookIdentities(current ?? "");
-      const lines = group.lines.filter((line) => !seen.has(lineFactIdentity(line)));
-      if (lines.length) {
-        try {
-          writeMemoryTopic(botId, name, mergeTopicText(current, { title: name.replace(/\.md$/, "").replace(/-/g, " "), aliases: group.aliases, lines }));
-        } catch (error) {
-          log(`memory upkeep: could not write ${path}; kept its entries in MEMORY.md: ${(error as Error).message}`);
-          continue;
+    return writing(botId, () => {
+      const { byTopic } = applyMoves(before, moves);
+      const written = new Set<string>();
+      const existing = new Map(listMemoryTopics(botId).map((topic) => [topic.name.toLowerCase(), topic.name]));
+      let count = 0;
+      for (const [wanted, group] of byTopic) {
+        const name = existing.get(wanted) ?? wanted;
+        const path = `memory/${name}`;
+        const current = readRaw(botId, path);
+        const seen = notebookIdentities(current ?? "");
+        const lines = group.lines.filter((line) => !seen.has(lineFactIdentity(line)));
+        if (lines.length) {
+          try {
+            writeMemoryTopic(botId, name, mergeTopicText(current, { title: name.replace(/\.md$/, "").replace(/-/g, " "), aliases: group.aliases, lines }));
+          } catch (error) {
+            log(`memory upkeep: could not write ${path}; kept its entries in MEMORY.md: ${(error as Error).message}`);
+            continue;
+          }
+          recordMemoryChange(botId, { path, actor: "upkeep", via: "organize", before: current, after: readRaw(botId, path) });
         }
-        recordMemoryChange(botId, { path, actor: "upkeep", via: "organize", before: current, after: readRaw(botId, path) });
+        existing.set(name.toLowerCase(), name);
+        written.add(wanted);
+        count += group.lines.length;
       }
-      existing.set(name.toLowerCase(), name);
-      written.add(wanted);
-      count += group.lines.length;
-    }
-    if (!written.size) return 0;
-    const { text } = applyMoves(before, moves.filter((move) => written.has(move.topic)));
-    writeMemoryFile(botId, text);
-    recordMemoryChange(botId, { path: "MEMORY.md", actor: "upkeep", via: "organize", before, after: readRaw(botId, "MEMORY.md") });
-    log(`memory upkeep: moved ${count} entr${count === 1 ? "y" : "ies"} from MEMORY.md into topic files for ${deps.bot(botId)?.name ?? botId}`);
-    return count;
+      if (!written.size) return 0;
+      const { text } = applyMoves(before, moves.filter((move) => written.has(move.topic)));
+      writeMemoryFile(botId, text);
+      recordMemoryChange(botId, { path: "MEMORY.md", actor: "upkeep", via: "organize", before, after: readRaw(botId, "MEMORY.md") });
+      log(`memory upkeep: moved ${count} entr${count === 1 ? "y" : "ies"} from MEMORY.md into topic files for ${deps.bot(botId)?.name ?? botId}`);
+      return count;
+    });
   }
 
   function appendArchive(botId: string, archived: readonly string[]): void {
@@ -402,8 +413,10 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       // The archive is written first: a line is never out of MEMORY.md
       // before it is in the archive, and the newest journal row — the one a
       // person undoes — is MEMORY.md, whose undo brings the line back.
-      if (archived.length) appendArchive(botId, archived);
-      writeMemoryFile(botId, text);
+      writing(botId, () => {
+        if (archived.length) appendArchive(botId, archived);
+        writeMemoryFile(botId, text);
+      });
       recordMemoryChange(botId, { path: "MEMORY.md", actor: "upkeep", via: "tidy", before, after: readRaw(botId, "MEMORY.md") });
     }
     // Topic files get the two steps that need no model: expired lines to the
@@ -418,8 +431,10 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       const topicPlan = planTidy(topicBefore, today);
       if (!planChanges(topicPlan)) continue;
       const tidied = applyTidy(topicBefore, topicPlan, today);
-      if (tidied.archived.length) appendArchive(botId, tidied.archived);
-      writeMemoryTopic(botId, topic.name, tidied.text);
+      writing(botId, () => {
+        if (tidied.archived.length) appendArchive(botId, tidied.archived);
+        writeMemoryTopic(botId, topic.name, tidied.text);
+      });
       recordMemoryChange(botId, { path, actor: "upkeep", via: "tidy", before: topicBefore, after: readRaw(botId, path) });
       topicExpired += topicPlan.expired.length;
       topicDuplicates += topicPlan.duplicates.length;

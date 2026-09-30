@@ -86,10 +86,12 @@ Check on iPhone and iPad:
 
 Keep the `.xcresult` bundle and screenshots as evidence. Shut down and remove
 only the disposable simulators you created.
-The PR's macOS CI runs `scripts/verify-ios-thread-navigation-ci.sh` after the
-simulator build. It creates fresh iPhone and iPad simulators, runs only this
-offline UI fixture, deletes those exact simulators, and uploads both `.xcresult`
-bundles with screenshots as a short-lived artifact.
+The `iOS thread UI` workflow (`.github/workflows/ios-thread-ui.yml`) runs
+`scripts/verify-ios-thread-navigation-ci.sh` nightly, after main pushes that
+touch `ios/`, and by hand from the Actions tab. It creates fresh iPhone and iPad
+simulators, runs only this offline UI fixture, deletes those exact simulators,
+and uploads both `.xcresult` bundles with screenshots as a short-lived artifact.
+PR CI runs the Swift tests and the simulator build only.
 
 The offline UI checks do **not** prove real-device pairing, HTTPS/Tailscale,
 live network reconnects, dictation or attachment uploads. Validate those with

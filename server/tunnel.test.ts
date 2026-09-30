@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runLogin, runLogout, runStatus, type CliIo, type CliOptions } from "./cli.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startControlPlaneStub, type ControlPlaneStub } from "./testing/control-plane-stub.ts";
+import { freePortBlock } from "./testing/ports.ts";
 import {
   cleanupTunnelOrigin,
   createTunnelOrigin,
@@ -161,7 +162,7 @@ describe.skipIf(!posix)("startTunnel: guardian, gateway and connector, verified 
       res.end(JSON.stringify({ app: "openmausbot", url: req.url, peer: req.socket.remoteAddress ?? null }));
     });
     await new Promise<void>((done) => harness.listen(origin.socketPath, done));
-    const originPort = 20000 + Math.floor(Math.random() * 20000);
+    const originPort = await freePortBlock([0], 29_600);
     const endpoint = "https://c-stub.openmausbot.invalid";
     const guardian = guardianEntry();
     expect(guardian).toBeTruthy();

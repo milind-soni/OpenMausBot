@@ -48,6 +48,10 @@
 //                   | stall-after-tool (finish a tool call, then go fully
 //                     silent forever: the guard must still fire once no tool
 //                     is running)
+//                   | lend-question (call list_shared_computers through the
+//                     injected agents MCP, ask a question card, call it again
+//                     once the card is answered, and reply
+//                     "before: <first> | after: <second>" — the lent-Mac e2e)
 //   FAKE_ACP_MCP_TRANSPORTS  comma list of remote MCP transports the agent
 //                       advertises in initialize (mcpCapabilities), e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS JSON options override in permission mode
@@ -60,7 +64,7 @@
 //                       method list as a JSON array — per process, so a
 //                       pooled child keeps one dump and a replacement child
 //                       starts its own
-//   FAKE_ACP_RPC_APPEND_FILE  append one {"pid","method"} JSON line per
+//   FAKE_ACP_RPC_APPEND_FILE  append one {"pid","method","cwd"} JSON line per
 //                       request, so a test can count RPCs across a pooled
 //                       child and its replacement together
 //   FAKE_ACP_RPC_FAILURE_FILE  read a JSON-RPC error object on session/prompt;
@@ -74,6 +78,22 @@
 //                        surface: session/new and session/load return
 //                        configOptions, and session/set_config_option switches
 //                        the model (rejecting an unadvertised one with -32602).
+//                        A new session starts on AGY_ACP_DEFAULT_MODEL (Google
+//                        Antigravity's own default variable) when it is set,
+//                        else on the first. Like agy_acp_server 1.1.1, any id
+//                        there is taken unchecked and added to the list.
+//   FAKE_ACP_MODELS_FILE  path of a file with the same comma-separated list,
+//                        read once when the process starts: a process started
+//                        before the file changed keeps the old list, the way
+//                        `opencode acp` never re-reads a login added later
+//   FAKE_ACP_MODELS_LIST=v2  OpenCode 2's `models` surface: plain `models`
+//                        answers an empty list with exit 0 (its first answer
+//                        after the background service starts), and `models
+//                        --verbose` is rejected with exit 1
+//   FAKE_ACP_VERBOSE_FAIL_ONCE  path of a marker file: the first `models
+//                        --verbose` creates it and fails, the way a first run
+//                        in a new OpenCode home loses the race to create its
+//                        database; later runs answer normally
 //   FAKE_ACP_MODEL_STICKS  session/set_config_option succeeds but leaves the
 //                        model where it was, so the confirmation guard in
 //                        core.ts has something to catch
@@ -83,6 +103,16 @@
 //                        replay?}, emitted after the named RPC response.
 //   FAKE_ACP_USAGE_ROOT  put the prompt result's usage at the root instead of
 //                        under _meta (what opencode 1.18.18 actually does)
+//   FAKE_ACP_MODE_ACK_FILE  path of a file read on every mode switch: while it
+//                        exists, "empty" answers without configOptions (the
+//                        switch cannot be confirmed) and "error" refuses it,
+//                        leaving the session in its previous mode either way
+//
+// With FAKE_ACP_DUMP and FAKE_ACP_MODES or FAKE_ACP_MODELS, every
+// session/prompt appends {"pid","sessionId","mode","model"} to
+// <FAKE_ACP_DUMP>.prompts.jsonl: what the prompt actually ran under, across a
+// pooled child and its replacement. The .config.json log is per process, so
+// on a pooled child it also holds earlier turns' switches.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
@@ -107,8 +137,12 @@ const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
 // model is chosen with session/set_config_option, because `opencode acp` takes
 // no -m. Off unless FAKE_ACP_MODELS is set, so every existing mode is byte-
 // identical to before.
-const models = (process.env.FAKE_ACP_MODELS ?? "").split(",").filter(Boolean);
-let currentModel: string | null = models[0] ?? null;
+const models = (process.env.FAKE_ACP_MODELS_FILE && existsSync(process.env.FAKE_ACP_MODELS_FILE)
+  ? readFileSync(process.env.FAKE_ACP_MODELS_FILE, "utf8")
+  : process.env.FAKE_ACP_MODELS ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+const defaultModelEnv = process.env.AGY_ACP_DEFAULT_MODEL;
+if (models.length && defaultModelEnv && !models.includes(defaultModelEnv)) models.push(defaultModelEnv);
+let currentModel: string | null = models.length && defaultModelEnv ? defaultModelEnv : models[0] ?? null;
 const variantConfigs: Record<string, { id?: string; currentValue?: string; options: any[] }> =
   JSON.parse(process.env.FAKE_ACP_VARIANTS ?? "{}");
 let currentVariant = variantConfigs[currentModel ?? ""]?.currentValue;
@@ -199,6 +233,8 @@ const dumpEnv = Object.fromEntries(
     "PATH",
     "HOME",
     "USERPROFILE",
+    "TEMP",
+    "TMP",
     "SystemRoot",
     "FAKE_ACP_MODE",
     "FAKE_ACP_RPC_DUMP",
@@ -232,6 +268,11 @@ const dumpEnv = Object.fromEntries(
     "GEMINI_HOME",
     "AGY_ACP_FORCE_FILE_STORAGE",
     "ANTIGRAVITY_HARNESS_PATH",
+    "AGY_ACP_DEFAULT_MODEL",
+    "OPENCODE_DISABLE_PROJECT_CONFIG",
+    "GEMINI_API_KEY",
+    "MISTRAL_API_KEY",
+    "OMB_ANTHROPIC_API_KEY",
   ].flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]] as const)),
 );
 // pid rides along so a test can tell a respawned process (new pid, fresh
@@ -264,6 +305,19 @@ if (argv[0] === "status" || argv[0] === "whoami") {
   process.exit(0);
 }
 if (argv[0] === "models" || argv.includes("--list-models")) {
+  const failOnce = process.env.FAKE_ACP_VERBOSE_FAIL_ONCE;
+  if (failOnce && argv.includes("--verbose") && !existsSync(failOnce)) {
+    writeFileSync(failOnce, "failed once\n");
+    console.error("Failed to run the query 'CREATE TABLE `workspace` (…)'");
+    process.exit(1);
+  }
+  if (process.env.FAKE_ACP_MODELS_LIST === "v2") {
+    if (argv.includes("--verbose")) {
+      console.error("Unrecognized flag: --verbose");
+      process.exit(1);
+    }
+    process.exit(0);
+  }
   if (models.length) {
     const verbose = argv.includes("--verbose");
     console.log(
@@ -329,7 +383,7 @@ const recordMethod = (method: string) => {
   if (process.env.FAKE_ACP_RPC_DUMP) writeFileSync(process.env.FAKE_ACP_RPC_DUMP, JSON.stringify(rpcMethods));
   if (process.env.FAKE_ACP_RPC_APPEND_FILE) {
     try {
-      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method }) + "\n");
+      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method, cwd: process.cwd() }) + "\n");
     } catch {}
   }
 };
@@ -659,6 +713,16 @@ function handle(msg: any) {
         break;
       }
       if (configId === "mode" && modes.includes(value)) {
+        const ackFile = process.env.FAKE_ACP_MODE_ACK_FILE;
+        const ack = ackFile && existsSync(ackFile) ? readFileSync(ackFile, "utf8").trim() : "";
+        if (ack === "error") {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "Internal error: could not change mode" } });
+          break;
+        }
+        if (ack === "empty") {
+          result(msg.id, {});
+          break;
+        }
         currentMode = value;
         configCalls.push({ method: msg.method, params: msg.params });
         if (process.env.FAKE_ACP_DUMP) {
@@ -690,6 +754,11 @@ function handle(msg: any) {
       break;
     }
     case "session/prompt": {
+      if (process.env.FAKE_ACP_DUMP && (modes.length || models.length)) {
+        appendFileSync(`${process.env.FAKE_ACP_DUMP}.prompts.jsonl`, JSON.stringify({
+          pid: process.pid, sessionId: msg.params?.sessionId, mode: currentMode, model: currentModel,
+        }) + "\n");
+      }
       emitConfigUpdates("session/prompt", msg.params.sessionId);
       if (process.env.FAKE_ACP_DUMP && process.env.FAKE_ACP_VARIANTS) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.selection.json`, JSON.stringify({
@@ -1030,6 +1099,25 @@ function handle(msg: any) {
             ],
           },
         });
+        return;
+      }
+      if (mode === "lend-question" && agentsMcp) {
+        const entry = agentsMcp;
+        const list = () => driveMcp(entry, [{ name: "list_shared_computers", args: () => ({}) }]).catch((e) => `error ${(e as Error).message}`);
+        void (async () => {
+          const before = await list();
+          pendingPermissionId = 9003;
+          onPermissionAnswered = () => {
+            void list().then((after) => {
+              out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `before: ${before} | after: ${after}` } } } });
+              complete();
+            });
+          };
+          out({ jsonrpc: "2.0", id: pendingPermissionId, method: "session/request_permission", params: {
+            toolCall: { toolCallId: "interaction_folder", kind: "other", title: "Which folder should I read?" },
+            options: [{ optionId: "docs-id", kind: "allow_once", name: "Docs" }, { optionId: "other-id", kind: "allow_once", name: "Other" }],
+          } });
+        })();
         return;
       }
       if (mode === "question") {

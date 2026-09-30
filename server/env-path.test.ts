@@ -2,7 +2,7 @@
 // well-known install dir — or an nvm bin dir — must be findable even
 // when the process itself started with a bare GUI PATH.
 import { execFile } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -109,6 +109,54 @@ describe("augmentedPath", () => {
       else process.env.SHELL = previousShell;
       if (previousVitest === undefined) delete process.env.VITEST;
       else process.env.VITEST = previousVitest;
+      resetPathCacheForTests();
+    }
+  });
+
+  posixIt("keeps a sealed fixture off machine-wide install dirs and the login shell (#2035)", async () => {
+    // Real directories on this machine: Homebrew's codex lives in one of them.
+    const machineDirs = ["/opt/homebrew/bin", "/usr/local/bin"].filter((dir) => existsSync(dir));
+    const ownBin = join(homedir(), ".local", "bin");
+    mkdirSync(ownBin, { recursive: true });
+    const shell = join(homedir(), "fake-login-shell");
+    const ran = join(homedir(), "login-shell-ran");
+    const rcOnlyBin = join(homedir(), "rc-only", "bin");
+    writeFileSync(shell, `#!/bin/sh\n: > '${ran}'\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
+    chmodSync(shell, 0o755);
+
+    const saved = { PATH: process.env.PATH, SHELL: process.env.SHELL, VITEST: process.env.VITEST };
+    const restore = (key: keyof typeof saved) => {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    };
+    try {
+      // A bare PATH, as the fixture has, so only discovery could add a dir.
+      process.env.PATH = join(homedir(), "bare-path");
+      process.env.SHELL = shell;
+      delete process.env.VITEST;
+
+      // Control: unsealed, the product scans both. This is the leak.
+      delete process.env.OMB_TEST_SEALED_PATH;
+      resetPathCacheForTests();
+      expect(augmentedPath().split(delimiter)).toEqual(expect.arrayContaining(machineDirs));
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin));
+      rmSync(ran);
+
+      process.env.OMB_TEST_SEALED_PATH = "1";
+      resetPathCacheForTests();
+      const sealed = augmentedPath().split(delimiter);
+      for (const dir of machineDirs) expect(sealed).not.toContain(dir);
+      // Its own home is still where a test plants a CLI for it to find.
+      expect(sealed).toContain(ownBin);
+      // The unsealed probe above landed well inside this; the sealed one never starts.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(existsSync(ran)).toBe(false);
+      expect(augmentedPath().split(delimiter)).not.toContain(rcOnlyBin);
+    } finally {
+      delete process.env.OMB_TEST_SEALED_PATH;
+      restore("PATH");
+      restore("SHELL");
+      restore("VITEST");
       resetPathCacheForTests();
     }
   });

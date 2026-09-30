@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, BellOff, Clock, Clock3, FolderInput, Link2, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 import type { BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
 import { threadRefUrl } from "@/lib/thread-refs";
@@ -246,6 +247,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   onSnooze?: (snoozedUntil: number | null) => void;
 }) {
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
+  const menuMotion = useHeldMenuMotion(menu);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const [deleting, setDeleting] = useState(false);
@@ -332,8 +334,8 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
         <MoreHorizontal size={13} />
       </button>
     </div>
-    {menu && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: task.title })} style={menu}
-      className="fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto rounded-lg border border-hairline/50 bg-card p-1 shadow-xl"
+    {menuMotion.shown && menuMotion.value && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: task.title })} style={menuMotion.value}
+      className={cn("fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto rounded-lg border border-hairline/50 bg-card p-1 shadow-xl", menuMotion.className)} {...menuMotion.exitProps}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
       <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Link2 size={12} />{t("task.copyLink")}</button>
       <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Pencil size={12} />{t("task.renameAria")}</button>

@@ -2,6 +2,7 @@
 // it. The server decides what a turn mounts (server/surface.ts); this is the
 // renderer's reading of the same facts, for the composer chip, the panel
 // tabs and the place icon on a tool chip.
+import { cloudHomeOffersPlace } from "../../shared/cloud-home";
 import { toolSurfaceKind } from "../../shared/tool-surface";
 import type { Bot, Task } from "@/state/store";
 import type { LocaleKey } from "@/locales";
@@ -10,6 +11,13 @@ export type Place = "cloud" | "vm" | "local" | "browser";
 export const PLACES: readonly Place[] = ["cloud", "vm", "local", "browser"];
 /** What the chip shows: a place, the bot's Auto, or Off. */
 export type EffectivePlace = Place | "auto" | "off";
+
+/** Whether this server offers a place at all. An OMB Cloud home offers no
+ * "this computer" and no Local VM (shared/cloud-home.ts), so the pickers do
+ * not list them there; every other server offers all four. */
+export function placeOffered(place: Place, config: { cloudHome?: boolean } | null | undefined): boolean {
+  return !config?.cloudHome || cloudHomeOffersPlace(place);
+}
 
 /** The conversation's pin wins over the bot's Works on, except Off, exactly
  * as the server resolves it. */

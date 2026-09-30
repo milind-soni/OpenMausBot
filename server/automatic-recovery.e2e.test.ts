@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
@@ -11,6 +11,10 @@ const backup = { instanceId: "claude", model: "claude-sonnet-5" };
 const transient = { code: -32603, message: "Internal error", data: { details: "Upstream connection timed out" } };
 const jsonLines = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
+// At boot OpenCode lists its models by opening one ACP session in this
+// folder. Those calls are catalog discovery, not the turns under test.
+const CATALOG_PROBE_FOLDER = ["", "providers", "opencode", "discovery"].join(sep);
+const turnCalls = (path: string) => jsonLines(path).filter((call) => !String(call.cwd ?? "").endsWith(CATALOG_PROBE_FOLDER));
 
 async function withRecoveryFixture(
   options: { enabled?: boolean; method?: string; error?: unknown; afterOutput?: boolean; backupFails?: boolean; gated?: boolean; scripted?: boolean },
@@ -73,7 +77,6 @@ async function withRecoveryFixture(
     };
     config.automaticRecovery = { enabled: options.enabled !== false, backup };
     writeFileSync(configPath, JSON.stringify(config));
-    writeFileSync(failureFile, JSON.stringify(options.error ?? transient));
     const log = openSync(logPath, "a", 0o600);
     server = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
@@ -83,8 +86,11 @@ async function withRecoveryFixture(
     await expect.poll(async () => {
       try { return (await fetch(url + "/api/health", { signal: AbortSignal.timeout(1_000) })).ok; } catch { return false; }
     }, { timeout: 20_000 }).toBe(true);
+    // Armed once the server is up: the failure is the turns' to meet, not the
+    // model discovery the server runs while it starts.
+    writeFileSync(failureFile, JSON.stringify(options.error ?? transient));
     await check({
-      api, control, calls: () => jsonLines(rpcFile), backupPrompts: () => jsonLines(backupFile),
+      api, control, calls: () => turnCalls(rpcFile), backupPrompts: () => jsonLines(backupFile),
       backupReceipt: () => {
         const { argv, prompt, systemPrompt } = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
         return { argv, prompt, systemPrompt };

@@ -36,6 +36,17 @@ describe("boatErrorMessage", () => {
     expect(msg).toMatch(/box_/);
   });
 
+  it("never asks for a token the person never pasted when Cloud Pro's included one is refused", () => {
+    for (const status of [401, 403]) {
+      const msg = boatErrorMessage(status, "boat create", { message: "This cloud computer key is not valid." }, true);
+      expect(msg).toBe("Cloud Pro's included cloud computers aren't available right now. Try again later.");
+      expect(msg).not.toMatch(/box_|paste/);
+    }
+    // Cloud Pro's own refusals (its limits, its subscription) keep their words.
+    expect(boatErrorMessage(402, "boat create", { message: "Cloud computers are included with an active Cloud Pro subscription." }, true))
+      .toBe("Cloud computers are included with an active Cloud Pro subscription.");
+  });
+
   it("names the rate limit rather than a bare status", () => {
     expect(boatErrorMessage(429, "boat create", { message: "Too many boxes created today." })).toBe(
       "Too many boxes created today.",

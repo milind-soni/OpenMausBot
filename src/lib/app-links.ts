@@ -13,6 +13,7 @@ export const APPROVAL_LEVELS_URL = `${APP_REPOSITORY}/blob/main/docs/approval-le
  * Discord in minutes instead of sitting open as an issue. */
 export const FEEDBACK_URL = "https://discord.gg/9Wb8MEpXRs";
 export const RELEASES_URL = `${APP_REPOSITORY}/releases`;
+export const PRO_URL = "https://www.openmausbot.com/pro";
 export const LICENSE_URL = `${APP_REPOSITORY}/blob/main/LICENSE`;
 
 /** The version Vite inlined from package.json; "dev" when the define is

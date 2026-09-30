@@ -471,6 +471,64 @@ test("a delegated child from an earlier boot cannot block a new parent", (t) => 
   assert.equal(parent.release(), true);
 });
 
+// MOCA-270: macOS renames the host when it joins another network. A lease a
+// crash left on one network looked like another machine's on the next, and the
+// desktop refused to start until the person deleted the file by hand.
+const renamedHost = (current) => (current.host === "Ryans-MacBook-Pro.local" ? "Ryans-MBP.lan" : "Ryans-MacBook-Pro.local");
+
+test("a lease this computer left under its old hostname is recovered", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.boot === null) return t.skip("no boot identity on this platform");
+  plantOwner(dataDir, { host: renamedHost(current), pid: await exitedPid(), token: randomUUID() });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(JSON.parse(readFileSync(path.join(dataDir, LEASE_NAME), "utf8")).host, hostname());
+  assert.equal(lease.release(), true);
+});
+
+test("a delegated child this computer left under its old hostname cannot block a new parent", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.boot === null) return t.skip("no boot identity on this platform");
+  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  mkdirSync(path.dirname(childPath));
+  writeFileSync(childPath, JSON.stringify({ ...current, host: renamedHost(current), pid: await exitedPid(), token: randomUUID() }));
+
+  const parent = acquireDataDirLease(dataDir);
+  const child = acquireDataDirLeaseForProcess(dataDir, { ...parent.utilityServerLeaseEnvironment() });
+  assert.equal(child.delegated, true);
+  assert.equal(child.release(), true);
+  assert.equal(parent.release(), true);
+});
+
+// Another computer's boot, or this computer's earlier boot under another name:
+// the two cannot be told apart, so both still fail closed. The message now says
+// how to recover when no other computer shares the folder.
+test("a lease under another name from another boot still fails closed, and says how to recover", async () => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  const foreign = { host: renamedHost(current), boot: randomUUID(), pid: await exitedPid(), token: randomUUID() };
+  const leasePath = plantOwner(dataDir, foreign);
+  const planted = JSON.parse(readFileSync(leasePath, "utf8"));
+  assert.throws(() => acquireDataDirLease(dataDir), (error) => {
+    assert.match(error.message, /already owned by a process on another machine/i);
+    assert.ok(error.message.includes(`delete ${JSON.stringify(leasePath)} and start again`));
+    return true;
+  });
+  assert.deepEqual(JSON.parse(readFileSync(leasePath, "utf8")), planted);
+  rmSync(leasePath);
+
+  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  mkdirSync(path.dirname(childPath));
+  writeFileSync(childPath, JSON.stringify({ ...current, ...foreign }));
+  assert.throws(() => acquireDataDirLease(dataDir), (error) => {
+    assert.match(error.message, /delegated server on another machine/i);
+    assert.ok(error.message.includes(`delete ${JSON.stringify(childPath)} and start again`));
+    return true;
+  });
+});
+
 test("a lease recorded above the machine's current uptime is retired", () => {
   const { dataDir } = temporaryDirectory();
   // Windows has no boot session id, so a reboot is proven by the only

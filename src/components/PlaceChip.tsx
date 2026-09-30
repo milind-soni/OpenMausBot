@@ -1,10 +1,11 @@
 import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
 import { browserAvailable, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { instanceSupportsLocalComputer, localComputerSelectable } from "@/lib/local-computer";
-import { effectivePlace, PLACES, placeLabelKey, type Place } from "@/lib/place";
+import { effectivePlace, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
 import { useStore, type Bot, type Task } from "@/state/store";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { PlaceIcon } from "./PlaceIcon";
@@ -19,12 +20,13 @@ export function usePlaceAvailability(bot: Bot): PlaceAvailability {
   const instance = state.instances.find((candidate) => candidate.instanceId === bot.modelSelection.instanceId);
   const computerMcp = instance?.capabilities?.computerMcp === true;
   const boxAgent = instance?.driverKind === "boxAgent";
-  // Places the enrolled organisation disallows are never offered.
+  // Places the enrolled organisation disallows, or this server never
+  // offers (an OMB Cloud home), are not reachable.
   const allowed = state.config?.managedPolicy?.computers ?? { thisComputer: true, localVm: true, box: true, vps: true };
   return {
     cloud: (bot.cloudBackend === "vps" ? computerMcp && !boxAgent : computerMcp || boxAgent) && (bot.cloudBackend === "vps" ? allowed.vps : allowed.box),
-    vm: Boolean(instance?.snapshot?.state === "available" && computerMcp && !boxAgent) && allowed.localVm,
-    local: localComputerSelectable({ capabilities, providerSupportsLocal: instanceSupportsLocalComputer(state.instances, bot) }) && allowed.thisComputer,
+    vm: Boolean(instance?.snapshot?.state === "available" && computerMcp && !boxAgent) && allowed.localVm && placeOffered("vm", state.config),
+    local: localComputerSelectable({ capabilities, providerSupportsLocal: instanceSupportsLocalComputer(state.instances, bot) }) && allowed.thisComputer && placeOffered("local", state.config),
     browser: builtInBrowserEnabled(state.config) && browserAvailable(state.config) && instance?.capabilities?.browserMcp === true && !boxAgent,
   };
 }
@@ -45,7 +47,9 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   onPin: (surface: Place | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const motion = useMenuMotion(open);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const { state } = useStore();
   const availability = usePlaceAvailability(bot);
   const effective = effectivePlace(bot, task);
   const pinned = Boolean(task?.surface);
@@ -86,8 +90,8 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
         <PlaceIcon place={effective} size={16} className="shrink-0 opacity-80" aria-hidden="true" />
         {showLive && <span className="absolute right-1.5 top-1.5 size-1.5 animate-pulse rounded-full bg-success" aria-label={t("place.live")} />}
       </button>
-      {open && (
-        <div role="menu" aria-label={t("place.chipTitle")} className="absolute bottom-full left-0 z-40 mb-2 w-[300px] overflow-hidden rounded-2xl border border-hairline/40 bg-raised shadow-2xl">
+      {motion.shown && (
+        <div role="menu" aria-label={t("place.chipTitle")} className={cn("absolute bottom-full left-0 z-40 mb-2 w-[300px] overflow-hidden rounded-2xl border border-hairline/40 bg-raised shadow-2xl", motion.className)} {...motion.exitProps}>
           <div className="border-b border-hairline/20 px-4 py-3 text-[14px] font-medium text-ink">{t("place.chipTitle")}</div>
           <div className="flex flex-col py-1.5">
             <button
@@ -104,7 +108,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
               </span>
               {!pinned && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
             </button>
-            {PLACES.map((place) => {
+            {PLACES.filter((place) => placeOffered(place, state.config)).map((place) => {
               const selected = task?.surface === place;
               const reachable = availability[place];
               return (

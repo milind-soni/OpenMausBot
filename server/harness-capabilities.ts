@@ -28,6 +28,8 @@ const ENVELOPE: CatalogProfile = {
   skillAuthoring: true,
   sharedComputers: true,
   voiceNotes: true,
+  // Not a tool it adds: a Cloud home only hides its Local VM shell.
+  cloudHome: false,
   botId: "",
 };
 

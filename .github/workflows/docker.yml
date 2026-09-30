@@ -150,8 +150,10 @@ jobs:
         # The Fly home machine built on the image above, with the environment
         # openmaus-cloud's provisioner writes (docs/cloud-pro.md): Caddy on
         # :8080 is the only listener, a forwarded request is never the
-        # loopback owner, a bad boot contract never serves, everything runs as
-        # maus, and only an HMAC-signed, fresh, unreplayed request opens a
+        # loopback owner, a bad boot contract never serves, the launcher stays
+        # root (and runs only root's code) while the server and the edge run as
+        # maus with no secret in their environment, and only an HMAC-signed,
+        # fresh, unreplayed request opens a
         # single-use pairing window, also after a restart. Cloud Pro includes
         # no AI: the machine boots without any model gateway, serves no
         # included models, and tells the paired app to open its engine sign-in.
@@ -163,8 +165,9 @@ jobs:
           secret=$(rand43)
           test "${#secret}" = 43
           host=omb-t-0123456789ab.fly.dev
+          relay=$(rand43)
           contract=(-e OMB_CLOUD_ROLE=home -e OMB_CLOUD_MACHINE_ID=3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93 -e OMB_CLOUD_ADMIN_URL=https://cloud.example.test
-            -e "OMB_PUBLIC_URL=https://$host" -e "OMB_CLOUD_BOOTSTRAP_SECRET=$secret")
+            -e "OMB_PUBLIC_URL=https://$host" -e "OMB_CLOUD_BOOTSTRAP_SECRET=$secret" -e "OMB_CLOUD_BOAT_TOKEN=box_omb_$relay")
           # An incomplete contract exits instead of serving.
           if timeout 60 docker run --name home-bad -e OMB_CLOUD_ROLE=home omb-cloud-home:ci; then echo "an incomplete contract served"; exit 1; fi
           grep -q "Cloud home configuration is invalid" <<<"$(docker logs home-bad 2>&1)"
@@ -183,10 +186,27 @@ jobs:
           grep -qF "bots run on the engines the person signs in to here" <<<"$logs"
           if grep -qF "ignoring OMB_HOSTED" <<<"$logs"; then echo "a model gateway reached the boot contract"; exit 1; fi
           if grep -qF "$secret" <<<"$logs"; then echo "the bootstrap secret reached the log"; exit 1; fi
-          # The launcher, the server and the edge all run as maus.
-          # comm and the /proc/<pid> owner are readable without CAP_SYS_PTRACE; readlink of another user's exe is not.
-          owners=$(docker exec home sh -c 'for p in /proc/[0-9]*; do case "$(cat "$p/comm" 2>/dev/null)" in node|caddy) stat -c %U "$p";; esac; done' | sort -u)
-          echo "process owners: $owners"; test "$owners" = maus
+          # The launcher stays root; the server and the edge run as maus. Chosen
+          # by command line (a node process's comm is not always "node"), from
+          # outside the container so no probe matches itself.
+          maus=$(docker exec home id -u maus)
+          procs=$(docker top home -eo pid,uid,args)   # docker top needs the pid column
+          echo "$procs"
+          uids() { awk -v pat="$1" 'NR > 1 && index($0, pat) { print $2 }' <<<"$procs" | sort -u | tr '\n' ' '; }
+          test "$(uids dist-server/cloud-home-start.js)" = "0 "
+          test "$(uids dist-server/index.js)" = "$maus "
+          test "$(uids 'caddy run')" = "$maus "
+          # No secret in the server's starting environment, read as any maus process (an
+          # engine's shell) can read it: root in the container lacks CAP_SYS_PTRACE for that.
+          spid=$(docker exec home sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"dist-server/in""dex.js"*) echo "${p#/proc/}";; esac; done')
+          test -n "$spid"
+          docker exec -u maus home grep -qaF OMB_CLOUD_ROLE=home "/proc/$spid/environ"         # the probe reads it
+          for value in "$secret" "box_omb_$relay"; do
+            if docker exec -u maus home grep -qaF -- "$value" "/proc/$spid/environ"; then echo "a secret is in the server's environment"; exit 1; fi
+          done
+          # The root launcher runs only code maus cannot change; maus owns only the volume.
+          docker exec -u maus home sh -c 'for f in /app /app/dist-server /app/dist-server/index.js /app/dist-server/cloud-home-start.js /app/cloud/Caddyfile /usr/local/bin/caddy; do if test -w "$f"; then echo "maus can write $f"; exit 1; fi; done; test -w /data'
+          test "$(docker exec home stat -c %U /app/dist-server/index.js)" = root
           code() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$@"; }
           H=(-H "Host: $host")
           test "$(code "${H[@]}" $E/api/bots)" = 403                       # through the edge: never the owner

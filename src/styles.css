@@ -74,6 +74,7 @@
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-workspace-in: workspace-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-pop-out: pop-out 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   --animate-caret: caret-blink 1s step-end infinite;
   --animate-msg-in: msg-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-shimmer: shimmer 2s linear infinite;
@@ -738,6 +739,10 @@ body {
   from { transform: scale(0.96) translateY(6px); opacity: 0; }
   to { transform: scale(1) translateY(0); opacity: 1; }
 }
+@keyframes pop-out {
+  from { transform: scale(1) translateY(0); opacity: 1; }
+  to { transform: scale(0.96) translateY(6px); opacity: 0; }
+}
 /* streaming caret: a true typing blink (step, not fade) */
 @keyframes caret-blink {
   0%, 100% { opacity: 1; }
@@ -850,7 +855,7 @@ body {
   color: transparent;
 }
 @media (prefers-reduced-motion: reduce) {
-  .animate-caret, .animate-msg-in, .animate-shimmer { animation: none; }
+  .animate-caret, .animate-msg-in, .animate-shimmer, .animate-pop-in, .animate-pop-out { animation: none; }
   .animate-status-pulse { animation: none; opacity: 0.6; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
   .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
@@ -864,6 +869,8 @@ body {
    its view transitions. Mirrors the media block above for its own classes. */
 :root[data-reduced-motion="true"] .animate-rise,
 :root[data-reduced-motion="true"] .animate-spot-in,
+:root[data-reduced-motion="true"] .animate-pop-in,
+:root[data-reduced-motion="true"] .animate-pop-out,
 :root[data-reduced-motion="true"] .welcome-card * {
   animation: none !important;
   transition: none !important;

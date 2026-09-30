@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
 import { EnginesSettings } from "./EnginesSettings";
 import { ClaudeAccountForm } from "./ClaudeAccountSettings";
+import { AntigravityFreeSpace, formatDiskSize } from "./AntigravityFreeSpace";
 
 const fixture = vi.hoisted(() => ({ instances: [] as InstanceInfo[], bots: [] as Bot[] }));
 vi.mock("@/state/store", async (importOriginal) => ({
@@ -141,6 +142,54 @@ describe("Settings → Engines → setup cards", () => {
     expect(html).toContain("CLI path and updates");
     fixture.instances[0].access = "custom";
     expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Sign in with Google");
+  });
+});
+
+describe("Settings → Engines → Antigravity → Free up space", () => {
+  const antigravity = (freeUpSpace?: boolean): InstanceInfo => ({
+    instanceId: "agy", displayName: "Antigravity", driverKind: "antigravityAgent", cliDefault: "agy",
+    snapshot: { state: "available", authenticated: true }, models: { default: "model", options: [] },
+    ...(freeUpSpace ? { freeUpSpace } : {}),
+  });
+
+  it("appears only where the server says the engine leaves files behind (Antigravity on Windows)", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    fixture.instances = [antigravity(true)];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain("Leftover files");
+    expect(html).toContain("Free up space");
+    expect(html).toContain("Nothing is deleted until you confirm.");
+    fixture.instances = [antigravity()];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Free up space");
+  });
+
+  it("says how much it found before offering to delete", () => {
+    const found = renderToStaticMarkup(createElement(AntigravityFreeSpace, {
+      instance: antigravity(true), initial: { kind: "found", bytes: 2.5 * 1024 ** 3, complete: true },
+    }));
+    expect(found).toContain("Found 2.5 GB of leftover files.");
+    expect(found).toContain("Delete them");
+    expect(found).toContain("Cancel");
+    const partial = renderToStaticMarkup(createElement(AntigravityFreeSpace, {
+      instance: antigravity(true), initial: { kind: "found", bytes: 340 * 1024 ** 2, complete: false },
+    }));
+    expect(partial).toContain("Found at least 340 MB of leftover files.");
+  });
+
+  it("reports what it freed and what it had to leave", () => {
+    const done = renderToStaticMarkup(createElement(AntigravityFreeSpace, {
+      instance: antigravity(true), initial: { kind: "done", freedBytes: 1.26 * 1024 ** 3, remaining: 1 },
+    }));
+    expect(done).toContain("Freed 1.3 GB.");
+    expect(done).toContain("Some files are still in use and were left alone.");
+    const nothing = renderToStaticMarkup(createElement(AntigravityFreeSpace, {
+      instance: antigravity(true), initial: { kind: "done", freedBytes: 0, remaining: 2 },
+    }));
+    expect(nothing).not.toContain("Freed");
+    expect(nothing).toContain("Some files are still in use and were left alone.");
+    expect(formatDiskSize(10)).toBe("less than 1 MB");
   });
 });
 

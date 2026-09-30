@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { loadEnvironmentId } from "./environment.ts";
+import { boatCredential, boatProviderApi, type ServiceCredential } from "./included-services.ts";
 import {
   adoptResolvedBoat,
   beginBoatCreate,
@@ -57,10 +58,8 @@ export function isolatedRemoteCommand(command: string): string {
   ].join(" ");
 }
 
-// overridable so tests can point at a stub instead of the live provider.
 // Boat's provider surface keeps its historical Box-era names: env OMB_BOX_API,
 // base path /api/box/v1, REST paths /boxes/*, and the box_ token prefix.
-const BOAT_API = process.env.OMB_BOX_API || "https://ascii.dev/api/box/v1";
 const READY = new Set(["idle", "ready", "running"]);
 const SLEEPING = new Set(["archived", "archiving", "stopped", "stopping"]);
 const DEFAULT_BOAT_TTL_SECONDS = 8 * 60 * 60;
@@ -172,11 +171,15 @@ function snapshotBoatConfig(cfg: AppConfig): AppConfig {
   return { box: cfg.box ? { token: cfg.box.token } : undefined };
 }
 
+/** The base URL follows the credential in use (included-services.ts): an own
+ * token goes to Boat (OMB_BOX_API points it at a stub in tests), Cloud Pro's
+ * included token only to its relay. */
 function boatFetch(cfg: AppConfig, path: string, opts: RequestInit = {}) {
-  return fetch(`${BOAT_API}${path}`, {
+  const account = boatAccount(cfg);
+  return fetch(`${account?.api ?? boatProviderApi()}${path}`, {
     ...opts,
     headers: {
-      authorization: `Bearer ${cfg.box?.token}`,
+      authorization: `Bearer ${account?.token}`,
       "content-type": "application/json",
       ...opts.headers,
     },
@@ -396,7 +399,7 @@ async function requestRecordedBoatDeletion(
   }
   if (!removed.ok) {
     markBoatDeletionBlocked(identity.boxId);
-    throw Object.assign(new Error(boatErrorMessage(removed.status, "boat delete", removed.body)), { status: removed.status });
+    throw Object.assign(new Error(boatErrorMessage(removed.status, "boat delete", removed.body, usesIncludedBoat(cfg))), { status: removed.status });
   }
   const confirmation = await confirmAcceptedBoatDeletion(cfg, deletion, removed.body, pollDelaysMs);
   if (confirmation === "blocked") throw deletionBlockedError(identity.boxId);
@@ -466,16 +469,30 @@ async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_
 async function waitReady(cfg: AppConfig, boxId: string, budgetMs = 90_000) {
   assertBoatNotDeleting(boxId);
   const t0 = Date.now();
+  // Boat's words for the last failed resume, if the wait runs out on them.
+  let resumeFailure: string | null = null;
   while (Date.now() - t0 < budgetMs) {
     assertBoatNotDeleting(boxId);
     const { body } = await boatJson(cfg, `/boxes/${boxId}`);
     const state = body?.box?.state;
     if (READY.has(state)) return body.box;
     if (state === "error") return null;
-    // an archiving boat can't resume until the snapshot lands — nudge after
-    if (state === "archived") await boatJson(cfg, `/boxes/${boxId}/resume`, { method: "POST" });
+    // an archiving boat can't resume until the snapshot lands — nudge after.
+    // A refusal (a plan limit, say) is final: report it now. A server error
+    // is retried on the next poll, as Boat asks; 409 is a state race with a
+    // wake already under way.
+    if (state === "archived") {
+      const resumed = await boatJson(cfg, `/boxes/${boxId}/resume`, { method: "POST" });
+      if (resumed.ok) resumeFailure = null;
+      else if (resumed.status !== 409) {
+        const message = boatErrorMessage(resumed.status, "waking the cloud computer", resumed.body, usesIncludedBoat(cfg));
+        if (resumed.status < 500) throw new Error(message);
+        resumeFailure = message;
+      }
+    }
     await new Promise((r) => setTimeout(r, 2500));
   }
+  if (resumeFailure) throw new Error(resumeFailure);
   return null;
 }
 
@@ -486,9 +503,9 @@ async function waitReady(cfg: AppConfig, boxId: string, budgetMs = 90_000) {
 // the live state so callers can still see "archived".
 const boatIdCache = new Map<string, string>();
 
-function boatInventoryProblem(status: number, body: any): string {
+function boatInventoryProblem(status: number, body: any, included = false): string {
   if (status === 401 || status === 403) {
-    return "boat.dev rejected the Boat API key — update it in Settings → Connections";
+    return included ? INCLUDED_BOAT_UNAVAILABLE : "boat.dev rejected the Boat API key — update it in Settings → Connections";
   }
   if (status === 429) return "boat.dev is rate-limiting this account — wait a minute and refresh";
   const message = typeof body?.message === "string" ? body.message.trim() : "";
@@ -517,7 +534,11 @@ async function listBoatPages(
       return { ok: false, problem: "Could not reach boat.dev to list cloud computers — check your connection and refresh" };
     }
     if (!listed.ok || !Array.isArray(listed.body?.boxes)) {
-      return { ok: false, problem: boatInventoryProblem(listed.status, listed.body), credentialRejected: listed.status === 401 || listed.status === 403 };
+      return {
+        ok: false,
+        problem: boatInventoryProblem(listed.status, listed.body, usesIncludedBoat(cfg)),
+        credentialRejected: listed.status === 401 || listed.status === 403,
+      };
     }
     boats.push(...listed.body.boxes);
 
@@ -792,7 +813,7 @@ export async function inspectBoatIdentity(cfg: AppConfig, boxId: string): Promis
     return { available: true, identity: null, problem: null };
   }
   if (!inspected.ok) {
-    return { available: false, identity: null, problem: boatInventoryProblem(inspected.status, inspected.body) };
+    return { available: false, identity: null, problem: boatInventoryProblem(inspected.status, inspected.body, usesIncludedBoat(cfg)) };
   }
   const candidate = inspected.body?.box;
   const returnedId = typeof candidate?.id === "string" ? candidate.id : "";
@@ -854,7 +875,9 @@ async function stopBoat(cfg: AppConfig, boxId: string): Promise<void> {
   // must never say a computer is sleeping when boat.dev rejected the action.
   await runCommand(cfg, boxId, QUIESCE_BROWSER, { timeoutMs: 5_000 }).catch(() => null);
   const stopped = await boatJson(cfg, `/boxes/${boxId}/stop`, { method: "POST" });
-  if (!stopped.ok) throw Object.assign(new Error(boatErrorMessage(stopped.status, "boat sleep", stopped.body)), { status: stopped.status });
+  if (!stopped.ok) {
+    throw Object.assign(new Error(boatErrorMessage(stopped.status, "boat sleep", stopped.body, usesIncludedBoat(cfg))), { status: stopped.status });
+  }
 }
 
 function forgetBoatId(boxId: string): void {
@@ -993,16 +1016,34 @@ export async function readyBoat(cfg: AppConfig, botId: string, budgetMs = 60_000
   return waitReady(cfg, boat.id, budgetMs);
 }
 
+/** The Boat credential a request uses: the person's own token, else Cloud
+ * Pro's included one. Settings' own-key flows read cfg.box.token instead. */
+export function boatAccount(cfg: AppConfig): ServiceCredential | null {
+  return boatCredential(cfg.box?.token);
+}
+
 export function boatConfigured(cfg: AppConfig) {
-  return Boolean(cfg.box?.token);
+  return Boolean(boatAccount(cfg));
+}
+
+function usesIncludedBoat(cfg: AppConfig): boolean {
+  return boatAccount(cfg)?.included === true;
+}
+
+/** What Settings shows: configured-or-not, and whether that is Cloud Pro's
+ * included account rather than a saved key. Never the token. */
+export function describeBoatAccount(cfg: AppConfig): { configured: boolean; included?: true } {
+  const account = boatAccount(cfg);
+  return { configured: Boolean(account), ...(account?.included ? { included: true as const } : {}) };
 }
 
 /** Ask the provider whether a token is real, before we let someone save
  * it. Without this the paste "succeeds", and the first sign of trouble is
- * a 401 in a different panel minutes later, with nothing to act on. */
+ * a 401 in a different panel minutes later, with nothing to act on. Only
+ * ever an own token, so only ever Boat itself. */
 export async function verifyToken(token: string): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    const res = await fetch(`${BOAT_API}/boxes`, {
+    const res = await fetch(`${boatProviderApi()}/boxes`, {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(20_000),
     });
@@ -1023,11 +1064,16 @@ export async function verifyToken(token: string): Promise<{ ok: true } | { ok: f
   }
 }
 
+/** A rejected Cloud Pro relay token: nothing the person pasted, so nothing
+ * for them to fix in Settings. */
+const INCLUDED_BOAT_UNAVAILABLE = "Cloud Pro's included cloud computers aren't available right now. Try again later.";
+
 /** Turn a provider refusal into something a person can act on. The
  * provider's own message is better than anything we can invent — it knows
  * the plan, the limit and the link — so prefer it and only fall back to
- * our own wording when it says nothing useful. */
-export function boatErrorMessage(status: number, what: string, body?: any): string {
+ * our own wording when it says nothing useful. `included`: the request used
+ * Cloud Pro's included token, not the person's own. */
+export function boatErrorMessage(status: number, what: string, body?: any, included = false): string {
   const theirs = typeof body?.message === "string" ? body.message.trim() : "";
   const link = typeof body?.error?.details?.billingUrl === "string" ? body.error.details.billingUrl : "";
   if (status === 402) {
@@ -1035,6 +1081,7 @@ export function boatErrorMessage(status: number, what: string, body?: any): stri
     return [theirs || "boat.dev needs a paid Boat plan before it will create a computer.", link].filter(Boolean).join(" ");
   }
   if (status === 401 || status === 403) {
+    if (included) return INCLUDED_BOAT_UNAVAILABLE;
     return "your box token was rejected by boat.dev — open App Settings and paste a current token (it starts with box_)";
   }
   if (status === 429) {
@@ -1237,7 +1284,7 @@ export async function provisionBoat(cfg: AppConfig, botId: string, _botName: str
       // retry when boat.dev reports their shorter TTL ceiling.
       const createRes = await createBoat(cfg, botId, credentialEnv);
       if (!createRes.ok || !createRes.body?.box?.id) {
-        throw new Error(boatErrorMessage(createRes.status, "boat create", createRes.body));
+        throw new Error(boatErrorMessage(createRes.status, "boat create", createRes.body, usesIncludedBoat(cfg)));
       }
       boat = createRes.body.box;
       createRequest = createRes.request;
@@ -1246,7 +1293,7 @@ export async function provisionBoat(cfg: AppConfig, botId: string, _botName: str
         method: "PATCH",
         body: JSON.stringify({ name: vmName }),
       });
-      if (!rename.ok) throw new Error(boatErrorMessage(rename.status, "box naming", rename.body));
+      if (!rename.ok) throw new Error(boatErrorMessage(rename.status, "box naming", rename.body, usesIncludedBoat(cfg)));
       if (createRequest) createRequest = resolveBoatCreate(createRequest);
     }
     const ready = await waitReady(cfg, boat.id);

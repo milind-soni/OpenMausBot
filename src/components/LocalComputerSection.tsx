@@ -19,6 +19,7 @@ import {
 import { Card, CommandLine } from "./SettingsPrimitives";
 import { MacLocalControl } from "./MacLocalControl";
 import { cn } from "@/lib/cn";
+import { useStore } from "@/state/store";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
 
@@ -818,6 +819,9 @@ function ActionButton({
 }
 
 export function LocalComputerSection() {
+  // An OMB Cloud home has no Local VM (shared/cloud-home.ts): it neither
+  // checks for one nor explains how to set one up.
+  const cloudHome = useStore().state.config?.cloudHome === true;
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<Action | null>(null);
@@ -911,6 +915,7 @@ export function LocalComputerSection() {
   }, []);
 
   useEffect(() => {
+    if (cloudHome) return;
     let active = true;
     let timer: number | undefined;
     let controller: AbortController | undefined;
@@ -936,7 +941,7 @@ export function LocalComputerSection() {
       controller?.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [refresh, refreshKey]);
+  }, [cloudHome, refresh, refreshKey]);
 
   useEffect(() => {
     if (status?.mode !== "per-bot") {
@@ -1253,6 +1258,7 @@ export function LocalComputerSection() {
 
       <MacLocalControl />
 
+      {!cloudHome && <>
       <Card
         title={t("vm.main.title")}
         subtitle={perBot
@@ -1482,6 +1488,7 @@ export function LocalComputerSection() {
           {status?.base_image_ref ? <> · {t("vm.safety.baseImage", { image: status.base_image_ref })}</> : null}
         </div>
       </Card>
+      </>}
     </>
   );
 }

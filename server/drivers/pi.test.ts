@@ -916,18 +916,24 @@ describe("PiDriver turns (fake CLI)", () => {
   it("cancels an ask's fail-safe timer when the turn is interrupted", async () => {
     await create("question-select");
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const scheduled = vi.spyOn(globalThis, "setTimeout");
+    const cancelled = vi.spyOn(globalThis, "clearTimeout");
     try {
       await instance.adapter.sendTurn({ threadId: "t-ask-interrupt", text: "go" });
       await recorder.until((e) => e.type === "request.opened");
+      const askIndex = scheduled.mock.calls.findIndex(([, delay]) => delay === 15 * 60_000);
+      expect(askIndex).toBeGreaterThanOrEqual(0);
+      const askTimer = scheduled.mock.results[askIndex].value;
+      expect(cancelled).not.toHaveBeenCalledWith(askTimer);
       await instance.adapter.interruptTurn("t-ask-interrupt");
       await recorder.until((e) => e.type === "turn.completed");
-      // Flush the short-lived RPC waiter timers, then require that nothing
-      // is left queued: settle() cancels the ask's 15-minute fail-safe
-      // outright instead of leaving it to fire against a dead child while
-      // holding the ask closure alive.
-      await vi.advanceTimersByTimeAsync(21_000);
-      expect(vi.getTimerCount()).toBe(0);
+      // Assert this ask's timer was cancelled, not that the whole process
+      // has no timers: killCliTree may still be polling for the real child
+      // to exit, which advancing a fake clock cannot guarantee.
+      expect(cancelled).toHaveBeenCalledWith(askTimer);
     } finally {
+      scheduled.mockRestore();
+      cancelled.mockRestore();
       vi.useRealTimers();
     }
   });

@@ -2,7 +2,7 @@
 // Only the model is fake. Files live in the disposable verification home.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
@@ -74,17 +74,45 @@ beforeAll(async () => {
     fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${pairing.token}` } }),
   });
   bot = (await api("POST", "/api/bots", { name: "Shared desktop tester" })).body.bot;
-  expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Inspect the folder shared by my desktop; do not use files on the server." })).status).toBe(202);
-  const dump = join(fixture.info.dataDir, "fake-claude-dump.json");
-  await vi.waitFor(() => expect(existsSync(dump)).toBe(true), { timeout: 15_000 });
-  const agents = JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.agents;
-  expect(agents.env.OMB_COMMS_TOKEN).toBeTruthy();
-  proxy = spawn(agents.command, agents.args, {
-    env: { PATH: process.env.PATH, HOME: fixture.info.dataDir, ...agents.env }, stdio: ["pipe", "pipe", "pipe"],
-  });
+  // The person who lends the desktop asks, from that same paired session:
+  // only a conversation that person started may use their computer.
+  proxy = await agentProxyFor(bot.id, pairing.token, "Inspect the folder shared by my desktop; do not use files on the server.");
   createInterface({ input: proxy.stdout! }).on("line", line => { const msg = JSON.parse(line); waiting.get(msg.id)?.(msg); waiting.delete(msg.id); });
   await rpc("initialize", { protocolVersion: "2024-11-05" });
 }, 30_000);
+
+/** Start a turn on this bot from this paired session and return the agents
+ * MCP proxy that turn was handed (the fake model hangs, so the turn and its
+ * capability stay live). */
+async function agentProxyFor(botId: string, token: string, text: string): Promise<ChildProcess> {
+  return proxyForTurn(async () => {
+    expect((await api("POST", `/api/bots/${botId}/messages`, { text }, { authorization: `Bearer ${token}` })).status).toBe(202);
+  });
+}
+
+/** A second MCP client for an already running proxy, with its own ids. */
+function mcpClient(child: ChildProcess) {
+  const replies = new Map<number, (value: any) => void>();
+  createInterface({ input: child.stdout! }).on("line", line => { const msg = JSON.parse(line); replies.get(msg.id)?.(msg); replies.delete(msg.id); });
+  let next = 1000;
+  const request = (method: string, params: unknown): Promise<any> => new Promise(resolve => {
+    const id = ++next; replies.set(id, msg => resolve(msg.result));
+    child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+  });
+  return { initialize: () => request("initialize", { protocolVersion: "2024-11-05" }), call: (name: string, args: unknown = {}) => request("tools/call", { name, arguments: args }) };
+}
+
+async function proxyForTurn(start: () => Promise<void>): Promise<ChildProcess> {
+  const dump = join(fixture.info.dataDir, "fake-claude-dump.json");
+  rmSync(dump, { force: true });
+  await start();
+  await vi.waitFor(() => expect(existsSync(dump)).toBe(true), { timeout: 15_000 });
+  const agents = JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.agents;
+  expect(agents.env.OMB_COMMS_TOKEN).toBeTruthy();
+  return spawn(agents.command, agents.args, {
+    env: { PATH: process.env.PATH, HOME: fixture.info.dataDir, ...agents.env }, stdio: ["pipe", "pipe", "pipe"],
+  });
+}
 
 afterAll(async () => {
   connector?.close(); proxy?.kill();
@@ -143,6 +171,68 @@ it("explicit edits and terminal work; old credentials and other sessions cannot 
   expect((await api("POST", `/api/shared-computers/${grant.id}/lease`, {}, { cookie, origin: "https://evil.invalid", "x-omb-computer-secret": grant.secret })).status).toBe(403);
   evidence.push("explicit hash-guarded edit and real terminal; cross-session, stale-secret, CSRF, local-control gate refusals");
 }, 60_000);
+
+it("another person's conversation can neither see nor use the lent desktop", async () => {
+  // A second person paired to the same server (client scope is enough to chat).
+  const opened = await api("POST", "/api/auth/pairing", { label: "Another person", scopes: ["client"] });
+  const intruder = (await api("POST", "/api/auth/pair", { code: opened.body.code })).body;
+  const theirs = (await api("POST", "/api/bots", { name: "Their bot" })).body.bot;
+  const other = await agentProxyFor(theirs.id, intruder.token, "List the shared computers and read brief.txt from the first one.");
+  const { initialize, call } = mcpClient(other);
+  try {
+    await initialize();
+    // The owner's own conversation still sees it.
+    expect(await computers()).toHaveLength(1);
+    expect(JSON.parse((await call("list_shared_computers")).content[0].text).computers).toEqual([]);
+    const refused = await call("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action: "read_file", path: "brief.txt" });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused)).not.toContain("Reviewed");
+    // Not a Cloud home: another person's conversation still keeps the bot's
+    // notes as before (the Cloud-only memory rules do not apply here).
+    const noted = await call("memory_update", { action: "append", text: "A note from another person's chat." });
+    expect(noted.isError, JSON.stringify(noted)).toBeFalsy();
+  } finally { other.kill(); }
+  evidence.push("owner partition: another paired person's bot sees no computers and cannot read the owner's file by id");
+}, 45_000);
+
+it("a routine acts for nobody, even one the lender created: it sees and uses no computer", async () => {
+  const routineBot = (await api("POST", "/api/bots", { name: "Routine bot" })).body.bot;
+  const owner = { authorization: `Bearer ${pairing.token}` };
+  const routine = await proxyForTurn(async () => {
+    const created = await api("POST", "/api/routines", {
+      name: "Nightly desktop read", prompt: "Read brief.txt from my shared computer.", botId: routineBot.id, enabled: false,
+      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+    }, owner);
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect((await api("POST", `/api/routines/${created.body.routine.id}/run`, undefined, owner)).status).toBe(201);
+  });
+  const { initialize, call } = mcpClient(routine);
+  try {
+    await initialize();
+    expect(await computers()).toHaveLength(1);
+    expect(JSON.parse((await call("list_shared_computers")).content[0].text).computers).toEqual([]);
+    const refused = await call("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action: "read_file", path: "brief.txt" });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toContain("only a conversation started by the person who shared it");
+  } finally { routine.kill(); }
+  evidence.push("fail-closed principal: a routine turn (created by the lender) sees no computers");
+}, 45_000);
+
+it("a bot whose computer is off cannot drive the lent screen, even when screen control is lent", async () => {
+  await connector.save(env, { folders: [{ ...folder, write: true }], terminal: true, computer: true }, await connector.identity(env));
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "off" })).status).toBe(200);
+  try {
+    const refused = await operation("computer_tools");
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toContain("This bot has no computer");
+    // Folder work is unaffected by the bot's screen setting.
+    expect(data(await operation("list_files")).entries.length).toBeGreaterThan(0);
+  } finally {
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: null })).status).toBe(200);
+  }
+  evidence.push("a bot set to no computer is refused the lent screen before anything reaches the desktop");
+}, 30_000);
 
 it("revocation stops a running command, prevents further access and stays off after restart", async () => {
   const pending = operation("run_command", { command: process.platform === "win32" ? "Start-Sleep -Seconds 20" : "sleep 20" });

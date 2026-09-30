@@ -20,6 +20,7 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
+import { boatCredential, boatProviderApi } from "../included-services.ts";
 import { appendNative } from "./native.ts";
 import {
   OMB_ASK_TOOL,
@@ -34,8 +35,6 @@ import {
 
 // "boxAgent" is Boat's historical driver kind (catalog and wire); keep it.
 const DRIVER_KIND = "boxAgent";
-// overridable so tests and a dev backend can be pointed at instead of the live provider
-const BOAT_API = process.env.OMB_BOX_API || "https://ascii.dev/api/box/v1";
 
 const MODELS = {
   default: "claude-fable-5",
@@ -54,10 +53,14 @@ const ASK_FENCE_ANY = /(^|\n)[ \t]{0,3}(`{3,}|~{3,})[ \t]*omb-ask\b/;
  * prime-agent, kimi). Which one a model id belongs to comes from the public
  * catalog, `GET /api/provider-models` at the API root: an object keyed by
  * harness, each with its `models`. A bot that arrives here from another engine
- * carries that engine's model id, so this is what lets it keep its model. */
+ * carries that engine's model id, so this is what lets it keep its model. The
+ * root is the API in use (Boat, or Cloud Pro's relay), so it is cached per root. */
 let catalog: Record<string, { models?: Array<{ id?: string }> }> | null = null;
-async function loadCatalog(): Promise<void> {
-  const root = BOAT_API.replace(/\/api\/box\/v1\/?$/, "");
+let catalogRoot = "";
+async function loadCatalog(api: string): Promise<void> {
+  const root = api.replace(/\/api\/box\/v1\/?$/, "");
+  if (catalog && catalogRoot === root) return;
+  catalogRoot = root;
   catalog = await fetch(`${root}/api/provider-models`, { signal: AbortSignal.timeout(15_000) })
     .then((res) => (res.ok ? res.json() : null))
     .catch(() => null) as typeof catalog;
@@ -96,7 +99,11 @@ export const BoatAgentDriver: ProviderDriver<BoatAgentConfig> = {
 
   async create(input: DriverCreateInput<BoatAgentConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
-    const token = input.environment.BOX_TOKEN ?? process.env.BOX_TOKEN ?? "";
+    // The person's own token (instanceConfigs injects it), else Cloud Pro's
+    // included one, with the one base URL each may be sent to. Resolved per
+    // request, like every other Boat call.
+    const ownToken = input.environment.BOX_TOKEN ?? process.env.BOX_TOKEN;
+    const account = () => boatCredential(ownToken);
     const listeners = new Set<RuntimeEventListener>();
     const active = new Map<string, { cancel: () => void; turnId: string; boxId: string }>();
     /** One open ask per thread: the turn-held transport's pending card. The
@@ -122,9 +129,10 @@ export const BoatAgentDriver: ProviderDriver<BoatAgentConfig> = {
     });
 
     const api = async (path: string, opts: RequestInit = {}) => {
-      const res = await fetch(`${BOAT_API}${path}`, {
+      const credential = account();
+      const res = await fetch(`${credential?.api ?? boatProviderApi()}${path}`, {
         ...opts,
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...opts.headers },
+        headers: { authorization: `Bearer ${credential?.token ?? ""}`, "content-type": "application/json", ...opts.headers },
         signal: (opts as any).signal ?? AbortSignal.timeout(30_000),
       });
       const body: any = await res.json().catch(() => null);
@@ -138,7 +146,7 @@ export const BoatAgentDriver: ProviderDriver<BoatAgentConfig> = {
       const { threadId } = turn;
       const computer = turn.integrations?.computer;
       const boxId = computer && (!computer.kind || computer.kind === "box") ? computer.boxId : undefined;
-      if (!token) throw new Error('box not configured — add {"box":{"token":"…"}} to ~/.openmausbot/config.json');
+      if (!account()) throw new Error('box not configured — add {"box":{"token":"…"}} to ~/.openmausbot/config.json');
       if (!boxId) {
         throw new Error("this bot has no computer yet — open the Computer panel and provision one");
       }
@@ -161,7 +169,7 @@ export const BoatAgentDriver: ProviderDriver<BoatAgentConfig> = {
         .join("\n");
 
       const postPrompt = async (promptText: string): Promise<string | null> => {
-        if (!catalog) await loadCatalog();
+        await loadCatalog(account()?.api ?? boatProviderApi());
         const started: any = await api(`/boxes/${boxId}/prompt`, {
           method: "POST",
           body: JSON.stringify({ ...providerFor(model), prompt: promptText }),
@@ -396,7 +404,7 @@ export const BoatAgentDriver: ProviderDriver<BoatAgentConfig> = {
     };
 
     const snapshot = async (): Promise<ProviderSnapshot> => {
-      if (!token) {
+      if (!account()) {
         return { state: "unavailable", reason: 'no Boat token — add {"box":{"token":"…"}} to ~/.openmausbot/config.json' };
       }
       try {

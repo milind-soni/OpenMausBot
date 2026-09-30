@@ -53,6 +53,8 @@ app.whenReady().then(async () => {
   }
   const agyDump = join(home, "agy.json");
   const agyRpc = join(home, "agy-rpc.json");
+  // what the latest Antigravity prompt ran under (mode and model), from any process
+  const lastPrompt = () => JSON.parse(readFileSync(`${agyDump}.prompts.jsonl`, "utf8").trim().split("\n").at(-1));
   const codexDump = join(home, "codex.json");
   const grokDump = join(home, "grok.json");
   const grokRpc = join(home, "grok-rpc.json");
@@ -71,7 +73,8 @@ app.whenReady().then(async () => {
     },
   });
   writeFileSync(join(home, "config.json"), JSON.stringify({ instances: {
-    claude: { driver: "claudeAgent", config: { cli: join(root, "server/testing/fake-claude-cli.ts") } },
+    claude: { driver: "claudeAgent", config: { cli: join(root, "server/testing/fake-claude-cli.ts") },
+      ...(process.argv.includes("--model-ui-only") ? { environment: { FAKE_CLAUDE_VERSION: "2.1.284" } } : {}) },
     codex: { driver: "codex", config: { cli: join(root, "server/testing/fake-codex-app-server.ts") }, environment: { FAKE_CODEX_MODE: "approval", FAKE_CODEX_DUMP: codexDump } },
     agy: { driver: "antigravityAgent", config: { cli: agy }, environment: { FAKE_ACP_DUMP: agyDump, FAKE_ACP_RPC_DUMP: agyRpc } },
     "agy-question": { driver: "antigravityAgent", config: { cli: agy }, environment: { FAKE_ACP_MODE: "question" } },
@@ -320,10 +323,14 @@ app.whenReady().then(async () => {
         await until(async () => !(await api("/api/bots?messages=0")).body.bots.find((bot) => bot.id === agyBot.id)?.busy);
       }
       const native = mode === "full" ? "yolo" : "default";
+      // One process serves every approval level of a conversation, so its
+      // config log also holds earlier turns' switches. What counts is what
+      // this turn's prompt ran under, which the fake records at the prompt.
+      const prompted = lastPrompt();
+      assert.equal(prompted.mode, native);
+      assert.equal(prompted.model, model);
       const calls = JSON.parse(readFileSync(`${agyDump}.config.json`, "utf8"));
-      assert.equal(calls.find((call) => call.params.configId === "mode")?.params.value, native);
-      // The first advertised model is already selected by session/new/load.
-      assert.equal(calls.find((call) => call.params.configId === "model")?.params.value ?? "gemini-3.8-flash-high", model);
+      assert.equal(calls.findLast((call) => call.params.configId === "mode")?.params.value, native);
       const rpc = JSON.parse(readFileSync(agyRpc, "utf8"));
       assert.ok(rpc.includes(turn === 0 ? "session/new" : "session/resume"));
       console.log(JSON.stringify({ provider: "antigravity", model, mode, native, resumed: turn > 0, autoApproved: mode === "full", humanApproved: mode !== "full" }));
@@ -357,8 +364,7 @@ app.whenReady().then(async () => {
   const completedPeer = (await api("/api/bots")).body.bots.find((bot) => bot.id === peerTarget.id);
   assert.ok(!pendingCard(completedPeer));
   assert.ok(!peerDecisions.some((row) => row.decision === "card-shown"));
-  const peerCalls = JSON.parse(readFileSync(`${agyDump}.config.json`, "utf8"));
-  assert.equal(peerCalls.find((call) => call.params.configId === "mode")?.params.value, "yolo");
+  assert.equal(lastPrompt().mode, "yolo");
   console.log(JSON.stringify({ provider: "antigravity", mode: "full", peerInitiated: true, native: "yolo", autoApproved: true, humanApproved: false }));
 
   // Revoking the receiving thread's grant must restore prompts on the resumed
@@ -369,8 +375,7 @@ app.whenReady().then(async () => {
   const askPeerRequest = api("/api/internal/ask-bot", "POST", { toBotId: peerTarget.id, message: "Ask target must not inherit sender Full" }, { authorization: `Bearer ${capability.body.token}` });
   void askPeerRequest.catch(() => {});
   const peerCard = await until(async () => pendingCard((await api("/api/bots")).body.bots.find((bot) => bot.id === peerTarget.id)));
-  const askPeerCalls = JSON.parse(readFileSync(`${agyDump}.config.json`, "utf8"));
-  assert.equal(askPeerCalls.find((call) => call.params.configId === "mode")?.params.value, "default");
+  assert.equal(lastPrompt().mode, "default");
   assert.equal((await api(`/api/bots/${peerTarget.id}/respond`, "POST", { requestId: peerCard.requestId, behavior: "allow" })).status, 200);
   assert.equal((await askPeerRequest).status, 200);
   console.log(JSON.stringify({ provider: "antigravity", mode: "ask", senderMode: "full", peerInitiated: true, native: "default", humanApproved: true }));

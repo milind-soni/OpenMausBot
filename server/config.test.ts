@@ -523,6 +523,15 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch({ features: { browser: false } })).toEqual({ features: { browser: false } });
     expect(builtInBrowserEnabled({ features: { browser: false } })).toBe(false);
     expect(builtInBrowserEnabled({ features: { browser: true } })).toBe(true);
+    // An OMB Cloud home skips the welcome that turns it on, so there it is on
+    // until the person turns it off; any other server is unchanged.
+    const cloudHome = { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93" };
+    expect(builtInBrowserEnabled({}, {})).toBe(false);
+    expect(builtInBrowserEnabled({}, { OMB_PUBLIC_URL: "https://selfhosted.example.test" })).toBe(false);
+    expect(builtInBrowserEnabled({}, cloudHome)).toBe(true);
+    expect(builtInBrowserEnabled({ features: { skillAuthoring: true } }, cloudHome)).toBe(true);
+    expect(builtInBrowserEnabled({ features: { browser: false } }, cloudHome)).toBe(false);
+    expect(builtInBrowserEnabled({ features: { browser: true } }, cloudHome)).toBe(true);
     // named browser profiles: the list is the unit, ids are partition-safe
     expect(parseConfigPatch({ browserProfiles: [{ id: "work", name: " Work " }] })).toEqual({
       browserProfiles: [{ id: "work", name: "Work" }],
@@ -644,6 +653,12 @@ describe("saving the newer sections", () => {
 });
 
 describe("default fleet", () => {
+  it("adds a separate ChatGPT plan account without copying Codex credentials", () => {
+    const cfg: AppConfig = { instances: { codex: { driver: "codex", config: { cli: "/fixture/codex" }, environment: { CODEX_HOME: "/other-account", OPENAI_API_KEY: "not-for-plan" } } } };
+    expect(instanceConfigs(cfg).chatgpt).toMatchObject({ driver: "codex", displayName: "ChatGPT plan", config: { cli: "/fixture/codex", authMode: "chatgpt-plan" }, environment: {} });
+    expect(cfg.instances).not.toHaveProperty("chatgpt");
+    expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("chatgpt");
+  });
   it("adds Mistral to product fleets and scopes its saved credential to Mistral", () => {
     const map = instanceConfigs({ mistral: { key: "mistral-fixture" }, instances: { codex: { driver: "codex" } } });
     expect(map.mistral).toEqual({ driver: "mistral", environment: { MISTRAL_API_KEY: "mistral-fixture" } });
@@ -684,6 +699,54 @@ describe("default fleet", () => {
     expect(map.openaiCompat.environment).toEqual({});
     expect(instanceConfigs({ anthropic: { url: "https://only-a-url.example.test" } }).claude.environment).toEqual({});
     expect(parseConfigPatch({ anthropic: { key: "sk-ant-new" } })).toEqual({ anthropic: { key: "sk-ant-new" } });
+  });
+
+  it("never hands the workspace Anthropic key to a Claude instance with its own endpoint or credential", () => {
+    const map = instanceConfigs({
+      anthropic: { key: "sk-ant-workspace", url: "https://anthropic-proxy.example.test" },
+      instances: {
+        claude: { driver: "claudeAgent" },
+        router: { driver: "claudeAgent", environment: { ANTHROPIC_BASE_URL: "https://router.example.test", ANTHROPIC_AUTH_TOKEN: "router-token" } },
+        keyed: { driver: "claudeAgent", environment: { ANTHROPIC_API_KEY: "sk-ant-own" } },
+        bedrock: { driver: "claudeAgent", environment: { CLAUDE_CODE_USE_BEDROCK: "1" } },
+      },
+    });
+    expect(map.claude.environment).toEqual({ ANTHROPIC_API_KEY: "sk-ant-workspace", ANTHROPIC_BASE_URL: "https://anthropic-proxy.example.test" });
+    expect(map.router.environment).toEqual({ ANTHROPIC_BASE_URL: "https://router.example.test", ANTHROPIC_AUTH_TOKEN: "router-token" });
+    expect(map.keyed.environment).toEqual({ ANTHROPIC_API_KEY: "sk-ant-own" });
+    expect(map.bedrock.environment).toEqual({ CLAUDE_CODE_USE_BEDROCK: "1" });
+  });
+
+  // The same leak as a Claude router instance, in the API-key engines: a
+  // hand-written instance with its own URL got the workspace key and sent it
+  // to that URL's host.
+  it("never hands a workspace API key to an API-key instance with its own endpoint or key", () => {
+    const map = instanceConfigs({
+      openaiCompat: { key: "sk-or-WORKSPACE" },
+      mistral: { key: "mistral-WORKSPACE" },
+      xai: { key: "xai-WORKSPACE" },
+      instances: {
+        claude: { driver: "claudeAgent" },
+        openaiCompat: { driver: "openai-compat" },
+        sameUrl: { driver: "openai-compat", config: { url: "https://openrouter.ai/api/v1/" } },
+        groq: { driver: "openai-compat", config: { url: "https://third-party.example.test/v1" } },
+        ownKey: { driver: "openai-compat", config: { key: "sk-own" } },
+        ownVariable: { driver: "openai-compat", config: { apiKeyEnv: "GROQ_API_KEY" } },
+        mistral: { driver: "mistral" },
+        mistralProxy: { driver: "mistral", config: { url: "https://mistral-proxy.example.test/v1" } },
+        grokApi: { driver: "grok" },
+        grokProxy: { driver: "grok", config: { url: "https://xai-proxy.example.test/v1" } },
+        grokOwn: { driver: "grok", environment: { XAI_API_KEY: "xai-own" } },
+      },
+    });
+    expect(map.openaiCompat.environment).toMatchObject({ OPENAI_COMPAT_API_KEY: "sk-or-WORKSPACE" });
+    expect(map.sameUrl.environment).toMatchObject({ OPENAI_COMPAT_API_KEY: "sk-or-WORKSPACE" });
+    for (const id of ["groq", "ownKey", "ownVariable"]) expect(map[id].environment, id).toEqual({});
+    expect(map.mistral.environment).toEqual({ MISTRAL_API_KEY: "mistral-WORKSPACE" });
+    expect(map.mistralProxy.environment).toEqual({});
+    expect(map.grokApi.environment).toEqual({ XAI_API_KEY: "xai-WORKSPACE" });
+    expect(map.grokProxy.environment).toEqual({});
+    expect(map.grokOwn.environment).toEqual({ XAI_API_KEY: "xai-own" });
   });
 
   it("preserves a per-instance OpenAI-compatible URL override", () => {
@@ -1033,6 +1096,50 @@ describe("credential env preference", () => {
     expect(cfg.imageGen).toEqual({ key: "env-image" });
   });
 
+  it("uses a preset voice only when the person has not chosen one or another provider", () => {
+    process.env.OMB_TTS_DEFAULT_VOICE = " preset-voice ";
+    expect(loadConfig().tts?.voice).toBe("preset-voice");
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ tts: { voice: "chosen" } }));
+    expect(loadConfig().tts?.voice).toBe("chosen");
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ tts: { provider: "system" } }));
+    expect(loadConfig().tts?.voice).toBeUndefined();
+    writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ tts: { provider: "elevenlabs" } }));
+    expect(loadConfig().tts?.voice).toBe("preset-voice");
+  });
+
+  it("never takes Cloud Pro's included tokens for the person's own keys, in config or an engine's environment", () => {
+    const included = {
+      OMB_CLOUD_BOAT_URL: "https://cloud.example.test/api/cloud/services/boat/api/box/v1",
+      OMB_CLOUD_BOAT_TOKEN: "box_omb_included-relay-token",
+      OMB_CLOUD_VOICE_URL: "https://cloud.example.test/api/cloud/services/voice/v1",
+      OMB_CLOUD_VOICE_TOKEN: "omb_voice_included-relay-token",
+      OMB_CLOUD_DECIDER_URL: "https://cloud.example.test/api/cloud/services/decider",
+      OMB_CLOUD_DECIDER_TOKEN: "omb_decide_included-relay-token",
+    };
+    for (const [name, value] of Object.entries(included)) vi.stubEnv(name, value);
+    try {
+      const cfg = loadConfig();
+      expect(cfg.box?.token).toBeUndefined();
+      expect(cfg.tts?.key).toBeUndefined();
+      expect(cfg.decider?.key).toBeUndefined();
+      expect(instanceConfigs(cfg).computer?.environment).toEqual({});
+      saveConfig({ tts: { voice: "chosen" }, box: { token: "" }, decider: { enabled: true, jobs: { roomRouting: true } } });
+      const disk = readFileSync(join(DATA_DIR, "config.json"), "utf8");
+      const runtime = JSON.stringify([loadConfig(), instanceConfigs(loadConfig()), persistableInstanceConfigs(loadConfig())]);
+      for (const token of [included.OMB_CLOUD_BOAT_TOKEN, included.OMB_CLOUD_VOICE_TOKEN, included.OMB_CLOUD_DECIDER_TOKEN]) {
+        expect(disk).not.toContain(token);
+        expect(runtime).not.toContain(token);
+      }
+      // The person's own keys, from the environment here, are theirs as ever.
+      process.env.BOX_TOKEN = "box_own";
+      process.env.OMB_TTS_KEY = "sk-own";
+      expect(loadConfig()).toMatchObject({ box: { token: "box_own" }, tts: { key: "sk-own" } });
+      expect(instanceConfigs(loadConfig()).computer?.environment).toEqual({ BOX_TOKEN: "box_own" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("saves and removes the verified domain without replacing existing settings", () => {
     saveConfig({ profile: { name: "Workspace owner" }, customDomain: "https://bots.example.com" });
     expect(loadConfig().customDomain).toBe("https://bots.example.com");
@@ -1367,6 +1474,11 @@ describe("workspace credential env strip", () => {
     // consumed in-process (Computer driver / voice module), never by a CLI
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("BOX_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TTS_KEY");
+    // Cloud Pro's included relay tokens (the server also drops them from its
+    // own environment at startup; included-services.ts)
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_BOAT_TOKEN");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_VOICE_TOKEN");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_DECIDER_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_FISH_AUDIO_API_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_OPENAI_IMAGE_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_BROWSER_CONNECTION");

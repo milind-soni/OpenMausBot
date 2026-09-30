@@ -9,10 +9,10 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useRef: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = { current: initial }; return f.values[index]; },
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
-import { CloudAccountSettings } from "./CloudAccountSettings";
+import { CloudAccountSettings, cloudLinkAction } from "./CloudAccountSettings";
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
-function render() { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudAccountSettings(); return tree; }
+function render(props?: { linkRequest?: number }) { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudAccountSettings(props); return tree; }
   const html = renderToStaticMarkup(createElement(Capture)); return { html, nodes: nodes(tree) }; }
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const click = (label: string) => { const button = render().nodes.find(node => node.type === "button" && node.props.children === label); expect(button).toBeTruthy(); button!.props.onClick!(); };
@@ -96,4 +96,82 @@ it("reports a failed connection as its own message", async () => {
   click("Connect to my Cloud"); await flush();
   expect(render().html).toContain("Could not connect to your Cloud");
   expect(render().html).not.toContain("Could not complete this Cloud action");
+});
+
+// openmausbot://cloud: React re-runs the link effect (the second one) after
+// each render; these helpers do the same for a link-opened and a normal view.
+const linked = (linkRequest = 1) => { render({ linkRequest }); f.effects[1](); };
+const visit = () => { render(); f.effects[1](); };
+const readyCloud: CloudAccountState = { ...pro, machine: { status: "ready", origin } };
+it("opened by the Cloud link while signed out, starts the existing device sign-in once", async () => {
+  await ready();
+  linked(); await flush();
+  expect(bridge.begin).toHaveBeenCalledExactlyOnceWith();
+  expect(render().html).toContain("approve this computer in your browser");
+  linked(); push({ status: "signed-out", message: "enrollment-ended" }); linked(); await flush();
+  expect(bridge.begin).toHaveBeenCalledOnce();
+  expect(bridge.connectHome).not.toHaveBeenCalled();
+});
+it("opened by the Cloud link while signed in and Ready, connects with no click", async () => {
+  await ready(readyCloud);
+  linked(); await flush();
+  expect(bridge.connectHome).toHaveBeenCalledExactlyOnceWith();
+  expect(bridge.begin).not.toHaveBeenCalled();
+  push(readyCloud); linked(); await flush();
+  expect(bridge.connectHome).toHaveBeenCalledOnce();
+});
+it("connects when the sign-in the link started completes and the Cloud becomes Ready", async () => {
+  await ready();
+  linked(); await flush();
+  push({ ...pro, machine: { status: "provisioning" } }); linked(); await flush();
+  expect(render().html).toContain("Setting up your Cloud");
+  expect(bridge.connectHome).not.toHaveBeenCalled();
+  push(readyCloud); linked(); await flush();
+  expect(bridge.connectHome).toHaveBeenCalledExactlyOnceWith();
+  expect(bridge.begin).toHaveBeenCalledOnce();
+});
+it("only shows the status of a Cloud that is not Ready, and a later sign-out starts nothing", async () => {
+  await ready({ ...pro, machine: { status: "stopped", origin } });
+  linked(); await flush();
+  for (const machine of [{ status: "payment-problem", origin }, { status: "failed", origin }, { status: "provisioning" }] as const) {
+    push({ ...pro, machine }); linked(); await flush();
+    expect(render().html).toContain(`data-cloud-home="${machine.status}"`);
+  }
+  push({ status: "signed-out" }); linked(); await flush();
+  expect(render().html).toContain("Sign in to OMB Cloud");
+  expect(bridge.connectHome).not.toHaveBeenCalled();
+  expect(bridge.begin).not.toHaveBeenCalled();
+});
+it("a normal visit never signs in or connects by itself", async () => {
+  await ready();
+  visit(); await flush();
+  expect(bridge.begin).not.toHaveBeenCalled();
+  push(readyCloud); visit(); await flush();
+  expect(bridge.connectHome).not.toHaveBeenCalled();
+  expect(render().html).toContain("Connect to my Cloud");
+});
+it("a failed automatic connection waits for the next link; a normal visit in between stops it", async () => {
+  vi.mocked(bridge.connectHome).mockRejectedValueOnce(new Error("offline"));
+  vi.mocked(bridge.state).mockResolvedValue(readyCloud);
+  await ready(readyCloud);
+  linked(1); await flush();
+  expect(render().html).toContain("Could not connect to your Cloud");
+  push(readyCloud); linked(1); await flush();
+  expect(bridge.connectHome).toHaveBeenCalledOnce();
+  visit(); push(readyCloud); visit(); await flush();
+  expect(bridge.connectHome).toHaveBeenCalledOnce();
+  linked(1); await flush();
+  expect(bridge.connectHome).toHaveBeenCalledTimes(2);
+});
+it("decides from the first snapshot after the link, and connects to a Ready Cloud once", () => {
+  const arrived = { arrived: true, connected: false }, later = { arrived: false, connected: false };
+  expect(cloudLinkAction({ status: "signed-out" }, arrived)).toBe("sign-in");
+  expect(cloudLinkAction({ status: "signed-out", message: "enrollment-ended" }, later)).toBeNull();
+  expect(cloudLinkAction(readyCloud, arrived)).toBe("connect");
+  expect(cloudLinkAction(readyCloud, later)).toBe("connect");
+  expect(cloudLinkAction(readyCloud, { arrived: false, connected: true })).toBeNull();
+  for (const state of [{ status: "connecting" }, { status: "reauth-required" }, { status: "unavailable" }, free, pro,
+    { ...pro, machine: { status: "provisioning" } }, { status: "unavailable", machine: { status: "ready", origin } }] as CloudAccountState[]) {
+    expect(cloudLinkAction(state, arrived)).toBeNull();
+  }
 });

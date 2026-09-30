@@ -219,6 +219,9 @@ including the surviving conversation and sending again without deleting the bot.
 The [Codex account recipe](codex-account.md) checks account switching against an
 offline Codex CLI whose identity is synthetic and whose credential directory is empty.
 
+The [ChatGPT plan recipe](chatgpt-plan.md) checks the separate official OAuth
+flow, credential rotation, account ownership, and native Responses routing.
+
 The [mention fixture](mentions.md) checks candidate selection, composer highlighting,
 sent mentions, multiline scrolling and responsive wrapping in real chat views.
 

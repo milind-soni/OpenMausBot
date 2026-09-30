@@ -44,6 +44,24 @@ function portableKey(value: string, fallback: string, used: Set<string>): string
   return key;
 }
 
+/** A room's responder in package terms. An Auto room is written as its lead
+ * (its fallback, else its first exported member): that is how it behaves on
+ * any install without the decision model, and every older app can read it,
+ * where a new `auto` kind would make them refuse the whole package. */
+function packageRoomResponder(
+  responder: GroupRecord["defaultResponder"],
+  keys: ReadonlyMap<string, string>,
+  members: readonly string[],
+): { kind: "agent"; agent: string } | { kind: "everyone" } | { kind: "mentions" } {
+  if (responder.kind === "member" && keys.has(responder.botId)) return { kind: "agent", agent: keys.get(responder.botId)! };
+  if (responder.kind === "everyone") return { kind: "everyone" };
+  if (responder.kind === "auto") {
+    const lead = responder.fallbackBotId ? keys.get(responder.fallbackBotId) : undefined;
+    return { kind: "agent", agent: lead ?? members[0]! };
+  }
+  return { kind: "mentions" };
+}
+
 function samePlaybook(a: InstalledPlaybook, b: BotPackagePlaybook): boolean {
   return a.name === b.name && a.summary === b.summary && a.instructions === b.instructions &&
     a.triggers.join("\n") === b.triggers.join("\n");
@@ -166,11 +184,7 @@ export function createBotPackageExport(input: {
   for (const [index, group] of input.groups.filter((group) => !group.dm).entries()) {
     const members = group.memberIds.flatMap((id) => idToKey.has(id) ? [idToKey.get(id)!] : []);
     if (!members.length) continue;
-    const defaultResponder = group.defaultResponder.kind === "member" && idToKey.has(group.defaultResponder.botId)
-      ? { kind: "agent" as const, agent: idToKey.get(group.defaultResponder.botId)! }
-      : group.defaultResponder.kind === "everyone"
-        ? { kind: "everyone" as const }
-        : { kind: "mentions" as const };
+    const defaultResponder = packageRoomResponder(group.defaultResponder, idToKey, members);
     rooms.push({
       key: portableKey(group.name, `room-${index + 1}`, roomKeys),
       name: group.name,
@@ -675,11 +689,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
   for (const group of groups) {
     const members = group.memberIds.flatMap((id) => botKeys.has(id) ? [botKeys.get(id)!] : []);
     if (!members.length) continue;
-    const defaultResponder = group.defaultResponder.kind === "member" && botKeys.has(group.defaultResponder.botId)
-      ? { kind: "agent" as const, agent: botKeys.get(group.defaultResponder.botId)! }
-      : group.defaultResponder.kind === "everyone"
-        ? { kind: "everyone" as const }
-        : { kind: "mentions" as const };
+    const defaultResponder = packageRoomResponder(group.defaultResponder, botKeys, members);
     const key = roomKeys.get(group.id)!;
     rooms.push({ key, name: group.name, members, ...(group.bulletin ? { bulletin: group.bulletin } : {}), defaultResponder });
     roomMembers.set(group.id, new Set(members));

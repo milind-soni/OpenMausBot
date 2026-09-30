@@ -34,11 +34,21 @@ const optionalText = (max: number) =>
     .refine((value) => value === undefined || value.length <= max, { message: "is too long" })
     .optional();
 
-const responderSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("member"), member: requiredText(64) }),
-  z.object({ kind: z.literal("everyone") }),
-  z.object({ kind: z.literal("mentions") }),
-]);
+const RESPONDER_KINDS = new Set(["member", "everyone", "mentions", "auto"]);
+/** A responder kind from a newer release reads as "no responder": the room
+ * is created with the default lead, never refused. */
+const responderSchema = z.preprocess(
+  (value) => {
+    const kind = value && typeof value === "object" ? (value as { kind?: unknown }).kind : undefined;
+    return typeof kind === "string" && !RESPONDER_KINDS.has(kind) ? { kind: "mentions" } : value;
+  },
+  z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("member"), member: requiredText(64) }),
+    z.object({ kind: z.literal("everyone") }),
+    z.object({ kind: z.literal("mentions") }),
+    z.object({ kind: z.literal("auto"), member: requiredText(64).optional() }),
+  ]),
+);
 
 const memberSchema = z.object({
   key: requiredText(64).regex(/^[a-z0-9][a-z0-9_-]*$/, {
@@ -104,7 +114,8 @@ export interface TeamManifestMember {
 export type TeamManifestResponder =
   | { kind: "member"; member: string }
   | { kind: "everyone" }
-  | { kind: "mentions" };
+  | { kind: "mentions" }
+  | { kind: "auto"; member?: string };
 
 export interface TeamManifestRoom {
   name: string;
@@ -194,7 +205,8 @@ export function parseTeamManifest(value: TeamManifestInput): ParsedTeamManifest 
 
   if (parsed.data.version === LEGACY_TEAM_MANIFEST_VERSION) {
     const defaultResponder = parsed.data.team.room.defaultResponder;
-    if (defaultResponder.kind === "member" && !seenKeys.has(defaultResponder.member)) {
+    if ((defaultResponder.kind === "member" || defaultResponder.kind === "auto") && defaultResponder.member !== undefined &&
+      !seenKeys.has(defaultResponder.member)) {
       throw new Error(`Unknown default responder: ${defaultResponder.member}`);
     }
     result.team.room = {

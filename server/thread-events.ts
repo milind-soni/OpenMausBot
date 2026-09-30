@@ -245,6 +245,8 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
       );
     case "thread.token-usage.updated":
       return typeof value.input === "number" && typeof value.output === "number";
+    case "runtime.notice":
+      return typeof value.message === "string";
     case "runtime.error":
       return typeof value.message === "string" &&
         (value.setup === undefined || typeof value.setup === "boolean") &&

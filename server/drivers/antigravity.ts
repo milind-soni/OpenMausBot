@@ -29,6 +29,7 @@ import {
   resolveAntigravityRuntime,
 } from "./antigravity-runtime.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
+import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
 import { augmentedPath } from "../env-path.ts";
 
 export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
@@ -70,6 +71,14 @@ const support: AcpSupport = {
   images: true,
   spawnArgs: () => [],
   selectModel: { configId: "model" },
+  // Google's server reads its new-session default from this variable
+  // (model_selection.get_default_model_id in agy_acp_server 1.1.1). Starting
+  // on OMB's model skips a switch that re-fetches the account's model list
+  // from Google: 1.3-1.8 s on every new or cold-resumed conversation.
+  sessionModelEnv: "AGY_ACP_DEFAULT_MODEL",
+  // configureSession sets the permission mode on every turn and nothing in
+  // the launch depends on it, so an approval change keeps the process.
+  sessionScopedApproval: true,
   resumeMethod: "resume",
   clientFileSystem: true,
   redactStderr: true,
@@ -79,6 +88,10 @@ const support: AcpSupport = {
   resolveCommand: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
     const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
+    // A process stopped by force since the last launch (an idle close that
+    // outlived its grace, a crash) left its unpacked files behind. Reclaim
+    // them in the background; live folders are kept.
+    if (profile.tempDirectory) scheduleAntigravityTempSweep(instanceId);
     return {
       command: runtime.executablePath,
       args: process.platform === "linux" ? ["--uid="] : [],
@@ -145,6 +158,13 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
   ...AcpAntigravityDriver,
   async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
     const base = await AcpAntigravityDriver.create(input);
+    // Reclaim what a previous run of this instance left behind when it was
+    // stopped by force (Windows keeps 0.34-1.26 GB per forced stop). Only
+    // this instance's folder under DATA_DIR/tmp/agy, only folders whose
+    // process is gone; the system temp folder is cleaned only on request.
+    scheduleAntigravityTempSweep(input.instanceId);
+    // The same for a runtime verification whose runtime would not stop.
+    scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
     const auth = new AntigravityAuthController();
     let installFailure: string | undefined;
     const runtimeAndProfile = async () => {

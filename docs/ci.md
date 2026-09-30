@@ -6,10 +6,12 @@ verification-documentation checks. Selection never skips the entire workflow.
 
 - Root Markdown files, Markdown under `docs/`, and `.github/FUNDING.yml` alone
   do not run the runtime or mobile jobs.
-- Changes confined to `src/`, `public/`, `index.html` and those documents run
-  the existing runtime suite, but not native iOS/Android builds.
-- Everything else runs all jobs. This includes server/shared code, dependency
-  files, workflows, scripts, native code and the iOS fixtures used by Android.
+- Any other change runs the runtime suite.
+- The native iOS/Android jobs run only for `ios/`, `android/` (Android's core
+  tests read the iOS fixtures), `.github/workflows/ci.yml`,
+  `scripts/ci-scope.mjs` and `.gitattributes`. The apps read committed server
+  fixtures (refreshed by hand with `scripts/capture-companion-fixtures.mjs`),
+  so a server change cannot move their result.
 - Main pushes, merge groups and manual runs always run all jobs. Empty or
   unreadable PR diffs also fall back to all jobs.
 
@@ -25,20 +27,32 @@ skips fail the gate. Existing advisory jobs remain advisory.
 The separate shared-terminal smoke workflow is manual-only: its tests already
 run in the Windows Vitest/Electron jobs.
 
-## Required-check migration
+## macOS runners
 
-The repository's `main-ci-gate` ruleset currently requires the three legacy
-`typecheck + test (<os>)` check names. This change replaces those identical
-aggregators with one `CI` job; it does not remove any platform tests.
+The account runs at most five macOS jobs at a time, and a PR used to queue
+seven (four Vitest shards, two smokes, the iOS job with its hour-long
+simulator suite). With 25 open PRs the macOS jobs waited a median of six and a
+half hours. Now:
 
-1. Review this workflow change and wait for `CI` to succeed on the exact PR
-   head. Workflow changes select the full suite, so this proves the full gate.
-2. In the existing ruleset, replace only the three legacy required-check entries
-   with `CI` from GitHub Actions. Preserve enforcement and all other rules.
-3. Merge the reviewed PR through the new required check, without bypassing it.
-   Older open PRs need to merge/rebase onto main to report the new check.
+- A PR runs the Vitest shards on Ubuntu and Windows; main pushes, merge groups
+  and manual runs add the macOS shards. Only a couple of test blocks are
+  macOS-only.
+- Every PR's macOS checks are one job: the packaged-server smoke and the
+  Electron smokes.
+- The iPhone/iPad simulator UI suite is `ios-thread-ui.yml`: nightly, on main
+  pushes that touch `ios/`, and by hand.
+- `ci-stop-closed.yml` cancels a PR's CI run when the PR is merged or closed.
 
-Do not remove the old requirements before the replacement check is green.
-Until migration, this PR being blocked on the old names is expected. If the
-rollout is abandoned, restore the legacy requirements together with the old
-workflow rather than leaving the branch without a required CI check.
+## Main and releases
+
+Every main commit gets its own CI run and it is never cancelled by the next
+merge, so each commit has a verdict. `release.yml` waits for the `CI` check on
+the commit it ships (overlapping the platform builds) and creates no draft
+unless it passed. A manual release can skip the wait with `ship_without_ci`,
+for emergencies only.
+
+## Required check
+
+The `main-ci-gate` ruleset requires the single `CI` check (it replaced the
+three legacy `typecheck + test (<os>)` names in September 2026). Renaming the
+`gate` job needs the ruleset updated first, or every PR waits forever.

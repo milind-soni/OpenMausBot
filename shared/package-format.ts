@@ -180,7 +180,21 @@ const requirementsSchema = z.object({
   capabilities: z.array(requiredText(80)).max(20),
   platforms: z.array(requiredText(80)).max(10).optional(),
 });
-const roomSchema = z.object({
+const ROOM_RESPONDER_KINDS = new Set(["agent", "everyone", "mentions", "auto"]);
+/** A responder kind from a newer release degrades to the room's first member
+ * as lead, which is what a room without a responder does, instead of
+ * refusing the whole package. Malformed values still fail below. */
+function knownRoomResponder(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const room = value as { members?: unknown; defaultResponder?: unknown };
+  const responder = room.defaultResponder;
+  if (!responder || typeof responder !== "object" || Array.isArray(responder)) return value;
+  const kind = (responder as { kind?: unknown }).kind;
+  if (typeof kind !== "string" || ROOM_RESPONDER_KINDS.has(kind)) return value;
+  const first = Array.isArray(room.members) && typeof room.members[0] === "string" ? room.members[0] : undefined;
+  return { ...room, defaultResponder: first ? { kind: "agent", agent: first } : { kind: "mentions" } };
+}
+const roomSchema = z.preprocess(knownRoomResponder, z.object({
   key,
   name: requiredText(100),
   members: z.array(key).min(1).max(200),
@@ -189,8 +203,11 @@ const roomSchema = z.object({
     z.object({ kind: z.literal("agent"), agent: key }),
     z.object({ kind: z.literal("everyone") }),
     z.object({ kind: z.literal("mentions") }),
+    // Read, not written: exports spell an Auto room as its lead (see
+    // server/package-export.ts) so every older app can still open them.
+    z.object({ kind: z.literal("auto"), agent: key.optional() }),
   ]),
-});
+}));
 const exampleSchema = z.object({
   title: requiredText(120),
   input: requiredText(4_000),
@@ -615,7 +632,8 @@ function checkV1References(pkg: PackageDocumentV1["package"]): void {
     for (const member of members) {
       if (!agents.has(member)) throw invalid(`Room ${room.key} references unknown agent: ${member}`);
     }
-    if (room.defaultResponder.kind === "agent" && !members.has(room.defaultResponder.agent)) {
+    if ((room.defaultResponder.kind === "agent" || room.defaultResponder.kind === "auto") && room.defaultResponder.agent !== undefined &&
+      !members.has(room.defaultResponder.agent)) {
       throw invalid(`Room ${room.key} has an unknown default responder`);
     }
   }
@@ -666,7 +684,8 @@ function checkV2References(pkg: PackageDefinition): void {
     for (const member of members) {
       if (!agents.has(member)) throw invalid(`Room ${room.key} references unknown agent: ${member}`);
     }
-    if (room.defaultResponder.kind === "agent" && !members.has(room.defaultResponder.agent)) {
+    if ((room.defaultResponder.kind === "agent" || room.defaultResponder.kind === "auto") && room.defaultResponder.agent !== undefined &&
+      !members.has(room.defaultResponder.agent)) {
       throw invalid(`Room ${room.key} has a default responder who is not a member: ${room.defaultResponder.agent}`);
     }
     roomMembers.set(room.key, members);
@@ -832,8 +851,12 @@ export function downgradeToV1(document: PackageDocument):
     team, publisher: _publisher, notes: _notes, presets: _presets, connections: _connections,
     skills: _skills, agents: _agents, routines: _routines, ...rest
   } = pkg;
+  // Older apps know no Auto room: spell one as its lead, as exports do.
+  const rooms = rest.rooms?.map((room) => room.defaultResponder.kind !== "auto" ? room
+    : { ...room, defaultResponder: { kind: "agent" as const, agent: room.defaultResponder.agent ?? room.members[0]! } });
   const v1: Record<string, unknown> = {
     ...rest,
+    ...(rooms ? { rooms } : {}),
     agents,
     ...(team.leader ? { chiefOfStaff: team.leader } : {}),
     ...(routines.length ? { routines } : {}),

@@ -4,8 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
 
+const storeFixture = vi.hoisted(() => ({ config: null as unknown }));
+vi.mock("@/state/store", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/state/store")>();
+  return { ...original, useStore: () => ({ state: { ...original.initialState, config: storeFixture.config }, dispatch: vi.fn() }) };
+});
+
 import {
   CloudComputersCard,
+  LocalComputerSection,
   LocalVmInventoryCard,
   VpsComputersCard,
   cloudComputerActionPlan,
@@ -524,5 +531,22 @@ describe("VPS computer inventory UI", () => {
     expect(running).not.toContain(">Remove</button>");
     expect(renderCard({ instances: [{ ...ownedVps, state: "paused" }] }))
       .toContain('bg-control text-ink-secondary">Pausado</span>');
+  });
+});
+
+describe("Settings → Computers on an OMB Cloud home", () => {
+  afterEach(() => { storeFixture.config = null; });
+  const cards = () => [...renderToStaticMarkup(createElement(LocalComputerSection)).matchAll(/<div class="text-\[15px\] font-medium text-ink">([^<]+)<\/div>/g)].map((match) => match[1]);
+
+  it("sets up a Local VM on a desktop or self-hosted server", () => {
+    expect(cards()).toEqual(expect.arrayContaining(["Cloud computers", "Local VM", "Setup"]));
+  });
+
+  it("shows no Local VM, and no steps to install one, where it cannot exist", () => {
+    storeFixture.config = { cloudHome: true };
+    const titles = cards();
+    expect(titles).toContain("Cloud computers");
+    expect(titles).not.toContain("Local VM");
+    expect(titles).not.toContain("Setup");
   });
 });

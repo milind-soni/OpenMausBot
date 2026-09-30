@@ -27,6 +27,17 @@ describe("boatCredentialEnv", () => {
     expect(boatCredentialEnv({} as AppConfig, {})).toEqual({});
   });
 
+  it("never forwards Cloud Pro's included relay tokens into a computer's environment", () => {
+    const env = {
+      OPENAI_API_KEY: "sk-openai",
+      OMB_CLOUD_BOAT_URL: "https://cloud.example.test/api/cloud/services/boat/api/box/v1",
+      OMB_CLOUD_BOAT_TOKEN: "box_omb_included-relay-token",
+      OMB_CLOUD_VOICE_URL: "https://cloud.example.test/api/cloud/services/voice/v1",
+      OMB_CLOUD_VOICE_TOKEN: "omb_voice_included-relay-token",
+    };
+    expect(boatCredentialEnv({} as AppConfig, env)).toEqual({ OPENAI_API_KEY: "sk-openai" });
+  });
+
   it("never forwards an ANTHROPIC_API_KEY from the server's own environment (only the workspace key)", () => {
     expect(boatCredentialEnv({} as AppConfig, { ANTHROPIC_API_KEY: "sk-ant-stray" })).toEqual({});
   });

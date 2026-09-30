@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { gzipSync } from "node:zlib";
 import { Header } from "tar";
+import { SessionRegistry } from "./sessions.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applyPendingWorkspaceRestore, commitPendingWorkspaceRestore, createWorkspaceBackup,
@@ -40,6 +41,8 @@ function fixture(root: string): DatabaseSync {
   writeFileSync(join(root, "environment-id"), "source-environment");
   mkdirSync(join(root, "tools"));
   writeFileSync(join(root, "tools", "downloaded"), "reinstallable");
+  mkdirSync(join(root, "decider-log"));
+  writeFileSync(join(root, "decider-log", "2026-09.ndjson"), '{"seam":"roomRouting"}\n');
   const db = new DatabaseSync(join(root, "messages.db"));
   db.exec("PRAGMA journal_mode=WAL; CREATE TABLE messages(thread_id TEXT, id TEXT, text TEXT, json TEXT, PRIMARY KEY(thread_id,id)); CREATE TABLE thread_state(thread_id TEXT PRIMARY KEY, active_leaf_id TEXT);");
   const message = {
@@ -132,6 +135,8 @@ describe("encrypted full workspace backups", () => {
       expect(existsSync(join(target, "messages.db-wal"))).toBe(false);
       expect(readFileSync(join(result.safetyCopyPath!, "data", "messages.db-wal"), "utf8")).toBe("old database WAL must not enter the new DB");
       expect(existsSync(join(target, "tools"))).toBe(false);
+      // this machine's decision-model log stays on this machine
+      expect(existsSync(join(target, "decider-log"))).toBe(false);
       expect(readJson(join(result.safetyCopyPath!, "data", "bots.json"))).toEqual([{ id: "old" }]);
       const restoredDb = new DatabaseSync(join(target, "messages.db"), { readOnly: true });
       try {
@@ -280,6 +285,31 @@ describe("encrypted full workspace backups", () => {
     for (const path of paths) {
       if (statSync(join(staging, "data", path)).isFile()) expect(readFileSync(join(staging, "data", path), "utf8")).not.toMatch(/ORGANIZATION_(?:CATALOG|RELEASE)_BYTES/);
     }
+  });
+
+  it("leaves the destination's session open-marker in place, so a crash before a restore still ends account sign-ins", async () => {
+    const source = directory(), target = directory();
+    json(join(source, "bots.json"), [{ id: "bot" }]);
+    // The source is running: its marker exists, and is never exported.
+    writeFileSync(join(source, "sessions.json.open"), "Session registry is open.\n");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    // The destination crashed with an account session saved.
+    const sessions = new SessionRegistry({ file: join(target, "sessions.json") });
+    sessions.issue({ label: "Member", scopes: ["client"], userId: "user-1" });
+    expect(existsSync(join(target, "sessions.json.open"))).toBe(true);
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    expect(readJson(join(target, ".backups", staged.id, "staged", "manifest.json")).entries.map((entry: { path: string }) => entry.path)).not.toContain("sessions.json.open");
+    commitPendingWorkspaceRestore(target, staged.id);
+    expect(applyPendingWorkspaceRestore(target)).toMatchObject({ restored: true });
+    expect(existsSync(join(target, "sessions.json.open"))).toBe(true);
+    expect(existsSync(join(target, ".backups", `safety-${staged.id}`, "data", "sessions.json.open"))).toBe(false);
+    expect(new SessionRegistry({ file: join(target, "sessions.json") }).list()).toEqual([]);
+  });
+
+  it("never lets tar decompress a payload: zstd is refused like gzip", async () => {
+    const root = directory();
+    const archive = encryptedPayload(root, Buffer.concat([Buffer.from([0x28, 0xb5, 0x2f, 0xfd]), Buffer.alloc(1020)]));
+    await expect(stageWorkspaceBackup(directory(), archive, { password: PASSWORD })).rejects.toThrow(/Compressed payloads are not supported/);
   });
 
   it("still restores an archive from a release that exported hook tokens, without installing them", async () => {
