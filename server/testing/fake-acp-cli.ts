@@ -103,6 +103,9 @@
 //                        replay?}, emitted after the named RPC response.
 //   FAKE_ACP_USAGE_ROOT  put the prompt result's usage at the root instead of
 //                        under _meta (what opencode 1.18.18 actually does)
+//   FAKE_ACP_USAGE_UPDATES_FILE  JSON array of numbers, re-read on every
+//                        session/prompt; each is sent as a usage_update
+//                        { used: n, size: 200000 } before the result
 //   FAKE_ACP_MODE_ACK_FILE  path of a file read on every mode switch: while it
 //                        exists, "empty" answers without configOptions (the
 //                        switch cannot be confirmed) and "error" refuses it,
@@ -796,6 +799,16 @@ function handle(msg: any) {
         return;
       }
       const complete = () => {
+        const usageFile = process.env.FAKE_ACP_USAGE_UPDATES_FILE;
+        if (usageFile && existsSync(usageFile)) {
+          try {
+            for (const used of JSON.parse(readFileSync(usageFile, "utf8")) as unknown[]) {
+              if (typeof used === "number") {
+                out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "usage_update", used, size: 200000 } } });
+              }
+            }
+          } catch {}
+        }
         recordMethod("session/prompt.result");
         result(
           msg.id,

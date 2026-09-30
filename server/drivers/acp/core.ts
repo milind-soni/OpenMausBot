@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
 import { decodeInjectId } from "../local-inject.ts";
-import { promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
+import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
 
@@ -135,7 +135,14 @@ interface AcpTurn {
   turn: SendTurnInput;
   turnConfig: AcpConfig;
   controlsHost: boolean;
-  state: { settled: boolean; promptSent: boolean; text: string; producedItem: boolean; startupActivity: boolean; stopped: boolean };
+  state: {
+    settled: boolean; promptSent: boolean; text: string; producedItem: boolean; startupActivity: boolean; stopped: boolean;
+    /** Compaction detection: peak and last reported context size, and
+     * whether a report collapsed below the peak. */
+    usagePeak: number | null;
+    usageLast: number | null;
+    usageCompacted: boolean;
+  };
   acknowledge: () => void;
   asks: Map<string, AcpAskFinish>;
   /** Tool calls the agent started and has not yet reported finished. A tool
@@ -369,8 +376,13 @@ const SESSION_CONFIG_TIMEOUT = envOr("OPENMAUS_ACP_SESSION_CONFIG_TIMEOUT_MS", 3
 const NEW_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_NEW_SESSION_TIMEOUT_MS", 300_000);
 const LOAD_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_LOAD_SESSION_TIMEOUT_MS", 120_000); // history replay on a long thread is slow
 /** ACP agents may compact their own history without telling the client;
- * re-send the full prompt after this many bare turns as a backstop. */
+ * re-send the full prompt after this many bare turns as a backstop to
+ * compaction detection. */
 const ACP_PROMPT_RE_ANCHOR_TURNS = 8;
+/** A reported context below this share of the peak marks a compaction.
+ * OpenCode compactions measured 30-52% of the peak; ordinary dips stay
+ * above 83%. A false alarm costs one extra full prompt. */
+const ACP_COMPACTION_COLLAPSE_RATIO = 0.6;
 // Read lazily (not at import) so a test can shorten the window. Unlike the
 // setup calls above, session/prompt legitimately streams for minutes, so a
 // wall-clock deadline would false-positive: this guard only trips when the
@@ -1227,6 +1239,17 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }
               break;
             }
+            case "usage_update": {
+              // opencode 1.18 sends `used` flat; ignore non-positive reports
+              const used = u.used ?? u.usage?.used;
+              if (typeof used !== "number" || !(used > 0)) break;
+              if (current.state.usagePeak !== null && used < current.state.usagePeak * ACP_COMPACTION_COLLAPSE_RATIO) {
+                current.state.usageCompacted = true;
+              }
+              if (current.state.usagePeak === null || used > current.state.usagePeak) current.state.usagePeak = used;
+              current.state.usageLast = used;
+              break;
+            }
           }
         };
 
@@ -1468,7 +1491,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
-        const state = { settled: false, promptSent: false, text: "", producedItem: false, startupActivity: false, stopped: false };
+        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", producedItem: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false };
         let acknowledge = () => {};
         let rejectStartup = (_error: TurnNotStartedError) => {};
         const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {
@@ -1835,20 +1858,24 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             // adapter call) keeps the legacy full-prompt shape.
             const halves = promptHalves(turn);
             let promptInput = promptTurn;
-            let pendingSplitReceipt: { key: string; receipt: PromptSplitReceipt } | null = null;
+            let pendingSplitReceipt: { key: string; receipt: PromptSplitReceipt; previous: PromptSplitReceipt | null } | null = null;
             if (halves.stable !== null) {
               const receiptKey = JSON.stringify([threadId, sessionId]);
+              const previousReceipt = readPromptSplitReceipt(DRIVER_KIND, receiptKey);
+              // seed the peak from the last turn, so a compaction before this
+              // turn's first report still shows as a collapse
+              state.usagePeak = typeof previousReceipt?.lastUsed === "number" ? previousReceipt.lastUsed : null;
               const composed = splitSessionPrompt(
                 halves.stable,
                 halves.volatile,
-                readPromptSplitReceipt(DRIVER_KIND, receiptKey),
+                previousReceipt,
                 promptTurn.system,
                 promptTurn.text,
                 Boolean(turn.mentionTurn),
                 ACP_PROMPT_RE_ANCHOR_TURNS,
               );
               promptInput = { ...promptTurn, system: "", text: composed.text };
-              pendingSplitReceipt = { key: receiptKey, receipt: composed.receipt };
+              pendingSplitReceipt = { key: receiptKey, receipt: composed.receipt, previous: previousReceipt };
             }
             const text = support.buildPromptText
               ? support.buildPromptText(promptInput)
@@ -1880,8 +1907,23 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (pendingSplitReceipt) {
               // session/prompt resolving is the acceptance boundary: a
               // rejected prompt leaves the receipt unwritten, so the next
-              // turn redelivers what this one never received.
-              writePromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt.key, pendingSplitReceipt.receipt);
+              // turn redelivers what this one never received. After a
+              // compaction, drop it so the next turn re-sends the full prompt.
+              if (state.usageCompacted) {
+                deletePromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt.key);
+              } else {
+                const previousLastUsed = typeof pendingSplitReceipt.previous?.lastUsed === "number"
+                  ? pendingSplitReceipt.previous.lastUsed
+                  : undefined;
+                const lastUsed = state.usageLast ?? previousLastUsed;
+                writePromptSplitReceipt(
+                  DRIVER_KIND,
+                  pendingSplitReceipt.key,
+                  lastUsed === undefined
+                    ? pendingSplitReceipt.receipt
+                    : { ...pendingSplitReceipt.receipt, lastUsed },
+                );
+              }
             }
             // opencode 1.18.18 reports usage at the result root; grok and
             // gemini put it under _meta. Read both rather than lose the count.

@@ -10,6 +10,7 @@ import {
   withContextNote,
   writePromptSplitReceipt,
 } from "./prompt-split.ts";
+import type { PromptSplitReceipt } from "./prompt-split.ts";
 
 describe("promptHalves", () => {
   it("reads the split only when a turn carries both halves", () => {
@@ -62,6 +63,20 @@ describe("prompt-split receipts", () => {
     // deleting an unknown receipt is a no-op, not an error
     deletePromptSplitReceipt(scope, key);
     deletePromptSplitReceipt(scope, randomUUID());
+  });
+
+  it("round-trips the last reported context size and drops invalid values", () => {
+    const scope = "test-driver";
+    const key = randomUUID();
+    const receipt = { ...promptSplitFingerprints("stable rules", "memory"), lastUsed: 167218 };
+    writePromptSplitReceipt(scope, key, receipt);
+    expect(readPromptSplitReceipt(scope, key)).toEqual(receipt);
+    // non-positive or non-numeric sizes read back as absent
+    for (const invalid of [0, -4096, "167218", null, undefined]) {
+      writePromptSplitReceipt(scope, key, { ...receipt, lastUsed: invalid } as unknown as PromptSplitReceipt);
+      expect(readPromptSplitReceipt(scope, key)?.lastUsed).toBeUndefined();
+    }
+    deletePromptSplitReceipt(scope, key);
   });
 });
 

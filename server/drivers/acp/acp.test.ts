@@ -17,6 +17,7 @@ import { ensureDirs, NATIVE_DIR } from "../../config.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { TurnNotStartedError } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
+import { promptSplitFingerprints, writePromptSplitReceipt } from "../prompt-split.ts";
 import { createAcpDriver, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
 import { GrokAgentDriver, grokAcceptsUnadvertisedImages } from "./grok.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
@@ -254,6 +255,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_IMAGE_CAPABILITY;
     delete process.env.FAKE_ACP_GROK_VERSION;
     delete process.env.FAKE_ACP_TOOL_MS;
+    delete process.env.FAKE_ACP_USAGE_UPDATES_FILE;
     delete process.env.FAKE_ACP_DUMP_PROMPT;
     delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
     delete process.env.OMB_ACP_SESSION_IDLE_MS;
@@ -408,6 +410,91 @@ describe("ACP turns (fake CLI)", () => {
     expect(messages[0]).toBe(full + "\n\nturn 0");
     for (let i = 1; i <= 8; i++) expect(messages[i]).toBe("turn " + i);
     expect(messages[9]).toBe(full + "\n\nturn 9");
+  });
+
+  // One split-prompt thread: usage() sets the context sizes the fake reports
+  // on the next turn, and send() returns the prompt text the agent received.
+  const FULL = "Standing rules.\n\nMemory: likes quiet hours.";
+  const usageThread = async (name: string) => {
+    const dump = join(scratch, `acp-${name}.json`);
+    const usageFile = join(scratch, `acp-${name}-usage.json`);
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    process.env.FAKE_ACP_USAGE_UPDATES_FILE = usageFile;
+    writeFileSync(usageFile, "[]");
+    await create();
+    const threadId = `t-acp-${name}-` + randomUUID();
+    const usage = (...used: number[]) => writeFileSync(usageFile, JSON.stringify(used));
+    const send = async (text: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text,
+        system: FULL,
+        systemStable: "Standing rules.",
+        systemVolatile: "Memory: likes quiet hours.",
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return (JSON.parse(readFileSync(dump + ".prompt.json", "utf8")) as Array<{ type: string; text: string }>)[0]?.text;
+    };
+    return { threadId, usage, send };
+  };
+
+  it("re-anchors the full prompt on the turn after the reported context collapses", async () => {
+    const { usage, send } = await usageThread("compaction");
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    usage(100000);
+    expect(await send("turn 2")).toBe("turn 2");
+    // the context collapses mid-turn (120000 -> 45000), so the next turn is full
+    usage(120000, 45000);
+    expect(await send("turn 3")).toBe("turn 3");
+    usage();
+    expect(await send("turn 4")).toBe(FULL + "\n\nturn 4");
+    expect(await send("turn 5")).toBe("turn 5");
+  });
+
+  it("keeps the split through an ordinary context dip", async () => {
+    const { usage, send } = await usageThread("ordinary-dip");
+    usage(108641);
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    // a 17% dip is an ordinary step, not a compaction
+    usage(90258);
+    expect(await send("turn 2")).toBe("turn 2");
+    expect(await send("turn 3")).toBe("turn 3");
+  });
+
+  it("detects a collapse against the previous turn's context", async () => {
+    const { usage, send } = await usageThread("cross-turn");
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    usage(150000);
+    expect(await send("turn 2")).toBe("turn 2");
+    // compaction before the first report: a collapse against last turn's peak
+    usage(50000);
+    expect(await send("turn 3")).toBe("turn 3");
+    usage();
+    expect(await send("turn 4")).toBe(FULL + "\n\nturn 4");
+  });
+
+  it("ignores a zero usage report", async () => {
+    const { usage, send } = await usageThread("zero-usage");
+    usage(150000);
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    // zero is not a measurement: no trigger, and the peak stays
+    usage(0);
+    expect(await send("turn 2")).toBe("turn 2");
+    expect(await send("turn 3")).toBe("turn 3");
+  });
+
+  it("never triggers from a receipt written before lastUsed existed", async () => {
+    const { threadId, usage, send } = await usageThread("legacy-receipt");
+    // a legacy receipt has no lastUsed, so a low first reading is no collapse
+    writePromptSplitReceipt(
+      "grokAgent",
+      JSON.stringify([threadId, "fake-acp-session"]),
+      promptSplitFingerprints("Standing rules.", "Memory: likes quiet hours."),
+    );
+    usage(50000);
+    expect(await send("turn 1")).toBe("turn 1");
+    expect(await send("turn 2")).toBe("turn 2");
   });
 
   it("fails clearly when an image-capable adapter meets an older ACP runtime", async () => {
