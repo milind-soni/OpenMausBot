@@ -69,6 +69,8 @@ export interface OptionCardData {
   title: string;
   subtitle: string;
   options: string[];
+  /** Distinguishes a provider question from an approval after its live run ends. */
+  requestType?: "permission" | "question";
   /** what each option means, keyed by its label — a question that came with
    * explanations (AskUserQuestion) shows them under the buttons. Kept beside
    * `options` rather than inside it so every existing reader of the plain

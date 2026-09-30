@@ -346,6 +346,13 @@ const finishIfDone = () => {
   if (stdinEnded && !turnRunning) process.exit(0);
 };
 
+const finishTurn = () => {
+  runHooks("Stop", { stop_hook_active: false });
+  out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
+  turnRunning = false;
+  finishIfDone();
+};
+
 const playTurn = (prompt: JsonValue) => {
   turnRunning = true;
   steered = [];
@@ -455,8 +462,20 @@ const playTurn = (prompt: JsonValue) => {
 
   if (mode === "hang") {
     // stay alive until killed — lets tests exercise interrupt + the
-    // permission broker while a turn is officially in flight
-    setInterval(() => {}, 1_000);
+    // permission broker while a turn is officially in flight. API tests may
+    // opt into a file gate to finish this exact run through the normal result
+    // frame, then leave the process available for another gated turn.
+    const finishGate = process.env.FAKE_CLAUDE_FINISH_GATE;
+    if (!finishGate) {
+      setInterval(() => {}, 1_000);
+      return;
+    }
+    const poll = setInterval(() => {
+      if (!existsSync(finishGate)) return;
+      clearInterval(poll);
+      out({ type: "assistant", message: { content: [{ type: "text", text: "fixture turn completed" }] } });
+      finishTurn();
+    }, 10);
     return;
   }
 

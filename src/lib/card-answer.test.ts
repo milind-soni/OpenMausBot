@@ -33,8 +33,9 @@ describe("dismissResponse", () => {
   it("denies a permission but ANSWERS a question", () => {
     expect(dismissResponse({ tool: "Bash" })).toMatchObject({ behavior: "deny" });
     // a deny on a question is refused by the broker, so closing the card
-    // used to leave the bot waiting on a card that was already gone
-    expect(dismissResponse({})).toMatchObject({ behavior: "answer" });
+    // used to leave the bot waiting on a card that was already gone. The
+    // explicit dismiss marker is rejected while the question is unresolved.
+    expect(dismissResponse({})).toMatchObject({ behavior: "answer", dismiss: true });
     expect(dismissResponse({}).message).toContain("without answering");
   });
 });

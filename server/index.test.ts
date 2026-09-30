@@ -480,6 +480,7 @@ beforeAll(async () => {
         name: "Cancel room",
         memberIds: ["test-bot-a"],
         defaultResponder: { kind: "member", botId: "test-bot-a" },
+        tasks: [{ threadId: "test-cancel-room-thread", title: "Cancel room", createdAt: 4, updatedAt: 4 }],
         bulletin: "",
         unread: false,
         createdAt: 4,
@@ -519,6 +520,73 @@ beforeAll(async () => {
         createdAt: 6,
       },
     ]),
+  );
+  writeFileSync(
+    join(home, ".openmausbot", "bots.json"),
+    JSON.stringify([
+      {
+        id: "test-bot-seed",
+        threadId: "test-bot-seed-thread",
+        name: "Seeded fixture bot",
+        title: "",
+        description: "",
+        soul: "",
+        soulHash: createHash("sha256").update("").digest("hex"),
+        notifications: true,
+        color: "purple",
+        unread: false,
+        modelSelection: { instanceId: "ghost", model: "ghost-1" },
+        resumeCursors: {},
+        createdAt: 0,
+        tasks: [{
+          threadId: "test-bot-seed-thread",
+          title: "Seeded fixture bot",
+          createdAt: 0,
+          updatedAt: 0,
+          resumeCursors: {},
+          modelSelection: { instanceId: "ghost", model: "ghost-1" },
+          unread: false,
+        }],
+      },
+      {
+        id: "test-bot-a",
+        threadId: "test-bot-a-thread",
+        name: "Test bot A",
+        title: "",
+        description: "",
+        soul: "",
+        soulHash: createHash("sha256").update("").digest("hex"),
+        notifications: true,
+        color: "purple",
+        unread: false,
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        resumeCursors: {},
+        createdAt: 1,
+        tasks: [{
+          threadId: "test-bot-a-thread",
+          title: "Test bot A",
+          createdAt: 1,
+          updatedAt: 1,
+          resumeCursors: {},
+          modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+          unread: false,
+        }],
+      },
+    ]),
+  );
+  writeFileSync(
+    join(home, ".openmausbot", "messages-test-bot-seed-thread.json"),
+    JSON.stringify({
+      activeLeafId: "test-bot-seed-greeting",
+      messages: [{
+        id: "test-bot-seed-greeting",
+        at: 1,
+        parentId: null,
+        role: "bot",
+        kind: "text",
+        text: "Hi, I'm Seeded fixture bot. What would you like me to do?",
+      }],
+    }),
   );
 
   const linkedWorkspace = join(home, ".openmausbot", "workspaces", "test-bot-a");
@@ -706,7 +774,7 @@ beforeAll(async () => {
   writeFileSync(
     join(home, ".openmausbot", "messages-test-cancel-room-thread.json"),
     JSON.stringify({
-      activeLeafId: "cancel-card",
+      activeLeafId: "cancel-question-card",
       messages: [
         {
           id: "cancel-card",
@@ -721,6 +789,21 @@ beforeAll(async () => {
             requestId: "cancel-request",
             tool: "Bash",
             allowKey: "Bash:rm",
+          },
+          from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
+        },
+        {
+          id: "cancel-question-card",
+          at: 5,
+          parentId: "cancel-card",
+          role: "bot",
+          kind: "options",
+          card: {
+            title: "Your bot has a question",
+            subtitle: "Which file should I update?",
+            options: ["README", "Guide"],
+            requestId: "cancel-question-request",
+            requestType: "question",
           },
           from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
         },
@@ -1172,6 +1255,231 @@ describe("harness HTTP API", () => {
     if (config.box?.configured) await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
     if (config.vps?.configured) await api("PUT", "/api/config", { vps: { sshAlias: "" } }).catch(() => undefined);
   });
+
+  it("restores a live unanswered provider question after a server restart", async () => {
+    const isolatedHome = mkdtempSync(join(tmpdir(), "omb-question-restart-"));
+    const isolatedData = join(isolatedHome, ".openmausbot");
+    const isolatedStatic = join(isolatedHome, "static");
+    const isolatedDump = join(isolatedHome, "fake-claude-dump.json");
+    const isolatedFinishGate = join(isolatedHome, "fake-claude-finish-gate");
+    const isolatedPort = await freePortBlock([0, 1]);
+    mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
+    mkdirSync(isolatedData, { recursive: true });
+    writeFileSync(join(isolatedStatic, "index.html"), "<!doctype html><title>Question restart test</title>");
+    writeFileSync(join(isolatedStatic, "assets", "smoke.css"), "body{}");
+    writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
+      instances: {
+        claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+      },
+    }));
+
+    let activeServer: { child: ChildProcess; stderr: () => string } | undefined;
+    const startServer = () => {
+      let capturedStderr = "";
+      const serverChild = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+        cwd: ROOT,
+        env: {
+          ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+          ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
+          ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+          HOME: isolatedHome,
+          USERPROFILE: isolatedHome,
+          OMB_PORT: String(isolatedPort),
+          OMB_WEBHOOK_PORT: String(isolatedPort + 1),
+          OMB_STATIC_DIR: isolatedStatic,
+          FAKE_CLAUDE_MODE: "hang",
+          FAKE_CLAUDE_DUMP: isolatedDump,
+          FAKE_CLAUDE_FINISH_GATE: isolatedFinishGate,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      serverChild.stderr!.on("data", (chunk) => (capturedStderr += chunk));
+      activeServer = { child: serverChild, stderr: () => capturedStderr };
+      return activeServer;
+    };
+    const isolatedApi = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+      const response = await fetch(`http://127.0.0.1:${isolatedPort}${path}`, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    let questionSocket: Socket | undefined;
+    let providerReply: Record<string, unknown> | undefined;
+    let socketBuffer = "";
+    let requestId = "";
+    let cardId = "";
+
+    try {
+      let server = startServer();
+      await waitForIsolatedServer(server.child, isolatedPort, server.stderr);
+      const created = await isolatedApi("POST", "/api/bots", {
+        name: "Restart question holder",
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        requireAvailableModel: true,
+      });
+      expect(created.status).toBe(201);
+      const bot = created.body.bot;
+      requestId = randomUUID();
+      expect((await isolatedApi("POST", `/api/bots/${bot.id}/messages`, {
+        text: "Ask me one question, then finish without waiting for my answer.",
+      })).status).toBe(202);
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=40")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(true);
+
+      const dump = z.object({
+        mcpConfig: z.object({ mcpServers: z.object({ ogb: z.object({ args: z.array(z.string()) }) }) }),
+      }).parse(await readJsonFileWhenReady(isolatedDump));
+      questionSocket = connect(dump.mcpConfig.mcpServers.ogb.args[1]!);
+      questionSocket.on("data", (chunk) => {
+        socketBuffer += chunk.toString();
+        const newline = socketBuffer.indexOf("\n");
+        if (newline === -1) return;
+        try { providerReply = JSON.parse(socketBuffer.slice(0, newline)) as Record<string, unknown>; } catch {}
+      });
+      await new Promise<void>((resolve, reject) => {
+        questionSocket!.once("connect", resolve);
+        questionSocket!.once("error", reject);
+      });
+      questionSocket.write(JSON.stringify({
+        t: "ask",
+        kind: "question",
+        id: requestId,
+        tool: "AskUserQuestion",
+        input: { questions: [{ question: "Which file should I update?", options: [{ label: "README" }, { label: "Guide" }] }] },
+      }) + "\n");
+      await expect.poll(async () => {
+        const messages = (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages;
+        const message = messages.find((candidate: { card?: { requestId?: string } }) => candidate.card?.requestId === requestId);
+        if (message) cardId = message.id;
+        return Boolean(message);
+      }, { timeout: 5_000 }).toBe(true);
+      const opened = (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages
+        .find((message: { id: string }) => message.id === cardId);
+      expect(opened.card).toMatchObject({ requestType: "question", requestId });
+      expect(opened.card.answered).toBeUndefined();
+
+      writeFileSync(isolatedFinishGate, "finish");
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
+      await expect.poll(() => providerReply, { timeout: 5_000 }).toMatchObject({ behavior: "answer" });
+      expect(providerReply?.message).toContain("turn is ending");
+      const settled = (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages
+        .find((message: { id: string }) => message.id === cardId)?.card;
+      expect(settled).toMatchObject({ requestType: "question", requestId });
+      expect(settled.answered).toBeUndefined();
+      expect(settled.dismissed).toBeUndefined();
+
+      await waitForExit(server.child, { signal: "SIGTERM" });
+      expectStoppedTestServerCleanly(server.child, server.stderr());
+      activeServer = undefined;
+      questionSocket.destroy();
+      questionSocket = undefined;
+
+      server = startServer();
+      await waitForIsolatedServer(server.child, isolatedPort, server.stderr);
+      const restored = (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages
+        .find((message: { id: string }) => message.id === cardId)?.card;
+      expect(restored).toMatchObject({ requestType: "question", requestId });
+      expect(restored.answered).toBeUndefined();
+      expect(restored.dismissed).toBeUndefined();
+
+      const completionsBeforeSubsequentTurn = (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages
+        .filter((message: { role?: string; kind?: string; text?: string }) =>
+          message.role === "bot" && message.kind === "text" && message.text === "fixture turn completed").length;
+      rmSync(isolatedFinishGate, { force: true });
+      const laterText = "A later turn while the earlier question is still unanswered.";
+      const laterSent = await isolatedApi("POST", `/api/bots/${bot.id}/messages`, { text: laterText });
+      expect(laterSent.status).toBe(202);
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(true);
+      writeFileSync(isolatedFinishGate, "finish");
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
+      const afterSubsequentTurn = (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages;
+      const laterUserMessage = afterSubsequentTurn.find((message: { id: string }) => message.id === laterSent.body.message.id);
+      expect(laterUserMessage).toMatchObject({ role: "user", text: laterText });
+      expect(afterSubsequentTurn).toContainEqual(expect.objectContaining({
+        role: "bot",
+        kind: "text",
+        text: "fixture turn completed",
+        parentId: laterUserMessage.id,
+      }));
+      await expect.poll(async () => (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages
+        .filter((message: { role?: string; kind?: string; text?: string }) =>
+          message.role === "bot" && message.kind === "text" && message.text === "fixture turn completed").length,
+      { timeout: 5_000 }).toBe(completionsBeforeSubsequentTurn + 1);
+      const afterSubsequentQuestion = afterSubsequentTurn
+        .find((message: { id: string }) => message.id === cardId)?.card;
+      expect(afterSubsequentQuestion).toMatchObject({ requestType: "question", requestId });
+      expect(afterSubsequentQuestion.answered).toBeUndefined();
+      expect(afterSubsequentQuestion.dismissed).toBeUndefined();
+
+      const refusedDismiss = await isolatedApi("POST", `/api/bots/${bot.id}/respond`, {
+        requestId,
+        behavior: "answer",
+        dismiss: true,
+      });
+      expect(refusedDismiss).toMatchObject({
+        status: 409,
+        body: { error: "answer this question before dismissing it" },
+      });
+      const afterRefusedDismiss = (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages
+        .find((message: { id: string }) => message.id === cardId)?.card;
+      expect(afterRefusedDismiss).toMatchObject({ requestType: "question", requestId });
+      expect(afterRefusedDismiss.answered).toBeUndefined();
+      expect(afterRefusedDismiss.dismissed).toBeUndefined();
+
+      const completionsBeforeAnswer = (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages
+        .filter((message: { role?: string; kind?: string; text?: string }) =>
+          message.role === "bot" && message.kind === "text" && message.text === "fixture turn completed").length;
+      rmSync(isolatedFinishGate, { force: true });
+      const lateAnswer = await isolatedApi("POST", `/api/bots/${bot.id}/respond`, {
+        requestId,
+        behavior: "answer",
+        message: "README",
+      });
+      expect(lateAnswer).toMatchObject({
+        status: 200,
+        body: { ok: true, outcome: "answered", late: true },
+      });
+      expect(lateAnswer.body.queued).toBeUndefined();
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(true);
+      await expect.poll(async () => {
+        const messages = (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages;
+        const question = messages.find((message: { id: string }) => message.id === cardId)?.card;
+        const answerMessage = messages.find((message: { role?: string; text?: string; replyToId?: string }) =>
+          message.role === "user" && message.text === "README" && message.replyToId === cardId);
+        return { question: question && { answered: question.answered, answeredText: question.answeredText, dismissed: question.dismissed }, hasReply: Boolean(answerMessage) };
+      }, { timeout: 5_000 }).toEqual({
+        question: { answered: "answer", answeredText: "README", dismissed: false },
+        hasReply: true,
+      });
+
+      writeFileSync(isolatedFinishGate, "finish");
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
+      await expect.poll(async () => (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages
+        .filter((message: { role?: string; kind?: string; text?: string }) =>
+          message.role === "bot" && message.kind === "text" && message.text === "fixture turn completed").length,
+      { timeout: 5_000 }).toBe(completionsBeforeAnswer + 1);
+      const afterAnsweredTurn = (await isolatedApi("GET", `/api/threads/${bot.threadId}/messages`)).body.messages
+        .find((message: { id: string }) => message.id === cardId)?.card;
+      expect(afterAnsweredTurn).toMatchObject({ answered: "answer", answeredText: "README", dismissed: false });
+    } finally {
+      writeFileSync(isolatedFinishGate, "finish");
+      questionSocket?.destroy();
+      if (activeServer) {
+        await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
+          .some((candidate: { busy?: boolean }) => candidate.busy), { timeout: 5_000 }).toBe(false);
+        await waitForExit(activeServer.child, { signal: "SIGTERM" });
+        expectStoppedTestServerCleanly(activeServer.child, activeServer.stderr());
+      }
+      await removeTempDir(isolatedHome);
+    }
+  }, 30_000);
 
   it("reconciles durable working goal cards with scheduler truth after a restart", async () => {
     const state = await api("GET", "/api/bots?messages=30");
@@ -6632,10 +6940,7 @@ describe("harness HTTP API", () => {
     expect(nothing.status).toBe(404);
   });
 
-  it("closes the approvals a cancelled turn can no longer answer", async () => {
-    // "Cancel turn" is a button ON the approval card, and a pending approval
-    // owns the composer. Stopping the turn without closing its card leaves the
-    // room blocked by a question whose asker is already gone.
+  it("closes cancelled approvals but preserves unanswered questions", async () => {
     const stopped = await api("POST", "/api/groups/test-cancel-room/interrupt");
     expect(stopped.status).toBe(200);
 
@@ -6645,6 +6950,57 @@ describe("harness HTTP API", () => {
     const card = room.messages.find((message: { id: string }) => message.id === "cancel-card").card;
     expect(card.dismissed).toBe(true);
     expect(card.answered).toBe("unavailable");
+
+    const question = room.messages.find((message: { id: string }) => message.id === "cancel-question-card").card;
+    expect(question).toMatchObject({ requestType: "question", requestId: "cancel-question-request" });
+    expect(question.answered).toBeUndefined();
+    expect(question.dismissed).toBeUndefined();
+
+    const dismissed = await api("POST", "/api/threads/test-cancel-room-thread/respond", {
+      requestId: "cancel-question-request",
+      behavior: "answer",
+      message: "The user closed this question without answering. Use your best judgment and continue.",
+      dismiss: true,
+    });
+    expect(dismissed.status).toBe(409);
+
+    const reread = (await api("GET", "/api/bots")).body.groups.find(
+      (group: { id: string }) => group.id === "test-cancel-room",
+    );
+    const stillOpen = reread.messages.find((message: { id: string }) => message.id === "cancel-question-card").card;
+    expect(stillOpen.answered).toBeUndefined();
+    expect(stillOpen.dismissed).toBeUndefined();
+
+    try {
+      const answered = await api("POST", "/api/threads/test-cancel-room-thread/respond", {
+        requestId: "cancel-question-request",
+        behavior: "answer",
+        message: "README",
+      });
+      expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+      expect(answered.body).toMatchObject({ ok: true, outcome: "answered", late: true });
+      await expect.poll(async () => {
+        const groups = (await api("GET", "/api/bots")).body.groups;
+        return groups.find((group: { id: string }) => group.id === "test-cancel-room")?.working;
+      }, { timeout: 5_000 }).toBe(true);
+      const afterAnswer = (await api("GET", "/api/bots")).body.groups.find(
+        (group: { id: string }) => group.id === "test-cancel-room",
+      );
+      const settled = afterAnswer.messages.find((message: { id: string }) => message.id === "cancel-question-card");
+      expect(settled.card).toMatchObject({ answered: "answer", answeredText: "README", dismissed: false });
+      expect(afterAnswer.messages).toContainEqual(expect.objectContaining({
+        role: "user",
+        kind: "text",
+        text: "@Test bot A: README",
+        replyToId: "cancel-question-card",
+      }));
+    } finally {
+      expect((await api("POST", "/api/groups/test-cancel-room/interrupt")).status).toBe(200);
+      await expect.poll(async () => {
+        const groups = (await api("GET", "/api/bots")).body.groups;
+        return groups.find((group: { id: string }) => group.id === "test-cancel-room")?.working;
+      }, { timeout: 5_000 }).toBe(false);
+    }
   });
 
   it("rejects an empty message and explains an unavailable provider", async () => {
@@ -7857,10 +8213,20 @@ describe("harness HTTP API", () => {
       { timeout: 5_000 }).toBe("dispatched");
     } finally {
       rmSync(failureMarker, { force: true });
-      if (room) await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
-      await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
+      if (room) {
+        await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
+        await expect.poll(async () => {
+          const current = (await api("GET", "/api/bots?messages=20")).body;
+          const member = current.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+          const group = current.groups.find((candidate: { id: string }) => candidate.id === room.id);
+          return { busy: member?.busy, working: group?.working };
+        }, { timeout: 5_000 }).toEqual({ busy: false, working: false });
+      }
+      const configCleanup = await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] });
+      expect(configCleanup.status, JSON.stringify(configCleanup.body)).toBe(200);
       if (room) await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
-      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      const botCleanup = await api("DELETE", `/api/bots/${bot.id}`);
+      expect(botCleanup.status, JSON.stringify(botCleanup.body)).toBe(200);
     }
   });
 

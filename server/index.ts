@@ -101,6 +101,7 @@ import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from 
 import * as boat from "./boat.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import { isEffortLevel, type BotVisibility, type CardAnswerer, type ResolvedSender, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isPersistentQuestionCard, QUESTION_DISMISS_MESSAGE, shouldSettleRequestCard } from "../shared/ask-question.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "./boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
@@ -5291,11 +5292,12 @@ async function answerRequest(
     const existing = messageId
       ? thread.find((m) => m.id === messageId)
       : thread.find((m) => m.card?.requestId === requestId);
-    if (existing?.card && !existing.card.answered) {
+    const persistentQuestion = isPersistentQuestionCard(existing?.card);
+    if (existing?.card && !existing.card.answered && !persistentQuestion) {
       store.patchMessage(threadId, existing.id, { card: { ...existing.card, answered: "unavailable", dismissed: true } });
     }
     if (messageId) askMessageByRequest.delete(`${threadId}:${requestId}`);
-    store.appendMessage(threadId, {
+    if (!persistentQuestion) store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
       tool: { name: "Couldn't deliver that answer — the request is no longer open, so the action was not run", ok: false },
@@ -5317,6 +5319,12 @@ function closeOpenApprovals(threadId: string): void {
     const card = message.card;
     if (!card?.requestId || card.answered || card.dismissed) continue;
     if (card.routineRequest || card.skillRequest) continue;
+    if (isPersistentQuestionCard(card)) {
+      // Keep the durable card; its in-flight adapter mapping cannot survive
+      // turn cleanup, and the response route can resume it from the transcript.
+      askMessageByRequest.delete(`${threadId}:${card.requestId}`);
+      continue;
+    }
     store.patchMessage(threadId, message.id, { card: { ...card, answered: "unavailable", dismissed: true } });
     askMessageByRequest.delete(`${threadId}:${card.requestId}`);
   }
@@ -5325,6 +5333,7 @@ function closeOpenApprovals(threadId: string): void {
 function requestBehavior(value: unknown): "allow" | "deny" | "answer" | null {
   return value === "allow" || value === "deny" || value === "answer" ? value : null;
 }
+
 // the last settled assistant text per thread, so a "finished" notification
 // can carry what the bot actually said
 const lastReply = new Map<string, string>();
@@ -6982,6 +6991,7 @@ bus.subscribe((event: RuntimeEvent) => {
           subtitle: event.summary,
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
           requestId: event.requestId,
+          requestType: permission ? "permission" : "question",
           tool: permission ? event.tool : undefined,
           questionRequest: questions
             ? { version: 1, questions, ...(event.origin === "output" ? { origin: "output" as const } : {}) }
@@ -7046,9 +7056,15 @@ bus.subscribe((event: RuntimeEvent) => {
       if (messageId) {
         const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
         if (existing?.card && !existing.card.answered) {
-          store.patchMessage(event.threadId, messageId, {
-            card: { ...existing.card, answered: event.behavior, dismissed: event.source !== "user" },
-          });
+          if (shouldSettleRequestCard(existing.card, event.source)) {
+            store.patchMessage(event.threadId, messageId, {
+              card: {
+                ...existing.card,
+                answered: event.behavior,
+                dismissed: isPersistentQuestionCard(existing.card) ? false : event.source !== "user",
+              },
+            });
+          }
         }
         if (event.requestId) askMessageByRequest.delete(`${event.threadId}:${event.requestId}`);
       }
@@ -8141,6 +8157,88 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
   }
   const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger });
   return { ok: true as const, threadId, message };
+}
+
+/** A provider can finish its run before the owner answers. Persist that answer
+ * as a normal reply and run/queue it against the original conversation. */
+async function deliverLateQuestionAnswer(
+  auth: RequestAuth,
+  threadId: string,
+  requestId: string,
+  answer: string,
+  cardMessage: Message,
+  owner: BotRecord,
+): Promise<{ queued: boolean }> {
+  const group = store.groupByThread(threadId);
+  const roomTarget = group
+    ? group.dm
+      ? group.threadId === threadId
+      : Boolean(store.groupTaskByThread(group.id, threadId))
+    : false;
+  if (group && (!roomTarget || !group.memberIds.includes(owner.id))) {
+    throw Object.assign(new Error("the bot that asked this question is no longer in this conversation"), { status: 409 });
+  }
+  if (!group && !store.taskByThread(owner.id, threadId)) {
+    throw Object.assign(new Error("the question's conversation no longer exists"), { status: 409 });
+  }
+
+  const text = group ? `@${owner.name}: ${answer}` : answer;
+  const sendId = `late-question-${createHash("sha256").update(`${threadId}:${requestId}`).digest("hex").slice(0, 32)}`;
+  const key = group
+    ? `group:${group.id}:${threadId}:${sendId}`
+    : `bot:${owner.id}:${threadId}:${sendId}`;
+  const receipt = await sendSequencer.run(key, sendFingerprint(text, cardMessage.id, group ? "chat" : undefined), async () => {
+    const accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, text, cardMessage.id, group ? "chat" : undefined);
+    if (accepted.kind === "conflict") throw Object.assign(new Error("this question already has a different recorded answer"), { status: 409 });
+    if (accepted.kind === "match") return { queued: false };
+
+    const queuedDirect = group ? null : queuedSteeredMessage(owner.id, threadId, sendId);
+    if (queuedDirect) {
+      if (queuedDirect.text !== text || queuedDirect.replyToId !== cardMessage.id) {
+        throw Object.assign(new Error("this question already has a different queued answer"), { status: 409 });
+      }
+      return { queued: true };
+    }
+    const queuedRoom = group ? queuedChannelMessage(group.id, threadId, sendId) : null;
+    if (queuedRoom) {
+      if (queuedRoom.text !== text || queuedRoom.replyToId !== cardMessage.id || queuedRoom.mode !== "chat") {
+        throw Object.assign(new Error("this question already has a different queued answer"), { status: 409 });
+      }
+      return { queued: true };
+    }
+
+    const latestCard = store.messagesFor(threadId).find((message) => message.id === cardMessage.id)?.card;
+    if (!latestCard || latestCard.answered || latestCard.dismissed) {
+      throw Object.assign(new Error("this question has already been answered"), { status: 409 });
+    }
+    assertWithinBudget(cfg, DATA_DIR);
+    const sender = messageSender(auth);
+    const trigger = usageTriggerFor(auth);
+    if (group) {
+      const current = store.group(group.id);
+      if (!current || !roomTarget) throw Object.assign(new Error("the room switched tasks before it could receive the answer"), { status: 409 });
+      if (groupIsWorking(current)) {
+        const queued = queueChannelMessage(current.id, threadId, text, {
+          replyToId: cardMessage.id,
+          sendId,
+          mode: "chat",
+          sender,
+          trigger,
+        });
+        return { queued: true, queueId: queued.id };
+      }
+      startGroupTurn(current.id, text, cardMessage, sendId, "chat", undefined, { threadId, sender, trigger });
+      return { queued: false };
+    }
+    const direct = await startOrQueueDirectMessage(owner.id, threadId, text, cardMessage, sendId, sender, trigger);
+    return { queued: "queued" in direct && Boolean(direct.queued) };
+  });
+
+  const latest = store.messagesFor(threadId).find((message) => message.id === cardMessage.id)?.card;
+  if (latest && !latest.answered && !latest.dismissed) {
+    store.patchMessage(threadId, cardMessage.id, { card: { ...latest, answered: "answer", answeredText: answer, dismissed: false } });
+  }
+  return receipt;
 }
 
 /** How many start_thread calls one turn may make. Same spirit as the
@@ -20494,7 +20592,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
           return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
         }
-        const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, { id: bot.id, name: bot.name }, body.always === true, body.rememberCommand === true);
+        const requestId = String(body.requestId);
+        const pending = store.messagesFor(bot.threadId).find((message) => message.card?.requestId === requestId);
+        if (isPersistentQuestionCard(pending?.card) && (body.dismiss === true || body.message === QUESTION_DISMISS_MESSAGE)) {
+          if (!pending?.card) return json(res, 404, { error: "this question is no longer available" });
+          if (pending.card.answered !== "answer" || pending.card.dismissed) {
+            return json(res, 409, { error: "answer this question before dismissing it" });
+          }
+          store.patchMessage(bot.threadId, pending.id, { card: { ...pending.card, dismissed: true } });
+          return json(res, 200, { ok: true, dismissed: true });
+        }
+        const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, requestId, behavior, body.message, { id: bot.id, name: bot.name }, body.always === true, body.rememberCommand === true);
+        if (outcome === "unavailable" && isPersistentQuestionCard(pending?.card) && behavior === "answer") {
+          if (!pending) return json(res, 404, { error: "this question is no longer available" });
+          const answer = typeof body.message === "string" ? body.message.trim() : "";
+          if (!answer) return json(res, 400, { error: "a question answer is required" });
+          try {
+            const reply = await deliverLateQuestionAnswer(auth, bot.threadId, requestId, answer, pending, bot);
+            return json(res, 200, { ok: true, outcome: "answered", late: true, ...(reply.queued ? { queued: true } : {}) });
+          } catch (error) {
+            return json(res, 409, { error: error instanceof Error ? error.message : "the late answer could not be queued" });
+          }
+        }
         return json(res, 200, { ok: true, outcome });
       });
     }
@@ -20616,13 +20735,34 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // answerRequest closes an unreachable card, and a pending approval owns
         // the composer, so a dead end here locks the room for good.
         const pending = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId);
+        if (isPersistentQuestionCard(pending?.card) && (body.dismiss === true || body.message === QUESTION_DISMISS_MESSAGE)) {
+          if (!pending?.card) return json(res, 404, { error: "this question is no longer available" });
+          if (pending.card.answered !== "answer" || pending.card.dismissed) {
+            return json(res, 409, { error: "answer this question before dismissing it" });
+          }
+          store.patchMessage(threadId, pending.id, { card: { ...pending.card, dismissed: true } });
+          return json(res, 200, { ok: true, dismissed: true });
+        }
         const owner = group
-          ? (group.busyBotId ? store.bot(group.busyBotId) : undefined) ??
+          ? (isPersistentQuestionCard(pending?.card) && pending?.from ? store.bot(pending.from.botId) : undefined) ??
+            (group.busyBotId ? store.bot(group.busyBotId) : undefined) ??
             (pending?.from ? store.bot(pending.from.botId) : undefined)
           : store.botByThread(threadId);
         if (!owner && !pending) return json(res, 404, { error: "nothing is waiting on an answer in this conversation" });
         const requestOwner = owner ? botForThread(owner.id, threadId) : null;
         const outcome = await answerRequest(threadId, requestOwner?.modelSelection.instanceId ?? "", requestId, behavior, body.message, owner ? { id: owner.id, name: owner.name } : undefined, body.always === true, body.rememberCommand === true);
+        if (outcome === "unavailable" && isPersistentQuestionCard(pending?.card) && behavior === "answer") {
+          if (!pending?.card) return json(res, 404, { error: "this question is no longer available" });
+          const answer = typeof body.message === "string" ? body.message.trim() : "";
+          if (!answer) return json(res, 400, { error: "a question answer is required" });
+          if (!owner) return json(res, 409, { error: "the bot that asked this question is no longer available" });
+          try {
+            const reply = await deliverLateQuestionAnswer(auth, threadId, requestId, answer, pending, owner);
+            return json(res, 200, { ok: true, outcome: "answered", late: true, ...(reply.queued ? { queued: true } : {}) });
+          } catch (error) {
+            return json(res, 409, { error: error instanceof Error ? error.message : "the late answer could not be queued" });
+          }
+        }
         return json(res, 200, { ok: true, outcome });
       });
     }

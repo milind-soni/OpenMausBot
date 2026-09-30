@@ -12,15 +12,16 @@
 // works only as long as no question ever offers an option called "Allow".
 // A question's options are written by the model, so that is a matter of
 // luck, and the CLI's own AskUserQuestion makes questions common.
+import { QUESTION_DISMISS_MESSAGE } from "../../shared/ask-question";
 
 /** The only field that decides it: a permission card names its tool. */
 interface CardKind {
   tool?: string;
 }
-
 export interface CardResponse {
   behavior: "allow" | "deny" | "answer";
   message?: string;
+  dismiss?: boolean;
 }
 
 /** The response for pressing one of a card's options. */
@@ -32,12 +33,14 @@ export function answerResponse(card: CardKind, answer: string): CardResponse {
   return { behavior: answer === "Deny" ? "deny" : "allow" };
 }
 
-/** The response for closing a card with its X. */
+/** The response for closing a card with its X. Unresolved questions carry an
+ * explicit dismiss marker that the server rejects until an answer is chosen. */
 export function dismissResponse(card: CardKind): CardResponse {
   if (card.tool) return { behavior: "deny", message: "Dismissed by user." };
   // Closing a question is an answer — "I am not choosing" — not a denial.
   return {
     behavior: "answer",
-    message: "The user closed this question without answering. Use your best judgment and continue.",
+    message: QUESTION_DISMISS_MESSAGE,
+    dismiss: true,
   };
 }

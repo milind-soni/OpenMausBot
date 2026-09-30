@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldHideOnboardingCard } from "./OptionCard";
+import { canDismissOptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import type { Message } from "@/state/store";
 
 const msg = (partial: Partial<Message> & Pick<Message, "id" | "kind">): Message => ({
@@ -63,5 +63,26 @@ describe("shouldHideOnboardingCard", () => {
       },
     });
     expect(shouldHideOnboardingCard(question, [user, question])).toBe(false);
+  });
+});
+
+describe("canDismissOptionCard", () => {
+  it("does not let an unresolved live question be silently dismissed", () => {
+    expect(canDismissOptionCard({
+      title: "Your bot has a question",
+      subtitle: "which file?",
+      options: [],
+      requestId: "req-1",
+      requestType: "question",
+    })).toBe(false);
+  });
+
+  it("keeps approval and settled-card dismissal behavior", () => {
+    expect(canDismissOptionCard({
+      title: "Approval needed", subtitle: "run command", options: ["Allow", "Deny"], requestId: "req-2", tool: "Bash",
+    })).toBe(true);
+    expect(canDismissOptionCard({
+      title: "Question", subtitle: "answered", options: [], requestId: "req-3", requestType: "question", answered: "answer",
+    })).toBe(true);
   });
 });

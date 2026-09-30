@@ -474,6 +474,8 @@ export interface OptionCardData {
   title: string;
   subtitle: string;
   options: string[];
+  /** Distinguishes a provider question from an approval after its live run ends. */
+  requestType?: "permission" | "question";
   answered?: string;
   /** What was actually answered, when the answer is words rather than a
    * verdict. */
