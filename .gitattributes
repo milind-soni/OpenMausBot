@@ -18,3 +18,9 @@ third_party/browser/** text eol=lf
 # on Windows fails both for a reason that has nothing to do with the evals.
 evals/live/judge/prompts/** text eol=lf
 evals/golden/**/*.json text eol=lf
+# The bundled model catalog is compared byte for byte with what
+# scripts/build-model-catalog.mjs writes (LF), and its licence text with the
+# LICENSE files, in scripts/build-model-catalog.test.mjs and by --check.
+server/model-catalog/models-dev.snapshot.json text eol=lf
+third_party/models-dev/LICENSE text eol=lf
+third_party/opencode/LICENSE text eol=lf

@@ -10,6 +10,12 @@ import { killCliTree, spawnCli } from "../procs.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
+import {
+  VERIFICATION_TEMP_KEY,
+  antigravityTempDir,
+  setAntigravityTempEnvironment,
+  sweepAntigravityTemp,
+} from "./antigravity-temp.ts";
 
 // Printed on stderr by Google's server, not stdout.
 export const ANTIGRAVITY_AUTH_PREFIX = "Open the following link to authenticate the ACP server: ";
@@ -21,11 +27,17 @@ const MAX_PROTOCOL_LINE_BYTES = 16 * 1024 * 1024;
 // Past the 16 KiB ceiling parseAntigravityAuthorizationUrl accepts, so a
 // partial stderr line is never dropped while it could still become a link.
 const MAX_DIAGNOSTIC_LINE_CHARS = 64 * 1024;
+// How long a closed runtime gets to exit on its own after its input ends.
+// A forced stop on Windows skips the runtime's own cleanup of the files it
+// unpacked; exiting by itself removes them. Same grace as the ACP pool.
+const GRACEFUL_EXIT_MS = 5_000;
 
 export interface AntigravityProfile {
   directory: string;
   tokenPath: string;
   environment: NodeJS.ProcessEnv;
+  /** Where the Windows runtime unpacks itself (TEMP/TMP). Windows only. */
+  tempDirectory?: string;
 }
 
 const REMOVED_ENVIRONMENT_KEYS = new Set([
@@ -113,6 +125,10 @@ export async function prepareAntigravityProfile(input: {
   baseEnv?: NodeJS.ProcessEnv;
   baseDir?: string;
   profileDirectory?: string;
+  /** Defaults to this instance's stable folder under DATA_DIR/tmp/agy. */
+  tempDirectory?: string;
+  /** Test seam for the Windows-only TEMP handling. */
+  platform?: NodeJS.Platform;
 }): Promise<AntigravityProfile> {
   const directory = resolve(input.profileDirectory ?? antigravityProfileDirectory(input.instanceId, input.baseDir));
   const acpDirectory = join(directory, "antigravity-acp");
@@ -148,7 +164,22 @@ export async function prepareAntigravityProfile(input: {
     PYTHONUNBUFFERED: "1",
     ELECTRON_RUN_AS_NODE: "1",
   });
-  return { directory, tokenPath: join(acpDirectory, "acp_token.json"), environment };
+  // On Windows the runtime unpacks 0.34-1.26 GB into TEMP on every launch.
+  // Keep that in a folder OMB owns and can clean. It is the same folder for
+  // every launch of this instance, so the pooled process's spawn contract
+  // (which hashes this environment) does not change from turn to turn.
+  let tempDirectory: string | undefined;
+  if ((input.platform ?? process.platform) === "win32") {
+    tempDirectory = resolve(input.tempDirectory ?? antigravityTempDir(input.baseDir ?? DATA_DIR, input.instanceId));
+    await mkdir(tempDirectory, { recursive: true });
+    setAntigravityTempEnvironment(environment, tempDirectory, "win32");
+  }
+  return {
+    directory,
+    tokenPath: join(acpDirectory, "acp_token.json"),
+    environment,
+    ...(tempDirectory ? { tempDirectory } : {}),
+  };
 }
 
 export async function antigravityProfileAuthenticated(profile: AntigravityProfile): Promise<boolean> {
@@ -222,6 +253,9 @@ export class AntigravityAcpClient {
   }
 
   private consume(chunk: string) {
+    // Output after close has no reader; do not buffer it while the process
+    // is given time to exit.
+    if (this.closed) return;
     if (!this.initializationComplete) this.startupOutputBytes += Buffer.byteLength(chunk);
     this.buffer += chunk;
     if (Buffer.byteLength(this.buffer) > MAX_PROTOCOL_LINE_BYTES) {
@@ -324,15 +358,40 @@ export class AntigravityAcpClient {
     return initialized;
   }
 
+  /** End the runtime's input and let it exit by itself, so it removes what
+   * it unpacked; stop it by force only if it is still running after
+   * GRACEFUL_EXIT_MS. killCliTree also runs after a clean exit. On macOS and
+   * Linux that reaps any helper still in the process group. On Windows it
+   * does nothing once the runtime has exited (procs.ts stopCliTree), so a
+   * helper that outlives a clean exit is left running, as in the ACP pool. */
   close() {
     if (this.closed) return;
     this.closed = true;
     this.failAll(new Error("Antigravity ACP was closed."));
-    this.stopping = killCliTree(this.child);
+    this.stopping = this.stopGracefully();
   }
 
-  /** Allow the shared 5s TERM grace and 1s force-stop verification to finish. */
-  async closeAndWait(timeoutMs = 7_000): Promise<boolean> {
+  private async stopGracefully(): Promise<boolean> {
+    try {
+      this.child.stdin?.end();
+    } catch {
+      /* already closed; the kill below still applies */
+    }
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      this.exited,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, GRACEFUL_EXIT_MS);
+        timer.unref?.();
+      }),
+    ]);
+    clearTimeout(timer);
+    return killCliTree(this.child);
+  }
+
+  /** Allow the graceful exit, the shared 5s TERM grace, and the 1s
+   * force-stop verification to finish. */
+  async closeAndWait(timeoutMs = 12_000): Promise<boolean> {
     this.close();
     let timer: NodeJS.Timeout | undefined;
     const timedOut = new Promise<boolean>((resolve) => {
@@ -531,20 +590,19 @@ export function isValidAntigravityInitializeResult(
 export async function validateAntigravityRuntime(runtime: AntigravityRuntime, expectedVersion: string): Promise<void> {
   const profileDirectory = await mkdtemp(join(tmpdir(), "openmaus-antigravity-verify-"));
   let client: AntigravityAcpClient | undefined;
+  let tempDirectory: string | undefined;
   let failed = false;
   let failure: unknown;
   try {
+    // On Windows every verification unpacks into one shared folder under
+    // DATA_DIR/tmp/agy, swept below once the runtime is gone.
     const profile = await prepareAntigravityProfile({
       instanceId: `verify-${randomUUID()}`,
       runtime,
       profileDirectory,
-      // Google's Windows one-file executable expands a large Python runtime
-      // into TEMP. Forced shutdown skips its own cleanup. Keep verification's
-      // extraction inside the profile we already remove after confirmed close.
-      baseEnv: process.platform === "win32"
-        ? { ...process.env, TEMP: profileDirectory, TMP: profileDirectory }
-        : undefined,
+      tempDirectory: antigravityTempDir(DATA_DIR, VERIFICATION_TEMP_KEY),
     });
+    tempDirectory = profile.tempDirectory;
     client = new AntigravityAcpClient(runtime, profile, profileDirectory);
     const initialized = await client.initialize();
     if (!isValidAntigravityInitializeResult(initialized, expectedVersion)) {
@@ -571,8 +629,16 @@ export async function validateAntigravityRuntime(runtime: AntigravityRuntime, ex
   if (stopped) {
     await rm(profileDirectory, { recursive: true, force: true, maxRetries: 4, retryDelay: 250 })
       .catch((error) => {
-        console.warn(`antigravity: could not remove verification profile ${profileDirectory}: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(`antigravity: could not remove verification files ${profileDirectory}: ${error instanceof Error ? error.message : String(error)}`);
       });
+    // The temp folder is shared, so only unpack folders whose process is
+    // gone go: this run's, and any an earlier run left when its runtime
+    // would not stop.
+    if (tempDirectory) {
+      await sweepAntigravityTemp(VERIFICATION_TEMP_KEY).catch((error) => {
+        console.warn(`antigravity: could not clear verification files: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }
   }
   if (failed) throw failure;
 }

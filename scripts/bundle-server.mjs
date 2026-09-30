@@ -152,6 +152,13 @@ if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
   copyFileSync(join(root, "enterprise", "LICENSE"), join(root, "dist-server", "enterprise", "LICENSE"));
 }
 
+// The model catalog snapshot (server/model-catalog/catalog.ts) is read from
+// disk, not inlined: 1.5 MB of JSON has no place in index.js. The bundle looks
+// for it under model-catalog/ beside itself. Its MIT notice is inside the file.
+const catalogSnapshot = join(root, "dist-server", "model-catalog", "models-dev.snapshot.json");
+mkdirSync(dirname(catalogSnapshot), { recursive: true });
+copyFileSync(join(server, "model-catalog", "models-dev.snapshot.json"), catalogSnapshot);
+
 // pi-mcp-extension.ts is NOT an OpenMausBot entry point: it is loaded by the
 // external `pi` process (pi's own jiti), which resolves its
 // @earendil-works/pi-coding-agent and typebox imports from pi's install. Ship

@@ -252,7 +252,7 @@ test("Electron relaunch waits for deferred cleanup and the replacement acquires 
     : process.platform === "linux" && !process.env.DBUS_SESSION_BUS_ADDRESS && !dbusRunSession
       ? "no session bus and no dbus-run-session; single-instance lock cannot be tested"
       : false,
-  timeout: 20_000,
+  timeout: 45_000,
 }, async (t) => {
   const workspace = mkdtempSync(join(tmpdir(), "omb-appimage-relaunch-"));
   t.after(() => rmSync(workspace, { recursive: true, force: true }));
@@ -318,11 +318,22 @@ test("Electron relaunch waits for deferred cleanup and the replacement acquires 
   delete env.ELECTRON_RUN_AS_NODE;
   const run = xvfb ? [xvfb, "-a", electron, ...args] : [electron, ...args];
   const launch = process.env.DBUS_SESSION_BUS_ADDRESS || !dbusRunSession ? run : [dbusRunSession, "--", ...run];
-  const child = spawn(launch[0], launch.slice(1), { env, stdio: ["ignore", "pipe", "pipe"] });
+  // The launcher leads its own process group, and a stuck run kills the whole
+  // group. On headless Linux the launcher is a wrapper (dbus-run-session →
+  // xvfb-run → Xvfb and Electron, plus the session's dbus-daemon): killing the
+  // wrapper alone orphaned the rest, which kept the output pipes open, so
+  // "close" never came, the test timed out, and the orphans held `node --test`
+  // open until the CI job's cap cancelled it with no result.
+  const child = spawn(launch[0], launch.slice(1), { env, stdio: ["ignore", "pipe", "pipe"], detached: true });
   let output = "";
   child.stdout.on("data", chunk => { output += chunk; });
   child.stderr.on("data", chunk => { output += chunk; });
-  const timeout = setTimeout(() => child.kill("SIGKILL"), 10_000);
+  const killLaunch = () => {
+    try { process.kill(-child.pid, "SIGKILL"); } catch { /* the group already exited */ }
+  };
+  // Passing runs have taken 1 to 9.5 s on hosted Ubuntu runners, so the old
+  // 10 s cap sat inside the normal range.
+  const timeout = setTimeout(killLaunch, 30_000);
   const code = await new Promise((resolve, reject) => {
     child.once("error", reject);
     child.once("close", resolve);

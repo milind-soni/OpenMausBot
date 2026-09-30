@@ -178,8 +178,16 @@ afterAll(async () => {
   if (fixtureHome) await removeTempDir(fixtureHome);
 });
 
+// The openai-compat turns mount the real computer server, whose bridge
+// (mcp-bridge.ts) spawns the runtime with a plain spawn: Windows launches only
+// a .com/.exe that way, so the extensionless node-script `podman` above can
+// never start there and the mount fails before any request (the product finds
+// Podman Desktop's podman.exe). Same fixture limit as container-mcp.test.ts;
+// the claudeAgent control below only builds the config and still runs there.
+const itWithFakeRuntime = it.skipIf(process.platform === "win32");
+
 describe("openai-compat Local VM tools", () => {
-  it("mounts the Local VM tools on a strict Works on: Local VM turn", async () => {
+  itWithFakeRuntime("mounts the Local VM tools on a strict Works on: Local VM turn", async () => {
     vmState({ containers: [] });
     requests.length = 0;
     const { bot } = await api("POST", "/api/bots", { name: "openai strict vm" });
@@ -197,7 +205,7 @@ describe("openai-compat Local VM tools", () => {
     expect(nativeToolNames(bot.threadId)).toContain("computer_screenshot");
   }, 60_000);
 
-  it("mounts the Local VM tools on the select_computer continuation", async () => {
+  itWithFakeRuntime("mounts the Local VM tools on the select_computer continuation", async () => {
     vmState({ containers: [] });
     requests.length = 0;
     pendingSelect = null;

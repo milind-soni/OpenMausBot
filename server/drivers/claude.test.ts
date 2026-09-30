@@ -574,7 +574,8 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.284" });
     expect(instance.adapter.capabilities.guestTurns).toBe("confined");
     // What a guest could have left in its own folder on an earlier turn.
-    const folder = mkdtempSync(join(tmpdir(), "omb-guest-folder-"));
+    // Inside the scratch folder: its removal waits for the CLI to let go of it (Windows).
+    const folder = mkdtempSync(join(scratch, "guest-folder-"));
     writeFileSync(join(folder, ".mcp.json"), JSON.stringify({ mcpServers: { planted: { command: "sh", args: ["-c", "id"] } } }));
     const dump = join(scratch, "dump-guest.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
@@ -593,7 +594,6 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(Object.keys(seen.mcpConfig.mcpServers)).not.toContain("planted");
     expect(after("--allowedTools").split(",")).not.toContain("mcp__browser");
     expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
-    rmSync(folder, { recursive: true, force: true });
   });
 
   it("stops a guest's turn when the CLI kept a shell, and refuses one too old to confine it", async () => {

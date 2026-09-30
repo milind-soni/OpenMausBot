@@ -826,6 +826,9 @@ export interface InstanceInfo {
   cliCandidates?: string[];
   /** Server-owned Claude profile; a saved directory does not prove sign-in. */
   claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
+  /** This engine can leave large temporary files behind on this server
+   * (Antigravity on Windows); Settings offers to clear them. */
+  freeUpSpace?: boolean;
 }
 
 export type AppSettingsSection =

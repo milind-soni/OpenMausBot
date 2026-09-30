@@ -203,6 +203,8 @@ const dumpEnv = Object.fromEntries(
     "PATH",
     "HOME",
     "USERPROFILE",
+    "TEMP",
+    "TMP",
     "SystemRoot",
     "FAKE_ACP_MODE",
     "FAKE_ACP_RPC_DUMP",
