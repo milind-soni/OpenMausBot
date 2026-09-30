@@ -6,6 +6,7 @@ import { ApprovalCard } from "./ApprovalCard";
 import { pendingApprovals, PendingApprovalPanel, spokenApprovalPrompt, type Pending } from "./PendingApproval";
 import type { Bot, Message } from "@/state/store";
 import { skillRequestBehavior } from "../../shared/skill-request";
+import type { ProfileRequestChanges } from "../../shared/profile-request";
 
 const routineRequest = {
   version: 1 as const,
@@ -130,7 +131,7 @@ describe("ApprovalCard routine proposals", () => {
 });
 
 describe("ApprovalCard profile proposals", () => {
-  const card = (answered?: string) => ({
+  const card = (answered?: string, changes: ProfileRequestChanges = { name: "Kiwi", soul: "Be brief." }) => ({
     title: "Set up Scout?",
     subtitle: 'Why: you asked\nName: "Scout" → "Kiwi"\nSOUL.md (0 → 9 bytes):\n+Be brief.\nChanges what Scout is told on every turn. Nothing runs.',
     options: ["Confirm", "Cancel"],
@@ -139,7 +140,7 @@ describe("ApprovalCard profile proposals", () => {
     answered,
     profileRequest: {
       version: 1 as const, requestId: "req-p1", botId: "bot-1", threadId: "thread-1", targetBotId: "bot-1", targetName: "Scout",
-      createdAt: 1, reason: "you asked", changes: { name: "Kiwi", soul: "Be brief." }, before: { name: "Scout", soul: "" }, expectedRevision: "r",
+      createdAt: 1, reason: "you asked", changes, before: { name: "Scout", soul: "" }, expectedRevision: "r",
     },
   });
 
@@ -159,6 +160,29 @@ describe("ApprovalCard profile proposals", () => {
     expect(html).toContain("update_profile");
     expect(html).toContain("+Be brief.");
     expect(html).toContain("Nothing runs.");
+  });
+
+  it("shows the proposed avatar image on the card, and none without an avatar change", () => {
+    const avatarCard = card(undefined, { avatarUrl: "/api/attachments/shared-1.png" });
+    const withAvatar: Message = {
+      id: "profile-card-avatar",
+      role: "bot",
+      kind: "options",
+      at: 1,
+      card: avatarCard,
+    };
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: withAvatar }));
+    expect(html).toContain('src="/api/attachments/shared-1.png"');
+    expect(html).toContain('alt="Proposed avatar"');
+
+    const without: Message = {
+      id: "profile-card-no-avatar",
+      role: "bot",
+      kind: "options",
+      at: 1,
+      card: card(),
+    };
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { bot, message: without }))).not.toContain("<img");
   });
 
   it("records Profile updated after confirmation", () => {

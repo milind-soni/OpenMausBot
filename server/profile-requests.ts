@@ -7,8 +7,10 @@
 // a card can sit open for days.
 import { soulDiffLines } from "../shared/line-diff.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestCardData, type ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TighteningRequestCardData } from "../shared/tightening-request.ts";
+import { MAUS_COLORS, type MausColor } from "../shared/wire.ts";
 import { parseBotProfilePatch, type BotProfilePatchInput } from "./bot-profile.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { newId } from "./contracts.ts";
@@ -26,9 +28,11 @@ const LABELS: Record<Exclude<(typeof PROFILE_REQUEST_FIELDS)[number], "soul" | "
   description: "Description",
   notifications: "Notifications",
   speakReplies: "Speak replies",
+  color: "Color",
+  avatarUrl: "Avatar",
 };
 const PRIVATE_WORKSPACE = "its private workspace";
-const CHOOSE_ONE = "Choose at least one of name, title, description, soul, cwd, notifications, speakReplies";
+const CHOOSE_ONE = "Choose at least one of name, title, description, soul, cwd, notifications, speakReplies, color, or avatarUrl";
 const toggleText = (value: boolean | undefined): string => (value ? "on" : "off");
 /** The fields that change what a bot is told: every card field except the
  * working folder and the two toggles. */
@@ -62,7 +66,7 @@ export interface ProfileRequestStore {
     },
   ): { id: string };
   patchMessage(threadId: string, messageId: string, patch: { card: OptionCardLike }): { id: string } | null;
-  patchBotProfile(id: string, patch: Partial<Pick<BotRecord, "name" | "title" | "description" | "cwd" | "soul" | "notifications" | "speakReplies" | "lastProfileRequestId">>): BotRecord | null;
+  patchBotProfile(id: string, patch: Partial<Pick<BotRecord, "name" | "title" | "description" | "cwd" | "soul" | "notifications" | "speakReplies" | "color" | "avatarUrl" | "avatarCrop" | "lastProfileRequestId">>): BotRecord | null;
 }
 
 export interface ProfileRequestServiceOptions {
@@ -73,6 +77,10 @@ export interface ProfileRequestServiceOptions {
   canPersist?: (botId: string, threadId: string) => { ok: true } | { ok: false; status: number; error: string };
   /** Chief targeting another bot: returns a refusal sentence or null. Checked at propose AND confirm. */
   validateTarget?: (proposerBotId: string, targetBotId: string) => string | null;
+  /** Checks that a proposed avatar still references an image the app has
+   * stored; checked at propose AND confirm, because a card can sit open for
+   * days and stored images can be removed. */
+  attachmentExists?: (avatarUrl: string) => boolean;
 }
 
 export class ProfileRequestError extends Error {
@@ -134,12 +142,33 @@ function parseChanges(input: unknown): ProfileRequestChanges {
   // it with validateBotCwd, not parseBotProfilePatch), so it is split off and
   // checked the same way that route does: absolute, exists, is a folder.
   // "" (or null) means the private workspace.
-  const { cwd: rawCwd, ...profileInput } = input as Record<string, unknown>;
+  const { cwd: rawCwd, color: rawColor, avatarUrl: rawAvatarUrl, ...profileInput } = input as Record<string, unknown>;
   let cwdChange: string | undefined;
   if (rawCwd !== undefined) {
     const checked = validateBotCwd(rawCwd);
     if (!checked.ok) throw new ProfileRequestError(checked.error, 400);
     cwdChange = checked.cwd ?? "";
+  }
+  let colorChange: MausColor | undefined;
+  if (rawColor !== undefined) {
+    const matched = typeof rawColor === "string" ? (MAUS_COLORS as readonly string[]).find((candidate) => candidate === rawColor) : undefined;
+    if (!matched) {
+      throw new ProfileRequestError(`color must be one of: ${MAUS_COLORS.join(", ")}`);
+    }
+    colorChange = matched as MausColor;
+  }
+  // The custom avatar travels by reference to an app-owned attachment — the
+  // same stored image the settings panel's upload and generate paths produce
+  // — so no image bytes ever move through a prompt. "" clears it.
+  let avatarChange: string | undefined;
+  if (rawAvatarUrl !== undefined) {
+    if (rawAvatarUrl === null || rawAvatarUrl === "") {
+      avatarChange = "";
+    } else {
+      const parsedUrl = botAvatarUrlSchema.safeParse(rawAvatarUrl);
+      if (!parsedUrl.success) throw new ProfileRequestError("avatarUrl must be a stored PNG, JPEG, GIF, or WebP attachment");
+      avatarChange = parsedUrl.data;
+    }
   }
   const parsed = Object.keys(profileInput).length
     ? parseBotProfilePatch(profileInput as BotProfilePatchInput, true)
@@ -147,8 +176,10 @@ function parseChanges(input: unknown): ProfileRequestChanges {
   if (!parsed.ok) throw new ProfileRequestError(parsed.error, 400);
   const changes: ProfileRequestChanges = {};
   if (cwdChange !== undefined) changes.cwd = cwdChange;
+  if (colorChange !== undefined) changes.color = colorChange;
+  if (avatarChange !== undefined) changes.avatarUrl = avatarChange;
   for (const field of PROFILE_REQUEST_FIELDS) {
-    if (field === "cwd") continue;
+    if (field === "cwd" || field === "color" || field === "avatarUrl") continue;
     const value = parsed.patch[field];
     if (field === "notifications" || field === "speakReplies") {
       if (value !== undefined) changes[field] = value as boolean;
@@ -203,6 +234,18 @@ export function profileCardCopy(
       lines.push(`${LABELS[field]}: ${toggleText(before[field] as boolean | undefined)} → ${toggleText(changes[field] as boolean | undefined)}`);
       continue;
     }
+    if (field === "color") {
+      lines.push(`Color: ${before.color ?? ""} → ${changes.color}`);
+      continue;
+    }
+    if (field === "avatarUrl") {
+      lines.push(changes.avatarUrl
+        ? before.avatarUrl
+          ? "Avatar: replaced with the image shown on this card"
+          : "Avatar: set to the image shown on this card"
+        : "Avatar: removed (back to the mascot)");
+      continue;
+    }
     lines.push(`${LABELS[field]}: "${before[field] ?? ""}" → "${changes[field]}"`);
   }
   if (changes.cwd !== undefined) {
@@ -231,6 +274,7 @@ export class ProfileRequestService {
   private readonly now: () => number;
   private readonly canPersist?: ProfileRequestServiceOptions["canPersist"];
   private readonly autoApply?: ProfileRequestServiceOptions["autoApply"];
+  private readonly attachmentExists?: ProfileRequestServiceOptions["attachmentExists"];
   /** Public: a caller's section membership can change between propose and
    * confirm, and tests flip this mid-scenario to model that. */
   validateTarget?: ProfileRequestServiceOptions["validateTarget"];
@@ -240,6 +284,7 @@ export class ProfileRequestService {
     this.now = options.now ?? Date.now;
     this.canPersist = options.canPersist;
     this.autoApply = options.autoApply;
+    this.attachmentExists = options.attachmentExists;
     this.validateTarget = options.validateTarget;
   }
 
@@ -265,6 +310,9 @@ export class ProfileRequestService {
   } {
     const reason = reasonText(args.reason);
     const changes = parseChanges(args.changes);
+    if (changes.avatarUrl && this.attachmentExists && !this.attachmentExists(changes.avatarUrl)) {
+      throw new ProfileRequestError("avatarUrl must reference an existing stored image", 400);
+    }
 
     const targetBotId = args.targetBotId ?? args.botId;
     const target = this.store.bot(targetBotId);
@@ -284,6 +332,20 @@ export class ProfileRequestService {
         if (value === undefined || value === snapshot[field]) continue;
         before[field] = snapshot[field];
         finalChanges[field] = value;
+        continue;
+      }
+      if (field === "color") {
+        // Neither the color nor the avatar is secret-bearing, so neither is
+        // redacted: a palette name and an app-owned attachment reference.
+        const value = changes.color;
+        if (value === undefined || value === snapshot.color) continue;
+        before.color = snapshot.color;
+        finalChanges.color = value;
+      } else if (field === "avatarUrl") {
+        const value = changes.avatarUrl;
+        if (value === undefined || value === snapshot.avatarUrl) continue;
+        before.avatarUrl = snapshot.avatarUrl;
+        finalChanges.avatarUrl = value;
       } else {
         const value = changes[field];
         if (value === undefined || value === snapshot[field]) continue;
@@ -411,6 +473,22 @@ export class ProfileRequestService {
         const checked = validateBotCwd(cwd || null);
         if (!checked.ok) throw new ProfileRequestError(checked.error, 409, { terminal: true });
         patch.cwd = checked.cwd ?? undefined;
+      }
+      if (payload.changes.avatarUrl) {
+        // Re-checked at confirm too: the stored image can be gone by the
+        // time the card is answered, and a proposal that can no longer show
+        // its own picture must not apply.
+        if (this.attachmentExists && !this.attachmentExists(payload.changes.avatarUrl)) {
+          throw new ProfileRequestError("The proposed avatar image is no longer stored. Ask for a fresh proposal.", 409, { terminal: true });
+        }
+        patch.avatarUrl = payload.changes.avatarUrl;
+        // The panel's upload picks a real crop for a mascot bot; mirror it
+        // so the confirmed avatar actually shows instead of staying hidden
+        // behind the mascot.
+        patch.avatarCrop = target.avatarCrop && target.avatarCrop !== "mascot" ? target.avatarCrop : "circle";
+      } else if (payload.changes.avatarUrl === "") {
+        patch.avatarUrl = undefined;
+        patch.avatarCrop = "mascot";
       }
       if (!this.store.patchBotProfile(target.id, patch)) throw new ProfileRequestError(NO_SUCH_BOT, 404);
       recordProfileChange(target.id, "bot", `card:${message.id}`, payload.before, payload.changes);

@@ -481,6 +481,7 @@
   "approval.card.wantsTo": "Veut {action}",
   "approval.card.profileWantsToOwn": "{name} veut mettre à jour son profil",
   "approval.card.profileWantsToOther": "{name} veut mettre à jour le profil de @{target}",
+  "approval.card.proposedAvatar": "Avatar proposé",
   "approval.aria.routineDetails": "Détails de la routine",
   "approval.aria.skillDetails": "Détails de la compétence",
   "approval.aria.profileChange": "Modification du profil",

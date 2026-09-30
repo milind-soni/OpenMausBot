@@ -483,6 +483,7 @@
   "approval.card.wantsTo": "{action}したい",
   "approval.card.profileWantsToOwn": "{name} が自分のプロフィールを更新したい",
   "approval.card.profileWantsToOther": "{name} が @{target} のプロフィールを更新したい",
+  "approval.card.proposedAvatar": "提案されたアバター",
   "approval.aria.routineDetails": "ルーティンの詳細",
   "approval.aria.skillDetails": "スキルの詳細",
   "approval.aria.profileChange": "プロフィールの変更",

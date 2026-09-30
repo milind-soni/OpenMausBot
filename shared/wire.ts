@@ -57,9 +57,12 @@ export type CloudBackend = "box" | "vps";
  * person's seat they are the same "cloud computer" panel. */
 export type Surface = "cloud" | "vm" | "local" | "browser";
 
-export type MausColor =
-  | "green" | "blue" | "red" | "orange" | "purple" | "cyan" | "pink"
-  | "yellow" | "teal" | "coral";
+/** The mascot colors a bot can wear; also the proposal-eligible palette. */
+export const MAUS_COLORS = [
+  "green", "blue", "red", "orange", "purple", "cyan", "pink",
+  "yellow", "teal", "coral",
+] as const;
+export type MausColor = (typeof MAUS_COLORS)[number];
 
 /** The face a bot rests on, as one of the engine's state names. Kept as a
  * plain string rather than a union: bots saved under the app's earlier

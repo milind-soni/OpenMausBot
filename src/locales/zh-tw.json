@@ -26,6 +26,7 @@
   "approval.card.wantsTo": "想要{action}",
   "approval.card.profileWantsToOwn": "{name} 想要更新自己的個人資料",
   "approval.card.profileWantsToOther": "{name} 想要更新 @{target} 的個人資料",
+  "approval.card.proposedAvatar": "建議的頭像",
   "approval.aria.routineDetails": "例行工作詳細資訊",
   "approval.aria.skillDetails": "技能詳細資訊",
   "approval.aria.profileChange": "個人資料變更",
