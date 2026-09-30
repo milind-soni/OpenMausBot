@@ -131,6 +131,7 @@ function pushApprovalCard(
   const note = bus.store.appendMessage(sourceThreadId, {
     role: "bot",
     kind: "options",
+    from: { botId: from.id, name: from.name, color: from.color },
     card: {
       // a room is named as a room; only a bot gets an @
       title: `@${from.name} wants to ${ACTION_VERB[action]} ${action === "post_to_room" ? `“${target.name}”` : `@${target.name}`}`,

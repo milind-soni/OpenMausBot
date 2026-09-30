@@ -249,6 +249,14 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
       return typeof value.message === "string" &&
         (value.setup === undefined || typeof value.setup === "boolean") &&
         (value.claudeUpdate === undefined || typeof value.claudeUpdate === "boolean");
+    case "content.class-passed":
+      return (
+        Array.isArray(value.classes) &&
+        value.classes.length > 0 &&
+        value.classes.every((item) => item === "personal" || item === "internal") &&
+        typeof value.funnel === "string" &&
+        stringOrMissing(value.botId)
+      );
     default:
       return false;
   }

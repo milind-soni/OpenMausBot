@@ -306,6 +306,32 @@ describe("workspace", () => {
     expect(memoryLineCount(readMemoryFile(BOT).text)).toBe(MEMORY_MAX_LINES + 1);
   });
 
+  it("scrubs what updateMemory returns when it rebuilds a line around existing content", () => {
+    const dir = ensureWorkspace(BOT);
+    // a hand-grown file: the person pasted a credential themselves, so it
+    // was never scrubbed on the way in
+    const secret = "sk-ant-api03-1234567890abcdef1234567890abcdef";
+    writeFileSync(join(dir, "MEMORY.md"), `# Memory\n- 2026-09-10 · key ${secret}\n`);
+    const result = updateMemory(BOT, { action: "replace", oldText: "key", text: "credential" }, { now: new Date(2026, 8, 11) });
+    if (!result.ok) throw new Error(`memory update failed: ${result.error}`);
+    expect(result.ok).toBe(true);
+    expect(result.entry).toContain("credential");
+    // the rebuilt entry keeps the secret span; it must not leave this call
+    expect(result.entry).not.toContain(secret);
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(readMemoryFile(BOT).text).not.toContain(secret);
+  });
+
+  it("scrubs the over-budget refusal's recent view of the file", () => {
+    const dir = ensureWorkspace(BOT);
+    const entries = Array.from({ length: MEMORY_MAX_LINES }, (_, i) => `- fact ${i}`);
+    entries[entries.length - 1] = "- key sk-ant-api03-1234567890abcdef1234567890abcdef";
+    writeFileSync(join(dir, "MEMORY.md"), entries.join("\n"));
+    const refused = updateMemory(BOT, { action: "append", text: "one fact too many" }, { now: new Date(2026, 8, 10) });
+    expect(refused).toMatchObject({ ok: false, code: "over-budget" });
+    expect(!refused.ok && "recent" in refused ? refused.recent.join("\n") : "").not.toContain("sk-ant-api03");
+  });
+
   it("tells the bot how far over budget a hand-grown file is, and how to fix it, when the prompt cuts it", () => {
     const dir = ensureWorkspace(BOT);
     const lines = Array.from({ length: MEMORY_MAX_LINES + 50 }, (_, i) => `- fact ${i}`);

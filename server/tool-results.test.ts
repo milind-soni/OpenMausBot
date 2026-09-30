@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ToolResults, TOOL_RESULT_MAX_CHARS, TOOL_RESULT_PREVIEW_CHARS, TOOL_RESULT_TTL_MS } from "./tool-results.ts";
+import { redactSecretsInText } from "../shared/redact.ts";
 
 const owner = { botId: "a", threadId: "chat" };
 
@@ -51,6 +52,19 @@ describe("temporary agent tool results", () => {
     expect(saved).toMatchObject({ truncated: true, length: TOOL_RESULT_MAX_CHARS - 1 });
     expect(results.save(owner, "already cut upstream", true).truncated).toBe(true);
     expect(results.read(owner, saved.id, 0)?.truncated).toBe(true);
+  });
+
+  it("runs the injected owner-aware redactor before retaining", () => {
+    const seen: string[] = [];
+    const results = new ToolResults(undefined, (owner, text) => {
+      seen.push(owner.botId + ":" + owner.threadId);
+      return redactSecretsInText(owner.botId === "strict" ? text.replace("edge@example.com", "hidden") : text);
+    });
+    const saved = results.save({ botId: "strict", threadId: "chat" }, "mail edge@example.com");
+    expect(seen).toEqual(["strict:chat"]);
+    expect(results.read({ botId: "strict", threadId: "chat" }, saved.id, 0)?.text).toBe("mail hidden");
+    const plain = results.save(owner, "kept 10.0.0.5");
+    expect(results.read(owner, plain.id, 0)?.text).toBe("kept 10.0.0.5");
   });
 
   it("evicts the owner's oldest entries before neighbours and bounds total count", () => {

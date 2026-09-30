@@ -3,6 +3,7 @@
  * store, and the inspector panel cannot drift; server/contracts.ts and
  * server/thread-events.ts re-export these under their historical names. */
 import type { AskQuestion } from "./ask-question.ts";
+import type { ContentClass } from "./content-class.ts";
 
 export type DriverKind = string;
 export type InstanceId = string;
@@ -167,6 +168,11 @@ export type RuntimeEvent = RuntimeEventBase &
     // `claudeUpdate: true` narrows a setup failure to "this Claude Code is
     // too old for the model": the UI offers to run `claude update` for them.
     | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean }
+    // The content boundary's escape-hatch audit (#1670): this bot is
+    // configured to loosen a class, and that class was detected flowing
+    // through unredacted. Never delivered live — the boundary writes it
+    // straight into the thread's canonical event log.
+    | { type: "content.class-passed"; classes: ContentClass[]; funnel: string; botId?: string }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;

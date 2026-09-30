@@ -233,6 +233,15 @@ describe("peer approval card lifecycle", () => {
     expect(pendingCard(store, from)).toBeUndefined();
   });
 
+  it("attributes the card to the asking bot, so late patches keep its policy", async () => {
+    const verdict = requestPeerApproval(bus, from, target, "ping", "ask_bot");
+    const card = pendingCard(store, from);
+    expect(card).toBeTruthy();
+    expect(card?.from).toEqual({ botId: from.id, name: from.name, color: from.color });
+    resolvePeerComms(bus, card!.card!.requestId!, "deny");
+    expect(await verdict).toBe("deny");
+  });
+
   it("dismisses cards left by a previous run, which nothing can answer", () => {
     // a card on disk whose in-memory approval died with the process
     const orphan = store.appendMessage(from.threadId, {
