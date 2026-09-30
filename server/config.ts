@@ -301,11 +301,14 @@ const featureConfigSchema = z.object({
    * enabled; a one-shot that fails or answers junk leaves the first-message
   * snippet in place — see llmThreadTitlesEnabled. */
   llmThreadTitles: z.boolean().optional(),
+  /** Opt-in shared skills library (skills lane S1/S2): one store bots
+   * reference by assignment instead of per-workspace copies. Off unless
+   * enabled by hand — see skillsLibraryEnabled. */
+  skillsLibrary: z.boolean().optional(),
   /** Before each turn, passages from the bot's own memory files and earlier
    * conversations that share words with the message ride into the turn.
    * Read-only; on unless explicitly switched off — see autoRecallEnabled. */
-  autoRecall: z.boolean().optional(),
-  /** Idle release for computer claims (#1653): a desktop seat that stays
+  autoRecall: z.boolean().optional(),  /** Idle release for computer claims (#1653): a desktop seat that stays
    * screen-quiet for 90 seconds is released to waiting turns while its
    * holder's turn still lives; the previous holder re-claims directly
    * for 10 minutes and yields to an occupied seat. Off until baked; see
@@ -596,8 +599,7 @@ export interface AppConfig {
    * seats shared by all conversations, with per-thread affinity (#1654). */
   localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; autoRecall?: boolean; computerClaimIdleRelease?: boolean; cloudOverflow?: boolean; routinesInConversation?: boolean };
-  /** #1655: consented cloud overflow for local computer waits. The cost is
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; computerClaimIdleRelease?: boolean; cloudOverflow?: boolean; autoRecall?: boolean; routinesInConversation?: boolean };  /** #1655: consented cloud overflow for local computer waits. The cost is
    * the operator's own per-second rate; unset keeps the feature inert. */
   cloudOverflow?: { perSecondCostUsd?: number; idleStopMs?: number; allowlistedThreads?: string[] };
   /** First-run progress; see onboardingConfigSchema. */
@@ -848,6 +850,15 @@ export function claudeUserMcpEnabled(cfg: AppConfig): boolean {
  * answers anything unusable leaves the snippet untouched. */
 export function llmThreadTitlesEnabled(cfg: AppConfig): boolean {
   return cfg.features?.llmThreadTitles === true;
+}
+
+/** Opt-in shared skills library (skills lane S1): one store at the data dir
+ * that bots reference by assignment instead of per-workspace copies. Off
+ * unless enabled by hand in ~/.openmausbot/config.json
+ * (`{"features": {"skillsLibrary": true}}`); while off, every skills
+ * surface keeps today's byte-identical per-bot behavior. */
+export function skillsLibraryEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.skillsLibrary === true;
 }
 
 /** Idle release for computer claims (#1653): a whole-turn desktop hold

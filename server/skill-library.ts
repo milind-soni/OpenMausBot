@@ -4,6 +4,15 @@
 // declared trigger terms and mounted capabilities.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
+import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { mkdirSync } from "node:fs";
+import { z } from "zod";
+
+import { writeFileAtomic } from "./atomic.ts";
+import { DATA_DIR } from "./config.ts";
+import { isSkillName, parseSkillMd, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
+import type { SkillPackageStamp } from "./skills.ts";
 
 export interface SkillManifest {
   id: string;
@@ -137,4 +146,248 @@ export function renderSkillInstructions(
   return selected.map(({ manifest, instructions, directory }) =>
     `\n\n<openmaus-skill id=${JSON.stringify(manifest.id)} version=${JSON.stringify(manifest.version)}${includeRoot ? ` root=${JSON.stringify(directory)}` : ""}>\n${instructions}\n</openmaus-skill>`,
   ).join("");
+}
+
+// ---------------------------------------------------------------------------
+// Skills library (features.skillsLibrary, skills lane S1)
+//
+// One shared store at the data dir. Bots reference library skills through an
+// assignment list on their bot record instead of private per-workspace
+// copies; per-bot copies migrate in by sha256 dedup with the originals
+// archived (never deleted). While the feature flag is off, nothing here is
+// reachable from any surface and per-bot behavior stays byte-identical.
+// ---------------------------------------------------------------------------
+
+export type LibraryReviewState = "approved" | "disabled";
+
+export interface SkillLibraryEntry {
+  name: string;
+  description: string;
+  source: string;
+  sha256: string;
+  importedAt: string;
+  reviewState: LibraryReviewState;
+  license?: string;
+  compatibility?: string;
+  warnings: string[];
+  skippedFiles: string[];
+  /** Organization installs only: the stamp that put this skill in the
+   * library, mapped from the per-bot manifest on migration. Never exposed
+   * to agents or clients. */
+  package?: SkillPackageStamp;
+}
+
+/** A library skill projected the way per-bot `SkillListing` reads, so
+ * assignment resolution composes the two without adapters. */
+export interface LibrarySkillListing {
+  name: string;
+  description: string;
+  enabled: boolean;
+  editable: false;
+  source: string;
+  sha256: string;
+  importedAt: string;
+  license?: string;
+  compatibility?: string;
+  warnings: string[];
+  skippedFiles: string[];
+}
+
+const skillLibraryEntrySchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  source: z.string(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  importedAt: z.string(),
+  reviewState: z.enum(["approved", "disabled"]),
+  license: z.string().optional(),
+  compatibility: z.string().optional(),
+  warnings: z.array(z.string()),
+  skippedFiles: z.array(z.string()),
+  package: z.object({
+    installId: z.string().regex(/^[a-f0-9]{32}$/),
+    key: z.string().min(1).max(64),
+    release: z.string().min(1).max(40),
+    r: z.string().regex(/^[a-f0-9]{64}$/),
+    w: z.string().regex(/^[a-f0-9]{64}$/),
+    via: z.literal("preset").optional(),
+  }).optional(),
+});
+const skillLibraryIndexSchema = z.record(z.string(), skillLibraryEntrySchema);
+
+/** Every library write emits here so later skills-lane consumers can drop
+ * caches without polling. The payload names what changed. */
+export const skillLibraryEvents = new EventEmitter();
+
+export function skillsLibraryRoot(dataDir: string = DATA_DIR): string {
+  return join(dataDir, "skills-library");
+}
+
+function libraryIndexPath(root: string): string {
+  return join(root, "index.json");
+}
+
+export function librarySkillDirectory(root: string, name: string): string {
+  return join(root, "skills", name);
+}
+
+/** The path agents are told to read for an assigned library skill. */
+export function librarySkillFilePath(name: string, root: string = skillsLibraryRoot()): string {
+  return join(root, "skills", name, "SKILL.md");
+}
+
+/** Where a migrated per-bot copy is preserved. Archives are write-once:
+ * migration never deletes the original bytes, it moves them here. */
+export function libraryArchiveDirectory(root: string, botId: string, name: string): string {
+  return join(root, "archive", botId, name);
+}
+
+export function readSkillLibraryIndex(root: string = skillsLibraryRoot()): Record<string, SkillLibraryEntry> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(libraryIndexPath(root), "utf8"));
+    const result = skillLibraryIndexSchema.safeParse(parsed);
+    return result.success ? result.data : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSkillLibraryIndex(root: string, index: Record<string, SkillLibraryEntry>): void {
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  writeFileAtomic(libraryIndexPath(root), `${JSON.stringify(index, null, 2)}\n`, { mode: 0o600 });
+}
+
+function sha256Hex(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function libraryContentMatches(root: string, entry: SkillLibraryEntry): boolean {
+  try {
+    const file = join(librarySkillDirectory(root, entry.name), "SKILL.md");
+    if (!existsSync(file)) return false;
+    return sha256Hex(readFileSync(file, "utf8")) === entry.sha256;
+  } catch {
+    return false;
+  }
+}
+
+function librarySkillListing(root: string, entry: SkillLibraryEntry): LibrarySkillListing {
+  const intact = libraryContentMatches(root, entry);
+  return {
+    name: entry.name,
+    description: entry.description,
+    enabled: entry.reviewState === "approved" && intact,
+    editable: false,
+    source: entry.source,
+    sha256: entry.sha256,
+    importedAt: entry.importedAt,
+    ...(entry.license ? { license: entry.license } : {}),
+    ...(entry.compatibility ? { compatibility: entry.compatibility } : {}),
+    warnings: intact
+      ? entry.warnings
+      : [...entry.warnings, "stored SKILL.md changed after review — enablement is blocked"],
+    skippedFiles: entry.skippedFiles,
+  };
+}
+
+export function listLibrarySkills(root: string = skillsLibraryRoot()): LibrarySkillListing[] {
+  return Object.values(readSkillLibraryIndex(root))
+    .map((entry) => librarySkillListing(root, entry))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Put a skill in the library. Installing the same name with the same
+ * SKILL.md bytes is idempotent (the existing entry wins); the same name
+ * with different bytes is refused, mirroring the per-bot import rule.
+ * Every failure returns `{ error }` — callers fall back. */
+export function installLibrarySkill(input: {
+  name: string;
+  description?: string;
+  instructions: string;
+  source: string;
+  license?: string;
+  compatibility?: string;
+  reviewState?: LibraryReviewState;
+  package?: SkillPackageStamp;
+  root?: string;
+}): LibrarySkillListing | { error: string } {
+  const root = input.root ?? skillsLibraryRoot();
+  if (!isSkillName(input.name)) return { error: "invalid skill name" };
+  if (Buffer.byteLength(input.instructions, "utf8") > SKILL_FILE_MAX_BYTES) {
+    return { error: `SKILL.md is larger than ${SKILL_FILE_MAX_BYTES / 1024}KB` };
+  }
+  const parsed = parseSkillMd(input.instructions);
+  if ("error" in parsed) return parsed;
+  if (parsed.name !== input.name) return { error: `the skill is named "${parsed.name}", not "${input.name}"` };
+  const sha256 = sha256Hex(input.instructions);
+  const index = readSkillLibraryIndex(root);
+  const existing = index[input.name];
+  if (existing) {
+    if (existing.sha256 === sha256) return librarySkillListing(root, existing);
+    return { error: `a skill named "${input.name}" is already in the library — choose a different name` };
+  }
+  const entry: SkillLibraryEntry = {
+    name: input.name,
+    description: input.description?.trim() || parsed.description,
+    source: input.source,
+    sha256,
+    importedAt: new Date().toISOString(),
+    reviewState: input.reviewState ?? "disabled",
+    ...(input.license ? { license: input.license } : {}),
+    ...(input.compatibility ? { compatibility: input.compatibility } : {}),
+    warnings: [],
+    skippedFiles: [],
+    ...(input.package ? { package: { ...input.package } } : {}),
+  };
+  // Bytes first, index second: the index is the commit point, so a crash
+  // between the two leaves unreferenced bytes, never a dangling entry.
+  mkdirSync(librarySkillDirectory(root, input.name), { recursive: true, mode: 0o700 });
+  writeFileAtomic(join(librarySkillDirectory(root, input.name), "SKILL.md"), input.instructions, { mode: 0o600 });
+  index[input.name] = entry;
+  writeSkillLibraryIndex(root, index);
+  skillLibraryEvents.emit("invalidate", { kind: "install", name: input.name });
+  return librarySkillListing(root, entry);
+}
+
+export function readLibrarySkillFile(name: string, root: string = skillsLibraryRoot()): string | null {
+  if (!isSkillName(name)) return null;
+  const entry = readSkillLibraryIndex(root)[name];
+  if (!entry) return null;
+  try {
+    const text = readFileSync(join(librarySkillDirectory(root, name), "SKILL.md"), "utf8");
+    return sha256Hex(text) === entry.sha256 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setLibrarySkillReviewState(
+  name: string,
+  reviewState: LibraryReviewState,
+  root: string = skillsLibraryRoot(),
+): LibrarySkillListing | { error: string } {
+  if (!isSkillName(name)) return { error: "invalid skill name" };
+  const index = readSkillLibraryIndex(root);
+  const entry = index[name];
+  if (!entry) return { error: `no library skill named "${name}"` };
+  if (reviewState === "approved" && !libraryContentMatches(root, entry)) {
+    return { error: "stored SKILL.md changed after review — the library entry cannot be approved" };
+  }
+  entry.reviewState = reviewState;
+  writeSkillLibraryIndex(root, index);
+  skillLibraryEvents.emit("invalidate", { kind: "review-state", name });
+  return librarySkillListing(root, entry);
+}
+
+/** The lane's one resolution rule, stated once: a skill name means the
+ * bot-private copy when one exists, else the library entry, else the
+ * bundled skill. Later slices route every lookup through this order. */
+export function resolveSkillSourceOrder<P, L, B>(
+  name: string,
+  sources: { private?: P; library?: L; bundled?: B },
+): { source: "private" | "library" | "bundled"; name: string; value: P | L | B } | null {
+  if (sources.private !== undefined) return { source: "private", name, value: sources.private };
+  if (sources.library !== undefined) return { source: "library", name, value: sources.library };
+  if (sources.bundled !== undefined) return { source: "bundled", name, value: sources.bundled };
+  return null;
 }
