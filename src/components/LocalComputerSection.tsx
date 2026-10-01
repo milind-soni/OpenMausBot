@@ -1,3 +1,4 @@
+import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 // One-place setup for the isolated Local VM image and its shared/per-bot policy.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
@@ -46,6 +47,7 @@ interface Status {
   workspace_guest_path: string;
   viewer_url: string;
   idle_timeout_ms: number;
+  stop_reason?: "idle" | null;
   mode: "shared" | "per-bot" | "pool";
   max_instances: number;
   commands: {
@@ -806,6 +808,7 @@ function ActionButton({
   return (
     <button
       onClick={onClick}
+      aria-busy={pending === action}
       disabled={pending !== null}
       className={cn(
         "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-50",
@@ -926,6 +929,8 @@ export function LocalComputerSection() {
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<Action | null>(null);
+  const actionController = useRef<AbortController | null>(null);
+  useEffect(() => () => actionController.current?.abort(), []);
   const [error, setError] = useState<string | null>(null);
   const [policyPending, setPolicyPending] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -1101,11 +1106,12 @@ export function LocalComputerSection() {
     return () => controller.abort();
   }, [refreshVpsInventory, vpsRefreshKey]);
 
-  const post = async (action: Exclude<Action, "recreate">) => {
+  const post = async (action: Exclude<Action, "recreate">, signal: AbortSignal) => {
     const response = await fetch(`/api/local-computer/${action}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
+      signal,
     });
     const body = await response.json().catch(() => ({}));
     const errorKeys: Record<Exclude<Action, "recreate">, LocaleKey> = {
@@ -1116,26 +1122,39 @@ export function LocalComputerSection() {
       remove: "vm.deleteError",
     };
     if (!response.ok) throw new Error(body.error ?? t(errorKeys[action]));
+    signal.throwIfAborted();
     setStatus(body as Status);
+    return body as Status;
   };
 
   const confirmAction = (message: string) => window.ogb?.confirm ? window.ogb.confirm(message) : window.confirm(message);
 
   const act = async (action: Action) => {
-    if (pending !== null) return;
+    if (pending !== null || actionController.current) return;
+    const controller = new AbortController();
+    actionController.current = controller;
     setPending(action);
     setError(null);
     try {
       if (action === "remove" && !(await confirmAction(t("vm.confirm.deleteShared")))) return;
       if (action === "recreate" && !(await confirmAction(t("vm.confirm.recreate")))) return;
+      let result: Status;
       if (action === "recreate") {
-        await post("remove");
-        await post("run");
+        await post("remove", controller.signal);
+        result = await post("run", controller.signal);
       } else {
-        await post(action);
+        result = await post(action, controller.signal);
       }
-      // The desktop starts after the container process; keep the progress
-      // state honest and let the regular poll mark it Ready a few seconds on.
+      if (action === "run" || action === "start" || action === "recreate") {
+        result = await waitForLocalVmReady(result, async () => {
+          const response = await fetch("/api/local-computer", { signal: controller.signal });
+          const body = await response.json();
+          if (!response.ok) throw new Error(body.error ?? t("vm.err.start"));
+          setStatus(body as Status);
+          return body as Status;
+        }, controller.signal);
+        if (!result.ready) throw new Error(result.problem ?? t("vm.err.start"));
+      }
       await refresh();
       setAnnouncement(
         action === "remove"
@@ -1145,9 +1164,11 @@ export function LocalComputerSection() {
             : t("vm.announce.updated"),
       );
     } catch (e) {
+      if (controller.signal.aborted) return;
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setPending(null);
+      actionController.current = null;
+      if (!controller.signal.aborted) setPending(null);
     }
   };
 
@@ -1328,8 +1349,7 @@ export function LocalComputerSection() {
   const existing = status?.container !== "missing";
   const needsRecreate = Boolean(
     existing &&
-      (status?.container === "stopped" ||
-        !status?.imageMatches ||
+      (!status?.imageMatches ||
         !status?.managed ||
         status?.network === "unsafe" ||
         status?.security === "unsafe" ||
@@ -1540,7 +1560,10 @@ export function LocalComputerSection() {
                 )}
               </>
             ) : status?.container === "stopped" ? (
-              <ActionButton action="start" pending={pending} onClick={() => void act("start")}>{t("vm.setup.start")}</ActionButton>
+              <>
+                <p className="text-[13px] text-ink-secondary">{t(status.stop_reason === "idle" ? "vm.stopped.idle" : "vm.stopped.detail")}</p>
+                <ActionButton action="start" pending={pending} onClick={() => void act("start")}>{t("vm.setup.start")}</ActionButton>
+              </>
             ) : status?.container === "running" ? (
               <div className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={13} className="animate-spin" /> {t("vm.setup.waiting")}</div>
             ) : status?.image ? (

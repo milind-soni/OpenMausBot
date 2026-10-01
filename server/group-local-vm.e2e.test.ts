@@ -155,6 +155,51 @@ async function room() {
 const send = (id: string) => api("POST", `/api/groups/${id}/messages`, { text: "Reply once." });
 const stop = (id: string) => api("POST", `/api/groups/${id}/interrupt`, {});
 
+describe("Local VM stop and resume", () => {
+  it("stops an idle shared VM without deleting it, remembers why across restart, and starts it from the bot panel", async () => {
+    vmState({ containers: ["shared"], idleMs: 300 });
+    await api("PATCH", "/api/config", { localVm: { mode: "shared", idleTimeoutMinutes: 5 } });
+    const { bot } = await api("POST", "/api/bots", { name: "Resume fixture", computer: "vm" });
+    await until(() => api("GET", "/api/local-computer"), s => s.container === "stopped");
+    expect((await api("GET", "/api/local-computer")).stop_reason).toBe("idle");
+    const stopped = JSON.parse(readFileSync(stateFile, "utf8"));
+    expect(stopped.containers).toEqual(["shared"]);
+    expect(stopped.actions).toEqual([{ action: "stop", target: "shared" }]);
+    vmState({ ...stopped, idleMs: 60_000 });
+    await waitForExit(child, { signal: "SIGTERM" });
+    await startServer();
+    expect((await api("GET", `/api/bots/${bot.id}/local-computer`)).stop_reason).toBe("idle");
+    const started = await api("POST", `/api/bots/${bot.id}/local-computer/start`, {});
+    expect(started.ready).toBe(true);
+    expect((await api("GET", "/api/local-computer")).stop_reason).toBeNull();
+    expect(JSON.parse(readFileSync(stateFile, "utf8")).actions).toEqual([
+      { action: "stop", target: "shared" }, { action: "start", target: "shared" },
+    ]);
+    await api("DELETE", `/api/bots/${bot.id}`);
+  });
+
+  it("resumes an existing per-bot VM even at the instance cap", async () => {
+    vmState({ containers: [] });
+    await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 1 } });
+    const { bot } = await api("POST", "/api/bots", { name: "Per-bot resume", computer: "vm" });
+    await api("POST", `/api/bots/${bot.id}/local-computer/run`, {});
+    await api("POST", `/api/bots/${bot.id}/local-computer/stop`, {});
+    expect((await api("POST", `/api/bots/${bot.id}/local-computer/start`, {})).ready).toBe(true);
+    await api("POST", `/api/bots/${bot.id}/local-computer/stop`, {});
+    await api("PATCH", `/api/bots/${bot.id}`, { computer: null, browser: false });
+    rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "Use the existing computer." });
+    expect(computer(await dump())).toBeTruthy();
+    writeFileSync(finishFile, "finish");
+    await idle(bot.id);
+    expect(JSON.parse(readFileSync(stateFile, "utf8")).actions.map((entry: any) => entry.action)).toEqual([
+      "run", "stop", "start", "stop", "start",
+    ]);
+    await api("DELETE", `/api/bots/${bot.id}`);
+    await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+  });
+});
+
 describe("Group Local VM ownership on the real isolated server", () => {
   it.each([false, true])("provisions concurrent cold pool seats (existing per-bot desktops: %s)", async (existingPerBot) => {
     vmState({ containers: [] });
@@ -243,7 +288,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect(created.workspace_path.startsWith(fixtureHome)).toBe(true);
       const saved = join(created.workspace_path, "saved.txt");
       writeFileSync(saved, "survives idle removal");
-      // Idle cleanup removes only this container; its workspace survives.
+      // Older versions removed idle containers; keep that recovery path working.
       await api("POST", `/api/bots/${returning.id}/local-computer/remove`, {});
       await api("POST", `/api/bots/${holder.id}/local-computer/run`, {});
       await waitForExit(child, { signal: "SIGTERM" });

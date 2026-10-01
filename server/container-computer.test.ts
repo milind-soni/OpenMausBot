@@ -29,6 +29,7 @@ import {
   containerRunArgs,
   dockerSecurityIsHardened,
   localVmRecreatableOnDemand,
+  localVmResumable,
   localVmWorkspaceExists,
   managedImageDockerfile,
   perBotLocalVmTarget,
@@ -829,17 +830,22 @@ describe("containerComputerAction", () => {
     expect(fake.calls.some((call) => call.startsWith("docker run "))).toBe(false);
   });
 
-  it("never starts a stopped desktop because its stale X lock makes resume unsafe", async () => {
+  it("resumes a compatible stopped desktop without removing it", async () => {
     const fake = runner({
       "/usr/bin/which docker": "docker\n",
       "/usr/bin/which podman": new Error("missing"),
       "docker info --format {{.ServerVersion}}": "29\n",
       [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
-      [`docker inspect ${CONTAINER}`]: readyInspect({ State: { Running: false } }),
+      [`docker inspect ${CONTAINER}`]: readyInspect({ State: { Running: false, FinishedAt: "2026-10-01T12:00:00Z" } }),
+      [`docker start ${CONTAINER}`]: CONTAINER,
     });
 
-    await expect(containerComputerAction("start", fake.run, "linux")).rejects.toThrow("cannot safely resume");
-    expect(fake.calls).not.toContain(`docker start ${CONTAINER}`);
+    const stopped = await containerComputerStatus(fake.run, "linux");
+    expect(localVmResumable(stopped)).toBe(true);
+    expect(stopped.stopped_at).toBe("2026-10-01T12:00:00Z");
+    await containerComputerAction("start", fake.run, "linux");
+    expect(fake.calls).toContain(`docker start ${CONTAINER}`);
+    expect(fake.calls.some(call => call.includes(" rm ") || call.includes(" run "))).toBe(false);
   });
 });
 
@@ -888,8 +894,8 @@ describe("setupCommands", () => {
     expect(command).toContain("VNC_PW=CHANGE_ME");
   });
 
-  it("does not suggest docker start for an image that must be recreated", () => {
-    expect(setupCommands("docker", "linux").start).toBeNull();
+  it("offers a start command for a stopped compatible desktop", () => {
+    expect(setupCommands("docker", "linux").start).toBe(`docker start ${CONTAINER}`);
   });
 
   it("limits resources and retains only the sandbox supervisor's identity-switch caps", () => {
@@ -979,7 +985,7 @@ describe("localVmRecreatableOnDemand", () => {
     expect(localVmRecreatableOnDemand(status)).toBe(true);
   });
 
-  it("leaves a stopped container alone, because it is asked to be recreated not started", async () => {
+  it("does not recreate an existing stopped container", async () => {
     const target = SHARED_LOCAL_VM_TARGET;
     const detail = JSON.parse(readyInspect())[0];
     detail.State = { Running: false, Status: "exited" };
@@ -1027,11 +1033,30 @@ describe("Auto's Local VM eligibility", () => {
   it("attaches a ready desktop or one whose prepared image can be recreated, and nothing else", () => {
     expect(autoLocalVmAttachable({ ...base, ready: true, container: "running" })).toBe(true);
     expect(autoLocalVmAttachable(base)).toBe(true);
-    // never a first-time setup, a stopped image that cannot resume, or a dead daemon
+    // Never a first-time setup, an unverified stopped image, or a dead daemon
     expect(autoLocalVmAttachable({ ...base, image: false })).toBe(false);
     expect(autoLocalVmAttachable({ ...base, daemonUp: false })).toBe(false);
     expect(autoLocalVmAttachable({ ...base, container: "stopped" })).toBe(false);
     expect(autoLocalVmAttachable({ ...base, runtime: null })).toBe(false);
     expect(autoLocalVmAttachable({ ...base, create_supported: false })).toBe(false);
+  });
+});
+
+
+describe("Local VM resume safety", () => {
+  it.each([
+    { Config: { Image: "foreign" } },
+    { HostConfig: { Privileged: true } },
+    { Mounts: [] },
+    { State: { Running: true } },
+  ])("refuses an incompatible, unsafe, or running desktop: %j", async patch => {
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: readyInspect({ State: { Running: false }, ...patch }),
+    });
+    await expect(containerComputerAction("start", fake.run, "linux")).rejects.toThrow();
+    expect(fake.calls).not.toContain(`docker start ${CONTAINER}`);
   });
 });

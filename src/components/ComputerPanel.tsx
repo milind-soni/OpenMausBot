@@ -1,3 +1,5 @@
+import { canResumeLocalVm } from "../../shared/local-vm-lifecycle";
+import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 import { cloudRunner } from "@/lib/remote-desktop";
 // The bot's computer, in the right-side slot. Where it runs decides the
 // whole flow: explicit cloud → provision the boat on open (idempotent) and preview
@@ -118,6 +120,8 @@ type Phase =
   | "error";
 
 interface LocalVmStatus {
+  daemonUp: boolean;
+  stop_reason?: "idle" | null;
   mode: "shared" | "per-bot" | "pool";
   max_instances: number;
   image: boolean;
@@ -344,7 +348,7 @@ export function ComputerPanel({
   const [vpsStatus, setVpsStatus] = useState<VpsComputerStatus | null>(null);
   const [localFrame, setLocalFrame] = useState<string | null>(null);
   const [pending, setPending] = useState<
-    "join" | "sleep" | "provision" | "vps-replace" | "vm-create" | "vm-recreate" | "vm-delete" | null
+    "join" | "sleep" | "provision" | "vps-replace" | "vm-start" | "vm-create" | "vm-recreate" | "vm-delete" | null
   >(null);
   const [controlPending, setControlPending] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -380,6 +384,14 @@ export function ComputerPanel({
     return () => controller.abort();
   }, [connectionKey, livePlace, computerSelectionPersisted, threadPath, retry]);
   const vmReadinessAttempts = useRef(0);
+  const vmActionController = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (vmActionController.current?.signal.aborted) {
+      vmActionController.current = null;
+      setPending(null);
+    }
+    return () => { vmActionController.current?.abort(); };
+  }, [bot.id, bot.threadId, bot.computer, panelView]);
   const selectedInstance = state.instances.find(
     (instance) => instance.instanceId === bot.modelSelection.instanceId,
   );
@@ -551,7 +563,7 @@ export function ComputerPanel({
               status.container === "missing" &&
               status.image &&
               status.create_supported;
-            setError(canCreateHere ? null : new LocalizedPanelError(
+            setError(canCreateHere || canResumeLocalVm(status) ? null : new LocalizedPanelError(
               "computer.err.vmOpenSettings", status.problem, "computer.err.vmNotReady",
             ));
             setPhase("vm-unavailable");
@@ -1116,7 +1128,7 @@ export function ComputerPanel({
       .finally(() => setPending(null));
   };
 
-  const runVmAction = async (action: "vm-create" | "vm-recreate" | "vm-delete") => {
+  const runVmAction = async (action: "vm-start" | "vm-create" | "vm-recreate" | "vm-delete") => {
     if (
       (action === "vm-recreate" || action === "vm-delete") &&
       !window.confirm(
@@ -1125,34 +1137,44 @@ export function ComputerPanel({
           : t("computer.confirm.replaceVm", { name: bot.name }),
       )
     ) return;
+    if (vmActionController.current) return;
+    const controller = new AbortController();
+    vmActionController.current = controller;
     setPending(action);
     setError(null);
-    setVmStatus(null);
     vmReadinessAttempts.current = 0;
     try {
-      if (action !== "vm-create") {
+      if (action === "vm-recreate" || action === "vm-delete") {
         await api(`/api/bots/${bot.id}/local-computer/remove`, {
           method: "POST",
           body: "{}",
+          signal: controller.signal,
         });
       }
       if (action !== "vm-delete") {
-        const status: LocalVmStatus = await api(`/api/bots/${bot.id}/local-computer/run`, {
+        const started: LocalVmStatus = await api(`/api/bots/${bot.id}/local-computer/${action === "vm-start" ? "start" : "run"}`, {
           method: "POST",
           body: "{}",
+          signal: controller.signal,
         });
+        const status = await waitForLocalVmReady(started, () => api(threadPath("local-computer"), { signal: controller.signal }), controller.signal);
+        if (!status.ready) throw new Error(status.problem ?? t("computer.err.vmNotReady"));
         setVmStatus(status);
-        setPhase(status.ready ? "vm" : "checking");
+        setPhase("vm");
       } else {
         setVmStatus((current) => current ? { ...current, container: "missing", ready: false } : current);
         setPhase("vm-unavailable");
       }
     } catch (e) {
+      if (controller.signal.aborted) return;
       setError(e instanceof Error ? e.message : String(e));
       setPhase("vm-unavailable");
     } finally {
-      setPending(null);
-      setRetry((n) => n + 1);
+      if (vmActionController.current === controller && !controller.signal.aborted) {
+        vmActionController.current = null;
+        setPending(null);
+        setRetry((n) => n + 1);
+      }
     }
   };
 
@@ -1414,7 +1436,9 @@ export function ComputerPanel({
                       : localMisses >= 3
                       ? t("computer.needsScreenPerm")
                       : t("computer.capturingLocal")
-                    : emptyState[phase]}
+                    : phase === "vm-unavailable" && vmStatus && canResumeLocalVm(vmStatus)
+                      ? t(pending === "vm-start" ? "vm.setup.starting" : "computer.phase.vmStopped")
+                      : emptyState[phase]}
               </span>
               {currentTeamComputer && <>
                 <p className="text-[12px]">Shared files and signed-in accounts. Auto uses this Boat, not a private computer.</p>
@@ -1452,8 +1476,21 @@ export function ComputerPanel({
                       : t("computer.chooseCloudManage")}
                 </button>
               )}
+              {phase === "vm-unavailable" && pending !== "vm-start" && vmStatus && canResumeLocalVm(vmStatus) && (
+                <p className="text-[12px]">{t(vmStatus.stop_reason === "idle" ? "vm.stopped.idle" : "vm.stopped.detail")}</p>
+              )}
               {phase === "vm-unavailable" && (
-                canManageVm && vmStatus?.mode === "per-bot" && vmStatus.image && vmStatus.create_supported ? (
+                canManageVm && vmStatus && vmStatus.mode !== "pool" && canResumeLocalVm(vmStatus) ? (
+                  <button
+                    onClick={() => void runVmAction("vm-start")}
+                    disabled={pending !== null}
+                    aria-busy={pending === "vm-start"}
+                    className="mt-1 flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+                  >
+                    {pending === "vm-start" && <Loader2 size={13} className="animate-spin" />}
+                    {t(pending === "vm-start" ? "vm.setup.starting" : "vm.setup.start")}
+                  </button>
+                ) : canManageVm && vmStatus?.mode === "per-bot" && vmStatus.image && vmStatus.create_supported ? (
                   <button
                     onClick={() => void runVmAction(vmStatus.container === "missing" ? "vm-create" : "vm-recreate")}
                     disabled={pending !== null}

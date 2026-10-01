@@ -130,6 +130,7 @@ import {
   containerExec,
   containerRuntimeStatus,
   localVmRecreatableOnDemand,
+  localVmResumable,
   localVmWorkspaceExists,
   perBotLocalVmTarget,
   poolLocalVmTarget,
@@ -418,6 +419,7 @@ import {
   localVmInventoryEntry,
   shouldArmLocalVmIdle,
 } from "./local-vm-inventory.ts";
+import { localVmStopReason, recordLocalVmIdleStop } from "./local-vm-stop-reason.ts";
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
@@ -6842,11 +6844,11 @@ function localVmIdleFor(target: LocalVmTarget): LocalVmIdleTimer {
       localVmLifecycleBusy.add(target.key);
       try {
         const status = await containerComputerStatus(undefined, undefined, target);
-        // The desktop leaves a stale X lock after stop, so idle cleanup
-        // removes only the disposable container. Its target-specific durable
-        // workspace and the shared prepared image remain.
-        if (status.container === "running") {
-          await containerComputerAction("remove", undefined, undefined, target);
+        // The pinned VNC startup clears stale X locks. Keep the container's
+        // home and installed software so inactivity is a reversible stop.
+        if (status.container === "running" && status.managed) {
+          const stopped = await containerComputerAction("stop", undefined, undefined, target);
+          recordLocalVmIdleStop(target.key, stopped.stopped_at);
         }
       } finally {
         localVmLifecycleBusy.delete(target.key);
@@ -6886,7 +6888,7 @@ function releaseLocalVmThread(threadId: string): void {
 // Browser, This computer, Auto, or Off does not delete its old Local VM.
 void (async () => {
   if (localVmMode(cfg) === "pool") {
-    // Same restore rule as per-bot: idle cleanup removes the container, not
+    // Same restore rule as per-bot: idle shutdown preserves the container and
     // its provisioned workspace, so every surviving seat stays Auto-eligible.
     const seats = localVmMaxInstances(cfg);
     for (let seat = 0; seat < seats; seat += 1) {
@@ -13995,6 +13997,7 @@ async function localVmPayload(target: LocalVmTarget, auth: RequestAuth) {
   const status = await containerComputerStatus(undefined, undefined, target);
   return {
     ...localVmViewerStatus(status, auth),
+    stop_reason: localVmStopReason(target.key, status),
     commands: setupCommands(status.runtime, process.platform, target),
     idle_timeout_ms: localVmIdleMs(),
     mode: localVmMode(cfg),
@@ -14002,28 +14005,8 @@ async function localVmPayload(target: LocalVmTarget, auth: RequestAuth) {
   };
 }
 
-/** The Local VM a turn is about to use, recreated if the idle timer took it.
- *
- * `LocalVmIdleTimer` REMOVES an unused Local VM rather than pausing it. The
- * turn then failed with "Create the Local VM (App Settings → Local VM)" —
- * which reads like a fault the person must repair by hand, for a container the
- * app itself deleted eight hours earlier. Someone who steps away overnight
- * comes back to an error on their first message.
- *
- * The cloud branch below already does the opposite: an absent boat is
- * provisioned on first use behind a `provisioning` broadcast. This gives the
- * Local VM the same lifecycle for the same reason.
- *
- * Only `missing` is recovered, and only when a fresh `run` is all it takes.
- * Every other problem still surfaces: no runtime installed, no image pulled,
- * `create_supported` false, or an existing container that is stale, unmanaged
- * or unsafe. Those need a decision — install podman, download 1.4 GB, replace
- * a container someone else made — and a stopped container is deliberately not
- * resumed here, because `localVmProblem` says this desktop image cannot safely
- * resume and asks for a recreate rather than a start. Per-bot mode keeps its
- * instance cap; creating past it would quietly do what the lifecycle route
- * refuses.
- */
+/** Wake an idle desktop, or recreate a missing one from an already prepared
+ * image. Incompatible or unsafe containers still require an explicit decision. */
 async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurrent = () => true) {
   localVmLifecycleBusy.add(target.key);
   // Fence this target, and the cross-target capacity decision for creates,
@@ -14041,20 +14024,20 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
     status = await containerComputerStatus(undefined, undefined, target);
     noteLocalVmSeen(target, status);
     if (!isCurrent()) return status;
-    if (status.ready || !localVmRecreatableOnDemand(status)) return status;
+    if (status.ready || (!localVmRecreatableOnDemand(status) && !localVmResumable(status))) return status;
     // Another creation is already mid-flight and its container is not yet
     // visible to a count, so the safe answer is the inspected status —
     // exactly what the over-cap path below returns.
-    if (!pooled && !ownsProvision) return status;
+    if (status.container === "missing" && !pooled && !ownsProvision) return status;
 
-    if (target.key.startsWith("bot:")) {
+    if (status.container === "missing" && target.key.startsWith("bot:")) {
       const count = await existingPerBotLocalVmCount(status.runtime);
       if (!isCurrent() || count >= localVmMaxInstances(cfg)) return status;
     }
 
     broadcast({ kind: "computer", botId, state: "provisioning" });
     try {
-      status = await containerComputerAction("run", undefined, undefined, target);
+      status = await containerComputerAction(status.container === "stopped" ? "start" : "run", undefined, undefined, target);
     } catch {
       // Keep the inspected status: its `problem` names the real obstacle,
       // which is more use to the person than "podman run exited non-zero".
@@ -21684,7 +21667,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       else localVmLifecycleBusy.add(SHARED_LOCAL_VM_TARGET.key);
       try {
         const status = await containerComputerAction(action, undefined, undefined, SHARED_LOCAL_VM_TARGET);
-        if (action === "run" || action === "start") localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
+        if (action === "run" || action === "start") {
+          localVmSeen.add(SHARED_LOCAL_VM_TARGET.key);
+          localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
+        }
         if (action === "stop" || action === "remove") localVmIdleFor(SHARED_LOCAL_VM_TARGET).cancel();
         return json(res, 200, {
           ...localVmViewerStatus(status, auth),
@@ -21712,7 +21698,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!bot) return json(res, 404, { error: "no such bot" });
       return json(res, 200, await localVmPayload(localVmTargetForStatus(bot.id, bot.threadId), auth));
     }
-    m = path.match(/^\/api\/bots\/([\w-]+)\/local-computer\/(run|stop|remove)$/);
+    m = path.match(/^\/api\/bots\/([\w-]+)\/local-computer\/(run|start|stop|remove)$/);
     if (m && method === "POST") {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
@@ -21722,9 +21708,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (boatLifecycleBusyBots.has(bot.id)) {
         return json(res, 409, { error: "this bot's computer is being changed or deleted — wait for it to finish" });
       }
-      const action = z.enum(["run", "stop", "remove"]).parse(m[2]);
+      const action = z.enum(["run", "start", "stop", "remove"]).parse(m[2]);
       const target = localVmTargetForBot(bot.id);
-      if (target.key === SHARED_LOCAL_VM_TARGET.key) {
+      if (localVmMode(cfg) === "pool") return json(res, 409, { error: "Pool desktops start automatically when a conversation needs one" });
+      if (localVmMode(cfg) !== "per-bot" && action !== "start") {
         return json(res, 409, { error: "Shared mode manages this desktop in App Settings → Computers" });
       }
       if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(target.key)) {
@@ -21758,7 +21745,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
         }
         const status = await containerComputerAction(action, undefined, undefined, target);
-        if (action === "run") localVmIdleFor(target).touch();
+        if (action === "run" || action === "start") {
+          localVmSeen.add(target.key);
+          localVmIdleFor(target).touch();
+        }
         if (action === "stop" || action === "remove") localVmIdleFor(target).cancel();
         return json(res, 200, {
           ...localVmViewerStatus(status, auth),
