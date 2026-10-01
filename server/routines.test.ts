@@ -260,9 +260,11 @@ it("names a new routine thread with the local dispatch date and time", async () 
   const routine = h.manager.create({ name: "Morning brief", prompt: "Summarize", botId: "maus-1",
     schedule: { type: "once", at } });
   h.manager.runNow(routine.id);
+  const createTask = h.options.createTask;
+  h.options.createTask = (...args) => { h.setNow(at + 60_000); return createTask(...args); };
   await h.manager.tick();
   expect(h.taskTitles).toEqual(["Morning brief · Oct 1, 9:26 PM"]);
-  expect(h.manager.listRuns()[0]?.routineName).toBe("Morning brief");
+  expect(h.manager.listRuns()[0]).toMatchObject({ routineName: "Morning brief", startedAt: at });
 
   const long = harness(at);
   const named = long.manager.create({ name: "x".repeat(100), prompt: "Summarize", botId: "maus-1",

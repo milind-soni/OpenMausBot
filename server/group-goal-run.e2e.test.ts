@@ -979,7 +979,7 @@ describe("goal-driven channel runs", () => {
       expect(backgroundRoom.threadId).toBe(completedRun.threadId);
       expect(backgroundRoom.tasks).toContainEqual(expect.objectContaining({
         threadId: completedRun.threadId,
-        title: "Daily team review",
+        title: expect.stringMatching(/^Daily team review · [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M$/),
       }));
 
       const switched = await api("POST", `/api/groups/${room.id}/tasks/${completedRun.threadId}`);
