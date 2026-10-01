@@ -893,6 +893,39 @@ public struct CompanionConnectionMetadata: Decodable, Sendable {
 /// A freshly minted provider viewer. It is deliberately not Codable for
 /// persistence: the URL is a short-lived bearer credential and belongs only
 /// in memory for the browser session that requested it.
+/// One still of a bot's Local VM, fetched on demand. The harness answers
+/// with a `data:` URL; anything but a PNG or JPEG in base64 is refused rather
+/// than handed to an image decoder.
+public struct LocalVmScreenshot: Decodable, Sendable, Equatable {
+    public let data: Data
+    public let mime: String
+
+    private enum CodingKeys: String, CodingKey { case image }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let raw = try container.decode(String.self, forKey: .image)
+        guard let parsed = Self.parse(raw) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .image,
+                in: container,
+                debugDescription: "Local VM screenshot must be a base64 PNG or JPEG data URL"
+            )
+        }
+        (data, mime) = parsed
+    }
+
+    static func parse(_ raw: String) -> (Data, String)? {
+        for mime in ["image/png", "image/jpeg"] {
+            let prefix = "data:\(mime);base64,"
+            guard raw.hasPrefix(prefix) else { continue }
+            guard let data = Data(base64Encoded: String(raw.dropFirst(prefix.count))), !data.isEmpty else { return nil }
+            return (data, mime)
+        }
+        return nil
+    }
+}
+
 public struct CloudDesktopSession: Decodable, Sendable {
     public let url: URL
 

@@ -1770,6 +1770,24 @@ public struct CompanionClient: Sendable {
         )
     }
 
+    /// A still of the bot's Local VM, whether or not it is working. Scoped to
+    /// a thread so the harness answers 409 when that conversation is not on
+    /// the Local VM, rather than picturing a computer it isn't using. The
+    /// sidecar requires the same per-device computer access as the cloud
+    /// desktop, and answers 403 while it is off.
+    public func localVmScreenshot(botId: String, threadId: String) async throws -> LocalVmScreenshot {
+        guard Self.validRouteID(botId), Self.validRouteID(threadId) else { throw APIError.badURL }
+        var request = try makeRequest(
+            "POST",
+            "/api/bots/\(botId)/local-computer/screenshot",
+            query: [URLQueryItem(name: "threadId", value: threadId)]
+        )
+        // The harness execs into the VM for each capture; a busy VM can take
+        // longer than an ordinary call.
+        request.timeoutInterval = 45
+        return try await send(request, as: LocalVmScreenshot.self)
+    }
+
     public func markRead(botId: String, threadId: String? = nil) async throws {
         try await send(try makeRequest("POST", "/api/bots/\(botId)/read", body: threadId.map { ["threadId": $0] }))
     }

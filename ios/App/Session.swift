@@ -1652,6 +1652,16 @@ final class Session: ObservableObject {
         }
     }
 
+    func localVmScreenshot(for bot: Bot) async throws -> LocalVmScreenshot {
+        guard let client else { throw APIError.transport("This computer is offline.") }
+        do {
+            return try await client.localVmScreenshot(botId: bot.id, threadId: bot.threadId)
+        } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+            throw error
+        }
+    }
+
     func markRead(_ chat: Chat) async {
         await perform(quietly: true) {
             switch chat {

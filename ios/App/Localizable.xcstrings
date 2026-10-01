@@ -4784,6 +4784,36 @@
           }
         }
       }
+    },
+    "Computer access is off for this phone": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O acesso ao computador está desativado para este celular"
+          }
+        }
+      }
+    },
+    "Turn on Allow computer view for this phone in OpenMausBot → Settings → Remote access on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ative Permitir ver o computador para este celular em OpenMausBot → Configurações → Acesso remoto no seu computador."
+          }
+        }
+      }
+    },
+    "Can't show the Local VM": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não é possível mostrar a VM local"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

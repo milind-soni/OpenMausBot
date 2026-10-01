@@ -10,6 +10,12 @@
 // off unless this view is on screen. `watchScreen` reopens the stream asking
 // for them and `stopWatchingScreen` reopens it asking not to; both resume
 // from the cursor, so the reconnect costs nothing but a round trip.
+//
+// A Local VM can also be pictured while its bot is idle: this view asks the
+// harness for a still every thirty seconds (every three while the bot works
+// and the stream has gone quiet), the same cadence as the desktop panel. The
+// Mac has to allow computer access for this phone first; until it does, the
+// sidecar answers 403 and the view says where to turn it on.
 import SwiftUI
 import CompanionCore
 // Unconditional for the same reason as ChatView: `UIImage` is used below
@@ -25,8 +31,34 @@ struct ComputerView: View {
     @State private var openingDesktop = false
     @State private var desktopURL: URL?
     @State private var desktopError: String?
+    @Environment(\.scenePhase) private var scenePhase
+    /// The latest on-demand Local VM still, and when it arrived.
+    @State private var polled: (shot: LocalVmScreenshot, at: Date)?
+    /// When the event stream last delivered a frame, so the newer of the
+    /// two pictures is the one on screen.
+    @State private var streamFrameAt: Date?
+    @State private var fetchingFirstStill = false
+    @State private var vmProblem: LocalVmProblem?
+
+    private enum LocalVmProblem: Equatable {
+        /// The Mac has not allowed computer access for this phone.
+        case accessOff
+        /// The VM exists in this conversation but cannot be pictured now.
+        case unavailable(String)
+    }
 
     private var frame: ScreenFrame? { session.state.screens[bot.id] }
+
+    /// Whichever picture is newer: a streamed frame of a working bot, or a
+    /// still fetched on demand.
+    private var shownImageData: Data? {
+        if let polled, streamFrameAt.map({ $0 < polled.at }) ?? true { return polled.shot.data }
+        return frame?.data
+    }
+
+    /// Cloud computers have their own viewer below; every other kind may be
+    /// the Local VM, which the harness confirms or refuses (409) per thread.
+    private var mayBeLocalVm: Bool { current.computer != "cloud" }
 
     /// The bot as the stream last described it — `busy` is what tells us
     /// whether more frames are coming or this is the last one.
@@ -36,7 +68,7 @@ struct ComputerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let image = frame.flatMap(\.data).flatMap(UIImage.init(data:)) {
+            if let image = shownImageData.flatMap(UIImage.init(data:)) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
@@ -120,17 +152,101 @@ struct ComputerView: View {
         .onDisappear {
             session.stopWatchingScreen(of: bot.id)
         }
+        .onValueChange(of: frame?.png) { png in
+            if png != nil { streamFrameAt = Date() }
+        }
+        // Restarted when the bot starts or stops working (the cadence
+        // changes) and stopped while the app is in the background.
+        .task(id: "\(current.busy == true)|\(scenePhase == .active)") {
+            guard scenePhase == .active else { return }
+            await pollLocalVm()
+        }
     }
 
+    /// Fetch Local VM stills while this view is on screen. Stops for good on
+    /// a 403 (computer access is off), on a 409 saying this conversation is
+    /// not on the Local VM, and on a 404 from a computer too old to offer it.
+    private func pollLocalVm() async {
+        guard mayBeLocalVm, vmProblem != .accessOff else { return }
+        fetchingFirstStill = polled == nil
+        defer { fetchingFirstStill = false }
+        while !Task.isCancelled {
+            let busy = current.busy == true
+            // A working bot's frames already arrive on the stream; only fill
+            // in when it has gone quiet for longer than a frame interval.
+            let streamFresh = streamFrameAt.map { Date().timeIntervalSince($0) < 10 } ?? false
+            if !(busy && streamFresh) {
+                do {
+                    let shot = try await session.localVmScreenshot(for: current)
+                    polled = (shot, Date())
+                    vmProblem = nil
+                } catch let APIError.status(code, message) {
+                    switch code {
+                    case 403:
+                        vmProblem = .accessOff
+                        return
+                    case 404:
+                        return
+                    case 409 where message?.contains("not using the Local VM") == true:
+                        return
+                    default:
+                        if polled == nil {
+                            vmProblem = .unavailable(APIError.status(code: code, message: message).localizedDescription)
+                        }
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    if Task.isCancelled { return }
+                    if polled == nil { vmProblem = .unavailable(error.localizedDescription) }
+                }
+                fetchingFirstStill = false
+            }
+            try? await Task.sleep(for: .seconds(busy ? 3 : 30))
+        }
+    }
+
+    @ViewBuilder
     private var waiting: some View {
+        switch vmProblem {
+        case .accessOff:
+            notice(
+                systemImage: "lock.display",
+                title: "Computer access is off for this phone",
+                detail: Text("Turn on Allow computer view for this phone in OpenMausBot → Settings → Remote access on your computer.")
+            )
+        case let .unavailable(reason):
+            notice(systemImage: "display.trianglebadge.exclamationmark", title: "Can't show the Local VM", detail: Text(verbatim: reason))
+        case nil:
+            streamWaiting
+        }
+    }
+
+    private func notice(systemImage: String, title: LocalizedStringKey, detail: Text) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 28))
+                .foregroundStyle(Color.white.opacity(0.7))
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.85))
+            detail
+                .font(.system(size: 13))
+                .foregroundStyle(Color.white.opacity(0.55))
+        }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 32)
+    }
+
+    private var streamWaiting: some View {
         VStack(spacing: 12) {
             ProgressView().tint(.white)
-            Text(current.busy == true ? "Waiting for a frame…" : "Nothing to show yet")
+            Text(current.busy == true || fetchingFirstStill ? "Waiting for a frame…" : "Nothing to show yet")
                 .font(.system(size: 15))
                 .foregroundStyle(Color.white.opacity(0.7))
             // An idle bot is not being screenshotted at all, so this would
             // otherwise be an indefinite spinner with no explanation.
-            if current.busy != true {
+            if current.busy != true && !fetchingFirstStill {
                 Text("This bot's computer is only captured while it is working.")
                     .font(.system(size: 13))
                     .foregroundStyle(Color.white.opacity(0.45))
