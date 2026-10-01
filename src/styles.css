@@ -25,6 +25,10 @@
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
+::highlight(search-result-text) {
+  color: var(--color-ink);
+  background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
 .mention-editor-mirror {
   /* Match the native textarea's direction independently for each paragraph. */
   unicode-bidi: plaintext;

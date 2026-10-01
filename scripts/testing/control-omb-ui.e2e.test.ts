@@ -121,6 +121,44 @@ describe("control-omb ui drives the real renderer", () => {
     if (ownsEvidenceDir) await removeTempDir(evidenceDir);
   });
 
+  run("shows the matched text inside a searched message", async () => {
+    launched = await launch([]);
+    const { info } = launched;
+    await ui("type", info.ui, "--name", "Message Pepper", "--text", "Find the striped zebra");
+    await ui("press", info.ui, "--keys", "Enter");
+    await ui("wait-settle", info.ui, "--timeout", "60");
+    await ui("click", info.ui, "--name", "Find in conversation");
+    await ui("type", info.ui, "--name", "Find in this conversation", "--text", "zebra");
+    const highlighted = async () => (await ui("eval", info.ui, "--js", "[...CSS.highlights.get('search-result-text') ?? []][0]?.toString() ?? null")).result;
+    await expect.poll(async () => (await ui("snapshot", info.ui)).snapshot, { timeout: 10_000 }).toContain("1 of 1");
+    expect((await ui("snapshot", info.ui)).snapshot).not.toContain("Show less");
+    mkdirSync(evidenceDir, { recursive: true });
+    await ui("screenshot", info.ui, "--out", join(evidenceDir, "search-result.png"));
+    await expect.poll(highlighted, { timeout: 10_000 }).toBe("zebra");
+    await ui("type", info.ui, "--name", "Message Pepper", "--text", `${"hay ".repeat(160)}saffron`);
+    await ui("press", info.ui, "--keys", "Enter");
+    await ui("wait-settle", info.ui, "--timeout", "60");
+    await ui("click", info.ui, "--name", "Find in this conversation");
+    await ui("eval", info.ui, "--js", "document.querySelector('input[aria-label=\"Find in this conversation\"]').select(); true");
+    await ui("press", info.ui, "--keys", "Backspace");
+    await ui("type", info.ui, "--name", "Find in this conversation", "--text", "saffron");
+    await expect.poll(highlighted, { timeout: 10_000 }).toBe("saffron");
+    expect((await ui("eval", info.ui, "--js", "[...document.querySelectorAll('.chat-text')].find(el => el.textContent.includes('saffron'))?.classList.contains('max-h-40')")).result).toBe(false);
+    await expect.poll(async () => (await ui("eval", info.ui, "--js", "(() => { const range = [...CSS.highlights.get('search-result-text')][0]; const bounds = range.startContainer.parentElement.closest('.overflow-y-auto').getBoundingClientRect(); const match = range.getBoundingClientRect(); return match.top >= bounds.top && match.bottom <= bounds.bottom; })()")).result).toBe(true);
+    await ui("click", info.ui, "--name", "Find in this conversation");
+    await ui("eval", info.ui, "--js", "document.querySelector('input[aria-label=\"Find in this conversation\"]').select(); true");
+    await ui("press", info.ui, "--keys", "Backspace");
+    await ui("type", info.ui, "--name", "Find in this conversation", "--text", "fake claude");
+    await expect.poll(highlighted, { timeout: 10_000 }).toBe("fake claude");
+    await ui("click", info.ui, "--name", "Find in conversation");
+    await ui("type", info.ui, "--name", "Search bots and messages", "--text", "zebra");
+    await expect.poll(async () => (await ui("eval", info.ui, "--js", "[...document.querySelectorAll('mark')].some(mark => mark.textContent === 'zebra')")).result, { timeout: 10_000 }).toBe(true);
+    await ui("eval", info.ui, "--js", "[...document.querySelectorAll('mark')].find(mark => mark.textContent === 'zebra').closest('button').click(); true");
+    await expect.poll(highlighted, { timeout: 10_000 }).toBe("zebra");
+    await waitForExit(launched.child, { signal: "SIGINT", graceMs: 30_000 });
+    expect(launched.child.exitCode).toBe(0);
+  }, LAUNCH_TIMEOUT_MS + 90_000);
+
   run("tests saved keys only from an untouched field and blocks erased drafts", async () => {
     launched = await launch([]);
     const { info } = launched;
