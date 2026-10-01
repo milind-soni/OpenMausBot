@@ -1659,6 +1659,11 @@ final class Session: ObservableObject {
         do {
             return try await call(client)
         } catch let error as APIError where error.isUnauthorized {
+            // As for screenshots: a call answered by the computer the phone
+            // has since switched away from must not evict the new session.
+            guard !Task.isCancelled, self.client?.connection.id == client.connection.id else {
+                throw CancellationError()
+            }
             status = .unauthorized
             throw error
         }
