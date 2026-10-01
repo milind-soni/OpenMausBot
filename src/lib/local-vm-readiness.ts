@@ -15,7 +15,6 @@ export async function waitForLocalVmReady<T extends { ready: boolean; container:
       const timer = window.setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, 1_000);
       signal.addEventListener("abort", abort, { once: true });
     });
-    signal.throwIfAborted();
     status = await read();
   }
   signal.throwIfAborted();

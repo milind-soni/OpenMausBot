@@ -1042,7 +1042,6 @@ describe("Auto's Local VM eligibility", () => {
   });
 });
 
-
 describe("Local VM resume safety", () => {
   it.each([
     { Config: { Image: "foreign" } },

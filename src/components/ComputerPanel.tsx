@@ -1,5 +1,3 @@
-import { canResumeLocalVm } from "../../shared/local-vm-lifecycle";
-import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 import { cloudRunner } from "@/lib/remote-desktop";
 // The bot's computer, in the right-side slot. Where it runs decides the
 // whole flow: explicit cloud → provision the boat on open (idempotent) and preview
@@ -13,6 +11,8 @@ import { cloudRunner } from "@/lib/remote-desktop";
 // it must never fall back to this host or become a private Cloud selection.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
+import { canResumeLocalVm } from "../../shared/local-vm-lifecycle";
+import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 import {
   CalendarClock,
   Columns2,
@@ -383,6 +383,7 @@ export function ComputerPanel({
     });
     return () => controller.abort();
   }, [connectionKey, livePlace, computerSelectionPersisted, threadPath, retry]);
+  const vmResumable = phase === "vm-unavailable" && vmStatus !== null && canResumeLocalVm(vmStatus);
   const vmReadinessAttempts = useRef(0);
   const vmActionController = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -1436,7 +1437,7 @@ export function ComputerPanel({
                       : localMisses >= 3
                       ? t("computer.needsScreenPerm")
                       : t("computer.capturingLocal")
-                    : phase === "vm-unavailable" && vmStatus && canResumeLocalVm(vmStatus)
+                    : vmResumable
                       ? t(pending === "vm-start" ? "vm.setup.starting" : "computer.phase.vmStopped")
                       : emptyState[phase]}
               </span>
@@ -1476,11 +1477,11 @@ export function ComputerPanel({
                       : t("computer.chooseCloudManage")}
                 </button>
               )}
-              {phase === "vm-unavailable" && pending !== "vm-start" && vmStatus && canResumeLocalVm(vmStatus) && (
-                <p className="text-[12px]">{t(vmStatus.stop_reason === "idle" ? "vm.stopped.idle" : "vm.stopped.detail")}</p>
+              {vmResumable && pending !== "vm-start" && (
+                <p className="text-[12px]">{t(vmStatus?.stop_reason === "idle" ? "vm.stopped.idle" : "vm.stopped.detail")}</p>
               )}
               {phase === "vm-unavailable" && (
-                canManageVm && vmStatus && vmStatus.mode !== "pool" && canResumeLocalVm(vmStatus) ? (
+                canManageVm && vmResumable && vmStatus.mode !== "pool" ? (
                   <button
                     onClick={() => void runVmAction("vm-start")}
                     disabled={pending !== null}

@@ -1,7 +1,7 @@
-import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 // One-place setup for the isolated Local VM image and its shared/per-bot policy.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
+import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 import type { LocaleKey } from "@/locales";
 import {
   AlertTriangle,
@@ -969,6 +969,7 @@ export function LocalComputerSection() {
     if (!response.ok) throw new Error(body.error ?? t("vm.err.status", { code: response.status }));
     setStatus(body as Status);
     setError(null);
+    return body as Status;
   }, []);
 
   const refreshInventory = useCallback(async (signal?: AbortSignal) => {
@@ -1146,13 +1147,11 @@ export function LocalComputerSection() {
         result = await post(action, controller.signal);
       }
       if (action === "run" || action === "start" || action === "recreate") {
-        result = await waitForLocalVmReady(result, async () => {
-          const response = await fetch("/api/local-computer", { signal: controller.signal });
-          const body = await response.json();
-          if (!response.ok) throw new Error(body.error ?? t("vm.err.start"));
-          setStatus(body as Status);
-          return body as Status;
-        }, controller.signal);
+        result = await waitForLocalVmReady(
+          result,
+          async () => (await refresh(controller.signal)) ?? result,
+          controller.signal,
+        );
         if (!result.ready) throw new Error(result.problem ?? t("vm.err.start"));
       }
       await refresh();
