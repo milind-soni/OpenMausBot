@@ -35,7 +35,13 @@ stop or an unknown timestamp gets the neutral stopped explanation.
 the pinned driver-0.20.0-v5 image passed two stop/start cycles. Each cycle
 passed the production readiness probe (driver version, health report, and
 complete screenshot) and preserved marker files under `/home/cua` and `/opt`.
-The fixture used an empty temporary workspace and was removed afterward.
+Two additional abrupt-shutdown cycles used `docker kill --signal KILL` and
+confirmed with `docker cp` that `/tmp/.X1-lock` remained in the stopped
+container before invoking production Start. Both resumes passed the same
+readiness and marker checks. The pinned image's `/usr/local/bin/start-vnc.sh`
+removes `/tmp/.X1-lock` and `/tmp/.X11-unix/X1` before launching VNC, addressing
+the stale-lock concern behind the earlier blanket refusal to resume.
+The fixtures used empty temporary workspaces and were removed afterward.
 No image rebuild was required. That live acceptance does not cover Podman,
 Apple container, native iOS, or persistence across image replacement.
 

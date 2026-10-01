@@ -569,7 +569,7 @@ describe("Local VM idle timeout setting", () => {
       onSave: async () => {},
     }));
     expect(markup).toContain('for="local-vm-idle-timeout"');
-    expect(markup).toContain("Recycle idle desktops after");
+    expect(markup).toContain("Stop idle desktops after");
     expect(markup).toContain('min="5"');
     expect(markup).toContain('max="1440"');
     expect(markup).toContain('value="30"');
