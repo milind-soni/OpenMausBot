@@ -459,6 +459,9 @@ function isMissingObjectMessage(message: string): boolean {
 }
 
 function transportFailure(message: string): string {
+  if (/timed out/i.test(message)) {
+    return "Docker over SSH failed while checking the VPS: the connection timed out. Check that the VPS is online, SSH is reachable from this computer, and Docker is running on the VPS, then retry. No computer was reset.";
+  }
   return `Docker over SSH failed while checking the VPS: ${message.trim().slice(0, 200) || "unknown transport error"}`;
 }
 
@@ -542,10 +545,21 @@ async function computeVpsComputerStatus(
   viewerConnections.delete(`${alias}:${status.container_name}`);
   const run = (args: string[], timeoutMs = 10_000, input?: string) =>
     runner(vpsDockerArgs(alias, args), { timeoutMs, input });
+  // Only repeat read-only Docker inspections, never an exec or lifecycle
+  // mutation whose outcome is unknown after a lost connection. Awaiting the
+  // runner also lets its owned SSH process finish cleanup before retrying.
+  const inspect = async (args: string[]) => {
+    try { return await run(args); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/timed out|connection reset by peer|broken pipe/i.test(message)) throw error;
+      return run(args);
+    }
+  };
 
   let inspectedImageId: string | null = null;
   try {
-    const inspected = JSON.parse((await run(["image", "inspect", VPS_IMAGE])).stdout) as Array<{
+    const inspected = JSON.parse((await inspect(["image", "inspect", VPS_IMAGE])).stdout) as Array<{
       Id?: string;
       id?: string;
       Config?: { Labels?: Record<string, string> };
@@ -570,7 +584,7 @@ async function computeVpsComputerStatus(
   }
 
   try {
-    const inspected = JSON.parse((await run(["inspect", status.container_name])).stdout) as Array<{
+    const inspected = JSON.parse((await inspect(["inspect", status.container_name])).stdout) as Array<{
       Config?: { Image?: string; Labels?: Record<string, string>; Env?: string[] };
       HostConfig?: DockerHardeningConfig & {
         Binds?: string[] | null;

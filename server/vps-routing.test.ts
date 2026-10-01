@@ -125,7 +125,13 @@ case "$*" in
   *" start "*) sed 's/"Running":false/"Running":true/' "$FAKE_DOCKER_DIR/container.json.tpl" > "$FAKE_DOCKER_DIR/container.next"; mv "$FAKE_DOCKER_DIR/container.next" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
   *" container ls "*) if [ ! -f "$FAKE_DOCKER_DIR/inventory-empty" ]; then echo "${CONTAINER_ID}"; fi ;;
   *" container inspect "*) name=$(cat "$FAKE_DOCKER_DIR/container.name"); sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
-  *" image inspect "*) cat "$FAKE_DOCKER_DIR/image.json" ;;
+  *" image inspect "*)
+    if [ -f "$FAKE_DOCKER_DIR/fail-inspect-once" ]; then
+      rm "$FAKE_DOCKER_DIR/fail-inspect-once"
+      echo "ssh: connection reset by peer" >&2
+      exit 1
+    fi
+    cat "$FAKE_DOCKER_DIR/image.json" ;;
   *" exec "*"--version"*) echo "cua-driver ${CUA_DRIVER_VERSION}" ;;
   *" exec "*"--screenshot-out-file"*)
     : > "$FAKE_DOCKER_DIR/capture-started"
@@ -250,6 +256,23 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
   afterAll(async () => {
     await waitForExit(child, { signal: "SIGTERM" });
     await removeTempDir(home);
+  });
+
+  it("recovers a transient VPS inspection failure through the real status route without provisioning", async () => {
+    expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud", cloudBackend: "vps" });
+    const marker = join(dirname(dockerLog), "fail-inspect-once");
+    const offset = readFileSync(dockerLog, "utf8").length;
+    writeFileSync(marker, "fail once");
+    try {
+      const result = await api("GET", `/api/bots/${bot.id}/computer`);
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ backend: "vps", ready: true, container: "running" });
+      const calls = readFileSync(dockerLog, "utf8").slice(offset);
+      expect(calls.match(/ image inspect /g)).toHaveLength(2);
+      expect(calls).not.toMatch(/ssh:\/\/production-vps (run|start|stop|rm|pull|build) /);
+    } finally { rmSync(marker, { force: true }); }
   });
 
   it("shares a canceled preview with retries and opens control without racing destructive actions", async () => {
