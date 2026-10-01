@@ -4,7 +4,7 @@ description: Diagnose launch failures and local server conflicts.
 icon: Power
 ---
 
-The Electron app starts a local harness and serves the interface from the same machine. The normal port is `8799`. If another process already owns it, packaged builds may select a fallback port automatically.
+The Electron app starts a local harness and serves the interface from the same machine. The normal port is `8799`. If another process already owns it, a source-run harness may select a fallback port automatically; packaged and CLI launches do not.
 
 ## Loading screen and system tray
 
@@ -33,7 +33,9 @@ console behavior.
 
 ## Development port overrides
 
-Use `OMB_PORT` for a source-run harness. A packaged desktop build owns its server lifecycle and may choose a fallback if the preferred port is unavailable.
+`OMB_PORT` sets the preferred port for a source-run harness (and `OMB_WEBHOOK_PORT` the preferred webhook port). If the preferred port is unavailable, a source-run harness walks forward to the next free port and logs the resolved value.
+
+`OMB_DESKTOP_PARENT=1` and `OMB_PORT_PINNED=1` disable that fallback: the child stays on the requested ports and exits with an `EADDRINUSE` error if either is busy. `openmausbot serve` negotiates the pair itself — it probes for the first free ports at or above the requested ones, then launches its child pinned to them so proxies, pairing URLs, and the readiness check all target the ports it configured. The packaged desktop parent pins its child to the port its health check polls.
 
 ## Isolate a test profile
 
