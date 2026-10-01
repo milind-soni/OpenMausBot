@@ -11,7 +11,7 @@ import { localeChoices, type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
 import { withTourReset } from "@/lib/guided-tour";
 import { completionPatch } from "@/lib/onboarding";
-import { ApiKeyRow, OpenAiCompatUrl, VpsConnection } from "./ApiKeys";
+import { AnthropicEveryClaudeBot, ApiKeyRow, OpenAiCompatUrl, VpsConnection } from "./ApiKeys";
 import { DecisionModelSettings } from "./DecisionModelSettings";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
@@ -48,6 +48,7 @@ import { CompanyBackupSettings } from "./CompanyBackupSettings";
 import { cn } from "@/lib/cn";
 import { setNotificationSounds, useNotificationSounds } from "@/lib/notification-preferences";
 import { setShowThreads, useShowThreads } from "@/lib/thread-preferences";
+import { parseSidebarDensity, setSidebarDensity, SIDEBAR_DENSITIES, useSidebarDensity, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 
@@ -65,11 +66,11 @@ export const SECTIONS: Array<{
   { id: "desktopWorkspaces", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
   { id: "organization", labelKey: "settings.section.organization", icon: Building2, keywords: ["company", "organization", "organisation", "sign in", "enroll", "managed", "models", "disconnect"] },
   { id: "cloudAccount", labelKey: "settings.section.cloudAccount", icon: User, keywords: ["cloud", "account", "personal", "sign in", "pro", "subscription", "billing"] },
-  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime"] },
+  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime"] },
   { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "learn", "skill", "authoring", "browser", "profiles"] },
-  { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "composio", "box", "xai", "mistral", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "opencode", "provider"] },
+  { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "opencode", "provider"] },
   { id: "decisionModel", labelKey: "settings.section.decisionModel", icon: Zap, keywords: ["decision", "jev", "typesafe", "routing", "auto", "rooms", "who answers"] },
-  { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
+  { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "model providers", "engines", "claude", "codex", "grok", "providers", "cli", "sign in", "subscription"] },
   { id: "companion", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "computer", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
   { id: "usage", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
@@ -387,6 +388,30 @@ function ShowThreadsRow() {
         aria-label={t("settings.threadDisplay.show")}
         onClick={() => setShowThreads(!enabled)}
       />
+    </SettingRow>
+  );
+}
+
+const SIDEBAR_DENSITY_LABEL_KEYS: Record<SidebarDensity, LocaleKey> = {
+  comfortable: "sidebar.density.comfortable",
+  compact: "sidebar.density.compact",
+  icons: "sidebar.density.iconsOnly",
+};
+
+function SidebarDensityRow() {
+  const density = useSidebarDensity();
+  return (
+    <SettingRow title={t("sidebar.density.title")} subtitle={t("settings.sidebarDensity.subtitle")}>
+      <select
+        value={density}
+        aria-label={t("sidebar.density.chooseAria")}
+        onChange={(event) => setSidebarDensity(parseSidebarDensity(event.target.value))}
+        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+      >
+        {SIDEBAR_DENSITIES.map((option) => (
+          <option key={option} value={option}>{t(SIDEBAR_DENSITY_LABEL_KEYS[option])}</option>
+        ))}
+      </select>
     </SettingRow>
   );
 }
@@ -814,6 +839,7 @@ export function SettingsModal() {
                 </Card>
                 <div>
                   <FontRow />
+                  <SidebarDensityRow />
                   <ShowThreadsRow />
                   <NotificationSoundsRow />
                   {!remoteActive && <ToolCallsRow />}
@@ -842,11 +868,19 @@ export function SettingsModal() {
                   ) : null}
                   <div className="text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.providers.title")}</div>
                   <p className="-mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("keys.providers.subtitle")}</p>
+                  <ApiKeyRow section="openai" testProvider="openai" />
                   <ApiKeyRow section="anthropic" testProvider="anthropic" />
-                  <ApiKeyRow section="openaiCompat" testProvider="openaiCompat" />
-                  <OpenAiCompatUrl />
+                  <AnthropicEveryClaudeBot />
                   <ApiKeyRow section="xai" testProvider="xai" />
+                  <ApiKeyRow section="openrouter" testProvider="openrouter" />
                   <ApiKeyRow section="mistral" testProvider="mistral" />
+                  <details data-api-keys-other className="rounded-lg border border-hairline/40 bg-inset px-3 py-2" open={Boolean(state.config?.openaiCompat?.configured)}>
+                    <summary className="cursor-pointer text-[13px] text-ink-secondary">{t("keys.other.title")}</summary>
+                    <div className="mt-3 flex flex-col gap-4">
+                      <ApiKeyRow section="openaiCompat" testProvider="openaiCompat" />
+                      <OpenAiCompatUrl />
+                    </div>
+                  </details>
                   <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
                   <ApiKeyRow section="box" />
                   <VpsConnection />

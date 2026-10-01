@@ -12,6 +12,9 @@ export interface McpAuthMetadata {
   registrationEndpoint?: string;
   revocationEndpoint?: string;
   scopes?: string[];
+  /** RFC 8414 `token_endpoint_auth_methods_supported`; absent means
+   * client_secret_basic for a client that has a secret. */
+  tokenEndpointAuthMethods?: string[];
   /** The MCP URL, sent as the RFC 8707 `resource` so tokens are audience-bound. */
   resource: string;
 }
@@ -132,6 +135,7 @@ export async function discoverMcpAuth(
   const registrationEndpoint = optionalEndpoint(metadata.registration_endpoint);
   const revocationEndpoint = optionalEndpoint(metadata.revocation_endpoint);
   const scopes = stringList(resource?.scopes_supported);
+  const tokenEndpointAuthMethods = stringList(metadata.token_endpoint_auth_methods_supported);
   target.hash = "";
   return {
     issuer,
@@ -140,6 +144,7 @@ export async function discoverMcpAuth(
     ...(registrationEndpoint ? { registrationEndpoint } : {}),
     ...(revocationEndpoint ? { revocationEndpoint } : {}),
     ...(scopes?.length ? { scopes } : {}),
+    ...(tokenEndpointAuthMethods?.length ? { tokenEndpointAuthMethods } : {}),
     resource: target.toString(),
   };
 }

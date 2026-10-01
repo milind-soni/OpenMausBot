@@ -311,6 +311,33 @@ describe("ModelPicker trigger", () => {
   });
 });
 
+describe("OpenAI sign-ins in the rail", () => {
+  const codex: InstanceInfo = { ...engine(), instanceId: "codex", driverKind: "codex", displayName: "Codex" };
+  const plan: InstanceInfo = { ...engine(), instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT plan" };
+  const apiKey: InstanceInfo = { ...engine(), instanceId: "openai", driverKind: "openai-compat", displayName: "OpenAI", access: "api" };
+
+  it("folds Codex and the ChatGPT plan into one OpenAI button, apart from the API-key OpenAI", () => {
+    const markup = renderToStaticMarkup(createElement(ModelEngineRail, {
+      instances: [codex, plan, apiKey], selectedInstance: plan, onSelect: () => {},
+    }));
+    // one folded sign-in button, pressed for either of its engines, plus the key engine
+    expect(markup.match(/aria-label="OpenAI"/g)).toHaveLength(2);
+    expect(markup).toContain('aria-label="OpenAI" aria-pressed="true"');
+    expect(markup).not.toContain('aria-label="Codex"');
+    expect(markup).not.toContain('aria-label="ChatGPT plan"');
+    // only the key engine carries the key badge
+    expect(markup.match(/data-rail-key-badge/g)).toHaveLength(1);
+  });
+
+  it("opens the remembered OpenAI sign-in", () => {
+    const onSelect = vi.fn();
+    const rail = ModelEngineRail({ instances: [codex, plan], openaiInstance: plan, onSelect });
+    const button = Children.toArray(rail.props.children).find((child) => (child as ReactElement).type === "button") as ReactElement<{ onClick: () => void }>;
+    button.props.onClick();
+    expect(onSelect).toHaveBeenLastCalledWith(plan);
+  });
+});
+
 describe("Claude provider and account selection", () => {
   const personal: InstanceInfo = { ...engine(), instanceId: "claude-personal", driverKind: "claudeAgent", displayName: "Personal" };
   const work: InstanceInfo = { ...engine(), instanceId: "claude-work", driverKind: "claudeAgent", displayName: "Work", access: "custom" };
@@ -322,7 +349,7 @@ describe("Claude provider and account selection", () => {
       }));
       expect(markup.match(/aria-label="Claude"/g)).toHaveLength(1);
       expect(markup).toContain('aria-label="Claude" aria-pressed="true"');
-      expect(markup).toContain('aria-label="Codex" aria-pressed="false"');
+      expect(markup).toContain('aria-label="OpenAI" aria-pressed="false"');
       expect(markup).not.toContain('aria-label="Personal"');
       expect(markup).not.toContain('aria-label="Work"');
       expect(markup).toContain("w-14");
@@ -368,7 +395,7 @@ describe("organisation policy", () => {
   it("shows an engine the organisation disallows as managed and dimmed, not hidden", () => {
     const blocked: InstanceInfo = { ...engine(), policy: { organizationName: "Fixture Agency", reason: "Fixture Agency allows only company models on this computer. Choose a Company model for this bot." } };
     const markup = renderToStaticMarkup(createElement(ModelEngineRail, { instances: [blocked], onSelect: () => {} }));
-    expect(markup).toContain('aria-label="Codex · Managed by Fixture Agency"');
+    expect(markup).toContain('aria-label="OpenAI · Managed by Fixture Agency"');
     expect(markup).toContain("opacity-40");
     const allowed = renderToStaticMarkup(createElement(ModelEngineRail, { instances: [engine()], onSelect: () => {} }));
     expect(allowed).not.toContain("Managed by");

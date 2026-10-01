@@ -319,7 +319,7 @@ function BotPicker({
 }
 
 function toContextAttachments(attachments: Attachment[]): Array<RoutineContextAttachment | CalendarCallAttachment> {
-  return attachments.flatMap((attachment) => attachment.kind === "paste" ? [] : [{
+  return attachments.flatMap((attachment) => attachment.kind === "paste" || attachment.kind === "citation" ? [] : [{
     id: attachment.id,
     kind: attachment.kind,
     name: attachment.name,

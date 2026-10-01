@@ -645,7 +645,10 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { resetAudience: true }, ADA)).status).toBe(403);
     expect((await api("PATCH", `/api/groups/${ids.roomMixed}`, { resetAudience: true }, BOSS)).status).toBe(200);
     expect(await status("GET", `/api/threads/${ids.roomMixedThread}/messages`, BOB)).toBe(200);
-    const reset = (await api("GET", "/api/admin-activity?what=visibility", undefined, BOSS)).body.entries.find((entry: any) => entry.action === "room.audience-reset");
+    // Audit writes run after the response: the earlier admins → Ada reset may
+    // be the newest row until this reset reaches disk. Wait for this receipt.
+    const reset = await waitFor(async () => (await api("GET", "/api/admin-activity?what=visibility", undefined, BOSS)).body.entries.find((entry: any) =>
+      entry.action === "room.audience-reset" && entry.target?.id === ids.roomMixed && entry.after?.audienceFloor === "everyone"), 3_000);
     expect(reset).toMatchObject({ who: BOSS, target: { id: ids.roomMixed }, before: { audienceFloor: { people: [ADA] } }, after: { audienceFloor: "everyone" } });
   });
 });

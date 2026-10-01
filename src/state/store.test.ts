@@ -905,6 +905,17 @@ describe("notification routing", () => {
 });
 
 describe("config status frames", () => {
+  it("keeps each provider's own key flag through a live config update", () => {
+    const status = configStatusFromFrame({
+      openai: { configured: true },
+      openrouter: { configured: false },
+      anthropic: { configured: true, everyClaudeBot: false },
+    } as ConfigStatusFrame);
+    expect(status.openai).toEqual({ configured: true });
+    expect(status.openrouter).toEqual({ configured: false });
+    expect(status.anthropic).toEqual({ configured: true, everyClaudeBot: false });
+  });
+
   it("keeps thread capacity and room timeout with the existing config fields", () => {
     expect(
       configStatusFromFrame({

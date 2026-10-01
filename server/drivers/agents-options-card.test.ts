@@ -42,6 +42,12 @@ function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
 }
 
 describe("Watcher options-card tool", () => {
+  it("hides memory tools when native memory is off", () => {
+    const names = availableTools(profile({ memoryEnabled: false })).map((tool) => tool.name);
+    expect(names).not.toContain("memory_update");
+    expect(names).not.toContain("memory_log");
+    expect(names).toContain("session_search");
+  });
   it("is advertised only to Watcher interactive turns", () => {
     expect(availableTools(profile()).map((tool) => tool.name)).toContain("create_options_card");
     expect(availableTools(profile({ botId: "another-bot" })).map((tool) => tool.name)).not.toContain("create_options_card");

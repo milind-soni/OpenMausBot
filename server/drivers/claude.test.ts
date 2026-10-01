@@ -3283,6 +3283,29 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv[seen.argv.indexOf("--output-format") + 1]).toBe("text");
   });
 
+  it("never falls back to personal authentication for API-key-only helper calls", async () => {
+    process.env.ANTHROPIC_API_KEY = "unselected-personal-key";
+    await create(undefined, {}, { requireApiKey: true });
+    const dump = join(scratch, "missing-api-key-helper.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await expect(instance.generateText!("summarize")).rejects.toThrow("No Anthropic API key");
+    await expect(instance.reviewPermission!("review request")).rejects.toThrow("No Anthropic API key");
+    await expect(instance.adapter.sendTurn({ threadId: "t-api-no-key", text: "hello" })).rejects.toThrow("No Anthropic API key");
+    expect(existsSync(dump)).toBe(false);
+  });
+
+  it("uses the selected API key for API-key-only helper calls", async () => {
+    await create(undefined, { ANTHROPIC_API_KEY: "selected-api-key" }, { requireApiKey: true });
+    const dump = join(scratch, "api-key-helper.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await expect(instance.generateText!("summarize")).resolves.toBe("fake generated text");
+    expect(JSON.parse(readFileSync(dump, "utf8")).env.ANTHROPIC_API_KEY).toBe("selected-api-key");
+    await expect(instance.reviewPermission!("review request")).resolves.toBe("fake generated text");
+    expect(JSON.parse(readFileSync(dump, "utf8")).env.ANTHROPIC_API_KEY).toBe("selected-api-key");
+  });
+
   it("reports the actual one-shot model, total input, cached input and cost once", async () => {
     await create(undefined, { FAKE_CLAUDE_TEXT_RESULT: JSON.stringify({
       type: "result", result: "  captured memory  ", is_error: false,

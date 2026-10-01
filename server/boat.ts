@@ -505,7 +505,7 @@ const boatIdCache = new Map<string, string>();
 
 function boatInventoryProblem(status: number, body: any, included = false): string {
   if (status === 401 || status === 403) {
-    return included ? INCLUDED_BOAT_UNAVAILABLE : "boat.dev rejected the Boat API key — update it in Settings → Connections";
+    return included ? INCLUDED_BOAT_UNAVAILABLE : "boat.dev rejected the Boat API key — update it in Settings → API keys";
   }
   if (status === 429) return "boat.dev is rate-limiting this account — wait a minute and refresh";
   const message = typeof body?.message === "string" ? body.message.trim() : "";
@@ -828,7 +828,7 @@ function inventoryFailure(inventory: ManagedBoatInventory): Error & { status: nu
   const error = new Error(
     inventory.configured
       ? (inventory.problem ?? "Cloud computer inventory is unavailable")
-      : "Boat is not configured — add its API key in Settings → Connections",
+      : "Boat is not configured — add its API key in Settings → API keys",
   ) as Error & { status: number };
   error.status = inventory.configured ? 503 : 409;
   return error;

@@ -79,7 +79,7 @@ it("opens the existing paste-code and device-code sign-ins on this server's own 
   expect(store.dispatch).not.toHaveBeenCalled();
 });
 
-it("sends an API key to the existing model-provider keys in Settings → Connections", () => {
+it("sends an API key to the existing model-provider keys in Settings → API keys", () => {
   choose("api-key");
   expect(store.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleAppSettings", open: true, section: "connections" });
 });

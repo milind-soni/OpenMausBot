@@ -416,6 +416,8 @@ export interface Bot {
   voice?: string;
   /** whether this bot may send voice notes (on unless switched off) */
   voiceNotes?: boolean;
+  /** whether this bot uses native memory (on unless switched off) */
+  memoryEnabled?: boolean;
   pinned?: boolean;
   hidden?: boolean;
   /** Sidebar section this bot renders under; absent = unsectioned. */
@@ -594,7 +596,10 @@ export function messageVersions(bot: Bot, message: Message): Message[] {
 export interface ConfigStatus {
   xai?: { configured: boolean };
   mistral?: { configured: boolean };
-  anthropic?: { configured: boolean };
+  /** `everyClaudeBot`: the key runs every Claude bot, not only "Claude (API key)". */
+  anthropic?: { configured: boolean; everyClaudeBot?: boolean };
+  openai?: { configured: boolean };
+  openrouter?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
   /** what this server is entitled to; Settings shows only what works here.
    * `license` reaches admins only, and only while the key is inside its
@@ -617,7 +622,7 @@ export interface ConfigStatus {
   newBots?: { effort?: EffortLevel };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
-  localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number };
+  localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number };
   opencodeGo?: { configured: boolean };
   /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
    * Fish Audio key, or a Chatterbox server address); `ready` = that AND a voice, which is
@@ -630,6 +635,8 @@ export interface ConfigStatus {
     provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai";
     baseUrl?: string;
     model?: string;
+    /** Fish Audio speech model; present only while Fish is the provider. */
+    fishModel?: "s2.1-pro" | "s2.1-pro-free";
     /** ElevenLabs voice comes with Cloud Pro; no key is saved. */
     included?: boolean;
   };
@@ -660,7 +667,7 @@ export interface ConfigStatus {
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean };
+  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;
@@ -710,7 +717,7 @@ export interface BrowserProfile {
 // Settings shows (a saved key's Test button used to vanish that way).
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
+  "xai" | "mistral" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -718,6 +725,8 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     xai: frame.xai,
     mistral: frame.mistral,
     anthropic: frame.anthropic,
+    openai: frame.openai,
+    openrouter: frame.openrouter,
     openaiCompat: frame.openaiCompat,
     fleet: frame.fleet,
     composio: frame.composio,
@@ -756,7 +765,7 @@ export interface EngineInstall {
   managed?: { label: string; downloadBytes: number };
   /** the server can install or update this engine itself, no terminal */
   server?: { package: string };
-  /** configured with a key in Settings → Connections, not in a terminal */
+  /** configured with a key in Settings → API keys, not in a terminal */
   settings?: "connections";
 }
 
@@ -1152,6 +1161,8 @@ export type Action =
   | { type: "switchTask"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
+  /** Name the thread again from its conversation; the new title arrives with the bot event. */
+  | { type: "regenerateTaskTitle"; botId: string; threadId: string; onSettled?: (ok: boolean) => void }
   | { type: "deleteTask"; botId: string; threadId: string }
   | { type: "newBot"; role?: BotRole; visibility?: BotVisibility; section?: string; preserveSelection?: boolean; onCreated?: (bot: Bot) => void; onError?: (message: string) => void }
   | { type: "botCreationPending"; on: boolean }
@@ -2220,6 +2231,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "newGroupTask":
     case "switchGroupTask":
     case "deleteGroupTask":
+    case "regenerateTaskTitle":
       return state;
     case "newTask":
       return { ...state, selectedId: action.botId, activeView: "chat" };
@@ -2805,12 +2817,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const expectedSelection = expected.modelSelection;
         if (
           approvalModeFor(persisted) !== approvalModeFor(expected) ||
+          (persisted.memoryEnabled !== false) !== (expected.memoryEnabled !== false) ||
           persisted.modelSelection.instanceId !== expectedSelection.instanceId ||
           persisted.modelSelection.model !== expectedSelection.model ||
           persisted.modelSelection.effort !== expectedSelection.effort ||
           persisted.modelSelection.variant !== expectedSelection.variant
         ) {
-          throw new Error("The approval level or model could not be saved, so this work was not started");
+          throw new Error("The approval level, memory setting, or model could not be saved, so this work was not started");
         }
       })]);
       if (threadId) await taskWrites.get(threadId)?.execution;
@@ -3487,6 +3500,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             method: "PATCH",
             body: JSON.stringify({ title: action.title }),
           }).catch(showError);
+          break;
+        case "regenerateTaskTitle":
+          api(`/api/bots/${action.botId}/tasks/${action.threadId}/title`, { method: "POST" })
+            .then(() => action.onSettled?.(true))
+            .catch((error) => { showError(error); action.onSettled?.(false); });
           break;
         case "deleteTask":
           api<{ bot?: BotAnnouncement }>(`/api/bots/${action.botId}/tasks/${action.threadId}`, { method: "DELETE" })

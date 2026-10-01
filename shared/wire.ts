@@ -285,6 +285,8 @@ export interface WireBot {
   /** Whether this bot may send voice notes. Absent/true = allowed; false
    * hides the tool and refuses the route even with a voice configured. */
   voiceNotes?: boolean;
+  /** Whether this bot uses native memory. Absent/true = enabled. */
+  memoryEnabled?: boolean;
   /** Queue direct-chat messages behind outstanding delegated work. */
   parkDirectMessages?: boolean;
   /** true after an edit/branch-switch rewound the visible conversation. */

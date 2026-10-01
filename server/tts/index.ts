@@ -72,8 +72,9 @@ export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
 
 /** What the settings panel needs. Never includes the key — same write-only
  * rule as every other credential. baseUrl and model are Chatterbox
- * settings, not credentials, so they come back in full. `included` says the
- * voice is Cloud Pro's, not a saved key. */
+ * settings, not credentials, so they come back in full; `fishModel` is the
+ * Fish Audio speech model, resolved to its default when unset. `included`
+ * says the voice is Cloud Pro's, not a saved key. */
 export function describeVoice(cfg: AppConfig) {
   const provider = voiceProvider(cfg);
   const included = provider === "elevenlabs" && elevenLabs(cfg)?.included === true;
@@ -84,6 +85,7 @@ export function describeVoice(cfg: AppConfig) {
     provider,
     baseUrl: provider === "chatterbox" ? (cfg.tts?.baseUrl ?? "") : "",
     model: provider === "chatterbox" ? (cfg.tts?.model ?? "") : "",
+    ...(provider === "fish" ? { fishModel: cfg.tts?.fishModel ?? fish.DEFAULT_FISH_MODEL } : {}),
     ...(included ? { included: true as const } : {}),
   };
 }
@@ -150,7 +152,7 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     }
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return fish.synthesize(text, voice, key);
+    return fish.synthesize(text, voice, key, cfg.tts?.fishModel);
   }
   const credential = elevenLabs(cfg);
   if (!credential) throw new NoVoiceConfigured("key");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { builtInBrowserEnabled, routinesInConversationEnabled, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "./feature-flags";
+import { builtInBrowserEnabled, llmThreadTitlesEnabled, routinesInConversationEnabled, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "./feature-flags";
 
 describe("experimental feature flags", () => {
   it("keeps skill authoring on by default, before and after the config arrives", () => {
@@ -40,5 +40,12 @@ describe("experimental feature flags", () => {
     expect(sharedComputersEnabled({ features: {} })).toBe(false);
     expect(sharedComputersEnabled({ features: { sharedComputers: false } })).toBe(false);
     expect(sharedComputersEnabled({ features: { sharedComputers: true } })).toBe(true);
+  });
+
+  it("offers Regenerate title only while the server has generated titles on", () => {
+    expect(llmThreadTitlesEnabled(null)).toBe(false);
+    expect(llmThreadTitlesEnabled({ features: {} })).toBe(false);
+    expect(llmThreadTitlesEnabled({ features: { llmThreadTitles: false } })).toBe(false);
+    expect(llmThreadTitlesEnabled({ features: { llmThreadTitles: true } })).toBe(true);
   });
 });

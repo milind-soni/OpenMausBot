@@ -96,7 +96,8 @@ async function probeRemoteMcpServer(
     const result = await client.request("tools/list", {}, combined);
     const tools = result && typeof result === "object" ? (result as { tools?: unknown }).tools : undefined;
     if (!Array.isArray(tools)) return { ok: false, error: "The server did not return a valid MCP tools list." };
-    return { ok: true, tools: publicTools(tools, server.headers) };
+    const secrets = server.oauth?.clientSecret ? { ...server.headers, "oauth.clientSecret": server.oauth.clientSecret } : server.headers;
+    return { ok: true, tools: publicTools(tools, secrets) };
   } catch (error) {
     if (signal?.aborted) return { ok: false, error: publicProbeError("cancelled") };
     if (timeout.aborted) return { ok: false, error: publicProbeError("timeout") };

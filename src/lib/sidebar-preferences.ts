@@ -1,6 +1,9 @@
+import { useSyncExternalStore } from "react";
 import { z } from "zod";
 
 export type SidebarDensity = "comfortable" | "compact" | "icons";
+
+export const SIDEBAR_DENSITIES: readonly SidebarDensity[] = ["comfortable", "compact", "icons"];
 
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
 export const SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth";
@@ -39,6 +42,55 @@ export function saveSidebarDensity(
     // Private browsing and locked-down webviews may reject localStorage.
     // The in-memory React state still makes the control useful this session.
   }
+}
+
+// The sidebar and Settings → Appearance both read and change the density, so
+// it lives in one renderer store rather than in either component's state.
+// A session choice survives storage that rejects writes; another window's
+// storage event supersedes it.
+let densitySessionChoice: SidebarDensity | undefined;
+const densityListeners = new Set<() => void>();
+
+function currentSidebarDensity(): SidebarDensity {
+  return densitySessionChoice ?? loadSidebarDensity();
+}
+
+function notifyDensity() {
+  for (const listener of densityListeners) listener();
+}
+
+function onDensityStorage(event: StorageEvent) {
+  if (event.key !== SIDEBAR_DENSITY_KEY && event.key !== null) return;
+  try {
+    if (event.storageArea && event.storageArea !== globalThis.localStorage) return;
+  } catch {
+    return;
+  }
+  densitySessionChoice = undefined;
+  notifyDensity();
+}
+
+function subscribeDensity(listener: () => void): () => void {
+  densityListeners.add(listener);
+  if (densityListeners.size === 1 && typeof window !== "undefined") {
+    window.addEventListener("storage", onDensityStorage);
+  }
+  return () => {
+    densityListeners.delete(listener);
+    if (densityListeners.size === 0 && typeof window !== "undefined") {
+      window.removeEventListener("storage", onDensityStorage);
+    }
+  };
+}
+
+export function setSidebarDensity(density: SidebarDensity): void {
+  densitySessionChoice = density;
+  saveSidebarDensity(density);
+  notifyDensity();
+}
+
+export function useSidebarDensity(): SidebarDensity {
+  return useSyncExternalStore(subscribeDensity, currentSidebarDensity, () => "comfortable");
 }
 
 export function clampSidebarWidth(width: number, viewportWidth: number): number {

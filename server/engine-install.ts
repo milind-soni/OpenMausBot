@@ -10,10 +10,11 @@ import { stripVTControlCharacters } from "node:util";
 import type { EngineInstall } from "./contracts.ts";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "./config.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCache } from "./env-path.ts";
-import { killCliTree, spawnCli } from "./procs.ts";
+import { execCli, killCliTree, spawnCli } from "./procs.ts";
 
 const MAX_OUTPUT = 64 * 1024;
 const DEFAULT_TIMEOUT_MS = 10 * 60_000;
+const PROBE_TIMEOUT_MS = 30_000;
 
 /** npm's global prefix for engines the app installs itself. */
 export function enginesPrefix(baseDir = DATA_DIR): string {
@@ -87,21 +88,52 @@ async function installOnce(pkg: string, options: InstallOptions): Promise<void> 
   stripWorkspaceCredentialEnv(env as Record<string, string | undefined>);
   // npm 11 skips a dependency's install script unless the package is named
   // here; the engines that need one (Claude Code) are exactly these.
-  const args = ["install", "-g", "--prefix", prefix, "--loglevel=error", `--allow-scripts=${pkg}`, `${pkg}@latest`];
-  const result = await runNpm(args, env, prefix, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  // Engines like Codex ship their native binary as a platform optional
+  // dependency, so a user-level `omit=optional` must not leave it out.
+  const args = ["install", "-g", "--prefix", prefix, "--loglevel=error", "--include=optional", `--allow-scripts=${pkg}`, `${pkg}@latest`];
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  await runInstall(pkg, args, env, prefix, timeoutMs);
+  // Whatever the boot registration did, the directory we just filled must
+  // be on the engines' PATH from here on.
+  const binDir = enginesBinDir(options.baseDir);
+  registerPathDir(binDir);
+  resetPathCache();
+  if (!options.cli) return;
+  const installed = findCliCandidates(options.cli).find((path) => path.startsWith(binDir));
+  if (!installed) {
+    throw new Error(`${pkg} installed, but it did not provide a \`${options.cli}\` command. Check the package name in this engine's install descriptor.`);
+  }
+  // npm exits 0 even when it drops an optional dependency it failed to
+  // download, which leaves a launcher without its platform binary (#2064).
+  // A copy here shadows every other one on PATH, so prove it starts; a
+  // second run fetches what the first one dropped.
+  let failure = await probeCli(installed, env);
+  if (failure === null) return;
+  await runInstall(pkg, args, env, prefix, timeoutMs);
+  failure = await probeCli(installed, env);
+  if (failure === null) return;
+  throw new Error(`npm installed ${pkg}, but \`${options.cli}\` does not start: ${failure}\nnpm can leave out a platform package when its download fails, even after a retry. Check this server's network connection, then install again from Settings.`);
+}
+
+async function runInstall(pkg: string, args: string[], env: NodeJS.ProcessEnv, prefix: string, timeoutMs: number): Promise<void> {
+  const result = await runNpm(args, env, prefix, timeoutMs);
   if (result.code !== 0) {
     throw new Error(`npm could not install ${pkg} on this server.${tail(result.output)}`);
   }
-  // Whatever the boot registration did, the directory we just filled must
-  // be on the engines' PATH from here on.
-  registerPathDir(enginesBinDir(options.baseDir));
-  resetPathCache();
-  if (options.cli) {
-    const binDir = enginesBinDir(options.baseDir);
-    if (!findCliCandidates(options.cli).some((path) => path.startsWith(binDir))) {
-      throw new Error(`${pkg} installed, but it did not provide a \`${options.cli}\` command. Check the package name in this engine's install descriptor.`);
-    }
-  }
+}
+
+/** Null when `<cli> --version` succeeds, else why it did not. A Node
+ * launcher that throws prints its source line first, so its `Error:` line
+ * is the one worth showing. */
+function probeCli(cli: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+  return new Promise((resolveProbe) => {
+    execCli(cli, ["--version"], { env: { ...env, PATH: augmentedPath() }, timeout: PROBE_TIMEOUT_MS, killSignal: "SIGKILL", maxBuffer: MAX_OUTPUT }, (error, stdout, stderr) => {
+      if (!error) return resolveProbe(null);
+      const lines = stripVTControlCharacters(`${stderr ?? ""}\n${stdout}`).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      const said = lines.find((line) => /^\w*Error: /.test(line)) ?? lines[0] ?? error.message;
+      resolveProbe(said.slice(0, 400));
+    });
+  });
 }
 
 function tail(output: string): string {

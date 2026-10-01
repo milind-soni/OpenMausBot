@@ -45,11 +45,12 @@ export interface UpkeepBot {
   id: string;
   name: string;
   memoryUpkeep?: boolean;
+  memoryEnabled?: boolean;
 }
 
 /** On unless switched off: every bot keeps its memory in shape by default. */
-export function upkeepEnabled(bot: Pick<UpkeepBot, "memoryUpkeep"> | undefined): bot is UpkeepBot {
-  return Boolean(bot) && bot!.memoryUpkeep !== false;
+export function upkeepEnabled(bot: Pick<UpkeepBot, "memoryUpkeep" | "memoryEnabled"> | undefined): bot is UpkeepBot {
+  return Boolean(bot) && bot!.memoryUpkeep !== false && bot!.memoryEnabled !== false;
 }
 
 export interface UpkeepDeps {

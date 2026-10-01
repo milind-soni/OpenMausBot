@@ -282,7 +282,7 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
         // while the user consults another section. It fetches when it
         // becomes the active section. Always mounted; visibility toggled
         // via hidden on the accordion body wrapper.
-        return <MemorySection bot={bot} active={!collapsed && section === "memory"} />;
+        return <MemorySection bot={bot} active={!collapsed && section === "memory"} onToggle={(enabled) => derived.patch({ memoryEnabled: enabled })} />;
       case "routines":
         return <RoutinesSection bot={bot} routines={derived.botRoutines} runs={state.routineRuns} />;
       case "access":

@@ -146,6 +146,7 @@ import {
   instanceConfigs,
   loadConfig,
   providerReloadKeys,
+  localVmIdleTimeoutMinutes,
   localVmMaxInstances,
   localVmMode,
   parseConfigPatch,
@@ -185,6 +186,7 @@ import {
   customMcpServers,
   roomHandoffLimits,
   onConfigSaved,
+  CLAUDE_API_INSTANCE,
 } from "./config.ts";
 import { sweepThreadEventLogs, type ThreadLogRetentionCandidate } from "./thread-retention.ts";
 import { ComputerControl } from "./computer-control.ts";
@@ -223,7 +225,7 @@ import {
   parseMcpServersImport,
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
-import { McpOAuthError, McpOAuthManager, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
+import { McpOAuthError, McpSignInError, McpOAuthManager, mcpOAuthRedirectUri, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
 import { probeMcpServer } from "./mcp-probe.ts";
 import {
   GROUP_GOAL_MAX_TURNS,
@@ -331,6 +333,7 @@ import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS, peerMessageText } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
+import { threadTitlePrompt, titleConversationExcerpt, type ThreadTitleSource } from "./thread-title.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import { TurnResources, workspaceResource, type TurnOwner } from "./turn-resources.ts";
 import { IdleReleasePolicy } from "./claim-idle.ts";
@@ -577,6 +580,8 @@ import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
 import { createDeciderRoutes } from "./routes/decider.ts";
+import { createDesktopViewer, desktopViewerUrl } from "./routes/desktop-viewer.ts";
+import { localDesktopTarget, localVmViewerStatus, viewerTargetId } from "./desktop-viewer-targets.ts";
 import { createAntigravityLeftoverRoutes } from "./routes/antigravity-leftovers.ts";
 import { findAntigravityLeftovers, removeAntigravityLeftovers } from "./drivers/antigravity-temp.ts";
 
@@ -589,6 +594,7 @@ const MIME: Record<string, string> = {
   ".html": "text/html",
   ".js": "text/javascript",
   ".css": "text/css",
+  ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".ico": "image/x-icon",
@@ -893,9 +899,7 @@ function cloudLendingTurn(capability: Pick<InternalCapability, "botId" | "thread
         triggerSource: run.triggerSource ?? (run.manual ? "manual" : "schedule"),
         ownerStarted: ownerStartedRoutineRuns.has(run.id),
         // What the run snapshotted, on the schedule its routine has now.
-        ownerAuthored: ((routine) => Boolean(routine) && cloudRoutineAuthors?.authored(run.routineId, {
-          ...routine!, prompt: run.prompt, target: run.target, botId: run.botId, groupId: run.groupId, attachments: run.attachments, runOn: run.runOn,
-        }) === true)(routines?.listRoutines().find((candidate) => candidate.id === run.routineId)),
+        ownerAuthored: cloudRoutineRunIsOwners(run, capability.botId, capability.threadId),
       };
     },
   };
@@ -1062,6 +1066,19 @@ function cloudRoutineIsOwners(routineId: string | undefined): boolean {
     (cloudRoutineAuthors.writer(routine.id) === CLOUD_OWNER_KEY && !cloudRoutineAuthors.recorded(routine.id));
 }
 
+/** On a Cloud home: a routine run that acts for the owner. Only in the run's
+ * own thread, and only while the owner's fingerprint matches what the run
+ * snapshotted, the same test as lending the Mac. A routine that is the
+ * owner's but not yet cleared for the Mac (no fingerprint: a v0.1.91
+ * approval, a template, a restore) can't clear itself or others this way. */
+function cloudRoutineRunIsOwners(run: RoutineRun | null | undefined, botId: string, threadId: string): boolean {
+  if (!run || run.threadId !== threadId || store.taskByThread(botId, threadId)?.routineRunId !== run.id || !cloudRoutineAuthors) return false;
+  const routine = routines?.listRoutines().find((candidate) => candidate.id === run.routineId);
+  return Boolean(routine) && cloudRoutineAuthors.authored(run.routineId, {
+    ...routine!, prompt: run.prompt, target: run.target, botId: run.botId, groupId: run.groupId, attachments: run.attachments, runOn: run.runOn,
+  }) === true;
+}
+
 /** After the owner approved a routine request (its card, or at once in their
  * own conversation): a routine it created is theirs; one it changed, paused
  * or resumed stays theirs only if it already was (`wasOwners`, taken before
@@ -1131,6 +1148,24 @@ function openerFrom(fromThreadId: string): string | undefined {
   const person = threadPersonKey(fromThreadId);
   if (!CLOUD_HOME || !cloudGuestDriven(fromThreadId)) return person;
   return person && !cloudOwnerPerson(person) ? person : CLOUD_NOBODY_KEY;
+}
+
+/** The model a thread a bot opens from one of its own threads starts on:
+ * that thread's, not the bot default the person may have moved away from
+ * (#1950). Only the bot's own thread counts — a room or a teammate's thread
+ * is not one of its tasks, and another bot's model belongs to another engine.
+ * Approval stays the bot's, except that a level the inherited engine would
+ * have to confirm on a model switch starts the new thread in Ask. */
+function parentThreadModel(botId: string, parentThreadId: string): { modelSelection?: ModelSelection; approvalMode?: "ask" } {
+  // The stored profile, never a per-thread projection: the comparison is
+  // against the defaults the new thread would otherwise get.
+  const bot = store.bot(botId);
+  const modelSelection = bot && store.taskByThread(bot.id, parentThreadId)?.modelSelection;
+  if (!bot || !modelSelection) return {};
+  const needsAsk = modelSwitchNeedsAsk(approvalModeFor(bot),
+    registry.cliTarget(bot.modelSelection.instanceId)?.driverKind,
+    registry.cliTarget(modelSelection.instanceId)?.driverKind);
+  return { modelSelection, ...(needsAsk ? { approvalMode: "ask" as const } : {}) };
 }
 
 /** On a Cloud home: the conversation that work a guest-driven turn hands a
@@ -1453,7 +1488,7 @@ function recentWorkSources(bot: BotRecord) {
  * or a room must not be able to pull a private chat into its reply. The
  * conversations are the ones session_search would search, minus this one. */
 function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opts: { conversations: boolean; userName: string }): string {
-  if (!autoRecallEnabled(cfg)) return "";
+  if (bot.memoryEnabled === false || !autoRecallEnabled(cfg)) return "";
   const roomByThread = new Map<string, GroupRecord>();
   if (opts.conversations) {
     for (const group of store.groups) {
@@ -1782,6 +1817,17 @@ function queuedTurnTrigger(item: { trigger?: UsageTrigger; sender?: ResolvedSend
   return item.sender ? { kind: "user", label: item.sender.name } : { kind: "owner" };
 }
 const providerAuthSessions = new ProviderAuthSessions();
+/** OAuth sign-in for URL servers; tokens live in their own owner-only file. */
+const mcpOAuth = new McpOAuthManager({
+  file: join(DATA_DIR, "mcp-oauth.json"),
+  isOwnerLive: (owner) => owner === "loopback" || sessions.isLive(owner),
+  // Read the registered app when needed; never copy its secret into the token store.
+  clients: (name, url) => {
+    const raw = cfg.mcpServers?.[name];
+    const parsed = raw === undefined ? null : parseStoredMcpServer(name, raw);
+    return parsed?.ok && isRemoteMcpServer(parsed.server) && parsed.server.url === url ? parsed.server.oauth : undefined;
+  },
+});
 // OpenCode reads provider keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) from
 // its environment, as it does in a terminal, but only where that environment
 // is the person's own shell (openCodeProviderKeysAllowed). Wired before the
@@ -2289,6 +2335,7 @@ function agentsIntegration(
       OMB_ROOM_TURN: roomCoordination ? "1" : "0",
       OMB_OWN_THREAD_CREATION: ownThreadCreation ? "1" : "0",
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
+      OMB_MEMORY_ENABLED: store.bot(botId)?.memoryEnabled === false ? "0" : "1",
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
       OMB_SHARED_COMPUTERS_ENABLED: lendingEnabled() ? "1" : "0",
@@ -3636,7 +3683,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "routine", label: "Routines", text: agentsMounted ? ROUTINE_PROMPT : "" },
     { id: "profile", label: "Profile changes", text: agentsMounted ? PROFILE_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
-    { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace) }) },
+    { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace), enabled: bot.memoryEnabled !== false }) },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
   ]);
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
@@ -5276,8 +5323,33 @@ function audienceChanged(): void {
     }
   }
 }
+// Cloud boot can revoke sessions before routes are registered. Create the
+// viewer manager before installing any revocation callbacks.
+const desktopViewer = createDesktopViewer({
+  target: (id) => {
+    if (id.startsWith("vps/")) {
+      const botId = id.slice(4);
+      if (store.bot(botId)?.cloudBackend !== "vps") return;
+      return { key: id, resolve: async () => {
+        const connection = vps.vpsDesktopConnection(botId);
+        if (!connection) throw Object.assign(new Error("VPS viewer is not open"), { status: 409 });
+        return connection;
+      } };
+    }
+    const targets = [SHARED_LOCAL_VM_TARGET, ...store.bots.map(bot => perBotLocalVmTarget(bot.id)),
+      ...Array.from({ length: localVmMaxInstances(cfg) }, (_, seat) => poolLocalVmTarget(seat))];
+    const target = targets.find(target => viewerTargetId(target) === id);
+    return target && localDesktopTarget(target, {
+      // A viewer can repair a sick CUA driver; skip desktop health probes.
+      status: target => containerComputerStatus(undefined, undefined, target, { probeDesktop: false }),
+      touch: target => localVmIdleFor(target).touch(),
+    });
+  },
+  live: auth => auth.kind === "loopback" || sessions.isLive(auth.session.id),
+});
 function closeSessionStreams(sessionId: string): void {
   browserLive.closeForOwner(sessionId);
+  desktopViewer.closeForOwner(sessionId);
   for (const client of sseClients) {
     if (client.sessionId !== sessionId) continue;
     sseClients.delete(client);
@@ -5290,6 +5362,7 @@ function closeSessionStreams(sessionId: string): void {
 }
 sessions.onSessionRevoked((sessionId) => {
   providerAuthSessions.revokeOwner(sessionId);
+  mcpOAuth.revokeOwner(sessionId);
   closeSessionStreams(sessionId);
   // A revoked owner device no longer vouches for its lines (cloudOwnerPerson).
   ownerOnlyCache.clear();
@@ -5853,7 +5926,7 @@ bus.subscribe((event: RuntimeEvent) => {
     const messages = store.messagesFor(event.threadId);
     const reply = messages.findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === event.turnId);
     const bot = store.botByThread(event.threadId) ?? (reply?.from ? store.bot(reply.from.botId) : undefined);
-    if (!bot) return;
+    if (!bot || bot.memoryEnabled === false) return;
     const tools = messages
       .filter((message) => message.kind === "activity" && message.turnId === event.turnId && message.tool?.name)
       .map((message) => message.tool!.name);
@@ -6159,6 +6232,9 @@ const boatLifecycleBusyBots = new Set<string>();
 // A refresh is a reader, not a lifecycle change. Keep its reservation until
 // the provider settles even if the HTTP client leaves, and share it on retry.
 const vpsPreviewRequests = new Map<string, ReturnType<typeof vps.vpsComputerScreenshot>>();
+// Joins in flight per bot. A second tab or a quick reconnect waits for the
+// pending join, then reuses its tunnel, instead of being refused by its lane.
+const vpsJoinRequests = new Map<string, Promise<void>>();
 const orphanBoatLifecycleBusyIds = new Set<string>();
 const boatInventoryRequestsBusyIds = new Set<string>();
 type RemoteComputerProvider = "box" | "vps";
@@ -6166,7 +6242,9 @@ const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
 // A restore mutates and cleans a project work tree. Claim the bot across the
 // entire async Git operation so a turn cannot start in that folder midway.
 const checkpointRestoreLeases = new Set<string>();
-const LOCAL_VM_IDLE_MS = 8 * 60 * 60_000;
+/** The effective idle window, read from config so a Settings change applies
+ * to both new and already-armed timers (see the config route). */
+const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
 /** How long a turn waits for Cua Driver after starting the container itself.
  * A cold XFCE desktop needs some seconds; past this the turn reports the
  * status it has rather than hanging on a container that will not come up. */
@@ -6306,7 +6384,7 @@ async function teamComputersPayload(): Promise<TeamComputersPayload> {
 /** The same named Boat identity and whole-turn lease in chats and rooms.
  * Assignment authorizes waking, never replacing a missing paid machine. */
 async function attachTeamBoat(computer: TeamComputerRecord, botId: string, owner: TurnOwner, canMount: boolean, remoteAgent: boolean) {
-  if (!canMount) throw new Error("This model engine cannot use the team's Boat computer; choose an engine with computer tools or an explicit bot destination");
+  if (!canMount) throw new Error("This model cannot use the team's Boat computer; choose a model provider with computer tools or an explicit bot destination");
   if (!boat.boatConfigured(cfg)) throw new Error("The team's Boat account is not configured; reconnect it in Settings");
   const ownerId = teamComputerOwner(computer.id);
   if (boatLifecycleBusyBots.has(ownerId)) throw new Error("The team computer is being changed; wait for it to finish");
@@ -6337,7 +6415,7 @@ async function mountHostComputer(owner: TurnOwner, botId: string, providerSuppor
     // ACP engine" while already on one has nowhere to go.
     throw new Error(providerSupportsLocal
       ? `local computer control is not available on ${process.platform} — select another destination`
-      : "this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
+      : "this model cannot control this computer — choose Claude or an ACP model provider, or select another destination");
   }
   const cua = readCuaConnection();
   if (!cua) {
@@ -6609,7 +6687,7 @@ async function selectableComputers(bot: BotRecord) {
           providerSupportsLocal: caps?.localComputerMcp === true }) && Boolean(readCuaConnection());
       } else if (surface === "browser") {
         ready = caps?.browserMcp === true && builtInBrowserEnabled(cfg) && bot.browser !== false && browserEngineStatus().kind === "ready";
-        reason = "The built-in browser is disabled, not installed, or unsupported by this model engine.";
+        reason = "The built-in browser is disabled, not installed, or unsupported by this model.";
       }
     } catch (error) { reason = error instanceof Error ? error.message : String(error); }
     // Not offered at all when the organisation disallows it.
@@ -6759,7 +6837,7 @@ function localVmIdleFor(target: LocalVmTarget): LocalVmIdleTimer {
   let idle = localVmIdles.get(target.key);
   if (idle) return idle;
   idle = new LocalVmIdleTimer(
-    LOCAL_VM_IDLE_MS,
+    localVmIdleMs(),
     () => localVmImageBusy || localVmLifecycleBusy.has(target.key) || localVmActiveThreads.has(target.key),
     async () => {
       localVmLifecycleBusy.add(target.key);
@@ -8578,17 +8656,14 @@ async function finalScreenFrame(_botId: string, threadId: string): Promise<Frame
  * (generateText — Haiku on Claude, the chat completion endpoint's text
  * path on OpenAI-compatible engines). Null whenever that call cannot run,
  * runs long, or answers with something that is not a plain short title;
- * the caller keeps the snippet it already applied. */
+ * the caller keeps the snippet it already applied. "conversation" names an
+ * existing thread from titleConversationExcerpt (Regenerate title). */
 async function generateThreadTitle(
   provider: { generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string> },
   text: string,
+  source: ThreadTitleSource = "first-message",
 ): Promise<string | null> {
-  const prompt = [
-    "Name the conversation that begins with the message below.",
-    "Reply with only a short title: 3 to 6 words, plain text, no quotes, no trailing period.",
-    "Message:",
-    text.trim().slice(0, 1_500),
-  ].join("\n");
+  const prompt = threadTitlePrompt(text, source);
   const expiry = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -8610,6 +8685,9 @@ async function generateThreadTitle(
     clearTimeout(timer);
   }
 }
+
+/** Threads whose Regenerate title one-shot is still running: one at a time. */
+const titleRegenerations = new Set<string>();
 
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 async function startTurn(
@@ -9111,7 +9189,7 @@ async function startTurn(
       if (worksInWorkspace) {
         ensureWorkspace(bot.id);
         // baseline for the journal's turn-boundary diff (see the bus hook)
-        beginMemoryTurn(bot.id, threadId);
+        if (bot.memoryEnabled !== false) beginMemoryTurn(bot.id, threadId);
       }
       const privateWorkspace = worksInWorkspace ? ensureTaskWorkspace(bot.id, threadId) : undefined;
       const skillInstructions = renderSkillInstructions(selectedSkills, {
@@ -9322,7 +9400,7 @@ async function startTurn(
       const attachLocalVm = async (strict: boolean): Promise<boolean> => {
         if (!mountsComputerMcp || instance.adapter.capabilities.remoteAgent === true) {
           if (!strict) return false;
-          throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
+          throw new Error("this model cannot use the Local VM — choose Claude or an ACP model provider, or select another computer destination");
         }
         if (!strict && localVmMode(cfg) === "pool") {
           // localVmTargetForThread records pool affinity, so a turn the
@@ -9551,9 +9629,9 @@ async function startTurn(
         !computerSelectionTurns.has(threadId)
       ) {
         const hint = opts?.automationSource
-          ? "This scheduled run tried to start the VPS computer and could not reach it. Check the VPS connection in App Settings → Connections."
+          ? "This scheduled run tried to start the VPS computer and could not reach it. Check the VPS connection in Settings → API keys."
           : bot.autoStartVps
-            ? "Check the VPS connection in App Settings → Connections."
+            ? "Check the VPS connection in Settings → API keys."
             : "Open Computer and enable Start VPS automatically, or choose Cloud to start it manually.";
         throw new Error(`${autoVpsProblem}. ${hint}`);
       }
@@ -9608,7 +9686,7 @@ async function startTurn(
       const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT + (boundedCoordination ? "" : THREADS_PROMPT) : "";
       const routinePrompt = integrations.agents ? ROUTINE_PROMPT : "";
       const profilePrompt = integrations.agents ? PROFILE_PROMPT : "";
-      const recallPrompt = integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "";
+      const recallPrompt = integrations.agents && bot.memoryEnabled !== false ? SESSION_SEARCH_SYSTEM_PROMPT : "";
       const learnPrompt = skillAuthoring ? LEARN_PROMPT : "";
 
       // (activeVpsThreads was already claimed above, before the provision or
@@ -9741,7 +9819,7 @@ async function startTurn(
         // what the bot said lately in its other conversations, so a task
         // never redoes — or forgets — what another one already did
         { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId, ...recentWorkFilter() })) },
-        { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace }) },
+        { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace, enabled: bot.memoryEnabled !== false }) },
         { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
@@ -10455,7 +10533,7 @@ async function cloudRoutineReadiness(botId: string, threadId?: string): Promise<
   if (!instance) return { ready: false, reason: "The Cloud VM runner is unavailable. Restart OpenMausBot and try again." };
   try {
     if ((await instance.snapshot()).state !== "available") {
-      return { ready: false, reason: "The target bot's model engine is not ready to use the Boat cloud computer." };
+      return { ready: false, reason: "The target bot's model is not ready to use the Boat cloud computer." };
     }
     const teamComputer = inheritedTeamComputer(bot);
     const ownerId = teamComputer ? teamComputerOwner(teamComputer.id) : bot.id;
@@ -11780,7 +11858,7 @@ async function runGroupMemberTurn(
   // Claim the same lease as direct turns before asynchronous VM setup.
   if (readyBot.computer === "vm") {
     if (instance.adapter.capabilities.computerMcp !== true || instance.adapter.capabilities.remoteAgent === true) {
-      throw new Error("this model engine cannot use the Local VM");
+      throw new Error("this model cannot use the Local VM");
     }
     // A distinct identity fences cleanup even in shared mode on the same room thread.
     const target = { ...localVmTargetForThread(readyBot.id, threadId) };
@@ -11879,7 +11957,7 @@ async function runGroupMemberTurn(
   const worksInWorkspace = supportsWorkspaceFiles(instance.driverKind);
   const workspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
   // a room member's memory writes are journaled the same as a 1:1 turn's
-  if (workspace) beginMemoryTurn(bot.id, threadId);
+  if (workspace && bot.memoryEnabled !== false) beginMemoryTurn(bot.id, threadId);
   // The room's folder pins here — on the first turn that actually
   // dispatches, not at PATCH time — so a folder set on a never-used room
   // still takes effect, while a room that already worked somewhere never
@@ -11894,7 +11972,7 @@ async function runGroupMemberTurn(
     const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
     if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
   }
-  const roomMemory = memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace });
+  const roomMemory = memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace, enabled: bot.memoryEnabled !== false });
   // The same brief a 1:1 turn gets: what this member said lately in its
   // other conversations, so a standup is answered from what happened. A
   // brief can carry a private chat into the room; as with session_search
@@ -11926,7 +12004,7 @@ async function runGroupMemberTurn(
     { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note, cloudHome: Boolean(CLOUD_HOME) }) },
     { id: "cloud-home", label: "OMB Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled()) : "" },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
-    { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
+    { id: "recall", label: "Recall", text: integrations.agents && bot.memoryEnabled !== false ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     { id: "recent", label: "Recent work", text: recentWorkPrompt(recentLines) },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     // the room path has always put a newline before memory and trimmed
@@ -13927,12 +14005,12 @@ function stderrOf(err: unknown): string {
   return typeof s === "string" ? s : Buffer.isBuffer(s) ? s.toString("utf8") : "";
 }
 
-async function localVmPayload(target: LocalVmTarget) {
+async function localVmPayload(target: LocalVmTarget, auth: RequestAuth) {
   const status = await containerComputerStatus(undefined, undefined, target);
   return {
-    ...status,
+    ...localVmViewerStatus(status, auth),
     commands: setupCommands(status.runtime, process.platform, target),
-    idle_timeout_ms: LOCAL_VM_IDLE_MS,
+    idle_timeout_ms: localVmIdleMs(),
     mode: localVmMode(cfg),
     max_instances: localVmMaxInstances(cfg),
   };
@@ -14058,7 +14136,9 @@ function configStatus() {
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
     mistral: { configured: Boolean(cfg.mistral?.key) },
-    anthropic: { configured: Boolean(cfg.anthropic?.key) },
+    anthropic: { configured: Boolean(cfg.anthropic?.key), everyClaudeBot: cfg.anthropic?.everyClaudeBot !== false },
+    openai: { configured: Boolean(cfg.openai?.key) },
+    openrouter: { configured: Boolean(cfg.openrouter?.key) },
     // a fleet agent on this server means Settings → Workspaces has something to drive
     fleet: { available: fleetAvailable(fleetSocketPath()) },
     // what this build is entitled to, so Settings shows only what works here
@@ -14109,6 +14189,7 @@ function configStatus() {
     localVm: {
       mode: localVmMode(cfg),
       maxInstances: localVmMaxInstances(cfg),
+      idleTimeoutMinutes: localVmIdleTimeoutMinutes(cfg),
     },
     features: {
       skillAuthoring: skillAuthoringEnabled(cfg),
@@ -14123,6 +14204,8 @@ function configStatus() {
       // own Claude Code MCP servers
       claudeUserMcp: claudeUserMcpEnabled(cfg),
       autoRecall: autoRecallEnabled(cfg),
+      // hand-edited config.json only; the thread menu offers Regenerate title from it
+      llmThreadTitles: llmThreadTitlesEnabled(cfg),
     },
     // first-run progress — not a secret; the app decides whether to show
     // the welcome tour from this, never from browser storage
@@ -14167,8 +14250,11 @@ function mcpServerResponse() {
   // but never reach bots, and why. Nothing here is written to config.json.
   const policy = managedPolicy.current();
   const servers = listMcpServers(cfg.mcpServers).map((server) => {
-    const auth = "url" in server ? mcpOAuth.authState(server.name, server.url) : "none";
-    return auth === "none" ? server : { ...server, auth };
+    if (!("url" in server)) return server;
+    const auth = mcpOAuth.authState(server.name, server.url);
+    // the redirect URI to register with a pre-registered sign-in app
+    const listed = server.oauth ? { ...server, oauth: { ...server.oauth, redirectUri: mcpOAuthRedirectUri(server.url) } } : server;
+    return auth === "none" ? listed : { ...listed, auth };
   }).map(server =>
     managedPolicy.mcpAllowed(server.name, "url" in server ? server.url : undefined) ? server : { ...server, managedBy: policy!.organizationName });
   return { servers, ...(policy && !policy.mcp.allowCustom ? { managed: { organizationName: policy.organizationName, allowlist: policy.mcp.allowlist } } : {}) };
@@ -14185,7 +14271,7 @@ function mcpServerBody(body: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (!body || typeof body !== "object") return out;
   const record = body as Record<string, unknown>;
-  for (const key of ["command", "args", "env", "type", "url", "headers", "enabled"]) {
+  for (const key of ["command", "args", "env", "type", "url", "headers", "oauth", "enabled"]) {
     if (record[key] !== undefined) out[key] = record[key];
   }
   return out;
@@ -14210,7 +14296,11 @@ async function describeInstances() {
   const configs = providerConfigs();
   return (await registry.describe()).map((instance) => {
     const entry = configs[instance.instanceId];
-    const described = entry?.icon ? { ...instance, icon: entry.icon } : instance;
+    const described = {
+      ...instance,
+      ...(entry?.icon ? { icon: entry.icon } : {}),
+      ...(entry?.access ? { access: entry.access } : {}),
+    };
     if (hostedModels) return { ...described, readOnly: true,
       install: undefined, authentication: undefined, cli: undefined, cliCandidates: [],
     };
@@ -14224,6 +14314,10 @@ async function describeInstances() {
     // stopped by force; its Settings card offers to clear that.
     if (instance.driverKind === "antigravityAgent" && process.platform === "win32") return { ...described, ...policy, freeUpSpace: true };
     if (entry?.driver !== "claudeAgent") return { ...described, ...policy };
+    // Claude on the workspace API key has no account to sign in to.
+    if (instance.instanceId === CLAUDE_API_INSTANCE) {
+      return { ...described, ...policy, authentication: undefined, install: { ...instance.install, signInCommand: undefined } };
+    }
     try {
       const claudeAccount = claudeAccountInfo(instance.instanceId, entry, instance.cli ?? instance.cliDefault ?? "claude");
       return { ...described, ...policy, claudeAccount, install: { ...instance.install, signInCommand: claudeAccount.signInCommand } };
@@ -14386,8 +14480,6 @@ async function reloadProviders() {
 let providerConfigBusy = false;
 const providerInstancesChanging = new Set<string>();
 let mcpConfigBusy = false;
-/** OAuth sign-in for URL servers; tokens live in their own owner-only file. */
-const mcpOAuth = new McpOAuthManager({ file: join(DATA_DIR, "mcp-oauth.json") });
 const MAX_CONCURRENT_MCP_PROBES = 2;
 let mcpProbesInFlight = 0;
 // One updater per executable: multiple Claude instances can point at the same
@@ -14536,6 +14628,8 @@ ROUTES.push(createAntigravityLeftoverRoutes({
   find: () => findAntigravityLeftovers(),
   remove: () => removeAntigravityLeftovers(),
 }));
+
+ROUTES.push(desktopViewer.route);
 
 const toolResults = new ToolResults();
 const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
@@ -15195,6 +15289,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (CLOUD_HOME && cloudHomeLendingRefusal(cloudLendingTurn(internalCapability)) !== null) {
           return json(res, 403, { error: "Notes can only be saved from a conversation that only the owner of this Cloud has written in." });
         }
+        if (internalSender.memoryEnabled === false) {
+          return json(res, 403, { error: "Memory is disabled for this bot." });
+        }
         const room = store.groupByThread(internalCapability.threadId);
         if (room && !roomFeedsBot(room, internalSender)) {
           return json(res, 403, { error: "This room is visible to fewer people than you are, so notes from it can't go into your memory. Keep them in the room." });
@@ -15571,7 +15668,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // routine that is theirs), both before the change.
         const wasOwners = proposedInput.action !== "create" && typeof proposedInput.routineId === "string" ? cloudRoutineIsOwners(proposedInput.routineId) : false;
         const run = activeRoutineRunForThread(fromThreadId);
-        const ownersTurn = cloudOwnerOnlyThread(fromThreadId) || (run != null && run.threadId === fromThreadId && cloudRoutineIsOwners(run.routineId));
+        const ownersTurn = cloudOwnerOnlyThread(fromThreadId) || cloudRoutineRunIsOwners(run, from.id, fromThreadId);
         const proposed = await routineRequests.submit({
           botId: from.id,
           threadId: fromThreadId,
@@ -15786,7 +15883,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (scope !== "all" && scope !== "conversations" && scope !== "memory") {
           return json(res, 400, { error: "scope must be all, conversations, or memory" });
         }
-        const memoryHits = scope === "conversations" || !q ? [] : searchMemoryFiles(from.id, q, limit);
+        const memoryHits = scope === "conversations" || !q || from.memoryEnabled === false ? [] : searchMemoryFiles(from.id, q, limit);
         if (scope === "memory") return json(res, 200, { hits: [], memoryHits });
         // Own threads: the bot's main chat and tasks, and the rooms it is a
         // member of with their tasks — conversations it already saw in full.
@@ -16826,7 +16923,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const sourceTitle = owner.group ? owner.group.name : (store.taskByThread(from.id, fromThreadId)?.title ?? "");
         if (target.id === from.id) {
-          const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
+          const inherited = parentThreadModel(from.id, fromThreadId);
+          const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() },
+            inherited.approvalMode, inherited.modelSelection);
           if (!task) return json(res, 500, { error: "couldn't create that thread" });
           threadStarters.set(task.threadId, openerFrom(fromThreadId));
           internalCapability.openedThreads += 1;
@@ -19698,6 +19797,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (typeof body.voiceNotes !== "boolean") return json(res, 400, { error: "voiceNotes must be true or false" });
         patch.voiceNotes = body.voiceNotes;
       }
+      if (body.memoryEnabled !== undefined) {
+        if (typeof body.memoryEnabled !== "boolean") return json(res, 400, { error: "memoryEnabled must be true or false" });
+        if (existingBot && (existingBot.busy || activeGroupTurnForBot(existingBot.id)) &&
+            body.memoryEnabled !== (existingBot.memoryEnabled !== false)) {
+          return json(res, 409, { error: "stop this bot's turn before changing its memory setting" });
+        }
+        patch.memoryEnabled = body.memoryEnabled;
+      }
       // which of those apps' tools this bot may call (connector grants 1/5:
       // data model only — enforcement lands with slice 2). null returns the
       // bot to boolean-only legacy behavior; {} means no tools.
@@ -20019,6 +20126,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
       const freshBrowserBot = store.bot(m[1]);
+      // Connector validation and runtime revocation can yield after the first
+      // memory check. Keep the same idle-only transition at the final commit.
+      if (freshBrowserBot && body.memoryEnabled !== undefined &&
+          body.memoryEnabled !== (freshBrowserBot.memoryEnabled !== false) &&
+          (freshBrowserBot.busy || activeGroupTurnForBot(freshBrowserBot.id))) {
+        return json(res, 409, { error: "stop this bot's turn before changing its memory setting" });
+      }
       // Custom servers are process configuration: a running turn cannot
       // unmount them. Recheck after any awaited runtime revocation above.
       if (body.mcpServers !== undefined) {
@@ -20065,7 +20179,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         bot = store.patchBot(m[1], patch);
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
-      if (body.memoryUpkeep === false) memoryUpkeep.dropBot(bot.id);
+      if (body.memoryUpkeep === false || body.memoryEnabled === false) memoryUpkeep.dropBot(bot.id);
       // A defined Works on is the newest explicit choice: this bot's
       // auto-recorded pins that now point elsewhere give way immediately, so
       // the next turn on each thread follows the new setting. Person-set pins
@@ -21358,6 +21472,43 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       broadcast({ kind: "bot", bot: fresh });
       return json(res, 200, { bot: fresh });
     }
+    // Regenerate title (#1858): name the thread again from its conversation
+    // as it is now. The person asked, so the result replaces any title, but
+    // only the one this started from: a rename that lands while the one-shot
+    // runs wins, and the late result is dropped.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/title$/);
+    if (m && method === "POST") {
+      const current = store.projectBotForTask(m[1], m[2]);
+      if (!current) return json(res, 404, { error: "no such task" });
+      const notYours = cloudThreadRefusal(auth, m[2]);
+      if (notYours) return json(res, 403, { error: notYours });
+      if (!llmThreadTitlesEnabled(cfg)) return json(res, 409, { error: "generated thread titles are turned off on this server" });
+      if (hostedModels && !hostedModels.allows(current.modelSelection)) return json(res, 409, { error: hostedModels.error() });
+      const instance = registry.get(current.modelSelection.instanceId);
+      if (!instance?.generateText) return json(res, 409, { error: "this bot's model can't generate a title — rename the thread instead" });
+      // An engine the organisation disallows never receives the text, even for a title.
+      const refusal = policyModelRefusal(instance);
+      if (refusal) return json(res, 409, { error: refusal });
+      if (titleRegenerations.has(m[2])) return json(res, 409, { error: "a new title is already being generated for this thread" });
+      const excerpt = titleConversationExcerpt(store.messagesTail(m[2], 200).messages);
+      if (!excerpt) return json(res, 409, { error: "this thread has no messages to take a title from yet" });
+      try {
+        assertWithinBudget(cfg, DATA_DIR);
+      } catch (error) {
+        return json(res, 409, { error: error instanceof Error ? error.message : String(error) });
+      }
+      const startedFrom = store.taskByThread(m[1], m[2])!.title;
+      titleRegenerations.add(m[2]);
+      try {
+        const title = await generateThreadTitle(instance, excerpt, "conversation");
+        if (!title) return json(res, 502, { error: "couldn't generate a title — try again, or rename the thread" });
+        const task = store.retitleTask(m[1], m[2], startedFrom, title) ?? store.taskByThread(m[1], m[2]);
+        if (!task) return json(res, 404, { error: "no such task" });
+        return json(res, 200, { task: wireTask(task) });
+      } finally {
+        titleRegenerations.delete(m[2]);
+      }
+    }
 
     // Named team Boats use real independent ownership, never a hidden bot or
     // an arbitrary provider id. These new routes remain admin-only by default.
@@ -21533,7 +21684,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // what the user's machine can host: which runtime is installed, whether
     // its daemon is up, and whether the desktop image and container exist
     if (method === "GET" && path === "/api/local-computer") {
-      return json(res, 200, await localVmPayload(SHARED_LOCAL_VM_TARGET));
+      return json(res, 200, await localVmPayload(SHARED_LOCAL_VM_TARGET, auth));
     }
     if (method === "GET" && path === "/api/local-computer/instances") {
       res.setHeader("cache-control", "private, no-store");
@@ -21575,9 +21726,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (action === "run" || action === "start") localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
         if (action === "stop" || action === "remove") localVmIdleFor(SHARED_LOCAL_VM_TARGET).cancel();
         return json(res, 200, {
-          ...status,
+          ...localVmViewerStatus(status, auth),
           commands: setupCommands(status.runtime, process.platform, SHARED_LOCAL_VM_TARGET),
-          idle_timeout_ms: LOCAL_VM_IDLE_MS,
+          idle_timeout_ms: localVmIdleMs(),
           mode: localVmMode(cfg),
           max_instances: localVmMaxInstances(cfg),
         });
@@ -21598,7 +21749,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       const bot = computerPreviewBot(m[1], url);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      return json(res, 200, await localVmPayload(localVmTargetForStatus(bot.id, bot.threadId)));
+      return json(res, 200, await localVmPayload(localVmTargetForStatus(bot.id, bot.threadId), auth));
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/local-computer\/(run|stop|remove)$/);
     if (m && method === "POST") {
@@ -21649,9 +21800,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (action === "run") localVmIdleFor(target).touch();
         if (action === "stop" || action === "remove") localVmIdleFor(target).cancel();
         return json(res, 200, {
-          ...status,
+          ...localVmViewerStatus(status, auth),
           commands: setupCommands(status.runtime, process.platform, target),
-          idle_timeout_ms: LOCAL_VM_IDLE_MS,
+          idle_timeout_ms: localVmIdleMs(),
           mode: localVmMode(cfg),
           max_instances: localVmMaxInstances(cfg),
         });
@@ -21810,7 +21961,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 400, { error: `provider must be one of ${PROVIDER_KEY_KINDS.join(", ")}` });
       }
       const kind = provider as ProviderKeyKind;
-      const saved = kind === "anthropic" ? cfg.anthropic : kind === "openaiCompat" ? cfg.openaiCompat : kind === "mistral" ? cfg.mistral : cfg.xai;
+      const saved = { anthropic: cfg.anthropic, openai: cfg.openai, openrouter: cfg.openrouter, openaiCompat: cfg.openaiCompat, mistral: cfg.mistral, xai: cfg.xai }[kind];
       if (body?.key !== undefined && typeof body.key !== "string") {
         return json(res, 400, { error: "key must be a string" });
       }
@@ -22208,8 +22359,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
     }
 
-    // OAuth sign-in for a URL server. The browser returns to a listener on
-    // this machine, so it starts only from a client on this machine.
+    // The loopback listener and authenticated paste-back complete the same flow.
     const mcpSignIn = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/(sign-in|sign-out)(?:\/([0-9a-f-]{36}))?$/.exec(path);
     if (mcpSignIn) {
       const [, name, action, flowId] = mcpSignIn;
@@ -22222,24 +22372,38 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         await mcpOAuth.signOut(name!, url);
         return json(res, 200, mcpServerResponse());
       }
-      if (action === "sign-in" && method === "GET" && flowId) {
-        const auth = mcpOAuth.status(name!, flowId);
-        return auth ? json(res, 200, { auth }) : json(res, 404, { error: "This sign-in is no longer available. Start again." });
-      }
-      if (action === "sign-in" && method === "DELETE" && !flowId) {
-        mcpOAuth.cancel(name!);
-        return json(res, 200, { ok: true });
-      }
-      if (action === "sign-in" && method === "POST" && !flowId) {
-        if (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress)) {
-          return json(res, 409, { error: "Sign in from the computer running this workspace.", code: "remote_workspace" });
+      const owner = auth.kind === "session" ? auth.session.id : "loopback";
+      res.setHeader("Cache-Control", "no-store");
+      try {
+        if (action === "sign-in" && method === "GET" && flowId) {
+          const status = mcpOAuth.status(name!, flowId, owner);
+          return status ? json(res, 200, { auth: status }) : json(res, 404, { error: "This sign-in is no longer available in this browser. Start again." });
         }
-        try {
-          return json(res, 200, { auth: await mcpOAuth.start(name!, url) });
-        } catch (error) {
-          if (error instanceof McpOAuthError) return json(res, 400, { error: error.message, code: error.code });
-          return json(res, 502, { error: error instanceof Error ? error.message : "Sign-in could not start." });
+        if (action === "sign-in" && method === "DELETE") {
+          mcpOAuth.cancelFlow(name!, owner, flowId);
+          return json(res, 200, { ok: true });
         }
+        if (action === "sign-in" && method === "POST" && flowId) {
+          if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+            return json(res, 415, { error: "content-type must be application/json" });
+          }
+          const body = await readBody(req, 20_480);
+          if (typeof body?.callbackUrl !== "string") return json(res, 400, { error: "A complete callbackUrl is required." });
+          return json(res, 200, { auth: await mcpOAuth.completeCallback(name!, flowId, body.callbackUrl, owner) });
+        }
+        if (action === "sign-in" && method === "POST" && !flowId) {
+          const started = await mcpOAuth.start(name!, url, undefined, owner);
+          if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+            mcpOAuth.revokeOwner(owner);
+            return json(res, 401, { error: "Your session ended. Start a new sign-in." });
+          }
+          return json(res, 200, { auth: started });
+        }
+      } catch (error) {
+        if (error instanceof McpSignInError) return json(res, error.status, { error: error.message });
+        if (error instanceof McpOAuthError) return json(res, 400, { error: error.message, code: error.code });
+        if (method === "POST" && !flowId) return json(res, 502, { error: error instanceof Error ? error.message : "Sign-in could not start." });
+        throw error;
       }
       return json(res, 405, { error: "method not allowed" });
     }
@@ -22343,9 +22507,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // a sign-in belongs to one address; a token never follows the entry elsewhere
         const before = isRemoteMcpServer(existing.server) ? existing.server.url : null;
         const after = isRemoteMcpServer(parsed.server) ? parsed.server.url : null;
+        // ...and to one sign-in app with its scopes; a new secret for the same app keeps it
+        const app = (server: typeof existing.server) => isRemoteMcpServer(server) && server.oauth
+          ? JSON.stringify([server.oauth.clientId, server.oauth.scopes ?? []]) : null;
         // Any other edit (a new header, say) drops a sign-in request that has
         // no tokens behind it; the next Test asks again if it still applies.
-        if (before !== after || (after && mcpOAuth.authState(name, after) === "needs-sign-in")) mcpOAuth.forget(name);
+        if (before !== after || app(existing.server) !== app(parsed.server)
+          || (after && mcpOAuth.authState(name, after) === "needs-sign-in")) mcpOAuth.forget(name);
         return json(res, 200, mcpServerResponse());
       } finally {
         mcpConfigBusy = false;
@@ -22358,7 +22526,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
-      if (hostedModels && ["instances", "anthropic", "openaiCompat", "xai", "mistral", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
+      if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatch(body);
       // A Cloud home is personal: nobody is invited to sign in to it.
       if (CLOUD_HOME && (patch.signIn?.admins?.length || patch.signIn?.members?.length)) {
@@ -22786,6 +22954,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           for (const request of browserCleanupRequests) browserCleanup.abort(request);
         }
         throw error;
+      }
+      // Desktops already counting down move to the new window at once, in
+      // every isolation mode; busy work still defers its expiry.
+      if (patch.localVm?.idleTimeoutMinutes !== undefined) {
+        for (const idle of localVmIdles.values()) idle.setIdleMs(localVmIdleMs());
       }
       let browserReferenceCleanupError: unknown = null;
       if (patch.signIn !== undefined) {
@@ -23222,6 +23395,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
+      if (m[2] === "join" && bot.cloudBackend === "vps") {
+        for (let pending; (pending = vpsJoinRequests.get(botId));) await pending;
+      }
       const remoteProvider: RemoteComputerProvider = bot.cloudBackend === "vps" ? "vps" : "box";
       if (computerProviderConfigTransitions.has(remoteProvider)) {
         return json(res, 409, { error: providerTransitionMessage(remoteProvider) });
@@ -23261,6 +23437,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // Opening the existing SSH viewer can coexist with a capture. Start,
         // stop, remove and Settings deletion still exclude pending previews.
         const releaseComputerLifecycle = claimBotComputerLifecycle(botId, m[2] === "join");
+        // Settles only after the lane is released, so a waiter can claim it.
+        let joinSettled: (() => void) | undefined;
+        if (m[2] === "join") vpsJoinRequests.set(botId, new Promise(resolve => { joinSettled = resolve; }));
         try {
           if (m[2] === "exec") {
             return json(res, 409, { error: "the VPS console is available to the bot through its scoped computer tools" });
@@ -23272,12 +23451,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             return json(res, 409, { error: "the VPS computer is being used by this bot — interrupt the turn first" });
           }
           if (m[2] === "join") {
-            return json(res, 200, await vps.vpsComputerJoin(cfg, botId));
+            const remote = auth.kind !== "loopback";
+            const result = await vps.vpsComputerJoin(cfg, botId, undefined, remote);
+            return json(res, 200, { ...result, joinUrl: remote
+              ? desktopViewerUrl(`vps/${botId}`, bot.threadId) : result.joinUrl });
           }
           const action = m[2] === "provision" ? "provision" : m[2] === "remove" ? "remove" : "stop";
           return json(res, 200, await vps.vpsComputerAction(action, cfg, botId));
         } finally {
           releaseComputerLifecycle();
+          if (joinSettled) {
+            vpsJoinRequests.delete(botId);
+            joinSettled();
+          }
         }
       }
       const activeBoatTurn = botHasActiveTurn(botId);
@@ -23341,6 +23527,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 };
 
 const server = createServer(handleRequest);
+desktopViewer.attach(server, handleRequest);
 
 calendarCalls.start();
 
@@ -23513,6 +23700,7 @@ let tunnelListener: ReturnType<typeof createServer> | null = null;
 if (TUNNEL_SOCKET) {
   if (process.platform !== "win32") rmSync(TUNNEL_SOCKET, { force: true });
   tunnelListener = createServer(handleRequest);
+  desktopViewer.attach(tunnelListener, handleRequest);
   tunnelListener.listen(TUNNEL_SOCKET, () => {
     console.log(`openmausbot tunnel listener on ${TUNNEL_SOCKET}`);
   });
@@ -23531,6 +23719,7 @@ const gracefulShutdown = createGracefulShutdown({
       sharedComputers.close();
       sharedComputerControl.close();
       browserLive.closeAll();
+      desktopViewer.closeAll();
       for (const idle of localVmIdles.values()) idle.cancel();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();

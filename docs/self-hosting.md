@@ -717,6 +717,37 @@ links, and `OMB_WEBHOOK_PUBLIC_URL=https://your.domain` so hook URLs, are
 printed with the public address. [`deploy/Caddyfile`](../deploy/Caddyfile)
 is the reference implementation.
 
+## Opening a desktop from another device
+
+In a paired admin browser, **Open live desktop** uses the same address as
+OpenMausBot for Local VMs and your own VPS. Shared, per-bot and pool Local VMs
+connect through their managed container's loopback port. VPS desktops connect
+through an SSH tunnel opened by the server. Neither needs an additional public
+port or viewer origin setting. Keep Local VM VNC ports bound to loopback and
+VPS VNC ports private.
+
+Your app reverse proxy must support WebSocket upgrades, preserve `Host`, and
+set `X-Forwarded-Proto` to the browser-facing scheme. This also applies when
+using Tailscale Serve. Viewer requests require an admin session. Logging out
+or revoking that session closes open viewers. Client-only pairing does not
+grant desktop control.
+
+An open Local VM viewer keeps that VM's idle timer active. Remote VPS viewers
+share a tunnel; it closes 30 seconds after the last viewer leaves, allowing
+reconnects during that interval. A native desktop viewer keeps its existing
+explicit-close behavior and maximum tunnel lifetime.
+
+Use **Keyboard** to send text from a phone and **Clipboard** to exchange text
+with the desktop; clipboard edits sync automatically. The desktop fits the
+window, with fullscreen available when the browser supports it. Hosted Cloud
+keeps its provider-issued viewer. Local owner connections keep their direct
+viewer URLs and the packaged desktop's isolated viewer windows.
+
+These controls are in the web app. The native phone apps have their own
+computer viewers; use a paired browser for interactive Local VM or VPS access.
+For the proxy boundary and offline regression checks, see the
+[viewer verification recipe](verification/desktop-viewer.md).
+
 ## Using it from your phone
 
 Signed in on a hosted server as an admin (with a pairing code or your

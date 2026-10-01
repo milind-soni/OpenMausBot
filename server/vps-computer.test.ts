@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
+import { createServer, type Server } from "node:net";
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock("node:child_process", async () => ({
@@ -31,6 +32,10 @@ import {
   VPS_MANAGED_LABEL,
   VPS_VIEWER_LABEL,
   vpsComputerAction,
+  vpsComputerJoin,
+  vpsDesktopConnection,
+  closeVpsDesktopTunnel,
+  closeAllVpsDesktopTunnels,
   vpsComputerScreenshot,
   vpsComputerStatus,
   vpsComputerMcp,
@@ -1091,5 +1096,78 @@ describe("VPS computer", () => {
     // another explicit destination is never the VPS
     expect(vpsStartsForTurn({ wants: "vm", automationSource: "schedule" })).toBe(false);
     expect(vpsStartsForTurn({ wants: "off", autoStartVps: true })).toBe(false);
+  });
+});
+
+// A real loopback listener stands in for SSH; no host or remote daemon is used.
+describe("remote desktop tunnel ownership", () => {
+  async function openFixture() {
+    let server: Server | undefined;
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null, killed: false, stderr: new PassThrough(),
+      kill: vi.fn(() => { child.killed = true; server?.close(); child.emit("close", 0); return true; }),
+    });
+    spawnMock.mockImplementation((_binary, args: string[]) => {
+      const port = Number(args[args.indexOf("-L") + 1].split(":")[1]);
+      server = createServer(socket => socket.end()).listen(port, "127.0.0.1");
+      return child;
+    });
+    const runner = fixture().runner;
+    try {
+      await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
+      return { child, runner };
+    } catch (error) { child.kill(); throw error; }
+  }
+
+  it("retains multiple tabs, survives reconnect, then reclaims the idle tunnel", async () => {
+    const { child } = await openFixture();
+    try {
+      const connection = vpsDesktopConnection(BOT_ID)!;
+      expect(connection.password).toBeTruthy();
+      const first = connection.retain();
+      const second = connection.retain();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      first(); first(); // release is idempotent
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(child.killed).toBe(false);
+      second();
+      await vi.advanceTimersByTimeAsync(15_000);
+      const reconnected = connection.retain();
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(connection.live()).toBe(true);
+      reconnected();
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(child.kill).toHaveBeenCalledTimes(1);
+      expect(connection.live()).toBe(false);
+      expect(vpsDesktopConnection(BOT_ID)).toBeUndefined();
+    } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+
+  it("does not close a native owner's tunnel when a remote tab leaves", async () => {
+    const { child, runner } = await openFixture();
+    try {
+      const release = vpsDesktopConnection(BOT_ID)!.retain();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const native = await vpsComputerJoin(CONFIG, BOT_ID, runner);
+      expect(native.joinUrl).toMatch(/^http:\/\/127\.0\.0\.1:/);
+      release();
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(child.killed).toBe(false);
+      closeAllVpsDesktopTunnels();
+      expect(child.kill).toHaveBeenCalledTimes(1);
+    } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+  it("keeps remote tabs connected when the native viewer closes", async () => {
+    const { child, runner } = await openFixture();
+    try {
+      const release = vpsDesktopConnection(BOT_ID)!.retain();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await vpsComputerJoin(CONFIG, BOT_ID, runner);
+      expect(closeVpsDesktopTunnel(BOT_ID)).toEqual({ closed: false });
+      expect(child.killed).toBe(false);
+      release();
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(child.kill).toHaveBeenCalledTimes(1);
+    } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
   });
 });

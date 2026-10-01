@@ -20,6 +20,9 @@ const recordSchema = z.object({
   state: z.enum(["needs-sign-in", "signed-in"]),
   issuer: z.string().optional(),
   clientId: z.string().optional(),
+  /** How a pre-registered app with a secret proves itself at the token
+   * endpoint. The secret stays in config.json; it is never kept here. */
+  tokenAuth: z.enum(["client_secret_post", "client_secret_basic"]).optional(),
   redirectUri: z.string().optional(),
   tokenEndpoint: z.string().optional(),
   revocationEndpoint: z.string().optional(),

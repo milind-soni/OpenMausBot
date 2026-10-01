@@ -81,19 +81,18 @@ describe("managed engine setup errors", () => {
 });
 
 describe("engines set up with a key in Settings", () => {
-  it("opens Settings → Connections instead of offering a terminal command", () => {
+  it("opens Settings → API keys instead of offering a terminal command", () => {
     vi.stubGlobal("window", { ogb: { platform: "darwin" } });
-    const reason = "No API key — open Settings → Connections and add an OpenAI-compatible key (OpenRouter, Groq, or your own router) and its base URL.";
     const engine: InstanceInfo = {
-      ...instance({ state: "unavailable", reason }),
+      ...instance({ state: "unavailable", reason: "No API key — open Settings → API keys." }),
       instanceId: "openaiCompat",
       driverKind: "openai-compat",
-      displayName: "OpenAI-compatible (OpenRouter / Groq)",
+      displayName: "Other (OpenAI-compatible)",
       install: { docsUrl: "https://openrouter.ai/keys", settings: "connections" },
     };
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
-    expect(markup).toContain(reason);
-    expect(markup).toContain("Open Settings → Connections");
+    expect(markup).toContain("Other (OpenAI-compatible) needs an API key");
+    expect(markup).toContain("Open API keys");
     expect(markup).not.toContain("Open install in Terminal");
     expect(markup).not.toContain("config.json");
   });
@@ -204,5 +203,33 @@ describe("server device-code sign-in", () => {
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine, intent: "inject" })));
     expect(markup).not.toContain("Connect ChatGPT");
     expect(markup).toContain("npm install");
+  });
+});
+
+describe("API-key engine setup", () => {
+  function keyEngine(driverKind: string, snapshot: InstanceInfo["snapshot"]): InstanceInfo {
+    return { ...instance(snapshot), instanceId: driverKind, driverKind, displayName: "Grok (API)", access: "api", install: { docsUrl: "https://console.x.ai" } };
+  }
+  const render = (engine: InstanceInfo, ogb: Record<string, unknown> = { platform: "darwin" }) => {
+    vi.stubGlobal("window", { ogb });
+    return renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
+  };
+
+  it("sends a missing key to Settings → API keys, not to a config file", () => {
+    const html = render(keyEngine("grok", { state: "unavailable", reason: "No xAI API key — open Settings → API keys." }));
+    expect(html).toContain("data-engine-setup-api-key");
+    expect(html).toContain("Grok (API) needs an API key");
+    expect(html).toContain("Open API keys");
+    expect(html).not.toContain("config.json");
+  });
+
+  it("has no button on a remote client, whose settings hide the keys", () => {
+    const html = render(keyEngine("openai-compat", { state: "unavailable" }), { platform: "darwin", remoteClient: { active: true } });
+    expect(html).toContain("on the computer running OpenMausBot");
+    expect(html).not.toContain("Open API keys");
+  });
+
+  it("leaves CLI engines on their install card", () => {
+    expect(render(instance({ state: "unavailable", reason: "`kimi` CLI not found" }))).not.toContain("data-engine-setup-api-key");
   });
 });

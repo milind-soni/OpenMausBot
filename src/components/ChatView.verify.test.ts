@@ -6,6 +6,7 @@ import { t } from "@/lib/i18n";
 import { askText, runSteps, skillPrompt } from "@/lib/verify-steps";
 import { SAVE_RUN_AS_SKILL_LINE } from "../../shared/learn-request";
 import type { VerifyCard } from "./VerifyCard";
+import { citationAttachment, createCitationTextSelector, serializeCitation } from "@/lib/citations";
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
@@ -90,6 +91,18 @@ const render = (messages: Message[]) => renderToStaticMarkup(createElement(ChatV
 const draft = (): string => fixture.appendComposerDraft.mock.calls[0]![1] as string;
 
 describe("The run card in the chat pane", () => {
+  it("renders a sent citation as a badge and keeps raw metadata out of edit actions", () => {
+    const citation = citationAttachment(
+      { ownerType: "bot", ownerId: bot.id, threadId: bot.threadId, messageId: "source" },
+      createCitationTextSelector("source quote", 0, 12)!,
+      "note",
+    );
+    const markup = render([asked("cited", serializeCitation(citation))]);
+    expect(markup).toContain("Open citation: source quote");
+    expect(markup).not.toContain("omb-citation-v1");
+    expect(markup).not.toContain(`aria-label="${t("chat.editMessage")}"`);
+  });
+
   it("appears once the bot runs a control CLI, with the run as a checklist and its verified steps tagged", () => {
     const markup = render(run);
     expect(markup).toContain(CARD);

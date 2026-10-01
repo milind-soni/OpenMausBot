@@ -88,6 +88,9 @@ export interface InstanceConfig {
   icon?: ProviderIcon;
   environment?: Record<string, string>;
   enabled?: boolean;
+  /** Picker group for this instance, over its driver's default: an
+   * `openai-compat` instance on a provider's own key is "api", not "custom". */
+  access?: EngineAccess;
   config?: unknown;
 }
 
@@ -439,7 +442,7 @@ export interface EngineInstall {
     downloadBytes: number;
   };
   /** Set up inside the app rather than in a terminal: the engine needs a key
-   * saved under Settings → Connections, and the setup card links there. */
+   * saved under Settings → API keys, and the setup card links there. */
   settings?: "connections";
   /** Settings can install or update this engine on the machine running the
    * server, as the server's own user, into a directory the app owns. Set by

@@ -297,6 +297,33 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     console.info(JSON.stringify({ fixture: info!, screenshot, emptyTeam: true, multiBotMove: true, delayedMemberCreation: true, reload: true, renameAndDelete: true,
       sidebarDelete: true, sidebarCancelAndFocus: true, preservedSectionMembers: ["active", "pinned", "archived", "group"],
       preservedBotMessages: transcript.length, preservedGroupMessages: roomTranscript.length }));
+    // Room confirmations also sit over the mobile drawer. Escape must cancel
+    // just that confirmation, leaving the drawer and its room intact.
+    preview = await mountPreview({ info: { url: info!.url } }, {
+      entry: "/scripts/testing/sidebar-preview.tsx", route: "/__sidebar-room-delete.html", title: "Room deletion drawer regression", logLevel: "silent",
+    });
+    await ui("eval", "--js", `location.href = ${JSON.stringify(preview.previewUrl)}; true`);
+    const roomMenu = async () => {
+      await expect.poll(snapshot).toContain("Drawer: open");
+      await ui("eval", "--js", `document.querySelector('[data-sidebar-group-row="${group.id}"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 120, clientY: 250 })); true`);
+      await click("Delete group chat");
+      await expect.poll(snapshot).toContain('alertdialog "Delete Sidebar room?"');
+      expect(await focused()).toBe("Cancel");
+    };
+    for (const action of ["Escape", "Cancel"]) {
+      await roomMenu();
+      if (action === "Escape") await ui("press", "--keys", "Escape");
+      else await click(action);
+      await expect.poll(snapshot).not.toContain('alertdialog "Delete Sidebar room?"');
+      expect(await snapshot()).toContain("Drawer: open");
+      expect((await api("/api/bots?messages=0")).groups.some((room: any) => room.id === group.id)).toBe(true);
+      await expect.poll(() => evaluate("Boolean(document.activeElement.closest('aside'))")).toBe(true);
+    }
+    await roomMenu();
+    await click("Delete group chat");
+    await expect.poll(async () => (await api("/api/bots?messages=0")).groups.some((room: any) => room.id === group.id)).toBe(false);
+    expect((await api("/api/bots?messages=0")).bots.map((bot: any) => bot.id)).toEqual(expect.arrayContaining([a.id, b.id]));
+    await preview.close();
     preview = await mountPreview({ info: { url: info!.url } }, {
       entry: "/scripts/testing/confirm-dialog-preview.tsx", route: "/__confirm-focus.html", title: "Confirmation focus regression", logLevel: "silent",
     });

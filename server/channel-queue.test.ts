@@ -15,6 +15,19 @@ import {
 import { saveChatFollowup } from "./message-db.ts";
 
 describe("channel queue", () => {
+  it("keeps readable citation prompts byte-for-byte through room queue and steer hold", () => {
+    const prompt = '<!--omb-citation-v1:fixture-->\n> Quoted message:\n> multiline 🐭\n>   code\n\nComment:\nCheck it';
+    const queued = queueChannelMessage("group-citation", "thread-citation", prompt);
+    const held = holdChannelQueue("group-citation", "thread-citation", queued.id)!;
+    expect(held.items[0].text).toBe(prompt);
+    restoreHeldChannelQueue(held);
+    const run = vi.fn();
+    drainChannelMessages(() => false, run);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      items: [expect.objectContaining({ text: prompt })],
+    }));
+  });
+
   it("keeps messages off the running channel and drains one follow-up at a time", () => {
     let working = true;
     const run = vi.fn(() => {

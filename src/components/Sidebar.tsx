@@ -36,6 +36,7 @@ import {
 import { api, useStore, formatTime, visibleMessages, currentTaskBot, type AppState, type Bot, type Group } from "@/state/store";
 import { peerLine } from "@/lib/peer-message";
 import { liveActivityLabel } from "@/lib/live-activity";
+import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
@@ -63,15 +64,15 @@ import {
   loadCollapsedSections,
   loadSectionOrder,
   loadSidebarAttentionPinned,
-  loadSidebarDensity,
   loadSidebarWidth,
   clampSidebarWidth,
   saveCollapsedSections,
   saveSectionOrder,
   saveSidebarAttentionPinned,
-  saveSidebarDensity,
   saveSidebarWidth,
+  setSidebarDensity,
   toggleCollapsedSection,
+  useSidebarDensity,
   type SidebarDensity,
 } from "@/lib/sidebar-preferences";
 import {
@@ -107,6 +108,7 @@ import { botShowsUnread } from "@/lib/bot-unread";
 import { attentionJumpAction, AttentionThreadRows, crossBotAttentionThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { ShortcutHint } from "./ShortcutHint";
+import { citationPreviewText } from "@/lib/citations";
 
 const SECTION_LABEL_KEYS: Record<string, LocaleKey> = {
   [PINNED_SECTION_ID]: "sidebar.section.pinned",
@@ -140,7 +142,7 @@ function preview(bot: Bot): string {
   if (last.kind === "screen") return t("sidebar.preview.screenFrame");
   const peer = peerLine(last);
   if (peer) return `${peer.name}: ${peer.body}`;
-  return last.text ?? "";
+  return citationPreviewText(last.text ?? "");
 }
 
 interface MenuState {
@@ -163,8 +165,9 @@ function groupPreview(group: Group, bots: Bot[]): string {
     : last.kind === "goal.run" && last.goalRun
       ? sidebarGoalRunPreview(last.goalRun)
       : (last.text ?? "");
-  if (last.role === "user") return t("sidebar.preview.you", { text });
-  return last.from ? `${last.from.name}: ${text}` : text;
+  const readable = citationPreviewText(text);
+  if (last.role === "user") return t("sidebar.preview.you", { text: readable });
+  return last.from ? `${last.from.name}: ${readable}` : readable;
 }
 
 /** A small member stack identifies a group without turning it into a card. */
@@ -319,14 +322,31 @@ export function GroupThreadList({ group, selected, density = "comfortable", quer
   </div>;
 }
 
+/** Copy for the room delete confirmation. Deleting a room drops its messages
+ * and every thread in it and turns off the routines that run there; the bots
+ * in it are untouched. Bot⇄bot rooms are labelled threads in the menu. */
+export function roomDeleteCopy(group: Pick<Group, "name" | "dm">) {
+  const isBotChat = Boolean(group.dm);
+  return {
+    title: t("sidebar.room.deleteConfirmTitle", { name: group.name }),
+    body: isBotChat
+      ? t("sidebar.room.deleteChatBody", { name: group.name })
+      : t("sidebar.room.deleteChannelBody", { name: group.name }),
+    confirmLabel: isBotChat ? t("sidebar.room.deleteChat") : t("sidebar.room.deleteChannel"),
+    tone: "danger" as const,
+  };
+}
+
 function RoomContextMenu({
   menu,
   onClose,
   onMoveToSection,
+  onDelete,
 }: {
   menu: { groupId: string; x: number; y: number } | null;
   onClose: () => void;
   onMoveToSection: (groupId: string) => void;
+  onDelete: (groupId: string) => void;
 }) {
   const motion = useHeldMenuMotion(menu);
   const shown = motion.value;
@@ -449,8 +469,8 @@ function RoomContextMenu({
       </button>
       {!remoteClient && <button
         onClick={() => {
-          dispatch({ type: "deleteGroup", groupId: group.id });
           onClose();
+          onDelete(group.id);
         }}
         className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger hover:bg-raised/70"
       >
@@ -962,12 +982,14 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
   // the same live verb the chat pane derives from the visible tail
   // ("Reading a file"), passed to the active thread's row while it works
   const activeActivityLabel = liveActivityLabel(visibleMessages(bot).at(-1));
+  const generatedTitles = llmThreadTitlesEnabled(state.config);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
     return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && task.threadId === bot.threadId} compact={density === "compact"} folders={projects} activityLabel={task.threadId === bot.threadId ? activeActivityLabel : undefined}
       now={now}
       onSelect={() => { if (task.threadId !== bot.threadId) dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId }); else dispatch({ type: "select", id: bot.id }); }}
       onRename={(title) => dispatch({ type: "renameTask", botId: bot.id, threadId: task.threadId, title })}
+      onRegenerateTitle={generatedTitles ? (onSettled) => dispatch({ type: "regenerateTaskTitle", botId: bot.id, threadId: task.threadId, onSettled }) : undefined}
       onDelete={() => dispatch({ type: "deleteTask", botId: bot.id, threadId: task.threadId })}
       onMove={(projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { projectId } })}
       onArchive={(archivedAt) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { archivedAt } })}
@@ -1613,6 +1635,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [shareTeam, setShareTeam] = useState<string | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
+  const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
+  const deletingRoom = deletingRoomId ? state.groups.find((g) => g.id === deletingRoomId) : undefined;
   const [plusOpen, setPlusOpen] = useState(false);
   const plusMotion = useMenuMotion(plusOpen);
   const [attentionOpen, setAttentionOpen] = useState(false);
@@ -1633,7 +1657,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     restoreBot?: { id: string; name: string };
   } | null>(null);
   const [query, setQuery] = useState("");
-  const [density, setDensityState] = useState<SidebarDensity>(() => loadSidebarDensity());
+  // Chosen in Settings → Appearance; the header's collapse button only flips
+  // between the avatar rail and the last expanded density.
+  const density = useSidebarDensity();
   const defaultWidth = density === "compact" ? 272 : 320;
   const sidePanelOpen = state.computerOpen || state.inspectorOpen;
   const maxSidebarWidth = sidePanelOpen ? defaultWidth : Math.min(480, window.innerWidth - 320);
@@ -1654,12 +1680,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       saveSidebarWidth(widthRef.current);
     }
   };
-  const [lastExpandedDensity, setLastExpandedDensity] = useState<Exclude<SidebarDensity, "icons">>(() => {
-    const saved = loadSidebarDensity();
-    return saved === "icons" ? "comfortable" : saved;
-  });
-  const [densityOpen, setDensityOpen] = useState(false);
-  const densityMotion = useMenuMotion(densityOpen);
+  const [lastExpandedDensity, setLastExpandedDensity] = useState<Exclude<SidebarDensity, "icons">>(
+    () => density === "icons" ? "comfortable" : density,
+  );
   // Compact is the quiet sidebar: a row is its name and its status, nothing
   // else (see the `quiet` prop on BotListItem and GroupListItem).
   const quietRows = density === "compact";
@@ -1673,22 +1696,17 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     over: { id: string; place: SectionDropPlace } | null;
   }>({ from: null, over: null });
 
-  const setDensity = (next: SidebarDensity) => {
-    setDensityState(next);
-    if (next !== "icons") setLastExpandedDensity(next);
+  // The density can change here or from Settings, so react to the value
+  // rather than to either control.
+  useEffect(() => {
+    if (density !== "icons") setLastExpandedDensity(density);
     // Search is hidden in avatar-only mode. Keeping its value would silently
     // filter bots, rooms, and message results with no visible way to clear it.
     else setQuery("");
-    saveSidebarDensity(next);
-    setDensityOpen(false);
-  };
+  }, [density]);
 
   const toggleCollapsed = () => {
-    if (density === "icons") setDensity(lastExpandedDensity);
-    else {
-      setLastExpandedDensity(density);
-      setDensity("icons");
-    }
+    setSidebarDensity(density === "icons" ? lastExpandedDensity : "icons");
   };
 
   // Esc closes the drawer, mirroring ApiKeys.tsx:75-85. Bound only while the
@@ -1696,22 +1714,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   // New Room panel can be open on top of it, so the same Escape press closes
   // them together. Fine, since both directions are "get me out of here."
   useEffect(() => {
-    if (!open || confirm) return;
+    if (!open || confirm || deletingRoom) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [open, onClose, confirm]);
-
-  useEffect(() => {
-    if (!densityOpen) return;
-    const closeDensityMenu = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setDensityOpen(false);
-    };
-    window.addEventListener("keydown", closeDensityMenu);
-    return () => window.removeEventListener("keydown", closeDensityMenu);
-  }, [densityOpen]);
+  }, [open, onClose, confirm, deletingRoom]);
 
   useEffect(() => {
     if (remoteClient) return;
@@ -1969,51 +1978,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           >
             {density === "icons" ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
           </button>
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setDensityOpen((value) => !value)}
-              aria-label={t("sidebar.density.chooseAria")}
-              aria-expanded={densityOpen}
-              className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
-              title={t("sidebar.density.title")}
-            >
-              <span aria-hidden="true" className="flex size-5 flex-col items-center justify-center gap-[3px]">
-                <span className="h-px w-3.5 rounded-full bg-current" />
-                <span className="h-px w-2.5 rounded-full bg-current" />
-                <span className="h-px w-3.5 rounded-full bg-current" />
-              </span>
-            </button>
-            {densityMotion.shown && (
-              <>
-                <div className={cn("fixed inset-0 z-30", densityMotion.closing && "pointer-events-none")} onMouseDown={() => setDensityOpen(false)} />
-                <div className={cn(
-                  "absolute top-full z-40 mt-1 w-40 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
-                  density === "icons" ? "left-0" : "right-0",
-                  densityMotion.className,
-                )} {...densityMotion.exitProps}>
-                  {(["comfortable", "compact", "icons"] as const).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => setDensity(option)}
-                      className={cn(
-                        "flex w-full items-center justify-between px-3 py-2 text-left text-[13px] hover:bg-raised/70",
-                        density === option ? "text-accent" : "text-ink",
-                      )}
-                    >
-                      {option === "icons"
-                        ? t("sidebar.density.iconsOnly")
-                        : option === "compact"
-                          ? t("sidebar.density.compact")
-                          : t("sidebar.density.comfortable")}
-                      {density === option && <Check size={14} />}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
           <div className={density === "icons" ? "relative" : "contents"}>
             <button
               type="button"
@@ -2527,7 +2491,27 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             if (!roomMenu) return;
             setRoomSectionPicker({ groupId, x: roomMenu.x, y: roomMenu.y });
           }}
+          onDelete={(groupId) => {
+            // The closing menu remains mounted briefly for its exit animation.
+            // Give the dialog a stable opener instead of that disappearing item.
+            sidebarRef.current?.focus();
+            setDeletingRoomId(groupId);
+          }}
         />
+      <ConfirmDialog
+        open={deletingRoom !== undefined}
+        {...roomDeleteCopy(deletingRoom ?? { name: "" })}
+        icon={<Trash2 size={18} />}
+        returnFocusRef={sidebarRef}
+        onCancel={() => setDeletingRoomId(null)}
+        onConfirm={() => {
+          // Read the room from live state: it may have been removed elsewhere
+          // while the dialog was open.
+          const groupId = deletingRoom?.id;
+          setDeletingRoomId(null);
+          if (groupId) dispatch({ type: "deleteGroup", groupId });
+        }}
+      />
       <SectionPicker
           current={roomSectionPicker ? state.groups.find((g) => g.id === roomSectionPicker.groupId)?.section : undefined}
           anchor={roomSectionPicker}

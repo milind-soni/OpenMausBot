@@ -80,6 +80,21 @@ function fakeStore(bots: BotRecord[]): SteerStore & { messages: Message[] } {
 }
 
 describe("steer-queue module", () => {
+  it("keeps readable citation prompts byte-for-byte through queue, hold, and drain", () => {
+    const bot = fakeBot("bot-citation-queue", "thread-citation-queue", true);
+    const store = fakeStore([bot]);
+    const prompt = '<!--omb-citation-v1:fixture-->\n> Quoted message:\n> const café = "🐭";\n\nComment:\nExplain this';
+    const queued = queueSteeredMessage(bot.id, bot.threadId, prompt);
+    const held = holdSteeredQueue(bot.id, bot.threadId, queued.id)!;
+    expect(held.items[0]).toMatchObject({ text: prompt, prompt });
+    restoreHeldSteeredQueue(held);
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls[0][2]).toBe(prompt);
+    expect(store.messages[0].text).toBe(prompt);
+  });
+
   it.each([undefined, "capacity", "group-turn"] as const)("detects an exact owner's queued correction with reason %s", (reason) => {
     const botId = `correction-${reason ?? "busy"}`;
     const threadId = `${botId}-thread`;

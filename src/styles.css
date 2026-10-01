@@ -1432,3 +1432,6 @@ button:disabled.bg-danger {
 [data-sidebar] :is(button, [role="button"]):not(:disabled, [aria-busy="true"]) {
   cursor: pointer;
 }
+::highlight(omb-citation-source) {
+  background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}

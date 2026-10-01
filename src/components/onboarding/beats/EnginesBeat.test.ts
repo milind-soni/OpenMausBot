@@ -110,7 +110,7 @@ describe("organisation sign-in in the engines beat", () => {
     expect(html).toContain("Everything is ready");
     expect(html).not.toContain("to set up");
     // personal engines stay listed, below, as optional
-    expect(html).toContain("The engines below are your own, and optional.");
+    expect(html).toContain("The model providers below are your own, and optional.");
     expect(html).toContain("claude");
     expect(html).toContain("codex");
     // the guide reacts as it does when everything personal is ready

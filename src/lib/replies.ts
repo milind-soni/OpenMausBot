@@ -1,9 +1,10 @@
 import type { Message } from "@/state/store";
 import { t } from "./i18n";
 import { peerLine } from "./peer-message";
+import { citationPreviewText } from "./citations";
 
 export function replySnippet(text: string, limit = 160): string {
-  const clean = text
+  const clean = citationPreviewText(text)
     .replace(
       /<attached-(image|file)\s+path="[^"]*"(?:\s+name="[^"]*")?\s*\/>/g,
       (_tag, kind: "image" | "file") => (kind === "image" ? t("chat.reply.image") : t("chat.reply.file")),

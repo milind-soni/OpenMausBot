@@ -1041,6 +1041,20 @@ describe("Store", () => {
     expect(reloaded.projectBotForTask(bot.id, future.threadId)!.modelSelection).toEqual({ ...chosen, variant: "minimal" });
   });
 
+  it("starts a task on a model it is handed, as its own copy, without moving the bot default", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const parent = { instanceId: "opencodeGo", model: "provider/model", variant: "low" };
+    const handed = structuredClone(parent);
+    const child = store.createTask(bot.id, "Child", false, undefined, undefined, undefined, handed)!;
+    handed.model = "provider/changed-later";
+    const fresh = store.createTask(bot.id, "Fresh", false)!;
+    const reloaded = new Store(selection);
+    expect(reloaded.projectBotForTask(bot.id, child.threadId)!.modelSelection).toEqual(parent);
+    expect(reloaded.projectBotForTask(bot.id, fresh.threadId)!.modelSelection).toEqual(selection());
+    expect(reloaded.bot(bot.id)!.modelSelection).toEqual(selection());
+  });
+
   it("applies one reviewed default-model change with applyTeamSetup's task stamping", () => {
     const store = new Store(selection);
     const bot = store.createBot();

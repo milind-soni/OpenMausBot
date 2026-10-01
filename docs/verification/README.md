@@ -87,6 +87,10 @@ built-in browser panel, and updater UI—is still not proven by the harness. Use
 the relevant Electron/package smoke test and state that limitation. Add a map
 entry only after the shared control surface can really drive it.
 
+The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
+paste-back, MCP tools and logout cancellation through the real settings panel
+and a synthetic OAuth provider in a disposable workspace.
+
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.
 
@@ -124,6 +128,10 @@ watching, takeover, input, and profile switching.
 The [local computer launch regression](local-computer-launch.md) starts the
 host CUA gate through real Electron in a disposable home, without opening the
 desktop app or controlling the user's computer.
+
+The [remote desktop viewer fixture](desktop-viewer.md) checks the bundled
+noVNC page, authenticated WebSocket proxy, desktop input, reconnect and logout
+against an isolated server, synthetic desktop and VPS SSH forward.
 
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.

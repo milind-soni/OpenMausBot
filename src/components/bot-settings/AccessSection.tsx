@@ -654,7 +654,7 @@ export function AccessSection({
               {!connectedAppsConfigured
                 ? "Connect apps in App Settings before giving this bot access."
                 : !canUseConnectedApps
-                  ? "This bot's current engine cannot use connected apps."
+                  ? "This bot's current model cannot use connected apps."
                   : connectedAppsEnabled
                     ? connectorGrantState === "partial"
                       ? "Tool access is tailored per app. Expand an app below to edit its tools."
@@ -676,7 +676,7 @@ export function AccessSection({
               !connectedAppsEnabled && !connectedAppsConfigured
                 ? "Connect apps in App Settings first"
                 : !connectedAppsEnabled && !canUseConnectedApps
-                  ? "This engine cannot use connected apps"
+                  ? "This model cannot use connected apps"
                   : undefined
             }
             className="disabled:cursor-not-allowed"
@@ -712,7 +712,7 @@ export function AccessSection({
               : !browserFeature
                 ? "The built-in browser is switched off under App Settings → Experimental."
                 : !canUseBrowser
-                  ? "This bot's current engine cannot use the built-in browser."
+                  ? "This bot's current model cannot use the built-in browser."
                   : bot.computer === "off"
                     ? "Works on is set to Off, so this bot has no browser. Pick another destination above to give it one."
                     : browserEnabled

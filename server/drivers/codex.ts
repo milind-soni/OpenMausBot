@@ -1136,6 +1136,24 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         });
       };
 
+      const seenReviews = new Set<string>();
+      let reviewWarning = false;
+      let timedOutReview = false;
+      const retryMode = approvalMode[0].toUpperCase() + approvalMode.slice(1);
+      const reviewNotice = (status: "warning" | "timedOut" | "denied", action?: any) => {
+        if (status === "warning") {
+          emit({ ...base(threadId, turnId), type: "runtime.error",
+            message: `Codex automatic review reported a timeout. Check what ran before retrying. Retry stays ${retryMode}. Select Ask for human approval in approval settings.`,
+          });
+          return;
+        }
+        const command = action?.type === "command" ? commandSummary({ command: action.command }) : undefined;
+        const target = command ? `: "${command.slice(0, 30)}"` : " for the requested action";
+        const outcome = status === "timedOut" ? "timed out" : "denied";
+        emit({ ...base(threadId, turnId), type: "runtime.error",
+          message: `Codex automatic review ${outcome}${target}. Action did not run. Retry stays ${retryMode}. Select Ask for human approval in approval settings.`,
+        });
+      };
       const handleNotification = (msg: any) => {
         const p = msg.params ?? {};
         // An app-server also emits notifications for native helper threads.
@@ -1171,9 +1189,27 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           const eventTurnId = msg.method === "turn/started" || msg.method === "turn/completed"
             ? p.turn?.id : p.turnId;
-          if (eventTurnId !== codexTurnId) return;
+          // guardianWarning is thread-scoped in Codex 0.147; this child
+          // process belongs to one app turn. Never admit a mismatched turnId.
+          if (eventTurnId !== codexTurnId && !(msg.method === "guardianWarning" && eventTurnId === undefined)) return;
         }
         switch (msg.method) {
+          case "guardianWarning":
+            if (typeof p.message === "string" && /automatic approval review.*timed out/i.test(p.message)) reviewWarning = true;
+            break;
+          case "item/autoApprovalReview/completed": {
+            const status = p.review?.status;
+            if (status !== "timedOut" && status !== "denied") break;
+            // Completed reviews carry a reviewId. Without it distinct
+            // failures cannot be separated from duplicate notifications.
+            if (typeof p.reviewId !== "string" || !p.reviewId) break;
+            if (!seenReviews.has(p.reviewId)) {
+              seenReviews.add(p.reviewId);
+              if (status === "timedOut") timedOutReview = true;
+              reviewNotice(status, p.action);
+            }
+            break;
+          }
           // token-level chat text; the item/completed frame follows with the
           // whole message, so its delta is only a fallback when none streamed
           case "item/agentMessage/delta": {
@@ -1304,6 +1340,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             break;
           }
           case "turn/completed": {
+            if (reviewWarning && !timedOutReview) reviewNotice("warning");
             const t = p.turn ?? {};
             const message = typeof t.error?.message === "string" ? codexUserError(t.error.message, plan) : "";
             if (t.status !== "completed" && message && message !== state.lastError) {

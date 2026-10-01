@@ -92,7 +92,7 @@ export function sessionEnv(handle: SessionEnv, parentEnv: NodeJS.ProcessEnv = pr
 
 /** Run one agent-browser verb with --json and return its `data`. The binary's
  * stderr is never surfaced: it can echo paths and environment. */
-function agentBrowser(
+export function agentBrowser(
   binary: string,
   env: NodeJS.ProcessEnv,
   args: string[],

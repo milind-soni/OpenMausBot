@@ -200,7 +200,7 @@ function claudeEnvironment(
   // env-injected at boot); none of them are this CLI's to see.
   stripWorkspaceCredentialEnv(env);
   const applied = applyClaudeInject(env, model);
-  // A key set on purpose for this workspace (Settings → Connections, carried
+  // A key set on purpose for this workspace (Settings → API keys, carried
   // in the instance environment) stays. One riding along in the parent's
   // env never does: it would flip a subscription login to pay-as-you-go.
   if (!applied.injected && !instanceEnvironment.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY;
@@ -409,6 +409,8 @@ export function claudeCliUpdate(version: string | null, cli: string): ProviderSn
 
 const DRIVER_KIND = "claudeAgent";
 
+const NO_ANTHROPIC_KEY = "No Anthropic API key — open Settings → API keys.";
+
 export interface ClaudeConfig {
   cli: string;
   /** Separate CLI-managed login/settings. Empty uses the normal CLI account. */
@@ -422,6 +424,9 @@ export interface ClaudeConfig {
   tools?: string[];
   /** Claude tool patterns to deny after the available set is selected. */
   disallowedTools?: string[];
+  /** Runs only on the workspace Anthropic key (the `claudeApi` instance):
+   * unavailable without one, never on a personal login. */
+  requireApiKey?: boolean;
 }
 
 // model catalog ported from upstream packages/contracts/src/model.ts
@@ -439,6 +444,8 @@ export const STATIC_CLAUDE_MODELS: ModelCatalog = {
 };
 
 const CLAUDE_MODEL_ID = /^[a-z0-9][a-z0-9._:/-]*$/i;
+/** Official Anthropic model ids, e.g. claude-sonnet-5-5 (no host:: inject prefix). */
+const OFFICIAL_CLAUDE_ID = /^claude-[a-z0-9.-]+$/;
 
 /** Rewrite a leftover API slug (`orcarouter/Qwen…`) to `host::model` when a
  *  local host is serving it, so the turn injects instead of asking for /login.
@@ -468,7 +475,7 @@ function extrasFromUnknown(value: unknown): Array<{ id: string; label: string }>
   });
 }
 
-/** Extra ids from ~/.claude/settings.json. Official cloud rows stay untagged.
+/** Extra ids from ~/.claude/settings.json. Official extraModels stay untagged.
  *  `model` is Claude Code's last-used slug, not a catalog — listing it as
  *  Custom put a non-inject id in the picker and the turn then had no
  *  ANTHROPIC_API_KEY ("Not logged in · Please run /login"). Live injects
@@ -485,20 +492,24 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
   }
 
   const extras = [
-    ...extrasFromUnknown(settings.availableModels),
-    ...extrasFromUnknown(settings.customModels),
-    ...extrasFromUnknown(settings.extraModels),
+    ...extrasFromUnknown(settings.availableModels).map((extra) => ({ ...extra, custom: true })),
+    ...extrasFromUnknown(settings.customModels).map((extra) => ({ ...extra, custom: true })),
+    ...extrasFromUnknown(settings.extraModels).map((extra) => ({ ...extra, custom: !OFFICIAL_CLAUDE_ID.test(extra.id) })),
   ];
   const nestedEnv = settings.env && typeof settings.env === "object" ? (settings.env as Record<string, unknown>) : {};
   const envModel = nestedEnv.ANTHROPIC_MODEL ?? env.ANTHROPIC_MODEL;
-  if (typeof envModel === "string") extras.push(...extrasFromUnknown([envModel]));
+  if (typeof envModel === "string") extras.push(...extrasFromUnknown([envModel]).map((extra) => ({ ...extra, custom: true })));
 
   const options = STATIC_CLAUDE_MODELS.options.map((option) => ({ ...option }));
   const seen = new Set(options.map((option) => option.id));
   for (const extra of extras) {
     if (seen.has(extra.id)) continue;
     seen.add(extra.id);
-    options.push({ id: extra.id, label: extra.label, custom: true });
+    // Only extraModels adds official cloud rows. An explicit endpoint model
+    // override stays custom even when its id also appears in that list.
+    options.push(extra.custom || extra.id === envModel
+      ? { id: extra.id, label: extra.label, custom: true }
+      : { id: extra.id, label: extra.label });
   }
   return { default: STATIC_CLAUDE_MODELS.default, options };
 }
@@ -926,6 +937,7 @@ function decodeConfig(raw: unknown): ClaudeConfig {
     permissionMode: (mode as ClaudeConfig["permissionMode"]) ?? "acceptEdits",
     ...(tools !== undefined ? { tools } : {}),
     ...(disallowedTools !== undefined ? { disallowedTools } : {}),
+    ...(o.requireApiKey === true ? { requireApiKey: true } : {}),
   };
 }
 
@@ -1325,6 +1337,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
     const sendTurn = async (turn: SendTurnInput, logicalTurnId?: string) => {
       if (config.managedModels && (!turn.model || !config.managedModels.includes(turn.model))) throw new Error("This model is not assigned to this workspace.");
+      if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) throw new Error(NO_ANTHROPIC_KEY);
       if (config.managed && (!turn.model || turn.model.includes("::") || !config.configDir ||
           !input.environment.ANTHROPIC_API_KEY || !input.environment.ANTHROPIC_BASE_URL)) {
         throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
@@ -2418,12 +2431,17 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
       cliVersion = parseClaudeCliVersion(version);
       cliVersionChecked = true;
+      const update = claudeCliUpdate(version, config.cli);
+      const warning = claudeInheritWarning(env);
+      if (config.requireApiKey) {
+        // Never falls back to a login: without the key it is not set up.
+        if (!input.environment.ANTHROPIC_API_KEY) return { state: "unavailable", version, reason: NO_ANTHROPIC_KEY };
+        return { state: "available", version, authenticated: true, account: { method: "api-key" }, ...(update ? { update } : {}), ...(warning ? { warning } : {}), billing: "metered" };
+      }
       const auth = await claudeAuthStatus(config.cli, env);
       // claudeEnvironment strips ANTHROPIC_API_KEY, so turns run on the
       // CLI's own login (Pro/Max): the cost it reports is what the call
       // WOULD bill, not a charge
-      const update = claudeCliUpdate(version, config.cli);
-      const warning = claudeInheritWarning(env);
       return { state: "available", version, ...auth, ...(update ? { update } : {}), ...(warning ? { warning } : {}), billing: "subscription" };
     };
 
@@ -2433,6 +2451,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
      * servers are mounted in this isolated process. */
     const generateReview = (prompt: string, signal?: AbortSignal, onUsage?: TextGenerationOptions["onUsage"]): Promise<string> =>
       new Promise((resolve, reject) => {
+        if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) {
+          reject(new Error(NO_ANTHROPIC_KEY));
+          return;
+        }
         const model = config.managedModels?.[0] ?? "claude-haiku-4-5";
         const child = spawnCli(
           config.cli,

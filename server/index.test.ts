@@ -158,6 +158,7 @@ let fakeVpsFixture: string;
 let fakeDockerLog: string;
 let stderr = "";
 let connectorAccounts: Array<{ id: string; alias?: string; status: string; toolkit: { slug: string } }> = [];
+let connectorAccountsGate: DeferredGate | null = null;
 // What the stubbed marketplace catalog serves for project keys; empty means
 // the walk found nothing and composio falls back to its curated list.
 let connectorCatalogToolkits: Array<{ slug: string; name: string }> = [];
@@ -756,6 +757,12 @@ beforeAll(async () => {
       return res.end(JSON.stringify(operation === "register" ? { ok: true, expiresAt: body.expiresAt } : { ok: true }));
     }
     if (req.url?.startsWith("/api/v3.1/connected_accounts") || req.url?.startsWith("/api/v3/toolkits")) {
+      if (req.url.startsWith("/api/v3.1/connected_accounts") && connectorAccountsGate) {
+        const gate = connectorAccountsGate;
+        connectorAccountsGate = null;
+        gate.enter();
+        await gate.wait;
+      }
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         items: req.url.startsWith("/api/v3.1/connected_accounts") ? connectorAccounts : connectorCatalogToolkits,
@@ -2827,7 +2834,7 @@ describe("harness HTTP API", () => {
       roomId = room.id;
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work in the virtual machine" })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body),
-        { timeout: 5_000 }).toMatch(/this model engine cannot use the Local VM/);
+        { timeout: 5_000 }).toMatch(/this model cannot use the Local VM/);
     } finally {
       if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
       if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
@@ -6750,6 +6757,28 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("saves the Fish Audio model and keeps it across provider switches", async () => {
+    try {
+      const fish = await api("PUT", "/api/config", { tts: { provider: "fish" } });
+      expect(fish.status).toBe(200);
+      expect(fish.body.tts).toMatchObject({ provider: "fish", fishModel: "s2.1-pro" });
+
+      const free = await api("PUT", "/api/config", { tts: { fishModel: "s2.1-pro-free" } });
+      expect(free.status).toBe(200);
+      expect(free.body.tts).toMatchObject({ provider: "fish", fishModel: "s2.1-pro-free" });
+      expect((await api("PUT", "/api/config", { tts: { fishModel: "s1" } })).status).toBe(400);
+
+      const away = await api("PUT", "/api/config", { tts: { provider: "elevenlabs" } });
+      expect(away.body.tts).not.toHaveProperty("fishModel");
+      const back = await api("PUT", "/api/config", { tts: { provider: "fish" } });
+      expect(back.body.tts).toMatchObject({ provider: "fish", fishModel: "s2.1-pro-free" });
+      const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+      expect(disk.tts).toMatchObject({ provider: "fish", fishModel: "s2.1-pro-free" });
+    } finally {
+      await api("PUT", "/api/config", { tts: { provider: "elevenlabs", voice: "", fishModel: "s2.1-pro" } }).catch(() => undefined);
+    }
+  });
+
   it("does not switch voice providers when per-agent voices cannot be cleared", async () => {
     let botId = "";
     const botsPath = join(home, ".openmausbot", "bots.json");
@@ -7207,6 +7236,124 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("signs in as a pre-registered app where self-registration is off, keeping its secret write-only", async () => {
+    const secret = "corp-app-secret-that-must-never-render";
+    const oauth = await startFakeOAuth({ noRegistration: true, preRegistered: { "corp-app": secret } });
+    const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    const configFile = join(home, ".openmausbot", "config.json");
+    try {
+      const created = await api("POST", "/api/mcp/servers", { name: "corp", url: fake.url, oauth: { clientId: "corp-app", clientSecret: secret, scopes: ["mcp", "offline_access"] } });
+      expect(created.status).toBe(201);
+      expect(created.body.servers).toEqual([{
+        name: "corp", type: "http", url: fake.url, headerKeys: [], enabled: false,
+        oauth: { clientId: "corp-app", scopes: ["mcp", "offline_access"], clientSecretConfigured: true, redirectUri: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-oauth\/callback$/) },
+      }]);
+
+      expect((await api("POST", "/api/mcp/servers/corp/test")).body.auth).toBe("required");
+      const started = await api("POST", "/api/mcp/servers/corp/sign-in");
+      expect(started.status).toBe(200);
+      expect(new URL(started.body.auth.authorizationUrl).searchParams.get("redirect_uri")).toBe(created.body.servers[0].oauth.redirectUri);
+      await fetch(started.body.auth.authorizationUrl, { redirect: "follow" });
+      let auth = started.body.auth;
+      for (let i = 0; i < 50 && auth.phase === "waiting"; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        auth = (await api("GET", `/api/mcp/servers/corp/sign-in/${auth.flowId}`)).body.auth;
+      }
+      expect(auth.phase).toBe("succeeded");
+      expect(oauth.counts.register).toBe(0);
+      const tested = await api("POST", "/api/mcp/servers/corp/test");
+      expect(tested.body.ok).toBe(true);
+
+      // an edit that keeps the app keeps the secret and the sign-in
+      const kept = await api("PUT", "/api/mcp/servers/corp", { type: "http", url: fake.url, headers: {}, oauth: { clientId: "corp-app", clientSecret: true, scopes: ["mcp", "offline_access"] } });
+      expect(kept.status).toBe(200);
+      expect(kept.body.servers[0]).toMatchObject({ auth: "signed-in", oauth: { clientSecretConfigured: true } });
+      expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.corp.oauth.clientSecret).toBe(secret);
+
+      for (const response of [created, started, tested, kept]) expect(JSON.stringify(response.body)).not.toContain(secret);
+      expect(readFileSync(join(home, ".openmausbot", "mcp-oauth.json"), "utf8")).not.toContain(secret);
+
+      // another app: the old app's tokens and secret go
+      const other = await api("PUT", "/api/mcp/servers/corp", { type: "http", url: fake.url, headers: {}, oauth: { clientId: "other-app", clientSecret: true } });
+      expect(other.status).toBe(400);
+      const moved = await api("PUT", "/api/mcp/servers/corp", { type: "http", url: fake.url, headers: {}, oauth: { clientId: "other-app" } });
+      expect(moved.body.servers[0].auth).toBeUndefined();
+      expect(moved.body.servers[0].oauth.clientSecretConfigured).toBe(false);
+      expect(readFileSync(configFile, "utf8")).not.toContain(secret);
+    } finally {
+      await api("DELETE", "/api/mcp/servers/corp").catch(() => undefined);
+      await fake.close();
+      await oauth.close();
+    }
+  });
+
+  it.each([false, true])("completes remote MCP OAuth only in its initiating admin session (pre-registered: %s)", async (registered) => {
+    const client = { clientId: "headless-corp", clientSecret: "headless-private-secret", scopes: ["mcp", "offline_access"] };
+    const oauth = await startFakeOAuth(registered ? { noRegistration: true, preRegistered: { [client.clientId]: client.clientSecret } } : {});
+    const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    const pair = async (scopes: string[]) => {
+      const opened = await api("POST", "/api/auth/pairing", { scopes });
+      const paired = await api("POST", "/api/auth/pair", { code: opened.body.code });
+      expect(paired.status).toBe(200);
+      return paired.body.token as string;
+    };
+    const alice = await pair(["admin", "client"]);
+    const bob = await pair(["admin", "client"]);
+    const member = await pair(["client"]);
+    const remote = async (token: string, method: string, path: string, body?: unknown) => {
+      const response = await fetch(`${BASE}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${token}`, "x-forwarded-for": "192.0.2.10", "content-type": "application/json" },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      return { status: response.status, body: await response.json() as any, cache: response.headers.get("cache-control") };
+    };
+    const base = "/api/mcp/servers/headless/sign-in";
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "headless", url: fake.url, ...(registered ? { oauth: client } : {}) })).status).toBe(201);
+      expect((await remote(member, "POST", base)).status).toBe(403);
+      const unauthenticated = await fetch(`${BASE}${base}`, { method: "POST", headers: { "x-forwarded-for": "192.0.2.11" } });
+      expect([401, 403]).toContain(unauthenticated.status);
+      const started = await remote(alice, "POST", base);
+      expect(started.status).toBe(200);
+      expect(started.cache).toBe("no-store");
+      const path = `${base}/${started.body.auth.flowId}`;
+      const approval = await fetch(started.body.auth.authorizationUrl, { redirect: "manual" });
+      const callbackUrl = approval.headers.get("location")!;
+      expect((await remote(bob, "POST", base)).status).toBe(409);
+      expect((await remote(bob, "GET", path)).status).toBe(404);
+      expect((await remote(bob, "DELETE", path)).status).toBe(404);
+      expect((await remote(bob, "POST", path, { callbackUrl })).status).toBe(404);
+      expect((await remote(alice, "POST", path, { callbackUrl: callbackUrl + "&state=duplicate" })).status).toBe(400);
+      expect((await remote(alice, "GET", path)).body.auth.phase).toBe("waiting");
+      const wrongContentType = await fetch(`${BASE}${path}`, {
+        method: "POST", headers: { authorization: `Bearer ${alice}`, "content-type": "text/plain" }, body: JSON.stringify({ callbackUrl }),
+      });
+      expect(wrongContentType.status).toBe(415);
+      const completed = await remote(alice, "POST", path, { callbackUrl });
+      expect(completed.status).toBe(200);
+      expect(completed.body.auth.phase).toBe("succeeded");
+      expect(JSON.stringify(completed.body)).not.toContain(new URL(callbackUrl).searchParams.get("code"));
+      expect((await remote(alice, "POST", path, { callbackUrl })).status).toBe(409);
+      expect(oauth.counts.token).toBe(1);
+      expect((await remote(alice, "POST", "/api/mcp/servers/headless/test")).body.ok).toBe(true);
+      await remote(alice, "POST", "/api/mcp/servers/headless/sign-out");
+      const second = await remote(alice, "POST", base);
+      const pending = await fetch(second.body.auth.authorizationUrl, { redirect: "manual" });
+      const pendingCallback = pending.headers.get("location")!;
+      expect((await remote(alice, "POST", "/api/auth/logout")).status).toBe(200);
+      expect((await remote(alice, "POST", `${base}/${second.body.auth.flowId}`, { callbackUrl: pendingCallback })).status).toBe(401);
+      // The independent loopback callback is also closed when its session ends.
+      await expect(fetch(pendingCallback)).rejects.toThrow();
+      expect(oauth.counts.token).toBe(1);
+    } finally {
+      await api("DELETE", "/api/mcp/servers/headless");
+      for (const token of [alice, bob, member]) await remote(token, "POST", "/api/auth/logout");
+      await fake.close();
+      await oauth.close();
+    }
+  });
+
   it("round-trips the UI language and clears it back to system", async () => {
     const set = await api("PUT", "/api/config", { language: "de" });
     expect(set.status).toBe(200);
@@ -7589,7 +7736,7 @@ describe("harness HTTP API", () => {
   it("keeps skill authoring on by default and persists an explicit opt-out", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, showToolCalls: false, routinesInConversation: false, sharedComputers: false, claudeUserMcp: false, autoRecall: true });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, showToolCalls: false, routinesInConversation: false, sharedComputers: false, claudeUserMcp: false, autoRecall: true, llmThreadTitles: true });
     // the default is the absence of the key: nothing is written until the toggle is used
     const untouched = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(untouched.features?.skillAuthoring).toBeUndefined();
@@ -7601,7 +7748,7 @@ describe("harness HTTP API", () => {
       features: { skillAuthoring: false },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, showToolCalls: false, routinesInConversation: false, sharedComputers: false, claudeUserMcp: false, autoRecall: true });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, showToolCalls: false, routinesInConversation: false, sharedComputers: false, claudeUserMcp: false, autoRecall: true, llmThreadTitles: true });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     // Earlier browser coverage may have persisted its own toggle. Opting out
@@ -7611,7 +7758,7 @@ describe("harness HTTP API", () => {
     // the opt-out survives patches to sibling flags
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, showToolCalls: true, routinesInConversation: false, sharedComputers: false, claudeUserMcp: false, autoRecall: true });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, showToolCalls: true, routinesInConversation: false, sharedComputers: false, claudeUserMcp: false, autoRecall: true, llmThreadTitles: true });
 
     // an opted-out workspace refuses the skill routes a turn would otherwise reach
     const bot = (await api("POST", "/api/bots", {})).body.bot;
@@ -8313,7 +8460,7 @@ describe("harness HTTP API", () => {
     const first = (await api("POST", "/api/bots")).body.bot;
     const second = (await api("POST", "/api/bots")).body.bot;
     const before = await api("GET", "/api/config");
-    expect(before.body.localVm).toEqual({ mode: "shared", maxInstances: 2 });
+    expect(before.body.localVm).toEqual({ mode: "shared", maxInstances: 2, idleTimeoutMinutes: 480 });
 
     const shared = await api("GET", `/api/bots/${first.id}/local-computer`);
     expect(shared.status).toBe(200);
@@ -8323,7 +8470,7 @@ describe("harness HTTP API", () => {
       localVm: { mode: "per-bot", maxInstances: 5 },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.localVm).toEqual({ mode: "per-bot", maxInstances: 5 });
+    expect(saved.body.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480 });
 
     const [firstStatus, secondStatus] = await Promise.all([
       api("GET", `/api/bots/${first.id}/local-computer`),
@@ -8365,6 +8512,38 @@ describe("harness HTTP API", () => {
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 5 });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+  });
+
+  it("validates, persists and applies the Local VM idle timeout in shared and per-bot modes", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const shared = await api("GET", `/api/bots/${bot.id}/local-computer`);
+      expect(shared.status).toBe(200);
+      expect(shared.body).toMatchObject({ mode: "shared", idle_timeout_ms: 480 * 60_000 });
+
+      for (const idleTimeoutMinutes of [0, 4, 1.5, 1441, "30", null]) {
+        const invalid = await api("PATCH", "/api/config", { localVm: { idleTimeoutMinutes } });
+        expect(invalid.status).toBe(400);
+        expect(invalid.body.error).toContain("localVm.idleTimeoutMinutes");
+      }
+
+      const saved = await api("PATCH", "/api/config", { localVm: { idleTimeoutMinutes: 30 } });
+      expect(saved.status).toBe(200);
+      expect(saved.body.localVm).toEqual({ mode: "shared", maxInstances: 2, idleTimeoutMinutes: 30 });
+      expect((await api("GET", "/api/config")).body.localVm.idleTimeoutMinutes).toBe(30);
+      expect((await api("GET", "/api/local-computer")).body.idle_timeout_ms).toBe(30 * 60_000);
+
+      const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+      expect(disk.localVm).toMatchObject({ idleTimeoutMinutes: 30 });
+
+      // A mode change keeps the configured window rather than resetting it.
+      expect((await api("PATCH", "/api/config", { localVm: { mode: "per-bot" } })).status).toBe(200);
+      const perBot = await api("GET", `/api/bots/${bot.id}/local-computer`);
+      expect(perBot.body).toMatchObject({ mode: "per-bot", idle_timeout_ms: 30 * 60_000 });
+    } finally {
+      await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2, idleTimeoutMinutes: 480 } }).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
   });
 
   it("never removes an unmanaged container that squats on a bot's exact Local VM name", async () => {
@@ -10185,6 +10364,62 @@ describe("harness HTTP API", () => {
       connectorCatalogToolkits = [];
       await api("PUT", "/api/config", { composio: { apiKey: "" } });
       await api("DELETE", "/api/bots/" + bot.id);
+    }
+  });
+
+  it.each([
+    ["direct", false], ["room", false], ["direct", true], ["room", true],
+  ] as const)("rechecks memory policy after connector validation when a %s turn starts (enabled=%s)", async (kind, enabled) => {
+    const gate = deferredGate();
+    let botId = "";
+    let roomId = "";
+    let pending: ReturnType<typeof api> | undefined;
+    try {
+      expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+      const created = await api("POST", "/api/bots", { name: "Memory policy race", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+      expect(created.status).toBe(201);
+      botId = created.body.bot.id;
+      expect((await api("PATCH", `/api/bots/${botId}`, { computer: "off", composio: false, memoryEnabled: !enabled })).status).toBe(200);
+      if (kind === "room") {
+        const room = await api("POST", "/api/groups", { name: "Memory policy race", memberIds: [botId] });
+        expect(room.status).toBe(201);
+        roomId = room.body.group.id;
+        expect((await api("PATCH", `/api/groups/${roomId}/setup`, { action: "skip" })).status).toBe(200);
+      }
+      connectorAccountsGate = gate;
+      pending = api("PATCH", `/api/bots/${botId}`, { memoryEnabled: enabled, connectorTools: { gmail: { tools: "*" } } });
+      await Promise.race([
+        gate.entered,
+        pending.then(({ status }) => { throw new Error(`memory patch returned ${status} before connector validation was held`); }),
+      ]);
+      rmSync(fakeClaudeDump, { force: true });
+      const route = kind === "room" ? `/api/groups/${roomId}/messages` : `/api/bots/${botId}/messages`;
+      expect((await api("POST", route, { text: "hold the memory policy turn" })).status).toBe(202);
+      await readJsonFileWhenReady(fakeClaudeDump);
+      gate.release();
+      const blocked = await pending;
+      pending = undefined;
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.error).toMatch(/stop this bot's turn before changing its memory setting/);
+      const current = (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === botId);
+      expect(current.memoryEnabled).toBe(!enabled);
+      expect(current.connectorTools).toBeUndefined();
+      // Re-saving the effective policy while busy is still allowed.
+      expect((await api("PATCH", `/api/bots/${botId}`, { memoryEnabled: !enabled })).status).toBe(200);
+    } finally {
+      gate.release();
+      connectorAccountsGate = null;
+      await pending?.catch(() => undefined);
+      if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
+      if (botId) {
+        await api("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
+        await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === botId)?.busy,
+          { timeout: 5_000 }).toBe(false).catch(() => undefined);
+      }
+      if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
+      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+      await api("PUT", "/api/config", { composio: { apiKey: "" } });
+      rmSync(fakeClaudeDump, { force: true });
     }
   });
 

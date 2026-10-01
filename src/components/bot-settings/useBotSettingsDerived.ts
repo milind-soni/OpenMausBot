@@ -34,6 +34,7 @@ export type BotPatch = Partial<
     | "autoApprove"
     | "approvalMode"
     | "speakReplies"
+    | "memoryEnabled"
     | "voice"
     | "chiefOfStaff"
     | "managedSections"
@@ -89,7 +90,7 @@ export function useBotSettingsDerived(bot: Bot) {
     ? browserUnavailableReason(state.config)
     : !browserFeature
       ? "The built-in browser is switched off under App Settings → Experimental"
-      : "This model engine cannot use the built-in browser";
+      : "This model cannot use the built-in browser";
   const sectionName = bot.section?.trim() || "General";
   const currentChief = state.bots.find(
     (candidate) =>

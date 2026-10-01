@@ -801,7 +801,7 @@ export function describeOpenCodeAccountError(code: AccountErrorCode, model?: str
   switch (code) {
     case "invalid_credentials":
       return zen || go || !provider
-        ? "OpenCode rejected its key, or has none for this model. Fix it in Settings → Connections or with `opencode auth login`."
+        ? "OpenCode rejected its key, or has none for this model. Fix it in Settings → API keys or with `opencode auth login`."
         : `OpenCode's ${name} key for this model is missing or was rejected. Fix it with \`opencode auth login\`, or choose another model.`;
     case "insufficient_funds":
       return zen || !provider

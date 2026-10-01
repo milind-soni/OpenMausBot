@@ -13,6 +13,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 import {
   CloudComputersCard,
   LocalComputerSection,
+  LocalVmIdleTimeoutSetting,
   LocalVmInventoryCard,
   VpsComputersCard,
   cloudComputerActionPlan,
@@ -20,6 +21,7 @@ import {
   computerInventoryRequest,
   confirmComputerAction,
   localVmInventoryState,
+  parseLocalVmIdleTimeoutMinutes,
   reconcileCloudInventoryPayload,
   perBotLocalVmDeletePlan,
   reconcileCloudInventorySnapshot,
@@ -548,5 +550,29 @@ describe("Settings → Computers on an OMB Cloud home", () => {
     expect(titles).toContain("Cloud computers");
     expect(titles).not.toContain("Local VM");
     expect(titles).not.toContain("Setup");
+  });
+});
+
+describe("Local VM idle timeout setting", () => {
+  it.each([["5", 5], ["30", 30], [" 480 ", 480], ["1440", 1_440]])("accepts %j", (value, minutes) => {
+    expect(parseLocalVmIdleTimeoutMinutes(value)).toBe(minutes);
+  });
+
+  it.each(["", "4", "1441", "1.5", "-30", "30m", "1e2"])("rejects %j", (value) => {
+    expect(parseLocalVmIdleTimeoutMinutes(value)).toBeNull();
+  });
+
+  it("shows the confirmed window as a bounded, labelled minutes field", () => {
+    const markup = renderToStaticMarkup(createElement(LocalVmIdleTimeoutSetting, {
+      minutes: 30,
+      disabled: false,
+      onSave: async () => {},
+    }));
+    expect(markup).toContain('for="local-vm-idle-timeout"');
+    expect(markup).toContain("Recycle idle desktops after");
+    expect(markup).toContain('min="5"');
+    expect(markup).toContain('max="1440"');
+    expect(markup).toContain('value="30"');
+    expect(markup).toContain("minutes");
   });
 });

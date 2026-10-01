@@ -24,6 +24,11 @@ import { voiceKeyDraftValue, type VoiceKeyDraft } from "@/lib/voice-key-draft";
 import { Switch } from "./SettingsPrimitives";
 
 const SAMPLE = "Morning. Overnight the tests went green, and I left two notes for you in the thread.";
+const FISH_MODELS = [
+  { value: "s2.1-pro", label: "voice.fish.modelPro" },
+  { value: "s2.1-pro-free", label: "voice.fish.modelFree" },
+] as const;
+type FishModel = (typeof FISH_MODELS)[number]["value"];
 
 export function VoiceSettings({
   bot,
@@ -42,6 +47,7 @@ export function VoiceSettings({
   const [model, setModel] = useState("");
   const [saving, setSaving] = useState(false);
   const [savingServer, setSavingServer] = useState(false);
+  const [savingFishModel, setSavingFishModel] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
@@ -197,6 +203,17 @@ export function VoiceSettings({
       .finally(() => setSavingServer(false));
   };
 
+  const saveFishModel = (next: FishModel) => {
+    if (next === tts?.fishModel || savingFishModel) return;
+    setSavingFishModel(true);
+    setError(null);
+    // a setting, not a secret: it rides the ordinary config write
+    api("/api/config", { method: "PUT", body: JSON.stringify({ tts: { fishModel: next } }) })
+      .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setSavingFishModel(false));
+  };
+
   if (!tts) return null;
 
   const selectedVoice = usesLocalSystem ? deviceVoice : (bot.voice ?? "");
@@ -317,6 +334,26 @@ export function VoiceSettings({
             Get a key from {cloudProvider.name}
           </a>
         )}
+        </div>
+      )}
+
+      {!workspaceConfigurationLocked && provider === "fish" && (
+        <div className="mt-4">
+          <div className="mb-1.5 text-[13px] text-ink-secondary">{t("voice.fish.model")}</div>
+          <select
+            value={tts.fishModel ?? "s2.1-pro"}
+            onChange={(e) => saveFishModel(e.target.value as FishModel)}
+            disabled={savingFishModel}
+            aria-label={t("voice.fish.model")}
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:outline-none disabled:opacity-50"
+          >
+            {FISH_MODELS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {t(option.label)}
+              </option>
+            ))}
+          </select>
+          <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">{t("voice.fish.modelHint")}</div>
         </div>
       )}
 

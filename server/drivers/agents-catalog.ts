@@ -32,6 +32,7 @@ export interface CatalogProfile {
   /** The server is a Cloud home (server/cloud-home.ts): no "this computer"
    * of the person's and no Local VM to offer. */
   cloudHome: boolean;
+  memoryEnabled?: boolean;
   /** Written into start_thread's schema in a coordinating turn. */
   botId: string;
 }
@@ -48,6 +49,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
     voiceNotes: env.OMB_VOICE_NOTES === "1",
     cloudHome: env.OMB_CLOUD_HOME === "1",
+    memoryEnabled: env.OMB_MEMORY_ENABLED !== "0",
     botId: env.OMB_BOT_ID ?? "",
   };
 }
@@ -858,9 +860,9 @@ export function availableTools(profile: CatalogProfile) {
 
 function catalogTools(profile: CatalogProfile) {
   const TOOLS = toolDefinitions(profile.externalRuntime);
-  const BOT_SCOPED_TOOLS = profile.botId === WATCHER_OPTIONS_CARD_BOT_ID
-    ? TOOLS
-    : TOOLS.filter((tool) => !WATCHER_TOOL_NAMES.has(tool.name));
+  const BOT_SCOPED_TOOLS = TOOLS.filter((tool) =>
+    (profile.botId === WATCHER_OPTIONS_CARD_BOT_ID || !WATCHER_TOOL_NAMES.has(tool.name)) &&
+    (profile.memoryEnabled !== false || (tool.name !== "memory_update" && tool.name !== "memory_log")));
   const AUTHORING_TOOLS = profile.skillAuthoring
     ? BOT_SCOPED_TOOLS
     : BOT_SCOPED_TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));
