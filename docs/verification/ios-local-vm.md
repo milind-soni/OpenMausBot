@@ -32,8 +32,10 @@ Use a disposable simulator:
    `curl -X POST http://127.0.0.1:CONTROL/devices/DEVICE_ID/cloud-desktop`
    (`GET /state` on the same address lists the device id). The sidecar drops
    the device's connection so it reconnects with the new capability.
-5. Go back and open the computer again. The idle VM's picture appears, and the
-   tile changes after the next 30-second refresh.
+5. Without leaving the view, the idle VM's picture appears at the next
+   30-second check, and the tile changes on each refresh after that. Revoking
+   access (`DELETE` on the same address) clears the picture and brings the
+   notice back at the next check.
 6. Set another bot's computer to `off` on the harness; its computer view keeps
    the existing "only captured while it is working" message.
 

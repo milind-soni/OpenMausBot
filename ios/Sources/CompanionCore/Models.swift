@@ -890,9 +890,6 @@ public struct CompanionConnectionMetadata: Decodable, Sendable {
     }
 }
 
-/// A freshly minted provider viewer. It is deliberately not Codable for
-/// persistence: the URL is a short-lived bearer credential and belongs only
-/// in memory for the browser session that requested it.
 /// One still of a bot's Local VM, fetched on demand. The harness answers
 /// with a `data:` URL; anything but a PNG or JPEG in base64 is refused rather
 /// than handed to an image decoder.
@@ -926,6 +923,9 @@ public struct LocalVmScreenshot: Decodable, Sendable, Equatable {
     }
 }
 
+/// A freshly minted provider viewer. It is deliberately not Codable for
+/// persistence: the URL is a short-lived bearer credential and belongs only
+/// in memory for the browser session that requested it.
 public struct CloudDesktopSession: Decodable, Sendable {
     public let url: URL
 

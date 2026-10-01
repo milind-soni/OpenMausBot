@@ -62,7 +62,9 @@ struct ComputerView: View {
 
     /// The bot as the stream last described it — `busy` is what tells us
     /// whether more frames are coming or this is the last one.
-    private var current: Bot { session.state.bot(bot.id) ?? bot }
+    /// Projected onto the thread this view was opened from, so a task thread
+    /// pictures its own computer, not the bot's default conversation.
+    private var current: Bot { session.state.bot(bot.id)?.projected(forThread: bot.threadId) ?? bot }
 
     var body: some View {
         ZStack {
@@ -76,6 +78,23 @@ struct ComputerView: View {
                     // letterbox. Pinch-to-zoom would be the obvious next
                     // thing; scaledToFit is the honest starting point.
                     .accessibilityLabel("\(current.name)'s computer")
+                    // The last good picture stays up, but says when it could
+                    // not be refreshed rather than passing for current.
+                    .overlay(alignment: .bottom) {
+                        if case let .unavailable(reason) = vmProblem {
+                            Label {
+                                Text("Couldn't refresh: \(reason)")
+                            } icon: {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                            }
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(0.85))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(.bottom, 12)
+                        }
+                    }
             } else {
                 waiting
             }
@@ -163,11 +182,13 @@ struct ComputerView: View {
         }
     }
 
-    /// Fetch Local VM stills while this view is on screen. Stops for good on
-    /// a 403 (computer access is off), on a 409 saying this conversation is
-    /// not on the Local VM, and on a 404 from a computer too old to offer it.
+    /// Fetch Local VM stills while this view is on screen. Stops on a 409
+    /// saying this conversation is not on the Local VM, and on a 404 from a
+    /// computer too old to offer it. With computer access off it keeps asking
+    /// at the idle cadence, so turning it on at the Mac shows up here without
+    /// leaving the view.
     private func pollLocalVm() async {
-        guard mayBeLocalVm, vmProblem != .accessOff else { return }
+        guard mayBeLocalVm else { return }
         fetchingFirstStill = polled == nil
         defer { fetchingFirstStill = false }
         while !Task.isCancelled {
@@ -176,33 +197,37 @@ struct ComputerView: View {
             // in when it has gone quiet for longer than a frame interval.
             let streamFresh = streamFrameAt.map { Date().timeIntervalSince($0) < 10 } ?? false
             if !(busy && streamFresh) {
+                // Stamped when asked, so a slow capture never outranks a
+                // streamed frame that arrived while it was being taken.
+                let askedAt = Date()
                 do {
                     let shot = try await session.localVmScreenshot(for: current)
-                    polled = (shot, Date())
+                    polled = (shot, askedAt)
                     vmProblem = nil
                 } catch let APIError.status(code, message) {
                     switch code {
-                    case 403:
+                    case 403 where message?.contains("computer access is off") == true:
+                        // Revoked or never granted: stop showing the old picture.
+                        polled = nil
                         vmProblem = .accessOff
-                        return
                     case 404:
                         return
                     case 409 where message?.contains("not using the Local VM") == true:
+                        polled = nil
+                        vmProblem = nil
                         return
                     default:
-                        if polled == nil {
-                            vmProblem = .unavailable(APIError.status(code: code, message: message).localizedDescription)
-                        }
+                        vmProblem = .unavailable(APIError.status(code: code, message: message).localizedDescription)
                     }
                 } catch is CancellationError {
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    if polled == nil { vmProblem = .unavailable(error.localizedDescription) }
+                    vmProblem = .unavailable(error.localizedDescription)
                 }
                 fetchingFirstStill = false
             }
-            try? await Task.sleep(for: .seconds(busy ? 3 : 30))
+            try? await Task.sleep(for: .seconds(busy && vmProblem == nil ? 3 : 30))
         }
     }
 

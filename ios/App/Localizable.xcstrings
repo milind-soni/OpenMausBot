@@ -4814,6 +4814,16 @@
           }
         }
       }
+    },
+    "Couldn't refresh: %@": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível atualizar: %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

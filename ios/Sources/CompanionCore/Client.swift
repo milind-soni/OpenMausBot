@@ -1770,9 +1770,10 @@ public struct CompanionClient: Sendable {
         )
     }
 
-    /// A still of the bot's Local VM, whether or not it is working. Scoped to
-    /// a thread so the harness answers 409 when that conversation is not on
-    /// the Local VM, rather than picturing a computer it isn't using. The
+    /// A still of the bot's Local VM, whether or not it is working. The phone
+    /// always names the thread, so the harness answers 409 when that
+    /// conversation is not on the Local VM rather than picturing a computer it
+    /// isn't using (and, in pool mode, pictures that thread's own VM). The
     /// sidecar requires the same per-device computer access as the cloud
     /// desktop, and answers 403 while it is off.
     public func localVmScreenshot(botId: String, threadId: String) async throws -> LocalVmScreenshot {

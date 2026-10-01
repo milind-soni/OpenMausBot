@@ -282,9 +282,12 @@ Allowed in the first release:
 - Request a fresh interactive cloud-desktop viewer only when the computer
   owner has enabled that capability for this specific paired phone.
 - With the same capability, fetch a still of a bot's Local VM
-  (`POST /api/bots/:id/local-computer/screenshot`, scoped to a thread so the
-  harness refuses a conversation that is not on the Local VM). This reads a
-  picture; it cannot start, stop, remove or drive the VM.
+  (`POST /api/bots/:id/local-computer/screenshot`). The app always passes the
+  conversation's `threadId`, so the harness answers 409 for a conversation
+  that is not on the Local VM. This reads a picture; it cannot start, stop,
+  remove or drive the VM. Like the desktop panel's preview, each capture
+  counts as use of the VM, so an open computer view keeps it from being
+  reclaimed as idle; leaving the view or backgrounding the app stops that.
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.
