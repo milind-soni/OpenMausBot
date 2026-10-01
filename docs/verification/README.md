@@ -174,6 +174,10 @@ interrupting a newer request.
 The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
 search and draft isolation using disposable simulators and an offline fixture.
 
+The [iOS Local VM view](ios-local-vm.md) pairs a disposable simulator with an
+isolated server, companion sidecar and synthetic Local VM to check on-demand
+stills and the per-device computer-access gate.
+
 The [Android stream recovery checks](android-stream-recovery.md) exercise early
 stream closure and fallback through disposable HTTP endpoints.
 
