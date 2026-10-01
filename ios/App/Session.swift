@@ -1657,6 +1657,11 @@ final class Session: ObservableObject {
         do {
             return try await client.localVmScreenshot(botId: bot.id, threadId: bot.threadId)
         } catch let error as APIError where error.isUnauthorized {
+            // A poll still in flight when the phone switched computers must
+            // not evict the new session with the old token's 401.
+            guard !Task.isCancelled, self.client?.connection.id == client.connection.id else {
+                throw CancellationError()
+            }
             status = .unauthorized
             throw error
         }

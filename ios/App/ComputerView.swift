@@ -79,20 +79,17 @@ struct ComputerView: View {
                     // thing; scaledToFit is the honest starting point.
                     .accessibilityLabel("\(current.name)'s computer")
                     // The last good picture stays up, but says when it could
-                    // not be refreshed rather than passing for current.
+                    // not be refreshed rather than passing for current. With
+                    // access off only a streamed frame can be on screen; it
+                    // stays, captioned, so the notice is not lost behind it.
                     .overlay(alignment: .bottom) {
-                        if case let .unavailable(reason) = vmProblem {
-                            Label {
-                                Text("Couldn't refresh: \(reason)")
-                            } icon: {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                            }
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color.white.opacity(0.85))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .padding(.bottom, 12)
+                        switch vmProblem {
+                        case .accessOff:
+                            caption("lock.display") { Text("Computer access is off for this phone") }
+                        case let .unavailable(reason):
+                            caption("exclamationmark.triangle.fill") { Text("Couldn't refresh: \(reason)") }
+                        case nil:
+                            EmptyView()
                         }
                     }
             } else {
@@ -245,6 +242,16 @@ struct ComputerView: View {
         case nil:
             streamWaiting
         }
+    }
+
+    private func caption(_ systemImage: String, @ViewBuilder text: () -> Text) -> some View {
+        Label { text() } icon: { Image(systemName: systemImage) }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Color.white.opacity(0.85))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(.bottom, 12)
     }
 
     private func notice(systemImage: String, title: LocalizedStringKey, detail: Text) -> some View {
