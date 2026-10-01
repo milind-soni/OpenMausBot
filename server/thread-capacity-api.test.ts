@@ -1,6 +1,6 @@
 // Real provider processes with independent per-thread gates, under the same
 // disposable-home launcher used by the independent-threads API fixture.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 
 describe("per-bot thread capacity through an isolated HTTP fixture", () => {
@@ -295,7 +296,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       }
       if (routineId) await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);
       if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
-      rmSync(project, { recursive: true, force: true });
+      await removeTempDir(project);
     }
   }, 90_000);
 
