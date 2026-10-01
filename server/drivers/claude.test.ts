@@ -1434,6 +1434,19 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     });
   });
 
+  it("withholds --autocompact from a CLI above the floor whose --help does not list it", async () => {
+    // 2.1.129 clears the 2.1.122 floor yet rejects the flag ("unknown option")
+    const dump = join(scratch, "no-autocompact-cli.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.129", FAKE_CLAUDE_AUTOCOMPACT: "0" });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-no-autocompact", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--autocompact");
+    expect(seen.argv).toContain("--strict-mcp-config");
+  });
+
   it("keeps only the isolation flag a very old CLI accepts", async () => {
     // 1.0.100: --strict-mcp-config exists (1.0.60), --setting-sources does
     // not yet (1.0.122)

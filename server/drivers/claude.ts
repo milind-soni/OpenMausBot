@@ -1182,6 +1182,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     // other context controls and an unknown flag would reject that request.
     let cliVersion: ClaudeCliVersion | null = null;
     let cliVersionChecked = false;
+    // Whether `claude --help` lists --autocompact, read once per CLI version
+    // by snapshot(). The flag is not in every build above its version floor
+    // (2.1.129 rejects it), so the listing wins over the floor; null until
+    // probed, or when the probe fails.
+    let cliHasAutocompact: boolean | null = null;
+    let cliHelpVersion: string | null = null;
     const readCliVersion = (env: NodeJS.ProcessEnv): Promise<string | null> =>
       new Promise((resolve) => {
         execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) =>
@@ -1439,7 +1445,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (claudeCliSupports(cliVersion, "--setting-sources")) args.push("--setting-sources", "project");
       }
       const compactWindow = autoCompactWindow(turnEnvironment);
-      if (compactWindow && claudeCliSupports(cliVersion, "--autocompact")) {
+      if (compactWindow && (cliHasAutocompact ?? claudeCliSupports(cliVersion, "--autocompact"))) {
         args.push("--autocompact", compactWindow);
       }
       // An old pair conversation can still carry its first assignment in
@@ -2431,6 +2437,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
       cliVersion = parseClaudeCliVersion(version);
       cliVersionChecked = true;
+      if (version !== cliHelpVersion) {
+        const help = await new Promise<string | null>((resolve) => {
+          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
+        });
+        cliHasAutocompact = help === null ? null : /^\s*--autocompact\b/m.test(help);
+        cliHelpVersion = version;
+      }
       const update = claudeCliUpdate(version, config.cli);
       const warning = claudeInheritWarning(env);
       if (config.requireApiKey) {

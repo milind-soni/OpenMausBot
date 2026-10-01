@@ -237,6 +237,18 @@ if (argv[0] === "--version") {
   process.exit(0);
 }
 
+if (argv[0] === "--help") {
+  // Lists --autocompact in the option column like the real CLI, unless the
+  // fake stands in for a build without it: FAKE_CLAUDE_AUTOCOMPACT=0, or a
+  // version below the 2.1.122 floor.
+  const [maj = 0, min = 0, pat = 0] = (process.env.FAKE_CLAUDE_VERSION ?? "2.1.232").split(".").map(Number);
+  const has = process.env.FAKE_CLAUDE_AUTOCOMPACT !== "0" && (maj > 2 || (maj === 2 && (min > 1 || (min === 1 && pat >= 122))));
+  process.stdout.write(
+    `Usage: claude [options]\n\nOptions:\n  --model <model>  Model\n${has ? "  --autocompact <tokens>  Compaction window\n" : ""}  -h, --help  Display help\n`,
+  );
+  process.exit(0);
+}
+
 if (argv[0] === "update") {
   if (process.env.FAKE_CLAUDE_UPDATE === "fail") {
     process.stderr.write("fake-claude: simulated update failure\n");
