@@ -100,11 +100,18 @@ for (let frame = 0; frame < 4; frame++) {
 }
 let fixture: VerificationServer | undefined;
 let sidecar: ChildProcess | undefined;
-const stop = async () => {
+// A signal during server startup aborts it; the launcher then stops its child
+// and removes its own data directory before the launch promise settles.
+const startup = new AbortController();
+let launching: Promise<VerificationServer> | undefined;
+let stopping: Promise<void> | undefined;
+const stop = () => stopping ??= (async () => {
   sidecar?.kill("SIGTERM");
+  startup.abort();
+  await launching?.catch(() => {});
   await fixture?.close().catch(() => {});
   rmSync(scratch, { recursive: true, force: true });
-};
+})();
 process.once("SIGINT", () => void stop().then(() => process.exit(0)));
 process.once("SIGTERM", () => void stop().then(() => process.exit(0)));
 
@@ -143,9 +150,10 @@ else process.exit(1);
 process.stdout.write(typeof result === 'string' ? result : JSON.stringify(result));
 `, { mode: 0o700 });
 
-  fixture = await launchVerificationServer(process.env, undefined, {
+  launching = launchVerificationServer(process.env, startup.signal, {
     binDir: bin, host: "ssh://127.0.0.1:1", sshKey: join(scratch, "unused-key"), staticDir: join(root, "dist"),
   });
+  fixture = await launching;
   const api = fixtureApi(fixture.info.url);
   const { bot } = await api("POST", "/api/bots", {
     name: "Vee", description: "Works on the Local VM.", modelSelection: { instanceId: "claude", model: "claude-sonnet-4-5" },
