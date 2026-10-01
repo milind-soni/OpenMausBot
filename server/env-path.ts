@@ -83,6 +83,7 @@ function windowsKnownDirs(): string[] {
     join(home, ".bun", "bin"),
     join(home, ".deno", "bin"),
     join(home, "go", "bin"),
+    join(process.env.ProgramFiles ?? "C:\\Program Files", "Docker", "Docker", "resources", "bin"), // Docker Desktop installer
   ];
 }
 

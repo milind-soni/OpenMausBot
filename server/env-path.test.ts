@@ -184,6 +184,23 @@ describe("augmentedPath", () => {
       rmSync(localAppData, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform !== "win32")("finds Docker Desktop's bin dir (#2117)", () => {
+    const previous = process.env.ProgramFiles;
+    const programFiles = mkdtempSync(join(tmpdir(), "omb-programfiles-"));
+    try {
+      process.env.ProgramFiles = programFiles;
+      const dockerBin = join(programFiles, "Docker", "Docker", "resources", "bin");
+      mkdirSync(dockerBin, { recursive: true });
+      resetPathCacheForTests();
+      expect(augmentedPath().split(delimiter)).toContain(dockerBin);
+    } finally {
+      if (previous === undefined) delete process.env.ProgramFiles;
+      else process.env.ProgramFiles = previous;
+      resetPathCacheForTests();
+      rmSync(programFiles, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("userHome / harnessHome", () => {
