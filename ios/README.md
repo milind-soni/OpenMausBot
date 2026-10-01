@@ -181,12 +181,12 @@ here by simply not having the methods:
 | Read bots, rooms and transcripts | Write API keys (`PUT /api/config`) |
 | Send messages, make a bot or a room | Manage pairing or revoke devices |
 | Share selected text, links, images and documents | Browse arbitrary files on the phone or Mac |
-| **Answer approvals and questions** | Drive the Local VM or this computer, or change its lifecycle |
+| **Answer approvals and questions** | Drive this computer, or change the Local VM's lifecycle |
 | Interrupt a bot, mark chats read | Reach `/api/internal/*` |
 | File visible bots into one sidebar section | Use general bot or room `PATCH` routes |
 | Fetch screen images on demand | Load the packaged desktop UI |
 | Open an explicitly enabled cloud desktop | Provision, sleep or run shell commands on cloud computers |
-| See an explicitly enabled Local VM, idle or working | |
+| See an explicitly enabled Local VM, idle or working, and take control of it | |
 
 Marking a chat read and remembering an approval use purpose-built server
 verbs. Section creation likewise uses one strict atomic batch route. The
@@ -206,8 +206,20 @@ The same per-device switch (**Allow computer view** in Settings → Remote acces
 lets the phone fetch a still of a bot's Local VM on demand, so the computer view
 shows it even while the bot is idle: every 30 seconds while the view is open,
 every 3 while the bot works and its streamed frames have gone quiet. It is a
-picture only. The Local VM's lifecycle, its loopback-only noVNC listener and the
-host computer remain unreachable through the companion.
+picture only.
+
+With the same switch on, **Take control** under that picture drives the VM from
+the phone. The phone takes the bot's computer under its own control lease — the
+harness then refuses the bot's computer actions, exactly as when someone takes
+control on the Mac — and asks for the VM's live desktop. The harness hands that
+out only to a loopback caller and only while the computer is held; the sidecar
+relays it to this one device the way it already relays a VPS viewer, so the
+VM's noVNC port never leaves the Mac. A small RFB client in `CompanionCore`
+speaks VNC over that WebSocket: a trackpad moves a pointer (tap to click, two
+fingers to right-click or scroll, hold to drag), and the system keyboard types.
+**Hand Back**, leaving the screen, or sending the app to the background closes
+the viewer and releases the lease. The Local VM's lifecycle and the host
+computer remain unreachable through the companion.
 
 ## Design notes
 

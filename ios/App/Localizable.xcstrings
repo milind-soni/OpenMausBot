@@ -4824,6 +4824,216 @@
           }
         }
       }
+    },
+    "Take control": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assumir o controle"
+          }
+        }
+      }
+    },
+    "The bot pauses its computer work until you hand it back.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O bot pausa o trabalho no computador até você devolver o controle."
+          }
+        }
+      }
+    },
+    "Hand Back": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Devolver"
+          }
+        }
+      }
+    },
+    "Gives the computer back to the bot": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Devolve o computador ao bot"
+          }
+        }
+      }
+    },
+    "Local VM": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VM local"
+          }
+        }
+      }
+    },
+    "Trackpad": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trackpad"
+          }
+        }
+      }
+    },
+    "Swipe to move · Tap to click · Hold to drag": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deslize para mover · Toque para clicar · Segure para arrastar"
+          }
+        }
+      }
+    },
+    "Swipe to move the pointer, tap to click, hold to drag": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deslize para mover o ponteiro, toque para clicar, segure para arrastar"
+          }
+        }
+      }
+    },
+    "Connecting to the Local VM…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectando à VM local…"
+          }
+        }
+      }
+    },
+    "The desktop disconnected": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A área de trabalho se desconectou"
+          }
+        }
+      }
+    },
+    "Show keyboard": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar teclado"
+          }
+        }
+      }
+    },
+    "Hide keyboard": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ocultar teclado"
+          }
+        }
+      }
+    },
+    "More keys": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mais teclas"
+          }
+        }
+      }
+    },
+    "Escape": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esc"
+          }
+        }
+      }
+    },
+    "Tab": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tab"
+          }
+        }
+      }
+    },
+    "Right click": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clique direito"
+          }
+        }
+      }
+    },
+    "Copy (Ctrl+C)": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiar (Ctrl+C)"
+          }
+        }
+      }
+    },
+    "Paste (Ctrl+V)": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colar (Ctrl+V)"
+          }
+        }
+      }
+    },
+    "Select all (Ctrl+A)": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecionar tudo (Ctrl+A)"
+          }
+        }
+      }
+    },
+    "Ctrl+Alt+Del": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ctrl+Alt+Del"
+          }
+        }
+      }
+    },
+    "%@'s Local VM": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VM local de %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -1652,6 +1652,44 @@ final class Session: ObservableObject {
         }
     }
 
+    /// Run one call against the active computer, marking the pairing
+    /// unauthorized when the computer says so.
+    private func withClient<T>(_ call: (CompanionClient) async throws -> T) async throws -> T {
+        guard let client else { throw APIError.transport("This computer is offline.") }
+        do {
+            return try await call(client)
+        } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+            throw error
+        }
+    }
+
+    /// Take the bot's computer under `leaseId` and open its Local VM's
+    /// relayed desktop. Hands the computer straight back if the join fails,
+    /// so a failed attempt never leaves the bot locked out.
+    func takeLocalVm(for bot: Bot, leaseId: String) async throws -> (request: URLRequest, password: String?) {
+        let state = try await withClient { try await $0.computerControl(botId: bot.id, take: true, leaseId: leaseId) }
+        guard state.held, state.owned != false else {
+            throw APIError.transport("Someone else is already controlling this computer.")
+        }
+        do {
+            return try await withClient { client in
+                let viewer = try await client.localVmViewer(botId: bot.id, threadId: bot.threadId)
+                return (try client.viewerSocketRequest(viewer), viewer.password)
+            }
+        } catch {
+            await handBackLocalVm(for: bot, leaseId: leaseId)
+            throw error
+        }
+    }
+
+    /// Close this device's viewer and release the lease. Best effort: the
+    /// harness drops an unknown lease, and the sidecar expires the viewer.
+    func handBackLocalVm(for bot: Bot, leaseId: String) async {
+        _ = try? await withClient { try await $0.closeViewer(botId: bot.id) }
+        _ = try? await withClient { try await $0.computerControl(botId: bot.id, take: false, leaseId: leaseId) }
+    }
+
     func localVmScreenshot(for bot: Bot) async throws -> LocalVmScreenshot {
         guard let client else { throw APIError.transport("This computer is offline.") }
         do {

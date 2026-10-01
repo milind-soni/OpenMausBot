@@ -39,6 +39,11 @@ struct ComputerView: View {
     @State private var streamFrameAt: Date?
     @State private var fetchingFirstStill = false
     @State private var vmProblem: LocalVmProblem?
+    /// The live desktop while this phone holds the Local VM, and the lease
+    /// it holds it under.
+    @State private var control: (desktop: LocalVmDesktop, leaseId: String)?
+    @State private var takingControl = false
+    @State private var controlError: String?
 
     private enum LocalVmProblem: Equatable {
         /// The Mac has not allowed computer access for this phone.
@@ -109,6 +114,9 @@ struct ComputerView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
+            if polled != nil && vmProblem == nil && control == nil {
+                takeControlBar
+            }
             // A VPS-backed bot is "cloud" too, but the server refuses to mint
             // an interactive desktop for it — no button beats a dead one. An
             // older harness never sends cloudBackend, so nil keeps the button.
@@ -172,11 +180,83 @@ struct ComputerView: View {
             if png != nil { streamFrameAt = Date() }
         }
         // Restarted when the bot starts or stops working (the cadence
-        // changes) and stopped while the app is in the background.
-        .task(id: "\(current.busy == true)|\(scenePhase == .active)") {
-            guard scenePhase == .active else { return }
+        // changes); stopped in the background and while this phone is
+        // driving the VM live.
+        .task(id: "\(current.busy == true)|\(scenePhase == .active)|\(control == nil)") {
+            guard scenePhase == .active, control == nil else { return }
             await pollLocalVm()
         }
+        .fullScreenCover(isPresented: Binding(
+            get: { control != nil },
+            set: { if !$0 { Task { await handBack() } } }
+        )) {
+            if let control {
+                LocalVmControlView(botName: current.name, desktop: control.desktop) {
+                    Task { await handBack() }
+                }
+            }
+        }
+        // Control needs the app in front: a phone that is locked or
+        // switched away gives the computer back rather than leaving the bot
+        // locked out behind a lease nobody is using.
+        .onValueChange(of: scenePhase) { phase in
+            if phase == .background, control != nil { Task { await handBack() } }
+        }
+    }
+
+    /// Take or join the Local VM: a person can then drive it from the
+    /// trackpad, and the bot's own computer actions are refused until Hand
+    /// Back.
+    private var takeControlBar: some View {
+        VStack(spacing: 8) {
+            if let controlError {
+                Text(verbatim: controlError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+            }
+            Button {
+                Task { await takeControl() }
+            } label: {
+                if takingControl {
+                    ProgressView().tint(.white).frame(maxWidth: .infinity)
+                } else {
+                    Label("Take control", systemImage: "hand.raised")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(takingControl)
+            Text("The bot pauses its computer work until you hand it back.")
+                .font(.caption)
+                .foregroundStyle(Color.white.opacity(0.6))
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+    }
+
+    private func takeControl() async {
+        takingControl = true
+        controlError = nil
+        defer { takingControl = false }
+        let leaseId = "phone-" + UUID().uuidString
+        do {
+            let viewer = try await session.takeLocalVm(for: current, leaseId: leaseId)
+            let desktop = LocalVmDesktop(request: viewer.request, password: viewer.password)
+            desktop.start()
+            control = (desktop, leaseId)
+        } catch {
+            controlError = error.localizedDescription
+        }
+    }
+
+    private func handBack() async {
+        guard let taken = control else { return }
+        control = nil
+        taken.desktop.stop()
+        await session.handBackLocalVm(for: current, leaseId: taken.leaseId)
     }
 
     /// Fetch Local VM stills while this view is on screen. Stops on a 409

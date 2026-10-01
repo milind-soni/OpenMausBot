@@ -285,9 +285,16 @@ Allowed in the first release:
   (`POST /api/bots/:id/local-computer/screenshot`). The app always passes the
   conversation's `threadId`, so the harness answers 409 for a conversation
   that is not on the Local VM. This reads a picture; it cannot start, stop,
-  remove or drive the VM. Like the desktop panel's preview, each capture
+  remove the VM. Like the desktop panel's preview, each capture
   counts as use of the VM, so an open computer view keeps it from being
   reclaimed as idle; leaving the view or backgrounding the app stops that.
+- With the same capability, drive the Local VM: take the bot's computer under
+  a device control lease (`POST /api/bots/:id/computer/control`), then
+  `POST /api/bots/:id/local-computer/join`. The harness answers that only for a
+  loopback caller, only for a conversation on the Local VM, and only while the
+  computer is held; the sidecar rewrites the loopback noVNC address into its
+  device-scoped relay path, and the phone speaks RFB over it. Hand back
+  closes the viewer and releases the lease, and so does backgrounding the app.
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.
@@ -309,8 +316,8 @@ Intentionally refused:
   configuration. The only credential write is the exact pending-card envelope
   above, and it feeds the existing desktop OS-encrypted save path.
 - Pairing, device revocation, or companion lifecycle control.
-- Local VM lifecycle and control, webhooks, connectors, routines, team
-  import/export, and internal peer-agent routes.
+- Local VM lifecycle, webhooks, connectors, routines, team import/export, and
+  internal peer-agent routes.
 - Cloud computer provisioning, sleep, shell execution, and screenshot APIs.
   The phone receives only the fresh `join` viewer URL, never the provider key.
 - New harness routes that have not been reviewed for device access.

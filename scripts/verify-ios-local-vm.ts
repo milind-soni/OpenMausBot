@@ -17,26 +17,33 @@ import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { launchVerificationServer, type VerificationServer } from "./control-omb.ts";
 import { fixtureApi } from "./testing/preview-fixture.ts";
+import { fakeVncDesktop } from "./testing/fake-vnc-desktop.ts";
+import { createServer as createHttpServer } from "node:http";
 import { BASE_IMAGE_DIGEST, CUA_DRIVER_VERSION, IMAGE, IMAGE_LAYER_VERSION } from "../server/container-computer.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-/** A flat RGB PNG: dark desktop, top panel, one window, and a tile whose
- * colour and position change with `frame` so each capture is distinct. */
-function desktopPng(frame: number, width = 1280, height = 800): Buffer {
-  const tile = [[0xe8, 0x5d, 0x3f], [0x3f, 0xa7, 0xe8], [0x5c, 0xc4, 0x6a], [0xe8, 0xc2, 0x3f]][frame % 4];
+/** The synthetic desktop: dark background, top panel, one window, and a
+ * tile whose colour and position change with `frame`. */
+function scene(frame: number): (x: number, y: number) => [number, number, number] {
+  const tile = ([[0xe8, 0x5d, 0x3f], [0x3f, 0xa7, 0xe8], [0x5c, 0xc4, 0x6a], [0xe8, 0xc2, 0x3f]] as const)[frame % 4];
   const tileX = 760 + (frame % 4) * 90;
+  return (x, y) => {
+    if (y < 28) return [0xee, 0xee, 0xee];
+    if (x >= 120 && x < 680 && y >= 120 && y < 520) return y < 150 ? [0xd8, 0xd8, 0xd8] : [0x0b, 0x0b, 0x0b];
+    if (x >= tileX && x < tileX + 80 && y >= 300 && y < 380) return [...tile];
+    return [0x1a, 0x24, 0x36];
+  };
+}
+
+/** A flat RGB PNG of `scene(frame)`, so each capture is distinct. */
+function desktopPng(frame: number, width = 1280, height = 800): Buffer {
+  const pixel = scene(frame);
   const raw = Buffer.alloc((width * 3 + 1) * height);
   for (let y = 0; y < height; y++) {
     const row = y * (width * 3 + 1);
     raw[row] = 0;
-    for (let x = 0; x < width; x++) {
-      let rgb = [0x1a, 0x24, 0x36];
-      if (y < 28) rgb = [0xee, 0xee, 0xee];
-      else if (x >= 120 && x < 680 && y >= 120 && y < 520) rgb = y < 150 ? [0xd8, 0xd8, 0xd8] : [0x0b, 0x0b, 0x0b];
-      else if (x >= tileX && x < tileX + 80 && y >= 300 && y < 380) rgb = tile;
-      raw.set(rgb, row + 1 + x * 3);
-    }
+    for (let x = 0; x < width; x++) raw.set(pixel(x, y), row + 1 + x * 3);
   }
   const chunk = (type: string, data: Buffer) => {
     const length = Buffer.alloc(4);
@@ -100,6 +107,8 @@ for (let frame = 0; frame < 4; frame++) {
 }
 let fixture: VerificationServer | undefined;
 let sidecar: ChildProcess | undefined;
+// The VM's live desktop, behind VNC authentication like the real one.
+const desktop = await fakeVncDesktop({ paint: scene(0) });
 // A signal during server startup aborts it; the launcher then stops its child
 // and removes its own data directory before the launch promise settles.
 const startup = new AbortController();
@@ -109,6 +118,7 @@ const stop = () => stopping ??= (async () => {
   sidecar?.kill("SIGTERM");
   startup.abort();
   await launching?.catch(() => {});
+  await desktop.close().catch(() => {});
   await fixture?.close().catch(() => {});
   rmSync(scratch, { recursive: true, force: true });
 })();
@@ -139,11 +149,11 @@ else if (args[0] === 'inspect' && args[1] === 'openmausbot-computer') result = [
   Config:{Image:${JSON.stringify(IMAGE)},Labels:labels,Env:['VNC_PW=fixture-password']},
   State:{Running:true},Image:imageId,
   Mounts:[{Type:'bind',Source:require('node:path').join(process.env.OMB_DATA_DIR,'vm-home'),Destination:'/home/cua/workspace',RW:true}],
-  HostConfig:{PortBindings:{'6901/tcp':[{HostIp:'127.0.0.1',HostPort:'6999'}]},
+  HostConfig:{PortBindings:{'6901/tcp':[{HostIp:'127.0.0.1',HostPort:'${desktop.port}'}]},
     Privileged:false,Memory:4294967296,MemorySwap:4294967296,NanoCpus:2000000000,PidsLimit:512,
     CapDrop:['ALL'],CapAdd:['CAP_SETUID','CAP_SETGID'],IpcMode:'private',ShmSize:536870912,
     CgroupnsMode:'private',SecurityOpt:[],RestartPolicy:{Name:'no',MaximumRetryCount:0}},
-  NetworkSettings:{Ports:{'6901/tcp':[{HostIp:'127.0.0.1',HostPort:'6999'}]}}
+  NetworkSettings:{Ports:{'6901/tcp':[{HostIp:'127.0.0.1',HostPort:'${desktop.port}'}]}}
 }];
 else if (args[0] === 'ps') result = '';
 else process.exit(1);
@@ -192,6 +202,23 @@ process.stdout.write(typeof result === 'string' ? result : JSON.stringify(result
   }, null, 2));
   console.log("Pair the Simulator with the address and code above. Allow computer view with:");
   console.log(`  curl -X POST http://127.0.0.1:${controlPort}/devices/<device-id>/cloud-desktop`);
+  // What the phone has done to the desktop, and who holds the computer.
+  const eventsPort = await freePort();
+  createHttpServer(async (_req, res) => {
+    const control = await api("GET", `/api/bots/${bot.id}/computer/control`).catch(() => null);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      connections: desktop.connections(),
+      authenticated: desktop.authResponses.length,
+      pointerEvents: desktop.pointer.length,
+      lastPointer: desktop.pointer.at(-1) ?? null,
+      clicks: desktop.pointer.filter((event, index, all) => event.buttons & 1 && !((all[index - 1]?.buttons ?? 0) & 1)).length,
+      typed: desktop.typed(),
+      keys: desktop.keys.length,
+      controlHeld: control?.held ?? null,
+    }, null, 2));
+  }).listen(eventsPort, "127.0.0.1");
+  console.log(`Desktop events and control state: http://127.0.0.1:${eventsPort}/`);
   console.log("Ctrl-C stops everything and removes the temporary data.");
   await new Promise(() => {});
 } catch (error) {
