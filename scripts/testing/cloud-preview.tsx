@@ -42,7 +42,7 @@ const vmResumeStatus = () => ({
 // A host capture outlives an aborted renderer fetch. Keep this work pending
 // until explicitly released, so reconnects exercise real lifecycle contention.
 const transport = {
-  resetVm: () => { vmRunning = false; vmDesktopReady = false; }, vmStarts: 0, requests: 0, aborted: 0, conflicts: 0, capturing: false,
+  resetVm: () => { vmRunning = false; vmDesktopReady = false; }, vmStarts: 0, vmReadinessReads: 0, requests: 0, aborted: 0, conflicts: 0, capturing: false,
   joining: false, duringJoin: 0, controlCalls: 0, opened: 0, abortedJoins: 0,
   releaseCapture: () => {}, releaseJoin: () => {},
   screenshot: `data:image/png;base64,${screenshot}`,
@@ -77,7 +77,10 @@ window.fetch = async (input, init) => {
     vmRunning = true;
     return json(vmResumeStatus());
   }
-  if (path.endsWith("/local-computer") && surfaceScenario === "vm-stopped") return json(vmResumeStatus());
+  if (path.endsWith("/local-computer") && surfaceScenario === "vm-stopped") {
+    if (vmRunning && !vmDesktopReady) transport.vmReadinessReads++;
+    return json(vmResumeStatus());
+  }
   if (path.endsWith("/local-computer")) return json({ daemonUp: true, mode: "per-bot", max_instances: 2, image: true, create_supported: true,
     container: "running", imageMatches: true, managed: true, network: "loopback", security: "hardened", persistence: "durable",
     desktopReady: true, ready: true, problem: null, viewer_url: "http://127.0.0.1/fixture-viewer" });

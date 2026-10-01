@@ -1,9 +1,9 @@
 // Real ComputerPanel in an isolated fake-engine workspace; only the desktop
 // transport is simulated. No host Docker or user profile is accessed.
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
 import { mountPreview } from "./testing/preview-fixture.ts";
 import { agentBrowser, ensureUiBrowser, sessionEnv } from "./testing/control-omb-ui.ts";
@@ -24,6 +24,11 @@ try {
   const command = (...args: string[]) => agentBrowser(binary, env, args);
   const evaluate = async <T = unknown>(js: string) => (await command("eval", js)).result as T;
   const wait = (condition: string) => { console.log("Waiting:", condition); return command("wait", "--fn", condition); };
+  const evidenceDir = process.env.OMB_UI_EVIDENCE_DIR
+    ? resolve(process.env.OMB_UI_EVIDENCE_DIR) : dirname(fixture.info.logPath);
+  mkdirSync(evidenceDir, { recursive: true });
+  const record = process.env.OMB_UI_RECORD === "1";
+  await command("set", "viewport", "900", "720");
   await command("open", preview.previewUrl);
   await wait(`document.querySelector('select[aria-label="Conversation surface"]') !== null`);
   await wait(`Array.from(document.querySelectorAll('img')).some(img => img.src === window.cloudPreviewFixture.screenshot && img.complete)`);
@@ -31,19 +36,29 @@ try {
   await wait(`document.body.textContent.includes('The Local VM is stopped')`);
   assert.equal(await evaluate(`document.body.textContent.includes('Stopped after inactivity')`), true);
   assert.equal(await evaluate(`document.body.textContent.includes("isn't available for this bot")`), false);
-  await command("screenshot", join(dirname(fixture.info.logPath), `vm-stopped-${process.pid}.png`));
+  await command("screenshot", "aside", join(evidenceDir, "stopped.png"));
+  if (record) {
+    // Hide only fixture controls in the video, leaving product UI untouched.
+    await evaluate(`document.querySelector('.fixed.left-2.top-2').style.visibility = 'hidden'`);
+    await command("record", "start", join(evidenceDir, "resume.mp4"));
+  }
   await command("find", "role", "button", "click", "--name", "Start Local VM", "--exact");
   await wait(`window.cloudPreviewFixture.vmStarts === 1`);
   await wait(`Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Starting Local VM') && b.disabled && b.getAttribute('aria-busy') === 'true')`);
   // The POST has returned but Cua is still warming up: the button must keep
   // spinning rather than become clickable or claim the desktop is ready.
-  await evaluate(`new Promise(resolve => setTimeout(resolve, 1500))`);
+  await wait(`window.cloudPreviewFixture.vmReadinessReads >= 2`);
   assert.equal(await evaluate(`Array.from(document.querySelectorAll('button')).some(b => b.textContent.includes('Starting Local VM') && b.disabled)`), true);
-  await command("screenshot", join(dirname(fixture.info.logPath), `vm-starting-${process.pid}.png`));
-  await command("find", "role", "button", "click", "--name", "Finish VM startup", "--exact");
+  await command("screenshot", "aside", join(evidenceDir, "starting.png"));
+  await evaluate(`Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Finish VM startup").click()`);
   await wait(`Array.from(document.querySelectorAll('img')).some(img => img.src === window.cloudPreviewFixture.vmScreenshot && img.complete && img.naturalWidth > 1)`);
   assert.equal(await evaluate(`window.cloudPreviewFixture.vmStarts`), 1);
   assert.equal(await evaluate(`window.cloudPreviewFixture.paths.some(p => p.endsWith('/local-computer/remove') || p.endsWith('/local-computer/run'))`), false);
+  await command("screenshot", "aside", join(evidenceDir, "ready.png"));
+  if (record) {
+    await command("record", "stop");
+    await evaluate(`document.querySelector('.fixed.left-2.top-2').style.visibility = ''`);
+  }
   await evaluate(`window.cloudPreviewFixture.resetVm(); const s = document.querySelector('select[aria-label="Panel"]'); s.value='settings'; s.dispatchEvent(new Event('change', {bubbles:true}));`);
   await wait(`document.body.textContent.includes('Stopped after inactivity')`);
   assert.equal(await evaluate(`document.body.textContent.includes('Delete and recreate')`), false);
