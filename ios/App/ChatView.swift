@@ -318,6 +318,19 @@ struct ChatView: View {
                     guard let last = transcript.last else { return }
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
+                // Neither of the above is enough on its own when the newest
+                // message holds a table or a code block. Their horizontal
+                // scroll views throw off the height the anchor measures on
+                // the first pass, so the chat opened a table's height short
+                // of the end; and the `initial` scroll above runs before
+                // there is anything to scroll. One more scroll once the first
+                // layout has settled lands on the end — again when the page
+                // arrives from the computer, which can be after the push.
+                .task(id: "\(threadId)|\(session.state.hasLoadedPage(forThread: threadId))") {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    guard !Task.isCancelled, let last = rows.last else { return }
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
                 // Follow the text as it arrives. Keyed on length rather than
                 // the string so this fires once per delta batch, and without
                 // animation — animating every token turns a smooth stream
