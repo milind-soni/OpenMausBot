@@ -19,7 +19,7 @@ import {
 import { BotAvatar } from "./Avatar";
 import { PlaceIcon } from "./PlaceIcon";
 import { ScreenFrame } from "./ScreenFrame";
-import { effectivePlace } from "@/lib/place";
+import { effectivePlace, placeLabelKey } from "@/lib/place";
 import { ThreadChip } from "./ThreadChip";
 import { ToolActivity } from "./ToolActivity";
 import { ThreadRefText } from "./ThreadRefs";
@@ -1245,7 +1245,11 @@ export function GroupView({ group }: { group: Group }) {
         <BotAvatar bot={b} state={normalizeState(b.mascotExpression) ?? "happy"} size={24} animated={false} />
         {busy && (
           showPlace ? (
-            <span className="absolute -right-1 -top-1 flex size-3.5 items-center justify-center rounded-full border border-app bg-accent text-white">
+            <span
+              className="absolute -right-1 -top-1 flex size-3.5 items-center justify-center rounded-full border border-app bg-accent text-white"
+              role="img"
+              aria-label={t("place.chipAria", { place: t(placeLabelKey(effective)) })}
+            >
               <PlaceIcon place={effective} size={9} strokeWidth={2.5} aria-hidden="true" />
             </span>
           ) : (

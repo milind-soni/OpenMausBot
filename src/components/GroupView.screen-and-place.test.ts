@@ -68,6 +68,11 @@ describe("GroupView: computer/browser session visibility", () => {
     expect(markup).toMatch(/width="9"[^>]*height="9"/);
   });
 
+  it("gives the place badge an accessible label naming the place", () => {
+    const markup = render([bot({ busy: true, computer: "browser" })], group({ busyBotId: "aleta" }));
+    expect(markup).toContain('aria-label="Where this conversation works: Browser"');
+  });
+
   it("falls back to the plain working dot when the busy member's place is Auto", () => {
     const markup = render([bot({ busy: true })], group({ busyBotId: "aleta" }));
     expect(markup).not.toMatch(/width="9"[^>]*height="9"/);
