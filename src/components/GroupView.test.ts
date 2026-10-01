@@ -95,3 +95,27 @@ describe("room header", () => {
     expect(markup).toContain("Launch planning");
   });
 });
+
+describe("room transcript", () => {
+  const room = (messages: Message[]): Group => ({
+    id: "room", threadId: "room-thread", name: "Launch planning", memberIds: [],
+    defaultResponder: { kind: "member", botId: "atlas" }, bulletin: "", unread: false,
+    createdAt: 1, setupCompletedAt: 1, messages,
+  });
+
+  it("renders a screen message as the live frame, like the 1:1 chat does", () => {
+    // A room-delegated computer session lands its frames as { kind: "screen",
+    // png } on the room thread; without an arm for them they render as nothing.
+    vi.stubGlobal("window", { ogb: undefined });
+    let markup: string;
+    try {
+      markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupView, {
+        group: room([{ id: "frame", role: "bot", kind: "screen", png: "AAAA", mime: "image/png", at: 1 }]),
+      })));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(markup).toContain('src="data:image/png;base64,AAAA"');
+    expect(markup).toContain('alt="Bot&#x27;s screen"');
+  });
+});
