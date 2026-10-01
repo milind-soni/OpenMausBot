@@ -499,7 +499,9 @@ struct ChatView: View {
                 .foregroundStyle(Color.primary)
                 .padding(.leading, 12)
                 .padding(.trailing, unreadElsewhere > 0 ? 8 : 12)
-                .frame(height: 44)
+                // At least as wide as it is tall: a circle alone, a pill
+                // once the unread count joins it.
+                .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
