@@ -167,6 +167,9 @@ export type RuntimeEvent = RuntimeEventBase &
     // `claudeUpdate: true` narrows a setup failure to "this Claude Code is
     // too old for the model": the UI offers to run `claude update` for them.
     | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean }
+    /** Something the person should know that did not fail the turn — for
+     * example, a saved model the engine no longer offers was replaced. */
+    | { type: "runtime.notice"; message: string }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;

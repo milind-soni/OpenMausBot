@@ -24,6 +24,7 @@ import { z } from "zod";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
+import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
@@ -7139,6 +7140,70 @@ describe("harness HTTP API", () => {
     } finally {
       await fake.close();
       await api("DELETE", "/api/mcp/servers/docs").catch(() => undefined);
+    }
+  });
+
+  it("signs in to an OAuth URL MCP server, and keeps its token out of every response", async () => {
+    const oauth = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "hf", url: fake.url })).status).toBe(201);
+      const first = await api("POST", "/api/mcp/servers/hf/test");
+      expect(first.body).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
+      expect((await api("GET", "/api/mcp/servers")).body.servers).toEqual([
+        { name: "hf", type: "http", url: fake.url, headerKeys: [], enabled: false, auth: "needs-sign-in" },
+      ]);
+
+      const started = await api("POST", "/api/mcp/servers/hf/sign-in");
+      expect(started.status).toBe(200);
+      expect(started.body.auth.phase).toBe("waiting");
+      await fetch(started.body.auth.authorizationUrl, { redirect: "follow" });
+      let auth = started.body.auth;
+      for (let i = 0; i < 50 && auth.phase === "waiting"; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        auth = (await api("GET", `/api/mcp/servers/hf/sign-in/${auth.flowId}`)).body.auth;
+      }
+      expect(auth.phase).toBe("succeeded");
+
+      const listed = await api("GET", "/api/mcp/servers");
+      expect(listed.body.servers[0]).toMatchObject({ name: "hf", auth: "signed-in", headerKeys: [] });
+      const tested = await api("POST", "/api/mcp/servers/hf/test");
+      expect(tested.body).toEqual({ ok: true, tools: [{ name: "read_notes", description: "Read saved notes" }] });
+
+      const file = join(home, ".openmausbot", "mcp-oauth.json");
+      // Windows has no POSIX permission bits; stat reports 0o666 there.
+      if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+      const stored = JSON.parse(readFileSync(file, "utf8")).servers.hf.tokens.access as string;
+      expect(oauth.isValid(`Bearer ${stored}`)).toBe(true);
+      for (const response of [started, listed, tested]) expect(JSON.stringify(response.body)).not.toContain(stored);
+      const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+      expect(JSON.stringify(disk)).not.toContain(stored);
+
+      const out = await api("POST", "/api/mcp/servers/hf/sign-out");
+      expect(out.status).toBe(200);
+      expect(out.body.servers[0].auth).toBeUndefined();
+      expect(oauth.counts.revoke).toBe(1);
+
+      // a server that needs sign-in, pointed at another address, starts clean
+      await api("POST", "/api/mcp/servers/hf/test");
+      expect((await api("GET", "/api/mcp/servers")).body.servers[0].auth).toBe("needs-sign-in");
+      const moved = await api("PUT", "/api/mcp/servers/hf", { type: "http", url: `${fake.url}?v=2`, headers: {} });
+      expect(moved.status).toBe(200);
+      expect(moved.body.servers[0].auth).toBeUndefined();
+
+      // a personal token pasted as a header, same address: it is used again
+      await api("POST", "/api/mcp/servers/hf/test");
+      expect((await api("GET", "/api/mcp/servers")).body.servers[0].auth).toBe("needs-sign-in");
+      const pasted = await api("PUT", "/api/mcp/servers/hf", { type: "http", url: `${fake.url}?v=2`, headers: { Authorization: `Bearer ${oauth.mint()}` } });
+      expect(pasted.body.servers[0].auth).toBeUndefined();
+      expect((await api("POST", "/api/mcp/servers/hf/test")).body.ok).toBe(true);
+
+      const local = await api("POST", "/api/mcp/servers/nope/sign-in");
+      expect(local.status).toBe(404);
+    } finally {
+      await api("DELETE", "/api/mcp/servers/hf").catch(() => undefined);
+      await fake.close();
+      await oauth.close();
     }
   });
 

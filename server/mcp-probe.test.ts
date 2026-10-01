@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { probeMcpServer } from "./mcp-probe.ts";
 import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
+import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
 
 const fakeServer = fileURLToPath(new URL("./testing/fake-mcp-server.ts", import.meta.url));
 
@@ -110,6 +111,20 @@ describe("remote MCP probe", () => {
       expect(JSON.stringify(result)).not.toContain("wrong-token");
     } finally {
       await fake.close();
+    }
+  });
+
+  it("says a server needs sign-in when its 401 points at an OAuth server", async () => {
+    const oauth = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    try {
+      const started = Date.now();
+      const result = await probeMcpServer({ type: "http", url: fake.url, headers: {}, enabled: false }, 8_000);
+      expect(result).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
+      expect(Date.now() - started).toBeLessThan(2_000);
+    } finally {
+      await fake.close();
+      await oauth.close();
     }
   });
 

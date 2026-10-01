@@ -57,6 +57,7 @@ import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
 import { VerifyCard } from "./VerifyCard";
 import { askText, runSteps, runSummary, showRun, skillPrompt, skillStaged } from "@/lib/verify-steps";
+import { useShowRunCard } from "@/lib/run-card-preferences";
 import { ToolActivity } from "./ToolActivity";
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
@@ -83,7 +84,8 @@ import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { useFocusMessage } from "@/lib/focus-message";
-import { groupTranscript, isRecoveryActivity } from "@/lib/activity-runs";
+import { groupTranscript, isStatusActivity } from "@/lib/activity-runs";
+import { StatusActivityRow } from "@/components/StatusActivityRow";
 import { ActivityRun } from "./ActivityRun";
 import { TurnNarrationRun } from "./TurnNarrationRun";
 import { webhookMessageView } from "@/lib/webhook-message";
@@ -822,14 +824,7 @@ const MessagesList = memo(function MessagesList({
               );
             }
             case "activity": {
-              if (isRecoveryActivity(m)) {
-                return (
-                  <div role="status" className="flex w-fit max-w-full items-start gap-2 rounded-xl border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink-secondary">
-                    <RefreshCw size={13} aria-hidden="true" className="mt-0.5 shrink-0" />
-                    <span className="min-w-0 break-words">{m.tool?.name.slice(9).trim()}</span>
-                  </div>
-                );
-              }
+              if (isStatusActivity(m)) return <StatusActivityRow message={m} />;
               // a failed turn is an error, not a tool run — render it as one.
               // bot⇄bot comm chips and opened-thread chips stay because they
               // link to another conversation.
@@ -989,6 +984,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   // and stays away across a switch to another thread and back.
   const [runDismissed, setRunDismissed] = useState<ReadonlyMap<string, string>>(() => new Map());
   const lastRunStep = recordedRun.at(-1);
+  const showRunCard = useShowRunCard();
 
   // Windowed transcript: only a tail of the thread mounts (screenshots make
   // full threads DOM-heavy). The boundary is anchored per bot+task; a
@@ -1559,7 +1555,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           here. In the dock so its height is measured with the composer's:
           the transcript pad, the jump pill and bottom-follow all move with
           it. */}
-      {lastRunStep && showRun(recordedRun) && runDismissed.get(transcriptKey) !== lastRunStep.id && (
+      {lastRunStep && showRun(recordedRun) && showRunCard && runDismissed.get(transcriptKey) !== lastRunStep.id && (
         <div className="flex justify-end px-5 pb-2">
           <VerifyCard
             key={transcriptKey}

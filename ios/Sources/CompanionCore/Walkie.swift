@@ -34,6 +34,11 @@ public enum Walkie {
             return line.isEmpty ? nil : line
         case .secret:
             return "It needs a credential from you. Open the chat to enter it."
+        case .routineRun:
+            // The same line the roster shows: which routine, how it ended,
+            // and the first thing it said. The full report is on screen.
+            let line = message.routineRun?.previewLine ?? message.text ?? ""
+            return line.isEmpty ? nil : line
         case .activity, .screen, .digest, .compaction:
             return nil
         }

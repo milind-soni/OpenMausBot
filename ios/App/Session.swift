@@ -257,7 +257,9 @@ final class Session: ObservableObject {
                 digest.compaction = nil
                 digest.at = 1789088406000
                 digest.parentId = receipt.id
-                digest.text = "Digest must stay hidden"
+                // The raw receipt never reaches the screen: it becomes a chip,
+                // and the reply part — this sentence — is dropped from its sheet.
+                digest.text = "[digest] · tools: shell ×2 · reply: Digest must stay hidden"
                 state.apply(.message(threadId: "preview-gmail", message: digest))
             }
             if arguments.contains("-chat-reasoning-preview"),

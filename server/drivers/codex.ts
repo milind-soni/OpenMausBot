@@ -1507,7 +1507,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // Proven before the turn starts: a Codex that did not take the
         // overrides runs nothing for a guest.
         if (turn.guestConfined && !codexShellDisabled(effectiveConfig)) {
-          throw new Error("This Codex could not turn its shell off, so it can't take a guest's request on this Cloud. Update Codex, or ask the owner to switch this bot to Claude.");
+          throw new Error(`This Codex could not turn its shell off, so it can't run this turn. Update Codex, or switch this bot to Claude.${turn.confinedWhy ? ` ${turn.confinedWhy}` : ""}`);
         }
         // Only the stable half of the prompt belongs in the developer slot:
         // it is the part that must survive compaction unchanged, and any

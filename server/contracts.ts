@@ -27,6 +27,8 @@ export type ProviderErrorCode =
   | "missing_cli"
   | "invalid_credentials"
   | "inactive_subscription"
+  /** The account has no credit left for a pay-as-you-go model. */
+  | "insufficient_funds"
   | "quota_or_region_restriction"
   | "upstream_outage"
   | "model_catalog_outage";
@@ -121,6 +123,10 @@ export interface SendTurnInput {
    * only to a driver whose capabilities.guestTurns is "confined"; the harness
    * refuses the turn for any other (docs/cloud-pro.md). */
   guestConfined?: boolean;
+  /** Why this turn is confined, in the owner's words, for a refusal to end
+   * with (on a personal Cloud home, what came before it: a routine or a
+   * conversation from before this update). */
+  confinedWhy?: string;
   /** Images attached to this user turn only. They are deliberately kept out
    * of replay transcripts: the provider's native session owns earlier image
    * context, while a fresh replay retains the visible attachment marker. */
@@ -432,6 +438,9 @@ export interface EngineInstall {
     label: string;
     downloadBytes: number;
   };
+  /** Set up inside the app rather than in a terminal: the engine needs a key
+   * saved under Settings → Connections, and the setup card links there. */
+  settings?: "connections";
   /** Settings can install or update this engine on the machine running the
    * server, as the server's own user, into a directory the app owns. Set by
    * the registry when the install one-liner is an npm package and npm is on

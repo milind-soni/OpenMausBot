@@ -80,6 +80,25 @@ describe("managed engine setup errors", () => {
   });
 });
 
+describe("engines set up with a key in Settings", () => {
+  it("opens Settings → Connections instead of offering a terminal command", () => {
+    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    const reason = "No API key — open Settings → Connections and add an OpenAI-compatible key (OpenRouter, Groq, or your own router) and its base URL.";
+    const engine: InstanceInfo = {
+      ...instance({ state: "unavailable", reason }),
+      instanceId: "openaiCompat",
+      driverKind: "openai-compat",
+      displayName: "OpenAI-compatible (OpenRouter / Groq)",
+      install: { docsUrl: "https://openrouter.ai/keys", settings: "connections" },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
+    expect(markup).toContain(reason);
+    expect(markup).toContain("Open Settings → Connections");
+    expect(markup).not.toContain("Open install in Terminal");
+    expect(markup).not.toContain("config.json");
+  });
+});
+
 describe("install from Settings on the server", () => {
   function npmEngine(snapshot: InstanceInfo["snapshot"], server = true): InstanceInfo {
     return {

@@ -311,6 +311,20 @@ that makes one read-only request to the provider from the server.
   always uses a personal ChatGPT login.
 - **xAI API key**: the Grok API engine and xAI image generation.
 
+A saved key goes only to its own engine and only to the workspace's endpoint:
+an engine instance in `config.json` with its own base URL or its own key (a
+router or proxy) never receives it.
+
+**OpenCode is the exception to "the server's own environment is ignored".**
+Like `opencode` in a terminal, it reads provider keys from its environment
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`,
+`KIMI_API_KEY`, `MOONSHOT_API_KEY`, `MINIMAX_API_KEY`) and offers those
+providers' models, billed to that key. It does so only where the server's
+environment is one person's own: never on an OMB Cloud home, a hosted team
+workspace, an organisation-managed desktop, or a server whose sign-in list
+lets other people in (members, more than one admin, or a whole domain).
+Providers added with `opencode auth login` work everywhere.
+
 ## Many client workspaces on one server
 
 `openmausbot fleet` runs one workspace per client on a single Linux server,

@@ -52,6 +52,18 @@ describe("readThreadEvents", () => {
     expect(page.entries[0]).toMatchObject({ kind: "runtime", data: { eventId: "e1" } });
   });
 
+  it("keeps a runtime notice, which reports without failing the turn", () => {
+    const eventsDir = tmp();
+    const nativeDir = tmp();
+    writeFileSync(
+      join(eventsDir, "t1.ndjson"),
+      line(runtime({ eventId: "e1", type: "runtime.notice", createdAt: "2026-08-17T10:00:00.000Z", message: "OpenCode no longer offers x" })) +
+        line(runtime({ eventId: "e2", type: "runtime.notice", createdAt: "2026-08-17T10:00:01.000Z" })),
+    );
+    const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+    expect(page.entries.map((entry) => (entry.data as { eventId: string }).eventId)).toEqual(["e1"]);
+  });
+
   it("caps each log to its most recent `limit` lines and reports what it skipped", () => {
     const eventsDir = tmp();
     const nativeDir = tmp();

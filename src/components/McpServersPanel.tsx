@@ -6,6 +6,8 @@ import {
   FlaskConical,
   Globe,
   Loader2,
+  LogIn,
+  LogOut,
   Pencil,
   Plus,
   RefreshCw,
@@ -13,11 +15,13 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { claudeUserMcpEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { updateMcpServers } from "@/lib/mcp-servers";
+import { runMcpSignIn } from "@/lib/mcp-sign-in";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 
 import { Switch } from "./SettingsPrimitives";
@@ -37,6 +41,8 @@ interface RemoteMcpListing {
   url: string;
   headerKeys: string[];
   enabled: boolean;
+  /** present when the server uses OAuth sign-in */
+  auth?: "signed-in" | "needs-sign-in";
 }
 /** managedBy: the enrolled organisation has not approved this server, so it
  * stays configured but never reaches bots. */
@@ -63,6 +69,8 @@ interface ProbeResult {
   ok: boolean;
   tools?: Array<{ name: string; description?: string }>;
   error?: string;
+  /** the server answered 401 and offers an OAuth sign-in */
+  auth?: "required";
 }
 
 interface McpMessage {
@@ -162,6 +170,9 @@ export function McpServersPanel() {
   const [error, setError] = useState<string | McpMessage | null>(null);
   const [notice, setNotice] = useState<(McpMessage & { stateKey?: LocaleKey }) | null>(null);
   const [probe, setProbe] = useState<Record<string, ProbeResult>>({});
+  /** the server whose browser sign-in is open, and how to cancel it */
+  const [signingIn, setSigningIn] = useState<string | null>(null);
+  const signInAbort = useRef<AbortController | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const loadGeneration = useRef(0);
@@ -319,6 +330,49 @@ export function McpServersPanel() {
       setBusy(null);
     }
   };
+
+  const signIn = async (server: McpServerListing) => {
+    const controller = new AbortController();
+    signInAbort.current = controller;
+    setSigningIn(server.name);
+    setError(null);
+    setNotice(null);
+    setProbe((current) => {
+      const next = { ...current };
+      delete next[server.name];
+      return next;
+    });
+    try {
+      const result = await runMcpSignIn(server.name, { api, open: openExternalLink, signal: controller.signal });
+      if (result.phase === "succeeded") setNotice({ key: "mcp.auth.done", params: { name: server.name } });
+      else if (result.phase !== "cancelled") {
+        setProbe((current) => ({ ...current, [server.name]: { ok: false, error: result.message || t("mcp.auth.failed") } }));
+      }
+    } catch (cause) {
+      setProbe((current) => ({ ...current, [server.name]: { ok: false, error: cause instanceof Error ? cause.message : String(cause) } }));
+    } finally {
+      if (signInAbort.current === controller) signInAbort.current = null;
+      setSigningIn(null);
+      void load();
+    }
+  };
+
+  const signOut = async (server: McpServerListing) => {
+    setBusy(`signout:${server.name}`);
+    loadGeneration.current += 1;
+    setError(null);
+    try {
+      const result = await api(`/api/mcp/servers/${server.name}/sign-out`, { method: "POST" });
+      setServers(result.servers ?? []);
+      updateMcpServers(result.servers ?? []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  useEffect(() => () => signInAbort.current?.abort(), []);
 
   const remove = async (server: McpServerListing) => {
     if (!window.confirm(t("mcp.removeConfirm", { name: server.name }))) return;
@@ -575,6 +629,8 @@ export function McpServersPanel() {
           <div className="mt-5 space-y-3">
             {servers.map((server) => {
               const result = probe[server.name];
+              const auth = isRemoteMcpListing(server) ? server.auth : undefined;
+              const canSignIn = isRemoteMcpListing(server) && (auth === "needs-sign-in" || result?.auth === "required");
               return (
                 <div key={server.name} className="rounded-2xl border border-hairline/50 bg-card px-4 py-4 sm:px-5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -585,6 +641,7 @@ export function McpServersPanel() {
                       <div className="flex items-center gap-2">
                         <span className="truncate text-[14px] font-medium text-ink">{server.name}</span>
                         <span className={cn("rounded-full px-2 py-0.5 text-[10.5px]", server.enabled ? "bg-success/10 text-success" : "bg-raised text-ink-secondary")}>{t(server.enabled ? "mcp.badge.on" : "mcp.badge.off")}</span>
+                        {auth && <span className={cn("rounded-full px-2 py-0.5 text-[10.5px]", auth === "signed-in" ? "bg-success/10 text-success" : "bg-warning/10 text-warning")}>{t(auth === "signed-in" ? "mcp.auth.signedIn" : "mcp.auth.needsSignIn")}</span>}
                         {server.managedBy && <span className="rounded-full bg-raised px-2 py-0.5 text-[10.5px] text-ink-secondary">{t("policy.managedBy", { organization: server.managedBy })}</span>}
                       </div>
                       {server.managedBy && <div className="mt-1 text-[11.5px] text-ink-secondary">{t("policy.mcpBlocked", { organization: server.managedBy })}</div>}
@@ -594,6 +651,19 @@ export function McpServersPanel() {
                         : server.envKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.secretsSaved", { keys: server.envKeys.join(", ") })}</div>}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
+                      {signingIn === server.name ? (
+                        <button type="button" onClick={() => signInAbort.current?.abort()} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">
+                          <Loader2 size={14} className="animate-spin" /> {t("mcp.auth.cancel")}
+                        </button>
+                      ) : canSignIn ? (
+                        <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void signIn(server)} className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-2 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-40">
+                          <LogIn size={14} /> {t("mcp.auth.signIn")}
+                        </button>
+                      ) : auth === "signed-in" ? (
+                        <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void signOut(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
+                          {busy === `signout:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />} {t("mcp.auth.signOut")}
+                        </button>
+                      ) : null}
                       <button type="button" disabled={busy !== null} onClick={() => void test(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
                         {busy === `test:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />} {t("mcp.test")}
                       </button>
@@ -607,9 +677,14 @@ export function McpServersPanel() {
                       <button type="button" disabled={busy !== null} onClick={() => void remove(server)} className="rounded-lg p-2 text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40" aria-label={t("mcp.removeAria", { name: server.name })}><Trash2 size={14} /></button>
                     </div>
                   </div>
-                  {result && (
-                    <div role="status" className={cn("mt-3 rounded-lg px-3 py-2 text-[12px]", result.ok ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>
-                      {result.ok ? (
+                  {signingIn === server.name && (
+                    <div role="status" className="mt-3 flex items-center gap-2 rounded-lg bg-raised px-3 py-2 text-[12px] text-ink-secondary">
+                      <Loader2 size={13} className="animate-spin" /> {t("mcp.auth.waiting")}
+                    </div>
+                  )}
+                  {result && signingIn !== server.name && (
+                    <div role="status" className={cn("mt-3 rounded-lg px-3 py-2 text-[12px]", result.ok ? "bg-success/10 text-success" : result.auth === "required" ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger")}>
+                      {result.auth === "required" ? t("mcp.auth.required") : result.ok ? (
                         <span className="flex items-start gap-2"><CheckCircle2 size={14} className="mt-px shrink-0" /> {t("mcp.probe.connected")} {probeToolsLabel(result.tools)}</span>
                       ) : result.error}
                     </div>

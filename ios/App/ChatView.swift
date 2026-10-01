@@ -1346,6 +1346,8 @@ struct MessageRow: View {
     @State private var showingEdit = false
     /// The text being selected, and the sheet's presentation in one value.
     @State private var selecting: SelectableText?
+    /// A digest chip's parts, and its sheet's presentation.
+    @State private var digest: DigestSummary?
 
     private static let reactionChoices = ["👍", "❤️", "😂", "🎉", "👀"]
 
@@ -1463,6 +1465,7 @@ struct MessageRow: View {
             Text("This creates a new version and continues from there.")
         }
         .sheet(item: $selecting) { SelectableTextSheet(text: $0.text) }
+        .sheet(item: $digest) { DigestSheet(summary: $0) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("message-\(message.id)")
     }
@@ -1487,7 +1490,10 @@ struct MessageRow: View {
                 TextBubble(message: message, chat: chat, tailed: endsRun, openLink: openLink)
             }
         case .activity:
-            ActivityChip(tool: message.tool, threadRef: message.threadRef, openThread: openThread)
+            ActivityChip(
+                tool: message.tool, threadRef: message.threadRef, openThread: openThread,
+                outputIsProse: message.isTeammateReport
+            )
             // A turn that failed because Claude Code is too old for the
             // model: offer to run the updater for the engine this thread uses.
             if message.tool?.claudeUpdate == true, case let .bot(bot) = chat {
@@ -1503,8 +1509,28 @@ struct MessageRow: View {
         case .screen:
             ScreenShot(threadId: chat.threadId, message: message)
         case .digest:
-            // Filtered out of the transcript rows; never drawn.
-            EmptyView()
+            // Not a bubble: a chip saying the turn did something, opening
+            // onto what. `transcriptRows` already dropped the ones with
+            // nothing to say, and all of them when activity is hidden.
+            let summary = DigestSummary(text: message.text ?? "")
+            if !summary.isEmpty {
+                ReceiptChip(icon: "checklist", label: summary.chipLabel, hint: "Shows what this turn did") {
+                    digest = summary
+                }
+            }
+        case .routineRun:
+            if let card = message.routineRun {
+                RoutineRunCardView(
+                    card: card,
+                    at: message.date,
+                    tint: MausPalette.color(chat.color),
+                    openRun: routineRunOpener(card)
+                )
+            } else if let text = message.text, !text.isEmpty {
+                // A computer that sent the kind without its card: the text
+                // is written for exactly this reader.
+                TextBubble(message: message, chat: chat, tailed: endsRun, openLink: openLink)
+            }
         case .unknown:
             // A message kind from a newer computer. Almost everything the
             // harness sends carries `text`, so showing it is usually the
@@ -1515,6 +1541,15 @@ struct MessageRow: View {
                 TextBubble(message: message, chat: chat, tailed: endsRun, openLink: openLink)
             }
         }
+    }
+
+    /// A run thread is opened by the same route an "Opened thread" chip
+    /// takes, so it lands on screen without joining the thread list. No
+    /// route — the run was deleted, or the phone holds no bot owning it —
+    /// means no button.
+    private func routineRunOpener(_ card: RoutineRunCard) -> (() -> Void)? {
+        guard let openThread, let ref = session.state.routineExecutionRef(for: card) else { return nil }
+        return { openThread(ref) }
     }
 
     private func reactionGroups(_ reactions: [Reaction]) -> [(emoji: String, count: Int, mine: Bool)] {
@@ -1658,16 +1693,45 @@ struct ActivityChip: View {
     /// The thread this chip opened, when it opened one.
     var threadRef: ThreadRef? = nil
     var openThread: ((ThreadRef) -> Void)? = nil
+    /// The output is a teammate's report, not a tool log.
+    var outputIsProse = false
 
     var body: some View {
         if let tool {
+            // Only a teammate's report expands. Ordinary tool chips also
+            // carry raw output, and that log stays on the computer's side.
+            let output = outputIsProse ? tool.expandableOutput : nil
             let receipt = SkillExecutionReceiptView(
                 skillName: tool.name,
-                status: tool.ok.map { $0 ? "success" : "error" } ?? "running"
+                status: tool.ok.map { $0 ? "success" : "error" } ?? "running",
+                output: output ?? "",
+                outputIsProse: outputIsProse
             )
             .padding(.leading, 2)
 
-            if let threadRef, let openThread {
+            if output != nil, let threadRef, let openThread {
+                // The receipt's own button expands the report now, so the
+                // thread gets a link of its own beneath it rather than
+                // taking over the whole chip.
+                VStack(alignment: .leading, spacing: 4) {
+                    receipt
+                    Button {
+                        Haptics.selection()
+                        openThread(threadRef)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Open thread")
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Open thread \(threadRef.title)")
+                }
+            } else if let threadRef, let openThread {
                 // The receipt's own button has nothing to expand here, so the
                 // whole chip is the link to the thread it names.
                 Button {
@@ -1691,6 +1755,7 @@ struct ActivityChip: View {
 struct ReceiptChip: View {
     let icon: String
     let label: String
+    var hint = "Shows the full text"
     var open: (() -> Void)? = nil
 
     var body: some View {
@@ -1714,7 +1779,7 @@ struct ReceiptChip: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(label)
-            .accessibilityHint("Shows the full text")
+            .accessibilityHint(hint)
         }
     }
 }

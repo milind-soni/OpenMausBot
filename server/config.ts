@@ -1393,6 +1393,58 @@ interface InstanceCliUpdate {
   config: AppConfig;
 }
 
+/** Claude Code variables that choose where a turn goes and how it signs in.
+ * An instance that sets any of them (a router, a gateway, a cloud platform)
+ * owns that routing and credential pair outright. */
+const CLAUDE_ROUTING_ENV = [
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_CUSTOM_HEADERS",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+] as const;
+
+/** Whether a Claude instance brings its own endpoint or credential. The
+ * workspace Anthropic key must never reach it: the key would be sent as
+ * x-api-key to that instance's host (a third-party router), or would
+ * silently re-route its turns to the workspace URL. */
+export function claudeInstanceOwnsRouting(environment: Record<string, string> | undefined): boolean {
+  return CLAUDE_ROUTING_ENV.some((key) => typeof environment?.[key] === "string" && environment[key] !== "");
+}
+
+const sameUrl = (a: string, b: string) => a.trim().replace(/\/+$/u, "") === b.trim().replace(/\/+$/u, "");
+
+/** Whether an instance brings its own endpoint or credential, so the
+ * workspace key for its driver must never reach it: that key would be sent
+ * to the instance's own host (a third-party router or proxy). The same rule
+ * as a Claude router instance, for the API-key engines. An instance on the
+ * workspace's own endpoint with nothing of its own still gets the key. */
+export function instanceOwnsRouting(cfg: AppConfig, entry: { driver: string; config?: unknown; environment?: Record<string, string> }): boolean {
+  const config = typeof entry.config === "object" && entry.config !== null && !Array.isArray(entry.config)
+    ? entry.config as Record<string, unknown>
+    : {};
+  const own = (value: unknown) => typeof value === "string" && value.trim() !== "";
+  const ownUrl = (...workspace: Array<string | undefined>) => own(config.url)
+    && !workspace.some((url) => url !== undefined && sameUrl(config.url as string, url));
+  switch (entry.driver) {
+    case "claudeAgent":
+      return claudeInstanceOwnsRouting(entry.environment);
+    case "openai-compat":
+      return own(config.key) || own(entry.environment?.OPENAI_COMPAT_API_KEY)
+        || (own(config.apiKeyEnv) && config.apiKeyEnv !== "OPENAI_COMPAT_API_KEY")
+        || ownUrl(cfg.openaiCompat?.url || process.env.OPENAI_COMPAT_URL || "https://openrouter.ai/api/v1");
+    case "mistral":
+      return own(entry.environment?.MISTRAL_API_KEY) || ownUrl("https://api.mistral.ai/v1");
+    case "grok":
+      return own(entry.environment?.XAI_API_KEY) || (own(config.apiKeyEnv) && config.apiKeyEnv !== "XAI_API_KEY")
+        || ownUrl("https://api.x.ai/v1", cfg.xai?.url);
+    default:
+      return false;
+  }
+}
+
 /** The credential env instanceConfigs() injects for one driver at runtime.
  * Each secret goes only to the driver that actually reads it: the API-key
  * Grok driver reads XAI_API_KEY, the Computer driver reads BOX_TOKEN, and
@@ -1495,7 +1547,10 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     const entry = { ...sourceEntry };
     map[id] = entry;
     const environment = { ...entry.environment };
-    for (const [key, value] of injectedEnvironment(cfg, entry.driver)) environment[key] = value;
+    const ownsRouting = instanceOwnsRouting(cfg, entry);
+    if (!ownsRouting) {
+      for (const [key, value] of injectedEnvironment(cfg, entry.driver)) environment[key] = value;
+    }
     entry.environment = environment;
     // The driver URL is configuration, not a credential. Environment is
     // intentionally not consulted by ProviderRegistry when it decodes a

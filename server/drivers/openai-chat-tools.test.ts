@@ -626,12 +626,12 @@ describe("structured tool execution boundaries", () => {
     expect(f.requests).toHaveLength(1);
   });
 
-  it("accumulates interleaved argument fragments and pairs both results with their original call IDs", async () => {
+  it("accepts null continuation fields while accumulating interleaved calls", async () => {
     const f = await fixture((_body, response, round) => {
       if (round > 1) return answer(response);
       sse(response, [
         chunk({ tool_calls: [toolCall("audit_write", '{"name":"first",', "call_first"), { ...toolCall("audit_write", '{"name":"second",', "call_second"), index: 1 }] }),
-        chunk({ tool_calls: [{ index: 1, function: { arguments: '"value":"two"}' } }] }),
+        chunk({ tool_calls: [{ index: 1, id: null, type: null, function: { name: null, arguments: '"value":"two"}' } }] }),
         chunk({ tool_calls: [{ index: 0, function: { arguments: '"value":"one"}' } }] }, "tool_calls"),
       ]);
     });

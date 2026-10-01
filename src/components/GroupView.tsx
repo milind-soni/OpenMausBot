@@ -24,6 +24,7 @@ import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { CompactionChip, DigestChip } from "./DigestChip";
 import { roomActivityVisible } from "@/lib/room-activity";
+import { StatusActivityRow } from "@/components/StatusActivityRow";
 import { normalizeState } from "@/lib/mascot";
 import { defaultResponderName, effectiveDefaultResponder, groupResponseHint, jevRoomRoutingOn } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -45,7 +46,7 @@ import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
 import { ApprovalCard } from "./ApprovalCard";
 import { QuestionCard } from "./QuestionCard";
 import { ManageMembersPanel } from "./ManageMembersPanel";
-import { groupActivityRuns } from "@/lib/activity-runs";
+import { groupActivityRuns, isStatusActivity } from "@/lib/activity-runs";
 import { ActivityRun } from "./ActivityRun";
 import { useDesktopCapabilities, useCaptionChrome } from "./DesktopCapabilities";
 import { cn } from "@/lib/cn";
@@ -281,7 +282,7 @@ export const Transcript = memo(function Transcript({
             </div>
           ) : m.kind === "activity" && m.tool ? (
             roomActivityVisible(m, showToolCalls) ? (
-              <RoomToolChip message={m} roomId={group.id} />
+              isStatusActivity(m) ? <StatusActivityRow message={m} /> : <RoomToolChip message={m} roomId={group.id} />
             ) : null
           ) : m.kind === "compaction" ? (
             <CompactionChip message={m} />

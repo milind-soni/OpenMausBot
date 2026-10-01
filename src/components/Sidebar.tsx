@@ -1,7 +1,7 @@
 import { track } from "@/lib/analytics";
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { approvalCardOutcome } from "./ApprovalCard";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import {
   Activity,
@@ -64,10 +64,13 @@ import {
   loadSectionOrder,
   loadSidebarAttentionPinned,
   loadSidebarDensity,
+  loadSidebarWidth,
+  clampSidebarWidth,
   saveCollapsedSections,
   saveSectionOrder,
   saveSidebarAttentionPinned,
   saveSidebarDensity,
+  saveSidebarWidth,
   toggleCollapsedSection,
   type SidebarDensity,
 } from "@/lib/sidebar-preferences";
@@ -1631,6 +1634,26 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   } | null>(null);
   const [query, setQuery] = useState("");
   const [density, setDensityState] = useState<SidebarDensity>(() => loadSidebarDensity());
+  const defaultWidth = density === "compact" ? 272 : 320;
+  const sidePanelOpen = state.computerOpen || state.inspectorOpen;
+  const maxSidebarWidth = sidePanelOpen ? defaultWidth : Math.min(480, window.innerWidth - 320);
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(() => loadSidebarWidth());
+  const widthRef = useRef(sidebarWidth);
+  const [resizing, setResizing] = useState(false);
+  const resizeTo = (width: number) => {
+    const next = clampSidebarWidth(width, sidePanelOpen ? defaultWidth + 320 : window.innerWidth);
+    if (next === Math.round(sidebarRef.current?.getBoundingClientRect().width ?? defaultWidth)) return null;
+    widthRef.current = next;
+    sidebarRef.current?.style.setProperty("--sidebar-width", `${next}px`);
+    return next;
+  };
+  const finishResize = () => {
+    setResizing(false);
+    if (widthRef.current !== null) {
+      setSidebarWidth(widthRef.current);
+      saveSidebarWidth(widthRef.current);
+    }
+  };
   const [lastExpandedDensity, setLastExpandedDensity] = useState<Exclude<SidebarDensity, "icons">>(() => {
     const saved = loadSidebarDensity();
     return saved === "icons" ? "comfortable" : saved;
@@ -1901,9 +1924,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       aria-label={t("sidebar.aria")}
       data-native-view-overlay
       data-sidebar
+      style={{ "--sidebar-width": `${widthRef.current ?? defaultWidth}px` } as CSSProperties}
       className={cn(
-        "flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200",
-        density === "icons" ? "w-[80px]" : density === "compact" ? "w-[272px]" : "w-[320px]",
+        "relative flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel",
+        resizing ? "transition-none" : "transition-[width] duration-200",
+        density === "icons" ? "w-[80px]" : density === "compact" ? "w-[272px] md:w-[var(--sidebar-width)]" : "w-[320px] md:w-[var(--sidebar-width)]",
+        sidePanelOpen ? density === "compact" ? "md:max-w-[272px]" : "md:max-w-[320px]" : "md:max-w-[calc(100vw-320px)]",
         // Below md only: the sidebar leaves the flow and slides in over the chat.
         // Scoped with max-md: rather than cancelled with md: on purpose — Tailwind
         // v4 emits the native `translate` property, and any value other than
@@ -2007,7 +2033,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 <div className={cn(
                   "absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
                   density === "icons" ? "left-0" : "right-0",
-                  density === "compact" ? "w-60" : "w-72",
+                  density === "icons" ? "w-72" : density === "compact" ? "w-60 md:w-[min(240px,calc(var(--sidebar-width)_-_32px))]" : "w-72 md:w-[min(288px,calc(var(--sidebar-width)_-_32px))]",
                   attentionMotion.className,
                 )} {...attentionMotion.exitProps}>
                   <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
@@ -2105,6 +2131,43 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           )}
         </div>
       </div>
+
+      {density !== "icons" && <div
+        role="separator"
+        aria-label={t("sidebar.resize")}
+        aria-orientation="vertical"
+        aria-valuemin={240}
+        aria-valuemax={maxSidebarWidth}
+        aria-valuenow={Math.min(sidebarWidth ?? defaultWidth, maxSidebarWidth)}
+        tabIndex={0}
+        data-sidebar-resize
+        className="absolute inset-y-0 -right-1 z-20 hidden w-2 cursor-col-resize touch-none hover:bg-accent/20 focus-visible:bg-accent/30 md:block"
+        style={windowNoDragStyle}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setResizing(true);
+        }}
+        onPointerMove={(event) => {
+          if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+          const next = resizeTo(event.clientX - (sidebarRef.current?.getBoundingClientRect().left ?? 0));
+          if (next !== null) event.currentTarget.setAttribute("aria-valuenow", String(next));
+        }}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) finishResize();
+        }}
+        onPointerCancel={finishResize}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          const limit = sidePanelOpen ? defaultWidth : Math.min(480, window.innerWidth - 320);
+          const next = resizeTo(Math.min(widthRef.current ?? defaultWidth, limit) + (event.key === "ArrowRight" ? 16 : -16));
+          if (next === null) return;
+          setSidebarWidth(next);
+          saveSidebarWidth(next);
+        }}
+      />}
 
       <DesktopWorkspaceSwitcher compact={density === "icons"} cloudHome={state.config?.cloudHome === true} owner={cloudOwner} />
       <OrganizationIdentity compact={density === "icons"} />

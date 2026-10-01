@@ -71,6 +71,14 @@ const support: AcpSupport = {
   images: true,
   spawnArgs: () => [],
   selectModel: { configId: "model" },
+  // Google's server reads its new-session default from this variable
+  // (model_selection.get_default_model_id in agy_acp_server 1.1.1). Starting
+  // on OMB's model skips a switch that re-fetches the account's model list
+  // from Google: 1.3-1.8 s on every new or cold-resumed conversation.
+  sessionModelEnv: "AGY_ACP_DEFAULT_MODEL",
+  // configureSession sets the permission mode on every turn and nothing in
+  // the launch depends on it, so an approval change keeps the process.
+  sessionScopedApproval: true,
   resumeMethod: "resume",
   clientFileSystem: true,
   redactStderr: true,

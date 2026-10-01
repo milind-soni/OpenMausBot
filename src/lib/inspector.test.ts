@@ -16,6 +16,11 @@ describe("summarizeRuntime", () => {
     });
     expect(summarizeRuntime({ ...base, type: "turn.completed", ok: false }).tone).toBe("error");
     expect(summarizeRuntime({ ...base, type: "runtime.error", message: "boom", setup: true }).summary).toBe("setup: boom");
+    // a notice did not fail the turn, so it is not drawn as an error
+    expect(summarizeRuntime({ ...base, type: "runtime.notice", message: "OpenCode no longer offers x" })).toEqual({
+      summary: "notice: OpenCode no longer offers x",
+      tone: "plain",
+    });
   });
 
   it("labels computer waits and their outcomes", () => {

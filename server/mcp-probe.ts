@@ -5,6 +5,7 @@ import {
 } from "./config.ts";
 import { createLineSplitter } from "./mcp-bridge.ts";
 import { McpHttpError, RemoteMcpClient } from "./mcp-http.ts";
+import { discoverMcpAuth } from "./mcp-oauth-discovery.ts";
 import { isRemoteMcpServer, type StoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "./mcp-registry.ts";
 import { killCliTree, spawnCli } from "./procs.ts";
 
@@ -15,7 +16,9 @@ export interface McpProbeTool {
 
 export type McpProbeResult =
   | { ok: true; tools: McpProbeTool[] }
-  | { ok: false; error: string };
+  | { ok: false; error: string; auth?: "required" };
+
+export const SIGN_IN_REQUIRED = "This server needs you to sign in.";
 
 const MAX_STDOUT_BYTES = 1_048_576;
 const MAX_TOOLS = 100;
@@ -97,6 +100,15 @@ async function probeRemoteMcpServer(
   } catch (error) {
     if (signal?.aborted) return { ok: false, error: publicProbeError("cancelled") };
     if (timeout.aborted) return { ok: false, error: publicProbeError("timeout") };
+    // A 401 that names an OAuth sign-in is not a wrong address or header:
+    // the person has to sign in. Anything else keeps the plain status.
+    if (error instanceof McpHttpError && error.status === 401) {
+      const discovery = AbortSignal.timeout(5_000);
+      const meta = await discoverMcpAuth(server.url, error.wwwAuthenticate ?? null, {
+        signal: signal ? AbortSignal.any([signal, discovery]) : discovery,
+      }).catch(() => null);
+      if (meta) return { ok: false, auth: "required", error: SIGN_IN_REQUIRED };
+    }
     if (error instanceof McpHttpError && error.kind === "status") {
       return { ok: false, error: `The server answered HTTP ${error.status}. Check the address and headers.` };
     }

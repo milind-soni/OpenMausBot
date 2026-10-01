@@ -2,7 +2,7 @@
 // errors. The command has one inline copy action and one primary next step;
 // unusable model lists stay out of the way until the engine is ready.
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Copy, Download, ExternalLink, Loader2, LogIn, TerminalSquare } from "lucide-react";
+import { AlertTriangle, Check, Copy, Download, ExternalLink, KeyRound, Loader2, LogIn, TerminalSquare } from "lucide-react";
 import { api, type EngineInstall, type InstanceInfo, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -385,6 +385,35 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
   );
 }
 
+/** An API engine has nothing to install: its key lives in Settings →
+ * Connections, so the card says why it is not ready and opens that page. */
+function ConnectionsSetup({ instance, className, unframed }: { instance: InstanceInfo; className?: string; unframed: boolean }) {
+  const { dispatch } = useStore();
+  return (
+    <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-inset text-ink-secondary">
+          <KeyRound size={14} />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold text-ink">{t("engineSetup.notReady", { name: instance.displayName })}</div>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+            {instance.snapshot.reason ?? instance.install?.signInCommand ?? t("engineSetup.connectionsDesc")}
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
+        className="mt-3 flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-[12px] font-semibold text-white hover:brightness-110"
+      >
+        <KeyRound size={12} />
+        {t("engineSetup.openConnections")}
+      </button>
+    </div>
+  );
+}
+
 export function EngineSetup({
   instance,
   className,
@@ -432,6 +461,10 @@ export function EngineSetup({
       : signInCommand
         ? t("engineSetup.installDescSignIn")
         : t("engineSetup.installDesc"));
+
+  if (install?.settings === "connections" && !instance.snapshot.authenticationUnavailableReason) {
+    return <ConnectionsSetup instance={instance} className={className} unframed={unframed} />;
+  }
 
   // Some engines are configured elsewhere (for example, a cloud computer
   // token) and intentionally have no install descriptor.

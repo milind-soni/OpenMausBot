@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
+import com.openmausbot.companion.core.routineRunPreview
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.PendingApproval
 import com.openmausbot.companion.core.forTask
@@ -120,7 +121,8 @@ private fun CompanionState.workingLine(threadId: String): String {
 }
 
 private fun CompanionState.lastLine(threadId: String): String {
-    val last = visibleTranscript(threadId).lastOrNull() ?: return ""
+    // The digest follows every reply and says nothing on its own.
+    val last = visibleTranscript(threadId).lastOrNull { it.kind != Message.Kind.DIGEST } ?: return ""
     return when (last.kind) {
         Message.Kind.TEXT, Message.Kind.UNKNOWN -> last.text.orEmpty()
         Message.Kind.OPTIONS -> last.card?.title.orEmpty()
@@ -128,6 +130,7 @@ private fun CompanionState.lastLine(threadId: String): String {
         Message.Kind.SCREEN -> "Screenshot"
         Message.Kind.DIGEST -> ""
         Message.Kind.COMPACTION -> last.compaction?.chipText ?: last.text.orEmpty()
+        Message.Kind.ROUTINE_RUN -> last.routineRunPreview
     }
 }
 

@@ -18,7 +18,7 @@ import { DroidAgentDriver } from "./droid.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { HermesAgentDriver } from "./hermes.ts";
 import { KimiAgentDriver } from "./kimi.ts";
-import { createOpenCodeDriver } from "./opencode-go.ts";
+import { createOpenCodeDriver, openCodeOwnedDirectories } from "./opencode-go.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
@@ -97,9 +97,13 @@ describe("remaining ACP approval mappings", () => {
           expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual([...argv, ...(native?.[approvalMode] ?? [])]);
           if (driver === OpenCodeDriver) {
             const permission = JSON.parse(JSON.parse(readFileSync(dump, "utf8")).env.OPENCODE_PERMISSION);
-            expect(permission).toMatchObject({ external_directory: approvalMode === "full" ? "allow" : "ask" });
-            if (approvalMode === "full") expect(permission).toMatchObject({ "*": "allow", read: "allow", bash: "allow", edit: "allow" });
-            else expect(permission).toEqual({ external_directory: "ask" });
+            if (approvalMode === "full") expect(permission).toMatchObject({ "*": "allow", external_directory: "allow", read: "allow", bash: "allow", edit: "allow" });
+            // the person's own rule stays in force; only the folders OpenMaus
+            // owns (attachments here: this turn names no bot) are allowed
+            else expect(permission).toEqual({ external_directory: {
+              "*": "ask",
+              ...Object.fromEntries(openCodeOwnedDirectories().flatMap((directory) => [[directory, "allow"], [join(directory, "*"), "allow"]])),
+            } });
           }
         }
         // Agent processes are pooled per spawn contract: a turn whose mode

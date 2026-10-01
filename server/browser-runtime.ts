@@ -8,6 +8,16 @@ export interface BrowserSpawnSpec {
 }
 
 export const BROWSER_CONTROL_REFUSAL = "Browser tools are paused while a person controls this browser. Wait for them to hand control back; do not try another browser or execution tool.";
+/** Harness-owned recovery tool, advertised beside the engine's own tools. A
+ * phone or chat-only user has no Browser panel Restart button; without this
+ * an interrupted action refuses the bot's browser until the app restarts. */
+export const BROWSER_RESTART_TOOL = "restart_browser";
+const BROWSER_RESTART_TOOL_SPEC = {
+  name: BROWSER_RESTART_TOOL,
+  description: "Close and restart your browser. Use this only when a browser tool says a browser action was interrupted and the browser must be restarted. Open pages are closed; afterwards open the page you need again and check whether the interrupted action already happened before repeating it.",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+};
+const BROWSER_INTERRUPTED = `A browser action was interrupted. Restart this browser with the ${BROWSER_RESTART_TOOL} tool before continuing.`;
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 16_777_216;
 /** Startup, not per-request work: a cold engine spawn can exceed a tight
@@ -203,14 +213,22 @@ interface Gate {
   changed: Set<() => void>;
 }
 
+/** Closes one session's native browser daemon; true only when it is gone. */
+export type CloseBrowser = (session: string, spec: BrowserSpawnSpec) => Promise<boolean>;
+
 export class BrowserRuntime {
   private gates = new Map<string, Gate>();
   private clients = new Map<string, { key: string; client: BrowserClient }>();
+  /** Last advertised tools per session, so a turn that starts while the
+   * browser is uncertain still sees the tools it can use after recovering. */
+  private toolLists = new Map<string, unknown>();
   private options: { requestTimeoutMs: number; takeoverTimeoutMs: number; idleMs: number; maxPending: number; resultBudget: number };
+  private closeBrowser: CloseBrowser;
 
-  constructor(options: Partial<BrowserRuntime["options"]> = {}) {
+  constructor({ closeBrowser, ...options }: Partial<BrowserRuntime["options"]> & { closeBrowser?: CloseBrowser } = {}) {
     const budget = Number(process.env.OMB_BROWSER_RESULT_BUDGET);
     this.options = { requestTimeoutMs: 120_000, takeoverTimeoutMs: 15_000, idleMs: 60_000, maxPending: 16, resultBudget: Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_BROWSER_RESULT_BUDGET, ...options };
+    this.closeBrowser = closeBrowser ?? (async () => false);
   }
 
   private gate(session: string): Gate {
@@ -234,7 +252,7 @@ export class BrowserRuntime {
   async withAgentAction<T>(session: string, fn: () => Promise<T>): Promise<T> {
     const gate = this.gate(session);
     if (gate.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
-    if (gate.uncertain) throw new Error("A browser action was interrupted. Restart this browser before continuing.");
+    if (gate.uncertain) throw new Error(BROWSER_INTERRUPTED);
     if (gate.closing) throw new Error("The browser is closing. Try again shortly.");
     gate.agents++;
     try {
@@ -253,9 +271,20 @@ export class BrowserRuntime {
     // tools/list bypasses withAgentAction (a human may hold control), so it
     // must refuse the closing window itself or its client outlives restart().
     if (method !== "tools/call" && this.gate(session).closing) throw new Error("The browser is closing. Try again shortly.");
+    if (method === "tools/call" && params && typeof params === "object" && (params as { name?: unknown }).name === BROWSER_RESTART_TOOL) {
+      beforeDispatch?.();
+      await this.agentRestart(session, () => this.closeBrowser(session, spec));
+      beforeDispatch?.(); // A turn revoked while the browser closed receives no result.
+      return { content: [{ type: "text", text: "Browser restarted. Open pages were closed; open the page you need again and check whether the interrupted action already happened before repeating it." }] };
+    }
     // Uncertainty survives client replacement and never self-resolves: refuse
-    // every new browser request until an explicit restart clears it.
-    if (this.gate(session).uncertain) throw new Error("A browser action was interrupted. Restart this browser before continuing.");
+    // every new browser request until an explicit restart clears it. Listing
+    // never reaches the engine; it answers from the last list so the restart
+    // tool is reachable and the engine's tools are there once it succeeds.
+    if (this.gate(session).uncertain) {
+      if (method === "tools/list") return withRestartTool(this.toolLists.get(session) ?? { tools: [] });
+      throw new Error(BROWSER_INTERRUPTED);
+    }
     const invoke = async () => {
       const key = JSON.stringify([spec.command, spec.args, Object.entries(spec.env).sort(([a], [b]) => a.localeCompare(b))]);
       let entry = this.clients.get(session);
@@ -279,7 +308,11 @@ export class BrowserRuntime {
         const request = method === "tools/call" ? stripHarnessOwnedArguments(params) : params;
         let result = await entry.client.rpc(method, request);
         beforeDispatch?.(); // A turn revoked while the tool ran receives no result.
-        if (method === "tools/list") return slimBrowserToolList(result);
+        if (method === "tools/list") {
+          const tools = withRestartTool(slimBrowserToolList(result));
+          this.toolLists.set(session, tools);
+          return tools;
+        }
         const toolName = request && typeof request === "object" && typeof (request as { name?: unknown }).name === "string" ? (request as { name: string }).name : undefined;
         if (toolName === "agent_browser_open" && result && typeof result === "object" &&
             (result as { isError?: boolean }).isError !== true) {
@@ -428,6 +461,31 @@ export class BrowserRuntime {
     }
   }
 
+  /** The agent's own recovery, for a turn with no Browser panel to press
+   * Restart in. The same barrier as restart() — the native browser must
+   * close — but it never takes a person's hold, and a failed close leaves no
+   * owner behind that would lock a person out of the panel. */
+  async agentRestart(session: string, closeBrowser: () => Promise<boolean>): Promise<void> {
+    const gate = this.gate(session);
+    if (gate.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+    if (gate.closing || gate.releasing || gate.agents || gate.humans) throw new Error("The browser is busy. Wait for current work to finish before restarting.");
+    gate.ready = false;
+    gate.closing = true;
+    this.changed(gate);
+    try {
+      if (!await closeBrowser()) throw new Error("The browser could not be closed. Ask the person to press Restart in the Browser panel of OpenMausBot on their computer, or to restart OpenMausBot.");
+      await this.clients.get(session)?.client.stop();
+      await this.clients.get(session)?.client.stop(); // see restart()
+      gate.uncertain = false;
+    } catch (error) {
+      gate.uncertain = true;
+      throw error;
+    } finally {
+      gate.closing = false;
+      this.changed(gate);
+    }
+  }
+
   /** Call after the underlying browser is closed when recovering an uncertain
    * action. This closes the MCP transport, not saved logins or profile files. */
   async close(session: string): Promise<void> {
@@ -440,10 +498,16 @@ export class BrowserRuntime {
     await this.clients.get(session)?.client.stop();
     gate.closing = false;
     this.changed(gate);
-    if (!gate.owner && !gate.agents && !gate.humans) this.gates.delete(session);
+    if (!gate.owner && !gate.agents && !gate.humans) { this.gates.delete(session); this.toolLists.delete(session); }
   }
 
   async closeAll(): Promise<void> {
     await Promise.all([...new Set([...this.clients.keys(), ...this.gates.keys()])].map((session) => this.close(session)));
   }
+}
+
+function withRestartTool(result: unknown): unknown {
+  if (!result || typeof result !== "object" || !Array.isArray((result as { tools?: unknown }).tools)) return result;
+  const tools = ((result as { tools: unknown[] }).tools).filter((tool) => (tool as { name?: unknown } | null)?.name !== BROWSER_RESTART_TOOL);
+  return { ...result, tools: [...tools, BROWSER_RESTART_TOOL_SPEC] };
 }

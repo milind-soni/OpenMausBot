@@ -123,6 +123,17 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     /// model; the phone offers to run Claude's updater. Absent on older
     /// computers, so it stays optional.
     public var claudeUpdate: Bool?
+    /// What the step returned, when the computer kept it. A teammate's
+    /// "X replied" chip carries the report itself here (redacted, ≤2000
+    /// characters) so it can be read without opening the teammate's thread.
+    /// Previews still read `name`: the chip label is the summary.
+    public var output: String?
+
+    /// The output worth expanding the chip for; nil when there is none.
+    public var expandableOutput: String? {
+        guard let text = output?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return text
+    }
 }
 
 /// A compaction record: from this message on, rebuilds of the thread's
@@ -192,11 +203,15 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
         case text, options, activity, screen, secret
         /// The harness's receipt of a settled turn: "[digest] · tools: … ·
         /// reply: …". Desktop shows it only behind "show tool calls"; it is
-        /// a log line, not something anyone said, so the phone never draws,
-        /// previews, or speaks it. Named so it cannot fall into `unknown`,
-        /// which draws whatever text a message carries.
+        /// a log line, not something anyone said, so the phone draws it as
+        /// a chip that opens the parts (`DigestSummary`) and never previews
+        /// or speaks it. Named so it cannot fall into `unknown`, which draws
+        /// whatever text a message carries as a bubble.
         case digest
         case compaction
+        /// One background routine run, upserted into the thread that asked
+        /// for it and patched as the run moves. `routineRun` carries the card.
+        case routineRun = "routine.run"
         /// A kind this build has never heard of.
         ///
         /// Not decorative. `kind` is not optional, so without this a single
@@ -242,6 +257,10 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var threadRef: ThreadRef?
     /// `kind == .compaction`: the record itself.
     public var compaction: Compaction?
+    /// `kind == .routineRun`: the run's status and what it said. Absent
+    /// leaves the message's text, which the computer writes for exactly
+    /// the clients that cannot read the card.
+    public var routineRun: RoutineRunCard?
     /// The message this one follows; nil at the thread root. Two messages
     /// sharing a parent are a fork.
     public var parentId: String?
@@ -263,6 +282,12 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var attachments: [MessageImageAttachment]?
 
     public var date: Date { Date(timeIntervalSince1970: at / 1000) }
+
+    /// A teammate's reply chip carrying its report: someone else's words,
+    /// so they read as prose in full rather than as a clipped tool log.
+    public var isTeammateReport: Bool {
+        kind == .activity && (threadRef != nil || comm != nil) && tool?.expandableOutput != nil
+    }
 }
 
 // MARK: - Bots and rooms

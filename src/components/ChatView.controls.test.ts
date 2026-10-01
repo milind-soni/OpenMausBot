@@ -129,6 +129,28 @@ describe("thread control placement", () => {
       fixture.showToolCalls = false;
     }
   });
+  // A bot saved on a retired model runs another one; with Tool calls off
+  // (the default) the notice saying so was dropped with the tool steps.
+  it.each([false, true])("shows a model notice as a status row when tool calls are %s", (showToolCalls) => {
+    fixture.showToolCalls = showToolCalls;
+    const explanation = "OpenCode no longer offers opencode/x-preview-f-free, so this conversation uses opencode/big-pickle.";
+    const messages: Bot["messages"] = [
+      { id: "read", role: "bot", kind: "activity", at: 1, tool: { name: "Read", ok: true } },
+      { id: "notice", role: "bot", kind: "activity", at: 2, tool: { name: `notice: ${explanation}`, ok: true } },
+      { id: "bash", role: "bot", kind: "activity", at: 3, tool: { name: "Bash", ok: true } },
+      { id: "reply", role: "bot", kind: "text", at: 4, text: "ok" },
+    ];
+    try {
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false, messages } }));
+      expect(markup).toContain('data-mid="notice"><div role="status"');
+      expect(markup.match(/no longer offers/g)).toHaveLength(1);
+      expect(markup).not.toContain(`notice: ${explanation}`);
+      if (!showToolCalls) expect(markup).not.toContain('data-testid="tool-activity"');
+    } finally {
+      fixture.showToolCalls = false;
+    }
+  });
+
   it("offers the matching macOS Settings and relaunch actions only for a named CUA permission failure", () => {
     fixture.platform = "darwin";
     fixture.localMessage = "Screen Recording required";

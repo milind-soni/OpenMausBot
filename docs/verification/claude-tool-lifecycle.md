@@ -41,6 +41,36 @@ is refused with 401 even when its request body arrives late — is covered by
 thread and rechecks late bodies"); every internal capability, the browser's
 included, passes through that same gate.
 
+A message steered into a running Claude turn is folded in only before a
+model call that has not started yet. Words that land during the turn's last
+call are queued and run as the CLI's next native turn, in the same process
+and on the same tools. The driver holds that turn open until the queued
+words are answered: one `turn.completed`, the bot busy throughout, and the
+turn's internal tool pass valid until then — never revoked under a running
+continuation and never re-issued. From Claude Code 2.1.282 the driver runs
+the CLI with `--replay-user-messages`: the CLI echoes each stdin message, with
+the uuid it was sent with, as a model call takes it in. A steer written during
+a tool call is echoed right after that tool's result; one written during the
+turn's last model call is echoed only after the turn's `result`, as its own
+turn starts. A `result` is held when the CLI reports `queued_turn_count` above
+zero, or while a steer has not been echoed (2.1.282 reports 0 for words
+waiting on stdin, so 0 decides nothing). On an older CLI nothing says whether
+a steer was folded in, so every steer since the previous hold holds the
+result, and a folded one costs the grace below. A held result stands as the
+turn's if no `init` follows within 2 s (the words were folded after all), or
+if the continuation's `init` is followed by 30 s of silence. Peer asides and
+the queue-steer
+buttons go through the same `steer()`, so an aside landing in the last
+model call extends the turn into its continuation the same way. The CLI's
+`total_cost_usd` is a running total, so the turn's cost is the latest
+figure; per-turn token usage adds up.
+
+```sh
+pnpm exec vitest run server/drivers/claude.test.ts -t "could not fold"
+pnpm exec vitest run server/drivers/claude.test.ts -t "queued_turn_count|tool result did not take in|echoed as taken in|does not echo|held window|stays silent|steered continuation|whole grace"
+pnpm exec vitest run server/steer-e2e.test.ts -t "internal tool pass"
+```
+
 For end-to-end verification, launch the isolated fixture described in
 [README.md](README.md), then follow [Chat turns](chat-turns.md). Never use the
 customer's running app to create test bots, approve requests, or rotate tools.

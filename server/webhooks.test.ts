@@ -18,7 +18,15 @@ function harness() {
   const queued: Array<Record<string, unknown>> = [];
   const cancelled: Array<{ id: string; message: string }> = [];
   const emitted: unknown[] = [];
-  const posted: Array<{ botId: string; text: string }> = [];
+  const posted: Array<{ botId: string; threadId: string; text: string }> = [];
+  // Mirrors index.ts's resolvePostThread: create-on-first-use, reused
+  // forever after via the manager's own trigger.resultsThreadId
+  // bookkeeping. `postThreadCreations` records only the *new* allocations
+  // (this fake's stand-in for a real server's store.createTask calls) so a
+  // test can prove the destination is minted once and reused thereafter,
+  // even though the resolver itself is invoked on every dispatch.
+  const postThreads = new Map<string, string>();
+  const postThreadCreations: string[] = [];
   const options: WebhookManagerOptions = {
     file,
     now: () => now,
@@ -30,7 +38,17 @@ function harness() {
     },
     cancelQueued: (id, message) => cancelled.push({ id, message }),
     pendingRuns: () => pending,
-    post: (botId, text) => posted.push({ botId, text }),
+    post: (botId, threadId, text) => posted.push({ botId, threadId, text }),
+    resolvePostThread: (trigger, forceNew) => {
+      if (!forceNew) {
+        const existing = postThreads.get(trigger.id);
+        if (existing) return existing;
+      }
+      const threadId = `post-thread-${postThreadCreations.length + 1}`;
+      postThreads.set(trigger.id, threadId);
+      postThreadCreations.push(threadId);
+      return threadId;
+    },
   };
   const manager = new WebhookManager(options);
   return {
@@ -41,6 +59,7 @@ function harness() {
     cancelled,
     emitted,
     posted,
+    postThreadCreations,
     setNow: (value: number) => (now = value),
     setBot: (value: typeof bot) => (bot = value),
     setPending: (value: number) => (pending = value),
@@ -127,7 +146,7 @@ describe("WebhookManager", () => {
     expect(h.manager.list()[0]).toMatchObject({ lastRunId: "run-1", deliveryCount: 1 });
   });
 
-  it("posts the payload text to the bot's chat instead of queuing a task when delivery is \"post\"", () => {
+  it("posts the payload text to the bot's chat in a stable dedicated thread when delivery is \"post\"", () => {
     const h = harness();
     const { webhook, secret } = h.manager.create({ name: "Brief", prompt: "", botId: "maus-1", delivery: "post" });
     const result = h.manager.receive(webhook.endpointId, secret, {
@@ -138,8 +157,8 @@ describe("WebhookManager", () => {
 
     expect(result).toEqual({ deliveryId: "evt-post-1", duplicate: false });
     expect(h.queued).toHaveLength(0);
-    expect(h.posted).toEqual([{ botId: "maus-1", text: "Morning brief: two calls today." }]);
-    expect(h.manager.list()[0]).toMatchObject({ delivery: "post", deliveryCount: 1 });
+    expect(h.posted).toEqual([{ botId: "maus-1", threadId: "post-thread-1", text: "Morning brief: two calls today." }]);
+    expect(h.manager.list()[0]).toMatchObject({ delivery: "post", deliveryCount: 1, resultsThreadId: "post-thread-1" });
     // a repeat of the same delivery id is deduplicated like any other webhook
     expect(h.manager.receive(webhook.endpointId, secret, { payload: { text: "again" }, deliveryId: "evt-post-1" })).toMatchObject({ duplicate: true });
     expect(h.posted).toHaveLength(1);
@@ -153,6 +172,48 @@ describe("WebhookManager", () => {
       .toThrow("cannot post");
     expect(h.queued).toHaveLength(0);
     expect(h.posted).toHaveLength(0);
+  });
+
+  it("rejects a post delivery instead of falling back to a shared thread when the server cannot resolve a destination", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({ name: "Brief", prompt: "", botId: "maus-1", delivery: "post" });
+    const without = new WebhookManager({ ...h.options, resolvePostThread: undefined });
+    expect(() => without.receive(webhook.endpointId, secret, { payload: { text: "hello" }, deliveryId: "evt-post-3" }))
+      .toThrow("could not resolve a destination thread");
+    expect(h.queued).toHaveLength(0);
+    expect(h.posted).toHaveLength(0);
+  });
+
+  // OpenMausBot#2071: a delivery:"post" webhook used to land in
+  // bot.threadId, the bot's CURRENTLY SELECTED task -- so a background
+  // brief/alert could land inside whatever live conversation the owner (or
+  // another automation) happened to have open at delivery time.
+  it("gives a delivery:\"post\" webhook one stable dedicated thread, independent of the bot's live selection, and it survives a restart (OpenMausBot#2071)", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({ name: "Brief", prompt: "", botId: "maus-1", delivery: "post" });
+
+    h.manager.receive(webhook.endpointId, secret, { payload: { text: "first" }, deliveryId: "evt-a" });
+    h.manager.receive(webhook.endpointId, secret, { payload: { text: "second" }, deliveryId: "evt-b" });
+
+    // resolvePostThread is invoked on every dispatch (mirroring routines'
+    // resolveResultsThread, called on every run) but only ever MINTS one
+    // destination for this trigger -- the second delivery reuses
+    // trigger.resultsThreadId, the same guarantee a real server gets from
+    // never calling store.createTask twice for the same webhook. Nothing
+    // here reads or depends on the bot's currently-selected thread at all.
+    expect(h.postThreadCreations).toEqual(["post-thread-1"]);
+    expect(h.posted).toEqual([
+      { botId: "maus-1", threadId: "post-thread-1", text: "first" },
+      { botId: "maus-1", threadId: "post-thread-1", text: "second" },
+    ]);
+
+    // A server restart re-hydrates the trigger from webhooks.json; the
+    // destination is read back from the persisted resultsThreadId, never
+    // recomputed.
+    const reloaded = new WebhookManager(h.options);
+    reloaded.receive(webhook.endpointId, secret, { payload: { text: "third" }, deliveryId: "evt-c" });
+    expect(h.postThreadCreations).toEqual(["post-thread-1"]);
+    expect(h.posted[2]).toEqual({ botId: "maus-1", threadId: "post-thread-1", text: "third" });
   });
 
   it("uses an authenticated task from the payload when default instructions are empty", () => {

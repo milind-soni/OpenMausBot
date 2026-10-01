@@ -17,9 +17,23 @@ export type TranscriptItem =
   | ActivityTranscriptItem
   | { kind: "turn"; id: string; turnId: string; label: string; messages: Message[] };
 
+/** A status row rather than a tool step: `recovery:` when automatic recovery
+ * changes this conversation's engine, `notice:` when the engine runs another
+ * model than the saved one. Both must remain visible and are never folded. */
+export function statusActivity(message: Message): { kind: "recovery" | "notice"; text: string } | null {
+  const name = message.kind === "activity" ? message.tool?.name : undefined;
+  if (name?.startsWith("recovery:")) return { kind: "recovery", text: name.slice("recovery:".length).trim() };
+  if (name?.startsWith("notice:")) return { kind: "notice", text: name.slice("notice:".length).trim() };
+  return null;
+}
+
 /** Recovery changes this conversation's engine and must remain visible. */
 export function isRecoveryActivity(message: Message): boolean {
-  return message.kind === "activity" && message.tool?.name.startsWith("recovery:") === true;
+  return statusActivity(message)?.kind === "recovery";
+}
+
+export function isStatusActivity(message: Message): boolean {
+  return statusActivity(message) !== null;
 }
 
 /** A step that may be folded away: finished, a real tool, and not a
@@ -29,7 +43,7 @@ export function isRecoveryActivity(message: Message): boolean {
 function foldable(message: Message): boolean {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool) return false;
-  if (message.comm || message.threadRef || isRecoveryActivity(message)) return false;
+  if (message.comm || message.threadRef || isStatusActivity(message)) return false;
   if (tool.ok !== true) return false;
   return !tool.name.startsWith("error:");
 }

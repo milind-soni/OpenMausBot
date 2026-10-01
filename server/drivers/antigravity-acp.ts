@@ -52,6 +52,8 @@ const REMOVED_ENVIRONMENT_KEYS = new Set([
   "CLOUDSDK_CORE_PROJECT",
   "AGY_ACP_CCPA_PROJECT",
   "AGY_ACP_ENABLE_OAUTH",
+  // OMB sets the new-session model itself (antigravity.ts sessionModelEnv).
+  "AGY_ACP_DEFAULT_MODEL",
   "GEMINI_HOME",
   "AGY_ACP_FORCE_FILE_STORAGE",
   "ANTIGRAVITY_HARNESS_PATH",

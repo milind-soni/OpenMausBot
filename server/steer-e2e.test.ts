@@ -27,6 +27,9 @@ posixOnly("mid-turn steering e2e", () => {
   let stderr = "";
   let steerGate: string;
   let steerFinishGate: string;
+  let lateSteerFinishGate: string;
+  let lateSteerContinuationGate: string;
+  let lateSteerDump: string;
   let codexSteerGate: string;
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
@@ -79,6 +82,9 @@ posixOnly("mid-turn steering e2e", () => {
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
     steerGate = join(home, "delayed-steer.gate");
     steerFinishGate = join(home, "finish-steered-turn.gate");
+    lateSteerFinishGate = join(home, "finish-late-steered-turn.gate");
+    lateSteerContinuationGate = join(home, "finish-late-steer-continuation.gate");
+    lateSteerDump = join(home, "late-steer-dump.json");
     codexSteerGate = join(home, "codex-steer-refused.gate");
     writeFileSync(codexSteerGate, "refuse live steers until the queue test clears this gate");
     writeFileSync(
@@ -94,6 +100,22 @@ posixOnly("mid-turn steering e2e", () => {
           claudeRace: {
             driver: "claudeAgent",
             environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_STEER_GATE: steerGate },
+            config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" },
+          },
+          // a steer that lands after the turn's last model call: the CLI
+          // finishes the turn, then runs the words as its next native turn.
+          // Its results say queued_turn_count: 0 throughout, as 2.1.282's
+          // did in the incident this replays — words waiting on stdin are
+          // not in the command queue that field counts.
+          claudeLateSteer: {
+            driver: "claudeAgent",
+            environment: {
+              FAKE_CLAUDE_MODE: "slow",
+              FAKE_CLAUDE_SLOW_FINISH_GATE: lateSteerFinishGate,
+              FAKE_CLAUDE_LATE_STEER_GATE: lateSteerContinuationGate,
+              FAKE_CLAUDE_QUEUED_TURN_COUNT: "zero",
+              FAKE_CLAUDE_DUMP: lateSteerDump,
+            },
             config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" },
           },
           // no live session: a message while busy uses the server-side queue
@@ -186,6 +208,71 @@ posixOnly("mid-turn steering e2e", () => {
     },
     40_000,
   );
+
+  it("a steer the CLI runs as its next native turn keeps the turn, its busy state and its internal tool pass until that reply lands", async () => {
+    rmSync(lateSteerFinishGate, { force: true });
+    rmSync(lateSteerContinuationGate, { force: true });
+    rmSync(lateSteerDump, { force: true });
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeLateSteer", model: "claude-fake" } });
+
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true, "the turn to start");
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
+    // the agents proxy inside this CLI process carries the turn's internal tool pass
+    let dump: any;
+    await waitFor(async () => {
+      try {
+        dump = JSON.parse(readFileSync(lateSteerDump, "utf8"));
+        return true;
+      } catch {
+        return false;
+      }
+    }, "the fake's spawn dump");
+    const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN as string;
+    expect(token).toMatch(/^[a-f0-9]{48}$/);
+    const internalTools = async () =>
+      (await fetch(`${BASE}/api/internal/agents`, { headers: { authorization: `Bearer ${token}` } })).status;
+    expect(await internalTools()).toBe(200);
+
+    // These words land after the turn's last model call began: the CLI cannot
+    // fold them, so it finishes the turn and runs them as its next native turn.
+    const second = await api("POST", `/api/bots/${created.id}/messages`, { text: "and also this" });
+    expect(second.status).toBe(202);
+    expect(second.body.steered).toBe(true);
+    writeFileSync(lateSteerFinishGate, "finish");
+    // the continuation is running (its tool call landed) and holds on its gate
+    await waitFor(
+      async () => (await getBot(created.id)).messages.filter((m: any) => m.kind === "activity").length === 2,
+      "the continuation's tool chip",
+    );
+    // still the same turn: the bot is working and its pass is honoured
+    expect((await getBot(created.id)).busy).toBe(true);
+    expect(await internalTools()).toBe(200);
+
+    writeFileSync(lateSteerContinuationGate, "finish");
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the turn to settle");
+    // and the pass dies with the turn, once the turn is really over
+    expect(await internalTools()).toBe(401);
+    const bot = await getBot(created.id);
+    const texts = bot.messages.filter((m: any) => m.kind === "text").map((m: any) => `${m.role}:${m.text}`);
+    expect(texts.slice(1)).toEqual([
+      "user:first",
+      "bot:hello from fake claude",
+      "user:and also this",
+      "bot:reply to: first",
+      "bot:hello from fake claude",
+      "bot:reply to: and also this",
+    ]);
+    // one provider turn from the harness's point of view, over after the steered reply
+    const events = readFileSync(join(home, ".openmausbot", "events", `${created.threadId}.ndjson`), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line));
+    const completed = events.filter((e) => e.type === "turn.completed");
+    expect(completed).toHaveLength(1);
+    const answered = events.findIndex((e) => e.type === "item.completed" && e.itemType === "assistant_text" && e.text === "reply to: and also this");
+    expect(answered).toBeGreaterThan(-1);
+    expect(events.indexOf(completed[0])).toBeGreaterThan(answered);
+  }, 40_000);
 
   it("keeps two queued attachment messages as two native images in one follow-up turn", async () => {
     const created = (await api("POST", "/api/bots")).body.bot;

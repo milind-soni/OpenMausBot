@@ -440,7 +440,17 @@ export function agentBrowserIntegration(input: {
       ...(sourceEnv.USERPROFILE ? { USERPROFILE: sourceEnv.USERPROFILE } : {}),
     })),
   };
-  if (input.headless !== false) env.AGENT_BROWSER_HEADLESS = "1";
+  // A Linux host with no display cannot run headed Chrome, and OMB's managed
+  // browser is headless automation (docs/browser-packaging.md). Pin headless
+  // there even for a headed-capable caller. The engine's own flag is
+  // AGENT_BROWSER_HEADED; an explicit "0" pins the default so a daemon that
+  // kept a headed launch config still comes back headless instead of failing
+  // every launch until it is killed by hand (#1383).
+  const displayless = (input.platform ?? process.platform) === "linux" && !sourceEnv.DISPLAY && !sourceEnv.WAYLAND_DISPLAY;
+  if (input.headless !== false || displayless) {
+    env.AGENT_BROWSER_HEADLESS = "1";
+    env.AGENT_BROWSER_HEADED = "0";
+  }
   if (input.attachCdpUrl) env.AGENT_BROWSER_CDP = input.attachCdpUrl;
   // MCP clients may filter the parent environment. Carry the configured
   // Chrome path explicitly without forwarding unrelated secrets or flags.
