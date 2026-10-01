@@ -43,7 +43,7 @@ export function createBrowserInputQueue(send: (body: Input) => Promise<void>, on
         const replaceable = queue.findIndex(movement);
         if (replaceable >= 0) queue.splice(replaceable, 1);
         else {
-          halt(new Error("Browser input stopped because the connection is too slow. Release control and reconnect before typing again."));
+          halt(new Error("Browser input stopped because the browser is not keeping up with it (it may be stuck, or the connection may be slow). Release control and reconnect before typing again. If it stays stuck, restart the browser."));
           if (!release(body) || queue.length >= 32) return;
         }
       }
