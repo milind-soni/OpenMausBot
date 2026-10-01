@@ -890,6 +890,60 @@ public struct CompanionConnectionMetadata: Decodable, Sendable {
     }
 }
 
+/// Who is driving a bot's computer. `owned` is present only when the request
+/// named a control lease, and says whether that lease is the one holding it.
+public struct ComputerControlState: Decodable, Sendable, Equatable {
+    public let held: Bool
+    public let owned: Bool?
+
+    public init(held: Bool, owned: Bool? = nil) {
+        self.held = held
+        self.owned = owned
+    }
+}
+
+/// The Local VM's live desktop, as the sidecar relays it to this device: a
+/// WebSocket path that only this paired device may open, and the VNC password
+/// the desktop asks for. In memory only, like `CloudDesktopSession`; the path
+/// is a short-lived capability.
+public struct LocalVmViewerSession: Decodable, Sendable, Equatable {
+    /// e.g. `vps-viewer/<32 characters>/websockify`, relative to the sidecar.
+    public let socketPath: String
+    public let password: String?
+
+    private enum CodingKeys: String, CodingKey { case joinUrl }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let raw = try container.decode(String.self, forKey: .joinUrl)
+        guard let parsed = Self.parse(raw) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .joinUrl,
+                in: container,
+                debugDescription: "Local VM viewer must be a relayed path on the paired computer"
+            )
+        }
+        (socketPath, password) = parsed
+    }
+
+    /// Only the sidecar's relay shape is accepted: anything with a scheme or
+    /// host (a loopback address that was not rewritten, or somewhere else
+    /// entirely) is refused rather than dialled.
+    static func parse(_ raw: String) -> (String, String?)? {
+        guard let components = URLComponents(string: raw),
+              components.scheme == nil, components.host == nil,
+              let match = raw.range(of: #"^/vps-viewer/([A-Za-z0-9_-]{32})/"#, options: .regularExpression)
+        else { return nil }
+        let id = raw[match].dropFirst("/vps-viewer/".count).dropLast()
+        let settings = URLComponents(string: "?" + (components.fragment ?? ""))?.queryItems ?? []
+        let expected = "vps-viewer/\(id)/websockify"
+        let path = settings.first { $0.name == "path" }?.value ?? expected
+        guard path == expected else { return nil }
+        let password = settings.first { $0.name == "password" }?.value
+        return (path, password?.isEmpty == false ? password : nil)
+    }
+}
+
 /// One still of a bot's Local VM, fetched on demand. The harness answers
 /// with a `data:` URL; anything but a PNG or JPEG in base64 is refused rather
 /// than handed to an image decoder.

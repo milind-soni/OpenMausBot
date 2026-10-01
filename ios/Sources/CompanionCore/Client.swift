@@ -1789,6 +1789,61 @@ public struct CompanionClient: Sendable {
         return try await send(request, as: LocalVmScreenshot.self)
     }
 
+    /// Take or hand back a bot's computer under this device's control lease.
+    /// While held, the harness refuses the bot's own computer actions.
+    @discardableResult
+    public func computerControl(botId: String, take: Bool, leaseId: String) async throws -> ComputerControlState {
+        guard Self.validRouteID(botId), Self.validRouteID(leaseId), (16...120).contains(leaseId.count) else {
+            throw APIError.badURL
+        }
+        return try await send(
+            try makeRequest(
+                "POST",
+                "/api/bots/\(botId)/computer/control",
+                body: ["action": take ? "take" : "release", "controlLeaseId": leaseId]
+            ),
+            as: ComputerControlState.self
+        )
+    }
+
+    /// The Local VM's live desktop, relayed by the sidecar. The harness grants
+    /// it only while this device holds the computer.
+    public func localVmViewer(botId: String, threadId: String) async throws -> LocalVmViewerSession {
+        guard Self.validRouteID(botId), Self.validRouteID(threadId) else { throw APIError.badURL }
+        return try await send(
+            try makeRequest(
+                "POST",
+                "/api/bots/\(botId)/local-computer/join",
+                query: [URLQueryItem(name: "threadId", value: threadId)]
+            ),
+            as: LocalVmViewerSession.self
+        )
+    }
+
+    /// Close this device's relayed viewers for the bot.
+    public func closeViewer(botId: String) async throws {
+        guard Self.validRouteID(botId) else { throw APIError.badURL }
+        try await send(try makeRequest("POST", "/api/bots/\(botId)/computer/viewer-close"))
+    }
+
+    /// The authenticated WebSocket request for a relayed viewer: same host and
+    /// token as every other call, `ws` or `wss` to match.
+    public func viewerSocketRequest(_ viewer: LocalVmViewerSession) throws -> URLRequest {
+        guard let base = connection.baseURL,
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        else { throw APIError.badURL }
+        components.scheme = components.scheme == "https" ? "wss" : "ws"
+        components.path = "/" + viewer.socketPath
+        components.query = nil
+        guard let url = components.url else { throw APIError.badURL }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = requestTimeout
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        // websockify carries RFB in binary frames.
+        request.setValue("binary", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        return request
+    }
+
     public func markRead(botId: String, threadId: String? = nil) async throws {
         try await send(try makeRequest("POST", "/api/bots/\(botId)/read", body: threadId.map { ["threadId": $0] }))
     }
