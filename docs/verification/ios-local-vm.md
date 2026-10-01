@@ -49,6 +49,10 @@ Use a disposable simulator:
 10. **Hand Back**: `controlHeld` returns to `false` and **Take control** is
     offered again. Taking control and then sending the app to the background
     releases it too.
+11. Take control again, then release it from the harness instead
+    (`POST /api/bots/BOT/computer/control` with `{"action":"release"}`): within
+    a few seconds the sidecar's lease check fails, the relay closes, and the
+    phone shows the desktop as disconnected.
 
 The companion route and capability checks are covered by
 `companion/test/routes.test.ts` and `companion/test/proxy-response.test.ts`;

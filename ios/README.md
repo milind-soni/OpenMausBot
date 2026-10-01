@@ -210,16 +210,21 @@ picture only.
 
 With the same switch on, **Take control** under that picture drives the VM from
 the phone. The phone takes the bot's computer under its own control lease — the
-harness then refuses the bot's computer actions, exactly as when someone takes
-control on the Mac — and asks for the VM's live desktop. The harness hands that
-out only to a loopback caller and only while the computer is held; the sidecar
-relays it to this one device the way it already relays a VPS viewer, so the
-VM's noVNC port never leaves the Mac. A small RFB client in `CompanionCore`
-speaks VNC over that WebSocket: a trackpad moves a pointer (tap to click, two
-fingers to right-click or scroll, hold to drag), and the system keyboard types.
-**Hand Back**, leaving the screen, or sending the app to the background closes
-the viewer and releases the lease. The Local VM's lifecycle and the host
-computer remain unreachable through the companion.
+harness then refuses that bot's computer actions, as when someone takes control
+on the Mac (in the default shared Local VM mode, other bots on the same VM are
+not paused, on the phone or on the Mac) — and asks for the VM's live desktop.
+The harness hands that out only to a loopback caller and only to the lease
+holding the computer; the sidecar relays it to this one device the way it
+already relays a VPS viewer, so the VM's noVNC port never leaves the Mac, and it
+re-checks the lease every few seconds and cuts the relay as soon as it no
+longer holds (released from the Mac, say). A small RFB client in
+`CompanionCore` speaks VNC over that WebSocket: a trackpad moves a pointer (tap
+to click, two fingers to right-click or scroll, hold to drag), and the system
+keyboard types. **Hand Back**, or sending the app to the background, closes the
+viewer and releases the lease. The lease is kept per bot, so if the app is
+killed while driving, taking control again resumes it and Hand Back releases it.
+The Local VM's lifecycle and the host computer remain unreachable through the
+companion.
 
 ## Design notes
 

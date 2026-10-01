@@ -5034,6 +5034,16 @@
           }
         }
       }
+    },
+    "Control may have been taken back on the computer, or the connection dropped. Hand back, then take control again.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O controle pode ter sido retomado no computador, ou a conexão caiu. Devolva e assuma o controle de novo."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

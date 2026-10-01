@@ -1807,14 +1807,21 @@ public struct CompanionClient: Sendable {
     }
 
     /// The Local VM's live desktop, relayed by the sidecar. The harness grants
-    /// it only while this device holds the computer.
-    public func localVmViewer(botId: String, threadId: String) async throws -> LocalVmViewerSession {
-        guard Self.validRouteID(botId), Self.validRouteID(threadId) else { throw APIError.badURL }
+    /// it only to the lease that holds the computer, and the sidecar closes
+    /// the relay as soon as that lease stops holding it.
+    public func localVmViewer(botId: String, threadId: String, leaseId: String) async throws -> LocalVmViewerSession {
+        guard Self.validRouteID(botId), Self.validRouteID(threadId), Self.validRouteID(leaseId),
+              (16...120).contains(leaseId.count)
+        else { throw APIError.badURL }
         return try await send(
             try makeRequest(
                 "POST",
                 "/api/bots/\(botId)/local-computer/join",
-                query: [URLQueryItem(name: "threadId", value: threadId)]
+                query: [
+                    URLQueryItem(name: "threadId", value: threadId),
+                    URLQueryItem(name: "controlLeaseId", value: leaseId),
+                ],
+                body: [:]
             ),
             as: LocalVmViewerSession.self
         )

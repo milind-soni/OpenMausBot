@@ -95,10 +95,11 @@ final class LocalVmControlClientTests: XCTestCase {
         LocalVmControlStub.responseBody = try JSONSerialization.data(withJSONObject: [
             "joinUrl": "/vps-viewer/\(relayID)/vnc.html#autoconnect=true&resize=scale&password=vm-secret&path=vps-viewer%2F\(relayID)%2Fwebsockify",
         ])
-        let viewer = try await client().localVmViewer(botId: "bot_1", threadId: "th-2")
+        let viewer = try await client().localVmViewer(botId: "bot_1", threadId: "th-2", leaseId: "phone-lease-0123456789")
         let request = try XCTUnwrap(LocalVmControlStub.capturedRequest)
         XCTAssertEqual(request.url?.path, "/api/bots/bot_1/local-computer/join")
-        XCTAssertEqual(request.url?.query, "threadId=th-2")
+        XCTAssertEqual(request.url?.query, "threadId=th-2&controlLeaseId=phone-lease-0123456789")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
         XCTAssertEqual(viewer.socketPath, "vps-viewer/\(relayID)/websockify")
         XCTAssertEqual(viewer.password, "vm-secret")
 

@@ -132,6 +132,23 @@ final class RFBTests: XCTestCase {
         XCTAssertEqual(client.framebuffer.count, 3 * 2 * 4)
     }
 
+    func testRefusesADesktopTooLargeToAllocate() throws {
+        let client = RFBClient(password: nil)
+        try client.receive(Data("RFB 003.008\n".utf8) + Data([1, 1]) + Data([0, 0, 0, 0]))
+        XCTAssertThrowsError(try client.receive(serverInit(width: 65_000, height: 65_000)))
+
+        let resized = try connected()
+        XCTAssertThrowsError(try resized.receive(Data([0, 0] + u16(1) + u16(0) + u16(0) + u16(60_000) + u16(60_000) + s32(-223))))
+    }
+
+    func testCopiesOverlappingRectanglesWithoutSmearing() throws {
+        let client = try connected(width: 3, height: 1)
+        try client.receive(Data([0, 0] + u16(1) + u16(0) + u16(0) + u16(3) + u16(1) + s32(0) + [1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0]))
+        // Shift the first two pixels right by one: source and target overlap.
+        try client.receive(Data([0, 0] + u16(1) + u16(1) + u16(0) + u16(2) + u16(1) + s32(1) + u16(0) + u16(0)))
+        XCTAssertEqual(client.framebuffer.enumerated().filter { $0.offset % 4 == 0 }.map(\.element), [1, 1, 2])
+    }
+
     func testRefusesAnEncodingItDidNotAskFor() throws {
         let client = try connected()
         XCTAssertThrowsError(try client.receive(Data([0, 0] + u16(1) + u16(0) + u16(0) + u16(1) + u16(1) + s32(7)))) { error in

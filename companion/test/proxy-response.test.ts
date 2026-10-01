@@ -166,12 +166,17 @@ describe("preparing a harness response for a device", () => {
         joinUrl: "http://127.0.0.1:45679/vnc.html#autoconnect=true&resize=scale&password=vm-secret",
       }));
     };
-    const { status, text } = await device("/api/bots/b1/local-computer/join", "POST");
+    const { status, text } = await device("/api/bots/b1/local-computer/join?controlLeaseId=phone-lease-0123456789", "POST");
     expect(status).toBe(200);
     const joinUrl = String(JSON.parse(text).joinUrl);
     expect(joinUrl).toMatch(/^\/vps-viewer\/[A-Za-z0-9_-]{32}\/vnc\.html#/);
     expect(joinUrl).toContain("password=vm-secret");
     expect(joinUrl).not.toContain("127.0.0.1:45679");
+
+    // Without a control lease the address never reaches the device.
+    const refused = await device("/api/bots/b1/local-computer/join", "POST");
+    expect(refused.status).toBe(502);
+    expect(refused.text).not.toContain("vm-secret");
   });
 
   it("never forwards a body it could not scrub", async () => {

@@ -8456,20 +8456,37 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("hands out a Local VM's viewer only while a person holds the computer and the VM is ready", async () => {
+  it("hands out a Local VM's viewer only to the lease holding the computer, once the VM is ready", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
+    const lease = "phone-lease-0123456789";
+    const join = (controlLeaseId = lease) =>
+      api("POST", `/api/bots/${bot.id}/local-computer/join?controlLeaseId=${controlLeaseId}`, {});
     try {
-      const unheld = await api("POST", `/api/bots/${bot.id}/local-computer/join`, {});
+      expect((await api("POST", `/api/bots/${bot.id}/local-computer/join`, {})).status).toBe(400);
+      const unheld = await join();
       expect(unheld.status).toBe(409);
       expect(unheld.body.error).toMatch(/take control/i);
-      expect(unheld.body.joinUrl).toBeUndefined();
 
+      // Someone else holding the computer is not this lease holding it.
       expect((await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "take" })).status).toBe(200);
+      expect((await join()).status).toBe(409);
+      expect((await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "check", controlLeaseId: lease })).body)
+        .toMatchObject({ held: true, owned: false });
+      expect((await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" })).status).toBe(200);
+
+      expect((await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "take", controlLeaseId: lease })).body)
+        .toMatchObject({ held: true, owned: true });
+      expect((await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "check", controlLeaseId: lease })).body)
+        .toMatchObject({ held: true, owned: true });
       // This suite's container runtime is unavailable, so the VM is never ready.
-      const notReady = await api("POST", `/api/bots/${bot.id}/local-computer/join`, {});
+      const notReady = await join();
       expect(notReady.status).toBe(409);
       expect(notReady.body.joinUrl).toBeUndefined();
 
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release", controlLeaseId: lease });
+      // Checking never takes a free computer.
+      expect((await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "check", controlLeaseId: lease })).body)
+        .toMatchObject({ held: false, owned: false });
       expect((await api("POST", "/api/bots/no-such-bot/local-computer/join", {})).status).toBe(404);
     } finally {
       await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" }).catch(() => undefined);

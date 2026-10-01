@@ -1664,18 +1664,31 @@ final class Session: ObservableObject {
         }
     }
 
-    /// Take the bot's computer under `leaseId` and open its Local VM's
-    /// relayed desktop. Hands the computer straight back if the join fails,
-    /// so a failed attempt never leaves the bot locked out.
-    func takeLocalVm(for bot: Bot, leaseId: String) async throws -> (request: URLRequest, password: String?) {
-        let state = try await withClient { try await $0.computerControl(botId: bot.id, take: true, leaseId: leaseId) }
-        guard state.held, state.owned != false else {
-            throw APIError.transport("Someone else is already controlling this computer.")
-        }
+    /// The control lease this phone uses for one bot on one computer. Kept
+    /// across launches, so a session the app never got to hand back (it was
+    /// killed while driving) can be taken again and released, rather than
+    /// leaving the bot locked behind a lease nobody remembers.
+    private func localVmLease(for bot: Bot) -> String {
+        let key = "localVmControlLease.\(connection?.id ?? "none").\(bot.id)"
+        if let saved = UserDefaults.standard.string(forKey: key) { return saved }
+        let lease = "phone-" + UUID().uuidString
+        UserDefaults.standard.set(lease, forKey: key)
+        return lease
+    }
+
+    /// Take the bot's computer under this phone's lease and open its Local
+    /// VM's relayed desktop. Any failure after asking hands the computer
+    /// straight back, so a failed attempt never leaves the bot locked out.
+    func takeLocalVm(for bot: Bot) async throws -> (request: URLRequest, password: String?, leaseId: String) {
+        let leaseId = localVmLease(for: bot)
         do {
+            let state = try await withClient { try await $0.computerControl(botId: bot.id, take: true, leaseId: leaseId) }
+            guard state.held, state.owned != false else {
+                throw APIError.transport("Someone else is already controlling this computer.")
+            }
             return try await withClient { client in
-                let viewer = try await client.localVmViewer(botId: bot.id, threadId: bot.threadId)
-                return (try client.viewerSocketRequest(viewer), viewer.password)
+                let viewer = try await client.localVmViewer(botId: bot.id, threadId: bot.threadId, leaseId: leaseId)
+                return (try client.viewerSocketRequest(viewer), viewer.password, leaseId)
             }
         } catch {
             await handBackLocalVm(for: bot, leaseId: leaseId)
@@ -1683,9 +1696,12 @@ final class Session: ObservableObject {
         }
     }
 
-    /// Close this device's viewer and release the lease. Best effort: the
-    /// harness drops an unknown lease, and the sidecar expires the viewer.
+    /// Close this device's viewer and release the lease, finishing even if
+    /// the app is on its way to the background. Best effort: releasing a
+    /// lease that no longer holds anything is a no-op on the harness.
     func handBackLocalVm(for bot: Bot, leaseId: String) async {
+        let task = UIApplication.shared.beginBackgroundTask(withName: "Hand back the Local VM")
+        defer { if task != .invalid { UIApplication.shared.endBackgroundTask(task) } }
         _ = try? await withClient { try await $0.closeViewer(botId: bot.id) }
         _ = try? await withClient { try await $0.computerControl(botId: bot.id, take: false, leaseId: leaseId) }
     }

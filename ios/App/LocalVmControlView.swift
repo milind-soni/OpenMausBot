@@ -117,9 +117,13 @@ struct LocalVmControlView: View {
                             .font(.system(size: 26))
                         Text("The desktop disconnected")
                             .font(.system(size: 15, weight: .semibold))
-                        Text(verbatim: reason)
+                        Text("Control may have been taken back on the computer, or the connection dropped. Hand back, then take control again.")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Text(verbatim: reason)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
                             .multilineTextAlignment(.center)
                     }
                     .padding(24)
@@ -224,7 +228,10 @@ private struct Trackpad: UIViewRepresentable {
 
         @MainActor @objc func move(_ recognizer: UIPanGestureRecognizer) {
             let point = recognizer.translation(in: recognizer.view)
-            if recognizer.state == .began { lastMove = .zero }
+            // The pan only begins once the hold-to-drag has failed, by which
+            // time the finger has already travelled; start from there rather
+            // than jumping the pointer by that distance.
+            if recognizer.state == .began { lastMove = point }
             let delta = CGSize(width: (point.x - lastMove.x) * speed, height: (point.y - lastMove.y) * speed)
             lastMove = point
             desktop.move(by: delta)

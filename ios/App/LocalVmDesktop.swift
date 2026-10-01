@@ -42,7 +42,7 @@ final class LocalVmDesktop: ObservableObject {
         socket.maximumMessageSize = 64 << 20
         self.socket = socket
         socket.resume()
-        receiving = Task { [weak self] in await self?.receiveLoop(socket) }
+        receiving = Task { [weak self] in await Self.receive(from: socket, into: self) }
         // A still desktop sends nothing, and an idle socket is one the
         // network is free to drop.
         keepAlive = Task { [weak socket] in
@@ -127,7 +127,11 @@ final class LocalVmDesktop: ObservableObject {
         }
     }
 
-    private func receiveLoop(_ socket: URLSessionWebSocketTask) async {
+    /// Holds the desktop only weakly between messages, so a desktop nobody
+    /// keeps is released and its socket closed rather than kept alive by its
+    /// own read loop.
+    private static func receive(from socket: URLSessionWebSocketTask, into owner: LocalVmDesktop?) async {
+        weak var desktop = owner
         do {
             while !Task.isCancelled {
                 let message = try await socket.receive()
@@ -137,11 +141,12 @@ final class LocalVmDesktop: ObservableObject {
                 case let .string(text): data = Data(text.utf8)
                 @unknown default: continue
                 }
-                try handle(rfb.receive(data))
-                flush()
+                guard let desktop else { socket.cancel(with: .goingAway, reason: nil); return }
+                try desktop.handle(desktop.rfb.receive(data))
+                desktop.flush()
             }
         } catch {
-            if !Task.isCancelled { fail(error) }
+            if !Task.isCancelled { desktop?.fail(error) }
         }
     }
 

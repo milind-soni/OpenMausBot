@@ -241,12 +241,11 @@ struct ComputerView: View {
         takingControl = true
         controlError = nil
         defer { takingControl = false }
-        let leaseId = "phone-" + UUID().uuidString
         do {
-            let viewer = try await session.takeLocalVm(for: current, leaseId: leaseId)
+            let viewer = try await session.takeLocalVm(for: current)
             let desktop = LocalVmDesktop(request: viewer.request, password: viewer.password)
             desktop.start()
-            control = (desktop, leaseId)
+            control = (desktop, viewer.leaseId)
         } catch {
             controlError = error.localizedDescription
         }

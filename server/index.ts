@@ -21789,18 +21789,26 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // The Local VM's own noVNC address, for the companion sidecar to relay to
     // a paired phone the owner has allowed computer access (the sidecar
     // checks that). Only a loopback caller gets it — the address carries the
-    // VNC password — and only while a person holds this bot's computer, so a
-    // phone can never drive the VM alongside the bot.
+    // VNC password — and only for the control lease that holds this bot's
+    // computer right now. The sidecar keeps re-checking that lease with
+    // `action: "check"` and cuts the relay when it no longer holds, so the
+    // phone never drives the VM alongside the bot.
     m = path.match(/^\/api\/bots\/([\w-]+)\/local-computer\/join$/);
     if (m && method === "POST") {
       if (auth.kind !== "loopback") return json(res, 404, { error: "not found" });
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
       const bot = computerPreviewBot(m[1], url);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const threadId = url.searchParams.has("threadId") ? bot.threadId : undefined;
       if (threadId && await computerPreviewSurface(bot, threadId) !== "vm") {
         return json(res, 409, { error: "This conversation is not using the Local VM" });
       }
-      if (!botComputerControlSnapshot(bot.id).held) {
+      const lease = controlLeaseIdSchema.safeParse(url.searchParams.get("controlLeaseId") ?? undefined);
+      if (!lease.success) return json(res, 400, { error: "controlLeaseId is required" });
+      const controlBot = store.bot(bot.id);
+      if (!controlBot || !computerControl.ownsLease(botComputerControlKey(controlBot), lease.data)) {
         return json(res, 409, { error: "Take control of this computer first" });
       }
       const target = localVmTargetForStatus(bot.id, threadId);
@@ -23349,10 +23357,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const result = computerControl.releaseLease(controlKey, controlLeaseId);
           return json(res, 200, { ...result.snapshot, released: result.released });
         }
+        // Read-only: does this lease still hold the wheel? The companion
+        // sidecar asks this while it relays a phone's live Local VM desktop,
+        // and cuts the relay the moment the answer is no.
+        if (action === "check" && controlLeaseId) {
+          return json(res, 200, { ...computerControl.snapshot(controlKey), owned: computerControl.ownsLease(controlKey, controlLeaseId) });
+        }
         if (action === "take") return json(res, 200, computerControl.take(controlKey));
         if (action === "release") return json(res, 200, computerControl.release(controlKey));
         if (action === "dismiss-help") return json(res, 200, computerControl.dismissHelp(controlKey));
-        return json(res, 400, { error: "action must be take, release, or dismiss-help" });
+        return json(res, 400, { error: "action must be take, release, check, or dismiss-help" });
       }
       return json(res, 405, { error: "method not allowed" });
     }

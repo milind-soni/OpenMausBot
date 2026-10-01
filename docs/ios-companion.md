@@ -290,11 +290,15 @@ Allowed in the first release:
   reclaimed as idle; leaving the view or backgrounding the app stops that.
 - With the same capability, drive the Local VM: take the bot's computer under
   a device control lease (`POST /api/bots/:id/computer/control`), then
-  `POST /api/bots/:id/local-computer/join`. The harness answers that only for a
-  loopback caller, only for a conversation on the Local VM, and only while the
-  computer is held; the sidecar rewrites the loopback noVNC address into its
-  device-scoped relay path, and the phone speaks RFB over it. Hand back
-  closes the viewer and releases the lease, and so does backgrounding the app.
+  `POST /api/bots/:id/local-computer/join?controlLeaseId=…`. The harness answers
+  that only for a loopback caller, only for a conversation on the Local VM,
+  and only to the lease that holds the computer. The sidecar rewrites the
+  loopback noVNC address into its device-scoped relay path, then asks the
+  harness every few seconds whether that lease still holds
+  (`action: "check"`, read-only) and closes the relay when it does not. The
+  phone speaks RFB over the relay. Hand back closes the viewer and releases
+  the lease, and so does backgrounding the app. In shared Local VM mode the
+  hold pauses only this bot, as it does on the Mac.
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.

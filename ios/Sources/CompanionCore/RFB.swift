@@ -102,6 +102,9 @@ public final class RFBClient {
     static let encodingRaw: Int32 = 0
     static let encodingCopyRect: Int32 = 1
     static let encodingDesktopSize: Int32 = -223
+    /// Larger than any desktop a Local VM runs, and small enough that a
+    /// misbehaving server cannot make the phone allocate gigabytes.
+    static let maxDimension = 8192
 
     private let password: String?
     private var phase = Phase.version
@@ -261,6 +264,7 @@ public final class RFBClient {
             guard pending.count >= 24 + nameLength else { return nil }
             width = Int(pending.readUInt16(at: 0))
             height = Int(pending.readUInt16(at: 2))
+            guard width <= Self.maxDimension, height <= Self.maxDimension else { throw RFBError.malformed("desktop size") }
             name = String(decoding: pending.subdata(in: pending.startIndex + 24 ..< pending.startIndex + 24 + nameLength), as: UTF8.self)
             consume(24 + nameLength)
             framebuffer = [UInt8](repeating: 0, count: width * height * 4)
@@ -335,6 +339,9 @@ public final class RFBClient {
             let w = Int(pending.readUInt16(at: offset + 4))
             let h = Int(pending.readUInt16(at: offset + 6))
             let encoding = Int32(bitPattern: pending.readUInt32(at: offset + 8))
+            if encoding == Self.encodingDesktopSize, w > Self.maxDimension || h > Self.maxDimension {
+                throw RFBError.malformed("desktop size")
+            }
             let body = try rectangleLength(width: w, height: h, encoding: encoding)
             guard pending.count >= offset + 12 + body else { return nil }
             rects.append((x, y, w, h, encoding, offset + 12))
@@ -390,11 +397,15 @@ public final class RFBClient {
     private func copyRect(x: Int, y: Int, w: Int, h: Int, fromX: Int, fromY: Int) {
         guard w > 0, h > 0, x + w <= width, y + h <= height, fromX + w <= width, fromY + h <= height else { return }
         let rowBytes = w * 4
-        let copy = framebuffer
-        for row in 0 ..< h {
-            let from = ((fromY + row) * width + fromX) * 4
-            let to = ((y + row) * width + x) * 4
-            framebuffer.replaceSubrange(to ..< to + rowBytes, with: copy[from ..< from + rowBytes])
+        // Overlapping regions: walk rows away from the destination, and let
+        // memmove handle overlap within a row.
+        let rows: [Int] = y > fromY ? Array((0 ..< h).reversed()) : Array(0 ..< h)
+        framebuffer.withUnsafeMutableBytes { bytes in
+            for row in rows {
+                let from = ((fromY + row) * width + fromX) * 4
+                let to = ((y + row) * width + x) * 4
+                memmove(bytes.baseAddress! + to, bytes.baseAddress! + from, rowBytes)
+            }
         }
     }
 
@@ -418,8 +429,11 @@ public final class RFBClient {
         outgoing.append(message)
     }
 
+    /// O(1): a slice shares storage, and every read is relative to
+    /// `startIndex`. The next `append` compacts it.
     private func consume(_ count: Int) {
-        pending.removeFirst(count)
+        pending = pending.dropFirst(count)
+        if pending.isEmpty { pending = Data() }
     }
 
     /// VNC authentication: DES-encrypt the 16-byte challenge with the first
