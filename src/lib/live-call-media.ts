@@ -263,6 +263,10 @@ export async function hangUpLiveCall(): Promise<void> {
   if (phase === "idle" || phase === "ended" || phase === "failed") return dismissLiveNotice();
   const mine = ++generation;
   set({ phase: "ending", hangingUp: true });
+  // Hang up stops capturing now, even if the harness is slow or unreachable.
+  // Keep the channel alive until its close command and the end request leave.
+  microphone?.getTracks().forEach((track) => track.stop());
+  microphone = null;
   sendClose();
   if (callId) await endOnServer(callId);
   // The harness's end frame, or a newer call, got here first: leave it be.

@@ -130,6 +130,20 @@ describe("live call media", () => {
     expect(liveMedia().phase).toBe("idle");
   });
 
+  it("stops capturing immediately while the server's hang-up is still pending", async () => {
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    let confirm!: (value: unknown) => void;
+    request.mockImplementationOnce(() => new Promise((resolve) => { confirm = resolve; }));
+    const hanging = hangUpLiveCall();
+
+    expect(liveMedia()).toMatchObject({ phase: "ending", hangingUp: true });
+    expect(track.stopped).toBe(true);
+    expect(peer.channel.sent.map((value) => JSON.parse(value).type)).toContain("session.close");
+    confirm({ call: { ...call, status: "ended", endReason: "hung-up" } });
+    await hanging;
+    expect(liveMedia().phase).toBe("idle");
+  });
+
   it("cancels a call that is still starting", async () => {
     let release!: (value: unknown) => void;
     request.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
