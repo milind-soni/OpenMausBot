@@ -25,6 +25,8 @@ The first version includes:
 - Approvals and questions, including narrow “always allow” grants.
 - Resumable SSE, streamed reply text, reconnect hydration, and an opt-in live
   Boat computer view. The loopback-only VPS SSH viewer remains desktop-only.
+- On-demand stills of a bot's Local VM, idle or working, for a phone the
+  computer owner has allowed computer access.
 - Markdown rendering and Keychain storage for the phone's pairing trust.
 - Secure completion of supported credential-request cards using iOS Password
   AutoFill and QR-pinned HPKE encryption. Apple Passwords/iCloud Keychain is
@@ -279,6 +281,10 @@ Allowed in the first release:
 - Fetch settled screen images and opt into live screen frames.
 - Request a fresh interactive cloud-desktop viewer only when the computer
   owner has enabled that capability for this specific paired phone.
+- With the same capability, fetch a still of a bot's Local VM
+  (`POST /api/bots/:id/local-computer/screenshot`, scoped to a thread so the
+  harness refuses a conversation that is not on the Local VM). This reads a
+  picture; it cannot start, stop, remove or drive the VM.
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.
@@ -300,8 +306,8 @@ Intentionally refused:
   configuration. The only credential write is the exact pending-card envelope
   above, and it feeds the existing desktop OS-encrypted save path.
 - Pairing, device revocation, or companion lifecycle control.
-- Local VM lifecycle, webhooks, connectors, routines, team import/export, and
-  internal peer-agent routes.
+- Local VM lifecycle and control, webhooks, connectors, routines, team
+  import/export, and internal peer-agent routes.
 - Cloud computer provisioning, sleep, shell execution, and screenshot APIs.
   The phone receives only the fresh `join` viewer URL, never the provider key.
 - New harness routes that have not been reviewed for device access.

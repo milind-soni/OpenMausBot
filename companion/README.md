@@ -30,7 +30,7 @@ upstream hardened its loopback gate.
 | | |
 |---|---|
 | **Pairing** | A high-entropy QR credential plus a six-digit manual fallback, valid two minutes and single-use. Redeeming either returns a device token stored only as a SHA-256 digest. |
-| **Authorisation** | Every request needs that token. Full cloud-desktop access is a separate per-device capability, off by default. A rebinding page cannot obtain either. |
+| **Authorisation** | Every request needs that token. Computer access — the cloud desktop and Local VM stills — is a separate per-device capability, off by default. A rebinding page cannot obtain either. |
 | **The allowlist** | Default deny, per method and path (`src/routes.ts`) — the list is every request the app makes, and nothing else. General bot/room PATCH routes stay closed; read state and approval grants use narrow verbs. A route that appears in the harness later is closed to devices until someone adds it here on purpose. |
 | **Scrubbing** | `resumeCursors` — the harness's own provider session ids — never reach a device, whether or not the harness still sends them. |
 | **Discovery** | Bonjour, so a phone finds the computer by name instead of by typed address. |
