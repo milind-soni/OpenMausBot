@@ -101,11 +101,11 @@ describe("preparing a harness response for a device", () => {
     }
   });
 
-  it("requires the host to enable cloud desktop for viewer and preview requests", async () => {
+  it("requires the host to enable computer access for viewer and preview requests", async () => {
     cloudDesktopAccess = false;
     try {
-      for (const action of ["join", "screenshot"]) {
-        const { status, text } = await device(`/api/bots/b1/computer/${action}`, "POST");
+      for (const path of ["computer/join", "computer/screenshot", "local-computer/screenshot"]) {
+        const { status, text } = await device(`/api/bots/b1/${path}`, "POST");
         expect(status).toBe(403);
         expect(text).toContain("enable it in OpenMausBot");
         expect(text).toContain("Settings → Remote access");

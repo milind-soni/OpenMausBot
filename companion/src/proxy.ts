@@ -293,11 +293,11 @@ export function createProxyHandler(options: ProxyOptions) {
     if (denial) return sendJson(res, denial.status, { error: denial.error });
 
     // Pairing a phone grants the ordinary companion surface, not a browser
-    // session with every credential that may exist inside the cloud desktop.
+    // session with every credential that may exist inside a bot's computer.
     // The computer owner enables this capability per device, off by default.
     if (isCloudDesktopAccess(method, path) && !device?.cloudDesktopAccess) {
       return sendJson(res, 403, {
-        error: "cloud desktop access is off for this device — enable it in OpenMausBot → Settings → Remote access",
+        error: "computer access is off for this device — enable it in OpenMausBot → Settings → Remote access",
       });
     }
 
