@@ -28,6 +28,8 @@ struct ChatView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var draft = ""
     @State private var revealedMessageId: String?
+    /// The reader has dragged this thread's transcript since it opened.
+    @State private var readerScrolled = false
     @State private var showingTasks = false
     @State private var showingComputer = false
     @State private var showingPlus = false
@@ -325,12 +327,14 @@ struct ChatView: View {
                 // of the end; and the `initial` scroll above runs before
                 // there is anything to scroll. One more scroll once the first
                 // layout has settled lands on the end — again when the page
-                // arrives from the computer, which can be after the push.
+                // arrives from the computer, which can be after the push,
+                // unless the reader has already scrolled away to read.
                 .task(id: "\(threadId)|\(session.state.hasLoadedPage(forThread: threadId))") {
                     try? await Task.sleep(for: .milliseconds(50))
-                    guard !Task.isCancelled, let last = rows.last else { return }
+                    guard !Task.isCancelled, !readerScrolled, let last = rows.last else { return }
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
+                .onUserScrollCompat { readerScrolled = true }
                 // Follow the text as it arrives. Keyed on length rather than
                 // the string so this fires once per delta batch, and without
                 // animation — animating every token turns a smooth stream
@@ -412,6 +416,7 @@ struct ChatView: View {
             selectedPhotos = []
             showCommandHUD = false
             showingPlus = false
+            readerScrolled = false
             // The local task picker changed threads. A download
             // started in the previous task must not open a sheet (or surface
             // its error) in the new one when the network reply arrives late.

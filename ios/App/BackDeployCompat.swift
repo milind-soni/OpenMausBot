@@ -190,6 +190,20 @@ extension View {
             self
         }
     }
+
+    /// Runs `action` when the person starts dragging a scroll view.
+    /// `onScrollPhaseChange` is iOS 18; below that this is a no-op, so
+    /// callers must treat "never called" as "do not know".
+    @ViewBuilder
+    func onUserScrollCompat(_ action: @escaping () -> Void) -> some View {
+        if #available(iOS 18.0, *) {
+            onScrollPhaseChange { _, phase in
+                if phase == .interacting { action() }
+            }
+        } else {
+            self
+        }
+    }
 }
 
 /// `onChange` when the call site needs the old value too.
