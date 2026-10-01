@@ -17,7 +17,9 @@ interface ViewerSession {
 }
 
 const VIEWER_PATH = /^\/vps-viewer\/([A-Za-z0-9_-]{32})(\/.*)?$/;
-const BOT_JOIN_PATH = /^\/api\/bots\/([\w-]+)\/computer\/join$/;
+/** Both joins hand back a loopback noVNC address: a VPS through its SSH
+ * tunnel, and the Local VM's own published port. */
+const BOT_JOIN_PATH = /^\/api\/bots\/([\w-]+)\/(?:computer|local-computer)\/join$/;
 const SESSION_TTL_MS = 8 * 60 * 60_000;
 const MAX_SESSIONS = 64;
 

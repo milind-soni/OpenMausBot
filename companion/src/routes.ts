@@ -53,6 +53,13 @@ export const CLOUD_DESKTOP_CONTROL_ROUTE = {
   path: /^\/api\/bots\/[\w-]+\/computer\/(?:control|screenshot|viewer-close)$/,
 } as const;
 
+/** The Local VM's live desktop, relayed by the sidecar like a VPS viewer.
+ * The harness grants it only while a person holds that bot's computer. */
+export const LOCAL_VM_JOIN_ROUTE = {
+  method: "POST",
+  path: /^\/api\/bots\/[\w-]+\/local-computer\/join$/,
+} as const;
+
 /** A still of a bot's Local VM, on demand. The VM's lifecycle stays on the
  * host; this only reads a picture of it, behind the same per-device
  * computer-access capability as the cloud desktop. */
@@ -74,7 +81,8 @@ export function isMessageFileDownload(method: string, path: string): boolean {
 export function isCloudDesktopAccess(method: string, path: string): boolean {
   return isCloudDesktopJoin(method, path)
     || (method === CLOUD_DESKTOP_CONTROL_ROUTE.method && CLOUD_DESKTOP_CONTROL_ROUTE.path.test(path))
-    || (method === LOCAL_VM_SCREENSHOT_ROUTE.method && LOCAL_VM_SCREENSHOT_ROUTE.path.test(path));
+    || (method === LOCAL_VM_SCREENSHOT_ROUTE.method && LOCAL_VM_SCREENSHOT_ROUTE.path.test(path))
+    || (method === LOCAL_VM_JOIN_ROUTE.method && LOCAL_VM_JOIN_ROUTE.path.test(path));
 }
 
 /** Every request the iOS app makes, and nothing else.
@@ -143,6 +151,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // A picture of the Local VM — not its lifecycle, which stays on the host.
   // Gated per device by the proxy like the cloud desktop above.
   LOCAL_VM_SCREENSHOT_ROUTE,
+  // Its live desktop while a person holds the computer, relayed like the
+  // VPS viewer and behind the same per-device capability.
+  LOCAL_VM_JOIN_ROUTE,
   // rooms — making one, and talking in one
   { method: "POST", path: /^\/api\/groups$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/messages$/ },

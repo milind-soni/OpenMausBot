@@ -8456,6 +8456,27 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("hands out a Local VM's viewer only while a person holds the computer and the VM is ready", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const unheld = await api("POST", `/api/bots/${bot.id}/local-computer/join`, {});
+      expect(unheld.status).toBe(409);
+      expect(unheld.body.error).toMatch(/take control/i);
+      expect(unheld.body.joinUrl).toBeUndefined();
+
+      expect((await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "take" })).status).toBe(200);
+      // This suite's container runtime is unavailable, so the VM is never ready.
+      const notReady = await api("POST", `/api/bots/${bot.id}/local-computer/join`, {});
+      expect(notReady.status).toBe(409);
+      expect(notReady.body.joinUrl).toBeUndefined();
+
+      expect((await api("POST", "/api/bots/no-such-bot/local-computer/join", {})).status).toBe(404);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" }).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
+  });
+
   it("keeps shared Local VM mode by default and resolves isolated targets per bot when enabled", async () => {
     const first = (await api("POST", "/api/bots")).body.bot;
     const second = (await api("POST", "/api/bots")).body.bot;

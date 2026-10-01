@@ -37,6 +37,18 @@ describe("VPS companion viewer relay", () => {
       { joinUrl: "http://203.0.113.8:6901/vnc.html#password=stolen" },
       "device-1",
     )).toEqual({ joinUrl: "http://203.0.113.8:6901/vnc.html#password=stolen" });
+
+    const vm = relay.rewriteJoinResponse(
+      "/api/bots/bot-1/local-computer/join",
+      { joinUrl: "http://127.0.0.1:45679/vnc.html#password=vm-secret" },
+      "device-1",
+    ) as { joinUrl: string };
+    expect(vm.joinUrl).toMatch(/^\/vps-viewer\/[A-Za-z0-9_-]{32}\/vnc\.html#/);
+    expect(relay.rewriteJoinResponse(
+      "/api/bots/bot-1/local-computer/run",
+      { joinUrl: "http://127.0.0.1:45679/vnc.html#password=vm-secret" },
+      "device-1",
+    )).toEqual({ joinUrl: "http://127.0.0.1:45679/vnc.html#password=vm-secret" });
   });
 
   it("pins HTTP and WebSocket traffic to the session, device, and loopback viewer", async () => {

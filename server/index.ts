@@ -21786,6 +21786,33 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         image: await containerComputerScreenshot(undefined, undefined, target),
       });
     }
+    // The Local VM's own noVNC address, for the companion sidecar to relay to
+    // a paired phone the owner has allowed computer access (the sidecar
+    // checks that). Only a loopback caller gets it — the address carries the
+    // VNC password — and only while a person holds this bot's computer, so a
+    // phone can never drive the VM alongside the bot.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/local-computer\/join$/);
+    if (m && method === "POST") {
+      if (auth.kind !== "loopback") return json(res, 404, { error: "not found" });
+      const bot = computerPreviewBot(m[1], url);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const threadId = url.searchParams.has("threadId") ? bot.threadId : undefined;
+      if (threadId && await computerPreviewSurface(bot, threadId) !== "vm") {
+        return json(res, 409, { error: "This conversation is not using the Local VM" });
+      }
+      if (!botComputerControlSnapshot(bot.id).held) {
+        return json(res, 409, { error: "Take control of this computer first" });
+      }
+      const target = localVmTargetForStatus(bot.id, threadId);
+      const status = await containerComputerStatus(undefined, undefined, target);
+      if (!status.ready || !status.managed || status.container !== "running" || status.network !== "loopback"
+        || !status.viewer_url) {
+        return json(res, 409, { error: status.problem ?? "The Local VM is not ready" });
+      }
+      localVmIdleFor(target).touch();
+      res.setHeader("cache-control", "private, no-store");
+      return json(res, 200, { joinUrl: status.viewer_url });
+    }
 
     // identity handshake for the packaged app's port fallback: the forked
     // child proves it is OURS by echoing its pid (a stray dev server has

@@ -104,7 +104,7 @@ describe("preparing a harness response for a device", () => {
   it("requires the host to enable computer access for viewer and preview requests", async () => {
     cloudDesktopAccess = false;
     try {
-      for (const path of ["computer/join", "computer/screenshot", "local-computer/screenshot"]) {
+      for (const path of ["computer/join", "computer/screenshot", "local-computer/screenshot", "local-computer/join"]) {
         const { status, text } = await device(`/api/bots/b1/${path}`, "POST");
         expect(status).toBe(403);
         expect(text).toContain("enable it in OpenMausBot");
@@ -157,6 +157,21 @@ describe("preparing a harness response for a device", () => {
     expect(joinUrl).toContain("password=viewer-secret");
     expect(joinUrl).toContain("path=vps-viewer%2F");
     expect(joinUrl).not.toContain("127.0.0.1:45678");
+  });
+
+  it("turns the Local VM's loopback viewer into the same device-scoped path", async () => {
+    respond = (res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        joinUrl: "http://127.0.0.1:45679/vnc.html#autoconnect=true&resize=scale&password=vm-secret",
+      }));
+    };
+    const { status, text } = await device("/api/bots/b1/local-computer/join", "POST");
+    expect(status).toBe(200);
+    const joinUrl = String(JSON.parse(text).joinUrl);
+    expect(joinUrl).toMatch(/^\/vps-viewer\/[A-Za-z0-9_-]{32}\/vnc\.html#/);
+    expect(joinUrl).toContain("password=vm-secret");
+    expect(joinUrl).not.toContain("127.0.0.1:45679");
   });
 
   it("never forwards a body it could not scrub", async () => {

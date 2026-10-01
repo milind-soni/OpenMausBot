@@ -71,6 +71,7 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/computer/screenshot"],
     ["POST", "/api/bots/bot_123/computer/viewer-close"],
     ["POST", "/api/bots/bot_123/local-computer/screenshot"],
+    ["POST", "/api/bots/bot_123/local-computer/join"],
     ["POST", "/api/groups/room-1/messages"],
     ["POST", "/api/groups/room-1/interrupt"],
     ["DELETE", "/api/groups/room-1/queue/queue_1"],
@@ -200,6 +201,13 @@ describe("what it may not", () => {
       expect(allowed("POST", `/api/bots/bot_123/local-computer/${action}`)).toBe(false);
     }
     expect(allowed("POST", "/api/local-computer/screenshot")).toBe(false);
+  });
+
+  it("joins a Local VM's live desktop only behind computer access", () => {
+    expect(allowed("POST", "/api/bots/bot_123/local-computer/join")).toBe(true);
+    expect(isCloudDesktopAccess("POST", "/api/bots/bot_123/local-computer/join")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/local-computer/join")).toBe(false);
+    expect(allowed("POST", "/api/local-computer/join")).toBe(false);
   });
 
   it("allows only the exact encrypted credential submission verb", () => {
