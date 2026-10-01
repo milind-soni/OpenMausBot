@@ -18,6 +18,13 @@ describe("full-backup browser state", () => {
     expect(Object.fromEntries(storage.entries)).toEqual({ "omb-drafts": "restored", "omb-show-threads": "false", "auth-token": "keep", "omb-webhook-credentials": "destination URL" });
   });
 
+  it("carries the run card visibility choice in a workspace backup", () => {
+    const storage = memory({ "omb-show-run-card": "0" });
+    expect(collectWorkspaceClientState(storage)).toEqual({ "omb-show-run-card": "0" });
+    applyWorkspaceClientState({ "omb-show-run-card": "1" }, storage);
+    expect(storage.getItem("omb-show-run-card")).toBe("1");
+  });
+
   it.each([null, [], { "auth-token": "injected" }, { "omb-webhook-credentials": "source URL" }, { "omb-drafts": 1 }])("rejects invalid client state before clearing anything (%j)", (value) => {
     const storage = memory({ "omb-drafts": "old", "auth-token": "keep" });
     expect(() => applyWorkspaceClientState(value, storage)).toThrow("Invalid backup browser state");

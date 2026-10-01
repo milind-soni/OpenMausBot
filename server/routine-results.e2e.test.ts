@@ -50,6 +50,8 @@ it("keeps results together while fresh executions, approvals, deletion and unrea
     expect(cards).toHaveLength(2);
     for (const run of completed) expect(cards.find((message) => message.routineRun.runId === run.id)?.routineRun)
       .toMatchObject({ status: "completed", scheduledFor: run.scheduledFor, executionThreadId: run.threadId, summary: "hello from fake claude" });
+    // A phone without the card reads only the text, so it carries the result.
+    for (const card of cards) expect(card.text).toBe("Routine “Persistent report” completed\n\nhello from fake claude");
     const currentBot = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id);
     const savedBot = await currentBot();
     expect(savedBot.threadId).toBe(originalThread);

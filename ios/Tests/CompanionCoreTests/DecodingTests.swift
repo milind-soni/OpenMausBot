@@ -845,7 +845,7 @@ final class DecodingTests: XCTestCase {
     func testAnUnknownMessageArrivesOverTheStream() throws {
         let json = """
         {"kind":"message","seq":3,"threadId":"t1",
-         "message":{"id":"m9","role":"bot","kind":"routine.run","at":9,"text":"ran"}}
+         "message":{"id":"m9","role":"bot","kind":"calendar.invite","at":9,"text":"ran"}}
         """
         let frame = try JSONDecoder().decode(StreamFrame.self, from: Data(json.utf8))
         guard case let .message(threadId, message) = frame.frame else {

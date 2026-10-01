@@ -1,8 +1,12 @@
+import { useSyncExternalStore } from "react";
 import { z } from "zod";
 
 export type SidebarDensity = "comfortable" | "compact" | "icons";
 
+export const SIDEBAR_DENSITIES: readonly SidebarDensity[] = ["comfortable", "compact", "icons"];
+
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
+export const SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth";
 export const SIDEBAR_ATTENTION_PINNED_KEY = "openmausbot.sidebarAttentionPinned.v1";
 export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSections.v1";
 export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.v1";
@@ -37,6 +41,80 @@ export function saveSidebarDensity(
   } catch {
     // Private browsing and locked-down webviews may reject localStorage.
     // The in-memory React state still makes the control useful this session.
+  }
+}
+
+// The sidebar and Settings → Appearance both read and change the density, so
+// it lives in one renderer store rather than in either component's state.
+// A session choice survives storage that rejects writes; another window's
+// storage event supersedes it.
+let densitySessionChoice: SidebarDensity | undefined;
+const densityListeners = new Set<() => void>();
+
+function currentSidebarDensity(): SidebarDensity {
+  return densitySessionChoice ?? loadSidebarDensity();
+}
+
+function notifyDensity() {
+  for (const listener of densityListeners) listener();
+}
+
+function onDensityStorage(event: StorageEvent) {
+  if (event.key !== SIDEBAR_DENSITY_KEY && event.key !== null) return;
+  try {
+    if (event.storageArea && event.storageArea !== globalThis.localStorage) return;
+  } catch {
+    return;
+  }
+  densitySessionChoice = undefined;
+  notifyDensity();
+}
+
+function subscribeDensity(listener: () => void): () => void {
+  densityListeners.add(listener);
+  if (densityListeners.size === 1 && typeof window !== "undefined") {
+    window.addEventListener("storage", onDensityStorage);
+  }
+  return () => {
+    densityListeners.delete(listener);
+    if (densityListeners.size === 0 && typeof window !== "undefined") {
+      window.removeEventListener("storage", onDensityStorage);
+    }
+  };
+}
+
+export function setSidebarDensity(density: SidebarDensity): void {
+  densitySessionChoice = density;
+  saveSidebarDensity(density);
+  notifyDensity();
+}
+
+export function useSidebarDensity(): SidebarDensity {
+  return useSyncExternalStore(subscribeDensity, currentSidebarDensity, () => "comfortable");
+}
+
+export function clampSidebarWidth(width: number, viewportWidth: number): number {
+  return Math.max(240, Math.min(480, viewportWidth - 320, Math.round(width)));
+}
+
+export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null): number | null {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    const raw = target?.getItem(SIDEBAR_WIDTH_KEY);
+    if (raw === null || raw === undefined || !/^\d+$/.test(raw)) return null;
+    const width = Number(raw);
+    return width >= 240 && width <= 480 ? width : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSidebarWidth(width: number, storage?: Pick<Storage, "setItem"> | null): void {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    target?.setItem(SIDEBAR_WIDTH_KEY, String(width));
+  } catch {
+    // A blocked local store does not prevent resizing this session.
   }
 }
 

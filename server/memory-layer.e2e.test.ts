@@ -84,6 +84,13 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     expect(sentSince(before)).toContain("Bluebird");
     expect(sentSince(before)).toMatch(/your main chat|chat \\"[^"\\]+\\"/);
 
+    await api(`/api/bots/${bot.id}`, "PATCH", { memoryEnabled: false });
+    before = sentCount();
+    await turn(bot.id, second, "Can you suggest some restaurants for Friday?");
+    expect(sentSince(before)).not.toContain("Recalled for this message");
+    expect(JSON.stringify(await api(`/api/bots/${bot.id}/system-prompt`))).not.toContain("memory/dining.md");
+    await api(`/api/bots/${bot.id}`, "PATCH", { memoryEnabled: true });
+
     // temporal: an entry past its until day no longer loads
     const index = await memoryFile(bot.id);
     await api(`/api/bots/${bot.id}/memory/file`, "PUT", {

@@ -139,6 +139,19 @@ describe("tasks", () => {
     expect(store.taskByThread(bot.id, other.threadId)!.title).toBe("Draft announcement");
   });
 
+  it("lets Regenerate title replace a chosen name, unless it was renamed while the title was generating", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const task = store.createTask(bot.id)!;
+    store.renameTask(bot.id, task.threadId, "Payroll audit");
+    // asked for explicitly, so the title it started from may be a person's
+    expect(store.retitleTask(bot.id, task.threadId, "Payroll audit", "Quarterly payroll export")).toMatchObject({ title: "Quarterly payroll export" });
+    // a rename that lands mid-flight stands; the late answer is dropped
+    store.renameTask(bot.id, task.threadId, "Export checks");
+    expect(store.retitleTask(bot.id, task.threadId, "Quarterly payroll export", "Payroll export review")).toBeNull();
+    expect(store.taskByThread(bot.id, task.threadId)!.title).toBe("Export checks");
+  });
+
   it("reads a usable title out of a model reply", async () => {
     const { titleFromLlm } = await import("./store.ts");
     expect(titleFromLlm('"Fix login timeout."\n')).toBe("Fix login timeout");

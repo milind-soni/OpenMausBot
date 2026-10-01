@@ -6,6 +6,7 @@ import { t } from "@/lib/i18n";
 import { askText, runSteps, skillPrompt } from "@/lib/verify-steps";
 import { SAVE_RUN_AS_SKILL_LINE } from "../../shared/learn-request";
 import type { VerifyCard } from "./VerifyCard";
+import { citationAttachment, createCitationTextSelector, serializeCitation } from "@/lib/citations";
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
@@ -13,6 +14,7 @@ const fixture = vi.hoisted(() => {
   return {
     dispatch: vi.fn(),
     appendComposerDraft: vi.fn(),
+    showRunCard: true,
     state: null as Partial<AppState> | null,
     verify: null as ComponentProps<typeof VerifyCard> | null,
   };
@@ -40,6 +42,9 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+// The run card's visibility switch is a renderer preference, not what these
+// tests are about; the fixture stands in for the stored value.
+vi.mock("@/lib/run-card-preferences", () => ({ useShowRunCard: () => fixture.showRunCard }));
 // The thread controls read live model lists; they are not what this file tests.
 vi.mock("./ModelPicker", () => ({ ModelPicker: () => createElement("span", { "data-test-model-control": true }) }));
 vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: () => createElement("span", { "data-test-approval-control": true }) }));
@@ -49,6 +54,7 @@ afterAll(() => vi.unstubAllGlobals());
 afterEach(() => {
   fixture.state = null;
   fixture.verify = null;
+  fixture.showRunCard = true;
   vi.clearAllMocks();
 });
 
@@ -85,6 +91,18 @@ const render = (messages: Message[]) => renderToStaticMarkup(createElement(ChatV
 const draft = (): string => fixture.appendComposerDraft.mock.calls[0]![1] as string;
 
 describe("The run card in the chat pane", () => {
+  it("renders a sent citation as a badge and keeps raw metadata out of edit actions", () => {
+    const citation = citationAttachment(
+      { ownerType: "bot", ownerId: bot.id, threadId: bot.threadId, messageId: "source" },
+      createCitationTextSelector("source quote", 0, 12)!,
+      "note",
+    );
+    const markup = render([asked("cited", serializeCitation(citation))]);
+    expect(markup).toContain("Open citation: source quote");
+    expect(markup).not.toContain("omb-citation-v1");
+    expect(markup).not.toContain(`aria-label="${t("chat.editMessage")}"`);
+  });
+
   it("appears once the bot runs a control CLI, with the run as a checklist and its verified steps tagged", () => {
     const markup = render(run);
     expect(markup).toContain(CARD);
@@ -152,5 +170,19 @@ describe("The run card in the chat pane", () => {
     expect(markup).not.toContain(CARD);
     expect(render([...run, asked("u2", "now publish"), chip("c5", "git push origin main", true), chip("c6", "npm publish", true)]))
       .toContain("2 steps<");
+  });
+
+  it("hides the card when 'This run' is turned off in Appearance", () => {
+    fixture.showRunCard = false;
+    const markup = render(run);
+    expect(markup).not.toContain(CARD);
+    // the dock itself survives: the composer still renders
+    expect(markup).toContain('class="pointer-events-none absolute inset-x-0 bottom-0 z-[2]"');
+  });
+
+  it("shows the card by default", () => {
+    const markup = render(run);
+    expect(markup).toContain(CARD);
+    expect(markup).toContain(`>${t("chat.verify.title")}<`);
   });
 });

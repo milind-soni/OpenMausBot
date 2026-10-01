@@ -67,8 +67,25 @@ export interface WebhookManagerOptions {
   }) => { id: string };
   cancelQueued?: (webhookId: string, message: string) => void;
   pendingRuns?: (webhookId: string) => number;
-  /** Sink for delivery:"post" webhooks: the payload text lands in the bot's chat. */
-  post?: (botId: string, text: string) => void;
+  /** Sink for delivery:"post" webhooks: the payload text lands as the
+   *  bot's own message in `threadId` -- the trigger's own stable
+   *  destination from `resolvePostThread`, never a caller-supplied
+   *  "current" thread. */
+  post?: (botId: string, threadId: string, text: string) => void;
+  /** Resolves the stable thread a delivery:"post" webhook's messages land
+   *  in, creating it on first use. Mirrors RoutineManagerOptions'
+   *  resolveResultsThread/isResultsThread pair (routines.ts): called on
+   *  every `post` dispatch, exactly like routines.ts's newRun calls
+   *  resolveResultsThread on every run, so the resolver itself owns the
+   *  reuse-vs-allocate decision from `trigger.resultsThreadId` rather than
+   *  the dispatcher special-casing "already have one". `forceNew` is
+   *  unused by any call site today (no caller resets a webhook's
+   *  destination yet) but kept for signature parity with that sibling and
+   *  any future explicit-reset entry point. Absent (a host with no task
+   *  creation support) makes every `post` delivery fail with 503 instead
+   *  of silently falling back to a shared/ambient thread -- see
+   *  https://github.com/milind-soni/OpenMausBot/issues/2071. */
+  resolvePostThread?: (trigger: WebhookTrigger, forceNew: boolean) => string | undefined;
   /** The execution store commits this identity together with the queued run. */
   findRun?: (webhookId: string, deliveryId: string) => { id: string } | null;
 }
@@ -125,6 +142,10 @@ const storedWebhookSchema = z.object({
   updatedAt: z.number().finite().nonnegative(),
   lastReceivedAt: z.number().finite().nonnegative().optional(),
   lastRunId: z.string().optional(),
+  /** delivery:"post" only: the stable destination thread, resolved once
+   *  via WebhookManagerOptions.resolvePostThread and reused forever
+   *  after -- see the `post`/`resolvePostThread` doc comments above. */
+  resultsThreadId: z.string().min(1).optional(),
   deliveryCount: z.number().int().nonnegative(),
   verificationPending: z.boolean().optional(),
   verifiedAt: z.number().finite().nonnegative().optional(),
@@ -506,10 +527,22 @@ export class WebhookManager {
       // Never fall through to a task run: a stored post webhook on a server
       // without a post sink is a configuration error, not a run request.
       if (!this.options.post) fail(503, "This server cannot post webhook messages to chat");
+      // Resolved on every dispatch, exactly like routines.ts's newRun calls
+      // resolveResultsThread on every run -- the resolver owns the
+      // reuse-vs-allocate decision from trigger.resultsThreadId, so a host
+      // without resolvePostThread wired can only fail closed here, never
+      // silently fall back to whatever thread the bot happens to have
+      // selected right now (the bug this replaces -- issue #2071).
+      const threadId = this.options.resolvePostThread?.(trigger, false);
+      if (!threadId) fail(503, "This server could not resolve a destination thread for this delivery");
+      if (threadId !== trigger.resultsThreadId) {
+        trigger.resultsThreadId = threadId;
+        trigger.updatedAt = now;
+      }
       const raw = event.payload as { text?: unknown } | null;
       const text =
         raw && typeof raw === "object" && typeof raw.text === "string" && raw.text.trim() ? raw.text : serializePayload(event.payload);
-      this.options.post(trigger.botId, text.slice(0, 20000));
+      this.options.post(trigger.botId, threadId, text.slice(0, 20000));
       this.deliveries.push({ key: `${trigger.endpointId}:${deliveryId}`, runId: "post", at: now });
       if (this.deliveries.length > MAX_DELIVERIES) this.deliveries.splice(0, this.deliveries.length - MAX_DELIVERIES);
       trigger.lastReceivedAt = now;

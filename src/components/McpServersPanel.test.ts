@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { parseMcpArguments, parseMcpEnvironment, parseMcpHeaders } from "./McpServersPanel";
+import { parseMcpArguments, parseMcpEnvironment, parseMcpHeaders, parseMcpOAuthClient } from "./McpServersPanel";
 import { setLocale, t } from "@/lib/i18n";
 
 afterEach(() => setLocale("en"));
@@ -49,6 +49,18 @@ describe("MCP server form", () => {
       ok: false,
       error: { key: "mcp.headers.duplicate", params: { key: "X-A" } },
     });
+  });
+
+  it("sends a sign-in app only with a client id, keeping a saved secret behind a blank", () => {
+    const blank = { clientId: "", clientSecret: "", scopes: "", forgetSecret: false };
+    expect(parseMcpOAuthClient(blank)).toBeUndefined();
+    expect(parseMcpOAuthClient({ ...blank, clientId: "  corp-app ", scopes: "offline_access, api://x/read  " })).toEqual({
+      clientId: "corp-app",
+      scopes: ["offline_access", "api://x/read"],
+    });
+    expect(parseMcpOAuthClient({ ...blank, clientId: "corp-app" }, { clientSecretConfigured: true })).toEqual({ clientId: "corp-app", clientSecret: true });
+    expect(parseMcpOAuthClient({ ...blank, clientId: "corp-app", forgetSecret: true }, { clientSecretConfigured: true })).toEqual({ clientId: "corp-app" });
+    expect(parseMcpOAuthClient({ ...blank, clientId: "corp-app", clientSecret: "new" }, { clientSecretConfigured: true })).toEqual({ clientId: "corp-app", clientSecret: "new" });
   });
 
   it("retains the offending input while an existing error changes language", () => {

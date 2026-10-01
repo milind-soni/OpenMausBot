@@ -107,9 +107,11 @@ const PREPARATION_LOCK_TIMEOUT_MS = SCREENSHOT_BUDGET_MS + LOCK_ACQUIRE_TIMEOUT_
 type VpsScreenshot = { png: string; format: "png" | "jpeg" };
 const pendingScreenshots = new Map<string, Promise<VpsScreenshot>>();
 const viewerConnections = new Map<string, { privateIp: string; password: string }>();
+const REMOTE_VIEWER_GRACE_MS = 30_000;
+const NATIVE_VIEWER_LIFETIME_MS = 8 * 60 * 60_000;
 const desktopTunnels = new Map<
   string,
-  { child: ReturnType<typeof spawn>; joinUrl: string; expiry: ReturnType<typeof setTimeout> }
+  { child: ReturnType<typeof spawn>; joinUrl: string; expiry: ReturnType<typeof setTimeout>; viewers: number; localViewer: boolean }
 >();
 
 function invalidateVpsStatus(key: string): void {
@@ -281,11 +283,49 @@ function stopDesktopTunnel(botId: string): boolean {
 }
 
 export function closeVpsDesktopTunnel(botId: string) {
+  const tunnel = desktopTunnels.get(botId);
+  // Remote tabs still hold the tunnel; drop only the native claim and let
+  // the last tab's release start the grace period.
+  if (tunnel?.viewers) {
+    tunnel.localViewer = false;
+    clearTimeout(tunnel.expiry);
+    return { closed: false };
+  }
   return { closed: stopDesktopTunnel(botId) };
 }
 
 export function closeAllVpsDesktopTunnels(): void {
   for (const botId of desktopTunnels.keys()) stopDesktopTunnel(botId);
+}
+
+/** Resolve only a tunnel opened by the authenticated join route. Multiple
+ * remote tabs share it; the final tab releases it unless a native viewer owns it. */
+export function vpsDesktopConnection(botId: string) {
+  const tunnel = desktopTunnels.get(botId);
+  if (!tunnel || tunnel.child.exitCode !== null || tunnel.child.killed) return;
+  const url = new URL(tunnel.joinUrl);
+  return {
+    port: Number(url.port),
+    password: new URLSearchParams(url.hash.slice(1)).get("password"),
+    live: () => desktopTunnels.get(botId) === tunnel && tunnel.child.exitCode === null && !tunnel.child.killed,
+    retain: () => {
+      tunnel.viewers++;
+      if (!tunnel.localViewer) clearTimeout(tunnel.expiry);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        tunnel.viewers--;
+        if (!tunnel.viewers && !tunnel.localViewer && desktopTunnels.get(botId) === tunnel) {
+          // A short grace period lets a reload/reconnect reuse the tunnel.
+          tunnel.expiry = setTimeout(() => {
+            if (desktopTunnels.get(botId) === tunnel) stopDesktopTunnel(botId);
+          }, REMOTE_VIEWER_GRACE_MS);
+          tunnel.expiry.unref();
+        }
+      };
+    },
+  };
 }
 
 const STREAM_CAP_CHARS = 16 * 1024 * 1024;
@@ -399,7 +439,7 @@ function emptyStatus(botId: string, alias: string | null): VpsComputerStatus {
     desktopReady: false,
     desktop_error: null,
     ready: false,
-    problem: alias ? "Docker over SSH is not reachable" : "Configure a VPS SSH alias in App Settings → Connections",
+    problem: alias ? "Docker over SSH is not reachable" : "Configure a VPS SSH alias in Settings → API keys",
     image_ref: VPS_IMAGE,
     base_image_ref: BASE_IMAGE,
     driver_version: CUA_DRIVER_VERSION,
@@ -467,7 +507,7 @@ function hasNoPublishedPorts(config: {
 }
 
 function statusProblem(status: VpsComputerStatus): string | null {
-  if (!status.configured) return "Configure a VPS SSH alias in App Settings → Connections";
+  if (!status.configured) return "Configure a VPS SSH alias in Settings → API keys";
   if (!status.daemonUp) return "Docker over SSH could not reach the VPS; check the SSH alias and Docker on the VPS";
   if (!status.image) return `Prepare the pinned OpenMausBot Cua image on the VPS (Driver ${CUA_DRIVER_VERSION})`;
   if (status.container === "missing") return "No OpenMausBot container exists for this bot on the VPS";
@@ -1066,7 +1106,7 @@ export async function removeManagedVpsComputer(
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
   if (!alias) {
-    throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Connections"), { status: 409 });
+    throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Settings → API keys"), { status: 409 });
   }
   if (!MANAGED_VPS_CONTAINER_NAME.test(containerName)) {
     throw Object.assign(new Error("invalid managed VPS computer name"), { status: 400 });
@@ -1123,7 +1163,7 @@ export async function vpsComputerAction(
 ): Promise<VpsComputerStatus> {
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
-  if (!alias) throw Object.assign(new Error("VPS is not configured — add an SSH config alias in App Settings → Connections"), { status: 409 });
+  if (!alias) throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Settings → API keys"), { status: 409 });
   const key = `${alias}:${vpsContainerName(botId)}`;
   const pending = action === "provision" ? pendingProvisions.get(key) : undefined;
   if (pending) return pending;
@@ -1227,6 +1267,7 @@ export async function vpsComputerJoin(
   cfg: AppConfig,
   botId: string,
   runner: VpsCommandRunner = defaultRunner,
+  remoteViewer = false,
 ): Promise<{ joinUrl: string; state: "running" }> {
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
@@ -1234,6 +1275,12 @@ export async function vpsComputerJoin(
 
   const existing = desktopTunnels.get(botId);
   if (existing && existing.child.exitCode === null && !existing.child.killed) {
+    if (!remoteViewer) existing.localViewer = true;
+    if (!existing.viewers || existing.localViewer) {
+      clearTimeout(existing.expiry);
+      existing.expiry = setTimeout(() => stopDesktopTunnel(botId), existing.localViewer ? NATIVE_VIEWER_LIFETIME_MS : REMOTE_VIEWER_GRACE_MS);
+      existing.expiry.unref();
+    }
     return { joinUrl: existing.joinUrl, state: "running" };
   }
   stopDesktopTunnel(botId);
@@ -1291,11 +1338,11 @@ export async function vpsComputerJoin(
   }
 
   const joinUrl = `http://127.0.0.1:${localPort}/vnc.html#autoconnect=true&resize=scale&password=${encodeURIComponent(connection.password)}`;
-  // Viewer-close is the normal cleanup. This unref'd ceiling is a backstop
-  // for a renderer crash or an old browser client that cannot signal close.
-  const expiry = setTimeout(() => stopDesktopTunnel(botId), 8 * 60 * 60_000);
+  // Remote tabs retain the tunnel when their WebSocket opens. Reclaim an
+  // abandoned join promptly; native windows retain the existing close/ceiling.
+  const expiry = setTimeout(() => stopDesktopTunnel(botId), remoteViewer ? REMOTE_VIEWER_GRACE_MS : NATIVE_VIEWER_LIFETIME_MS);
   expiry.unref?.();
-  desktopTunnels.set(botId, { child, joinUrl, expiry });
+  desktopTunnels.set(botId, { child, joinUrl, expiry, viewers: 0, localViewer: !remoteViewer });
   return { joinUrl, state: "running" };
 }
 
@@ -1328,7 +1375,7 @@ export function vpsDriverError(driverKind: string, computerMcp: boolean): string
     return "The Computer engine runs its agent on Boat and cannot use a self-hosted VPS — choose Claude or an ACP engine";
   }
   if (!computerMcp) {
-    return "This model engine cannot mount a self-hosted VPS computer — choose Claude or an ACP engine";
+    return "This model cannot mount a self-hosted VPS computer — choose Claude or an ACP model provider";
   }
   return null;
 }

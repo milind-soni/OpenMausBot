@@ -278,7 +278,7 @@ describe("Settings → Engines → Claude accounts", () => {
     expect(defaultMarkup).not.toContain(">Remove account</button>");
     const assignedMarkup = renderClaude(claude(true), true);
     expect(assignedMarkup).toMatch(/<button[^>]*disabled=""[^>]*>Remove account<\/button>/);
-    expect(assignedMarkup).toContain("Choose a different engine for every bot");
+    expect(assignedMarkup).toContain("Choose a different model provider for every bot");
     expect(renderClaude(claude(true))).toContain("credentials and files stay on disk");
   });
 });

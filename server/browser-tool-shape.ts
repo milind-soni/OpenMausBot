@@ -13,11 +13,13 @@ import { trimResultText } from "./mcp-trim.ts";
 
 /** Launch, session and network settings OpenMausBot owns through the
  * environment (see browser-engine.ts). A model has no business setting them
- * per call — `session` would reach another bot's browser, `extraArgs` and
- * `caCert` change the launch — and each one cost more schema than the tool's
- * own description. */
+ * per call — `session` would reach another bot's browser, `extraArgs`,
+ * `caCert` and `headed` change the launch — and each one cost more schema
+ * than the tool's own description. `headed` in particular overrides
+ * AGENT_BROWSER_HEADED and the managed config, so a single call can pin a
+ * daemon to a launch mode this host cannot satisfy (#1383). */
 export const HARNESS_OWNED_BROWSER_PARAMS: ReadonlySet<string> = new Set([
-  "allowedDomains", "caCert", "clearCaCert", "extraArgs", "idleTimeout", "namespace",
+  "allowedDomains", "caCert", "clearCaCert", "extraArgs", "headed", "idleTimeout", "namespace",
   "restore", "restoreCheckFn", "restoreCheckText", "restoreCheckUrl", "restoreSave", "session", "timeoutMs",
 ]);
 

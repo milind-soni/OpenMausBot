@@ -522,6 +522,20 @@ describe("containerComputerStatus", () => {
     expect(status.viewer_url).toContain("#autoconnect=true&resize=scale&password=secret123");
   });
 
+  it("can inspect the viewer without waiting for CUA health or screenshots", async () => {
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: readyInspect(),
+    });
+    const status = await containerComputerStatus(fake.run, "linux", undefined, { probeDesktop: false });
+    expect(status.viewer_url).toContain("#autoconnect=true&resize=scale&password=secret123");
+    expect(status.managed).toBe(true);
+    expect(fake.calls.some(call => call.startsWith("docker exec"))).toBe(false);
+  });
+
   it("reports the bounded desktop startup error instead of waiting forever", async () => {
     const errorProbe =
       `docker exec ${CONTAINER} tail -n 4 /var/log/supervisor/cua-driver.error.log`;

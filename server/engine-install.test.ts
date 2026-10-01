@@ -14,7 +14,7 @@ import * as procs from "./procs.ts";
 // itself before anything slower (requires, log writes) can delay boot.
 const FAKE_NPM = `#!/usr/bin/env node
 if (process.env.FAKE_NPM_MODE === 'stubborn') process.on('SIGTERM', () => {});
-const { appendFileSync, mkdirSync, writeFileSync } = require('node:fs');
+const { appendFileSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 const args = process.argv.slice(2);
 const mode = process.env.FAKE_NPM_MODE || 'ok';
@@ -23,13 +23,61 @@ if (mode === 'fail') { console.error('npm ERR! code E404\\nnpm ERR! 404 Not Foun
 if (mode === 'hang' || mode === 'stubborn') { setInterval(() => {}, 1000); }
 else {
   const prefix = args[args.indexOf('--prefix') + 1];
-  if (mode !== 'no-bin') {
+  // Like npm in #2064: exit 0 having dropped the platform package, so the
+  // launcher is there but cannot start. 'broken-once' does it on run one only.
+  const runs = readFileSync(process.env.FAKE_NPM_LOG, 'utf8').trim().split('\\n').length;
+  const broken = mode === 'broken' || (mode === 'broken-once' && runs === 1);
+  if (mode !== 'no-bin' && process.platform === 'win32') {
+    writeFileSync(join(prefix, 'fakebin.js'), broken ? "throw new Error('Missing optional dependency fake-engine-platform.');\\n" : "console.log('fixture');\\n");
+    writeFileSync(join(prefix, 'fakebin.cmd'), '@echo off\\r\\nnode "%~dp0\\\\fakebin.js" %*\\r\\n');
+  } else if (mode !== 'no-bin') {
     mkdirSync(join(prefix, 'bin'), { recursive: true });
-    writeFileSync(join(prefix, 'bin', 'fakebin'), '#!/bin/sh\\necho fixture\\n', { mode: 0o755 });
+    writeFileSync(join(prefix, 'bin', 'fakebin'), broken
+      ? '#!/bin/sh\\necho "fakebin.js:1" >&2\\necho "Error: Missing optional dependency fake-engine-platform." >&2\\nexit 1\\n'
+      : '#!/bin/sh\\necho fixture\\n', { mode: 0o755 });
   }
   if (mode === 'slow') setTimeout(() => process.exit(0), 300); else process.exit(0);
 }
 `;
+
+/** Put the stand-in npm in `dir`: a shebang script, or on Windows the
+ * `.cmd` shim npm itself would write, which spawnCli resolves to Node. */
+function writeFakeNpm(dir: string): void {
+  if (process.platform === "win32") {
+    writeFileSync(join(dir, "npm.js"), FAKE_NPM);
+    writeFileSync(join(dir, "npm.cmd"), '@echo off\r\nnode "%~dp0\\npm.js" %*\r\n');
+    return;
+  }
+  writeFileSync(join(dir, "npm"), FAKE_NPM, { mode: 0o755 });
+  chmodSync(join(dir, "npm"), 0o755);
+}
+
+/** A scratch data dir and a PATH holding only the stand-in npm. */
+function useFakeNpm() {
+  const ctx = { scratch: "", binDir: "", base: "" };
+  let originalPath: string | undefined;
+  beforeEach(() => {
+    ctx.scratch = mkdtempSync(join(tmpdir(), "omb-engine-install-"));
+    ctx.binDir = join(ctx.scratch, "fake-path");
+    ctx.base = join(ctx.scratch, "data");
+    mkdirSync(ctx.binDir);
+    writeFakeNpm(ctx.binDir);
+    originalPath = process.env.PATH;
+    process.env.PATH = ctx.binDir;
+    process.env.FAKE_NPM_LOG = join(ctx.scratch, "calls.jsonl");
+    delete process.env.FAKE_NPM_MODE;
+    resetPathCacheForTests();
+  });
+  afterEach(async () => {
+    process.env.PATH = originalPath;
+    delete process.env.FAKE_NPM_LOG;
+    delete process.env.FAKE_NPM_MODE;
+    resetPathCacheForTests();
+    await removeTempDir(ctx.scratch);
+  });
+  const calls = () => readFileSync(join(ctx.scratch, "calls.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { args: string[]; cwd: string; secret: string | null });
+  return { ctx, calls };
+}
 
 describe("npm package detection", () => {
   it("reads only a plain npm one-liner", () => {
@@ -47,67 +95,60 @@ describe("npm package detection", () => {
   });
 });
 
+describe("checking the installed command starts", () => {
+  const { ctx, calls } = useFakeNpm();
+
+  it("installs again when npm left a command that does not start", async () => {
+    process.env.FAKE_NPM_MODE = "broken-once";
+    await installNpmEngine("fake-engine", { baseDir: ctx.base, cli: "fakebin" });
+    expect(calls()).toHaveLength(2);
+    for (const call of calls()) expect(call.args).toContain("--include=optional");
+  });
+
+  it("reports a command that still does not start, in its own words", async () => {
+    process.env.FAKE_NPM_MODE = "broken";
+    const failure = await installNpmEngine("fake-engine", { baseDir: ctx.base, cli: "fakebin" }).catch((error: Error) => error.message);
+    expect(failure).toContain("`fakebin` does not start: Error: Missing optional dependency fake-engine-platform.");
+    expect(failure).toContain("install again from Settings");
+    expect(calls()).toHaveLength(2);
+  });
+});
+
 describe.skipIf(process.platform === "win32")("installing with npm", () => {
-  let scratch: string;
-  let binDir: string;
-  let base: string;
-  let originalPath: string | undefined;
-  const calls = () => readFileSync(join(scratch, "calls.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { args: string[]; cwd: string; secret: string | null });
-
-  beforeEach(() => {
-    scratch = mkdtempSync(join(tmpdir(), "omb-engine-install-"));
-    binDir = join(scratch, "fake-path");
-    base = join(scratch, "data");
-    mkdirSync(binDir);
-    writeFileSync(join(binDir, "npm"), FAKE_NPM, { mode: 0o755 });
-    chmodSync(join(binDir, "npm"), 0o755);
-    originalPath = process.env.PATH;
-    process.env.PATH = binDir;
-    process.env.FAKE_NPM_LOG = join(scratch, "calls.jsonl");
-    delete process.env.FAKE_NPM_MODE;
-    resetPathCacheForTests();
-  });
-
-  afterEach(async () => {
-    process.env.PATH = originalPath;
-    delete process.env.FAKE_NPM_LOG;
-    delete process.env.FAKE_NPM_MODE;
-    resetPathCacheForTests();
-    await removeTempDir(scratch);
-  });
+  const { ctx, calls } = useFakeNpm();
 
   it("installs into the app's prefix with a fixed argument list and no workspace credentials", async () => {
     expect(serverInstallFor({ command: { linux: "npm install -g fake-engine" } })).toEqual({ package: "fake-engine" });
-    registerPathDir(enginesBinDir(base));
-    await installNpmEngine("fake-engine", { baseDir: base, cli: "fakebin", env: { ...process.env, XAI_API_KEY: "workspace-secret" } });
+    registerPathDir(enginesBinDir(ctx.base));
+    await installNpmEngine("fake-engine", { baseDir: ctx.base, cli: "fakebin", env: { ...process.env, XAI_API_KEY: "workspace-secret" } });
     expect(calls()).toHaveLength(1);
-    expect(calls()[0]!.args).toEqual(["install", "-g", "--prefix", enginesPrefix(base), "--loglevel=error", "--allow-scripts=fake-engine", "fake-engine@latest"]);
+    expect(calls()[0]!.args).toEqual(["install", "-g", "--prefix", enginesPrefix(ctx.base), "--loglevel=error", "--include=optional", "--allow-scripts=fake-engine", "fake-engine@latest"]);
     // The child reports its cwd resolved; macOS puts the temp dir under /private.
-    expect(realpathSync(calls()[0]!.cwd)).toBe(realpathSync(enginesPrefix(base)));
+    expect(realpathSync(calls()[0]!.cwd)).toBe(realpathSync(enginesPrefix(ctx.base)));
     expect(calls()[0]!.secret).toBeNull();
     // The freshly installed binary is what a bare name now resolves to.
-    expect(realpathSync(findCliCandidates("fakebin")[0]!)).toBe(realpathSync(join(enginesBinDir(base), "fakebin")));
-    expect(augmentedPath().split(delimiter)[0]).toBe(enginesBinDir(base));
+    expect(realpathSync(findCliCandidates("fakebin")[0]!)).toBe(realpathSync(join(enginesBinDir(ctx.base), "fakebin")));
+    expect(augmentedPath().split(delimiter)[0]).toBe(enginesBinDir(ctx.base));
   });
 
   it("coalesces concurrent clicks into one npm run", async () => {
     process.env.FAKE_NPM_MODE = "slow";
-    await Promise.all([installNpmEngine("fake-engine", { baseDir: base }), installNpmEngine("fake-engine", { baseDir: base })]);
+    await Promise.all([installNpmEngine("fake-engine", { baseDir: ctx.base }), installNpmEngine("fake-engine", { baseDir: ctx.base })]);
     expect(calls()).toHaveLength(1);
   });
 
   it("reports a failed install with npm's last lines, and a package that provides no command", async () => {
     process.env.FAKE_NPM_MODE = "fail";
-    const failure = await installNpmEngine("fake-engine", { baseDir: base }).catch((error: Error) => error.message);
+    const failure = await installNpmEngine("fake-engine", { baseDir: ctx.base }).catch((error: Error) => error.message);
     expect(failure).toContain("could not install fake-engine");
     expect(failure).toContain("404 Not Found");
     process.env.FAKE_NPM_MODE = "no-bin";
-    await expect(installNpmEngine("fake-engine", { baseDir: base, cli: "fakebin" })).rejects.toThrow("did not provide a `fakebin` command");
+    await expect(installNpmEngine("fake-engine", { baseDir: ctx.base, cli: "fakebin" })).rejects.toThrow("did not provide a `fakebin` command");
   });
 
   it("stops an install that hangs", async () => {
     process.env.FAKE_NPM_MODE = "hang";
-    await expect(installNpmEngine("fake-engine", { baseDir: base, timeoutMs: 300 })).rejects.toThrow("took too long");
+    await expect(installNpmEngine("fake-engine", { baseDir: ctx.base, timeoutMs: 300 })).rejects.toThrow("took too long");
   });
 
   it("force-stops an install that ignores TERM", async () => {
@@ -116,7 +157,7 @@ describe.skipIf(process.platform === "win32")("installing with npm", () => {
     try {
       // Enough headroom for the fixture's Node boot under load, so TERM
       // arrives after the trap above is armed and only KILL can finish it.
-      await expect(installNpmEngine("fake-engine", { baseDir: base, timeoutMs: 5000 })).rejects.toThrow("took too long and was stopped");
+      await expect(installNpmEngine("fake-engine", { baseDir: ctx.base, timeoutMs: 5000 })).rejects.toThrow("took too long and was stopped");
       expect(stopped.mock.calls[0]![0].signalCode).toBe("SIGKILL");
     } finally {
       stopped.mockRestore();
@@ -128,7 +169,7 @@ describe.skipIf(process.platform === "win32")("installing with npm", () => {
     const kill = procs.killCliTree;
     const stopped = vi.spyOn(procs, "killCliTree").mockResolvedValue(false);
     try {
-      await expect(installNpmEngine("fake-engine", { baseDir: base, timeoutMs: 300 })).rejects.toThrow("could not be confirmed stopped");
+      await expect(installNpmEngine("fake-engine", { baseDir: ctx.base, timeoutMs: 300 })).rejects.toThrow("could not be confirmed stopped");
       expect(stopped.mock.calls[0]![0].exitCode).toBeNull();
       expect(stopped.mock.calls[0]![0].signalCode).toBeNull();
     } finally {
@@ -142,7 +183,7 @@ describe.skipIf(process.platform === "win32")("installing with npm", () => {
     // The PATH scan also looks in standard install locations, which a test
     // cannot empty, so absence is injected at both call sites.
     expect(serverInstallFor({ command: { linux: "npm install -g fake-engine" } }, false)).toBeNull();
-    mkdirSync(join(scratch, "empty"));
-    await expect(installNpmEngine("fake-engine", { baseDir: base, path: join(scratch, "empty") })).rejects.toThrow("npm is not installed");
+    mkdirSync(join(ctx.scratch, "empty"));
+    await expect(installNpmEngine("fake-engine", { baseDir: ctx.base, path: join(ctx.scratch, "empty") })).rejects.toThrow("npm is not installed");
   });
 });

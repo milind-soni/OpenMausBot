@@ -22,6 +22,8 @@ import {
   setDraftChannelMode,
   useComposerChannelMode,
 } from "./drafts";
+import { citationAttachment, createCitationTextSelector } from "./citations";
+import { composeMessage } from "./composer-attachments";
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -148,6 +150,38 @@ describe("channel draft delivery mode", () => {
 });
 
 describe("durable attachment completion", () => {
+  it("isolates persisted citation drafts and keeps an older failed citation send out of a newer draft", () => {
+    const store = memoryStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });
+    const draftId = "bot:citations:thread-a";
+    const otherDraftId = "bot:citations:thread-b";
+    const citation = citationAttachment(
+      { ownerType: "bot", ownerId: "citations", threadId: "thread-a", messageId: "source-1" },
+      createCitationTextSelector("before selected after", 7, 15)!,
+      "old note",
+    );
+    setDraftAttachments(store, draftId, [citation]);
+    expect(getDraftAttachments(store, draftId)).toEqual([citation]);
+    expect(getDraftAttachments(store, otherDraftId)).toEqual([]);
+
+    const revision = draftRevision(draftId);
+    markDraftEdited(draftId);
+    setDraft(store, draftId, "newer words");
+    setDraftAttachments(store, draftId, []);
+    expect(recoverFailedComposerSend({
+      draftId,
+      revision,
+      sendId: "citation-send",
+      threadId: "thread-a",
+      text: "",
+      requestText: composeMessage("", [citation]),
+      attachments: [citation],
+    })).toBe("outbox");
+    expect(getDraft(store, draftId)).toBe("newer words");
+    expect(getDraftAttachments(store, draftId)).toEqual([]);
+    expect(failedComposerSends(draftId)).toEqual([expect.objectContaining({ sendId: "citation-send" })]);
+  });
+
   it("keeps blob previews in memory but never writes them into durable storage", () => {
     const store = memoryStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });

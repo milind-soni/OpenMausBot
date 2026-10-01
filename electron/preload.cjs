@@ -45,7 +45,7 @@ const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChang
 // Only main can request a fresh snapshot; there is no renderer-callable method.
 const COMPANY_BACKUP_CLIENT_KEYS = [
   "omb-drafts", "omb-draft-attachments", "omb-draft-send-ids", "omb-draft-channel-modes",
-  "omb-skin", "omb-show-threads", "openmausbot.sidebarDensity",
+  "omb-skin", "omb-show-threads", "omb-show-run-card", "openmausbot.sidebarDensity",
   "openmausbot.sidebarCollapsedSections.v1", "openmausbot.sidebarSectionOrder.v1",
   "omb-analytics-opt-out", "openmausbot.remote-voice.v1",
 ];

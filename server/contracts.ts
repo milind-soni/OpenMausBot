@@ -88,6 +88,9 @@ export interface InstanceConfig {
   icon?: ProviderIcon;
   environment?: Record<string, string>;
   enabled?: boolean;
+  /** Picker group for this instance, over its driver's default: an
+   * `openai-compat` instance on a provider's own key is "api", not "custom". */
+  access?: EngineAccess;
   config?: unknown;
 }
 
@@ -123,6 +126,10 @@ export interface SendTurnInput {
    * only to a driver whose capabilities.guestTurns is "confined"; the harness
    * refuses the turn for any other (docs/cloud-pro.md). */
   guestConfined?: boolean;
+  /** Why this turn is confined, in the owner's words, for a refusal to end
+   * with (on a personal Cloud home, what came before it: a routine or a
+   * conversation from before this update). */
+  confinedWhy?: string;
   /** Images attached to this user turn only. They are deliberately kept out
    * of replay transcripts: the provider's native session owns earlier image
    * context, while a fresh replay retains the visible attachment marker. */
@@ -435,7 +442,7 @@ export interface EngineInstall {
     downloadBytes: number;
   };
   /** Set up inside the app rather than in a terminal: the engine needs a key
-   * saved under Settings → Connections, and the setup card links there. */
+   * saved under Settings → API keys, and the setup card links there. */
   settings?: "connections";
   /** Settings can install or update this engine on the machine running the
    * server, as the server's own user, into a directory the app owns. Set by

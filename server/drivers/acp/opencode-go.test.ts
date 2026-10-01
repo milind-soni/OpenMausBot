@@ -337,7 +337,7 @@ describe("OpenCode catalog", () => {
         expect(text.length, `${code} ${model}`).toBeLessThanOrEqual(160);
         if (model?.startsWith("openrouter/")) {
           expect(text).toContain("OpenRouter");
-          expect(text).not.toMatch(/Zen|OpenCode Go|Settings → Connections/u);
+          expect(text).not.toMatch(/Zen|OpenCode Go|Settings → API keys/u);
         }
         if (model?.startsWith("anthropic/")) expect(text).toContain("Anthropic");
       }
@@ -345,7 +345,7 @@ describe("OpenCode catalog", () => {
   );
 
   it("points a rejected Zen key at the key OpenMaus saves", () => {
-    expect(describeOpenCodeAccountError("invalid_credentials", "opencode/big-pickle")).toContain("Settings → Connections");
+    expect(describeOpenCodeAccountError("invalid_credentials", "opencode/big-pickle")).toContain("Settings → API keys");
     expect(describeOpenCodeAccountError("insufficient_funds", "opencode/big-pickle")).toContain("Zen");
     expect(describeOpenCodeAccountError("inactive_subscription", "opencode-go/minimax-m3")).toContain("OpenCode Go subscription");
   });
@@ -603,7 +603,7 @@ describe("OpenCode turns without a sign-in gate", () => {
       const { done, events } = await f.run("t-bad-key", "opencode/big-pickle");
       expect(done, `attempt ${attempt}`).toMatchObject({ ok: false, stopReason: "auth_required" });
       const error = events.find((event) => event.type === "runtime.error");
-      expect(error).toMatchObject({ setup: true, message: expect.stringContaining("Settings → Connections") });
+      expect(error).toMatchObject({ setup: true, message: expect.stringContaining("Settings → API keys") });
       expect(error).not.toMatchObject({ message: expect.stringContaining("Internal error") });
     }
     // the retry reused the warm process instead of cold-starting OpenCode

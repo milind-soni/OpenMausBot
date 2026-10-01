@@ -397,7 +397,7 @@ it("uses recipient bot defaults for its new task, never the sender's or its sele
   expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).every((turn: any) => turn.model === f.lead.modelSelection.model && turn.permissionMode === "default")).toBe(true);
 }), 45_000);
 
-it("keeps one conversation per bot pair across separate user turns, titled for the sender", () => fixture(async f => {
+it("opens a fresh recipient thread for every distinct direct assignment", () => fixture(async f => {
   f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Header row added" }, { reply: "Write-up published" }] };
   f.plan[f.chief.id] = { turns: [
     { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } }], reply: "Assigned the build" },
@@ -414,21 +414,23 @@ it("keeps one conversation per bot pair across separate user turns, titled for t
   };
   const leadTasks = async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
   await send("Ask Engineering to build the CSV export.");
-  const opened = (await leadTasks()).filter((task: any) => task.threadId !== f.lead.activeTaskId);
-  expect(opened).toHaveLength(1);
-  const pair = opened[0];
-  // the sender's name, not an 80-character slice of the brief
-  expect(pair.title).toBe("@Clive");
-  expect(pair.openedBy).toMatchObject({ botId: f.chief.id, name: "Clive", kind: "pair" });
+  const first = (await leadTasks()).find((task: any) => task.threadId !== f.lead.activeTaskId);
+  expect(first.title).toBe("@Clive · work");
+  expect(first.openedBy).toMatchObject({ botId: f.chief.id, name: "Clive", kind: "work" });
   await send("Now ask them to add the header row.");
   await send("Now ask them to document it.");
-  // three assignments, three user turns, one conversation
-  expect(await leadTasks()).toHaveLength(2);
-  expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId))
-    .toEqual([pair.threadId, pair.threadId, pair.threadId]);
-  const transcript = (await f.messages(pair.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
-  for (const brief of ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"]) {
-    expect(transcript).toContain(brief);
+  const tasks = await leadTasks();
+  expect(tasks).toHaveLength(4);
+  const threads = f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId);
+  expect(new Set(threads).size).toBe(3);
+  expect(threads).not.toContain(f.lead.activeTaskId);
+  expect(threads).toContain(first.threadId);
+  const briefs = ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"];
+  for (const [index, threadId] of threads.entries()) {
+    const transcript = (await f.messages(threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
+    expect(transcript).toContain(briefs[index]);
+    for (const other of briefs.filter((_, at) => at !== index)) expect(transcript).not.toContain(other);
+    expect(tasks.find((task: any) => task.threadId === threadId)).toMatchObject({ closedBy: { botId: f.chief.id } });
   }
   // Claude snapshots the system prompt at the session's first request. The
   // briefs must therefore travel in their user turns so they remain current
@@ -443,13 +445,12 @@ it("keeps one conversation per bot pair across separate user turns, titled for t
   for (const brief of ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"]) {
     expect(leadTurns.every((turn: any) => !turn.system.includes(brief))).toBe(true);
   }
-  // a pair conversation is the standing line between two bots: it never
-  // auto-closes, and every receipt in the sender's chat points at it
-  expect((await leadTasks()).find((task: any) => task.threadId === pair.threadId)).not.toHaveProperty("closedBy");
-  expect((await f.messages(f.chief.activeTaskId)).filter((message: any) => message.threadRef?.threadId === pair.threadId)).toHaveLength(6);
+  const receipts = (await f.messages(f.chief.activeTaskId)).filter((message: any) => message.threadRef && threads.includes(message.threadRef.threadId));
+  expect(new Set(receipts.map((message: any) => message.threadRef.threadId))).toEqual(new Set(threads));
+  expect((await leadTasks()).find((task: any) => task.threadId === f.lead.activeTaskId)).not.toHaveProperty("closedBy");
 }, { FAKE_CLAUDE_VERSION: "2.1.270" }), 90_000);
 
-it("gives a second simultaneous assignment its own labelled thread, which closes once its result is reported", () => fixture(async f => {
+it("gives simultaneous assignments distinct work threads, which close once reported", () => fixture(async f => {
   f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Benchmark finished" }] };
   f.plan[f.chief.id] = { steps: [
     { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } },
@@ -459,19 +460,16 @@ it("gives a second simultaneous assignment its own labelled thread, which closes
   expect((await f.wait()).status).toBe("settled");
   const tasks = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
   expect(tasks).toHaveLength(3);
-  const pair = tasks.find((task: any) => task.openedBy?.kind === "pair");
-  const work = tasks.find((task: any) => task.openedBy?.kind === "work");
-  expect(pair.title).toBe("@Clive");
-  expect(work.title).toBe("@Clive · Benchmark");
-  // the two jobs never share a transcript
+  const work = tasks.filter((task: any) => task.openedBy?.kind === "work");
+  expect(work.map((task: any) => task.title).sort()).toEqual(["@Clive · Benchmark", "@Clive · work"]);
   const threads = f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId);
-  expect(new Set(threads)).toEqual(new Set([pair.threadId, work.threadId]));
-  expect((await f.messages(pair.threadId)).some((message: any) => message.text?.includes("Implement the CSV export"))).toBe(true);
-  expect((await f.messages(work.threadId)).some((message: any) => message.text?.includes("Benchmark the exporter"))).toBe(true);
-  expect((await f.messages(pair.threadId)).some((message: any) => message.text?.includes("Benchmark the exporter"))).toBe(false);
-  // scaffolding tidies up after itself; the standing conversation stays
-  expect(work.closedBy).toMatchObject({ botId: f.chief.id, name: "Clive" });
-  expect(pair).not.toHaveProperty("closedBy");
+  expect(new Set(threads)).toEqual(new Set(work.map((task: any) => task.threadId)));
+  const build = work.find((task: any) => task.title === "@Clive · work");
+  const benchmark = work.find((task: any) => task.title === "@Clive · Benchmark");
+  expect((await f.messages(build.threadId)).some((message: any) => message.text?.includes("Implement the CSV export"))).toBe(true);
+  expect((await f.messages(benchmark.threadId)).some((message: any) => message.text?.includes("Benchmark the exporter"))).toBe(true);
+  expect((await f.messages(build.threadId)).some((message: any) => message.text?.includes("Benchmark the exporter"))).toBe(false);
+  expect(work.every((task: any) => task.closedBy?.botId === f.chief.id)).toBe(true);
 }), 60_000);
 
 it("refuses a reused request_key for different work and leaves no thread behind", () => fixture(async f => {
@@ -653,6 +651,9 @@ it("stops a waiting source without reaching into the teammate already working", 
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 20_000 }).toBe("completed");
   expect(f.nodes().find((node: any) => node.parentId).result).toContain("Finished after the source was stopped");
   await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied")).toBe(true);
+  // The chip carries the report, so a phone can show it without the thread.
+  const replied = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.tool?.name === "Engineering lead replied");
+  expect(replied.tool.output).toContain("Finished after the source was stopped");
   // ...but nothing resumes the conversation the person stopped.
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The requested CSV export is implemented and verified")).toBe(false);
@@ -767,7 +768,7 @@ it("sends each teammate result once in the turn that reviews it", () => fixture(
   expect(text.split("LEAD_RESULT_ONCE").length - 1).toBe(1);
 }), 45_000);
 
-it("gives a teammate whose session is rebuilt its second request once, never also as a bare assistant line", () => fixture(async f => {
+it("gives a teammate's fresh thread its request once, never also as a bare assistant line", () => fixture(async f => {
   f.plan[f.lead.id] = { reply: "round result" };
   for (const key of ["first", "second"]) {
     f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: key, message: `REQUEST_${key.toUpperCase()} please do it` } }], reply: "Assigned", resumeReply: "Done" };
@@ -777,6 +778,5 @@ it("gives a teammate whose session is rebuilt its second request once, never als
   }
   const second = String(f.evidence().filter((turn: any) => turn.botId === f.lead.id).at(-1).prompt.message.content);
   expect(second.split("REQUEST_SECOND").length - 1).toBe(1);
-  expect(second).toContain("could not be resumed");
   expect(second).not.toMatch(/^Assistant: @/m);
 }, { FAKE_CLAUDE_MODE: "dead-session" }), 60_000);

@@ -589,3 +589,30 @@ describe("stream tickets", () => {
     expect(registry.redeemStreamTicket(orphan)).toBeNull();
   });
 });
+
+describe("admin scope only (an OMB Cloud home is personal: server/cloud-owner.ts)", () => {
+  const PERSONAL = "Cloud Pro is personal: only your own devices can connect.";
+  it("opens, redeems, issues and accepts nothing without admin scope; the owner's devices are unaffected", () => {
+    // Made before the rule applies (as a stored session is at boot).
+    const earlier = registry.openPairing({ scopes: ["client"], label: "Guest phone" });
+    const stored = registry.exchange({ code: earlier.credential, label: "Guest phone", source: "a" });
+    expect(stored.ok).toBe(true);
+    const ticket = stored.ok ? registry.issueStreamTicket(stored.session.id).ticket : "";
+    const openWindow = registry.openPairing({ scopes: ["client"] });
+    const owner = registry.exchange({ code: registry.openPairing().credential, label: "Mac", source: "a" });
+    registry.requireAdmin(PERSONAL);
+    expect(() => registry.openPairing({ scopes: ["client"] })).toThrow(PERSONAL);
+    expect(registry.exchange({ code: openWindow.credential, label: "Guest", source: "b" })).toEqual({ ok: false, status: 403, error: PERSONAL });
+    expect(() => registry.issue({ label: "Friend", scopes: ["client"], email: "friend@example.test" })).toThrow(PERSONAL);
+    expect(() => registry.issuePortal({ email: "friend@example.test", grant: "g".repeat(43), scopes: ["client"] })).toThrow(PERSONAL);
+    if (!stored.ok || !owner.ok) throw new Error("unreachable");
+    expect(registry.authenticate(stored.token)).toBeNull();
+    expect(registry.redeemStreamTicket(ticket)).toBeNull();
+    expect(registry.isLive(stored.session.id)).toBe(false);
+    // The owner's devices: as before.
+    expect(registry.authenticate(owner.token)?.id).toBe(owner.session.id);
+    expect(registry.isLive(owner.session.id)).toBe(true);
+    const next = registry.exchange({ code: registry.openPairing({ scopes: ["admin"] }).credential, label: "Phone", source: "c" });
+    expect(next.ok).toBe(true);
+  });
+});

@@ -484,6 +484,7 @@ describe("workspace", () => {
     const withMemory = memorySystemPrompt(BOT);
     expect(withMemory).toContain("Your memory (MEMORY.md):");
     expect(withMemory).toContain("railway up");
+    expect(memorySystemPrompt(BOT, { enabled: false })).toBe("");
   });
 
   it("routes facts, procedures and short-lived notes to the right place, in both write modes", () => {

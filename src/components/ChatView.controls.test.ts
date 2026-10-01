@@ -27,6 +27,10 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite }));
+vi.mock("./CitationUI", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./CitationUI")>(),
+  CitationSelectionToolbar: () => createElement("span", { "data-testid": "citation-toolbar" }),
+}));
 vi.mock("./ModelPicker", () => ({ ModelPicker: (props: ComponentProps<typeof ModelPicker>) => {
   fixture.model = props;
   return createElement("span", { "data-test-model-control": true });
@@ -189,7 +193,7 @@ describe("thread control placement", () => {
     } }));
     // unicode-bidi does not inherit: setting it on the bubble leaves this
     // inner text block LTR. Keep the class directly on the node with prose.
-    expect(markup).toMatch(/<div class="chat-text[^"]*">(?:شغّل|שלום|مرحبا)/);
+    expect(markup).toMatch(/<div class="chat-text[^"]*"[^>]*>(?:شغّل|שלום|مرحبا)/);
     expect(markup).not.toMatch(/class="[^"]*chat-text[^"\n]*bg-bubble-user/);
   });
 
@@ -286,10 +290,12 @@ describe("a guest's composer on a Cloud home", () => {
     const refused = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(refused).toContain('data-testid="cloud-guest-composer"');
     expect(refused).not.toContain("<textarea");
+    expect(refused).not.toContain('data-testid="citation-toolbar"');
     fixture.canWrite = true;
     const allowed = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(allowed).not.toContain('data-testid="cloud-guest-composer"');
     expect(allowed).toContain("<textarea");
+    expect(allowed).toContain('data-testid="citation-toolbar"');
     fixture.canWrite = null;
   });
 });

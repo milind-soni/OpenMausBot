@@ -250,6 +250,7 @@ describe("Fish Audio", () => {
       provider: "fish",
       baseUrl: "",
       model: "",
+      fishModel: "s2.1-pro",
     });
     expect(JSON.stringify(described)).not.toContain("fish-key");
   });
@@ -307,6 +308,18 @@ describe("Fish Audio", () => {
       mp3_bitrate: 64,
       latency: "normal",
     });
+  });
+
+  it("speaks with the saved Fish model and reports it to settings", async () => {
+    seen.length = 0;
+    const { describeVoice, speak } = await voice();
+    const free = cfg({ ...ready, fishModel: "s2.1-pro-free" });
+    expect(describeVoice(free)).toMatchObject({ provider: "fish", fishModel: "s2.1-pro-free" });
+    await speak(free, "hello there");
+    expect(seen.at(-1)!.headers.model).toBe("s2.1-pro-free");
+    // a Fish model saved earlier is not reported for another engine
+    expect(describeVoice(cfg({ ...ready, provider: "elevenlabs", fishModel: "s2.1-pro-free" })))
+      .not.toHaveProperty("fishModel");
   });
 
   it("returns a useful bounded error without echoing arbitrary response bodies", async () => {

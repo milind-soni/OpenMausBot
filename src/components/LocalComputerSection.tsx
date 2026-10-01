@@ -818,6 +818,107 @@ function ActionButton({
   );
 }
 
+// Mirrors localVm.idleTimeoutMinutes in server/config.ts; the server is the
+// authority and rejects anything outside these bounds.
+const MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES = 5;
+const MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES = 1_440;
+const DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES = 480;
+
+/** A whole number of minutes within the server's bounds, or null. */
+export function parseLocalVmIdleTimeoutMinutes(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const minutes = Number(trimmed);
+  return minutes >= MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES && minutes <= MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES ? minutes : null;
+}
+
+export function LocalVmIdleTimeoutSetting({
+  minutes,
+  disabled,
+  onSave,
+}: {
+  minutes: number;
+  disabled: boolean;
+  onSave: (minutes: number) => Promise<void>;
+}) {
+  const [value, setValue] = useState(String(minutes));
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // The status poll keeps refreshing the confirmed value; never overwrite
+  // what the person is typing.
+  useEffect(() => {
+    if (!dirty) setValue(String(minutes));
+  }, [minutes, dirty]);
+
+  const save = async () => {
+    if (!dirty || saving) return;
+    const parsed = parseLocalVmIdleTimeoutMinutes(value);
+    if (parsed === null) {
+      setError(t("vm.idle.range"));
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(parsed);
+      setValue(String(parsed));
+      setDirty(false);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("vm.idle.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <label htmlFor="local-vm-idle-timeout" className="text-[13px] text-ink">{t("vm.idle.label")}</label>
+          <div id="local-vm-idle-timeout-help" className="text-[11.5px] text-ink-secondary">{t("vm.idle.detail")}</div>
+        </div>
+        <div
+          className={cn(
+            "flex w-[150px] shrink-0 items-center rounded-lg border bg-control",
+            error ? "border-danger/60" : "border-hairline/40 focus-within:border-focus",
+          )}
+        >
+          <input
+            id="local-vm-idle-timeout"
+            type="number"
+            min={MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
+            max={MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
+            step={1}
+            inputMode="numeric"
+            value={value}
+            disabled={disabled || saving}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? "local-vm-idle-timeout-error local-vm-idle-timeout-help" : "local-vm-idle-timeout-help"}
+            onChange={(event) => {
+              setValue(event.target.value);
+              setDirty(true);
+              setError("");
+            }}
+            onBlur={() => void save()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            className="min-w-0 flex-1 bg-transparent px-2.5 py-1.5 text-[13px] tabular-nums text-ink focus:outline-none disabled:opacity-50"
+          />
+          <span className="pr-2.5 text-[12.5px] text-ink-secondary">{t("vm.idle.minutes")}</span>
+        </div>
+      </div>
+      {error ? (
+        <p id="local-vm-idle-timeout-error" role="alert" className="mt-1.5 text-[12px] text-danger">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function LocalComputerSection() {
   // An OMB Cloud home has no Local VM (shared/cloud-home.ts): it neither
   // checks for one nor explains how to set one up.
@@ -1068,6 +1169,17 @@ export function LocalComputerSection() {
     } finally {
       setPolicyPending(false);
     }
+  };
+
+  const saveIdleTimeout = async (idleTimeoutMinutes: number) => {
+    const response = await fetch("/api/config", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ localVm: { idleTimeoutMinutes } }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? t("vm.idle.error"));
+    setStatus((current) => current ? { ...current, idle_timeout_ms: idleTimeoutMinutes * 60_000 } : current);
   };
 
   const deletePerBotVm = async (instance: LocalVmInventoryInstance) => {
@@ -1350,6 +1462,11 @@ export function LocalComputerSection() {
             </select>
           </div>
         )}
+        <LocalVmIdleTimeoutSetting
+          minutes={status ? Math.round(status.idle_timeout_ms / 60_000) : DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
+          disabled={!status || policyPending}
+          onSave={saveIdleTimeout}
+        />
         {policyPending && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-secondary"><Loader2 size={12} className="animate-spin" /> {t("vm.saving")}</div>}
       </Card>
 

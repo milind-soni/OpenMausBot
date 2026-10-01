@@ -30,7 +30,7 @@
 // pending window), or from editing this record: a guest who can drive a
 // Full-access bot on the Cloud already controls the machine.
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, opendirSync, readFileSync, readlinkSync } from "node:fs";
+import { existsSync, lstatSync, opendirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
@@ -45,7 +45,8 @@ export const WORKING_FOLDER_DIRS = [".claude/skills", ".claude/agents", ".claude
 export const ANCESTOR_FILES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "AGENTS.override.md"] as const;
 /** At most this many entries of one skills, agents or commands folder are
  * read. A fuller folder is judged as a whole: any entry added, removed or
- * renamed in it is a change (see `listing`). */
+ * renamed in it is a change (see `listing`), and so is any edit to an entry
+ * or its SKILL.md (by identity, size and times: see `fullFolder`). */
 export const FOLDER_ENTRY_CAP = 200;
 /** A working folder with more top-level entries than this is not listed;
  * its instruction files are looked up by name instead. */
@@ -79,13 +80,23 @@ function describe(file: string): string | undefined {
  * itself: adding, removing or renaming an entry moves its modification and
  * change times (a file edited in place does not, which is why each file is
  * still looked at by `describe`). At most `cap` names are read; `overflow`
- * says there were more, and `key` changes whenever the entries do.
- * undefined: not a folder (absent, never created, a file or a link). */
-type Listing = { key: string; names: ReadonlySet<string>; overflow: boolean };
+ * says there were more, and `key` changes whenever the entries do. A folder
+ * that could not be read is not remembered, and reads as too full to list
+ * (its files are then looked up by name).
+ * undefined: not a folder (absent, never created, a file or a link). With
+ * `through`, a link to a folder is listed as the folder it resolves to, and
+ * `link` says so. */
+type Listing = { key: string; names: ReadonlySet<string>; overflow: boolean; link?: true };
 const listingCache = new Map<string, Listing>();
-function listing(dir: string, cap: number): Listing | undefined {
+function listing(dir: string, cap: number, through = false): Listing | undefined {
   let stat;
   try { stat = lstatSync(dir, { bigint: true, throwIfNoEntry: false }); } catch { return undefined; }
+  if (through && stat?.isSymbolicLink()) {
+    let real: string;
+    try { real = realpathSync(dir); } catch { return undefined; }
+    const target = listing(real, cap);
+    return target && { ...target, link: true };
+  }
   if (!stat?.isDirectory()) return undefined;
   const key = `${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}`;
   const cacheKey = `${cap}\u0000${dir}`;
@@ -104,12 +115,32 @@ function listing(dir: string, cap: number): Listing | undefined {
       handle.closeSync();
     }
   } catch {
-    names.clear();
+    return { key: `${key}:unreadable`, names: new Set(), overflow: true };
   }
   const listed = { key, names, overflow };
   if (listingCache.size > 50_000) listingCache.clear();
   listingCache.set(cacheKey, listed);
   return listed;
+}
+
+function isLink(path: string): boolean {
+  try { return lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() === true; } catch { return false; }
+}
+
+/** A folder too full to list entry by entry (FOLDER_ENTRY_CAP), as one
+ * value: its entries, and the identity, size and times of each entry and its
+ * SKILL.md, so an edit in place is a change too. Nothing is read. */
+function fullFolder(dir: string): string {
+  const all = listing(dir, Infinity, true);
+  if (!all) return "absent";
+  const hash = createHash("sha256").update(all.key);
+  const stamp = (file: string) => {
+    let stat;
+    try { stat = lstatSync(file, { bigint: true, throwIfNoEntry: false }); } catch { return "!"; }
+    return stat ? `${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}` : "-";
+  };
+  for (const name of [...all.names].sort()) hash.update(`${name}\u0000${stamp(join(dir, name))}\u0000${stamp(join(dir, name, "SKILL.md"))}\n`);
+  return hash.digest("hex");
 }
 
 /** Every file that shapes a bot's turns, by name, as `describe` sees it:
@@ -132,10 +163,13 @@ export function memoryFiles(workspace: string, workingFolders: readonly string[]
    * the folder is too full to list). */
   const present = (dir: string, wanted: readonly string[], listed = listing(dir, ROOT_ENTRY_CAP)) =>
     listed ? wanted.filter((name) => listed.overflow || listed.names.has(name)) : [];
+  /** A skills, agents or commands folder (or a link to one: its target is
+   * recorded too, and its entries are read through it). */
   const capped = (dir: string) => {
-    const listed = listing(dir, FOLDER_ENTRY_CAP);
+    const listed = listing(dir, FOLDER_ENTRY_CAP, true);
+    if (!listed || listed.link) add(dir, dir);
     if (!listed) return;
-    if (listed.overflow) { files[dir] = `overflow:${listed.key}`; return; }
+    if (listed.overflow) { files[dir] = `overflow:${fullFolder(dir)}`; return; }
     for (const entry of [...listed.names].sort()) {
       add(join(dir, entry), join(dir, entry));
       add(join(dir, entry, "SKILL.md"), join(dir, entry, "SKILL.md"));
@@ -144,21 +178,22 @@ export function memoryFiles(workspace: string, workingFolders: readonly string[]
   const listedRoots = new Map<string, Listing>();
   const ancestors = new Set<string>();
   for (const folder of new Set([workspace, ...workingFolders].map((dir) => resolve(dir)))) {
-    const top = listing(folder, ROOT_ENTRY_CAP);
+    // A working folder that is a link is read through it.
+    const top = listing(folder, ROOT_ENTRY_CAP, true);
     if (top) {
       listedRoots.set(folder, top);
       for (const name of present(folder, [".mcp.json", ".claude", ".agents"], top)) {
         const path = join(folder, name);
         if (name === ".mcp.json") { add(path, path); continue; }
+        // A link (or a file) in place of the folder is judged by what it
+        // is, and a link's files by name through it.
         const inner = listing(path, ROOT_ENTRY_CAP);
-        // A link (or a file) in place of the folder is judged by what it is.
-        if (!inner) { add(path, path); continue; }
+        if (!inner) add(path, path);
+        if (!inner && !isLink(path)) continue;
         const wanted = name === ".claude" ? ["settings.json", "settings.local.json", "CLAUDE.md", "skills", "agents", "commands"] : ["skills"];
-        for (const entry of present(path, wanted, inner)) {
-          if (entry === "skills" || entry === "agents" || entry === "commands") {
-            const dir = join(path, entry);
-            if (listing(dir, FOLDER_ENTRY_CAP)) capped(dir); else add(dir, dir);
-          } else add(join(path, entry), join(path, entry));
+        for (const entry of inner ? present(path, wanted, inner) : wanted) {
+          if (entry === "skills" || entry === "agents" || entry === "commands") capped(join(path, entry));
+          else add(join(path, entry), join(path, entry));
         }
       }
     }

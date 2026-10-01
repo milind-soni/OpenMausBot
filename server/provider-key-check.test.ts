@@ -104,8 +104,21 @@ describe("provider key check", () => {
       .toEqual({ ok: false, reason: "rejected", status: 401 });
     expect(await checkProviderKey({ provider: "openaiCompat", key: "valid-fixture-key", url: "https://openrouter.ai/api/v1/" }, openRouter))
       .toEqual({ ok: true, check: "authentication", models: [] });
-    expect(paths).toHaveLength(2);
+    // The OpenRouter row authenticates the same way.
+    expect(await checkProviderKey({ provider: "openrouter", key: "valid-fixture-key" }, openRouter))
+      .toEqual({ ok: true, check: "authentication", models: [] });
+    expect(paths).toHaveLength(3);
     expect(paths.every((path) => path.endsWith("/key"))).toBe(true);
+  });
+
+  it("checks an OpenAI key against OpenAI, never OpenRouter", async () => {
+    const urls: string[] = [];
+    const openAi: typeof fetch = async (input) => {
+      urls.push(String(input));
+      return Response.json({ data: [{ id: "gpt-5" }] });
+    };
+    expect(await checkProviderKey({ provider: "openai", key: "sk-fixture" }, openAi)).toEqual({ ok: true, check: "models", models: ["gpt-5"] });
+    expect(urls).toEqual(["https://api.openai.com/v1/models"]);
   });
 
   it("does not call a custom compatible server's nonexistent /key endpoint", async () => {

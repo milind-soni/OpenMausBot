@@ -131,7 +131,7 @@ export interface PublicPairing {
 
 export type ExchangeResult =
   | { ok: true; token: string; session: PublicSession }
-  | { ok: false; status: 401 | 429; error: string };
+  | { ok: false; status: 401 | 403 | 429; error: string };
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -226,6 +226,8 @@ export class SessionRegistry {
   private readonly options: SessionStoreOptions;
   private readonly openMarker: string;
   private closed = false;
+  /** Set on an OMB Cloud home (requireAdmin): only admin scope, anywhere. */
+  private adminOnly: string | null = null;
 
   // No parameter properties: the server runs this file under Node's
   // strip-only TypeScript mode, which only erases types.
@@ -323,6 +325,22 @@ export class SessionRegistry {
     for (const listener of this.onRevoked) listener(sessionId);
   }
 
+  /** From now on no pairing window, sign-in or session without admin scope
+   * is opened, redeemed, issued or accepted; `refusal` says why (an OMB
+   * Cloud home is personal: server/cloud-owner.ts). Sessions stored without
+   * it stop authenticating; the caller revokes them. */
+  requireAdmin(refusal: string): void {
+    this.adminOnly = refusal;
+  }
+
+  private personal(scopes: readonly Scope[]): boolean {
+    return this.adminOnly !== null && !scopes.includes("admin");
+  }
+
+  private refusePersonal(scopes: readonly Scope[]): void {
+    if (this.personal(scopes)) throw Object.assign(new Error(this.adminOnly!), { status: 403, code: "cloud_personal" });
+  }
+
   // ── pairing ────────────────────────────────────────────────────────────
 
   openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; browser?: boolean; owner?: string } = {}): { id: string; code: string; credential: string; expiresAt: number } {
@@ -331,6 +349,7 @@ export class SessionRegistry {
     const code = generatePairingCode();
     const credential = generatePairingCredential();
     const scopes = input.scopes?.length ? [...new Set(input.scopes)] : [...SCOPES];
+    this.refusePersonal(scopes);
     const pairing: PairingCode = {
       id: randomUUID(),
       codeHash: sha256(code),
@@ -429,6 +448,7 @@ export class SessionRegistry {
     }
     const [pairing] = this.pairings.splice(index, 1); // single use
     this.failures.delete(input.source);
+    if (this.personal(pairing.scopes)) return { ok: false, status: 403, error: this.adminOnly! };
     const token = `omb_sess_${randomBytes(32).toString("base64url")}`;
     const record: SessionRecord = {
       id: randomUUID(),
@@ -464,6 +484,7 @@ export class SessionRegistry {
   }
 
   private issueAccount(input: { label: string; scopes: Scope[]; userId?: string; email?: string }, membershipAuthority?: "portal"): { token: string; session: PublicSession } {
+    this.refusePersonal(input.scopes);
     this.prune();
     const now = this.now();
     const token = `omb_sess_${randomBytes(32).toString("base64url")}`;
@@ -543,7 +564,7 @@ export class SessionRegistry {
     const hash = sha256(token);
     const now = this.now();
     const record = this.sessions.find((s) => sameDigest(s.tokenHash, hash));
-    if (!record || record.expiresAt <= now) return null;
+    if (!record || record.expiresAt <= now || this.personal(record.scopes)) return null;
     const lastWrite = this.lastSeenWrites.get(record.id) ?? 0;
     if (now - lastWrite >= LAST_SEEN_WRITE_INTERVAL_MS) {
       record.lastSeenAt = now;
@@ -577,7 +598,7 @@ export class SessionRegistry {
   /** Still valid right now (prunes expiry first). */
   isLive(sessionId: string): boolean {
     this.prune();
-    return this.sessions.some((s) => s.id === sessionId);
+    return this.sessions.some((s) => s.id === sessionId && !this.personal(s.scopes));
   }
 
   list(): PublicSession[] {
@@ -615,6 +636,6 @@ export class SessionRegistry {
     this.tickets.delete(hash);
     const now = this.now();
     const record = this.sessions.find((s) => s.id === entry.sessionId);
-    return record && record.expiresAt > now ? record : null;
+    return record && record.expiresAt > now && !this.personal(record.scopes) ? record : null;
   }
 }

@@ -85,7 +85,7 @@ it("runs structured MCP calls through real harness approval and continuation, pr
     } else {
       // Arguments arrive across events, and are only valid JSON when joined.
       res.write(frame({ tool_calls: [{ ...call, function: { name: call.function.name, arguments: '{"content":' } }] }, null));
-      res.end(frame({ tool_calls: [{ index: 0, function: { arguments: '"verified"}' } }] }, "tool_calls") + "data: [DONE]\n\n");
+      res.end(frame({ tool_calls: [{ index: 0, id: null, type: null, function: { name: null, arguments: '"verified"}' } }] }, "tool_calls") + "data: [DONE]\n\n");
     }
   });
   await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));

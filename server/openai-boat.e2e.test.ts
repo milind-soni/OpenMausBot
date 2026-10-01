@@ -163,7 +163,7 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
       expect(nativePrompts).toBe(0);
     };
     await api("PATCH", "/api/config", { openaiCompat: { key: "", url: origin + "/v1", model: "other-default" } });
-    await expectBlockedRun(/target bot's model engine is not ready/i);
+    await expectBlockedRun(/target bot's model is not ready/i);
     await api("PATCH", "/api/config", { openaiCompat: { key: "synthetic-model-key", url: origin + "/v1", model: "other-default" } });
     boatOffline = true;
     await expectBlockedRun(/cloud computer could not be checked/i);

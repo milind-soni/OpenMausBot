@@ -1,11 +1,18 @@
 # Bot memory
 
-Every bot keeps notes between tasks. The notes are plain markdown files in a
+By default, bots keep notes between tasks. The notes are plain markdown files in a
 folder on the computer running OpenMausBot — nothing is stored anywhere else,
 and you can open, edit, or delete any of it in any editor. **Bot Settings →
 Memory** shows the same files with a gauge of how much of them actually loads,
 an editor that never overwrites something the bot wrote while you were typing,
 and a journal of every change with one-click undo.
+
+The **Let this bot use memory** switch is on by default. Turn it off while the
+bot is idle to stop loading `MEMORY.md` into new turns, stop automatic recall
+and upkeep, hide native memory tools, exclude memory files from `session_search`,
+and stop automatic daily turn logs. Existing files remain for review. A bot
+with filesystem access can still edit those files directly; use standing
+instructions to forbid that when memory must stay in another source of truth.
 
 ## Where it lives
 
@@ -174,7 +181,7 @@ guesses. Three things close that gap without attaching transcripts:
   listed. When a brief in a room names a private 1:1 chat, the room gets a
   chip — *Lead's recent-work brief covers 1 private chat with you* — once per
   chat, the same rule as recalled messages.
-- **One log line per finished turn.** The harness appends what the bot said
+- **One log line per finished turn when memory is on.** The harness appends what the bot said
   last, the tools it used, and whether the turn failed to
   `memory/log/YYYY-MM-DD.md`, sourced to the chat or room. The log is never
   loaded into a prompt; `session_search` finds it.

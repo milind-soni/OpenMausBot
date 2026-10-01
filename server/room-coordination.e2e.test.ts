@@ -116,8 +116,7 @@ it("runs room-destined work in the room's own conversation, opening no thread on
   const tasksOf = async (botId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === botId).tasks ?? [];
   const before = await tasksOf(f.target.id);
   await f.start(); expect((await f.wait()).status).toBe("settled");
-  // a room is already a destination: pair conversations are for the
-  // direct case only and must not appear beside one
+  // A room is already a destination; direct work threads must not appear beside it.
   const node = f.nodes().find((n: any) => n.botId === f.target.id);
   expect(node.groupId).toBe(f.destination.id);
   expect(node.threadId).toBe(f.destination.activeTaskId);

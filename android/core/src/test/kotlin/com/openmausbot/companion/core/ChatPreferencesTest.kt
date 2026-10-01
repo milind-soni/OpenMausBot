@@ -50,6 +50,23 @@ class ChatPreferencesTest {
     }
 
     @Test
+    fun theDigestIsItsOwnRowAndNeverAStep() {
+        val messages = listOf(activity("a"), activity("b"), digest("c"), text("d"))
+        val reduced = transcriptRows(messages, ActivityDetail.REDUCED)
+        assertEquals(listOf("run.a", "c", "d"), reduced.map { it.id })
+        assertEquals(2, (reduced[0] as TranscriptRow.ActivityRun).items.size)
+        assertEquals(Message.Kind.DIGEST, reduced[1].kind)
+        assertEquals(listOf("a", "b", "c", "d"), transcriptRows(messages, ActivityDetail.FULL).map { it.id })
+    }
+
+    @Test
+    fun theRosterPreviewReadsPastTheDigestToTheReply() {
+        val messages = listOf(text("a"), digest("b"))
+        assertEquals("hello", rosterPreview(messages, ActivityDetail.FULL))
+        assertEquals("hello", rosterPreview(messages, ActivityDetail.REDUCED))
+    }
+
+    @Test
     fun reducedKeepsACompactionAsItsOwnRowAndBreaksTheRun() {
         val messages = listOf(activity("a"), activity("b"), compaction("c"), activity("d"), activity("e"))
         val rows = transcriptRows(messages, ActivityDetail.REDUCED)

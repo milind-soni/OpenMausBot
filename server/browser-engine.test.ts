@@ -438,7 +438,7 @@ describe("what a bot gets", () => {
       AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_NO_WEBMCP: "1", AGENT_BROWSER_RESTORE: browserRestoreKey("bot-1"),
       AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_ENCRYPTION_KEY: "session-key",
       AGENT_BROWSER_CONFIG: expect.stringContaining("omb-managed-config.json"),
-      AGENT_BROWSER_HEADLESS: "1", PATH: "/usr/bin",
+      AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_HEADED: "0", PATH: "/usr/bin",
       AGENT_BROWSER_EXECUTABLE_PATH: "/opt/trusted chrome/chrome",
     });
   });
@@ -452,7 +452,7 @@ describe("what a bot gets", () => {
       AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_NO_WEBMCP: "1", AGENT_BROWSER_RESTORE: browserRestoreKey("bot-1"),
       AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_ENCRYPTION_KEY: "session-key",
       AGENT_BROWSER_CONFIG: expect.stringContaining("omb-managed-config.json"),
-      AGENT_BROWSER_HEADLESS: "1", PATH: "/usr/bin",
+      AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_HEADED: "0", PATH: "/usr/bin",
       AGENT_BROWSER_EXECUTABLE_PATH: "/opt/process-chrome/chrome",
     });
     for (const env of [{}, { AGENT_BROWSER_EXECUTABLE_PATH: "" }]) {
@@ -486,9 +486,21 @@ describe("what a bot gets", () => {
     const spec = agentBrowserIntegration({ binaryPath: "/x/agent-browser", session: "bot-1", encryptionKey: "k".repeat(64), env: { PATH: "/usr/bin" } });
     expect(spec.command).toBe("/x/agent-browser");
     expect(spec.args).toEqual(["mcp", "--tools", "core", "--no-webmcp"]);
-    expect(spec.env).toMatchObject({ AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_RESTORE: browserRestoreKey("bot-1"), AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_HEADLESS: "1", PATH: "/usr/bin" });
+    expect(spec.env).toMatchObject({ AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_RESTORE: browserRestoreKey("bot-1"), AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_HEADED: "0", PATH: "/usr/bin" });
     expect(spec.env.AGENT_BROWSER_ENCRYPTION_KEY).toBe("k".repeat(64));
-    expect(agentBrowserIntegration({ binaryPath: "/x", session: "s", encryptionKey: "k", headless: false }).env.AGENT_BROWSER_HEADLESS).toBeUndefined();
+    // The headless:false opt-out survives on a headed-capable platform; on a
+    // displayless Linux host it is overridden (covered below).
+    expect(agentBrowserIntegration({ binaryPath: "/x", session: "s", encryptionKey: "k", headless: false, platform: "darwin" }).env.AGENT_BROWSER_HEADLESS).toBeUndefined();
+  });
+
+  it("pins headless on a displayless Linux host, even for a headed-capable caller (#1383)", () => {
+    const linux = { binaryPath: "/x/agent-browser", session: "s", encryptionKey: "k", platform: "linux" as const, env: { PATH: "/usr/bin" } };
+    expect(agentBrowserIntegration(linux).env).toMatchObject({ AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_HEADED: "0" });
+    expect(agentBrowserIntegration({ ...linux, headless: false }).env).toMatchObject({ AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_HEADED: "0" });
+    // a display keeps the caller's choice, as does a non-Linux host
+    expect(agentBrowserIntegration({ ...linux, headless: false, env: { PATH: "/usr/bin", DISPLAY: ":0" } }).env.AGENT_BROWSER_HEADED).toBeUndefined();
+    expect(agentBrowserIntegration({ ...linux, headless: false, env: { PATH: "/usr/bin", WAYLAND_DISPLAY: "wayland-0" } }).env.AGENT_BROWSER_HEADED).toBeUndefined();
+    expect(agentBrowserIntegration({ ...linux, platform: "darwin", headless: false }).env.AGENT_BROWSER_HEADED).toBeUndefined();
   });
 
   it("keeps saved state separate for different bots and never saves guest state", () => {

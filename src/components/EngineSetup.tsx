@@ -385,31 +385,40 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
   );
 }
 
-/** An API engine has nothing to install: its key lives in Settings →
- * Connections, so the card says why it is not ready and opens that page. */
-function ConnectionsSetup({ instance, className, unframed }: { instance: InstanceInfo; className?: string; unframed: boolean }) {
+/** Engines that run on a pasted API key. Their setup is the key row in
+ * Settings → API keys, never a terminal command or a sign-in. Claude on the
+ * workspace key still needs its CLI first, which the install card covers. */
+export function isApiKeyEngine(instance: InstanceInfo | undefined): boolean {
+  if (!instance || instance.access !== "api" || instance.managed) return false;
+  return instance.driverKind !== "claudeAgent" || Boolean(instance.snapshot.version);
+}
+
+function ApiKeyEngineSetup({ instance, className, unframed }: { instance: InstanceInfo; className?: string; unframed: boolean }) {
   const { dispatch } = useStore();
+  const remote = window.ogb?.remoteClient?.active === true;
   return (
-    <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
+    <div data-engine-setup-api-key className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-inset text-ink-secondary">
           <KeyRound size={14} />
         </span>
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold text-ink">{t("engineSetup.notReady", { name: instance.displayName })}</div>
+          <div className="text-[13px] font-semibold text-ink">{t("engineSetup.apiKey.title", { name: instance.displayName })}</div>
           <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {instance.snapshot.reason ?? instance.install?.signInCommand ?? t("engineSetup.connectionsDesc")}
+            {remote ? t("engineSetup.apiKey.remote") : t("engineSetup.apiKey.description")}
           </p>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
-        className="mt-3 flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-[12px] font-semibold text-white hover:brightness-110"
-      >
-        <KeyRound size={12} />
-        {t("engineSetup.openConnections")}
-      </button>
+      {!remote && (
+        <button
+          type="button"
+          onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
+          className="mt-3 flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-raised-hover"
+        >
+          <KeyRound size={13} aria-hidden="true" />
+          {t("engineSetup.apiKey.open")}
+        </button>
+      )}
     </div>
   );
 }
@@ -462,8 +471,9 @@ export function EngineSetup({
         ? t("engineSetup.installDescSignIn")
         : t("engineSetup.installDesc"));
 
-  if (install?.settings === "connections" && !instance.snapshot.authenticationUnavailableReason) {
-    return <ConnectionsSetup instance={instance} className={className} unframed={unframed} />;
+  if ((isApiKeyEngine(instance) || install?.settings === "connections") && !instance.snapshot.authenticationUnavailableReason
+    && (instance.snapshot.state !== "available" || instance.snapshot.authenticated === false)) {
+    return <ApiKeyEngineSetup instance={instance} className={className} unframed={unframed} />;
   }
 
   // Some engines are configured elsewhere (for example, a cloud computer

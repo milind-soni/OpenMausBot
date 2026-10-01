@@ -156,6 +156,10 @@ public enum TranscriptRow: Identifiable, Hashable, Sendable {
 /// on the screen they spend the most time on. Reading the preview off the
 /// raw last message made "Hidden" mean "hidden in one place".
 public func rosterPreview(_ messages: [Message], detail: ActivityDetail) -> String {
+    // The digest is a row in the chat now, as a chip, but never the line
+    // under a chat's name: it follows every reply, so it would be the
+    // preview of every chat and say nothing about any of them.
+    let messages = messages.filter { $0.kind != .digest }
     guard let last = transcriptRows(messages, detail: detail).last else { return "" }
     switch last {
     case let .message(message):
@@ -183,6 +187,7 @@ func previewText(of message: Message) -> String {
     case .screen: return "Screenshot"
     case .digest: return ""
     case .compaction: return message.compaction?.chipText ?? message.text ?? ""
+    case .routineRun: return message.routineRun?.previewLine ?? message.text ?? ""
     case .unknown: return message.text ?? ""
     }
 }
@@ -203,8 +208,11 @@ public func isActivityReceipt(_ message: Message) -> Bool {
 /// A failed step is never folded away: the reason to turn activity down is
 /// the successful noise, and losing the one chip that says something went
 /// wrong would make `reduced` a worse default than `full`.
+///
+/// A digest is a row of its own, drawn as a chip: never folded into a run
+/// of the tool chips it summarises, never counted as one of their steps,
+/// and gone with them when activity is hidden.
 public func transcriptRows(_ messages: [Message], detail: ActivityDetail) -> [TranscriptRow] {
-    let messages = messages.filter { $0.kind != .digest }
     // Fold only explicitly completed turns; never guess that the last reply
     // is final on an older server or while the bot is still working.
     var narration: [String: [Message]] = [:]
@@ -250,6 +258,9 @@ public func transcriptRows(_ messages: [Message], detail: ActivityDetail) -> [Tr
         }
         if hiddenIDs.contains(message.id) { continue }
         if detail == .hidden && isActivityReceipt(message) { continue }
+        // A turn that touched nothing leaves a digest with nothing to show;
+        // an empty row would still cost the transcript a gap.
+        if message.kind == .digest && DigestSummary(text: message.text ?? "").isEmpty { continue }
         if detail != .reduced {
             rows.append(.message(message))
             continue

@@ -24,7 +24,8 @@ describe("OpenAICompatDriver", () => {
 
   it("registers with the openai-compat kind and a display name", () => {
     expect(OpenAICompatDriver.driverKind).toBe("openai-compat");
-    expect(OpenAICompatDriver.metadata.displayName).toMatch(/OpenRouter|Groq/);
+    expect(OpenAICompatDriver.metadata.displayName).toBe("Other (OpenAI-compatible)");
+    expect(OpenAICompatDriver.metadata.access).toBe("api");
   });
 
   it("falls back to the OpenRouter endpoint by default", () => {
@@ -55,6 +56,52 @@ describe("OpenAICompatDriver", () => {
     }
   });
 
+  it("keeps a provider's own instance off the workspace key, URL and model", async () => {
+    process.env.OPENAI_COMPAT_API_KEY = "workspace-key";
+    process.env.OPENAI_COMPAT_URL = "https://openrouter.ai/api/v1";
+    const before = process.env.OPENAI_COMPAT_MODEL;
+    process.env.OPENAI_COMPAT_MODEL = "meta-llama/llama-3.3-70b-instruct";
+    try {
+      const config = OpenAICompatDriver.decodeConfig({ url: "https://api.openai.com/v1", apiKeyEnv: "OMB_OPENAI_API_KEY", catalog: "openai" });
+      expect(config).toMatchObject({ url: "https://api.openai.com/v1", catalog: "openai" });
+      expect(config.model).toBeUndefined();
+      const inst = await OpenAICompatDriver.create({
+        instanceId: "openai", displayName: "OpenAI", enabled: true, config,
+        environment: { OPENAI_COMPAT_API_KEY: "workspace-key" },
+      });
+      // No OpenAI key: unavailable, never the workspace key against OpenAI.
+      expect((await inst.snapshot()).state).toBe("unavailable");
+      expect(inst.models.default).toBe("gpt-5");
+      await inst.dispose();
+      // A custom key variable still falls back, as it always has.
+      expect(OpenAICompatDriver.decodeConfig({ apiKeyEnv: "GROQ_KEY" }).model).toBe("meta-llama/llama-3.3-70b-instruct");
+    } finally {
+      if (before === undefined) delete process.env.OPENAI_COMPAT_MODEL;
+      else process.env.OPENAI_COMPAT_MODEL = before;
+    }
+  });
+
+  it("lists only OpenAI's chat models, newest first", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [
+      { id: "gpt-4.1", created: 1 },
+      { id: "text-embedding-3-large", created: 9 },
+      { id: "gpt-5", created: 3 },
+      { id: "gpt-4o-realtime-preview", created: 8 },
+      { id: "dall-e-3", created: 7 },
+      { id: "o3", created: 2 },
+      { id: "gpt-5-codex", created: 6 },
+    ] }), { status: 200 })));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "openai", displayName: "OpenAI", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.openai.com/v1", apiKeyEnv: "OMB_OPENAI_API_KEY", catalog: "openai" }),
+      environment: { OMB_OPENAI_API_KEY: "sk-fixture" },
+    });
+    await vi.waitFor(() => expect(inst.models.options.map((option) => option.id)).toEqual(["gpt-5", "o3", "gpt-4.1"]));
+    // A provider's own list is its official catalog, not custom models.
+    expect(inst.models.options.every((option) => !option.custom)).toBe(true);
+    await inst.dispose();
+  });
+
   it("reports unavailable without an API key", async () => {
     const inst = await OpenAICompatDriver.create({
       instanceId: "test-1",
@@ -70,16 +117,16 @@ describe("OpenAICompatDriver", () => {
 
   // The setup card used to show a config.json sentence as an "Open install
   // in Terminal" command. The key is saved in the app.
-  it("sends setup to Settings → Connections instead of a terminal", async () => {
+  it("sends setup to Settings → API keys instead of a terminal", async () => {
     expect(OpenAICompatDriver.install?.command).toBeUndefined();
     expect(OpenAICompatDriver.install?.settings).toBe("connections");
-    expect(OpenAICompatDriver.install?.signInCommand).toContain("Settings → Connections");
+    expect(OpenAICompatDriver.install?.signInCommand).toContain("Settings → API keys");
     const inst = await OpenAICompatDriver.create({
       instanceId: "test-setup", displayName: "Router", enabled: true,
       config: { url: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENAI_COMPAT_API_KEY" }, environment: {},
     });
     const snap = await inst.snapshot();
-    expect(snap).toMatchObject({ state: "unavailable", reason: expect.stringContaining("Settings → Connections") });
+    expect(snap).toMatchObject({ state: "unavailable", reason: expect.stringContaining("Settings → API keys") });
     expect(JSON.stringify(snap)).not.toContain("config.json");
     await inst.dispose();
   });

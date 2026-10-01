@@ -356,6 +356,46 @@ describe("start_thread on yourself", () => {
       await cleanup([bot.id]);
     }
   }, 60_000);
+
+  // #1950: the person moved this thread off the bot default, so the work it
+  // opens stays where they put it. A teammate's thread and a thread started
+  // from scratch have no such parent and keep their own bot's default.
+  it("starts on the model of the thread it was opened from, never on a teammate's", async () => {
+    const pm = await createBot("Pam", "gated");
+    const qa = await createBot("Quinn", "gated");
+    const sonnet = { instanceId: "gated", model: "claude-sonnet-5" };
+    const opus = { instanceId: "gated", model: "claude-opus-5" };
+    try {
+      expect((await api("PATCH", `/api/bots/${pm.id}`, { approvalMode: "edits" })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${pm.id}/tasks/${pm.threadId}`, { modelSelection: opus })).status).toBe(200);
+      const token = await heldTurn(pm, "Split this into separate jobs.");
+      const opened = await api("POST", "/api/internal/threads", { title: "Same model", message: "go" }, token);
+      expect(opened.status).toBe(201);
+      release(opened.body.threadId);
+      expect(await taskOf(pm.id, opened.body.threadId)).toMatchObject({ modelSelection: opus, approvalMode: "edits" });
+      expect((await botState(pm.id)).modelSelection).toMatchObject(sonnet);
+      const handed = await coordinated(token, qa.id, "Check it.", "inherit-model");
+      release(handed.threadId);
+      expect(await taskOf(qa.id, handed.threadId)).toMatchObject({ modelSelection: sonnet });
+      release(pm.threadId);
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+
+      // An engine that cannot carry the bot's level starts the new thread in
+      // Ask, as switching the parent thread to it did.
+      const fresh = await api("POST", `/api/bots/${pm.id}/tasks`, { title: "From scratch" });
+      expect(fresh.body.task).toMatchObject({ modelSelection: sonnet, approvalMode: "edits" });
+      const retired = { instanceId: "retired", model: "old-model" };
+      expect((await api("PATCH", `/api/bots/${pm.id}/tasks/${fresh.body.task.threadId}`,
+        { modelSelection: retired, resetApprovalToAsk: true })).status).toBe(200);
+      const elsewhere = await api("POST", "/api/internal/threads", { title: "Retired engine", message: "go" },
+        await mintedToken(pm.id, fresh.body.task.threadId));
+      expect(elsewhere.status).toBe(201);
+      expect(await taskOf(pm.id, elsewhere.body.threadId)).toMatchObject({ modelSelection: retired, approvalMode: "ask", alwaysAllow: [] });
+      expect(await botState(pm.id)).toMatchObject({ modelSelection: sonnet, approvalMode: "edits" });
+    } finally {
+      await cleanup([pm.id, qa.id]);
+    }
+  }, 60_000);
 });
 
 describe("coordinate_bots on a teammate", () => {
@@ -547,9 +587,8 @@ describe("list_threads", () => {
       const mine = await api("GET", "/api/internal/threads", undefined, token);
       expect(mine.status).toBe(200);
       const titles = mine.body.threads.map((row: { title: string; botName: string; own: boolean }) => `${row.own ? "own" : row.botName}:${row.title}`);
-      // coordinated work lands in Parker's standing conversation with Quinn,
-      // which the sidebar and this list name after the sender, not the brief
-      expect(titles).toContain("Quinn:@Parker");
+      // Direct work gets a fresh thread, named for its sender.
+      expect(titles).toContain("Quinn:@Parker · work");
       expect(titles.some((title: string) => title.startsWith("own:"))).toBe(true);
       expect(titles).not.toContain("Quinn:Quinn's own audit");
       // and Quinn, asking for itself, sees its own rows only — never Parker's
@@ -564,7 +603,7 @@ describe("list_threads", () => {
 });
 
 describe("close_thread", () => {
-  it("closes your own thread and one you opened on a teammate, refuses a teammate's other thread and a running one", async () => {
+  it("closes your own thread, auto-closes completed peer work, and refuses other or running threads", async () => {
     const pm = await createBot("Parker", "gated");
     const qa = await createBot("Quinn", "gated");
     try {
@@ -581,18 +620,19 @@ describe("close_thread", () => {
       release(child.threadId);
       release(pm.threadId);
       await expect.poll(() => handoffs().find(node => node.id === child.id)?.status, { timeout: 15_000 }).toBe("completed");
+      await expect.poll(async () => (await taskOf(qa.id, child.threadId)).closedBy, { timeout: 15_000 })
+        .toMatchObject({ botId: pm.id, name: "Parker" });
       token = await heldTurn(pm, "Close the completed QA task.");
       const closed = await close(opened.body.threadId);
       expect(closed.status).toBe(200);
-      expect(closed.body).toMatchObject({ closed: true, title: "@Parker", botName: "Quinn" });
-      expect((await messages(opened.body.threadId)).some((message) => message.tool?.name === "Closed by @Parker")).toBe(true);
-      // the close is stamped on the task — that is what the sidebar folds on — and list_threads says closed
+      expect(closed.body).toMatchObject({ closed: true, alreadyClosed: true, title: "@Parker · work", botName: "Quinn" });
+      // Successful peer work is already folded from the sidebar.
       expect((await taskOf(qa.id, opened.body.threadId)).closedBy).toMatchObject({ botId: pm.id, name: "Parker" });
       const listed = (await api("GET", "/api/internal/threads", undefined, token)).body.threads as any[];
       expect(listed.find((row) => row.threadId === opened.body.threadId)).toMatchObject({ state: "closed" });
-      // closing again is a quiet no-op: same answer, no second chip
+      // Closing again is a quiet no-op.
       expect((await close(opened.body.threadId)).body).toMatchObject({ closed: true, alreadyClosed: true });
-      expect((await messages(opened.body.threadId)).filter((message) => message.tool?.name === "Closed by @Parker")).toHaveLength(1);
+      expect((await messages(opened.body.threadId)).filter((message) => message.tool?.name === "Closed by @Parker")).toHaveLength(0);
       // Parker's own second thread closes too; the one it speaks in does not
       const own = (await api("POST", `/api/bots/${pm.id}/tasks`, { title: "Notes" })).body.task.threadId as string;
       expect((await close(own)).status).toBe(200);

@@ -4,7 +4,7 @@
 // completely functional until the first message, then fails with a raw spawn
 // error. Every engine unavailable is a setup state, not an error state, so it
 // gets a screen that says what to do rather than a bot that can't answer.
-import { Loader2, RefreshCw } from "lucide-react";
+import { ArrowUpRight, KeyRound, Loader2, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useStore } from "@/state/store";
 import { EngineGroupLabel } from "@/components/EngineGroupLabel";
@@ -15,7 +15,7 @@ import { t } from "@/lib/i18n";
 import { brand } from "../lib/brand";
 
 export function NoEngines() {
-  const { state, refreshInstances } = useStore();
+  const { state, dispatch, refreshInstances } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const [rechecking, setRechecking] = useState(false);
   const recheck = async () => {
@@ -68,7 +68,7 @@ export function NoEngines() {
 
         <div className="mt-6 flex flex-col gap-2.5">
           {(() => {
-            const { subscription, custom } = splitEngineRail(engines);
+            const { subscription, api, custom } = splitEngineRail(engines);
             const card = (instance: (typeof engines)[number]) => (
               <div key={instance.instanceId} className="rounded-xl border border-hairline/40 bg-card p-3.5">
                 <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
@@ -86,6 +86,23 @@ export function NoEngines() {
               <>
                 {subscription.length > 0 && <EngineGroupLabel className="px-1">{t("engines.cloud")}</EngineGroupLabel>}
                 {subscription.map(card)}
+                {/* One way in for every pasted-key provider, not a card each:
+                    they all finish in the same place. */}
+                {api.length > 0 && window.ogb?.remoteClient?.active !== true && (
+                  <button
+                    type="button"
+                    data-no-engines-api-keys
+                    onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
+                    className="flex items-center gap-3 rounded-xl border border-hairline/40 bg-card p-3.5 text-left hover:bg-control/40"
+                  >
+                    <KeyRound size={16} className="shrink-0 text-ink-secondary" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[14px] font-medium text-ink">{t("cloudSignIn.apiKey")}</span>
+                      <span className="block text-[12px] text-ink-secondary">{t("cloudSignIn.apiKeyHint")}</span>
+                    </span>
+                    <ArrowUpRight size={14} className="shrink-0 text-ink-secondary" />
+                  </button>
+                )}
                 {custom.length > 0 && <EngineGroupLabel className="px-1 pt-1">{t("engines.local")}</EngineGroupLabel>}
                 {custom.map(card)}
               </>

@@ -97,7 +97,7 @@ describe("scopes", () => {
   it("is default deny: chat, approvals, rooms, attachments, routines and own session are client; everything else admin", () => {
     for (const [method, path] of [
       ["POST", "/api/bots/x/messages"], ["POST", "/api/bots/x/respond"], ["POST", "/api/threads/t/respond"],
-      ["POST", "/api/bots/x/compact"],
+      ["POST", "/api/bots/x/compact"], ["POST", "/api/bots/x/tasks/t/title"],
       ["PATCH", "/api/bots/x/cards/m"], ["POST", "/api/groups/g/messages"], ["PATCH", "/api/groups/g"],
       ["PATCH", "/api/bots/x"], ["PATCH", "/api/bots/x/profile"], ["POST", "/api/attachments"],
       ["GET", "/api/attachments/a.png"], ["POST", "/api/routines"], ["POST", "/api/routines/r/run"],
@@ -281,6 +281,11 @@ describe("resolveRequestAuth", () => {
     );
     expect(connectorRefresh.auth).toBeNull();
     expect(connectorRefresh.status).toBe(403);
+    // The remote viewer route hands out a desktop password and its RFB
+    // socket; native owners use the direct viewer instead.
+    for (const path of ["/api/desktop-viewer/vps/bot-1", "/api/desktop-viewer/local/shared/websockify"]) {
+      expect(resolveRequestAuth(request({ host: "127.0.0.1:8799" }, "GET"), options(path)).status).toBe(403);
+    }
     expect(resolveRequestAuth(
       request({ host: "127.0.0.1:8799" }, "POST"),
       options("/api/internal/ask-bot"),

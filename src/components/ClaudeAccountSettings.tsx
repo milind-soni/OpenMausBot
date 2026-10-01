@@ -112,7 +112,7 @@ export function ClaudeAccountSettings({ instance }: { instance: InstanceInfo }) 
   // Only a hosted server that can run `claude auth logout` for this account
   // offers it; the desktop app keeps the CLI's own sign-out.
   // On the workspace API key there is no personal login to sign out of;
-  // removing the key in Settings → Connections is the way back.
+  // removing the key in Settings → API keys is the way back.
   const onApiKey = instance.snapshot.account?.method === "api-key";
   const canSignOut = authenticated && instance.authentication?.signOut === true && !onApiKey;
   const identity = authenticated

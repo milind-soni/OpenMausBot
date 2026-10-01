@@ -637,7 +637,7 @@ function normalizedOperation(
   };
 }
 
-function asSchedule(schedule: RoutineRequestSchedule, now: number): RoutineSchedule {
+export function asSchedule(schedule: RoutineRequestSchedule, now: number): RoutineSchedule {
   if (schedule.type === "cron") return { ...schedule };
   if (schedule.type === "once") return { type: "once", at: schedule.at };
   if (schedule.type === "interval") {

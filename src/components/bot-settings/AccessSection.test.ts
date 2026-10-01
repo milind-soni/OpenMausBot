@@ -89,7 +89,7 @@ describe("AccessSection always-allowed list", () => {
     expect(markup).toContain('disabled="" aria-label="Let this bot use offline"');
     expect(markup).toMatch(/<button type="button" disabled=""[^>]*>Use every enabled server<\/button>/);
     expect(markup).toContain("finishes all active tasks");
-    expect(markup).toContain("Individual tool approvals depend on the engine and approval mode.");
+    expect(markup).toContain("Individual tool approvals depend on the model provider and approval mode.");
     const idle = render(makeBot({ mcpServers: ["notes"] }));
     expect(idle).not.toContain('disabled="" aria-label="Let this bot use notes"');
     expect(idle).toContain('disabled="" aria-label="Let this bot use offline"');
