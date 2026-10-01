@@ -391,12 +391,19 @@ export function localVmResumable(
     && status.network === "loopback" && status.security === "hardened" && status.persistence === "durable";
 }
 
+/** What a turn may do on its own to bring this Local VM up, if anything. */
+export function localVmWakeAction(status: ContainerComputerStatus): "run" | "start" | null {
+  if (localVmRecreatableOnDemand(status)) return "run";
+  if (localVmResumable(status)) return "start";
+  return null;
+}
+
 /** Whether Auto may attach this Local VM without a person choosing it: the
  * desktop is ready, a compatible stopped desktop can be started, or its image
  * is prepared and a missing container can be recreated. Anything else — no runtime, daemon down, image
  * never prepared, an unmanaged or unsafe container — stays the person's call. */
 export function autoLocalVmAttachable(status: ContainerComputerStatus): boolean {
-  return status.ready === true || localVmRecreatableOnDemand(status) || localVmResumable(status);
+  return status.ready === true || localVmWakeAction(status) !== null;
 }
 
 function statusProblem(status: ContainerComputerStatus): string | null {

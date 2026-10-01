@@ -129,8 +129,7 @@ import {
   containerComputerStatus,
   containerExec,
   containerRuntimeStatus,
-  localVmRecreatableOnDemand,
-  localVmResumable,
+  localVmWakeAction,
   localVmWorkspaceExists,
   perBotLocalVmTarget,
   poolLocalVmTarget,
@@ -14024,20 +14023,21 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
     status = await containerComputerStatus(undefined, undefined, target);
     noteLocalVmSeen(target, status);
     if (!isCurrent()) return status;
-    if (status.ready || (!localVmRecreatableOnDemand(status) && !localVmResumable(status))) return status;
+    const action = localVmWakeAction(status);
+    if (status.ready || !action || !status.runtime) return status;
     // Another creation is already mid-flight and its container is not yet
     // visible to a count, so the safe answer is the inspected status —
     // exactly what the over-cap path below returns.
-    if (status.container === "missing" && !pooled && !ownsProvision) return status;
+    if (action === "run" && !pooled && !ownsProvision) return status;
 
-    if (status.container === "missing" && target.key.startsWith("bot:")) {
+    if (action === "run" && target.key.startsWith("bot:")) {
       const count = await existingPerBotLocalVmCount(status.runtime);
       if (!isCurrent() || count >= localVmMaxInstances(cfg)) return status;
     }
 
     broadcast({ kind: "computer", botId, state: "provisioning" });
     try {
-      status = await containerComputerAction(status.container === "stopped" ? "start" : "run", undefined, undefined, target);
+      status = await containerComputerAction(action, undefined, undefined, target);
     } catch {
       // Keep the inspected status: its `problem` names the real obstacle,
       // which is more use to the person than "podman run exited non-zero".
