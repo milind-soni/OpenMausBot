@@ -15,7 +15,6 @@ import { promisify } from "node:util";
 
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { DATA_DIR } from "./config.ts";
-import { canResumeLocalVm } from "../shared/local-vm-lifecycle.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 const run = promisify(execFile);
@@ -320,6 +319,8 @@ export interface ContainerComputerStatus {
   desktop_error: string | null;
   /** Runtime timestamp used to match an idle-stop record, never an inferred cause. */
   stopped_at?: string | null;
+  /** A stopped desktop whose only problem is that it is stopped. */
+  resumable: boolean;
   create_supported: boolean;
   ready: boolean;
   problem: string | null;
@@ -351,6 +352,7 @@ function emptyStatus(platform: NodeJS.Platform, target: LocalVmTarget): Containe
     desktopReady: false,
     desktop_error: null,
     create_supported: true,
+    resumable: false,
     ready: false,
     problem: "Install a supported container runtime first",
     image_ref: IMAGE,
@@ -378,11 +380,15 @@ export function localVmRecreatableOnDemand(
     && status.create_supported;
 }
 
-/** Start only an existing, compatible desktop with the managed safety boundary. */
+/** Start only an existing, compatible desktop with the managed safety boundary.
+ * Fails closed on fields left "unknown" by a partial inspect, which
+ * `statusProblem` alone would let through. */
 export function localVmResumable(
   status: ContainerComputerStatus,
 ): status is ContainerComputerStatus & { runtime: Runtime } {
-  return Boolean(status.runtime) && canResumeLocalVm(status);
+  return Boolean(status.runtime) && status.daemonUp && status.image && status.container === "stopped"
+    && existingContainerProblem(status) === null
+    && status.network === "loopback" && status.security === "hardened" && status.persistence === "durable";
 }
 
 /** Whether Auto may attach this Local VM without a person choosing it: the
@@ -401,14 +407,21 @@ function statusProblem(status: ContainerComputerStatus): string | null {
     return "Per-bot Local VMs require Docker or Podman because Apple container requires a fixed host port";
   }
   if (status.container === "missing") return "Create the Local VM";
+  const existing = existingContainerProblem(status);
+  if (existing) return existing;
+  if (status.container === "stopped") return "The Local VM is stopped; start it to continue";
+  if (status.desktop_error) return `The Local VM desktop failed to start: ${status.desktop_error}`;
+  if (!status.desktopReady) return "The Local VM started, but Cua Driver is not ready yet";
+  return null;
+}
+
+/** Problems with an existing container that only a recreate fixes. */
+function existingContainerProblem(status: ContainerComputerStatus): string | null {
   if (!status.imageMatches) return "The existing Local VM uses an older desktop or Cua Driver; recreate it";
   if (!status.managed) return "The existing container was not created by OpenMausBot; recreate it";
   if (status.network === "unsafe") return "The existing Local VM exposes its viewer publicly; recreate it";
   if (status.security === "unsafe") return "The existing Local VM is missing safety limits; recreate it";
   if (status.persistence === "unsafe") return "The existing Local VM is missing its durable folder; recreate it";
-  if (status.container === "stopped") return "The Local VM is stopped; start it to continue";
-  if (status.desktop_error) return `The Local VM desktop failed to start: ${status.desktop_error}`;
-  if (!status.desktopReady) return "The Local VM started, but Cua Driver is not ready yet";
   return null;
 }
 
@@ -685,6 +698,7 @@ export async function containerComputerStatus(
 
   status.problem = statusProblem(status);
   status.ready = status.problem === null;
+  status.resumable = localVmResumable(status);
   return status;
 }
 

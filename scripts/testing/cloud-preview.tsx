@@ -32,7 +32,7 @@ let vmRunning = false;
 let vmDesktopReady = false;
 const vmResumeStatus = () => ({
   platform: "linux", runtime: "docker", available: ["docker"], mode: "shared", daemonUp: true,
-  image: true, create_supported: true, container: vmRunning ? "running" : "stopped",
+  image: true, create_supported: true, container: vmRunning ? "running" : "stopped", resumable: !vmRunning,
   imageMatches: true, managed: true, network: "loopback", security: "hardened", persistence: "durable",
   desktopReady: vmDesktopReady, ready: vmDesktopReady, stop_reason: vmRunning ? null : "idle",
   problem: vmDesktopReady ? null : vmRunning ? "Desktop is starting" : "The Local VM is stopped",

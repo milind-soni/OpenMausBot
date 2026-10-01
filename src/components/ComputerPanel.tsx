@@ -11,7 +11,6 @@ import { cloudRunner } from "@/lib/remote-desktop";
 // it must never fall back to this host or become a private Cloud selection.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { canResumeLocalVm } from "../../shared/local-vm-lifecycle";
 import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 import {
   CalendarClock,
@@ -120,7 +119,8 @@ type Phase =
   | "error";
 
 interface LocalVmStatus {
-  daemonUp: boolean;
+  /** Optional: a hosted server can lag behind this app. */
+  resumable?: boolean;
   stop_reason?: "idle" | null;
   mode: "shared" | "per-bot" | "pool";
   max_instances: number;
@@ -383,7 +383,7 @@ export function ComputerPanel({
     });
     return () => controller.abort();
   }, [connectionKey, livePlace, computerSelectionPersisted, threadPath, retry]);
-  const vmResumable = phase === "vm-unavailable" && vmStatus !== null && canResumeLocalVm(vmStatus);
+  const vmResumable = phase === "vm-unavailable" && vmStatus?.resumable === true;
   const vmReadinessAttempts = useRef(0);
   const vmActionController = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -564,7 +564,7 @@ export function ComputerPanel({
               status.container === "missing" &&
               status.image &&
               status.create_supported;
-            setError(canCreateHere || canResumeLocalVm(status) ? null : new LocalizedPanelError(
+            setError(canCreateHere || status.resumable ? null : new LocalizedPanelError(
               "computer.err.vmOpenSettings", status.problem, "computer.err.vmNotReady",
             ));
             setPhase("vm-unavailable");

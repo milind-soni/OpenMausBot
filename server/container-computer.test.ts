@@ -842,6 +842,7 @@ describe("containerComputerAction", () => {
 
     const stopped = await containerComputerStatus(fake.run, "linux");
     expect(localVmResumable(stopped)).toBe(true);
+    expect(stopped.resumable).toBe(true);
     expect(stopped.stopped_at).toBe("2026-10-01T12:00:00Z");
     await containerComputerAction("start", fake.run, "linux");
     expect(fake.calls).toContain(`docker start ${CONTAINER}`);
@@ -1055,6 +1056,7 @@ describe("Local VM resume safety", () => {
       [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
       [`docker inspect ${CONTAINER}`]: readyInspect({ State: { Running: false }, ...patch }),
     });
+    expect((await containerComputerStatus(fake.run, "linux")).resumable).toBe(false);
     await expect(containerComputerAction("start", fake.run, "linux")).rejects.toThrow();
     expect(fake.calls).not.toContain(`docker start ${CONTAINER}`);
   });

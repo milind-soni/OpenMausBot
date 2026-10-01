@@ -34,7 +34,7 @@ registerHooks({
         const ready = !missing && !stopped && !read().failed;
         return { runtime: 'podman', daemonUp: true, image: true, create_supported: true, managed: !missing,
           container: missing ? 'missing' : stopped ? 'stopped' : 'running', ready,
-          imageMatches: true, network: 'loopback', security: 'hardened', persistence: 'durable',
+          imageMatches: true, network: 'loopback', security: 'hardened', persistence: 'durable', resumable: Boolean(stopped),
           stopped_at: stopped ? read().stoppedAt : null, problem: ready ? null : 'fixture desktop unavailable',
           container_name: target.containerName, target_key: target.key, workspace_path: target.workspaceDir };
       }
