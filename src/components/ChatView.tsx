@@ -430,6 +430,7 @@ function Bubble({
           </MessageActions>
         )}
         <div
+          data-chat-bubble
           className={cn(
             "w-fit max-w-[min(42rem,78%)] rounded-2xl text-[15px] leading-relaxed",
             emerging && "turn-answer",

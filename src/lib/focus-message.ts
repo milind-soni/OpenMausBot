@@ -88,7 +88,8 @@ export function useFocusMessage(threadId: string, ready: boolean) {
     const attempt = () => {
       if (cancelled) return;
       const wrapper = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(focus.messageId)}"]`);
-      target = wrapper?.lastElementChild as HTMLElement | null;
+      const row = wrapper?.lastElementChild as HTMLElement | null;
+      target = focus.matchText ? row?.querySelector<HTMLElement>("[data-chat-bubble]") ?? row : row;
       if (!target) {
         if (tries++ < 20) retryTimer = setTimeout(attempt, 100);
         return;

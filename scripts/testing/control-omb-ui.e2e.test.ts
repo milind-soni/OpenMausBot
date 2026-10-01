@@ -134,6 +134,7 @@ describe("control-omb ui drives the real renderer", () => {
     expect((await ui("snapshot", info.ui)).snapshot).not.toContain("Show less");
     mkdirSync(evidenceDir, { recursive: true });
     await ui("screenshot", info.ui, "--out", join(evidenceDir, "search-result.png"));
+    await expect.poll(async () => (await ui("eval", info.ui, "--js", "(() => { const row = [...document.querySelectorAll('[data-mid]')].find(el => el.textContent.includes('Find the striped zebra')); const bubble = row?.querySelector('[data-chat-bubble]'); return !!bubble && row.querySelector('.ring-2') === bubble && bubble.getBoundingClientRect().width < row.lastElementChild.getBoundingClientRect().width; })()")).result, { timeout: 10_000 }).toBe(true);
     await expect.poll(highlighted, { timeout: 10_000 }).toBe("zebra");
     await ui("type", info.ui, "--name", "Message Pepper", "--text", `${"hay ".repeat(160)}saffron`);
     await ui("press", info.ui, "--keys", "Enter");
