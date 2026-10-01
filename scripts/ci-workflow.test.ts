@@ -129,6 +129,13 @@ describe("CI concurrency", () => {
         expect(job.needs).toEqual(["control-plane"]);
         expect(job.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/main'");
         expect(workflow.jobs.gate.needs).not.toContain(name);
+        // Without the Cloudflare token the deploy is skipped with a warning, not failed:
+        // every step after the token check waits on it.
+        const [check, ...rest] = job.steps as { id?: string; if?: string; env?: Record<string, string>; run?: string }[];
+        expect(check.id).toBe("token");
+        expect(check.env).toEqual({ CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}" });
+        expect(check.run).toContain("::warning");
+        for (const step of rest) expect(step.if).toBe("steps.token.outputs.present == 'true'");
         continue;
       }
       expect(job.needs).toBe("static");
