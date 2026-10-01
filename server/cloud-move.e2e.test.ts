@@ -37,6 +37,7 @@ let source: Fixture;
 let cloud: Fixture;
 let scratch: string;
 let windowToken: string;
+let movedRoutine = "";
 // The desktop's bots: its first-run starter bot and the one made below.
 let desktopBots: string[];
 
@@ -187,6 +188,11 @@ beforeAll(async () => {
   await until("the bot's reply", async () => ((await api(source, "GET", `/api/threads/${planner.threadId}/messages`)).body?.messages ?? [])
     .filter((message: { role: string }) => message.role === "bot").length >= 2);
   await idle(source);
+  // …and a routine: the desktop records no writer for it.
+  const routine = await api(source, "POST", "/api/routines", { body: { name: "Weekly plan", prompt: "Plan the week.", botId: planner.id, enabled: false,
+    schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } } });
+  expect(routine.status, JSON.stringify(routine.body)).toBe(201);
+  movedRoutine = routine.body.routine.id;
   const room = await api(source, "POST", "/api/groups", { body: { name: "Launch room", memberIds: [planner.id] } });
   expect(room.status, JSON.stringify(room.body)).toBe(201);
   desktopBots = (await botNames(source)).sort();
@@ -224,6 +230,19 @@ it("moves this computer's bots, chats and rooms to an empty Cloud, which keeps i
   const planner = moved.bots.find((bot: { name: string }) => bot.name === "Moved Planner");
   const transcript = await api(cloud, "GET", `/api/threads/${planner.threadId}/messages`, { token: windowToken });
   expect(JSON.stringify(transcript.body.messages)).toContain("Plan the launch party");
+  // What the move brought is the owner's (server/cloud-owner.ts): its
+  // routine is theirs, and not nobody's, though nothing recorded a writer.
+  const ownerKey = `p_${createHash("sha256").update("cloud-owner:3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93").digest("base64url").slice(0, 22)}`;
+  expect(JSON.parse(readFileSync(join(cloud.dataDir, "lending-routines.json"), "utf8")).writers[movedRoutine]).toBe(ownerKey);
+  expect(cloud.log).toContain("settled what came before (a restore)");
+  // A restore pauses every routine; the owner's Resume keeps it theirs (and
+  // their fingerprint goes on it).
+  const resumed = await api(cloud, "PATCH", `/api/routines/${movedRoutine}`, { token: windowToken, body: { enabled: true } });
+  expect(resumed.status, JSON.stringify(resumed.body)).toBe(200);
+  const authors = JSON.parse(readFileSync(join(cloud.dataDir, "lending-routines.json"), "utf8"));
+  expect(authors.writers[movedRoutine]).toBe(ownerKey);
+  expect(authors.routines[movedRoutine]).toMatch(/^[a-f0-9]{64}$/);
+  expect((await api(cloud, "PATCH", `/api/routines/${movedRoutine}`, { token: windowToken, body: { enabled: false } })).status).toBe(200);
   // The move's own session was signed out; the window's is the one left.
   const sessions = (await api(cloud, "GET", "/api/auth/sessions", { token: windowToken })).body.sessions as Array<{ label: string }>;
   expect(sessions.map((entry) => entry.label)).not.toContain("Move to Cloud");

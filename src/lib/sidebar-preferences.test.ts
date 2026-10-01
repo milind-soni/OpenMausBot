@@ -4,17 +4,21 @@ import {
   SIDEBAR_ATTENTION_PINNED_KEY,
   SIDEBAR_COLLAPSED_SECTIONS_KEY,
   SIDEBAR_DENSITY_KEY,
+  SIDEBAR_WIDTH_KEY,
   SIDEBAR_SECTION_ORDER_KEY,
   loadSidebarAttentionPinned,
   loadCollapsedSections,
   loadSectionOrder,
   loadSidebarDensity,
+  loadSidebarWidth,
+  clampSidebarWidth,
   parseSidebarAttentionPinned,
   parseSidebarDensity,
   saveCollapsedSections,
   saveSectionOrder,
   saveSidebarAttentionPinned,
   saveSidebarDensity,
+  saveSidebarWidth,
   toggleCollapsedSection,
 } from "./sidebar-preferences";
 import { userSectionId } from "./sidebar-layout";
@@ -34,6 +38,26 @@ describe("sidebar density preferences", () => {
     expect(setItem).toHaveBeenCalledWith(SIDEBAR_DENSITY_KEY, "icons");
     expect(loadSidebarDensity({ getItem: () => "compact" })).toBe("compact");
     expect(loadSidebarDensity({ getItem: () => { throw new Error("blocked"); } })).toBe("comfortable");
+  });
+});
+
+describe("sidebar width preference", () => {
+  it("keeps the chat usable and rejects invalid saved widths", () => {
+    expect(clampSidebarWidth(500, 900)).toBe(480);
+    expect(clampSidebarWidth(500, 768)).toBe(448);
+    expect(clampSidebarWidth(100, 900)).toBe(240);
+    expect(loadSidebarWidth({ getItem: () => "360" })).toBe(360);
+    for (const raw of ["NaN", "9999", "-1", "320.5"]) {
+      expect(loadSidebarWidth({ getItem: () => raw })).toBeNull();
+    }
+  });
+
+  it("persists width without requiring local storage", () => {
+    const setItem = vi.fn();
+    saveSidebarWidth(360, { setItem });
+    expect(setItem).toHaveBeenCalledWith(SIDEBAR_WIDTH_KEY, "360");
+    expect(loadSidebarWidth({ getItem: () => { throw new Error("blocked"); } })).toBeNull();
+    expect(() => saveSidebarWidth(360, { setItem: () => { throw new Error("blocked"); } })).not.toThrow();
   });
 });
 

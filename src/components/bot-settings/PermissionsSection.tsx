@@ -84,7 +84,7 @@ export function PermissionsSection({
             aria-label="Chief of Staff"
             disabled={!bot.chiefOfStaff && !canCoordinate}
             onClick={() => patch({ chiefOfStaff: !bot.chiefOfStaff })}
-            title={!bot.chiefOfStaff && !canCoordinate ? "This engine cannot contact other bots" : undefined}
+            title={!bot.chiefOfStaff && !canCoordinate ? "This model cannot contact other bots" : undefined}
             className="disabled:cursor-not-allowed"
           />
         </div>
@@ -125,7 +125,7 @@ export function PermissionsSection({
           aria-label="Ask me before contacting other bots"
           disabled={!bot.approvePeerComms && !canCoordinate}
           onClick={() => patch({ approvePeerComms: !bot.approvePeerComms })}
-          title={!bot.approvePeerComms && !canCoordinate ? "This engine cannot contact other bots" : undefined}
+          title={!bot.approvePeerComms && !canCoordinate ? "This model cannot contact other bots" : undefined}
           className="disabled:cursor-not-allowed"
         />
       </div>

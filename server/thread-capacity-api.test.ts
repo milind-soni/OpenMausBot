@@ -1,13 +1,15 @@
 // Real provider processes with independent per-thread gates, under the same
 // disposable-home launcher used by the independent-threads API fixture.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 
 describe("per-bot thread capacity through an isolated HTTP fixture", () => {
@@ -15,6 +17,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
   let model: string;
   let evidence: unknown[];
   const sockets: Socket[] = [];
+  const projectDirs: string[] = [];
 
   const api = async (method: string, path: string, body?: unknown) => {
     const response = await fetch(`${fixture.info.url}${path}`, {
@@ -115,6 +118,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     writeFileSync(evidencePath, JSON.stringify({ fixture: fixture.info, requests: evidence }, null, 2));
     console.info(JSON.stringify({ ...fixture.info, evidencePath }));
     await fixture.close();
+    for (const project of projectDirs.splice(0)) await removeTempDir(project);
   });
 
   it("defaults to three, runs ten real turns after raising the limit, and safely queues and cancels overflow", async () => {
@@ -226,6 +230,75 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       await expect.poll(async () => (await busyThreads(botId)).length, { timeout: 15_000 }).toBe(0);
       await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+    }
+  }, 90_000);
+
+  it("defers a routine behind a busy workspace lease instead of failing it (F-collide)", async () => {
+    // A real spawned subprocess server has no fake-timer hook: the waits
+    // below let its own async admission/compaction settle in wall-clock
+    // time, the same exception the file's other capacity test already
+    // relies on (line ~223 above). tsconfig.server.json targets ES2023,
+    // which has no Promise.withResolvers type, hence the executor form.
+    const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+    await limit(2);
+    const project = mkdtempSync(join(tmpdir(), "omb-collide-"));
+    projectDirs.push(project);
+    // Both threads below pin to this one folder (same rule startTurn's cwd
+    // resolution follows for a bot with an explicit project folder), so the
+    // fake CLI's per-thread gate/dump naming (basename of its cwd) collapses
+    // to one shared path for both of them — which is exactly what lets one
+    // write release the other, once it is actually dispatched.
+    const projectGate = join(fixture.info.dataDir, `${basename(project)}.gate`);
+    let botId: string | undefined;
+    let routineId: string | undefined;
+    try {
+      ({ botId } = await botWithThreads(1));
+      const threadId = (await botState(botId)).threadId as string;
+      expect((await api("PATCH", `/api/bots/${botId}`, { cwd: project })).status).toBe(200);
+      expect((await send(botId, threadId, "HOLD_THE_FOLDER")).body.queued).toBeUndefined();
+      await expect.poll(() => busyThreads(botId!)).toEqual([threadId]);
+      // Let the claim past compaction/skill-setup land before the routine
+      // races it — dump()/gate polling can't key off this thread's own id,
+      // since both turns share one project folder's basename.
+      await wait(1_500);
+
+      const created = await api("POST", "/api/routines", {
+        name: "Workspace collision probe",
+        prompt: "Write the scheduled digest.",
+        target: "bot",
+        botId,
+        runOn: "maus",
+        enabled: true,
+        schedule: { type: "daily", time: "23:00" },
+      });
+      expect(created.status).toBe(201);
+      routineId = created.body.routine.id;
+      const runState = async (id: string) =>
+        (await api("GET", "/api/routines")).body.runs.find((run: any) => run.id === id);
+
+      // A free thread slot exists (capacity 2, one busy): admission must not
+      // start this run on slot count alone. Its fresh task would pin to the
+      // exact folder the first thread already holds.
+      const run = (await api("POST", `/api/routines/${routineId}/run`)).body.run;
+      await wait(2_000);
+      const held = await runState(run.id);
+      expect(held?.status).toBe("queued");
+      expect(held?.deferredAt).toEqual(expect.any(Number));
+      expect(held?.error).toBeUndefined();
+
+      // Freeing the folder lets the deferred run start, in its own thread.
+      writeFileSync(projectGate, "finish this isolated turn");
+      await expect.poll(async () => ["running", "completed"].includes((await runState(run.id))?.status), { timeout: 15_000 }).toBe(true);
+      const dispatched = await runState(run.id);
+      expect(dispatched.threadId).not.toBe(threadId);
+      await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("completed");
+    } finally {
+      if (botId) {
+        writeFileSync(projectGate, "finish this isolated turn");
+        await expect.poll(async () => (await busyThreads(botId!)).length, { timeout: 15_000 }).toBe(0);
+      }
+      if (routineId) await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);
+      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
     }
   }, 90_000);
 

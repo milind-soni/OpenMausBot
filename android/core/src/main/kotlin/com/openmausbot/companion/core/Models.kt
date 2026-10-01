@@ -147,6 +147,12 @@ data class ToolActivity(
      * the command to run by hand. Older computers omit it.
      */
     val claudeUpdate: Boolean? = null,
+    /**
+     * What the call produced, where the computer chose to send it: today a
+     * finished teammate's report on its "… replied" chip, at most 2000
+     * characters and already redacted. Older computers omit it.
+     */
+    val output: String? = null,
 )
 
 /**
@@ -204,6 +210,8 @@ data class Message(
     val threadRef: ThreadRef? = null,
     /** `kind == COMPACTION`: the record itself. */
     val compaction: Compaction? = null,
+    /** `kind == ROUTINE_RUN`: the run, patched in place as it moves. */
+    val routineRun: RoutineRunCard? = null,
     val parentId: String? = null,
     val from: Sender? = null,
     val reactions: List<Reaction>? = null,
@@ -229,7 +237,7 @@ data class Message(
     val turnTerminal: Boolean? = null,
 ) {
     @Serializable(with = MessageKindSerializer::class)
-    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, DIGEST, COMPACTION, UNKNOWN }
+    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, DIGEST, COMPACTION, ROUTINE_RUN, UNKNOWN }
 
     @Serializable(with = MessageRoleSerializer::class)
     enum class Role { BOT, USER }
@@ -245,11 +253,12 @@ object MessageKindSerializer : KSerializer<Message.Kind> {
         "screen" -> Message.Kind.SCREEN
         "digest" -> Message.Kind.DIGEST
         "compaction" -> Message.Kind.COMPACTION
+        "routine.run" -> Message.Kind.ROUTINE_RUN
         else -> Message.Kind.UNKNOWN
     }
 
     override fun serialize(encoder: Encoder, value: Message.Kind) {
-        encoder.encodeString(value.name.lowercase())
+        encoder.encodeString(if (value == Message.Kind.ROUTINE_RUN) "routine.run" else value.name.lowercase())
     }
 }
 

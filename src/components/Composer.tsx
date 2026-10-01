@@ -27,6 +27,7 @@ import {
 import { BotAvatar } from "./Avatar";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
+import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { PlaceChip } from "./PlaceChip";
 import { FullAccessWarning } from "./FullAccessWarning";
@@ -450,13 +451,15 @@ export function Composer({
     if (!queued) return;
     const targetDraftId = draftId;
     const onCancelled = () => {
-      prependComposerDraft(targetDraftId, queued.text);
+      const cited = splitTranscriptCitations(queued.text);
+      if (cited.display) prependComposerDraft(targetDraftId, cited.display);
+      appendDraftAttachments(targetDraftId, cited.citations);
       if (targetDraftId !== draftIdRef.current) return;
       requestAnimationFrame(() => {
         const input = inputRef.current;
         if (!input) return;
         input.focus();
-        input.setSelectionRange(queued.text.length, queued.text.length);
+        input.setSelectionRange(cited.display.length, cited.display.length);
       });
     };
     if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId, onCancelled });
@@ -927,6 +930,7 @@ export function Composer({
           items={attachments}
           onAdd={addAttachments}
           onRemove={removeAttachment}
+          onChangeCitation={(citation: CitationAttachment) => editAttachments((current) => current.map((attachment) => attachment.id === citation.id ? citation : attachment))}
           onDisplayInChatBox={displayPasteInChatBox}
           allowImages={engineSupportsImages}
           notice={attachmentNotice}

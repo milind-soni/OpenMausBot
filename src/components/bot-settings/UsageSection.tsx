@@ -58,7 +58,7 @@ export function UsageSection({ bot }: { bot: Bot }) {
       <div className="mt-2 text-[12px] text-ink-secondary">
         {hasFiniteCost(usage.costUsd)
           ? `Cost ${costCaption(instance?.snapshot.billing)}.`
-          : "This engine doesn't report a price; tokens are counted."}
+          : "This provider doesn't report a price; tokens are counted."}
       </div>
     </div>
   );

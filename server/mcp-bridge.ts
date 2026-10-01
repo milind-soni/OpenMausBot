@@ -28,7 +28,7 @@ import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 
 import { CONTROL_REFUSAL_PLAIN, createControlClient } from "./control-client.ts";
-import { augmentedPath } from "./env-path.ts";
+import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { createToolListNormalizer } from "./mcp-tool-schema.ts";
 
 // 45s of TOTAL silence before the bridge even probes. An MCP session is
@@ -261,9 +261,11 @@ export function createMcpBridgeInterceptor(
 }
 
 export function runMcpBridge(options: BridgeOptions): void {
-  const child = spawn(options.command, options.args, {
+  const env = options.env ?? { ...process.env, PATH: augmentedPath() };
+  const { command, args } = resolveCliSpawn(options.command, options.args, env);
+  const child = spawn(command, args, {
     shell: false,
-    env: options.env ?? { ...process.env, PATH: augmentedPath() },
+    env,
     stdio: ["pipe", "pipe", "pipe"],
   });
 

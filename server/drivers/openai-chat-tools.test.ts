@@ -507,6 +507,61 @@ describe("structured tool execution boundaries", () => {
     expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
   });
 
+  // Groq's wording (#2077), truncated in the runtime error but not in the body.
+  const reasoningRejection = { error: {
+    message: "'messages.2' : for 'role:assistant' the following must be satisfied[('messages.2' : property 'reasoning_content' is unsupported)]",
+    type: "invalid_request_error",
+  } };
+  const reasoningToolRound = (response: ServerResponse) => sse(response, [
+    chunk({ reasoning: "Synthetic reasoning." }),
+    chunk({ content: null, tool_calls: [toolCall()] }, "tool_calls"),
+  ]);
+
+  it("resends a tool continuation without reasoning_content once an endpoint rejects it, and omits it afterwards", async () => {
+    const f = await fixture((body, response) => {
+      if (body.messages.some((message) => "reasoning_content" in message)) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify(reasoningRejection));
+      } else if (body.messages.at(-1)?.role === "tool") answer(response);
+      else reasoningToolRound(response);
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(3);
+    expect(f.requests[1].messages.find((message) => message.role === "assistant")).toMatchObject({ reasoning_content: "Synthetic reasoning." });
+    const resent = f.requests[2].messages;
+    expect(resent.some((message) => "reasoning_content" in message)).toBe(false);
+    expect(resent).toEqual(f.requests[1].messages.map(({ reasoning_content: _omitted, ...message }) => message));
+    // The rejected request executed nothing; the call ran exactly once.
+    expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+
+    f.recorder.events.length = 0;
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(5);
+    expect(f.requests[4].messages.at(-2)).toMatchObject({ role: "assistant", tool_calls: [expect.objectContaining({ id: "call_write" })] });
+    expect(f.requests[4].messages.some((message) => "reasoning_content" in message)).toBe(false);
+  });
+
+  it.each([
+    [400, { error: { message: "Invalid request body." } }],
+    [400, { error: { message: "reasoning_content is required for thinking-mode tool calls." } }],
+    [401, reasoningRejection],
+    [500, reasoningRejection],
+  ])("keeps reasoning_content and fails on unrelated HTTP %s error %j", async (status, error) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) return reasoningToolRound(response);
+      response.writeHead(status as number, { "content-type": "application/json" });
+      response.end(JSON.stringify(error));
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.requests[1].messages.find((message) => message.role === "assistant")).toMatchObject({ reasoning_content: "Synthetic reasoning." });
+    expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
+  });
+
   it.each([
     { scenario: "only a DONE marker", body: "data: [DONE]\n\n" },
     { scenario: "an invalid frame before DONE", body: "data: {invalid\n\ndata: [DONE]\n\n" },
@@ -626,12 +681,12 @@ describe("structured tool execution boundaries", () => {
     expect(f.requests).toHaveLength(1);
   });
 
-  it("accumulates interleaved argument fragments and pairs both results with their original call IDs", async () => {
+  it("accepts null continuation fields while accumulating interleaved calls", async () => {
     const f = await fixture((_body, response, round) => {
       if (round > 1) return answer(response);
       sse(response, [
         chunk({ tool_calls: [toolCall("audit_write", '{"name":"first",', "call_first"), { ...toolCall("audit_write", '{"name":"second",', "call_second"), index: 1 }] }),
-        chunk({ tool_calls: [{ index: 1, function: { arguments: '"value":"two"}' } }] }),
+        chunk({ tool_calls: [{ index: 1, id: null, type: null, function: { name: null, arguments: '"value":"two"}' } }] }),
         chunk({ tool_calls: [{ index: 0, function: { arguments: '"value":"one"}' } }] }, "tool_calls"),
       ]);
     });

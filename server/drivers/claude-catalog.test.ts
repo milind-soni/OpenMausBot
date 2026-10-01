@@ -65,6 +65,57 @@ describe("readClaudeModelCatalog", () => {
     });
   });
 
+  it("lists a newer Anthropic model from extraModels with the official rows, not as custom", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-claude-catalog-"));
+    scratchDirs.push(home);
+    const dir = join(home, ".claude");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "settings.json"),
+      JSON.stringify({ extraModels: [{ id: "claude-sonnet-future-test", label: "Future Claude Sonnet" }, "omlx::local-qwen"] }),
+    );
+
+    expect(readClaudeModelCatalog({ HOME: home }).options.slice(STATIC_CLAUDE_MODELS.options.length)).toEqual([
+      { id: "claude-sonnet-future-test", label: "Future Claude Sonnet" },
+      { id: "omlx::local-qwen", label: "omlx::local-qwen", custom: true },
+    ]);
+  });
+
+  it.each(["settings", "instance"])("keeps an official-looking model override custom for a compatible endpoint in %s", (source) => {
+    const home = mkdtempSync(join(tmpdir(), "omb-claude-compatible-"));
+    scratchDirs.push(home);
+    const dir = join(home, ".claude");
+    mkdirSync(dir, { recursive: true });
+    const override = {
+      ANTHROPIC_BASE_URL: "https://compatible.example.test/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "fake-compatible-key",
+      ANTHROPIC_MODEL: "claude-compatible-test",
+    };
+    writeFileSync(join(dir, "settings.json"), JSON.stringify({
+      extraModels: [override.ANTHROPIC_MODEL],
+      ...(source === "settings" ? { env: override } : {}),
+    }));
+
+    const catalog = readClaudeModelCatalog({ HOME: home, ...(source === "instance" ? override : {}) });
+    expect(catalog.options.slice(STATIC_CLAUDE_MODELS.options.length)).toEqual([
+      { id: override.ANTHROPIC_MODEL, label: override.ANTHROPIC_MODEL, custom: true },
+    ]);
+  });
+
+  it("keeps official-looking availableModels and customModels custom", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-claude-custom-catalog-"));
+    scratchDirs.push(home);
+    const dir = join(home, ".claude");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "settings.json"), JSON.stringify({
+      availableModels: ["claude-available-test"], customModels: ["claude-custom-test"],
+    }));
+    expect(readClaudeModelCatalog({ HOME: home }).options.slice(STATIC_CLAUDE_MODELS.options.length)).toEqual([
+      { id: "claude-available-test", label: "claude-available-test", custom: true },
+      { id: "claude-custom-test", label: "claude-custom-test", custom: true },
+    ]);
+  });
+
   it("does not list settings.model as a Custom leftover", () => {
     const home = mkdtempSync(join(tmpdir(), "omb-claude-leftover-"));
     scratchDirs.push(home);

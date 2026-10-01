@@ -70,6 +70,28 @@
 //                      which `--permission-mode auto` starts in "default",
 //                      the way the real CLI (2.1.266) does for Haiku 4.5 and
 //                      Sonnet 4.5: init reports the mode it actually runs in.
+//   FAKE_CLAUDE_LATE_STEER_GATE path: a message that arrives mid-turn landed
+//                      after the turn's last model call began. The real CLI
+//                      (2.1.282) cannot fold it then: it finishes the turn
+//                      with `result` and runs the message as its NEXT turn on
+//                      the same stdin — init, tool call, reply. In `slow`
+//                      mode that reply waits for this file, so a test can
+//                      probe the harness while the continuation is running.
+//   FAKE_CLAUDE_LATE_STEER_INIT_GATE path: with the gate above, the late
+//                      turn's `init` waits for this file too, so a test can
+//                      act while the first result is held and nothing has
+//                      announced the continuation yet.
+//   FAKE_CLAUDE_LATE_STEER_SILENT 1: the late turn prints `init` and then
+//                      nothing at all — a continuation that never speaks.
+//   FAKE_CLAUDE_SLOW_TAIL_TOOL 1: `slow` makes one more tool call right
+//                      before its reply — a fold seam the harness sees after
+//                      a steer that was already too late to be folded.
+//   FAKE_CLAUDE_QUEUED_TURN_COUNT unset | zero | count — whether a result
+//                      carries queued_turn_count. Unset: absent, an older
+//                      CLI. zero: always 0, what 2.1.282 reports for words
+//                      waiting on stdin (they are not in its command queue,
+//                      yet it runs them next). count: the late steers still
+//                      queued, the field's documented meaning.
 //   Every result's total_cost_usd is the process's running total (0.01 per
 //   result), the way the real CLI reports it: read the latest, never sum.
 //   Its modelUsage is the same running count per model (tokens and costUSD).
@@ -87,6 +109,9 @@
 //   FAKE_CLAUDE_RESUMED_API_ERROR 1: a --resume launch plays its first turn
 //                      the `api-error` way — an error result with no cost
 //                      figure — and its later turns normally.
+//   FAKE_CLAUDE_EXIT_DELAY_MS ms this process keeps running after SIGTERM
+//                      before it exits: a CLI that is slow to stop, as one
+//                      can be on Windows, where taskkill is asynchronous.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawnSync } from "node:child_process";
@@ -107,6 +132,12 @@ const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
     }
   }, 500);
   orphanWatch.unref();
+}
+{
+  const exitDelay = Number(process.env.FAKE_CLAUDE_EXIT_DELAY_MS);
+  if (Number.isFinite(exitDelay) && exitDelay > 0) {
+    process.on("SIGTERM", () => { setTimeout(() => process.exit(0), exitDelay); });
+  }
 }
 const scriptedReplies = (() => {
   try {
@@ -319,6 +350,28 @@ const tools = [...new Set([...(toolsFlag ? toolsFlag.split(",") : ["Bash", "Read
 let dumped = false;
 let turnRunning = false;
 let steered: string[] = [];
+/** The folded steers as they were sent, echoed when the reply takes them in. */
+let steeredMessages: JsonValue[] = [];
+// --replay-user-messages (2.1.282): each stdin user message is echoed, with
+// the uuid it was sent with, as a turn takes it in — the prompt as its turn
+// starts, a folded steer before the reply that answers it, a late steer as
+// its own turn starts.
+const replayUserMessages = argv.includes("--replay-user-messages");
+let replayCount = 0;
+const replay = (sent: JsonValue) => {
+  if (!replayUserMessages) return;
+  const message = (sent ?? {}) as { uuid?: unknown; message?: unknown };
+  const uuid = typeof message.uuid === "string" ? message.uuid : `fake-replay-${process.pid}-${++replayCount}`;
+  out({ type: "user", message: message.message ?? null, uuid, session_id: sessionId, parent_tool_use_id: null, isReplay: true });
+};
+const replaySteered = () => {
+  for (const message of steeredMessages.splice(0)) replay(message);
+};
+// Messages that landed after the running turn's last model call
+// (FAKE_CLAUDE_LATE_STEER_GATE): each becomes the next turn once it ends.
+const lateSteers: JsonValue[] = [];
+let lateContinuation = false;
+let lateTurnWaiting = false;
 // the running cost behind total_cost_usd and modelUsage; a --resume launch
 // starts from the session's saved one (FAKE_CLAUDE_COST_STATE)
 type FakeModelUsage = { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; costUSD: number };
@@ -355,13 +408,40 @@ const promptText = (prompt: JsonValue): string => {
   return typeof m?.content === "string" ? m.content : "";
 };
 
-const finishIfDone = () => {
-  if (stdinEnded && !turnRunning) process.exit(0);
+/** A message the finished turn could not fold runs as the next turn — once
+ * FAKE_CLAUDE_LATE_STEER_INIT_GATE, if set, lets its `init` out. True while
+ * one is queued or waiting. */
+const startLateTurn = (): boolean => {
+  if (lateTurnWaiting) return true;
+  const late = lateSteers[0];
+  if (late === undefined) return false;
+  const initGate = process.env.FAKE_CLAUDE_LATE_STEER_INIT_GATE;
+  if (initGate && !existsSync(initGate)) {
+    lateTurnWaiting = true;
+    const poll = setInterval(() => {
+      if (!existsSync(initGate)) return;
+      clearInterval(poll);
+      lateTurnWaiting = false;
+      finishIfDone();
+    }, 10);
+    return true;
+  }
+  lateSteers.shift();
+  playTurn(late, true);
+  return true;
 };
 
-const playTurn = (prompt: JsonValue) => {
+const finishIfDone = () => {
+  if (turnRunning) return;
+  if (startLateTurn()) return;
+  if (stdinEnded) process.exit(0);
+};
+
+const playTurn = (prompt: JsonValue, late = false) => {
   turnRunning = true;
+  lateContinuation = late;
   steered = [];
+  steeredMessages = [];
   // Every prompt this process receives, one JSON object per line. FAKE_CLAUDE_DUMP
   // records only the first, which cannot show what a REUSED session was sent on
   // its second and later turns.
@@ -447,6 +527,13 @@ const playTurn = (prompt: JsonValue) => {
 
   // the real CLI re-announces init on every turn of a live process
   out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode, tools });
+
+  // a continuation that announces itself and then never speaks again
+  if (lateContinuation && process.env.FAKE_CLAUDE_LATE_STEER_SILENT) {
+    setInterval(() => {}, 1_000);
+    return;
+  }
+  replay(prompt);
 
   // The CLI accepted the resumed session — it read the prompt — and then
   // died with nothing to show. The prompt may already have run tools, so
@@ -576,6 +663,8 @@ const playTurn = (prompt: JsonValue) => {
   // total_cost_usd is the process's running total (2.1.282: "read the latest
   // result rather than summing across results"); usage is this turn's own.
   const finish = () => {
+    // anything steered in was taken in before this turn's result
+    replaySteered();
     runHooks("Stop", { stop_hook_active: false });
     runningCost.total = Number((runningCost.total + 0.01).toFixed(2));
     const counted = (runningCost.modelUsage[model] ??= { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0 });
@@ -584,6 +673,7 @@ const playTurn = (prompt: JsonValue) => {
     counted.outputTokens += 5;
     counted.costUSD = Number((counted.costUSD + 0.01).toFixed(2));
     if (costStateFile) writeFileSync(costStateFile, JSON.stringify(runningCost));
+    const queued = process.env.FAKE_CLAUDE_QUEUED_TURN_COUNT;
     out({
       type: "result",
       is_error: false,
@@ -591,6 +681,7 @@ const playTurn = (prompt: JsonValue) => {
       total_cost_usd: runningCost.total,
       usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 },
       modelUsage: runningCost.modelUsage,
+      ...(queued === "zero" ? { queued_turn_count: 0 } : queued === "count" ? { queued_turn_count: lateSteers.length } : {}),
     });
     turnRunning = false;
     finishIfDone();
@@ -612,11 +703,21 @@ const playTurn = (prompt: JsonValue) => {
     // was folded in, the way the real CLI includes a mid-turn message in
     // the same turn's next model call
     const finishSlowTurn = () => {
+      if (process.env.FAKE_CLAUDE_SLOW_TAIL_TOOL) {
+        // one more tool call before the reply: a fold seam the harness sees
+        // AFTER a steer that this turn's stdin drain had already passed by
+        const id = `tu-${process.pid}-${++toolUseCount}`;
+        out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: "echo tail" } }] } });
+        out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: false, content: [{ type: "text", text: "tail" }] }] } });
+      }
       const tail = steered.length ? ` + steered: ${steered.join(" | ")}` : "";
+      replaySteered();
       out({ type: "assistant", message: { content: [{ type: "text", text: `reply to: ${promptText(prompt)}${tail}` }] } });
       finish();
     };
-    const finishGate = process.env.FAKE_CLAUDE_SLOW_FINISH_GATE;
+    // a late steer's turn holds on its own gate, so a test can look at the
+    // harness while the CLI is still working on the words it steered
+    const finishGate = lateContinuation ? process.env.FAKE_CLAUDE_LATE_STEER_GATE : process.env.FAKE_CLAUDE_SLOW_FINISH_GATE;
     if (finishGate) {
       const poll = setInterval(() => {
         if (!existsSync(finishGate)) return;
@@ -651,8 +752,15 @@ process.stdin.on("data", (c) => {
     } catch {
       continue;
     }
-    if (turnRunning) {
-      steered.push(promptText(prompt));
+    if (turnRunning || lateTurnWaiting) {
+      // folded into the running turn, unless it landed after that turn's
+      // last model call — then the real CLI queues it for the next turn,
+      // behind any queued message whose turn has not been announced yet
+      if (process.env.FAKE_CLAUDE_LATE_STEER_GATE) lateSteers.push(prompt);
+      else {
+        steered.push(promptText(prompt));
+        steeredMessages.push(prompt);
+      }
       if (process.env.FAKE_CLAUDE_STEER_RECEIVED) writeFileSync(process.env.FAKE_CLAUDE_STEER_RECEIVED, "received");
     } else {
       playTurn(prompt);

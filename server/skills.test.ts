@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   existsSync,
   lstatSync,
@@ -21,6 +21,7 @@ import {
   applyStagedSkillWrite,
   applySkillWriteWithReceipt,
   installSkill,
+  INDEX_MAX_BYTES,
   listSkills,
   listStagedSkillWrites,
   parseSkillMd,
@@ -34,6 +35,7 @@ import {
   syncSkillLinks,
 } from "./skills.ts";
 import { parseSkillSource } from "./skill-fetch.ts";
+import { buildSystemPrompt } from "./system-prompt.ts";
 import { workspaceDir } from "./workspace.ts";
 
 // skills.ts resolves storage through workspaceDir(botId) → DATA_DIR, which
@@ -65,6 +67,114 @@ beforeEach(() => {
 
 afterEach(async () => {
   await removeTempDir(scratch);
+});
+
+describe("skills prompt index budget", () => {
+  function manifestSkills(descriptions: Record<string, string>, disabled: string[] = [], revisions: Record<string, string> = {}) {
+    const entries: Record<string, ReturnType<typeof legacyManifestEntry>> = {};
+    for (const [name, description] of Object.entries(descriptions)) {
+      const content = SKILL(name);
+      const directory = revisions[name]
+        ? join(workspaceDir(bot), "skills", ".revisions", revisions[name])
+        : join(workspaceDir(bot), "skills", name);
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, "SKILL.md"), content);
+      entries[name] = { ...legacyManifestEntry(content, !disabled.includes(name)), description,
+        ...(revisions[name] ? { storageRevision: revisions[name] } : {}) };
+    }
+    const stateDir = join(DATA_DIR, "skill-state", bot);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, "skills.json"), JSON.stringify(entries));
+  }
+
+  it("keeps an under-budget entry and its exact path without warning", () => {
+    const revision = "a".repeat(64);
+    manifestSkills({ alpha: "Résumé 🐈" }, [], { alpha: revision });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const assembled = buildSystemPrompt("You are a bot.", "", [
+        { id: "skills", label: "Skills index", text: skillsSystemPrompt(bot) },
+      ]);
+      expect(assembled.text).toContain(`- alpha: Résumé 🐈 Read ${JSON.stringify(join(workspaceDir(bot), "skills", ".revisions", revision, "SKILL.md"))}.`);
+      expect(assembled.sections.find((section) => section.id === "skills")?.bytes).toBe(Buffer.byteLength(skillsSystemPrompt(bot), "utf8"));
+      expect(assembled.text).not.toContain("omitted");
+      expect(warn).not.toHaveBeenCalled();
+    } finally { warn.mockRestore(); }
+  });
+
+  it("reports byte omissions in the prompt and logs omitted names once per skill set", () => {
+    manifestSkills({ alpha: "a".repeat(2500), bravo: "b".repeat(2500), charlie: "c".repeat(2500) });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const prompt = skillsSystemPrompt(bot);
+      expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+      expect(prompt).toContain("2 enabled skills omitted");
+      expect(prompt).toContain("skills_list");
+      expect(prompt).toContain("Bot Settings > Skills");
+      expect(prompt).not.toContain("- bravo:");
+      expect(listSkills(bot).filter((skill) => skill.enabled).map((skill) => skill.name)).toEqual(["alpha", "bravo", "charlie"]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("bravo, charlie"));
+      skillsSystemPrompt(bot);
+      expect(warn).toHaveBeenCalledTimes(1);
+      manifestSkills({ aardvark: "a".repeat(2500), bravo: "b".repeat(2500), charlie: "c".repeat(2500) });
+      skillsSystemPrompt(bot);
+      expect(warn).toHaveBeenCalledTimes(1);
+      manifestSkills({ alpha: "a".repeat(2500), bravo: "b".repeat(2500), charlie: "c".repeat(2500), delta: "d" });
+      expect(skillsSystemPrompt(bot)).toContain("3 enabled skills omitted");
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally { warn.mockRestore(); }
+  });
+
+  it("reports the applicable entry or byte limit and excludes disabled skills", () => {
+    const descriptions = Object.fromEntries(Array.from({ length: 32 }, (_, i) => [`skill-${String(i).padStart(2, "0")}`, "x"]));
+    manifestSkills(descriptions, ["skill-31"]);
+    const prompt = skillsSystemPrompt(bot);
+    const indexed = prompt.match(/^- skill-\d{2}:/gm) ?? [];
+    const omitted = 31 - indexed.length;
+    expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+    expect(prompt).toContain(`${omitted} enabled skill${omitted === 1 ? "" : "s"} omitted`);
+    expect(prompt).toContain(indexed.length === 30 ? "30-skill cap" : "4000-byte cap");
+    expect(prompt).not.toContain("skill-31");
+  });
+
+  it("explains when even the first entry cannot fit", () => {
+    manifestSkills({ alpha: "🐈".repeat(1200) });
+    const prompt = skillsSystemPrompt(bot);
+    expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+    expect(prompt).toContain("1 enabled skill omitted");
+    expect(prompt).toContain("skills_list");
+    expect(prompt).not.toContain("- alpha:");
+  });
+
+  it("fits the exact UTF-8 boundary and reserves notice bytes when it grows", () => {
+    manifestSkills({ alpha: "x" });
+    const baseBytes = Buffer.byteLength(skillsSystemPrompt(bot), "utf8");
+    const exact = "x".repeat(INDEX_MAX_BYTES - baseBytes + 1);
+    manifestSkills({ alpha: exact });
+    expect(Buffer.byteLength(skillsSystemPrompt(bot), "utf8")).toBe(INDEX_MAX_BYTES);
+    manifestSkills({ alpha: exact, bravo: "tiny" });
+    const withNotice = skillsSystemPrompt(bot);
+    expect(Buffer.byteLength(withNotice, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+    expect(withNotice).toContain("2 enabled skills omitted");
+    expect(withNotice).not.toContain("- alpha:");
+    manifestSkills({ alpha: `${exact}é` });
+    const over = skillsSystemPrompt(bot);
+    expect(Buffer.byteLength(over, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
+    expect(over).toContain("1 enabled skill omitted");
+  });
+
+  it("does not advertise an integrity-rejected entry", () => {
+    manifestSkills({ alpha: "Valid.", bravo: "Changed after review." });
+    writeFileSync(join(workspaceDir(bot), "skills", "bravo", "SKILL.md"), SKILL("bravo", "tampered"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const prompt = skillsSystemPrompt(bot);
+      expect(prompt).toContain("- alpha:");
+      expect(prompt).not.toContain("bravo");
+      expect(prompt).not.toContain("omitted");
+      expect(warn).not.toHaveBeenCalled();
+    } finally { warn.mockRestore(); }
+  });
 });
 
 describe("parseSkillMd", () => {

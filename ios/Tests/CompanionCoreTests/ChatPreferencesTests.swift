@@ -193,12 +193,37 @@ final class ChatPreferencesTests: XCTestCase {
     // MARK: - Digests
 
     // The harness writes a "[digest] · tools: … · reply: …" receipt after
-    // every turn. Desktop shows it only behind "show tool calls"; the phone
-    // drew it as a bubble under every reply. It is never a row.
-    func testADigestIsNeverATranscriptRow() {
+    // every turn. Drawn as a bubble it was a log line under every reply;
+    // dropped, the one record of what a turn touched was gone. It is its
+    // own row — a chip — beside the tool chips it sums up, never among them.
+    func testADigestIsItsOwnRowAtFullAndReduced() {
         let messages = [text("a"), activity("b"), digest("c"), text("d"), digest("e")]
-        XCTAssertEqual(transcriptRows(messages, detail: .full).map(\.id), ["a", "b", "d"])
+        XCTAssertEqual(transcriptRows(messages, detail: .full).map(\.id), ["a", "b", "c", "d", "e"])
+        XCTAssertEqual(transcriptRows(messages, detail: .reduced).map(\.id), ["a", "b", "c", "d", "e"])
+    }
+
+    func testADigestIsHiddenWithTheActivityItSummarises() {
+        let messages = [text("a"), activity("b"), digest("c"), text("d"), digest("e")]
         XCTAssertEqual(transcriptRows(messages, detail: .hidden).map(\.id), ["a", "d"])
-        XCTAssertEqual(transcriptRows(messages, detail: .reduced).map(\.id), ["a", "b", "d"])
+    }
+
+    func testADigestIsNeverFoldedIntoARunOfActivity() {
+        let messages = [activity("a"), activity("b"), digest("c"), activity("d"), activity("e")]
+        let rows = transcriptRows(messages, detail: .reduced)
+        XCTAssertEqual(rows.map(\.id), ["run.a", "c", "run.d"])
+        guard case let .message(receipt) = rows[1] else { return XCTFail("digest should be a message row") }
+        XCTAssertEqual(receipt.kind, .digest)
+        for row in rows {
+            if case let .activityRun(items) = row {
+                XCTAssertFalse(items.contains { $0.kind == .digest }, "a digest is not a step")
+            }
+        }
+    }
+
+    // A turn that touched nothing has nothing for the chip to open.
+    func testADigestWithNothingDoneIsNotARow() {
+        var quiet = digest("c")
+        quiet.text = "[digest] · no tool calls · reply: Hi there."
+        XCTAssertEqual(transcriptRows([text("a"), quiet], detail: .full).map(\.id), ["a"])
     }
 }

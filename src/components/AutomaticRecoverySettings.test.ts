@@ -68,11 +68,11 @@ describe("AutomaticRecoverySettings", () => {
     expect(view.toggle.props.checked).toBe(false);
     expect(view.engine.props.disabled).toBe(true);
     expect(view.save.props.disabled).toBe(true);
-    expect(view.html).toContain("If an ACP engine (such as Qwen or OpenCode) fails before starting, try a backup once. Work that may have already run is not replayed.");
+    expect(view.html).toContain("If an ACP model provider (such as Qwen or OpenCode) fails before starting, try a backup once. Work that may have already run is not replayed.");
     expect(view.html).toContain("direct bot threads, including Chief and delegated work");
     expect(view.html).toContain("Channels are not included");
     expect(view.html).toContain("Only this thread switches; bot defaults stay unchanged.");
-    expect(view.html).toContain("Permissions stay unchanged; some engine switches need confirmation.");
+    expect(view.html).toContain("Permissions stay unchanged; some provider switches need confirmation.");
     expect(view.html).toContain("can incur charges from its provider");
     expect(view.html).toContain('for="automatic-recovery-engine"');
     expect(view.html).toContain('for="automatic-recovery-model"');

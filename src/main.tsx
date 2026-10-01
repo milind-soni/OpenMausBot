@@ -38,6 +38,10 @@ async function chooseRoot(): Promise<React.ReactNode> {
   // A service-trust server answers this machine's requests without a session
   // but refuses to let it manage anything: sign in first, as a remote browser would.
   if (session.kind === "loopback" && session.trust === "service") return <PairPage initialCode={null} reason={SERVICE_TRUST_REASON} />;
+  if (location.pathname === "/desktop-viewer") {
+    const { DesktopViewer } = await import("./components/DesktopViewer");
+    return <DesktopViewer />;
+  }
   return <App />;
 }
 

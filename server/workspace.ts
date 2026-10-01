@@ -652,12 +652,13 @@ export function memoryTopicIndex(botId: string): string {
   return renderTopicIndex(listMemoryTopics(botId).map((topic) => ({ name: topic.name, header: parseTopicHeader(readTopicHead(join(dir, topic.name))) })));
 }
 
-/** The memory block appended to a bot's system prompt. Always present for
- * bots with a workspace, so the bot knows the mechanism exists even before
+/** The memory block appended to a bot's system prompt when enabled. Present for
+ * enabled bots with a workspace, so the bot knows the mechanism exists even before
  * it has written anything. Content from other bots or imported files must
  * never be recorded as fact — memory is a prompt-injection persistence
  * vector the moment a bot copies untrusted text into it. */
-export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolean; fileTools?: boolean } = {}): string {
+export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolean; fileTools?: boolean; enabled?: boolean } = {}): string {
+  if (opts.enabled === false) return "";
   const memory = loadMemory(botId);
   const memoryFile = join(workspaceDir(botId), "MEMORY.md");
   const topicDir = join(workspaceDir(botId), "memory");

@@ -49,6 +49,26 @@ export class ThreadStarters {
     return threads;
   }
 
+  /** Everyone a thread here was opened for. */
+  people(): Set<string> {
+    return new Set(this.starters.values());
+  }
+
+  /** Name `to` for every thread whose person `move` accepts: a one-time
+   * migration (server/cloud-owner.ts), not an ordinary record. The threads
+   * that changed. */
+  reassign(move: (person: string) => boolean, to: string): string[] {
+    if (!KEY.test(to)) return [];
+    const moved: string[] = [];
+    for (const [threadId, person] of this.starters) {
+      if (person === to || !move(person)) continue;
+      this.starters.set(threadId, to);
+      moved.push(threadId);
+    }
+    if (moved.length) writeFileAtomic(this.file, JSON.stringify(Object.fromEntries(this.starters)) + "\n", { mode: 0o600 });
+    return moved;
+  }
+
   /** Record once; a thread keeps the person it was first opened for. */
   set(threadId: string, person: string | undefined): void {
     if (!person || !KEY.test(person) || !THREAD.test(threadId) || this.starters.has(threadId)) return;

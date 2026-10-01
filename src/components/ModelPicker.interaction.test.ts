@@ -184,7 +184,27 @@ describe("ModelPicker with a signed-out or missing Claude", () => {
     const opened = open(bot("codex", "gpt-5.6"));
     expect(rail(opened)!.props.instances.map((instance) => instance.instanceId)).toEqual(["codex"]);
     expect(opened.html).not.toContain('aria-label="Claude"');
-    expect(opened.html).toContain("Engines and accounts");
+    expect(opened.html).toContain("Model providers and accounts");
+  });
+});
+
+describe("the way into API keys", () => {
+  it("opens Settings on the API keys section from the picker footer", () => {
+    fixture.instances = [codex];
+    const opened = open(bot("codex", "gpt-5.6"));
+    const entry = opened.nodes.find((node) => node.props["data-model-add-api-keys"]);
+    expect(opened.html).toContain("Add API keys");
+    (entry!.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
+  });
+
+  it("ends the rail's API keys group with a way to add one", () => {
+    fixture.instances = [codex];
+    const opened = open(bot("codex", "gpt-5.6"));
+    expect(opened.html).toContain(">API keys<");
+    const add = rail(opened)!.props as { onAddApiKeys?: () => void };
+    add.onAddApiKeys!();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
   });
 });
 

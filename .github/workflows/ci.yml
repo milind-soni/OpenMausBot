@@ -340,6 +340,37 @@ jobs:
       - run: pnpm control-plane:test
       - run: pnpm control-plane:dry-run
 
+  deploy-composio-broker:
+    # Only deploys on push to upstream main. PRs run the control-plane tests
+    # but do not deploy: the wiring is exercised end-to-end only by a merged
+    # commit, so an unreviewed branch can never push to production. Closes
+    # the deploy gap that left #1914's broker fix (45cc2cf) sitting in
+    # source without reaching Cloudflare.
+    needs: [control-plane]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: deploy composio broker (Cloudflare Worker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Deploy the composio broker Worker via Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Mirrors the local `pnpm broker:deploy` script so CI is the same
+          # command a developer runs by hand. The token is created in the
+          # Cloudflare dashboard with Workers Scripts:Edit on the broker
+          # account; store it as the CLOUDFLARE_API_TOKEN repo secret.
+          command: deploy --config cloudflare/composio-broker/wrangler.jsonc
+
   ui-smoke:
     needs: static
     if: needs.static.outputs.runtime == 'true'

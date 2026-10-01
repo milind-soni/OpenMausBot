@@ -524,7 +524,9 @@ export function ComputerPanel({
           setVmStatus(status);
           // parse at the boundary: our own status endpoint sends a string or nothing
           const viewerUrl = String(status.viewer_url ?? "");
-          if (viewerUrl.startsWith("http")) setVmViewerUrl(viewerUrl);
+          if (viewerUrl.startsWith("http") || viewerUrl.startsWith("/desktop-viewer#")) {
+            setVmViewerUrl(new URL(viewerUrl, window.location.href).href);
+          }
           if (status.ready) {
             vmReadinessAttempts.current = 0;
             setPhase("vm");

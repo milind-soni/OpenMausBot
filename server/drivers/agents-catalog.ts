@@ -32,6 +32,7 @@ export interface CatalogProfile {
   /** The server is a Cloud home (server/cloud-home.ts): no "this computer"
    * of the person's and no Local VM to offer. */
   cloudHome: boolean;
+  memoryEnabled?: boolean;
   /** Written into start_thread's schema in a coordinating turn. */
   botId: string;
 }
@@ -48,6 +49,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
     voiceNotes: env.OMB_VOICE_NOTES === "1",
     cloudHome: env.OMB_CLOUD_HOME === "1",
+    memoryEnabled: env.OMB_MEMORY_ENABLED !== "0",
     botId: env.OMB_BOT_ID ?? "",
   };
 }
@@ -247,14 +249,14 @@ const toolDefinitions = (externalRuntime: boolean) => [
   },
   {
     name: "coordinate_bots",
-    description: "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat every assignment you send a teammate continues your one standing conversation with that teammate, so they keep the context of what you asked before; from a room it defaults to this room. Use group_id from list_room_targets for a specific room. Give 1-4 bot_ids — teammate ids as list_bots or your roster prints them; a unique teammate name also resolves: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work.",
+    description: "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat each distinct assignment starts a fresh thread for that teammate; from a room it defaults to this room. Give a self-contained brief. Use group_id from list_room_targets for a specific room. Give 1-4 bot_ids — teammate ids as list_bots or your roster prints them; a unique teammate name also resolves: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
-      group_id: { type: "string", description: "Optional destination room. Omit for this room, or your standing conversation with each teammate when chatting directly." },
+      group_id: { type: "string", description: "Optional destination room. Omit for this room, or a fresh thread for each teammate when chatting directly." },
       bot_ids: { type: "array", items: { type: "string", description: "A teammate's id exactly as list_bots or your roster prints it ([id: …]). A teammate's unique display name also resolves; a name shared by two reachable teammates is refused." }, minItems: 1, maxItems: 4, uniqueItems: true },
       message: { type: "string", minLength: 1, maxLength: 4000, description: "Self-contained question or task for these teammates. Send separate requests when responsibilities differ." },
       request_key: { type: "string", description: "A short unique assignment key. Reuse for an identical retry." },
       rework: { type: "boolean", description: "True only for concrete additional work from someone who already completed a request." },
-      label: { type: "string", description: "Optional short name (one line, at most 60 characters) for this job. Used only when the teammate is still working on your previous assignment and this one therefore runs in its own thread beside your standing conversation." },
+      label: { type: "string", description: "Optional short name (one line, at most 60 characters) for this job. Names the new direct assignment thread." },
     }, required: ["bot_ids", "message", "request_key"] },
   },
   {
@@ -848,9 +850,9 @@ export function availableTools(profile: CatalogProfile) {
 
 function catalogTools(profile: CatalogProfile) {
   const TOOLS = toolDefinitions(profile.externalRuntime);
-  const BOT_SCOPED_TOOLS = profile.botId === WATCHER_OPTIONS_CARD_BOT_ID
-    ? TOOLS
-    : TOOLS.filter((tool) => !WATCHER_TOOL_NAMES.has(tool.name));
+  const BOT_SCOPED_TOOLS = TOOLS.filter((tool) =>
+    (profile.botId === WATCHER_OPTIONS_CARD_BOT_ID || !WATCHER_TOOL_NAMES.has(tool.name)) &&
+    (profile.memoryEnabled !== false || (tool.name !== "memory_update" && tool.name !== "memory_log")));
   const AUTHORING_TOOLS = profile.skillAuthoring
     ? BOT_SCOPED_TOOLS
     : BOT_SCOPED_TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));

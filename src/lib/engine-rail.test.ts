@@ -4,15 +4,16 @@ import type { InstanceInfo } from "@/state/store";
 import { configuredModelInstances, splitEngineRail } from "./engine-rail";
 
 describe("splitEngineRail", () => {
-  it("keeps Cloud engines above Local engines", () => {
-    const { subscription, custom } = splitEngineRail([
+  it("groups sign-in plans, pasted provider keys and Local engines", () => {
+    const { subscription, api, custom } = splitEngineRail([
       { access: "subscription", instanceId: "claude" },
       { access: "custom", instanceId: "hermes" },
       { instanceId: "grok" },
       { access: "api", instanceId: "mistral" },
       { access: "custom", instanceId: "qwen" },
     ]);
-    expect(subscription.map((row) => row.instanceId)).toEqual(["claude", "grok", "mistral"]);
+    expect(subscription.map((row) => row.instanceId)).toEqual(["claude", "grok"]);
+    expect(api.map((row) => row.instanceId)).toEqual(["mistral"]);
     expect(custom.map((row) => row.instanceId)).toEqual(["hermes", "qwen"]);
   });
 

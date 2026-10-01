@@ -6,6 +6,9 @@ public struct SkillExecutionReceiptView: View {
     public let durationMs: Int
     public let parameters: String
     public let output: String
+    /// Output that is someone's words — a teammate's report — rather than a
+    /// tool's log: shown in full, in the body font, and selectable.
+    public let outputIsProse: Bool
     
     @State private var isExpanded: Bool = false
     
@@ -14,13 +17,15 @@ public struct SkillExecutionReceiptView: View {
         status: String = "success",
         durationMs: Int = 0,
         parameters: String = "",
-        output: String = ""
+        output: String = "",
+        outputIsProse: Bool = false
     ) {
         self.skillName = skillName
         self.status = status
         self.durationMs = durationMs
         self.parameters = parameters
         self.output = output
+        self.outputIsProse = outputIsProse
     }
     
     public var body: some View {
@@ -75,13 +80,21 @@ public struct SkillExecutionReceiptView: View {
                     
                     if !output.isEmpty {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("OUTPUT")
+                            Text(outputIsProse ? "REPORT" : "OUTPUT")
                                 .font(.system(size: 8.5, weight: .heavy, design: .monospaced))
                                 .foregroundColor(Color(hex: "#10B981"))
-                            Text(output)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.primary)
-                                .lineLimit(6)
+                            if outputIsProse {
+                                Text(verbatim: output)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.primary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                Text(output)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(6)
+                            }
                         }
                     }
                 }

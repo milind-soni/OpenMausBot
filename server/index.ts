@@ -146,6 +146,7 @@ import {
   instanceConfigs,
   loadConfig,
   providerReloadKeys,
+  localVmIdleTimeoutMinutes,
   localVmMaxInstances,
   localVmMode,
   parseConfigPatch,
@@ -186,6 +187,7 @@ import {
   roomHandoffLimits,
   onConfigSaved,
   liveSettingsFor,
+  CLAUDE_API_INSTANCE,
 } from "./config.ts";
 import { sweepThreadEventLogs, type ThreadLogRetentionCandidate } from "./thread-retention.ts";
 import { ComputerControl } from "./computer-control.ts";
@@ -217,12 +219,14 @@ import { recoveryCapabilityError } from "./automatic-recovery.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
 import {
   MAX_MCP_SERVERS,
+  isRemoteMcpServer,
   listMcpServers,
   mcpServerNameError,
   parseMcpServerMutation,
   parseMcpServersImport,
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
+import { McpOAuthError, McpSignInError, McpOAuthManager, mcpOAuthRedirectUri, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
 import { probeMcpServer } from "./mcp-probe.ts";
 import {
   GROUP_GOAL_MAX_TURNS,
@@ -300,6 +304,7 @@ import {
   boatNotConfiguredMessage, CLOUD_HOME_RESTART_EXIT_CODE, CLOUD_HOME_SECRET_KEYS, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_PATH, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal,
   createCloudPairing, firstCloudTurnPatch, readSignedBody,
 } from "./cloud-home.ts";
+import { CLOUD_PERSONAL_REFUSAL, settleCloudOwnership, type CloudOwnership } from "./cloud-owner.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
 import { holdIncludedServices } from "./included-services.ts";
 import type { ProviderInstance } from "./contracts.ts";
@@ -333,6 +338,7 @@ import { turnStartLogLine } from "./turn-log.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS, peerMessageText } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
+import { threadTitlePrompt, titleConversationExcerpt, type ThreadTitleSource } from "./thread-title.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import { TurnResources, workspaceResource, type TurnOwner } from "./turn-resources.ts";
 import { IdleReleasePolicy } from "./claim-idle.ts";
@@ -427,7 +433,7 @@ import * as vps from "./vps-computer.ts";
 import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
-import { BrowserRuntime } from "./browser-runtime.ts";
+import { BrowserRuntime, browserRuntimeEnv } from "./browser-runtime.ts";
 import { BrowserLive } from "./browser-live.ts";
 import {
   agentBrowserFrame,
@@ -435,6 +441,7 @@ import {
   browserEngineEncryptionKey,
   prepareBrowserSessionState,
   clearBrowserSessionState,
+  closeBrowserSession,
   ensureChrome,
   installAgentBrowserBinary,
   resolveAgentBrowserBinary,
@@ -444,7 +451,7 @@ import {
 } from "./browser-engine.ts";
 import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
-import { RoutineRequestService } from "./routine-requests.ts";
+import { asSchedule, RoutineRequestService } from "./routine-requests.ts";
 import { createOptionsCard } from "./options-card.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
@@ -579,6 +586,8 @@ import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createLiveRoutes } from "./routes/live.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
 import { createDeciderRoutes } from "./routes/decider.ts";
+import { createDesktopViewer, desktopViewerUrl } from "./routes/desktop-viewer.ts";
+import { localDesktopTarget, localVmViewerStatus, viewerTargetId } from "./desktop-viewer-targets.ts";
 import { createAntigravityLeftoverRoutes } from "./routes/antigravity-leftovers.ts";
 import { findAntigravityLeftovers, removeAntigravityLeftovers } from "./drivers/antigravity-temp.ts";
 
@@ -591,6 +600,7 @@ const MIME: Record<string, string> = {
   ".html": "text/html",
   ".js": "text/javascript",
   ".css": "text/css",
+  ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".ico": "image/x-icon",
@@ -619,8 +629,11 @@ process.once("exit", releaseDataDirLeaseAtExit);
 // Restore before constructing any long-lived config, Store, session or provider
 // objects. Replacing files underneath a live Store would overwrite restored data.
 let workspaceRestore: WorkspaceRestoreResult = { restored: false };
+/** A restore applied at this very start (not the last one on record). */
+let restoredAtStart: string | undefined;
 if (existsSync(join(DATA_DIR, ".backups"))) {
   workspaceRestore = applyPendingWorkspaceRestore(DATA_DIR);
+  if (workspaceRestore.restored) restoredAtStart = workspaceRestore.id;
   if (!workspaceRestore.restored && !workspaceRestore.rolledBack) {
     workspaceRestore = readLastWorkspaceRestore(DATA_DIR) ?? workspaceRestore;
   }
@@ -652,6 +665,9 @@ const sharedComputers = new SharedComputers(id => sessions.isLive(id));
 const CLOUD_SECRETS = BOOT_CLOUD_SECRETS;
 const CLOUD_ENV: NodeJS.ProcessEnv = { ...process.env, ...CLOUD_SECRETS };
 const CLOUD_HOME = cloudHomeConfiguration(CLOUD_ENV);
+// A Cloud home is personal: only the owner's own devices, each with admin
+// scope, connect (server/cloud-owner.ts; the stored rest is revoked below).
+if (CLOUD_HOME) sessions.requireAdmin(CLOUD_PERSONAL_REFUSAL);
 /** Lending a computer to this server (the shared-computer routes, the two
  * agent tools, the advertised capability): the maintainer flag anywhere, and
  * always on an OMB Cloud home, where it is the person's own Mac lent to their
@@ -880,7 +896,7 @@ function cloudLendingTurn(capability: Pick<InternalCapability, "botId" | "thread
     thread: store.messagesFor(capability.threadId),
     starters: cloudThreadStarters(capability.threadId),
     reportsFromOthers: store.messagesFor(capability.threadId).some(cloudOthersRoutineReport),
-    ownerPerson: cloudOwnerPerson,
+    ownerPerson: cloudProvenOwnerPerson,
     cardAnswerer: cloudCardAnswerer,
     routineRun: () => {
       const run = activeRoutineRunForThread(capability.threadId);
@@ -889,9 +905,7 @@ function cloudLendingTurn(capability: Pick<InternalCapability, "botId" | "thread
         triggerSource: run.triggerSource ?? (run.manual ? "manual" : "schedule"),
         ownerStarted: ownerStartedRoutineRuns.has(run.id),
         // What the run snapshotted, on the schedule its routine has now.
-        ownerAuthored: ((routine) => Boolean(routine) && cloudRoutineAuthors?.authored(run.routineId, {
-          ...routine!, prompt: run.prompt, target: run.target, botId: run.botId, groupId: run.groupId, attachments: run.attachments, runOn: run.runOn,
-        }) === true)(routines?.listRoutines().find((candidate) => candidate.id === run.routineId)),
+        ownerAuthored: cloudRoutineRunIsOwners(run, capability.botId, capability.threadId),
       };
     },
   };
@@ -944,14 +958,14 @@ function cloudOthersRoutineReport(line: Message): boolean {
  * message, and dropped whenever a session is revoked. */
 const ownerOnlyCache = new Map<string, { length: number; last?: string; owner: boolean }>();
 function cloudOwnerOnlyThread(threadId: string): boolean {
-  if (cloudThreadStarters(threadId).some((person) => person !== undefined && !cloudOwnerPerson(person))) return false;
+  if (cloudThreadStarters(threadId).some((person) => person !== undefined && !cloudProvenOwnerPerson(person))) return false;
   const thread = store.messagesFor(threadId);
   const last = thread.at(-1);
   const cached = ownerOnlyCache.get(threadId);
   // A card answered later changes the answer too: key on its answerer as well.
   const lastKey = last ? `${last.id}:${last.card?.answeredBy ? JSON.stringify(last.card.answeredBy) : ""}` : undefined;
   if (cached && cached.length === thread.length && cached.last === lastKey) return cached.owner;
-  const owner = ownerOnlyConversation(thread, cloudOwnerPerson, cloudCardAnswerer) && !thread.some(cloudOthersRoutineReport);
+  const owner = ownerOnlyConversation(thread, cloudProvenOwnerPerson, cloudCardAnswerer) && !thread.some(cloudOthersRoutineReport);
   if (ownerOnlyCache.size > 5_000) ownerOnlyCache.clear();
   ownerOnlyCache.set(threadId, { length: thread.length, last: lastKey, owner });
   return owner;
@@ -1017,6 +1031,12 @@ const CLOUD_OWNER_KEY = CLOUD_HOME ? `p_${createHash("sha256").update(`cloud-own
 /** …and the key of nobody at all: what a conversation made for work no
  * person can be named for (a routine with no recorded writer) opens as. */
 const CLOUD_NOBODY_KEY = `p_${createHash("sha256").update("cloud-nobody").digest("base64url").slice(0, 22)}`;
+/** A Cloud home is personal (server/cloud-owner.ts): the keys its owner's
+ * devices carried before they shared one, settled at boot once the routines
+ * are loaded (settleCloudOwnership, below). `adopted` decides who opened a
+ * conversation, its level and its folder; only `proven` feeds lending and
+ * memory. Nothing is either until then. */
+let cloudEarlierOwners: CloudOwnership = { adopted: new Set(), proven: new Set() };
 
 /** Who a session acts as, for lines, openers and answers: on a Cloud home
  * one of the owner's own devices is the owner; anyone else is themselves. */
@@ -1032,20 +1052,76 @@ function withRoutineWriter<T>(writer: string, work: () => T): T {
   routineWriterInFlight = writer;
   try { return work(); } finally { routineWriterInFlight = previous; }
 }
+/** On a Cloud home: a routine the owner approved (its card, or a proposal
+ * applied at once in their own Full-access conversation) is theirs as it
+ * stands: their key as its writer, their fingerprint on it. */
+function cloudOwnersRoutine(routineId: string | undefined): void {
+  const routine = routineId ? routines?.listRoutines().find((candidate) => candidate.id === routineId) : undefined;
+  if (!routine || !cloudRoutineAuthors || !CLOUD_OWNER_KEY) return;
+  cloudRoutineAuthors.record(routine.id, routine);
+  cloudRoutineAuthors.wrote(routine.id, CLOUD_OWNER_KEY);
+}
+
+/** On a Cloud home: a routine that is the owner's as it stands: their
+ * fingerprint matches what it runs, or they are its writer and no
+ * fingerprint of theirs was ever recorded (a template, a restore). */
+function cloudRoutineIsOwners(routineId: string | undefined): boolean {
+  const routine = routineId ? routines?.listRoutines().find((candidate) => candidate.id === routineId) : undefined;
+  if (!routine || !cloudRoutineAuthors || !CLOUD_OWNER_KEY) return false;
+  return cloudRoutineAuthors.authored(routine.id, routine) ||
+    (cloudRoutineAuthors.writer(routine.id) === CLOUD_OWNER_KEY && !cloudRoutineAuthors.recorded(routine.id));
+}
+
+/** On a Cloud home: a routine run that acts for the owner. Only in the run's
+ * own thread, and only while the owner's fingerprint matches what the run
+ * snapshotted, the same test as lending the Mac. A routine that is the
+ * owner's but not yet cleared for the Mac (no fingerprint: a v0.1.91
+ * approval, a template, a restore) can't clear itself or others this way. */
+function cloudRoutineRunIsOwners(run: RoutineRun | null | undefined, botId: string, threadId: string): boolean {
+  if (!run || run.threadId !== threadId || store.taskByThread(botId, threadId)?.routineRunId !== run.id || !cloudRoutineAuthors) return false;
+  const routine = routines?.listRoutines().find((candidate) => candidate.id === run.routineId);
+  return Boolean(routine) && cloudRoutineAuthors.authored(run.routineId, {
+    ...routine!, prompt: run.prompt, target: run.target, botId: run.botId, groupId: run.groupId, attachments: run.attachments, runOn: run.runOn,
+  }) === true;
+}
+
+/** After the owner approved a routine request (its card, or at once in their
+ * own conversation): a routine it created is theirs; one it changed, paused
+ * or resumed stays theirs only if it already was (`wasOwners`, taken before
+ * the change). Approving a harmless change never makes anyone else's routine
+ * the owner's. */
+function cloudOwnerApplied(action: string, routineId: string | undefined, wasOwners: boolean): void {
+  if (action === "create" || ((action === "update" || action === "pause" || action === "resume") && wasOwners)) cloudOwnersRoutine(routineId);
+}
+
+/** What the owner saw on a card that proposed a routine, and what a routine
+ * runs, in the same terms (everything its fingerprint covers except an
+ * interval's anchor, which only moves when it runs). */
+function approvalShape(shape: { prompt?: string; botId?: string; runOn?: string; schedule?: unknown; target?: string; groupId?: string | null; attachments?: { id: string; path: string }[] }): string {
+  const schedule = shape.schedule && typeof shape.schedule === "object" ? { ...(shape.schedule as Record<string, unknown>) } : null;
+  if (schedule) delete schedule.anchorAt;
+  return JSON.stringify([shape.prompt ?? "", shape.botId ?? "", shape.runOn ?? "maus", schedule, shape.target ?? "bot", shape.groupId ?? null,
+    (shape.attachments ?? []).map((attachment) => [attachment.id, attachment.path])]);
+}
+
 /** Who opens a routine's results conversation on a Cloud home: the writer
- * of this request, else the owner for a routine they wrote as it stands,
- * else its last writer when that is not the owner, else nobody. */
+ * of this request, else the owner for a routine that is theirs (they wrote
+ * it as it stands, or they are its writer: cloud-owner.ts), else its last
+ * writer, else nobody. */
 function routineOpener(routineId: string): string {
   if (routineWriterInFlight) return routineWriterInFlight;
   const routine = routines?.listRoutines().find((candidate) => candidate.id === routineId);
   if (routine && CLOUD_OWNER_KEY && cloudRoutineAuthors?.authored(routineId, routine)) return CLOUD_OWNER_KEY;
   const writer = cloudRoutineAuthors?.writer(routineId);
+  if (writer && CLOUD_OWNER_KEY && writer === CLOUD_OWNER_KEY) return CLOUD_OWNER_KEY;
   return writer && !cloudOwnerPerson(writer) ? writer : CLOUD_NOBODY_KEY;
 }
 
 /** On a Cloud home: a conversation someone other than the owner opened (a
- * guest, a guest's routine, or its room). Its turns run in Ask, in a private
- * folder of their own, and nothing in it reaches the owner's turns. */
+ * guest, a guest's routine, or its room; on a personal Cloud, one a revoked
+ * session opened: nobody's). Its turns run in Ask, confined, in a private
+ * folder of their own (pinned at its first turn, or after it was unpinned at
+ * boot: see pinTaskCwd), and nothing in it reaches the owner's turns. */
 function cloudGuestOpened(threadId: string): boolean {
   return Boolean(CLOUD_HOME) && cloudThreadStarters(threadId).some((person) => person !== undefined && !cloudOwnerPerson(person));
 }
@@ -1080,6 +1156,24 @@ function openerFrom(fromThreadId: string): string | undefined {
   return person && !cloudOwnerPerson(person) ? person : CLOUD_NOBODY_KEY;
 }
 
+/** The model a thread a bot opens from one of its own threads starts on:
+ * that thread's, not the bot default the person may have moved away from
+ * (#1950). Only the bot's own thread counts — a room or a teammate's thread
+ * is not one of its tasks, and another bot's model belongs to another engine.
+ * Approval stays the bot's, except that a level the inherited engine would
+ * have to confirm on a model switch starts the new thread in Ask. */
+function parentThreadModel(botId: string, parentThreadId: string): { modelSelection?: ModelSelection; approvalMode?: "ask" } {
+  // The stored profile, never a per-thread projection: the comparison is
+  // against the defaults the new thread would otherwise get.
+  const bot = store.bot(botId);
+  const modelSelection = bot && store.taskByThread(bot.id, parentThreadId)?.modelSelection;
+  if (!bot || !modelSelection) return {};
+  const needsAsk = modelSwitchNeedsAsk(approvalModeFor(bot),
+    registry.cliTarget(bot.modelSelection.instanceId)?.driverKind,
+    registry.cliTarget(modelSelection.instanceId)?.driverKind);
+  return { modelSelection, ...(needsAsk ? { approvalMode: "ask" as const } : {}) };
+}
+
 /** On a Cloud home: the conversation that work a guest-driven turn hands a
  * teammate (delegate_bot, ask_bot) runs in. It is a fresh one of the guest's
  * own on the teammate, never the owner's conversation with it, so the work,
@@ -1094,13 +1188,26 @@ function guestWorkThread(from: BotRecord, target: BotRecord, fromThreadId: strin
   return task.threadId;
 }
 
-/** What a guest is told on a Cloud home when the bot's engine cannot run
- * without a shell (cloudGuestDriven turns get none). */
-const GUEST_ENGINE_REFUSAL = "This bot can't take requests from guests on this Cloud. Ask the owner to switch it to Claude.";
+/** On a personal Cloud home the only turns confined like a guest's
+ * (cloudGuestDriven) are in what came before it: a routine nobody is proven
+ * to have written, or a conversation or room a revoked session opened. What
+ * the owner is told about one, and when its engine cannot be confined. */
+const ROUTINE_FROM_BEFORE = "This routine was made before this update. Open it and save it once to run it with full access.";
+const CONVERSATION_FROM_BEFORE = "This conversation is from before your Cloud was only yours, so this bot works in it without a shell. Start a new conversation to use it fully.";
+function confinedWhy(threadId: string): string {
+  const run = activeRoutineRunForThread(threadId);
+  const writer = run ? cloudRoutineAuthors?.writer(run.routineId) : undefined;
+  return run && writer && !cloudOwnerPerson(writer) ? ROUTINE_FROM_BEFORE : CONVERSATION_FROM_BEFORE;
+}
+function guestEngineRefusal(threadId: string): string {
+  const why = confinedWhy(threadId);
+  return why === ROUTINE_FROM_BEFORE ? `This bot's engine can't run it that way. ${why}`
+    : "This conversation is from before your Cloud was only yours, and this bot's engine can't work in it. Start a new conversation.";
+}
 
 /** On a Cloud home: a turn a guest drives, which runs in Ask whatever the
  * bot's own level (no Full access, no Auto reviewer, no saved commands), with
- * no shell (GUEST_ENGINE_REFUSAL): a conversation a guest opened, a run of a
+ * no shell (guestEngineRefusal): a conversation a guest opened, a run of a
  * routine a guest wrote, work a guest's turn handed on (guestDrivenTurns), or
  * a room whose latest line from a person is a guest's. */
 function cloudGuestDriven(threadId: string): boolean {
@@ -1124,12 +1231,28 @@ function cloudOwnerSession(auth: RequestAuth): boolean {
   return auth.kind === "session" && auth.scopes.includes("admin");
 }
 
-/** On a Cloud home: whether a message's person key is one of the owner's own
- * devices right now (a live admin session with that key). */
+/** On a Cloud home: whether a person key is the owner's, for who opened a
+ * conversation, who drives a turn, its approval level and its folder: the
+ * owner's one key, a device of theirs still paired, or a key from before
+ * they shared one (cloud-owner.ts, adopted). */
 function cloudOwnerPerson(person: string | undefined): boolean {
   if (!person) return false;
-  if (person === CLOUD_OWNER_KEY) return true;
-  // Written before the owner had one key: a device of theirs still paired.
+  if (person === CLOUD_OWNER_KEY || cloudEarlierOwners.adopted.has(person)) return true;
+  return cloudOwnerDevice(person);
+}
+
+/** …and whether it is proven the owner's, the only kind whose words may
+ * reach the lent Mac, memory, recall and the recent-work brief: a key from
+ * before counts only with proof it was the owner's (cloud-owner.ts, proven),
+ * never just because nobody revoked it. */
+function cloudProvenOwnerPerson(person: string | undefined): boolean {
+  if (!person) return false;
+  if (person === CLOUD_OWNER_KEY || cloudEarlierOwners.proven.has(person)) return true;
+  return cloudOwnerDevice(person);
+}
+
+/** Written before the owner had one key: a device of theirs still paired. */
+function cloudOwnerDevice(person: string): boolean {
   return sessions.list().some((session) => session.scopes.includes("admin") && personKey(session) === person);
 }
 
@@ -1372,7 +1495,7 @@ function recentWorkSources(bot: BotRecord) {
  * or a room must not be able to pull a private chat into its reply. The
  * conversations are the ones session_search would search, minus this one. */
 function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opts: { conversations: boolean; userName: string }): string {
-  if (!autoRecallEnabled(cfg)) return "";
+  if (bot.memoryEnabled === false || !autoRecallEnabled(cfg)) return "";
   const roomByThread = new Map<string, GroupRecord>();
   if (opts.conversations) {
     for (const group of store.groups) {
@@ -1701,6 +1824,17 @@ function queuedTurnTrigger(item: { trigger?: UsageTrigger; sender?: ResolvedSend
   return item.sender ? { kind: "user", label: item.sender.name } : { kind: "owner" };
 }
 const providerAuthSessions = new ProviderAuthSessions();
+/** OAuth sign-in for URL servers; tokens live in their own owner-only file. */
+const mcpOAuth = new McpOAuthManager({
+  file: join(DATA_DIR, "mcp-oauth.json"),
+  isOwnerLive: (owner) => owner === "loopback" || sessions.isLive(owner),
+  // Read the registered app when needed; never copy its secret into the token store.
+  clients: (name, url) => {
+    const raw = cfg.mcpServers?.[name];
+    const parsed = raw === undefined ? null : parseStoredMcpServer(name, raw);
+    return parsed?.ok && isRemoteMcpServer(parsed.server) && parsed.server.url === url ? parsed.server.oauth : undefined;
+  },
+});
 // OpenCode reads provider keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) from
 // its environment, as it does in a terminal, but only where that environment
 // is the person's own shell (openCodeProviderKeysAllowed). Wired before the
@@ -2208,6 +2342,7 @@ function agentsIntegration(
       OMB_ROOM_TURN: roomCoordination ? "1" : "0",
       OMB_OWN_THREAD_CREATION: ownThreadCreation ? "1" : "0",
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
+      OMB_MEMORY_ENABLED: store.bot(botId)?.memoryEnabled === false ? "0" : "1",
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
       OMB_SHARED_COMPUTERS_ENABLED: lendingEnabled() ? "1" : "0",
@@ -2642,7 +2777,15 @@ function canAdmitDirectTurn(botId: string, threadId: string): boolean {
 /** Routine and webhook dispatch shares startTurn's admission preconditions
  * instead of waiting for whole-bot idleness: a free thread slot and no
  * active group turn. A group turn blocks scheduled starts the same way it
- * blocks every other turn kind; it does not consume a capacity slot. */
+ * blocks every other turn kind; it does not consume a capacity slot.
+ *
+ * A fresh dispatch also pins to the bot's own project folder, exactly like
+ * startTurn's cwd resolution: a free thread slot alone can miss a second
+ * task of this bot landing in that one folder (#F-collide). Predicting that
+ * collision here lets it defer through the same busy-target machinery as
+ * capacity and group-turn contention, instead of reaching startTurn's own
+ * workspace claim — which throws deep inside a detached dispatch that no
+ * caller here awaits, so the run would otherwise fail permanently. */
 function unattendedDispatchState(botId: string): "ready" | "busy" | "missing" {
   const bot = store.bot(botId);
   const decision = admit("unattended", {}, {
@@ -2650,7 +2793,16 @@ function unattendedDispatchState(botId: string): "ready" | "busy" | "missing" {
     atCapacity: Boolean(bot) && botAtThreadCapacity(botId),
     groupTurn: Boolean(bot) && Boolean(activeGroupTurnForBot(botId)),
   });
-  return decision.action !== "refuse" ? "ready" : decision.code === "missing" ? "missing" : "busy";
+  if (decision.action === "refuse") return decision.code === "missing" ? "missing" : "busy";
+  if (bot?.cwd) {
+    try {
+      if (turnResources.blocker(workspaceResource(bot.cwd), { threadId: "", generation: "" })) return "busy";
+    } catch {
+      // An unresolvable folder is startTurn's own admission check to
+      // report; this prediction only ever adds a defer, never a refusal.
+    }
+  }
+  return "ready";
 }
 
 function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
@@ -2825,7 +2977,15 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
 /** The bot's browser for this turn: agent-browser, one isolated session per
  * browser profile or per bot (docs/plans/browser-engine.md). Null, with the
  * reason logged once, when the engine is not on this machine. */
-const browserRuntime = new BrowserRuntime();
+const browserRuntime = new BrowserRuntime({
+  // The bot's restart_browser tool. An open Browser panel watched the old
+  // browser; drop its stream the way the panel's own Restart button does.
+  closeBrowser: async (session, spec) => {
+    const closed = await closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }));
+    if (closed) browserLive.closeForSession(session);
+    return closed;
+  },
+});
 const browserLive = new BrowserLive({ runtime: browserRuntime });
 // Temporary profiles last for this server run, but are never saved to disk.
 // The viewer and the agent must address the SAME temporary browser.
@@ -3530,7 +3690,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "routine", label: "Routines", text: agentsMounted ? ROUTINE_PROMPT : "" },
     { id: "profile", label: "Profile changes", text: agentsMounted ? PROFILE_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
-    { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace) }) },
+    { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace), enabled: bot.memoryEnabled !== false }) },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
   ]);
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
@@ -3625,10 +3785,11 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
  * with one deliberate exception: a Chief of Staff with Full access makes the
  * threads it delegates Full too (delegatedFullAccess), so the grant the
  * person gave the Chief covers the work the Chief hands out. */
-const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMode => {
-  // On a Cloud home a conversation a guest opened runs in Ask, whatever the
-  // bot's own level (`bot` is projected onto its conversation).
-  if (cloudGuestDriven(bot.threadId)) return "ask";
+const approvalModeForTurn = (bot: BotRecord, peerInitiated = false, threadId = bot.threadId): ApprovalMode => {
+  // On a Cloud home a turn a guest drives runs in Ask, whatever the bot's
+  // own level. Judged by the conversation the turn runs in (a room's, for a
+  // room turn), never by whichever of the bot's conversations is active.
+  if (cloudGuestDriven(threadId)) return "ask";
   const mode = approvalModeForOrigin(approvalModeFor(bot), { peerInitiated });
   if (!supportsApprovalMode(bot.modelSelection, mode)) {
     return "ask";
@@ -3643,7 +3804,7 @@ function fullAccessForSource(botId: string, threadId: string): boolean {
   if (!owner) return false;
   const bot = store.projectBotForTask(botId, threadId) ?? owner.bot;
   // Origin changes Custom to Auto, never Full; no live-turn state is needed.
-  return approvalModeForTurn(bot) === "full";
+  return approvalModeForTurn(bot, false, threadId) === "full";
 }
 
 function peerReviewRequired(bot: BotRecord, threadId: string): boolean {
@@ -3670,8 +3831,7 @@ function delegatedFullAccess(from: BotRecord, fromThreadId: string, target: BotR
 
 /** Make a delegated thread Full and say so in it once, so the level the
  * chip shows and the level the turns run at agree, and the person can see
- * where the access came from. Idempotent: a pair conversation is reused
- * across delegations and must not collect a chip per request. */
+ * where the access came from. */
 function grantDelegatedFullAccess(from: BotRecord, target: BotRecord, threadId: string): void {
   if (store.taskByThread(target.id, threadId)?.approvalMode === "full") return;
   store.patchTask(target.id, threadId, { approvalMode: "full", autoApprove: false, alwaysAllow: [] });
@@ -3692,7 +3852,7 @@ function roomTurnApprovalMode(bot: BotRecord, threadId: string, orchestration?: 
   const source = handoff?.parentId ? roomHandoffs.nodes.get(handoff.parentId) : undefined;
   const from = source ? store.bot(source.botId) : undefined;
   if (from && source && delegatedFullAccess(from, source.threadId, bot)) return "full";
-  return approvalModeForTurn(bot, Boolean(orchestration?.roomHandoffId));
+  return approvalModeForTurn(bot, Boolean(orchestration?.roomHandoffId), threadId);
 }
 
 /** Privileged approval-mode transitions are deliberately absent from the
@@ -4474,6 +4634,10 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
           : child.status === "completed" ? `${bot?.name ?? "Teammate"} replied${child.groupId ? ` · ${store.group(child.groupId)?.name ?? "Room"}` : ""}`
           : `${bot?.name ?? "Teammate"} — ${child.status}: ${child.result.slice(0, 180)}`,
         ok: child.status === "completed" && !problem,
+        // The chip label stays short; the report itself rides along so a
+        // phone can show what the teammate said without opening its thread.
+        ...(child.status === "completed" && !problem && child.result.trim()
+          ? { output: redactSecretsInText(child.result.trim()).slice(0, 2_000) } : {}),
       },
       ...(child.groupId ? { comm: { groupId: child.groupId, threadId: child.threadId, withBotId: child.botId,
         withName: bot?.name ?? "Teammate", withColor: bot?.color ?? "blue" } }
@@ -4485,14 +4649,9 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
       const source = store.bot(parent.botId);
       if (source) markTaskContextExternallyUpdated(source, parent.threadId);
     }
-    // A work thread exists only because the pair conversation was busy with
-    // another job. Its result is now in the sender's conversation, so it
-    // closes itself exactly as close_thread would — folded out of the
-    // sidebar, never deleted, and open again the moment anyone speaks
-    // there. A finished job tidies up after itself; a failed or withheld
-    // one stays in the sidebar where the person can see it. The pair
-    // conversation is the standing line between two bots and never
-    // auto-closes.
+    // A successful direct work thread closes after its result is reported:
+    // folded out of the sidebar, never deleted, and reopened if addressed.
+    // Failed or withheld work stays visible.
     const childTask = store.taskByThread(child.botId, child.threadId);
     if (!child.groupId && child.status === "completed" && !problem && !childTask?.closedBy
       && childTask?.openedBy?.kind === "work" && childTask.openedBy.botId === parent.botId) {
@@ -5171,8 +5330,33 @@ function audienceChanged(): void {
     }
   }
 }
+// Cloud boot can revoke sessions before routes are registered. Create the
+// viewer manager before installing any revocation callbacks.
+const desktopViewer = createDesktopViewer({
+  target: (id) => {
+    if (id.startsWith("vps/")) {
+      const botId = id.slice(4);
+      if (store.bot(botId)?.cloudBackend !== "vps") return;
+      return { key: id, resolve: async () => {
+        const connection = vps.vpsDesktopConnection(botId);
+        if (!connection) throw Object.assign(new Error("VPS viewer is not open"), { status: 409 });
+        return connection;
+      } };
+    }
+    const targets = [SHARED_LOCAL_VM_TARGET, ...store.bots.map(bot => perBotLocalVmTarget(bot.id)),
+      ...Array.from({ length: localVmMaxInstances(cfg) }, (_, seat) => poolLocalVmTarget(seat))];
+    const target = targets.find(target => viewerTargetId(target) === id);
+    return target && localDesktopTarget(target, {
+      // A viewer can repair a sick CUA driver; skip desktop health probes.
+      status: target => containerComputerStatus(undefined, undefined, target, { probeDesktop: false }),
+      touch: target => localVmIdleFor(target).touch(),
+    });
+  },
+  live: auth => auth.kind === "loopback" || sessions.isLive(auth.session.id),
+});
 function closeSessionStreams(sessionId: string): void {
   browserLive.closeForOwner(sessionId);
+  desktopViewer.closeForOwner(sessionId);
   for (const client of sseClients) {
     if (client.sessionId !== sessionId) continue;
     sseClients.delete(client);
@@ -5185,6 +5369,7 @@ function closeSessionStreams(sessionId: string): void {
 }
 sessions.onSessionRevoked((sessionId) => {
   providerAuthSessions.revokeOwner(sessionId);
+  mcpOAuth.revokeOwner(sessionId);
   closeSessionStreams(sessionId);
   // A revoked owner device no longer vouches for its lines (cloudOwnerPerson).
   ownerOnlyCache.clear();
@@ -5790,7 +5975,7 @@ bus.subscribe((event: RuntimeEvent) => {
     const messages = store.messagesFor(event.threadId);
     const reply = messages.findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === event.turnId);
     const bot = store.botByThread(event.threadId) ?? (reply?.from ? store.bot(reply.from.botId) : undefined);
-    if (!bot) return;
+    if (!bot || bot.memoryEnabled === false) return;
     const tools = messages
       .filter((message) => message.kind === "activity" && message.turnId === event.turnId && message.tool?.name)
       .map((message) => message.tool!.name);
@@ -6096,6 +6281,9 @@ const boatLifecycleBusyBots = new Set<string>();
 // A refresh is a reader, not a lifecycle change. Keep its reservation until
 // the provider settles even if the HTTP client leaves, and share it on retry.
 const vpsPreviewRequests = new Map<string, ReturnType<typeof vps.vpsComputerScreenshot>>();
+// Joins in flight per bot. A second tab or a quick reconnect waits for the
+// pending join, then reuses its tunnel, instead of being refused by its lane.
+const vpsJoinRequests = new Map<string, Promise<void>>();
 const orphanBoatLifecycleBusyIds = new Set<string>();
 const boatInventoryRequestsBusyIds = new Set<string>();
 type RemoteComputerProvider = "box" | "vps";
@@ -6103,7 +6291,9 @@ const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
 // A restore mutates and cleans a project work tree. Claim the bot across the
 // entire async Git operation so a turn cannot start in that folder midway.
 const checkpointRestoreLeases = new Set<string>();
-const LOCAL_VM_IDLE_MS = 8 * 60 * 60_000;
+/** The effective idle window, read from config so a Settings change applies
+ * to both new and already-armed timers (see the config route). */
+const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
 /** How long a turn waits for Cua Driver after starting the container itself.
  * A cold XFCE desktop needs some seconds; past this the turn reports the
  * status it has rather than hanging on a container that will not come up. */
@@ -6243,7 +6433,7 @@ async function teamComputersPayload(): Promise<TeamComputersPayload> {
 /** The same named Boat identity and whole-turn lease in chats and rooms.
  * Assignment authorizes waking, never replacing a missing paid machine. */
 async function attachTeamBoat(computer: TeamComputerRecord, botId: string, owner: TurnOwner, canMount: boolean, remoteAgent: boolean) {
-  if (!canMount) throw new Error("This model engine cannot use the team's Boat computer; choose an engine with computer tools or an explicit bot destination");
+  if (!canMount) throw new Error("This model cannot use the team's Boat computer; choose a model provider with computer tools or an explicit bot destination");
   if (!boat.boatConfigured(cfg)) throw new Error("The team's Boat account is not configured; reconnect it in Settings");
   const ownerId = teamComputerOwner(computer.id);
   if (boatLifecycleBusyBots.has(ownerId)) throw new Error("The team computer is being changed; wait for it to finish");
@@ -6274,7 +6464,7 @@ async function mountHostComputer(owner: TurnOwner, botId: string, providerSuppor
     // ACP engine" while already on one has nowhere to go.
     throw new Error(providerSupportsLocal
       ? `local computer control is not available on ${process.platform} — select another destination`
-      : "this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
+      : "this model cannot control this computer — choose Claude or an ACP model provider, or select another destination");
   }
   const cua = readCuaConnection();
   if (!cua) {
@@ -6546,7 +6736,7 @@ async function selectableComputers(bot: BotRecord) {
           providerSupportsLocal: caps?.localComputerMcp === true }) && Boolean(readCuaConnection());
       } else if (surface === "browser") {
         ready = caps?.browserMcp === true && builtInBrowserEnabled(cfg) && bot.browser !== false && browserEngineStatus().kind === "ready";
-        reason = "The built-in browser is disabled, not installed, or unsupported by this model engine.";
+        reason = "The built-in browser is disabled, not installed, or unsupported by this model.";
       }
     } catch (error) { reason = error instanceof Error ? error.message : String(error); }
     // Not offered at all when the organisation disallows it.
@@ -6696,7 +6886,7 @@ function localVmIdleFor(target: LocalVmTarget): LocalVmIdleTimer {
   let idle = localVmIdles.get(target.key);
   if (idle) return idle;
   idle = new LocalVmIdleTimer(
-    LOCAL_VM_IDLE_MS,
+    localVmIdleMs(),
     () => localVmImageBusy || localVmLifecycleBusy.has(target.key) || localVmActiveThreads.has(target.key),
     async () => {
       localVmLifecycleBusy.add(target.key);
@@ -7032,7 +7222,7 @@ bus.subscribe((event: RuntimeEvent) => {
       // A turn a guest drives on a Cloud home is Ask, room turns included,
       // and no command the owner saved answers for it.
       const guestDriven = cloudGuestDriven(event.threadId);
-      const effectiveApprovalMode = asker && !guestDriven ? approvalModeForTurn(asker, isInternalTurn(event.threadId)) : "ask";
+      const effectiveApprovalMode = asker && !guestDriven ? approvalModeForTurn(asker, isInternalTurn(event.threadId), event.threadId) : "ask";
       // Native shell descriptors are distinct from computer/MCP permissions;
       // choosing a local desktop must not disable an exact shell grant.
       const command = permission && asker && event.requestId && !event.requiresExplicitApproval && event.command && !guestDriven
@@ -8680,17 +8870,14 @@ async function finalScreenFrame(_botId: string, threadId: string): Promise<Frame
  * (generateText — Haiku on Claude, the chat completion endpoint's text
  * path on OpenAI-compatible engines). Null whenever that call cannot run,
  * runs long, or answers with something that is not a plain short title;
- * the caller keeps the snippet it already applied. */
+ * the caller keeps the snippet it already applied. "conversation" names an
+ * existing thread from titleConversationExcerpt (Regenerate title). */
 async function generateThreadTitle(
   provider: { generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string> },
   text: string,
+  source: ThreadTitleSource = "first-message",
 ): Promise<string | null> {
-  const prompt = [
-    "Name the conversation that begins with the message below.",
-    "Reply with only a short title: 3 to 6 words, plain text, no quotes, no trailing period.",
-    "Message:",
-    text.trim().slice(0, 1_500),
-  ].join("\n");
+  const prompt = threadTitlePrompt(text, source);
   const expiry = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -8712,6 +8899,9 @@ async function generateThreadTitle(
     clearTimeout(timer);
   }
 }
+
+/** Threads whose Regenerate title one-shot is still running: one at a time. */
+const titleRegenerations = new Set<string>();
 
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 async function startTurn(
@@ -8859,7 +9049,7 @@ async function startTurn(
   guestDrivenTurns.delete(threadId);
   const guestConfined = cloudGuestDriven(threadId) || cloudGuestDrivenHandoff(opts?.coordination?.id);
   if (guestConfined && instance.adapter.capabilities.guestTurns !== "confined") {
-    throw Object.assign(new Error(GUEST_ENGINE_REFUSAL), { status: 409, code: "guest_engine" });
+    throw Object.assign(new Error(guestEngineRefusal(threadId)), { status: 409, code: "guest_engine" });
   }
   // Resolve only transport tags from this newly submitted text. The original
   // string remains the durable message. Native-image providers get a
@@ -8879,11 +9069,9 @@ async function startTurn(
     const titled = store.titleTaskFromFirstMessage(bot.id, resolvedImages.text, threadId);
     // The snippet is only the fallback name. A cheap one-shot may trade it
     // for a title a person would have typed, but never on a peer-opened
-    // row: adoption recognises those by the exact title their assignment
-    // gave them (openingRequestTitle), and a generated one would break the
-    // comparison it renames under. Everywhere else, the swap happens only
-    // while the row still carries the snippet — a rename by the person or
-    // by adoption has already broken that equality by then.
+    // row: its title belongs to the assigned work. Everywhere else, the
+    // swap happens only while the row still carries the snippet — a rename
+    // by a person has already broken that equality by then.
     const snippet = titled?.title;
     if (titled && snippet && !titled.openedBy?.botId && llmThreadTitlesEnabled(cfg) && instance.generateText) {
       void generateThreadTitle(instance, resolvedImages.text)
@@ -9218,7 +9406,7 @@ async function startTurn(
       // composio — only to a driver that can mount them. Their tools are
       // never pre-allowed, so every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true) {
-        const custom = engineMcpServers(bot);
+        const custom = await withMcpSignIn(engineMcpServers(bot), mcpOAuth);
         if (Object.keys(custom).length) integrations.custom = custom;
       }
       // CLI engines work inside the bot's own workspace directory rather
@@ -9229,7 +9417,7 @@ async function startTurn(
       if (worksInWorkspace) {
         ensureWorkspace(bot.id);
         // baseline for the journal's turn-boundary diff (see the bus hook)
-        beginMemoryTurn(bot.id, threadId);
+        if (bot.memoryEnabled !== false) beginMemoryTurn(bot.id, threadId);
       }
       const privateWorkspace = worksInWorkspace ? ensureTaskWorkspace(bot.id, threadId) : undefined;
       const skillInstructions = renderSkillInstructions(selectedSkills, {
@@ -9244,9 +9432,11 @@ async function startTurn(
       // pin the task to the default so the header chip never shows the
       // bot's folder for a task that runs elsewhere.
       if (opts?.runOn === "cloud") store.pinTaskCwd(bot.id, threadId, undefined, { none: true });
-      // On a Cloud home a conversation a guest opened works only in its own
-      // folder, never the bot's project folder the owner's conversations
-      // share (what it leaves there reaches none of them).
+      // On a Cloud home a conversation a guest opened is pinned to its own
+      // folder when it first runs, not the bot's project folder the owner's
+      // conversations share (what it leaves there reaches none of them). One
+      // that ran before keeps its pin, unless the session that opened it was
+      // revoked: then it was unpinned at boot (server/cloud-owner.ts).
       const pinnedCwd =
         privateWorkspace && opts?.runOn !== "cloud"
           ? store.pinTaskCwd(bot.id, threadId, privateWorkspace, { privateOnly: cloudGuestOpened(threadId) })
@@ -9438,7 +9628,7 @@ async function startTurn(
       const attachLocalVm = async (strict: boolean): Promise<boolean> => {
         if (!mountsComputerMcp || instance.adapter.capabilities.remoteAgent === true) {
           if (!strict) return false;
-          throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
+          throw new Error("this model cannot use the Local VM — choose Claude or an ACP model provider, or select another computer destination");
         }
         if (!strict && localVmMode(cfg) === "pool") {
           // localVmTargetForThread records pool affinity, so a turn the
@@ -9667,9 +9857,9 @@ async function startTurn(
         !computerSelectionTurns.has(threadId)
       ) {
         const hint = opts?.automationSource
-          ? "This scheduled run tried to start the VPS computer and could not reach it. Check the VPS connection in App Settings → Connections."
+          ? "This scheduled run tried to start the VPS computer and could not reach it. Check the VPS connection in Settings → API keys."
           : bot.autoStartVps
-            ? "Check the VPS connection in App Settings → Connections."
+            ? "Check the VPS connection in Settings → API keys."
             : "Open Computer and enable Start VPS automatically, or choose Cloud to start it manually.";
         throw new Error(`${autoVpsProblem}. ${hint}`);
       }
@@ -9724,7 +9914,7 @@ async function startTurn(
       const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT + (boundedCoordination ? "" : THREADS_PROMPT) : "";
       const routinePrompt = integrations.agents ? ROUTINE_PROMPT : "";
       const profilePrompt = integrations.agents ? PROFILE_PROMPT : "";
-      const recallPrompt = integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "";
+      const recallPrompt = integrations.agents && bot.memoryEnabled !== false ? SESSION_SEARCH_SYSTEM_PROMPT : "";
       const learnPrompt = skillAuthoring ? LEARN_PROMPT : "";
 
       // (activeVpsThreads was already claimed above, before the provision or
@@ -9857,7 +10047,7 @@ async function startTurn(
         // what the bot said lately in its other conversations, so a task
         // never redoes — or forgets — what another one already did
         { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId, ...recentWorkFilter() })) },
-        { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace }) },
+        { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace, enabled: bot.memoryEnabled !== false }) },
         { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
@@ -9900,8 +10090,8 @@ async function startTurn(
         text: withRecalled(recalled, dispatchContext.turnText),
         refreshSystemPrompt: true,
         images: turnImages,
-        approvalMode: approvalModeForTurn(bot, commsDepth > 0),
-        ...(guestConfined ? { guestConfined: true } : {}),
+        approvalMode: approvalModeForTurn(bot, commsDepth > 0, threadId),
+        ...(guestConfined ? { guestConfined: true, confinedWhy: confinedWhy(threadId) } : {}),
         model,
         effort,
         variant,
@@ -10188,7 +10378,10 @@ function routineRunFallbackText(card: NonNullable<Message["routineRun"]>): strin
                 ? "deferred: target busy"
               : card.status
   );
-  return `Routine “${card.routineName}” ${state}`;
+  // Clients without the card (older phones) draw only this line, so it
+  // carries what the run said, not just that it finished.
+  const detail = card.summary ?? card.error;
+  return `Routine “${card.routineName}” ${state}${detail ? `\n\n${detail}` : ""}`;
 }
 
 /** Upsert one durable lifecycle card per run. Replaying the same transition,
@@ -10342,8 +10535,12 @@ routines = new RoutineManager({
     }
     return groupIsWorking(group) || coordinator.busy ? "busy" : "ready";
   },
-  createTask: (botId, title, activate = false) => {
+  createTask: (botId, title, activate = false, routineId) => {
     const task = store.createTask(botId, title, activate);
+    // On a Cloud home a run's conversation is opened, like its results
+    // conversation, by whoever wrote the routine: a run of one that is
+    // nobody's is confined to a folder of its own, never the bot's project.
+    if (task && CLOUD_HOME && routineId) threadStarters.set(task.threadId, routineOpener(routineId));
     const bot = store.bot(botId);
     if (task && bot) broadcast({ kind: "bot", bot: publicBot(bot) });
     return task;
@@ -10430,6 +10627,59 @@ routines = new RoutineManager({
     notify(buildNotification("routine-deferred", notificationBot, routineSourceThread(run) ?? bot.threadId, detail));
   },
 });
+// A Cloud home is personal (server/cloud-owner.ts): every stored session
+// without admin scope is revoked and what it opened or wrote is nobody's;
+// once (and after a restore) the earlier keys are settled. Before anything
+// is served, and before any routine can run.
+if (CLOUD_HOME && CLOUD_OWNER_KEY && cloudRoutineAuthors) {
+  const authors = cloudRoutineAuthors;
+  const routineById = (id: string) => routines?.listRoutines().find((routine) => routine.id === id);
+  cloudEarlierOwners = settleCloudOwnership({
+    file: join(DATA_DIR, "cloud-owner.json"),
+    machineId: CLOUD_HOME.machineId,
+    ownerKey: CLOUD_OWNER_KEY,
+    nobodyKey: CLOUD_NOBODY_KEY,
+    sessions,
+    personKey,
+    starters: threadStarters,
+    writers: authors,
+    routines: {
+      ids: () => (routines?.listRoutines() ?? []).map((routine) => routine.id),
+      writer: (id) => authors.writer(id),
+      fingerprinted: (id) => { const routine = routineById(id); return Boolean(routine) && authors.authored(id, routine!); },
+      resultsOpener: (id) => { const results = routineById(id)?.resultsThreadId; return results ? threadStarters.get(results) : undefined; },
+      shape: (id) => { const routine = routineById(id); return routine ? approvalShape(routine) : undefined; },
+      name: (id, person) => authors.wrote(id, person),
+      pause: (ids) => { for (const id of ids) routines?.update(id, { enabled: false }); },
+    },
+    unpin: (threadIds) => { for (const threadId of threadIds) store.unpinTaskCwd(threadId); },
+    lines: () => {
+      const senders = new Set<string>(), answerers = new Set<string>();
+      const approvals: Array<[string, string, string]> = [];
+      const threads = new Set([...store.bots.flatMap((bot) => store.tasks(bot.id).map((task) => task.threadId)), ...store.groups.map((group) => group.threadId)]);
+      for (const threadId of threads) {
+        for (const line of store.messagesFor(threadId)) {
+          const sender = linePersonKey(line);
+          if (sender) senders.add(sender);
+          const answerer = line.card?.answeredBy?.kind === "session" ? line.card.answeredBy.person : undefined;
+          if (answerer) answerers.add(answerer);
+          // A routine a bot proposed, created when this person allowed its card.
+          const request = line.card?.routineRequest;
+          if (answerer && line.card?.answered === "allow" && request?.operation.action === "create" && request.resultId) {
+            const definition = request.operation.routine;
+            approvals.push([request.resultId, answerer, approvalShape({ prompt: definition.instructions, botId: request.operation.forBot?.botId ?? request.botId,
+              runOn: definition.runOn, schedule: asSchedule(definition.schedule, 0) })]);
+          }
+        }
+      }
+      return { senders, answerers, approvals };
+    },
+    ...(restoredAtStart ? { restoredNow: restoredAtStart } : {}),
+    ...(workspaceRestore.restored && workspaceRestore.id ? { lastRestore: workspaceRestore.id } : {}),
+    log: (line) => console.log(line),
+  });
+  ownerOnlyCache.clear();
+}
 orgLibrary = new OrgLibrary({
   dataDir: DATA_DIR,
   store,
@@ -10511,7 +10761,7 @@ async function cloudRoutineReadiness(botId: string, threadId?: string): Promise<
   if (!instance) return { ready: false, reason: "The Cloud VM runner is unavailable. Restart OpenMausBot and try again." };
   try {
     if ((await instance.snapshot()).state !== "available") {
-      return { ready: false, reason: "The target bot's model engine is not ready to use the Boat cloud computer." };
+      return { ready: false, reason: "The target bot's model is not ready to use the Boat cloud computer." };
     }
     const teamComputer = inheritedTeamComputer(bot);
     const ownerId = teamComputer ? teamComputerOwner(teamComputer.id) : bot.id;
@@ -11044,11 +11294,17 @@ function sendRoutineResolution(
 function resolveAndSendRoutine(
   res: ServerResponse,
   args: { botId: string; botName?: string; threadId: string; requestId: string; behavior: string },
+  ownersAnswer = false,
 ): boolean {
   const card = store.messagesFor(args.threadId).find(
     (message) => message.card?.requestId === args.requestId && message.card.routineRequest,
   )?.card;
+  // On a Cloud home a routine the owner approved on its card is theirs; one
+  // it only changed stays whosever it was (cloudOwnerApplied).
+  const operation = card?.routineRequest?.operation;
+  const wasOwners = operation && operation.action !== "create" ? cloudRoutineIsOwners(operation.routineId) : false;
   const result = routineRequests.resolve(args);
+  if (ownersAnswer && result.claimed && result.state === "applied") cloudOwnerApplied(result.action, result.resultId, wasOwners);
   if (
     result.claimed &&
     (result.state === "applied" || result.state === "denied")
@@ -11190,11 +11446,23 @@ const webhooks = new WebhookManager({
   findRun: (webhookId, deliveryId) => routines!.webhookRunReceipt(webhookId, deliveryId),
   cancelQueued: (webhookId, message) => routines!.cancelQueuedWebhook(webhookId, message),
   pendingRuns: (webhookId) => routines!.activeWebhookRunCount(webhookId),
-  // delivery:"post" webhooks land in the bot's main chat as the bot's own message.
-  post: (botId, text) => {
-    const bot = store.bot(botId);
-    if (!bot) return;
-    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text });
+  // delivery:"post" webhooks land in a dedicated "Updates" task, never
+  // bot.threadId (the bot's currently-selected task) -- see
+  // resolvePostThread below. Fixes
+  // https://github.com/milind-soni/OpenMausBot/issues/2071: a post used to
+  // land wherever the owner (or another automation) had last switched
+  // that bot's selection, including a live conversation.
+  post: (botId, threadId, text) => {
+    if (!store.bot(botId)) return;
+    store.appendMessage(threadId, { role: "bot", kind: "text", text });
+  },
+  // Mirrors resolveResultsThread's routines wiring a few hundred lines up
+  // in this same file: create-on-first-use, never activated (so it never
+  // steals the bot's live selection the way POST /api/bots/:id/tasks
+  // does), reused forever after via trigger.resultsThreadId.
+  resolvePostThread: (trigger, forceNew) => {
+    if (!forceNew && trigger.resultsThreadId) return trigger.resultsThreadId;
+    return store.createTask(trigger.botId, "Updates", false)?.threadId;
   },
 });
 
@@ -11428,7 +11696,7 @@ async function runGroupMemberTurn(
   // own conversation, or refused on an engine that cannot be.
   if (!groupSpeakers.has(threadId)) guestDrivenTurns.delete(threadId);
   const roomGuestConfined = cloudGuestDriven(threadId) || cloudGuestDrivenHandoff(orchestration?.roomHandoffId);
-  const roomGuestRefusal = roomGuestConfined && instance?.adapter.capabilities.guestTurns !== "confined" ? GUEST_ENGINE_REFUSAL : undefined;
+  const roomGuestRefusal = roomGuestConfined && instance?.adapter.capabilities.guestTurns !== "confined" ? guestEngineRefusal(threadId) : undefined;
   if (!instance || roomPolicyRefusal || roomGuestRefusal) {
     const message = roomPolicyRefusal ?? roomGuestRefusal ?? `${bot.name}'s model is unavailable`;
     store.appendMessage(threadId, {
@@ -11584,7 +11852,7 @@ async function runGroupMemberTurn(
   }
   // user-configured MCP servers: same gating as the 1:1 site above.
   if (instance.adapter.capabilities.customMcp === true) {
-    const custom = engineMcpServers(bot);
+    const custom = await withMcpSignIn(engineMcpServers(bot), mcpOAuth);
     if (Object.keys(custom).length) integrations.custom = custom;
   }
   // Connected-app discovery is intentionally awaited before a provider owns
@@ -11818,7 +12086,7 @@ async function runGroupMemberTurn(
   // Claim the same lease as direct turns before asynchronous VM setup.
   if (readyBot.computer === "vm") {
     if (instance.adapter.capabilities.computerMcp !== true || instance.adapter.capabilities.remoteAgent === true) {
-      throw new Error("this model engine cannot use the Local VM");
+      throw new Error("this model cannot use the Local VM");
     }
     // A distinct identity fences cleanup even in shared mode on the same room thread.
     const target = { ...localVmTargetForThread(readyBot.id, threadId) };
@@ -11917,7 +12185,7 @@ async function runGroupMemberTurn(
   const worksInWorkspace = supportsWorkspaceFiles(instance.driverKind);
   const workspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
   // a room member's memory writes are journaled the same as a 1:1 turn's
-  if (workspace) beginMemoryTurn(bot.id, threadId);
+  if (workspace && bot.memoryEnabled !== false) beginMemoryTurn(bot.id, threadId);
   // The room's folder pins here — on the first turn that actually
   // dispatches, not at PATCH time — so a folder set on a never-used room
   // still takes effect, while a room that already worked somewhere never
@@ -11932,7 +12200,7 @@ async function runGroupMemberTurn(
     const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
     if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
   }
-  const roomMemory = memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace });
+  const roomMemory = memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace, enabled: bot.memoryEnabled !== false });
   // The same brief a 1:1 turn gets: what this member said lately in its
   // other conversations, so a standup is answered from what happened. A
   // brief can carry a private chat into the room; as with session_search
@@ -11964,7 +12232,7 @@ async function runGroupMemberTurn(
     { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note, cloudHome: Boolean(CLOUD_HOME) }) },
     { id: "cloud-home", label: "OMB Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled()) : "" },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
-    { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
+    { id: "recall", label: "Recall", text: integrations.agents && bot.memoryEnabled !== false ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     { id: "recent", label: "Recent work", text: recentWorkPrompt(recentLines) },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     // the room path has always put a newline before memory and trimmed
@@ -12091,7 +12359,7 @@ async function runGroupMemberTurn(
         refreshSystemPrompt: true,
         images: turnImages,
         approvalMode: roomTurnApprovalMode(readyBot, threadId, orchestration),
-        ...(roomGuestConfined ? { guestConfined: true } : {}),
+        ...(roomGuestConfined ? { guestConfined: true, confinedWhy: confinedWhy(threadId) } : {}),
         system: roomSystem.text,
         systemStable: roomSystem.stable,
         systemVolatile: roomSystem.volatile,
@@ -13965,12 +14233,12 @@ function stderrOf(err: unknown): string {
   return typeof s === "string" ? s : Buffer.isBuffer(s) ? s.toString("utf8") : "";
 }
 
-async function localVmPayload(target: LocalVmTarget) {
+async function localVmPayload(target: LocalVmTarget, auth: RequestAuth) {
   const status = await containerComputerStatus(undefined, undefined, target);
   return {
-    ...status,
+    ...localVmViewerStatus(status, auth),
     commands: setupCommands(status.runtime, process.platform, target),
-    idle_timeout_ms: LOCAL_VM_IDLE_MS,
+    idle_timeout_ms: localVmIdleMs(),
     mode: localVmMode(cfg),
     max_instances: localVmMaxInstances(cfg),
   };
@@ -14096,7 +14364,9 @@ function configStatus() {
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
     mistral: { configured: Boolean(cfg.mistral?.key) },
-    anthropic: { configured: Boolean(cfg.anthropic?.key) },
+    anthropic: { configured: Boolean(cfg.anthropic?.key), everyClaudeBot: cfg.anthropic?.everyClaudeBot !== false },
+    openai: { configured: Boolean(cfg.openai?.key) },
+    openrouter: { configured: Boolean(cfg.openrouter?.key) },
     // a fleet agent on this server means Settings → Workspaces has something to drive
     fleet: { available: fleetAvailable(fleetSocketPath()) },
     // what this build is entitled to, so Settings shows only what works here
@@ -14149,6 +14419,7 @@ function configStatus() {
     localVm: {
       mode: localVmMode(cfg),
       maxInstances: localVmMaxInstances(cfg),
+      idleTimeoutMinutes: localVmIdleTimeoutMinutes(cfg),
     },
     features: {
       skillAuthoring: skillAuthoringEnabled(cfg),
@@ -14163,6 +14434,8 @@ function configStatus() {
       // own Claude Code MCP servers
       claudeUserMcp: claudeUserMcpEnabled(cfg),
       autoRecall: autoRecallEnabled(cfg),
+      // hand-edited config.json only; the thread menu offers Regenerate title from it
+      llmThreadTitles: llmThreadTitlesEnabled(cfg),
     },
     // first-run progress — not a secret; the app decides whether to show
     // the welcome tour from this, never from browser storage
@@ -14206,7 +14479,13 @@ function mcpServerResponse() {
   // While enrolled with custom servers off, say which servers stay configured
   // but never reach bots, and why. Nothing here is written to config.json.
   const policy = managedPolicy.current();
-  const servers = listMcpServers(cfg.mcpServers).map(server =>
+  const servers = listMcpServers(cfg.mcpServers).map((server) => {
+    if (!("url" in server)) return server;
+    const auth = mcpOAuth.authState(server.name, server.url);
+    // the redirect URI to register with a pre-registered sign-in app
+    const listed = server.oauth ? { ...server, oauth: { ...server.oauth, redirectUri: mcpOAuthRedirectUri(server.url) } } : server;
+    return auth === "none" ? listed : { ...listed, auth };
+  }).map(server =>
     managedPolicy.mcpAllowed(server.name, "url" in server ? server.url : undefined) ? server : { ...server, managedBy: policy!.organizationName });
   return { servers, ...(policy && !policy.mcp.allowCustom ? { managed: { organizationName: policy.organizationName, allowlist: policy.mcp.allowlist } } : {}) };
 }
@@ -14222,7 +14501,7 @@ function mcpServerBody(body: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (!body || typeof body !== "object") return out;
   const record = body as Record<string, unknown>;
-  for (const key of ["command", "args", "env", "type", "url", "headers", "enabled"]) {
+  for (const key of ["command", "args", "env", "type", "url", "headers", "oauth", "enabled"]) {
     if (record[key] !== undefined) out[key] = record[key];
   }
   return out;
@@ -14231,7 +14510,7 @@ function mcpServerBody(body: unknown): Record<string, unknown> {
 /** Configured MCP servers that may reach this bot's engine. While enrolled,
  * the organisation's allow-list filters them; config.json is never changed. */
 function engineMcpServers(bot: BotRecord) {
-  return managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers));
+  return withoutPendingSignIn(managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers)), mcpOAuth);
 }
 
 function persistMcpServers(next: Record<string, unknown>): void {
@@ -14247,7 +14526,11 @@ async function describeInstances() {
   const configs = providerConfigs();
   return (await registry.describe()).map((instance) => {
     const entry = configs[instance.instanceId];
-    const described = entry?.icon ? { ...instance, icon: entry.icon } : instance;
+    const described = {
+      ...instance,
+      ...(entry?.icon ? { icon: entry.icon } : {}),
+      ...(entry?.access ? { access: entry.access } : {}),
+    };
     if (hostedModels) return { ...described, readOnly: true,
       install: undefined, authentication: undefined, cli: undefined, cliCandidates: [],
     };
@@ -14261,6 +14544,10 @@ async function describeInstances() {
     // stopped by force; its Settings card offers to clear that.
     if (instance.driverKind === "antigravityAgent" && process.platform === "win32") return { ...described, ...policy, freeUpSpace: true };
     if (entry?.driver !== "claudeAgent") return { ...described, ...policy };
+    // Claude on the workspace API key has no account to sign in to.
+    if (instance.instanceId === CLAUDE_API_INSTANCE) {
+      return { ...described, ...policy, authentication: undefined, install: { ...instance.install, signInCommand: undefined } };
+    }
     try {
       const claudeAccount = claudeAccountInfo(instance.instanceId, entry, instance.cli ?? instance.cliDefault ?? "claude");
       return { ...described, ...policy, claudeAccount, install: { ...instance.install, signInCommand: claudeAccount.signInCommand } };
@@ -14659,6 +14946,7 @@ ROUTES.push(createLiveRoutes({
     return liveSettingsFor(cfg);
   },
 }));
+ROUTES.push(desktopViewer.route);
 
 const toolResults = new ToolResults();
 const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
@@ -14710,7 +14998,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // paired session with the right scope.
     if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/.well-known/") && serveStatic(res, path)) return;
     if (method === "GET" && path === "/.well-known/openmausbot/environment") {
-      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && emailSignIn.enabled(), sharedComputers: lendingEnabled() }));
+      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled() }));
     }
     const domainCheck = /^\/\.well-known\/openmausbot\/domain-check\/([a-f0-9]{64})$/.exec(path);
     if (method === "GET" && domainCheck) {
@@ -14720,7 +15008,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     // Sign in with an emailed code (server/account-signin.ts). Public like
     // /api/auth/pair, JSON-only for the same reason, and counted against the
-    // same per-source lockout so a code cannot be guessed.
+    // same per-source lockout so a code cannot be guessed. Never on a Cloud
+    // home: it is personal, and the owner's devices sign in through the Admin.
+    if (CLOUD_HOME && method === "POST" && (path === "/api/auth/email/start" || path === "/api/auth/email/verify")) {
+      return json(res, 403, { error: CLOUD_PERSONAL_REFUSAL, code: "cloud_personal" });
+    }
     if (method === "POST" && (path === "/api/auth/email/start" || path === "/api/auth/email/verify")) {
       if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
         return json(res, 415, { error: "send the sign-in request as JSON (content-type: application/json)" });
@@ -14798,7 +15090,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         console.warn(`pairing refused from ${requestSource(req)}: ${result.error}`);
         return json(res, result.status, { error: result.error });
       }
-      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: emailSignIn.enabled(), sharedComputers: lendingEnabled() });
+      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled() });
       if (wantsCookie) {
         // A browser sign-in replaces this browser's own session here, if it had one, rather than leaving it behind.
         const previous = browser ? sessions.authenticate(parseCookies(req.headers.cookie).get(SESSION_COOKIE)) : null;
@@ -14970,7 +15262,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const requested: unknown = body?.scopes;
       const scopes = Array.isArray(requested) ? requested.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
-      const opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
+      let opened: ReturnType<typeof sessions.openPairing>;
+      try {
+        opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
+      } catch (error) {
+        // A Cloud home is personal: a device paired to it has admin scope (sessions.requireAdmin).
+        if ((error as { code?: unknown }).code === "cloud_personal") return json(res, 403, { error: (error as Error).message, code: "cloud_personal" });
+        throw error;
+      }
       const origin = requestOrigin(req);
       const base = publicUrl() ?? (auth.kind === "session" && origin ? origin : null);
       const code = formatPairingCode(opened.code);
@@ -15306,6 +15605,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // provably the owner's may write it.
         if (CLOUD_HOME && cloudHomeLendingRefusal(cloudLendingTurn(internalCapability)) !== null) {
           return json(res, 403, { error: "Notes can only be saved from a conversation that only the owner of this Cloud has written in." });
+        }
+        if (internalSender.memoryEnabled === false) {
+          return json(res, 403, { error: "Memory is disabled for this bot." });
         }
         const room = store.groupByThread(internalCapability.threadId);
         if (room && !roomFeedsBot(room, internalSender)) {
@@ -15678,6 +15980,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           : body.action === "update"
             ? { action: body.action, routineId: body.routineId, changes: body.changes, forBot }
             : { action: body.action, routineId: body.routineId, forBot };
+        // Whether the routine a change is for is the owner's, and whether this
+        // turn acts for the owner (their own conversation, or a run of a
+        // routine that is theirs), both before the change.
+        const wasOwners = proposedInput.action !== "create" && typeof proposedInput.routineId === "string" ? cloudRoutineIsOwners(proposedInput.routineId) : false;
+        const run = activeRoutineRunForThread(fromThreadId);
+        const ownersTurn = cloudOwnerOnlyThread(fromThreadId) || cloudRoutineRunIsOwners(run, from.id, fromThreadId);
         const proposed = await routineRequests.submit({
           botId: from.id,
           threadId: fromThreadId,
@@ -15686,6 +15994,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           canCommit: () => internalCapabilityIsActive(internalCapability),
         });
         const proposedCard = store.messagesFor(fromThreadId).find((message) => message.id === proposed.messageId)?.card;
+        // Applied at once in a Full-access conversation. In the owner's own (one
+        // only they provably wrote in) it is theirs, as if they had approved
+        // the card. From anywhere else, a routine it created or changed is no
+        // longer the owner's, like anyone else's edit (the routine PATCH).
+        const applied = CLOUD_HOME && proposed.state === "applied" && "result" in proposed ? proposed.result : undefined;
+        if (applied?.resultId && ownersTurn) cloudOwnerApplied(applied.action, applied.resultId, wasOwners);
+        else if (applied?.resultId && (applied.action === "create" || applied.action === "update")) {
+          cloudRoutineAuthors?.forget(applied.resultId);
+          cloudRoutineAuthors?.wrote(applied.resultId, CLOUD_NOBODY_KEY);
+        }
         appendDecision(DATA_DIR, {
           threadId: fromThreadId,
           requestId: proposed.requestId,
@@ -15882,7 +16200,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (scope !== "all" && scope !== "conversations" && scope !== "memory") {
           return json(res, 400, { error: "scope must be all, conversations, or memory" });
         }
-        const memoryHits = scope === "conversations" || !q ? [] : searchMemoryFiles(from.id, q, limit);
+        const memoryHits = scope === "conversations" || !q || from.memoryEnabled === false ? [] : searchMemoryFiles(from.id, q, limit);
         if (scope === "memory") return json(res, 200, { hits: [], memoryHits });
         // Own threads: the bot's main chat and tasks, and the rooms it is a
         // member of with their tasks — conversations it already saw in full.
@@ -16529,7 +16847,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           })).filter(g => g.members.length);
           return json(res, 200, { currentRoom: source ? { id: source.id, name: source.name, workingFolder: source.cwd || null } : null,
             bots: reachablePeers(store.bots, internalSender).map(bot => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section, busy: bot.busy })),
-            rooms, note: "Without group_id: use this room when in a room, otherwise your standing conversation with that teammate — every assignment you send it continues the same thread, so write as if it remembers the last one. Each bot uses its own environment and permissions. Files are not transferred: pass absolute paths only when accessible to the recipient, otherwise pass the content." });
+            rooms, note: "Without group_id: use this room when in a room, otherwise each distinct assignment starts a fresh thread for that teammate. Give a self-contained brief. Each bot uses its own environment and permissions. Files are not transferred: pass absolute paths only when accessible to the recipient, otherwise pass the content." });
         }
         if (method === "POST" && path === "/api/internal/coordinate-bots") {
           const parsed = z.object({
@@ -16602,25 +16920,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             try {
               requireActiveInternalCapability();
               if (!destination) {
-                // One durable conversation per pair of bots, resolved from
-                // the recipient's own threads — never from this turn, the
-                // request key, or the thread the person has selected there.
-                const resolved = store.resolvePairConversation(internalSender, target.botId, {
-                  label: parsed.data.label,
-                  // "Still working" exactly as close_thread reads it: a
-                  // running turn, a queued one, or coordinated work already
-                  // addressed at that thread.
-                  working: threadId => threadBusy(target.botId, threadId)
-                    || queuedThreadPosition(target.botId, threadId) !== null
-                    || roomHandoffs.activeDirect(threadId),
-                });
-                if (!resolved) throw new Error("The recipient no longer exists");
-                target.threadId = resolved.task.threadId;
-                if (resolved.created) createdThread = resolved.task.threadId;
-                // A work thread carries one assignment: it is for the person
-                // this coordination serves. The durable pair conversation is
-                // shared by every assignment between two bots, so it names nobody.
-                if (resolved.created && resolved.task.openedBy?.kind === "work") threadStarters.set(resolved.task.threadId, openerFrom(address.threadId));
+                const task = store.createTask(target.botId,
+                  `@${internalSender.name}${parsed.data.label ? ` · ${parsed.data.label}` : " · work"}`,
+                  false, undefined, { botId: internalSender.id, name: internalSender.name, kind: "work", at: Date.now() });
+                if (!task) throw new Error("The recipient no longer exists");
+                target.threadId = createdThread = task.threadId;
                 if (delegatedFullAccess(internalSender, internalCapability.threadId, store.bot(target.botId)!)) {
                   grantDelegatedFullAccess(internalSender, store.bot(target.botId)!, target.threadId);
                 }
@@ -16628,11 +16932,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               const { node, duplicate } = roomHandoffs.enqueue(address, internalCapability.generation, internalCapability.roomHandoffId,
                 target, parsed.data.requestKey + ":" + target.botId, parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "",
                 destination ? parsed.data.requestKey : undefined);
-              // A re-dispatched request_key is answered by the request it
-              // already made, so a thread resolved for the retry (the pair
-              // conversation was busy with that very request) goes back
-              // before anyone sees a row that leads nowhere.
-              if (duplicate && createdThread && createdThread !== node.threadId) store.deleteTask(target.botId, createdThread);
+              // A retry keeps its original task; discard the speculative row.
+              if (duplicate && createdThread && createdThread !== node.threadId) {
+                store.deleteTask(target.botId, createdThread);
+              }
+              if (!duplicate && createdThread) threadStarters.set(createdThread, openerFrom(address.threadId));
               createdThread = undefined; // The durable coordinator now owns this task.
               accepted.push({ requestId: node.id, botId: node.botId, duplicate, status: node.status });
               // A duplicate request_key lands on the node enqueue already
@@ -16671,7 +16975,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 });
               }
             } catch (error) {
-              if (createdThread) store.deleteTask(target.botId, createdThread);
+              if (createdThread) {
+                store.deleteTask(target.botId, createdThread);
+              }
               const said = error instanceof Error ? error.message : String(error);
               errors.push({ botId: target.botId, error: said });
               receipts.push(peerDeliveryReceipt({
@@ -16915,7 +17221,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const sourceTitle = owner.group ? owner.group.name : (store.taskByThread(from.id, fromThreadId)?.title ?? "");
         if (target.id === from.id) {
-          const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
+          const inherited = parentThreadModel(from.id, fromThreadId);
+          const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() },
+            inherited.approvalMode, inherited.modelSelection);
           if (!task) return json(res, 500, { error: "couldn't create that thread" });
           threadStarters.set(task.threadId, openerFrom(fromThreadId));
           internalCapability.openedThreads += 1;
@@ -17537,11 +17845,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (notYours) return json(res, 403, { error: notYours });
       const before = cloudRoutineAuthors ? routines!.listRoutines().find((candidate) => candidate.id === routineMatch![1]) : undefined;
       const wasOwners = Boolean(before && cloudRoutineAuthors?.authored(before.id, before));
-      // Who this edit leaves as the routine's writer: the owner when the
-      // routine stays (or becomes) theirs, a guest when a guest edits it,
-      // else whoever wrote it before.
-      const ownerAuthors = cloudOwnerSession(auth) && (wasOwners || (body && typeof body === "object" && "prompt" in body));
       const previous = cloudRoutineAuthors?.writer(routineMatch[1]);
+      // Who this edit leaves as the routine's writer: the owner when the
+      // routine stays (or becomes) theirs (their fingerprint, or already
+      // theirs as its writer: a template, a restore), a guest when a guest
+      // edits it, else whoever wrote it before.
+      // An owner writer is proof only for a routine that never had the
+      // owner's fingerprint (a template, a restore, one the settlement named):
+      // a fingerprint that no longer matches means someone else changed what
+      // it runs, and only the owner rewriting its instructions renews it.
+      const ownerWriterOnly = CLOUD_OWNER_KEY !== null && previous === CLOUD_OWNER_KEY && !cloudRoutineAuthors?.recorded(routineMatch[1]);
+      const ownerAuthors = cloudOwnerSession(auth) && (wasOwners || ownerWriterOnly ||
+        (body && typeof body === "object" && "prompt" in body));
       const writer = ownerAuthors && CLOUD_OWNER_KEY ? CLOUD_OWNER_KEY
         : auth.kind === "session" && !cloudOwnerSession(auth) ? actorKey(auth)
           : previous && !cloudOwnerPerson(previous) ? previous : CLOUD_NOBODY_KEY;
@@ -19449,9 +19764,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if ("error" in enabled) throw Object.assign(new Error(enabled.error), { status: 422 });
           }
         }
+        // On a Cloud home only the owner's devices create bots: its routines
+        // (and the conversations they report into) are theirs.
+        const ownersRoutines = CLOUD_OWNER_KEY && auth.kind === "session" && cloudOwnerSession(auth) ? CLOUD_OWNER_KEY : null;
         for (const routine of template.routines) {
           const created = routines!.create({ ...routine, botId: bot.id, enabled: false });
           createdRoutines.push({ id: created.id, enabled: routine.enabled !== false });
+          if (ownersRoutines) cloudRoutineAuthors?.wrote(created.id, ownersRoutines);
         }
       } catch (error) {
         for (const routine of createdRoutines) routines!.remove(routine.id);
@@ -19769,6 +20088,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (body.voiceNotes !== undefined) {
         if (typeof body.voiceNotes !== "boolean") return json(res, 400, { error: "voiceNotes must be true or false" });
         patch.voiceNotes = body.voiceNotes;
+      }
+      if (body.memoryEnabled !== undefined) {
+        if (typeof body.memoryEnabled !== "boolean") return json(res, 400, { error: "memoryEnabled must be true or false" });
+        if (existingBot && (existingBot.busy || activeGroupTurnForBot(existingBot.id)) &&
+            body.memoryEnabled !== (existingBot.memoryEnabled !== false)) {
+          return json(res, 409, { error: "stop this bot's turn before changing its memory setting" });
+        }
+        patch.memoryEnabled = body.memoryEnabled;
       }
       // which of those apps' tools this bot may call (connector grants 1/5:
       // data model only — enforcement lands with slice 2). null returns the
@@ -20091,6 +20418,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
       const freshBrowserBot = store.bot(m[1]);
+      // Connector validation and runtime revocation can yield after the first
+      // memory check. Keep the same idle-only transition at the final commit.
+      if (freshBrowserBot && body.memoryEnabled !== undefined &&
+          body.memoryEnabled !== (freshBrowserBot.memoryEnabled !== false) &&
+          (freshBrowserBot.busy || activeGroupTurnForBot(freshBrowserBot.id))) {
+        return json(res, 409, { error: "stop this bot's turn before changing its memory setting" });
+      }
       // Custom servers are process configuration: a running turn cannot
       // unmount them. Recheck after any awaited runtime revocation above.
       if (body.mcpServers !== undefined) {
@@ -20137,7 +20471,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         bot = store.patchBot(m[1], patch);
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
-      if (body.memoryUpkeep === false) memoryUpkeep.dropBot(bot.id);
+      if (body.memoryUpkeep === false || body.memoryEnabled === false) memoryUpkeep.dropBot(bot.id);
       // A defined Works on is the newest explicit choice: this bot's
       // auto-recorded pins that now point elsewhere give way immediately, so
       // the next turn on each thread follows the new setting. Person-set pins
@@ -20842,7 +21176,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           threadId: bot.threadId,
           requestId: String(body.requestId),
           behavior,
-        })) return;
+        }, auth.kind === "session" && cloudOwnerSession(auth))) return;
         if (resolveAndSendProfile(res, {
           botId: bot.id,
           botName: bot.name,
@@ -20933,7 +21267,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             threadId,
             requestId,
             behavior,
-          })) return;
+          }, auth.kind === "session" && cloudOwnerSession(auth))) return;
         }
         const setupCard = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId && message.card.teamSetupRequest);
         if (setupCard) {
@@ -21327,6 +21661,43 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       broadcast({ kind: "bot", bot: fresh });
       return json(res, 200, { bot: fresh });
     }
+    // Regenerate title (#1858): name the thread again from its conversation
+    // as it is now. The person asked, so the result replaces any title, but
+    // only the one this started from: a rename that lands while the one-shot
+    // runs wins, and the late result is dropped.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/title$/);
+    if (m && method === "POST") {
+      const current = store.projectBotForTask(m[1], m[2]);
+      if (!current) return json(res, 404, { error: "no such task" });
+      const notYours = cloudThreadRefusal(auth, m[2]);
+      if (notYours) return json(res, 403, { error: notYours });
+      if (!llmThreadTitlesEnabled(cfg)) return json(res, 409, { error: "generated thread titles are turned off on this server" });
+      if (hostedModels && !hostedModels.allows(current.modelSelection)) return json(res, 409, { error: hostedModels.error() });
+      const instance = registry.get(current.modelSelection.instanceId);
+      if (!instance?.generateText) return json(res, 409, { error: "this bot's model can't generate a title — rename the thread instead" });
+      // An engine the organisation disallows never receives the text, even for a title.
+      const refusal = policyModelRefusal(instance);
+      if (refusal) return json(res, 409, { error: refusal });
+      if (titleRegenerations.has(m[2])) return json(res, 409, { error: "a new title is already being generated for this thread" });
+      const excerpt = titleConversationExcerpt(store.messagesTail(m[2], 200).messages);
+      if (!excerpt) return json(res, 409, { error: "this thread has no messages to take a title from yet" });
+      try {
+        assertWithinBudget(cfg, DATA_DIR);
+      } catch (error) {
+        return json(res, 409, { error: error instanceof Error ? error.message : String(error) });
+      }
+      const startedFrom = store.taskByThread(m[1], m[2])!.title;
+      titleRegenerations.add(m[2]);
+      try {
+        const title = await generateThreadTitle(instance, excerpt, "conversation");
+        if (!title) return json(res, 502, { error: "couldn't generate a title — try again, or rename the thread" });
+        const task = store.retitleTask(m[1], m[2], startedFrom, title) ?? store.taskByThread(m[1], m[2]);
+        if (!task) return json(res, 404, { error: "no such task" });
+        return json(res, 200, { task: wireTask(task) });
+      } finally {
+        titleRegenerations.delete(m[2]);
+      }
+    }
 
     // Named team Boats use real independent ownership, never a hidden bot or
     // an arbitrary provider id. These new routes remain admin-only by default.
@@ -21502,7 +21873,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // what the user's machine can host: which runtime is installed, whether
     // its daemon is up, and whether the desktop image and container exist
     if (method === "GET" && path === "/api/local-computer") {
-      return json(res, 200, await localVmPayload(SHARED_LOCAL_VM_TARGET));
+      return json(res, 200, await localVmPayload(SHARED_LOCAL_VM_TARGET, auth));
     }
     if (method === "GET" && path === "/api/local-computer/instances") {
       res.setHeader("cache-control", "private, no-store");
@@ -21544,9 +21915,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (action === "run" || action === "start") localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
         if (action === "stop" || action === "remove") localVmIdleFor(SHARED_LOCAL_VM_TARGET).cancel();
         return json(res, 200, {
-          ...status,
+          ...localVmViewerStatus(status, auth),
           commands: setupCommands(status.runtime, process.platform, SHARED_LOCAL_VM_TARGET),
-          idle_timeout_ms: LOCAL_VM_IDLE_MS,
+          idle_timeout_ms: localVmIdleMs(),
           mode: localVmMode(cfg),
           max_instances: localVmMaxInstances(cfg),
         });
@@ -21567,7 +21938,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       const bot = computerPreviewBot(m[1], url);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      return json(res, 200, await localVmPayload(localVmTargetForStatus(bot.id, bot.threadId)));
+      return json(res, 200, await localVmPayload(localVmTargetForStatus(bot.id, bot.threadId), auth));
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/local-computer\/(run|stop|remove)$/);
     if (m && method === "POST") {
@@ -21618,9 +21989,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (action === "run") localVmIdleFor(target).touch();
         if (action === "stop" || action === "remove") localVmIdleFor(target).cancel();
         return json(res, 200, {
-          ...status,
+          ...localVmViewerStatus(status, auth),
           commands: setupCommands(status.runtime, process.platform, target),
-          idle_timeout_ms: LOCAL_VM_IDLE_MS,
+          idle_timeout_ms: localVmIdleMs(),
           mode: localVmMode(cfg),
           max_instances: localVmMaxInstances(cfg),
         });
@@ -21779,7 +22150,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 400, { error: `provider must be one of ${PROVIDER_KEY_KINDS.join(", ")}` });
       }
       const kind = provider as ProviderKeyKind;
-      const saved = kind === "anthropic" ? cfg.anthropic : kind === "openaiCompat" ? cfg.openaiCompat : kind === "mistral" ? cfg.mistral : cfg.xai;
+      const saved = { anthropic: cfg.anthropic, openai: cfg.openai, openrouter: cfg.openrouter, openaiCompat: cfg.openaiCompat, mistral: cfg.mistral, xai: cfg.xai }[kind];
       if (body?.key !== undefined && typeof body.key !== "string") {
         return json(res, 400, { error: "key must be a string" });
       }
@@ -22162,11 +22533,68 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       res.once("close", disconnect);
       mcpProbesInFlight += 1;
       try {
-        return json(res, 200, await probeMcpServer(parsed.server, undefined, controller.signal));
+        const name = mcpTest[1];
+        let target = parsed.server;
+        if (isRemoteMcpServer(target) && mcpOAuth.authState(name, target.url) === "signed-in") {
+          const signedIn = (await withMcpSignIn({ [name]: target }, mcpOAuth))[name];
+          if (signedIn) target = { ...signedIn, enabled: target.enabled } as typeof target;
+        }
+        const result = await probeMcpServer(target, undefined, controller.signal);
+        if (!result.ok && result.auth === "required" && isRemoteMcpServer(target)) mcpOAuth.markNeedsSignIn(name, target.url);
+        return json(res, 200, result);
       } finally {
         res.off("close", disconnect);
         mcpProbesInFlight -= 1;
       }
+    }
+
+    // The loopback listener and authenticated paste-back complete the same flow.
+    const mcpSignIn = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/(sign-in|sign-out)(?:\/([0-9a-f-]{36}))?$/.exec(path);
+    if (mcpSignIn) {
+      const [, name, action, flowId] = mcpSignIn;
+      const raw = cfg.mcpServers?.[name!];
+      const parsed = raw === undefined ? null : parseStoredMcpServer(name!, raw);
+      if (!parsed?.ok) return json(res, 404, { error: "MCP server not found." });
+      if (!isRemoteMcpServer(parsed.server)) return json(res, 400, { error: "Only servers reached by URL can be signed in to." });
+      const url = parsed.server.url;
+      if (action === "sign-out" && method === "POST" && !flowId) {
+        await mcpOAuth.signOut(name!, url);
+        return json(res, 200, mcpServerResponse());
+      }
+      const owner = auth.kind === "session" ? auth.session.id : "loopback";
+      res.setHeader("Cache-Control", "no-store");
+      try {
+        if (action === "sign-in" && method === "GET" && flowId) {
+          const status = mcpOAuth.status(name!, flowId, owner);
+          return status ? json(res, 200, { auth: status }) : json(res, 404, { error: "This sign-in is no longer available in this browser. Start again." });
+        }
+        if (action === "sign-in" && method === "DELETE") {
+          mcpOAuth.cancelFlow(name!, owner, flowId);
+          return json(res, 200, { ok: true });
+        }
+        if (action === "sign-in" && method === "POST" && flowId) {
+          if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+            return json(res, 415, { error: "content-type must be application/json" });
+          }
+          const body = await readBody(req, 20_480);
+          if (typeof body?.callbackUrl !== "string") return json(res, 400, { error: "A complete callbackUrl is required." });
+          return json(res, 200, { auth: await mcpOAuth.completeCallback(name!, flowId, body.callbackUrl, owner) });
+        }
+        if (action === "sign-in" && method === "POST" && !flowId) {
+          const started = await mcpOAuth.start(name!, url, undefined, owner);
+          if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+            mcpOAuth.revokeOwner(owner);
+            return json(res, 401, { error: "Your session ended. Start a new sign-in." });
+          }
+          return json(res, 200, { auth: started });
+        }
+      } catch (error) {
+        if (error instanceof McpSignInError) return json(res, error.status, { error: error.message });
+        if (error instanceof McpOAuthError) return json(res, 400, { error: error.message, code: error.code });
+        if (method === "POST" && !flowId) return json(res, 502, { error: error instanceof Error ? error.message : "Sign-in could not start." });
+        throw error;
+      }
+      return json(res, 405, { error: "method not allowed" });
     }
 
     if (method === "POST" && path === "/api/mcp/servers") {
@@ -22244,6 +22672,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const next = { ...current };
           delete next[name];
           persistMcpServers(next);
+          mcpOAuth.forget(name);
           return json(res, 200, mcpServerResponse());
         }
 
@@ -22264,6 +22693,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const refusal = mcpPolicyRefusal(name, parsed.server);
         if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         persistMcpServers({ ...current, [name]: parsed.server });
+        // a sign-in belongs to one address; a token never follows the entry elsewhere
+        const before = isRemoteMcpServer(existing.server) ? existing.server.url : null;
+        const after = isRemoteMcpServer(parsed.server) ? parsed.server.url : null;
+        // ...and to one sign-in app with its scopes; a new secret for the same app keeps it
+        const app = (server: typeof existing.server) => isRemoteMcpServer(server) && server.oauth
+          ? JSON.stringify([server.oauth.clientId, server.oauth.scopes ?? []]) : null;
+        // Any other edit (a new header, say) drops a sign-in request that has
+        // no tokens behind it; the next Test asks again if it still applies.
+        if (before !== after || app(existing.server) !== app(parsed.server)
+          || (after && mcpOAuth.authState(name, after) === "needs-sign-in")) mcpOAuth.forget(name);
         return json(res, 200, mcpServerResponse());
       } finally {
         mcpConfigBusy = false;
@@ -22276,8 +22715,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
-      if (hostedModels && ["instances", "anthropic", "openaiCompat", "xai", "mistral", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
+      if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatch(body);
+      // A Cloud home is personal: nobody is invited to sign in to it.
+      if (CLOUD_HOME && (patch.signIn?.admins?.length || patch.signIn?.members?.length)) {
+        return json(res, 403, { error: CLOUD_PERSONAL_REFUSAL, code: "cloud_personal" });
+      }
       if (patch.newBotDefaults) {
         if (patch.newBotDefaults.profile.modelSelection) {
           const checked = checkedModelSelection(patch.newBotDefaults.profile.modelSelection);
@@ -22701,6 +23144,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           for (const request of browserCleanupRequests) browserCleanup.abort(request);
         }
         throw error;
+      }
+      // Desktops already counting down move to the new window at once, in
+      // every isolation mode; busy work still defers its expiry.
+      if (patch.localVm?.idleTimeoutMinutes !== undefined) {
+        for (const idle of localVmIdles.values()) idle.setIdleMs(localVmIdleMs());
       }
       let browserReferenceCleanupError: unknown = null;
       if (patch.signIn !== undefined) {
@@ -23137,6 +23585,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
+      if (m[2] === "join" && bot.cloudBackend === "vps") {
+        for (let pending; (pending = vpsJoinRequests.get(botId));) await pending;
+      }
       const remoteProvider: RemoteComputerProvider = bot.cloudBackend === "vps" ? "vps" : "box";
       if (computerProviderConfigTransitions.has(remoteProvider)) {
         return json(res, 409, { error: providerTransitionMessage(remoteProvider) });
@@ -23176,6 +23627,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // Opening the existing SSH viewer can coexist with a capture. Start,
         // stop, remove and Settings deletion still exclude pending previews.
         const releaseComputerLifecycle = claimBotComputerLifecycle(botId, m[2] === "join");
+        // Settles only after the lane is released, so a waiter can claim it.
+        let joinSettled: (() => void) | undefined;
+        if (m[2] === "join") vpsJoinRequests.set(botId, new Promise(resolve => { joinSettled = resolve; }));
         try {
           if (m[2] === "exec") {
             return json(res, 409, { error: "the VPS console is available to the bot through its scoped computer tools" });
@@ -23187,12 +23641,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             return json(res, 409, { error: "the VPS computer is being used by this bot — interrupt the turn first" });
           }
           if (m[2] === "join") {
-            return json(res, 200, await vps.vpsComputerJoin(cfg, botId));
+            const remote = auth.kind !== "loopback";
+            const result = await vps.vpsComputerJoin(cfg, botId, undefined, remote);
+            return json(res, 200, { ...result, joinUrl: remote
+              ? desktopViewerUrl(`vps/${botId}`, bot.threadId) : result.joinUrl });
           }
           const action = m[2] === "provision" ? "provision" : m[2] === "remove" ? "remove" : "stop";
           return json(res, 200, await vps.vpsComputerAction(action, cfg, botId));
         } finally {
           releaseComputerLifecycle();
+          if (joinSettled) {
+            vpsJoinRequests.delete(botId);
+            joinSettled();
+          }
         }
       }
       const activeBoatTurn = botHasActiveTurn(botId);
@@ -23256,6 +23717,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 };
 
 const server = createServer(handleRequest);
+desktopViewer.attach(server, handleRequest);
 
 calendarCalls.start();
 
@@ -23429,6 +23891,7 @@ let tunnelListener: ReturnType<typeof createServer> | null = null;
 if (TUNNEL_SOCKET) {
   if (process.platform !== "win32") rmSync(TUNNEL_SOCKET, { force: true });
   tunnelListener = createServer(handleRequest);
+  desktopViewer.attach(tunnelListener, handleRequest);
   tunnelListener.listen(TUNNEL_SOCKET, () => {
     console.log(`openmausbot tunnel listener on ${TUNNEL_SOCKET}`);
   });
@@ -23447,6 +23910,7 @@ const gracefulShutdown = createGracefulShutdown({
       sharedComputers.close();
       sharedComputerControl.close();
       browserLive.closeAll();
+      desktopViewer.closeAll();
       for (const idle of localVmIdles.values()) idle.cancel();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();
@@ -23481,6 +23945,7 @@ const gracefulShutdown = createGracefulShutdown({
       code = 1;
     }
     closeMessageDb();
+    mcpOAuth.dispose();
     releaseDataDirLeaseAtExit();
     // A Cloud home's launcher starts the server again on this code only.
     process.exit(cloudHomeRestartRequested && code === 0 ? CLOUD_HOME_RESTART_EXIT_CODE : code);

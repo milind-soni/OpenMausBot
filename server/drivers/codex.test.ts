@@ -131,6 +131,8 @@ describe("CodexDriver turns (fake app-server)", () => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     delete process.env.FAKE_CODEX_MODE;
+    delete process.env.FAKE_CODEX_REVIEW_EVENTS;
+    delete process.env.FAKE_CODEX_REVIEW_AFTER_COMPLETION;
     delete process.env.FAKE_CODEX_APPROVAL_REQUEST;
     delete process.env.FAKE_CODEX_DUMP;
     delete process.env.FAKE_CODEX_ASK_HOLD;
@@ -163,6 +165,113 @@ describe("CodexDriver turns (fake app-server)", () => {
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
+  });
+
+  it("surfaces one attributed Auto-review timeout without failing a completed reply", async () => {
+    const scope = { threadId: "codex-thread-1", turnId: "turn-1" };
+    process.env.FAKE_CODEX_REVIEW_EVENTS = JSON.stringify([
+      { method: "guardianWarning", params: { threadId: scope.threadId, message: "Automatic approval review timed out." } },
+      { method: "item/autoApprovalReview/completed", params: {
+        ...scope, reviewId: "review-1", targetItemId: "tool-1", review: { status: "timedOut" },
+        action: { type: "command", source: "unifiedExec", command: "git status --short" },
+      } },
+    ]);
+    await create({ mode: "review-events" });
+    await instance.adapter.sendTurn({ threadId: "app-thread", text: "check", approvalMode: "auto" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const notices = recorder.events.filter((event) => event.type === "runtime.error" && event.message.includes("automatic review"));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ threadId: "app-thread", message: expect.stringContaining("git status --short") });
+    expect(notices[0]?.type === "runtime.error" && notices[0].message).toMatch(/Ask.*Auto|Auto.*Ask/);
+    expect(recorder.events.find((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+  });
+
+  it("names Custom rather than Auto when Custom uses native automatic review", async () => {
+    process.env.FAKE_CODEX_REVIEW_EVENTS = JSON.stringify([{
+      method: "item/autoApprovalReview/completed",
+      params: { threadId: "codex-thread-1", turnId: "turn-1", reviewId: "custom-1", review: { status: "timedOut" } },
+    }]);
+    await create({ mode: "review-events", fullAuto: true });
+    await instance.adapter.sendTurn({ threadId: "app-thread", text: "check", approvalMode: "custom" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const notices = recorder.events.filter((event) => event.type === "runtime.error" && event.message.includes("automatic review"));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ message: expect.stringContaining("Retry stays Custom") });
+  });
+
+  it.each([
+    { name: "thread warning only", events: [
+      { method: "guardianWarning", params: { threadId: "codex-thread-1", message: "Automatic approval review timed out." } },
+    ], expected: "reported a timeout" },
+    { name: "explicit denial", events: [
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", reviewId: "denied-1", review: { status: "denied" } } },
+    ], expected: "denied" },
+    { name: "approved review", events: [
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", reviewId: "approved-1", review: { status: "approved" } } },
+    ], expected: null },
+    { name: "approved review after another timeout warning", events: [
+      { method: "guardianWarning", params: { threadId: "codex-thread-1", message: "Automatic approval review timed out." } },
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", reviewId: "approved-1", review: { status: "approved" } } },
+    ], expected: "reported a timeout" },
+    { name: "unknown review status", events: [
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", review: { status: "futureStatus" } } },
+    ], expected: null },
+    { name: "missing review status", events: [
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1" } },
+    ], expected: null },
+    { name: "duplicate result", events: [
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", reviewId: "same", review: { status: "timedOut" } } },
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", reviewId: "same", review: { status: "timedOut" } } },
+    ], expected: "timed out" },
+    { name: "ID-less result cannot be safely deduplicated", events: [
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", review: { status: "timedOut" } } },
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", review: { status: "timedOut" } } },
+    ], expected: null },
+    { name: "helper and stale turns", events: [
+      { method: "guardianWarning", params: { threadId: "helper-thread", message: "Automatic approval review timed out." } },
+      { method: "item/autoApprovalReview/completed", params: { threadId: "helper-thread", turnId: "turn-1", review: { status: "timedOut" } } },
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "old-turn", review: { status: "timedOut" } } },
+      { method: "guardianWarning", params: { threadId: "codex-thread-1", turnId: "old-turn", message: "Automatic approval review timed out." } },
+      { method: "guardianWarning", params: { threadId: "codex-thread-1", turnId: null, message: "Automatic approval review timed out." } },
+    ], expected: null },
+  ])("handles $name without contaminating another turn", async ({ events, expected }) => {
+    process.env.FAKE_CODEX_REVIEW_EVENTS = JSON.stringify(events);
+    await create({ mode: "review-events" });
+    await instance.adapter.sendTurn({ threadId: "app-thread", text: "check", approvalMode: "auto" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const notices = recorder.events.filter((event) => event.type === "runtime.error" && event.message.includes("automatic review"));
+    expect(notices).toHaveLength(expected ? 1 : 0);
+    if (expected) expect(notices[0]).toMatchObject({ message: expect.stringContaining(expected) });
+  });
+
+  it.each([
+    { name: "warning plus unrelated denial", events: [
+      { method: "guardianWarning", params: { threadId: "codex-thread-1", message: "Automatic approval review timed out." } },
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", reviewId: "denied-1", review: { status: "denied" } } },
+    ], outcomes: ["denied", "reported a timeout"] },
+    { name: "distinct actionless failures", events: [
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", reviewId: "first", review: { status: "timedOut" } } },
+      { method: "item/autoApprovalReview/completed", params: { threadId: "codex-thread-1", turnId: "turn-1", reviewId: "second", review: { status: "timedOut" } } },
+    ], outcomes: ["timed out", "timed out"] },
+  ])("keeps $name separate", async ({ events, outcomes }) => {
+    process.env.FAKE_CODEX_REVIEW_EVENTS = JSON.stringify(events);
+    await create({ mode: "review-events" });
+    await instance.adapter.sendTurn({ threadId: "app-thread", text: "check", approvalMode: "auto" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const notices = recorder.events.filter((event) => event.type === "runtime.error" && event.message.includes("automatic review"));
+    expect(notices.map((event) => event.type === "runtime.error" && event.message)).toEqual(outcomes.map((outcome) => expect.stringContaining(outcome)));
+  });
+
+  it("ignores a review result delayed past turn completion", async () => {
+    process.env.FAKE_CODEX_REVIEW_AFTER_COMPLETION = JSON.stringify({
+      method: "item/autoApprovalReview/completed",
+      params: { threadId: "codex-thread-1", turnId: "turn-1", reviewId: "late", review: { status: "timedOut" } },
+    });
+    await create({ mode: "review-events" });
+    await instance.adapter.sendTurn({ threadId: "app-thread", text: "check", approvalMode: "auto" });
+    await recorder.until((event) => event.type === "turn.completed");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("automatic review"))).toBe(false);
   });
 
   it("names the signed-in ChatGPT account from Codex's protocol and offers sign-out", async () => {

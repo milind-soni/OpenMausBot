@@ -10,22 +10,23 @@ import { SettingsModal } from "./SettingsModal";
 // desktop instance instead of only the ones that don't own the server
 // being paired against. MOCA-84 then found the remote-client case needs it
 // too. These tests pin the card as always offered; the server decides who may act.
-const fixture = vi.hoisted(() => ({ section: "companion" as AppSettingsSection }));
+const fixture = vi.hoisted(() => ({ section: "companion" as AppSettingsSection, config: undefined as { cloudHome?: boolean } | undefined }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
 
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: vi.fn(),
-  useStore: () => ({ state: { appSettingsSection: fixture.section }, dispatch: vi.fn() }),
+  useStore: () => ({ state: { appSettingsSection: fixture.section, config: fixture.config }, dispatch: vi.fn() }),
 }));
 vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: () => null }));
 vi.mock("./CustomDomainSettings", () => ({ CustomDomainSettings: () => null }));
 vi.mock("./CompanionSection", () => ({ CompanionSection: () => null }));
-vi.mock("./ServerPairingCard", () => ({ ServerPairingCard: () => "SERVER_PAIRING_CARD_MARKER" }));
+vi.mock("./ServerPairingCard", () => ({ ServerPairingCard: ({ cloudHome }: { cloudHome?: boolean }) => `SERVER_PAIRING_CARD_MARKER${cloudHome ? " cloud" : ""}` }));
 
 beforeEach(() => {
   vi.clearAllMocks();
   fixture.section = "companion";
+  fixture.config = undefined;
   vi.stubGlobal("document", { documentElement: { dataset: {} } });
 });
 
@@ -53,5 +54,14 @@ describe("Settings → Remote access: server pairing card visibility", () => {
     // not this gate, decides whether that session may mint codes.
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     expect(render()).toContain("SERVER_PAIRING_CARD_MARKER");
+  });
+
+  it("on an OMB Cloud home, which is personal, tells the card so and offers no People section to invite anyone", () => {
+    vi.stubGlobal("window", {});
+    expect(render()).toContain(">People<");
+    fixture.config = { cloudHome: true };
+    const html = render();
+    expect(html).toContain("SERVER_PAIRING_CARD_MARKER cloud");
+    expect(html).not.toContain(">People<");
   });
 });

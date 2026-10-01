@@ -126,6 +126,19 @@ function rejectsToolsParameter(status: number, body: string): boolean {
   );
 }
 
+class UnsupportedReasoningReplayError extends Error {}
+
+/** DeepSeek-style providers need `reasoning_content` echoed on a tool-call
+ *  assistant message; strict endpoints such as Groq reject the property. */
+function rejectsReasoningReplay(status: number, body: string): boolean {
+  if (status !== 400 && status !== 422) return false;
+  let envelope: Record<string, unknown> | undefined;
+  try { envelope = object(JSON.parse(body)); } catch { return false; }
+  const message = object(envelope?.error)?.message ?? envelope?.error;
+  return typeof message === "string" && /\breasoning_content\b/.test(message) &&
+    /\b(?:unsupported|not supported|unknown|unrecognized|unexpected|not permitted|not allowed)\b/i.test(message);
+}
+
 /** Shared runtime for the three providers that speak OpenAI chat completions. */
 export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>): ProviderInstance {
   const { input } = options;
@@ -142,6 +155,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
      * a parked item must never look like delivered input. */
     asides: string[];
   }>();
+  /** Models whose endpoint rejected an echoed `reasoning_content`. In memory
+   * only: later rounds and turns omit the field instead of failing again. */
+  const reasoningReplayRejected = new Set<string>();
 
   const emit = (event: RuntimeEvent) => {
     for (const listener of Array.from(listeners)) listener(event);
@@ -194,6 +210,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const body = await response.text().catch(() => "");
         const message = `${options.httpErrorLabel} HTTP ${response.status}${body ? `: ${body.slice(0, 200)}` : ""}`;
         if (rejectsToolsParameter(response.status, body)) throw new UnsupportedChatToolsError(message);
+        if (messages.some((entry) => entry.reasoning_content !== undefined) && rejectsReasoningReplay(response.status, body)) {
+          throw new UnsupportedReasoningReplayError(message);
+        }
         throw new Error(message);
       }
 
@@ -483,6 +502,15 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             } catch (value) {
               const error = asError(value);
               const verdict = classifyError(error);
+              // A schema rejection of the echoed reasoning executed nothing
+              // upstream, so the same transcript without that one property
+              // repeats no operation. The error needs the field in the
+              // request, so the stripped resend cannot loop.
+              if (error instanceof UnsupportedReasoningReplayError && !streamed && !abort.signal.aborted) {
+                reasoningReplayRejected.add(model);
+                for (const message of messages) delete message.reasoning_content;
+                continue;
+              }
               // Only our optional question changed a previously plain request.
               // A structured parameter rejection has executed nothing; never
               // downgrade mounted tools, streamed output or a handled call.
@@ -532,7 +560,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           if (seenCalls.size > MAX_CHAT_TOOL_CALLS) throw new ChatProtocolError("tool-call limit reached");
           messages.push({ role: "assistant", content: completion.text || null, tool_calls: completion.toolCalls,
-            ...(completion.protocolReasoning ? { reasoning_content: completion.protocolReasoning } : {}),
+            ...(completion.protocolReasoning && !reasoningReplayRejected.has(model) ? { reasoning_content: completion.protocolReasoning } : {}),
             ...(completion.protocolReasoningDetails.length ? { reasoning_details: completion.protocolReasoningDetails } : {}),
           });
           const screenshotParts: ChatContentPart[] = [];

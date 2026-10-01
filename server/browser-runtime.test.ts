@@ -313,7 +313,51 @@ describe("server-owned browser MCP runtime", () => {
     expect(other.pid).not.toBe(list.pid);
     await value.take("one", "owner");
     await expect(value.agentRpc("one", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/paused/);
-    await expect(value.agentRpc("one", spec(), "tools/list", {})).resolves.toMatchObject({ tools: [{ name: "echo" }] });
+    await expect(value.agentRpc("one", spec(), "tools/list", {})).resolves.toMatchObject({ tools: [{ name: "echo" }, { name: "restart_browser" }] });
+  });
+
+  it("lets the agent restart an interrupted browser itself, then resume", async () => {
+    const closeBrowser = vi.fn(async () => true);
+    const value = runtime({ closeBrowser });
+    await value.agentRpc("s", spec(), "tools/list", {});
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "crash" })).rejects.toThrow();
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/restart_browser/);
+    // A new turn lists tools without reaching the engine: the engine's tools
+    // from the last list, plus the one way out.
+    const listed = await value.agentRpc("s", spec(), "tools/list", {}) as { tools: Array<{ name: string }> };
+    expect(listed.tools.map((tool) => tool.name)).toEqual(["echo", "restart_browser"]);
+    const check = vi.fn();
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "restart_browser", arguments: {} }, check))
+      .resolves.toMatchObject({ content: [{ text: expect.stringContaining("Browser restarted") }] });
+    expect(closeBrowser).toHaveBeenCalledWith("s", expect.objectContaining({ command: process.execPath }));
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(value.heldBy("s")).toBeNull();
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "back" } }))
+      .resolves.toMatchObject({ content: [{ text: expect.stringContaining("back") }] });
+  });
+
+  it("stays uncertain without holding the browser when the agent's restart cannot close it", async () => {
+    const value = runtime({ closeBrowser: async () => false });
+    await value.agentRpc("s", spec(), "tools/list", {});
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "crash" })).rejects.toThrow();
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "restart_browser" })).rejects.toThrow(/could not be closed/);
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/Restart/);
+    // No agent-owned hold: the person's own Restart button still works.
+    expect(value.heldBy("s")).toBeNull();
+    await value.restart("s", "person", async () => {});
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).resolves.toBeTruthy();
+  });
+
+  it("never lets the agent restart a browser a person controls, or after its turn is revoked", async () => {
+    const closeBrowser = vi.fn(async () => true);
+    const value = runtime({ closeBrowser });
+    await value.agentRpc("s", spec(), "tools/list", {});
+    await value.take("s", "person");
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "restart_browser" })).rejects.toThrow(/paused/);
+    value.release("s", "person");
+    const revoked = () => { throw new Error("capability revoked"); };
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "restart_browser" }, revoked)).rejects.toThrow(/revoked/);
+    expect(closeBrowser).not.toHaveBeenCalled();
   });
 
   it("keeps completed MCP refusals distinct from uncertain transport failure", async () => {

@@ -281,7 +281,8 @@ export interface RoutineManagerOptions {
   emit?: (payload: Record<string, unknown>) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
   goalState?: (groupId: string, coordinatorBotId: string) => "ready" | "busy" | "missing";
-  createTask: (botId: string, title: string, activate?: boolean) => { threadId: string } | null;
+  /** A task for one run of `routineId` (it may name who the run is for). */
+  createTask: (botId: string, title: string, activate?: boolean, routineId?: string) => { threadId: string } | null;
   /** When set, run this bot's routine in that existing conversation instead of
    * a new hidden task. Room goals never use it. */
   joinConversation?: (run: RoutineRun) => string | null;
@@ -1587,7 +1588,7 @@ export class RoutineManager {
           ? run.groupId
             ? this.options.createGoalTask?.(run.groupId, run.routineName) ?? null
             : null
-          : this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook");
+          : this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook", run.routineId);
         if (!task) {
           this.failRun(run, run.target === "room-goal"
             ? "Could not create a room task for this goal"

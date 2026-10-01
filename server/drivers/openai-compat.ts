@@ -19,10 +19,36 @@ const DEFAULT_MODELS: ModelCatalog = {
   ],
 };
 
+const DEFAULT_KEY_ENV = "OPENAI_COMPAT_API_KEY";
+/** A provider's own key (the built-in OpenAI and OpenRouter instances). An
+ * instance reading one of these never falls back to the workspace
+ * OpenAI-compatible key, URL, model or routing. */
+const OWN_KEY_ENVS = new Set(["OMB_OPENAI_API_KEY", "OMB_OPENROUTER_API_KEY"]);
+
+/** OpenAI's own API, seeded until its live catalog loads. */
+const OPENAI_MODELS: ModelCatalog = {
+  default: "gpt-5",
+  options: [
+    { id: "gpt-5", label: "gpt-5" },
+    { id: "gpt-5-mini", label: "gpt-5-mini" },
+  ],
+};
+
+/** OpenAI's /models lists every model the key can reach: embeddings, speech,
+ * images, moderation and Responses-only models too. Only chat models belong
+ * in a chat picker. */
+export function isOpenAIChatModel(id: string): boolean {
+  if (!/^(gpt-|chatgpt-|o\d)/i.test(id)) return false;
+  return !/(audio|realtime|tts|transcribe|search|image|embedding|moderation|instruct|codex|computer-use|deep-research|-pro\b)/i.test(id);
+}
+
 export interface OpenAICompatConfig {
   tools?: boolean;
   url: string;
+  /** Where the key comes from; see OWN_KEY_ENVS. */
   apiKeyEnv: string;
+  /** "openai": seed and filter the catalog for OpenAI's own API. */
+  catalog?: "openai";
   key?: string;
   model?: string;
   provider?: string;
@@ -42,7 +68,10 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
   const config = (raw ?? {}) as Record<string, unknown>;
   if (config.tools !== undefined && typeof config.tools !== "boolean") throw new Error("tools must be a boolean");
   if (config.managedModels !== undefined && (!Array.isArray(config.managedModels) || !config.managedModels.length || config.managedModels.some(model => typeof model !== "string" || !model.trim()))) throw new Error("Invalid managed models.");
-  const envUrl = process.env.OPENAI_COMPAT_URL;
+  const ownKey = typeof config.apiKeyEnv === "string" && OWN_KEY_ENVS.has(config.apiKeyEnv);
+  if (config.catalog !== undefined && config.catalog !== "openai") throw new Error("catalog must be \"openai\"");
+  // Workspace defaults belong to the shared OpenAI-compatible connection only.
+  const envUrl = ownKey ? undefined : process.env.OPENAI_COMPAT_URL;
   return {
     ...(config.tools !== undefined ? { tools: config.tools as boolean } : {}),
     ...(config.managedModels ? { managedModels: config.managedModels as string[] } : {}),
@@ -50,25 +79,26 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
       .replace(/\/+$/, ""),
     apiKeyEnv: typeof config.apiKeyEnv === "string" && config.apiKeyEnv
       ? config.apiKeyEnv
-      : "OPENAI_COMPAT_API_KEY",
+      : DEFAULT_KEY_ENV,
+    ...(config.catalog === "openai" ? { catalog: "openai" as const } : {}),
     key: typeof config.key === "string" && config.key ? config.key : undefined,
     model: typeof config.model === "string" && config.model
       ? config.model
-      : process.env.OPENAI_COMPAT_MODEL || undefined,
+      : ownKey ? undefined : process.env.OPENAI_COMPAT_MODEL || undefined,
     // An explicit empty override disables inherited routing for an isolated
     // connection (CLI setup uses this). Absent still inherits the global pin.
     provider: typeof config.provider === "string"
       ? config.provider || undefined
-      : process.env.OPENAI_COMPAT_PROVIDER || undefined,
+      : ownKey ? undefined : process.env.OPENAI_COMPAT_PROVIDER || undefined,
   };
 }
 
 export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
   driverKind: DRIVER_KIND,
   metadata: {
-    displayName: "OpenAI-compatible (OpenRouter / Groq)",
+    displayName: "Other (OpenAI-compatible)",
     supportsMultipleInstances: true,
-    access: "custom",
+    access: "api",
   },
   models: DEFAULT_MODELS,
   // Nothing to install: the key and base URL are saved in the app. The old
@@ -77,8 +107,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
   install: {
     docsUrl: "https://openrouter.ai/keys",
     settings: "connections",
-    signInCommand:
-      "Save an OpenAI-compatible API key (OpenRouter, Groq, or your own router) and its base URL in Settings → Connections, or set OPENAI_COMPAT_API_KEY on the server.",
+    signInCommand: "Save an OpenAI-compatible API key in Settings → API keys, or set OPENAI_COMPAT_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
@@ -88,29 +117,30 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     // An instance that names its own key variable reads only that one: the
     // workspace key (OPENAI_COMPAT_API_KEY) belongs to the workspace's
     // endpoint and must not reach this instance's host.
-    const ownKeyVariable = config.apiKeyEnv !== "OPENAI_COMPAT_API_KEY";
+    const ownKeyVariable = config.apiKeyEnv !== DEFAULT_KEY_ENV;
     const apiKey =
       config.key ??
       input.environment[config.apiKeyEnv] ??
-      (ownKeyVariable ? undefined : input.environment.OPENAI_COMPAT_API_KEY) ??
+      (ownKeyVariable ? undefined : input.environment[DEFAULT_KEY_ENV]) ??
       process.env[config.apiKeyEnv] ??
-      (ownKeyVariable ? undefined : process.env.OPENAI_COMPAT_API_KEY) ??
+      (ownKeyVariable ? undefined : process.env[DEFAULT_KEY_ENV]) ??
       "";
-    // The default key variable is the one Settings → Connections saves; an
-    // instance with its own variable is configured where it was written.
-    const missingKey = config.apiKeyEnv === "OPENAI_COMPAT_API_KEY"
-      ? "No API key — open Settings → Connections and add an OpenAI-compatible key (OpenRouter, Groq, or your own router) and its base URL."
+    // The default key and the built-in providers' keys are saved in
+    // Settings → API keys; any other variable is configured where it was written.
+    const missingKey = !ownKeyVariable || OWN_KEY_ENVS.has(config.apiKeyEnv)
+      ? "No API key — open Settings → API keys."
       : `no API key — set ${config.apiKeyEnv} or add it to the instance config`;
+    const seeded = config.catalog === "openai" ? OPENAI_MODELS : DEFAULT_MODELS;
     let catalog: ModelCatalog = config.managedModels
       ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
       : config.model
       ? {
           default: config.model,
-          options: DEFAULT_MODELS.options.some((model) => model.id === config.model)
-            ? DEFAULT_MODELS.options
-            : [{ id: config.model, label: config.model, custom: true }, ...DEFAULT_MODELS.options],
+          options: seeded.options.some((model) => model.id === config.model)
+            ? seeded.options
+            : [{ id: config.model, label: config.model, custom: true }, ...seeded.options],
         }
-      : DEFAULT_MODELS;
+      : seeded;
 
     const fetchModels = async () => {
       if (config.managedModels) return;
@@ -121,8 +151,16 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           signal: AbortSignal.timeout(8_000),
         });
         if (!response.ok) return;
-        const json = await response.json() as { data?: Array<{ id?: unknown; name?: unknown }> } | Array<{ id?: unknown; name?: unknown }>;
-        const rows = Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
+        type Row = { id?: unknown; name?: unknown; created?: unknown };
+        const json = await response.json() as { data?: Row[] } | Row[];
+        let rows = Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
+        // OpenAI lists its catalog unordered and mixed with non-chat models:
+        // keep chat models, newest first.
+        if (config.catalog === "openai") {
+          rows = rows
+            .filter((row) => typeof row.id === "string" && isOpenAIChatModel(row.id))
+            .sort((a, b) => (typeof b.created === "number" ? b.created : 0) - (typeof a.created === "number" ? a.created : 0));
+        }
         const seen = new Set<string>();
         const options: ModelCatalog["options"] = [];
         for (const row of rows) {
@@ -132,7 +170,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           options.push({
             id,
             label: typeof row.name === "string" && row.name.trim() ? row.name : id,
-            custom: true,
+            // A provider's own catalog is its official list, not a custom model.
+            ...(config.catalog === "openai" ? {} : { custom: true }),
           });
         }
         if (!options.length) return;

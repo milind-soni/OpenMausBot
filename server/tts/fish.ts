@@ -1,7 +1,10 @@
 // Fish Audio text to speech. The API key stays on the harness: the renderer
 // receives only voice metadata and synthesized audio bytes.
+import type { FishTtsModel } from "../config.ts";
+
 const API = (process.env.OMB_FISH_AUDIO_API || "https://api.fish.audio").replace(/\/+$/, "");
-const MODEL = "s2.1-pro";
+/** Used when no model is saved, so existing setups keep their behavior. */
+export const DEFAULT_FISH_MODEL: FishTtsModel = "s2.1-pro";
 const MAX_ERROR_LENGTH = 240;
 const PAGE_SIZE = 100;
 const MAX_OWNED_PAGES = 100;
@@ -134,7 +137,12 @@ export async function listVoices(key: string): Promise<Voice[]> {
   return [...new Map(voices.map((voice) => [voice.id, voice])).values()];
 }
 
-export async function synthesize(text: string, voiceId: string, key: string): Promise<Audio> {
+export async function synthesize(
+  text: string,
+  voiceId: string,
+  key: string,
+  model: FishTtsModel = DEFAULT_FISH_MODEL,
+): Promise<Audio> {
   let res: Response;
   try {
     res = await fetch(`${API}/v1/tts`, {
@@ -143,7 +151,7 @@ export async function synthesize(text: string, voiceId: string, key: string): Pr
         authorization: `Bearer ${key}`,
         "content-type": "application/json",
         accept: "audio/mpeg",
-        model: MODEL,
+        model,
       },
       body: JSON.stringify({
         text,

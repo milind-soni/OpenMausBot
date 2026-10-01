@@ -40,6 +40,20 @@ function displayUrl(value: unknown): string {
   } catch { return ""; }
 }
 
+/** Chrome's own launch-failure wording: the engine is installed and its
+ * daemon answers, but no browser can start (no display, an early exit).
+ * Distinct from a missing engine — the fix is a fresh session, not an
+ * install, so the generic "check the engine is installed" guidance would
+ * send the operator the wrong way (#1383). */
+function browserLaunchFailure(error: unknown): boolean {
+  const detail = [
+    (error as { stderr?: unknown })?.stderr,
+    (error as { stdout?: unknown })?.stdout,
+    error instanceof Error ? error.message : String(error),
+  ].filter((part): part is string => typeof part === "string").join("\n");
+  return /missing x server|\$DISPLAY|devtoolsactiveport|chrome exited|could not launch|failed to launch|browser launch failed/iu.test(detail);
+}
+
 /** Project only the viewer protocol. Never relay engine commands, results or console output. */
 export function normalizeBrowserLiveMessage(value: unknown): ObjectValue | null {
   const message = object(value);
@@ -159,6 +173,7 @@ interface Viewer extends OpenOptions {
 export class BrowserLive {
   private readonly runtime: BrowserRuntime;
   private readonly viewers = new Map<string, Viewer>();
+  private readonly sessionResets = new Map<string, Promise<boolean>>();
   constructor({ runtime }: { runtime: BrowserRuntime }) { this.runtime = runtime; }
 
   private current(viewer: Viewer): boolean {
@@ -264,10 +279,33 @@ export class BrowserLive {
       if (!this.current(viewer)) throw new Error("stale viewer");
       const result = object(JSON.parse(stdout));
       const data = object(result?.data);
-      if (result?.success !== true || !data) throw new Error("browser command failed");
+      if (result?.success !== true || !data) {
+        // Keep the engine's own error internal (logged, never sent) so a
+        // launch failure is recognized for what it is below.
+        const detail = [result?.error, result?.message].filter((part): part is string => typeof part === "string").join(" ");
+        throw new Error(detail ? `browser command failed: ${detail}` : "browser command failed");
+      }
       return data;
     } catch (error) {
       console.warn("browser-live:", error);
+      if (browserLaunchFailure(error)) {
+        // The daemon is alive but holding a launch configuration Chrome
+        // cannot satisfy on this host (a headed launch with no display). It
+        // fails every command the same way until the daemon is killed —
+        // discard the session so the next connect starts a fresh one. One
+        // tracked reset per session: a reconnect or repeated command joins
+        // the in-flight teardown instead of spawning another (#1383).
+        if (!this.sessionResets.has(viewer.session)) {
+          const reset = closeBrowserSession(viewer.spec.command, env).then((closed) => {
+            if (closed) console.warn(`browser-live: reset ${viewer.session} after a failed browser launch; reconnecting starts a fresh session`);
+            else console.warn(`browser-live: reset of ${viewer.session} after a failed browser launch did not finish; the next command retries it`);
+            return closed;
+          }, () => false);
+          this.sessionResets.set(viewer.session, reset);
+          void reset.finally(() => { if (this.sessionResets.get(viewer.session) === reset) this.sessionResets.delete(viewer.session); });
+        }
+        throw new BrowserLiveError("The browser could not start on this server. Reconnect to retry with a fresh browser session.", 503);
+      }
       throw new BrowserLiveError("The browser could not complete this action. Check that the browser engine is installed, then reconnect.", 503);
     }
   }
@@ -327,6 +365,10 @@ export class BrowserLive {
     options.res.once("close", () => this.close(viewer));
     options.res.once("error", () => this.close(viewer));
     try {
+      // A failed launch already started this session's daemon teardown; wait
+      // for it so the status probe meets a fresh daemon, not the stuck one.
+      const resetting = this.sessionResets.get(viewer.session);
+      if (resetting) await resetting;
       let status = await this.command(viewer, ["stream", "status"]);
       if (status.enabled !== true) {
         try { status = await this.command(viewer, ["stream", "enable"]); }

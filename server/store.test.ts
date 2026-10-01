@@ -1041,6 +1041,20 @@ describe("Store", () => {
     expect(reloaded.projectBotForTask(bot.id, future.threadId)!.modelSelection).toEqual({ ...chosen, variant: "minimal" });
   });
 
+  it("starts a task on a model it is handed, as its own copy, without moving the bot default", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const parent = { instanceId: "opencodeGo", model: "provider/model", variant: "low" };
+    const handed = structuredClone(parent);
+    const child = store.createTask(bot.id, "Child", false, undefined, undefined, undefined, handed)!;
+    handed.model = "provider/changed-later";
+    const fresh = store.createTask(bot.id, "Fresh", false)!;
+    const reloaded = new Store(selection);
+    expect(reloaded.projectBotForTask(bot.id, child.threadId)!.modelSelection).toEqual(parent);
+    expect(reloaded.projectBotForTask(bot.id, fresh.threadId)!.modelSelection).toEqual(selection());
+    expect(reloaded.bot(bot.id)!.modelSelection).toEqual(selection());
+  });
+
   it("applies one reviewed default-model change with applyTeamSetup's task stamping", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -1581,127 +1595,18 @@ describe("Store change stream", () => {
     expect(reloaded.taskByThread(bot.id, own.threadId)).not.toHaveProperty("openedBy");
   });
 
-  it("resolvePairConversation keeps one conversation per bot pair, whatever the turn or the person is looking at", () => {
+  it("first-message titling preserves peer provenance and a person's rename", () => {
     const store = new Store(selection);
     const recipient = store.createBot({ name: "Scout" });
     const sender = store.createBot({ name: "Clive" });
-    const other = store.createBot({ name: "Ada" });
-    const idle = { working: () => false };
-    const selected = store.activeTask(recipient.id)!;
-    const first = store.resolvePairConversation(sender, recipient.id, idle)!;
-    expect(first.created).toBe(true);
-    // the sender's name, never the brief: an 80-character slice of an
-    // assignment is the sidebar row nobody can read
-    expect(first.task.title).toBe("@Clive");
-    expect(first.task.openedBy).toMatchObject({ botId: sender.id, name: "Clive", kind: "pair" });
-    expect(first.task.threadId).not.toBe(selected.threadId);
-    // the person is still looking at what they were looking at
-    expect(store.bot(recipient.id)!.threadId).toBe(selected.threadId);
-    // every later send from that sender continues it — nothing about a
-    // turn, a request key or the recipient's selected thread takes part
-    store.switchTask(recipient.id, first.task.threadId);
-    const second = store.resolvePairConversation(sender, recipient.id, idle)!;
-    const third = store.resolvePairConversation(sender, recipient.id, { label: "unused while idle", working: () => false })!;
-    expect([second.task.threadId, third.task.threadId]).toEqual([first.task.threadId, first.task.threadId]);
-    expect([second.created, third.created]).toEqual([false, false]);
-    // a different sender gets its own line, not this one
-    const elsewhere = store.resolvePairConversation(other, recipient.id, idle)!;
-    expect(elsewhere.task.threadId).not.toBe(first.task.threadId);
-    expect(elsewhere.task.title).toBe("@Ada");
-    expect(store.tasks(recipient.id)).toHaveLength(3);
-    expect(store.resolvePairConversation(sender, "no-such-bot", idle)).toBeNull();
-    const reloaded = new Store(selection);
-    expect(reloaded.resolvePairConversation(sender, recipient.id, idle)!.task.threadId).toBe(first.task.threadId);
-  });
-
-  it("resolvePairConversation adopts the sender's most recent old thread instead of adding one more row", () => {
-    const store = new Store(selection);
-    const recipient = store.createBot({ name: "Scout" });
-    const sender = store.createBot({ name: "Clive" });
-    const other = store.createBot({ name: "Ada" });
-    const idle = { working: () => false };
-    const brief = "Implement and independently verify the CSV export for the reporting page";
-    const header = "Add the header row to that export";
-    // the rows a 0.1.76 server left behind: one per assignment, titled with
-    // a sliced brief, all opened by the same sender, each holding the
-    // request that named it
-    // "most recently active" is the last thing said there, not the hour the
-    // row was opened: the one opened later has been silent for longer
-    const older = store.createTask(recipient.id, brief, false, undefined, { botId: sender.id, name: "Clive", at: 60 })!;
-    const newer = store.createTask(recipient.id, header, false, undefined, { botId: sender.id, name: "Clive", at: 20 })!;
-    const closed = store.createTask(recipient.id, "Already tidied away", false, undefined, { botId: sender.id, name: "Clive", at: 30 })!;
-    store.setTaskClosedBy(recipient.id, closed.threadId, { botId: sender.id, name: "Clive", at: 31 });
-    // a start_thread handoff is the sender's own named job, tracked by its
-    // delegation id — adoption leaves it alone
-    const handoff = store.createTask(recipient.id, "Review PR 12", false, undefined, { botId: sender.id, name: "Clive", delegationId: "d-9", at: 40 })!;
-    const stranger = store.createTask(recipient.id, "From someone else", false, undefined, { botId: other.id, name: "Ada", at: 50 })!;
-    store.appendMessage(older.threadId, { role: "bot", kind: "text", text: `@Scout ${brief}`, at: 1_000 });
-    store.appendMessage(newer.threadId, { role: "bot", kind: "text", text: `@Scout ${header}`, at: 2_000 });
-    const before = store.tasks(recipient.id).length;
-    const adopted = store.resolvePairConversation(sender, recipient.id, idle)!;
-    expect(adopted.created).toBe(false);
-    expect(adopted.task.threadId).toBe(newer.threadId);
-    expect(store.tasks(recipient.id)).toHaveLength(before);
-    expect(adopted.task.title).toBe("@Clive");
-    // adoption is not a new conversation: it keeps the hour it was opened
-    expect(adopted.task.openedBy).toEqual({ botId: sender.id, name: "Clive", kind: "pair", at: 20 });
-    // nothing is deleted or closed on the way
-    expect(store.taskByThread(recipient.id, older.threadId)!.title).toBe(brief.slice(0, 80));
-    expect(store.taskByThread(recipient.id, closed.threadId)!.closedBy).toBeDefined();
-    expect(store.taskByThread(recipient.id, handoff.threadId)!.openedBy).toMatchObject({ delegationId: "d-9" });
-    expect(store.taskByThread(recipient.id, handoff.threadId)!.title).toBe("Review PR 12");
-    expect(store.taskByThread(recipient.id, stranger.threadId)!.openedBy).toEqual({ botId: other.id, name: "Ada", at: 50 });
-    // and the next send continues the adopted one
-    expect(store.resolvePairConversation(sender, recipient.id, idle)!.task.threadId).toBe(newer.threadId);
-    expect(store.tasks(recipient.id)).toHaveLength(before);
-  });
-
-  it("resolvePairConversation adopts a hand-renamed thread without overwriting the name the person typed", () => {
-    const store = new Store(selection);
-    const recipient = store.createBot({ name: "Scout" });
-    const sender = store.createBot({ name: "Clive" });
-    const idle = { working: () => false };
-    const brief = "Implement and independently verify the CSV export for the reporting page";
-    const row = store.createTask(recipient.id, brief, false, undefined, { botId: sender.id, name: "Clive", at: 10 })!;
-    store.appendMessage(row.threadId, { role: "bot", kind: "text", text: `@Scout ${brief}`, at: 1_000 });
-    // the person gave the row a name of their own; the machine's slice is
-    // gone, so adoption has nothing to recognise as its own and must not
-    // guess
-    store.renameTask(recipient.id, row.threadId, "Reporting exports");
-    const adopted = store.resolvePairConversation(sender, recipient.id, idle)!;
-    expect(adopted.created).toBe(false);
-    expect(adopted.task.threadId).toBe(row.threadId);
-    expect(adopted.task.title).toBe("Reporting exports");
-    expect(adopted.task.openedBy).toMatchObject({ botId: sender.id, kind: "pair" });
-    // it is the pair conversation all the same: the next send continues it
-    expect(store.resolvePairConversation(sender, recipient.id, idle)!.task.threadId).toBe(row.threadId);
-    expect(store.taskByThread(recipient.id, row.threadId)!.title).toBe("Reporting exports");
-    expect(store.tasks(recipient.id)).toHaveLength(2);
-  });
-
-  it("first-message titling reports the peer provenance adoption relies on, and a late retitle cannot undo an adoption rename", () => {
-    const store = new Store(selection);
-    const recipient = store.createBot({ name: "Scout" });
-    const sender = store.createBot({ name: "Clive" });
-    const idle = { working: () => false };
     const brief = "Verify the export";
-    // a peer-opened row that was still untitled when its assignment landed:
-    // the first message names it, and the record it gets back carries the
-    // provenance that must keep any generated title away from the row
-    const row = store.createTask(recipient.id, undefined, false, undefined, { botId: sender.id, name: "Clive", at: 10 })!;
+    const row = store.createTask(recipient.id, undefined, false, undefined, { botId: sender.id, name: sender.name, kind: "work", at: 10 })!;
     store.appendMessage(row.threadId, { role: "bot", kind: "text", text: `@Scout ${brief}`, at: 1_000 });
     const titled = store.titleTaskFromFirstMessage(recipient.id, `@Scout ${brief}`, row.threadId);
     expect(titled?.title).toBe(`@Scout ${brief}`);
     expect(titled?.openedBy?.botId).toBe(sender.id);
-    // the row a person's assignment named: adoption renames it to the
-    // sender, and a generated title arriving later finds nothing to replace
-    const named = store.createTask(recipient.id, brief, false, undefined, { botId: sender.id, name: "Clive", at: 20 })!;
-    store.appendMessage(named.threadId, { role: "bot", kind: "text", text: `@Scout ${brief}`, at: 2_000 });
-    const adopted = store.resolvePairConversation(sender, recipient.id, idle)!;
-    expect(adopted.created).toBe(false);
-    expect(adopted.task.title).toBe("@Clive");
-    expect(store.retitleTask(recipient.id, named.threadId, `@Scout ${brief}`, "Export verification")).toBeNull();
-    expect(store.taskByThread(recipient.id, named.threadId)!.title).toBe("@Clive");
+    store.renameTask(recipient.id, row.threadId, "Export verification");
+    expect(store.retitleTask(recipient.id, row.threadId, `@Scout ${brief}`, "Late title")).toBeNull();
   });
 
   it("channel first-message titling reports the row it named, and a late retitle cannot undo a rename", () => {
@@ -1725,90 +1630,11 @@ describe("Store change stream", () => {
     expect(store.groupTaskByThread(group.id, fresh)!.title).toBe("Draft announcement");
   });
 
-  it("resolvePairConversation reopens a closed pair conversation and gives concurrent work its own thread", () => {
-    const store = new Store(selection);
-    const recipient = store.createBot({ name: "Scout" });
-    const sender = store.createBot({ name: "Clive" });
-    const idle = { working: () => false };
-    const pair = store.resolvePairConversation(sender, recipient.id, idle)!.task;
-    // closed once its result was read; picking it back up must not open a
-    // second line between the same two bots
-    store.setTaskClosedBy(recipient.id, pair.threadId, { botId: sender.id, name: "Clive", at: 5 });
-    const reopened = store.resolvePairConversation(sender, recipient.id, idle)!;
-    expect(reopened.task.threadId).toBe(pair.threadId);
-    expect(reopened.created).toBe(false);
-    expect(store.taskByThread(recipient.id, pair.threadId)).not.toHaveProperty("closedBy");
-    // a second assignment arriving while that one is still working gets its
-    // own thread, named by the caller's label
-    const busy = { working: (threadId: string) => threadId === pair.threadId };
-    const work = store.resolvePairConversation(sender, recipient.id, { ...busy, label: "Header row" })!;
-    expect(work.created).toBe(true);
-    expect(work.task.threadId).not.toBe(pair.threadId);
-    expect(work.task.title).toBe("@Clive · Header row");
-    expect(work.task.openedBy).toMatchObject({ botId: sender.id, kind: "work" });
-    // no label is still honest and short, never the brief
-    expect(store.resolvePairConversation(sender, recipient.id, busy)!.task.title).toBe("@Clive · parallel work");
-    // a work thread is never mistaken for the pair conversation afterwards
-    expect(store.resolvePairConversation(sender, recipient.id, idle)!.task.threadId).toBe(pair.threadId);
-    expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(1);
-    expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "work")).toHaveLength(2);
-  });
-
-  it("a sender deleted and recreated under the same name inherits its pair conversation", () => {
-    const store = new Store(selection);
-    const recipient = store.createBot({ name: "Scout" });
-    const sender = store.createBot({ name: "Clive" });
-    const idle = { working: () => false };
-    const pair = store.resolvePairConversation(sender, recipient.id, idle)!;
-    const openedAt = pair.task.openedBy!.at;
-    store.appendMessage(pair.task.threadId, { role: "bot", kind: "text", text: "the standing history", at: 1_000 });
-    // deleted and recreated: a new id under the same name, while the
-    // recipient's row still carries only the predecessor's stamp
-    store.deleteBot(sender.id);
-    const recreated = store.createBot({ name: "Clive" });
-    expect(recreated.id).not.toBe(sender.id);
-    const inherited = store.resolvePairConversation(recreated, recipient.id, idle)!;
-    expect(inherited.created).toBe(false);
-    expect(inherited.task.threadId).toBe(pair.task.threadId);
-    // no twin was minted, and the history stayed in the one row
-    expect(store.tasks(recipient.id)).toHaveLength(2);
-    expect(store.messagesFor(pair.task.threadId).at(-1)?.text).toBe("the standing history");
-    // the stamp now names the live bot, and the hour it was opened did not move
-    expect(inherited.task.openedBy).toEqual({ botId: recreated.id, name: "Clive", kind: "pair", at: openedAt });
-    // a reload keeps answering with the same row
-    expect(new Store(selection).resolvePairConversation(recreated, recipient.id, idle)!.task.threadId).toBe(pair.task.threadId);
-  });
-
-  it("a name two live bots share never inherits a deleted bot's pair conversation", () => {
-    const store = new Store(selection);
-    const recipient = store.createBot({ name: "Scout" });
-    const sender = store.createBot({ name: "Clive" });
-    const idle = { working: () => false };
-    const dangling = store.resolvePairConversation(sender, recipient.id, idle)!.task;
-    store.deleteBot(sender.id);
-    const recreated = store.createBot({ name: "Clive" });
-    const namesake = store.createBot({ name: "Clive" });
-    // the name is ambiguous now: each live Clive mints its own row rather
-    // than either one claiming the dead bot's history
-    const own = store.resolvePairConversation(recreated, recipient.id, idle)!;
-    expect(own.created).toBe(true);
-    expect(own.task.threadId).not.toBe(dangling.threadId);
-    const elsewhere = store.resolvePairConversation(namesake, recipient.id, idle)!;
-    expect(elsewhere.task.threadId).not.toBe(dangling.threadId);
-    expect(elsewhere.task.threadId).not.toBe(own.task.threadId);
-    // the dangling row is untouched: still its dead opener's, still live,
-    // because no live bot can prove it is theirs
-    expect(store.taskByThread(recipient.id, dangling.threadId)!.openedBy).toMatchObject({ botId: sender.id, kind: "pair" });
-    // three identities, one live row each
-    expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(3);
-  });
-
   it("loading collapses the duplicate live pair rows an older server minted, and a second load changes nothing", () => {
     const store = new Store(selection);
     const recipient = store.createBot({ name: "Scout" });
     const sender = store.createBot({ name: "Clive" });
-    const idle = { working: () => false };
-    const older = store.resolvePairConversation(sender, recipient.id, idle)!.task;
+    const older = store.createTask(recipient.id, "@Clive", false, undefined, { botId: sender.id, name: "Clive", kind: "pair", at: 1_000 })!;
     const olderAt = older.openedBy!.at;
     store.appendMessage(older.threadId, { role: "bot", kind: "text", text: "the predecessor's job", at: 1_000 });
     store.deleteBot(sender.id);
@@ -1817,10 +1643,10 @@ describe("Store change stream", () => {
     // new id while the predecessor's dangles live beside it
     const newer = store.createTask(recipient.id, "@Clive", false, undefined, { botId: recreated.id, name: "Clive", kind: "pair", at: 2_000 })!;
     const reloaded = new Store(selection);
-    const kept = reloaded.resolvePairConversation(recreated, recipient.id, idle)!;
+    const kept = reloaded.taskByThread(recipient.id, newer.threadId)!;
     // the row the resolver favors survives; the twin is demoted to a
     // closed plain thread — history kept, never deleted, never re-adopted
-    expect(kept.task.threadId).toBe(newer.threadId);
+    expect(kept.threadId).toBe(newer.threadId);
     const demoted = reloaded.taskByThread(recipient.id, older.threadId)!;
     expect(demoted.openedBy).toEqual({ botId: sender.id, name: "Clive", at: olderAt });
     expect(demoted.closedBy).toMatchObject({ botId: recreated.id, name: "Clive" });
@@ -2209,6 +2035,19 @@ describe("Store task working folder", () => {
     // a new task starts in the bot's current folder
     const next = store.createTask(bot.id, "second")!;
     expect(store.pinTaskCwd(bot.id, next.threadId)).toBe("/tmp/project-b");
+  });
+
+  it("pins a private-only conversation to its own folder when it first runs, and never moves one that already ran elsewhere", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, { cwd: "/tmp/project-a" });
+    const ran = bot.threadId;
+    expect(store.pinTaskCwd(bot.id, ran, "/tmp/private-old")).toBe("/tmp/project-a");
+    const fresh = store.createTask(bot.id, "fresh")!;
+    expect(store.pinTaskCwd(bot.id, fresh.threadId, "/tmp/private-fresh", { privateOnly: true })).toBe("/tmp/private-fresh");
+    // A conversation that already ran in the project folder stays there.
+    expect(store.pinTaskCwd(bot.id, ran, "/tmp/private-old", { privateOnly: true })).toBe("/tmp/project-a");
+    expect(store.taskByThread(bot.id, ran)?.cwd).toBe("/tmp/project-a");
   });
 
   it("pins the default (null) when the bot has no folder, so a later folder can't move a live session", () => {

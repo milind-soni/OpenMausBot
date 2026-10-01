@@ -8,6 +8,7 @@ import {
   doubleEnterSteerWindowExpiresAt,
   doubleEnterSteersQueue,
 } from "./ComposerQueuedMessages";
+import { citationAttachment, createCitationTextSelector, serializeCitation } from "@/lib/citations";
 
 const oneItem = [{ queueId: "q1", text: "actually stop at 10\nand use the smaller model" }];
 
@@ -69,6 +70,21 @@ describe("QueuedComposerMessages", () => {
     expect(markup).toContain("truncate");
     expect(markup).toContain('aria-label="Steer queued message now"');
     expect(markup).toContain('aria-label="Delete queued message 1 of 1"');
+  });
+
+  it("shows readable citation content instead of transport metadata", () => {
+    const citation = citationAttachment(
+      { ownerType: "bot", ownerId: "b1", threadId: "t1", messageId: "m1" },
+      createCitationTextSelector("selected 🐭 code", 0, 16)!,
+      "explain it",
+    );
+    const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, {
+      items: [{ queueId: "citation", text: serializeCitation(citation) }],
+      onCancel: () => undefined,
+    }));
+    expect(markup).toContain("selected 🐭 code");
+    expect(markup).toContain("explain it");
+    expect(markup).not.toContain("omb-citation-v1");
   });
 
   it("offers Edit on every queued row only when the composer can take the words back", () => {

@@ -10,12 +10,15 @@ export type McpHttpFailure = "network" | "status" | "protocol";
 export class McpHttpError extends Error {
   readonly kind: McpHttpFailure;
   readonly status: number | undefined;
+  /** The server's `WWW-Authenticate` challenge on a 401: where to sign in. */
+  readonly wwwAuthenticate: string | undefined;
 
-  constructor(kind: McpHttpFailure, message: string, status?: number) {
+  constructor(kind: McpHttpFailure, message: string, status?: number, wwwAuthenticate?: string) {
     super(message);
     this.name = "McpHttpError";
     this.kind = kind;
     this.status = status;
+    this.wwwAuthenticate = wwwAuthenticate;
   }
 }
 
@@ -226,7 +229,7 @@ export class RemoteMcpClient {
     }
     if (!response.ok) {
       drain(response);
-      throw new McpHttpError("status", `HTTP ${response.status}`, response.status);
+      throw new McpHttpError("status", `HTTP ${response.status}`, response.status, response.headers.get("www-authenticate") ?? undefined);
     }
     const session = response.headers.get("mcp-session-id");
     if (session) this.sessionId = session;
@@ -285,7 +288,7 @@ export class RemoteMcpClient {
         .then(async (response) => {
           if (!response.ok) {
             drain(response);
-            throw new McpHttpError("status", `HTTP ${response.status}`, response.status);
+            throw new McpHttpError("status", `HTTP ${response.status}`, response.status, response.headers.get("www-authenticate") ?? undefined);
           }
           await readSse(response, this.sseAbort.signal, (event) => {
             if (event.event === "endpoint") {

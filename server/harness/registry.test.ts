@@ -260,7 +260,7 @@ process.exit(0);
     expect(await registry.installRuntime("a")).toBe(true);
     const calls = readFileSync(process.env.FAKE_NPM_LOG!, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toEqual(["install", "-g", "--prefix", join(scratch, "data", "tools", "npm"), "--loglevel=error", "--allow-scripts=fake-engine", "fake-engine@latest"]);
+    expect(calls[0]).toEqual(["install", "-g", "--prefix", join(scratch, "data", "tools", "npm"), "--loglevel=error", "--include=optional", "--allow-scripts=fake-engine", "fake-engine@latest"]);
     expect(existsSync(join(scratch, "data", "tools", "npm", "bin", "fakebin"))).toBe(true);
     expect(await registry.installRuntime("missing")).toBe(false);
   });

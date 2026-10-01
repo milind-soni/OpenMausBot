@@ -12,6 +12,10 @@ export interface FakeHttpMcpOptions {
   transport?: "http" | "sse";
   /** require this header on every request; anything else gets 401 */
   requireHeader?: { name: string; value: string };
+  /** accept a request only when this approves its Authorization header */
+  acceptBearer?: (authorization: string | undefined) => boolean;
+  /** WWW-Authenticate value sent with a 401 */
+  wwwAuthenticate?: string;
   /** never answer tools/list (initialize still works) */
   silentTools?: boolean;
   description?: string;
@@ -56,8 +60,12 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
   const server: Server = createServer((req, res) => {
     void (async () => {
       seenHeaders.push({ ...req.headers });
-      if (options.requireHeader && req.headers[options.requireHeader.name.toLowerCase()] !== options.requireHeader.value) {
-        res.writeHead(401, { "content-type": "application/json" }).end(JSON.stringify({ error: "unauthorized" }));
+      if ((options.requireHeader && req.headers[options.requireHeader.name.toLowerCase()] !== options.requireHeader.value)
+        || (options.acceptBearer && !options.acceptBearer(req.headers.authorization))) {
+        res.writeHead(401, {
+          "content-type": "application/json",
+          ...(options.wwwAuthenticate ? { "www-authenticate": options.wwwAuthenticate } : {}),
+        }).end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
       if (transport === "sse" && req.method === "GET") {

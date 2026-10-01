@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArchiveRestore, BellOff, Clock, Clock3, FolderInput, Link2, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, BellOff, Clock, Clock3, FolderInput, Link2, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
 import type { BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
@@ -226,7 +226,7 @@ export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
 
 /** One quiet row for bot and group histories. Surface denotes selection;
  * working/waiting/unread remain independent signals, never different cards. */
-export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onDelete, onMove, onArchive, onPin, onSnooze, activityLabel, now }: {
+export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, activityLabel, now }: {
   task: ThreadRowTask;
   /** the bot or room that owns the thread: the link's ?bot= */
   ownerId: string;
@@ -240,6 +240,9 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   now?: number;
   onSelect: () => void;
   onRename: (title: string) => void;
+  /** Present only where generated titles are available. Calls back once the
+   * request settles, ok or not; the new title arrives with the bot event. */
+  onRegenerateTitle?: (onSettled: (ok: boolean) => void) => void;
   onDelete: () => void;
   onMove?: (folderId: string | null) => void;
   onArchive?: (archivedAt: number | null) => void;
@@ -251,6 +254,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const [deleting, setDeleting] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const finishing = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
@@ -269,6 +273,13 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
     navigator.clipboard?.writeText(threadRefUrl({ botId: ownerId, threadId: task.threadId })).catch(() => {
       // clipboard write rejected — the link stays available to copy again
     });
+  };
+  // The menu stays open on "Regenerating…" until the answer lands; a failure
+  // keeps it open behind the error so the person can rename by hand.
+  const regenerateTitle = () => {
+    if (!onRegenerateTitle || regenerating) return;
+    setRegenerating(true);
+    onRegenerateTitle((ok) => { setRegenerating(false); if (ok) setMenu(null); });
   };
   const finishRename = (save: boolean) => {
     if (finishing.current) return;
@@ -339,6 +350,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
       <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Link2 size={12} />{t("task.copyLink")}</button>
       <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Pencil size={12} />{t("task.renameAria")}</button>
+      {onRegenerateTitle && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{regenerating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
       {onMove && Boolean(folders?.length) && <label className="block rounded px-2.5 py-2 text-[12px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={12} />{t("folder.move")}</span>
         <select aria-label={t("folder.moveNamed", { title: task.title })} value={folders?.some((folder) => folder.id === task.projectId) ? task.projectId : ""}
           onChange={(event) => { onMove(event.target.value || null); setMenu(null); }} className="w-full rounded border border-hairline/40 bg-card px-1 py-1 text-ink outline-none">

@@ -173,3 +173,49 @@ describe("remote (url) MCP servers", () => {
     )).toEqual({ ok: false, error: "No saved value exists for Authorization." });
   });
 });
+
+describe("a url server's sign-in app", () => {
+  const url = "https://docs.example/mcp";
+  const saved = {
+    type: "http" as const, url, headers: {}, enabled: true,
+    oauth: { clientId: "corp-app", clientSecret: "app-secret-value", scopes: ["api://mcp/read"] },
+  };
+
+  it("stores a client id, secret and scopes, and lists only whether a secret is saved", () => {
+    expect(parseStoredMcpServer("docs", { url, oauth: { clientId: " corp-app ", scopes: ["a", "a", "offline_access"] } })).toEqual({
+      ok: true,
+      server: { type: "http", url, headers: {}, oauth: { clientId: "corp-app", scopes: ["a", "offline_access"] }, enabled: true },
+    });
+    const listings = listMcpServers({ docs: saved });
+    expect(listings).toEqual([{
+      name: "docs", type: "http", url, headerKeys: [], enabled: true,
+      oauth: { clientId: "corp-app", scopes: ["api://mcp/read"], clientSecretConfigured: true },
+    }]);
+    expect(JSON.stringify(listings)).not.toContain("app-secret-value");
+  });
+
+  it("keeps a saved secret behind a placeholder only for the same client id", () => {
+    expect(parseMcpServerMutation("docs", { url, oauth: { clientId: "corp-app", clientSecret: true } }, saved)).toEqual({
+      ok: true,
+      server: { type: "http", url, headers: {}, oauth: { clientId: "corp-app", clientSecret: "app-secret-value" }, enabled: true },
+    });
+    expect(parseMcpServerMutation("docs", { url, oauth: { clientId: "other-app", clientSecret: true } }, saved)).toEqual({
+      ok: false, error: "No client secret is saved for this client ID. Enter it again, or leave it out for an app without one.",
+    });
+    expect(parseMcpServerMutation("docs", { url, oauth: { clientId: "corp-app", clientSecret: true } })).toMatchObject({ ok: false });
+    // a stored entry never takes the placeholder
+    expect(parseStoredMcpServer("docs", { url, oauth: { clientId: "corp-app", clientSecret: true } })).toMatchObject({ ok: false });
+    // leaving the app out removes it, secret and all
+    expect(parseMcpServerMutation("docs", { url }, saved)).toEqual({ ok: true, server: { type: "http", url, headers: {}, enabled: true } });
+  });
+
+  it("refuses an empty client id, a scope with spaces and unknown fields, with a sentence that teaches", () => {
+    expect(parseStoredMcpServer("docs", { url, oauth: { clientId: "  " } })).toEqual({
+      ok: false, error: "Enter the client ID of the app registered with this server's sign-in provider.",
+    });
+    expect(parseStoredMcpServer("docs", { url, oauth: { clientId: "a", scopes: ["read write"] } })).toEqual({
+      ok: false, error: "Scopes are single words, like offline_access or api://my-app/mcp.read.",
+    });
+    expect(parseStoredMcpServer("docs", { url, oauth: { clientId: "a", callbackPort: 8080 } })).toMatchObject({ ok: false });
+  });
+});

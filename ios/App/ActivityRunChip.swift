@@ -61,7 +61,10 @@ struct ActivityRunChip: View {
             if expanded {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(items, id: \.id) { item in
-                        ActivityChip(tool: item.tool, threadRef: item.threadRef, openThread: openThread)
+                        ActivityChip(
+                            tool: item.tool, threadRef: item.threadRef, openThread: openThread,
+                            outputIsProse: item.isTeammateReport
+                        )
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
