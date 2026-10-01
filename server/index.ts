@@ -21710,8 +21710,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const action = z.enum(["run", "start", "stop", "remove"]).parse(m[2]);
       const target = localVmTargetForBot(bot.id);
-      if (localVmMode(cfg) === "pool") return json(res, 409, { error: "Pool desktops start automatically when a conversation needs one" });
-      if (localVmMode(cfg) !== "per-bot" && action !== "start") {
+      if (target.key === SHARED_LOCAL_VM_TARGET.key) {
         return json(res, 409, { error: "Shared mode manages this desktop in App Settings → Computers" });
       }
       if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(target.key)) {

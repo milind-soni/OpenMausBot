@@ -1153,7 +1153,11 @@ export function ComputerPanel({
         });
       }
       if (action !== "vm-delete") {
-        const started: LocalVmStatus = await api(`/api/bots/${bot.id}/local-computer/${action === "vm-start" ? "start" : "run"}`, {
+        // Shared mode has one desktop, started from the same route as Settings.
+        const lifecyclePath = action === "vm-start" && vmStatus?.mode !== "per-bot"
+          ? "/api/local-computer/start"
+          : `/api/bots/${bot.id}/local-computer/${action === "vm-start" ? "start" : "run"}`;
+        const started: LocalVmStatus = await api(lifecyclePath, {
           method: "POST",
           body: "{}",
           signal: controller.signal,
