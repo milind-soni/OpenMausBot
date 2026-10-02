@@ -23,6 +23,11 @@ struct LocalVmControlView: View {
     /// the screen is briefly shorter than the picture needs, and the picture
     /// narrows for a few frames before growing back.
     @StateObject private var keyboard = KeyboardPresence()
+    /// The trackpad's hint, cut the moment the keyboard starts up and faded
+    /// back as the pad grows. Its own flag, not an animation on the hint:
+    /// an animation modifier there delays the hint's move as well as its
+    /// fade, and it would slide into place late.
+    @State private var hintShown = true
 
     var body: some View {
         VStack(spacing: 14) {
@@ -49,8 +54,7 @@ struct LocalVmControlView: View {
                         Text("Swipe to move · Tap to click · Hold to drag")
                             .font(.system(size: 12))
                             .foregroundStyle(Color.white.opacity(0.6))
-                            .opacity(keyboard.visible ? 0 : 1)
-                            .animation(keyboard.visible ? nil : .easeIn(duration: 0.2).delay(0.5), value: keyboard.visible)
+                            .opacity(hintShown ? 1 : 0)
                     }
                     .foregroundStyle(Color.white.opacity(0.85))
                     .allowsHitTesting(false)
@@ -67,6 +71,19 @@ struct LocalVmControlView: View {
         .padding(.top, 8)
         .padding(.bottom, 12 + keyboard.height)
         .ignoresSafeArea(.keyboard)
+        .onValueChange(of: keyboard.visible) { visible in
+            if visible {
+                var cut = Transaction()
+                cut.disablesAnimations = true
+                withTransaction(cut) { hintShown = false }
+                return
+            }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !keyboard.visible else { return }
+                withAnimation(.easeIn(duration: 0.2)) { hintShown = true }
+            }
+        }
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
     }
