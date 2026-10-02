@@ -48,6 +48,7 @@ import { CompanyBackupSettings } from "./CompanyBackupSettings";
 import { cn } from "@/lib/cn";
 import { setNotificationSounds, useNotificationSounds } from "@/lib/notification-preferences";
 import { setShowThreads, useShowThreads } from "@/lib/thread-preferences";
+import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { parseSidebarDensity, setSidebarDensity, SIDEBAR_DENSITIES, useSidebarDensity, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
@@ -375,6 +376,19 @@ function FontRow() {
           <option key={id} value={id}>{t(`settings.font.${id}`)}</option>
         ))}
       </select>
+    </SettingRow>
+  );
+}
+
+function AdvancedModeRow() {
+  const enabled = useAdvancedMode();
+  return (
+    <SettingRow title={t("settings.advancedMode.title")} subtitle={t("settings.advancedMode.subtitle")}>
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.advancedMode.title")}
+        onClick={() => setAdvancedMode(!enabled)}
+      />
     </SettingRow>
   );
 }
@@ -838,6 +852,7 @@ export function SettingsModal() {
                   <SkinPicker />
                 </Card>
                 <div>
+                  <AdvancedModeRow />
                   <FontRow />
                   <SidebarDensityRow />
                   <ShowThreadsRow />

@@ -16,6 +16,8 @@ const fixture = vi.hoisted(() => ({
   setSidebarDensity: vi.fn(),
   notificationSounds: true,
   setNotificationSounds: vi.fn(),
+  advancedMode: false,
+  setAdvancedMode: vi.fn(),
   api: vi.fn(),
   dispatch: vi.fn(),
   switches: [] as ComponentProps<typeof Switch>[],
@@ -44,6 +46,10 @@ vi.mock("@/lib/notification-preferences", () => ({
   useNotificationSounds: () => fixture.notificationSounds,
   setNotificationSounds: fixture.setNotificationSounds,
 }));
+vi.mock("@/lib/interface-mode", () => ({
+  useAdvancedMode: () => fixture.advancedMode,
+  setAdvancedMode: fixture.setAdvancedMode,
+}));
 vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 vi.mock("./SettingsPrimitives", async (importOriginal) => {
   const original = await importOriginal<typeof import("./SettingsPrimitives")>();
@@ -63,6 +69,7 @@ beforeEach(() => {
   fixture.showRunCard = true;
   fixture.sidebarDensity = "comfortable";
   fixture.notificationSounds = true;
+  fixture.advancedMode = false;
   fixture.switches = [];
   vi.stubGlobal("window", {});
   vi.stubGlobal("document", { documentElement: { dataset: {} } });
@@ -77,6 +84,25 @@ afterEach(() => {
 const render = () => renderToStaticMarkup(createElement(SettingsModal));
 
 describe("Settings → Appearance", () => {
+  it.each([true, false])("flips Advanced mode on this device only when the switch is %s", (enabled) => {
+    fixture.advancedMode = enabled;
+    const html = render();
+    expect(html).toContain('aria-label="Advanced mode"');
+    expect(html).toContain("Nothing is deleted either way");
+    const toggle = fixture.switches.find((props) => props["aria-label"] === "Advanced mode")!;
+    expect(toggle.checked).toBe(enabled);
+    toggle.onClick!({} as never);
+    expect(fixture.setAdvancedMode).toHaveBeenCalledWith(!enabled);
+    expect(fixture.api).not.toHaveBeenCalled();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Advanced mode switch reachable from a paired remote client", () => {
+    vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
+    expect(render()).toContain('aria-label="Advanced mode"');
+  });
+
+
   it("groups skins, thread visibility, and tool-call display with preservation copy", () => {
     const html = render();
     expect(html).toContain('<option value="appearance" selected="">Appearance</option>');
