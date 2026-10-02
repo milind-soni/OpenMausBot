@@ -204,6 +204,24 @@ class TranscriptPresentationTest {
     }
 
     @Test
+    fun quietReplyHasNoDigestChipButRecordedWorkCanStillBeOpened() {
+        val quiet = Message("quiet", Message.Role.BOT, Message.Kind.DIGEST, 6000.0,
+            text = "[digest] · no tool activity observed in this turn · files: none changed · reply: A dependency is missing.")
+        val work = quiet.copy(id = "work", at = 7000.0,
+            text = "[digest] · tools: shell ×1 · files: changed a.ts · reply: Fixed.")
+        mount(ActivityDetail.FULL, transcript = messages + quiet + work)
+        compose.onNodeWithText("A dependency is missing.").assertIsDisplayed()
+        compose.onNodeWithText("What I did", substring = false).assertDoesNotExist()
+        compose.onNodeWithText("What I did · 1 tool").performClick()
+        compose.onNodeWithText("changed a.ts").assertIsDisplayed()
+        compose.onNodeWithText("Done").performClick()
+        compose.runOnIdle { scene.environment.chatPreferences.setActivityDetail(ActivityDetail.REDUCED) }
+        compose.onNodeWithText("What I did", substring = false).assertDoesNotExist()
+        compose.onNodeWithText("What I did · 1 tool").assertIsDisplayed()
+        screenshot("digest-only-recorded-work")
+    }
+
+    @Test
     fun changingActivityToHiddenSuppressesLiveReasoningButKeepsWorkingIndicator() {
         mount(ActivityDetail.FULL, reasoning = true)
         compose.onNodeWithText("Thinking…").assertIsDisplayed()

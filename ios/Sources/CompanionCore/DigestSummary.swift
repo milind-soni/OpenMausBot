@@ -60,8 +60,9 @@ public struct DigestSummary: Hashable, Identifiable, Sendable {
             }
             guard !part.isEmpty else { continue }
             // The reply is the bubble just above the chip; repeating its
-            // first sentence here says nothing new.
-            if part.hasPrefix("reply:") { continue }
+            // first sentence here says nothing new. It is the last field and
+            // may itself contain separators, so drop the whole remaining tail.
+            if part.hasPrefix("reply:") { break }
             // A turn that touched nothing gets no chip: these are the
             // renderer saying so, and a chip under every plain chat reply
             // that opens onto "no tool calls" is the noise this replaces.

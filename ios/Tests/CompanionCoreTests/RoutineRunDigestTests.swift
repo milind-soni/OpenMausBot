@@ -168,6 +168,8 @@ final class RoutineRunDigestTests: XCTestCase {
     func testATurnThatDidNothingHasNoSummary() {
         XCTAssertTrue(DigestSummary(text: "[digest] · no tool calls · reply: Hi.").isEmpty)
         XCTAssertTrue(DigestSummary(text: "[digest] · no tool activity observed in this turn · files: none changed · reply: Hi.").isEmpty)
+        XCTAssertTrue(DigestSummary(text: "[digest] · no tool calls · files: none changed · reply: Choose A · B · tools: examples only").isEmpty)
+        XCTAssertEqual(DigestSummary(text: "[digest] · files: changed a.ts · reply: Choose A · B").lines.map(\.value), ["changed a.ts"])
         XCTAssertTrue(DigestSummary(text: "").isEmpty)
         XCTAssertEqual(DigestSummary(text: "[digest] · files: changed a.ts").chipLabel, "What I did")
     }

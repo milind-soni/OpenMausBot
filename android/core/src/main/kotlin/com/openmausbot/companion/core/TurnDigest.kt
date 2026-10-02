@@ -28,6 +28,7 @@ data class TurnDigest(val sections: List<Section>, val toolCalls: Int) {
         private const val SEPARATOR = " · "
         private const val PREFIX = "[digest]"
         private val LABELS = listOf("tools", "files", "memory")
+        private val NO_ACTIVITY = setOf("no tool calls", "no tool activity observed in this turn")
 
         /** `name ×N` with an optional `(k failed)`; lazy, so a name may hold ", ". */
         private val TOOL = Regex("""(?:^|, )((.+?) ×(\d+)(?: \(\d+ failed\))?)(?=, |$)""")
@@ -38,9 +39,11 @@ data class TurnDigest(val sections: List<Section>, val toolCalls: Int) {
             val parts = text.orEmpty().trim().removePrefix(PREFIX).split(SEPARATOR)
                 .map { it.trim() }
                 .filter { it.isNotEmpty() && it != PREFIX }
+                // The reply is the last field and may itself contain separators.
+                .takeWhile { !it.startsWith("reply:") }
             var toolCalls = 0
             val sections = parts.mapNotNull { part ->
-                if (part.startsWith("reply:")) return@mapNotNull null
+                if (part in NO_ACTIVITY) return@mapNotNull null
                 val label = LABELS.firstOrNull { part.startsWith("$it: ") }
                     ?: return@mapNotNull Section(null, listOf(part))
                 val body = part.removePrefix("$label: ")
@@ -50,7 +53,7 @@ data class TurnDigest(val sections: List<Section>, val toolCalls: Int) {
                         toolCalls += calls
                         Section(label, items)
                     }
-                    "files" -> Section(label, body.split("; ").filter { it.isNotBlank() })
+                    "files" -> if (body == "none changed") null else Section(label, body.split("; ").filter { it.isNotBlank() })
                     else -> Section(label, body.split(", ").filter { it.isNotBlank() })
                 }
             }

@@ -26,6 +26,30 @@ another fake engine. The multi-engine and older hook suites currently run on
 POSIX; the shared-control test is cross-platform. CI must establish Windows
 behavior rather than treating a local macOS run as Windows verification.
 
+## Replies with no recorded work
+
+Android and desktop omit empty receipts. Both mobile parsers stop at the
+trailing `reply:` field, including when the reply contains ` · ` separators.
+Recorded tools, files, memory changes, truncation notices and unknown work
+sections remain visible; the stored digest is not deleted.
+
+Regression checks:
+
+```sh
+pnpm exec vitest run src/components/DigestChip.test.ts
+(cd ios && swift test --filter RoutineRunDigestTests)
+(cd android && ./gradlew :core:test --tests '*TurnDigestTest' --tests '*ChatPreferencesTest' :app:testDebugUnitTest --tests '*TranscriptPresentationTest')
+```
+
+For the real desktop renderer, follow [the chat UI recipe](chat-ui.md), launching
+with `--tool-calls '[]'` and setting `features.showToolCalls=true`. Send `hello`
+and wait for settlement: the reply remains visible and the transcript contains
+no `[data-testid="digest-chip"]`. Repeat in a new disposable fixture with
+`--tool-calls '[{"name":"Bash","input":{"command":"echo hi"},"ok":true}]'`:
+the work receipt must now remain visible. Keep both wait results and DOM
+snapshots. Android's transcript suite opens a useful receipt after checking
+that the empty receipt is absent, and saves `digest-only-recorded-work.png`.
+
 ## Boundaries
 
 - A summary contains the visible tool calls, bounded memory changes and a

@@ -78,6 +78,16 @@ class ChatPreferencesTest {
     }
 
     @Test
+    fun quietTurnsDoNotLeaveAnEmptyDigestRowAtAnyActivityLevel() {
+        val quiet = digest("quiet").copy(text = "[digest] · no tool activity observed in this turn · files: none changed · reply: hello")
+        for (detail in ActivityDetail.entries) {
+            assertEquals(listOf("answer"), transcriptRows(listOf(text("answer"), quiet), detail).map { it.id })
+        }
+        val changed = quiet.copy(text = "[digest] · no tool calls · files: changed notes.txt")
+        assertEquals(listOf("answer", "quiet"), transcriptRows(listOf(text("answer"), changed), ActivityDetail.REDUCED).map { it.id })
+    }
+
+    @Test
     fun reducedKeepsACompactionAsItsOwnRowAndBreaksTheRun() {
         val messages = listOf(activity("a"), activity("b"), compaction("c"), activity("d"), activity("e"))
         val rows = transcriptRows(messages, ActivityDetail.REDUCED)

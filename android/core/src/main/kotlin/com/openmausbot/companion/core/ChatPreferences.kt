@@ -208,6 +208,9 @@ fun transcriptRows(messages: List<Message>, detail: ActivityDetail): List<Transc
         }
 
         messages.forEach { message ->
+            // Match iOS: a receipt with no recorded work should not leave a
+            // chip or an empty row after every ordinary conversational reply.
+            if (message.kind == Message.Kind.DIGEST && TurnDigest.parse(message.text).sections.isEmpty()) return@forEach
             val turn = folds[message.id]
             if (turn != null) {
                 flush()
