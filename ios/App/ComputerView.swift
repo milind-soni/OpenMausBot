@@ -43,6 +43,10 @@ struct ComputerView: View {
     /// it holds it under.
     @State private var control: (desktop: LocalVmDesktop, leaseId: String, client: CompanionClient)?
     @State private var takingControl = false
+    /// A hand-back still releasing. The lease id is reused per bot and
+    /// computer, so a take started now would be undone when that release
+    /// lands; Take control waits for it.
+    @State private var handingBack = false
     /// The take in flight, cancelled if the person leaves before it lands.
     @State private var taking: Task<Void, Never>?
     @State private var controlError: String?
@@ -233,7 +237,7 @@ struct ComputerView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(takingControl)
+            .disabled(takingControl || handingBack)
             Text("The bot pauses its computer work until you hand it back.")
                 .font(.caption)
                 .foregroundStyle(Color.white.opacity(0.6))
@@ -245,6 +249,7 @@ struct ComputerView: View {
     }
 
     private func takeControl() async {
+        guard !handingBack else { return }
         takingControl = true
         controlError = nil
         defer { takingControl = false }
@@ -271,6 +276,8 @@ struct ComputerView: View {
         guard let taken = control else { return }
         control = nil
         taken.desktop.stop()
+        handingBack = true
+        defer { handingBack = false }
         await session.handBackLocalVm(for: current, leaseId: taken.leaseId, client: taken.client)
     }
 
