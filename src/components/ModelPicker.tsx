@@ -21,7 +21,7 @@ import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
-import { SimpleModelPane } from "./SimpleModelPane";
+import { repeatedModelLabels, SimpleModelPane } from "./SimpleModelPane";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { friendlyEffort, simpleEffortLevels } from "@/lib/model-friendly";
 import { t } from "@/lib/i18n";
@@ -623,13 +623,17 @@ export function ModelPicker({
     resetList();
   };
 
-  const openLocalModels = (instance: InstanceInfo) => {
-    setPane("custom");
-    resetList();
+  const lookForLocal = (instance: InstanceInfo) => {
     if (needsCli(instance) || instance.policy || probingLocal === instance.instanceId) return;
     setProbingLocal(instance.instanceId);
     void probeLocalModels(instance.instanceId, refreshInstanceModels).then(() =>
       setProbingLocal((current) => (current === instance.instanceId ? null : current)));
+  };
+
+  const openLocalModels = (instance: InstanceInfo) => {
+    setPane("custom");
+    resetList();
+    lookForLocal(instance);
   };
 
   const openApiKeys = () => {
@@ -696,17 +700,33 @@ export function ModelPicker({
   );
 
   // Simple mode lists every provider the picker knows, in the rail's order:
-  // sign-ins, then API keys, then local engines.
+  // sign-ins, then API keys, then local engines. A sign-in family's row opens
+  // on the account last browsed, else the bot's, else the first one ready to
+  // use, so a signed-out first account never hides a signed-in second one;
+  // the family's other accounts are a select away above its models.
+  const simpleOpensOn = (accounts: InstanceInfo[], lastId: string | null) =>
+    accounts.find((account) => account.instanceId === lastId)
+      ?? accounts.find((account) => account.instanceId === selection.instanceId)
+      ?? accounts.find((account) => !needsCli(account) && !needsSignIn(account))
+      ?? accounts[0];
   const simpleProviders = (() => {
-    const groups = railProviders(pickerInstances, railInstance, claudeRailInstance, openaiRailInstance);
+    const groups = railProviders(pickerInstances, railInstance,
+      simpleOpensOn(claudeAccounts, lastClaudeIdRef.current), simpleOpensOn(openaiAccounts, lastOpenaiIdRef.current));
     return [...groups.subscription, ...groups.api, ...groups.custom];
   })();
+  const simpleFamily = signInFamily(railInstance);
+  const simpleAccounts = simpleFamily === "claude" ? claudeAccounts : simpleFamily === "openai" ? openaiAccounts : [];
+  const simpleLabel = simpleProviders.find((provider) => provider.selected)?.label ?? railInstance?.displayName ?? "";
   // Simple mode has no separate local pane: a provider lists its own models,
   // then the local ones it can run (loaded first). Its own models need the
-  // sign-in local ones do not, so a signed-out engine lists only those.
-  const simpleOfficial = customOnly || needsSignIn(railInstance) ? [] : official;
+  // sign-in local ones do not, so a signed-out engine lists only those, and
+  // a way to sign in after them. None of this hangs on the full picker's
+  // pane, so browsing back to a provider shows the same list.
+  const simpleSignIn = !customOnly && needsSignIn(railInstance);
+  const simpleOfficial = customOnly || simpleSignIn ? [] : official;
   const simpleLocal = partitionCustomModels(custom);
   const simpleAll = [...simpleOfficial, ...simpleLocal.pinned, ...simpleLocal.rest];
+  const simpleSetup = Boolean(railInstance && (railInstance.policy || needsCli(railInstance) || (simpleSignIn && simpleAll.length === 0)));
   const simpleSuggested = railInstance
     ? suggestedModels(simpleAll, railInstance.models.default, currentModel, COMPACT_MODEL_COUNT)
     : [];
@@ -715,6 +735,16 @@ export function ModelPicker({
   const simpleSearch = showAll && simpleAll.length > SIMPLE_SEARCH_AFTER;
   const simpleQuery = simpleSearch ? query : "";
   const simpleModels = simpleQuery ? filterCustomModels(simpleOpened, simpleQuery) : showAll ? simpleOpened : simpleSuggested;
+  // Browsing to a provider, or opening its whole list, is asking for every
+  // model it has, so one that runs local models looks for them again (local
+  // servers are otherwise probed only at startup, after sign-in or on refresh).
+  const lookForLocalIn = (instance: InstanceInfo) => {
+    if (offersLocalModels(instance, instance.models.options.filter((option) => option.custom).length)) lookForLocal(instance);
+  };
+  const browseSimple = (instance: InstanceInfo) => {
+    selectRail(instance);
+    lookForLocalIn(instance);
+  };
   const activeLevels = active?.capabilities?.effortLevels ?? [];
   const simpleEffort = activeLevels.length > 0 ? {
     levels: simpleEffortLevels(activeLevels, selection.effort),
@@ -837,13 +867,37 @@ export function ModelPicker({
             <SimpleModelPane
               botName={bot.name}
               providers={simpleProviders}
-              onProvider={selectRail}
-              needsSetup={railInstance && (railInstance.policy || blocked) ? { name: simpleProviders.find((provider) => provider.selected)?.label ?? railInstance.displayName } : null}
-              onSetUp={() => setFullView(true)}
+              onProvider={browseSimple}
+              account={railInstance && simpleAccounts.length > 1 ? (
+                <ClaudeAccountSelect accounts={simpleAccounts} selectedId={railInstance.instanceId} onSelect={browseSimple} />
+              ) : undefined}
+              managedBy={railInstance?.policy?.organizationName ?? null}
+              // With several accounts the select above names the one at issue.
+              needsSetup={railInstance && simpleSetup ? { name: simpleAccounts.length > 1 ? railInstance.displayName : simpleLabel } : null}
+              signIn={railInstance && simpleSignIn && !simpleSetup ? { name: simpleLabel } : null}
+              onSetUp={() => {
+                // Sign-in is for the provider's own models: the full picker's main list.
+                if (simpleSignIn && hasOfficialModels) setPane("main");
+                setFullView(true);
+              }}
               models={simpleModels}
+              repeatedLabels={repeatedModelLabels(simpleAll)}
               query={simpleQuery}
-              showAll={!showAll && simpleAll.length > simpleSuggested.length
-                ? { count: simpleAll.length, onShow: () => setShowAll(true) } : null}
+              // One button that opens the list and folds it back, so focus stays on it.
+              showAll={simpleAll.length > simpleSuggested.length && !simpleQuery ? {
+                count: simpleAll.length,
+                open: showAll,
+                onToggle: () => {
+                  if (showAll) {
+                    resetList();
+                    return;
+                  }
+                  setShowAll(true);
+                  if (railInstance) lookForLocalIn(railInstance);
+                },
+              } : null}
+              onRefresh={refreshModels}
+              refreshing={refreshing}
               search={simpleSearch ? (
                 <ModelSearch
                   value={query}
@@ -855,7 +909,9 @@ export function ModelPicker({
               currentModelId={currentModel}
               onPick={(model) => railInstance && pick(railInstance, model)}
               variantsRow={active?.capabilities?.modelVariants ? (
-                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId && scope === "bot")} />
+                // A closed select shows only its choice, so it keeps a short name.
+                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId && scope === "bot")}
+                  label={<span className="shrink-0 text-[12px] font-medium text-ink-secondary">{t("model.simple.reasoning")}</span>} />
               ) : undefined}
               effort={simpleEffort}
               newChats={threadId ? { checked: scope === "bot", onChange: (checked) => setScope(checked ? "bot" : "thread") } : null}

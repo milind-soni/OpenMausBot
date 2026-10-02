@@ -18,6 +18,8 @@ const fixture = vi.hoisted(() => {
     own: 0,
     instances: [] as InstanceInfo[],
     dispatch: (() => {}) as (...args: unknown[]) => void,
+    refreshModels: (() => Promise.resolve()) as (instanceId: string) => Promise<void>,
+    refreshInstances: (() => Promise.resolve()) as () => Promise<void>,
   };
 });
 vi.mock("react", async (original) => ({
@@ -38,13 +40,15 @@ vi.mock("@/state/store", async (importOriginal) => ({
   useStore: () => ({
     state: { instances: fixture.instances, bots: [], modelVariantSessions: {} },
     dispatch: fixture.dispatch,
-    refreshInstances: () => Promise.resolve(),
-    refreshModels: () => Promise.resolve(),
+    refreshInstances: fixture.refreshInstances,
+    refreshModels: fixture.refreshModels,
   }),
 }));
 
-const { ModelEngineRail, ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
+const { ClaudeAccountSelect, ModelEngineRail, ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
 const { SimpleModelPane } = await import("./SimpleModelPane");
+const { EngineSetup } = await import("./EngineSetup");
+const { InstanceProviderMark } = await import("./ProviderIcons");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -139,6 +143,8 @@ beforeEach(() => {
   fixture.own = 0;
   fixture.instances = [claude()];
   fixture.dispatch = vi.fn();
+  fixture.refreshModels = vi.fn(() => Promise.resolve());
+  fixture.refreshInstances = vi.fn(() => Promise.resolve());
 });
 
 describe("the model picker in Simple mode", () => {
@@ -194,18 +200,34 @@ describe("the model picker in Simple mode", () => {
     expect(pane(opened)!.props.providers.map((provider) => provider.label))
       .toEqual(["Claude", "OpenAI", "Grok", "Cursor", "OpenAI", "Claude (API key)", "pi"]);
     const column = region(menu(opened.html), "data-simple-providers", "data-simple-models");
-    for (const name of ["Claude", "OpenAI", "Grok", "Cursor", "Claude (API key)", "pi"]) expect(column).toContain(`>${name}</span>`);
+    for (const name of ["Claude", "OpenAI", "Grok", "Cursor", "pi"]) expect(column).toContain(`>${name}</span>`);
     expect(column.match(/data-simple-key/g)).toHaveLength(2);
+    // The key on the mark says "API key", so the name does not say it again.
+    expect(column).not.toContain("(API key)");
 
-    // The two OpenAI rows differ by the key alone.
+    // The two OpenAI rows (and the two Claude rows) differ by the key alone.
     const rows = inside(opened).filter((node) => node.props["data-simple-provider"] !== undefined);
     const byId = (id: string) => rows.find((node) => node.props["data-simple-provider"] === id)!;
+    const hasKey = (id: string) => nodes(byId(id).props.children).some((node) => node.props["data-simple-key"] !== undefined);
     expect(byId("openai").props["aria-label"]).toBe("OpenAI · API key");
     expect(byId("openai").props.title).toContain("Runs on your API key");
-    expect(nodes(byId("openai").props.children).some((node) => node.props["data-simple-key"] !== undefined)).toBe(true);
+    expect(byId("claudeApi").props["aria-label"]).toBe("Claude · API key");
+    expect(hasKey("openai")).toBe(true);
+    expect(hasKey("claudeApi")).toBe(true);
     expect(byId("codex").props["aria-label"]).toBeUndefined();
-    expect(nodes(byId("codex").props.children).some((node) => node.props["data-simple-key"] !== undefined)).toBe(false);
-    expect(nodes(byId("pi").props.children).some((node) => node.props["data-simple-key"] !== undefined)).toBe(false);
+    expect(hasKey("codex")).toBe(false);
+    expect(hasKey("pi")).toBe(false);
+  });
+
+  it("puts the key on the provider mark, so the name keeps the row's width", () => {
+    fixture.instances = [claude(), openaiKey];
+    const row = inside(open(bot())).find((node) => node.props["data-simple-provider"] === "openai")!;
+    const [mark, name] = Children.toArray(row.props.children).filter(isValidElement) as Node[];
+    const onMark = Children.toArray(mark.props.children).filter(isValidElement) as Node[];
+    expect(onMark.map((node) => node.type)).toEqual([InstanceProviderMark, "span"]);
+    expect(onMark[1].props["data-simple-key"]).toBeDefined();
+    expect(String(onMark[1].props.className)).toContain("absolute");
+    expect(name.props.children).toBe("OpenAI");
   });
 
   it("has no More row: there is nothing past the providers and models", () => {
@@ -254,8 +276,12 @@ describe("the model picker in Simple mode", () => {
     const all = render(forBot);
     expect(labels(all)).toHaveLength(15);
     expect(labels(all).slice(0, 5)).toEqual(suggested);
-    expect(pane(all)!.props.showAll).toBeNull();
+    // The same button stays where it was (so keyboard focus does too) and
+    // now folds the list back.
+    expect(pane(all)!.props.showAll).toMatchObject({ count: 15, open: true });
     expect(menu(all.html)).not.toContain("Show all 15 models");
+    expect(menu(all.html)).toContain('aria-expanded="true"');
+    expect(menu(all.html)).toContain("Show suggested only");
     const html = region(menu(all.html), "data-simple-models", "data-simple-effort-band");
     expect(html.indexOf("data-simple-model-search")).toBeLessThan(html.indexOf("Model 1<"));
     expect(html).toContain('aria-label="Search models"');
@@ -267,6 +293,28 @@ describe("the model picker in Simple mode", () => {
     const none = render(forBot);
     expect(labels(none)).toEqual([]);
     expect(menu(none.html)).toContain("Nothing matches “zzz”");
+  });
+
+  it("folds an opened list back from the same button", () => {
+    fixture.instances = [claude(true, many(15))];
+    const forBot = bot(undefined, "claude", "model-1");
+    pane(open(forBot))!.props.showAll!.onToggle();
+    const search = pane(render(forBot))!.props.search as ReactElement<{ onChange: (value: string) => void }>;
+    // A search narrows the list, so the toggle steps aside until it is cleared.
+    search.props.onChange("model 1");
+    expect(pane(render(forBot))!.props.showAll).toBeNull();
+    search.props.onChange("");
+    const opened = pane(render(forBot))!;
+    expect(opened.props.showAll).toMatchObject({ open: true });
+
+    opened.props.showAll!.onToggle();
+    const folded = render(forBot);
+    expect(labels(folded)).toHaveLength(5);
+    expect(pane(folded)!.props.showAll).toMatchObject({ count: 15, open: false });
+    expect(pane(folded)!.props.search).toBeUndefined();
+    expect(menu(folded.html)).toContain('aria-expanded="false"');
+    pane(folded)!.props.showAll!.onToggle();
+    expect(labels(render(forBot))).toHaveLength(15);
   });
 
   it("opens a shorter list in place without a search box", () => {
@@ -287,7 +335,7 @@ describe("the model picker in Simple mode", () => {
     expect(pane(browsed)!.props.needsSetup).toBeNull();
     expect(labels(browsed)).toEqual(["Llama 4", "Gemma 4", "Qwen 3", "Mistral Small", "Phi 4"]);
     expect(pane(browsed)!.props.showAll!.count).toBe(7);
-    pane(browsed)!.props.showAll!.onShow();
+    pane(browsed)!.props.showAll!.onToggle();
     expect(labels(render(forBot))).toEqual(["Llama 4", "Gemma 4", "Qwen 3", "Mistral Small", "Phi 4", "DeepSeek R2", "Granite 4"]);
     pane(render(forBot))!.props.onPick("granite");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -302,7 +350,7 @@ describe("the model picker in Simple mode", () => {
     const forBot = bot(undefined, "claude", "model-1");
     const opened = open(forBot);
     expect(labels(opened)).toEqual(["Model 1", "Model 2", "Model 3", "Model 4", "Model 5"]);
-    pane(opened)!.props.showAll!.onShow();
+    pane(opened)!.props.showAll!.onToggle();
     expect(labels(render(forBot))).toEqual([...own.map((option) => option.label), "llama4 (Ollama)", "qwen3 (Ollama)"]);
   });
 
@@ -311,6 +359,40 @@ describe("the model picker in Simple mode", () => {
     const opened = open(bot(undefined, "claude", "ollama::qwen3"));
     expect(pane(opened)!.props.needsSetup).toBeNull();
     expect(labels(opened)).toEqual(["qwen3 (Ollama)"]);
+  });
+
+  it("keeps a signed-out engine's local list when its row is clicked again, with a way to sign in", () => {
+    const signedOut = claude(false, [...claudeModels, { id: "ollama::qwen3", label: "qwen3 (Ollama)", custom: true }]);
+    fixture.instances = [signedOut, grok];
+    const forBot = bot(undefined, "claude", "ollama::qwen3");
+    const opened = open(forBot);
+    expect(pane(opened)!.props.signIn).toEqual({ name: "Claude" });
+
+    // Clicking the row it is already on, or browsing away and back, must not
+    // trade the local list (and the model the bot is on) for "needs setup".
+    pane(opened)!.props.onProvider(signedOut);
+    const again = render(forBot);
+    expect(pane(again)!.props.needsSetup).toBeNull();
+    expect(labels(again)).toEqual(["qwen3 (Ollama)"]);
+    pane(again)!.props.onProvider(grok);
+    pane(render(forBot))!.props.onProvider(signedOut);
+    const back = render(forBot);
+    expect(pane(back)!.props.needsSetup).toBeNull();
+    expect(labels(back)).toEqual(["qwen3 (Ollama)"]);
+
+    const list = region(menu(back.html), "data-simple-models", "data-simple-effort-band");
+    expect(list).toContain("Sign in for Claude&#x27;s own models");
+    click(inside(back).find((node) => node.props["data-simple-sign-in"] !== undefined));
+    // The full picker opens on the sign-in, not on the local list.
+    const full = render(forBot);
+    expect(pane(full)).toBeUndefined();
+    const setup = full.nodes.find((node) => node.type === EngineSetup);
+    expect(setup?.props).toMatchObject({ intent: "cloud" });
+  });
+
+  it("offers no sign-in row on a signed-in engine", () => {
+    expect(pane(open(bot()))!.props.signIn).toBeNull();
+    expect(menu(open(bot()).html)).not.toContain("data-simple-sign-in");
   });
 
   it("spans the effort steps across the whole bottom band, with no question above them", () => {
@@ -404,6 +486,170 @@ describe("the model picker in Simple mode", () => {
     expect(region(html, "data-simple-models", "data-simple-effort-band")).toContain("No model providers are available.");
   });
 
+  it("asks a provider with nothing to list to check again", async () => {
+    const plan: InstanceInfo = {
+      ...engine("chatgpt", "codex", "ChatGPT plan", "subscription", []),
+      snapshot: { state: "available", version: "1.0.0", authenticated: true, chatgptPlan: true },
+    };
+    fixture.instances = [plan];
+    const opened = open(bot(undefined, "chatgpt", "gpt-5.6"));
+    const list = region(menu(opened.html), "data-simple-models", "data-simple-effort-band");
+    expect(list).toContain("No models to show here yet.");
+    expect(list).toContain(">Check again</button>");
+    click(inside(opened).find((node) => node.props["data-simple-refresh"] !== undefined));
+    await vi.waitFor(() => expect(fixture.refreshModels).toHaveBeenCalledWith("chatgpt"));
+    expect(fixture.refreshInstances).toHaveBeenCalled();
+  });
+
+  it("reaches every Claude account from the one Claude row, through a select above its models", () => {
+    const work: InstanceInfo = { ...claude(true, [{ id: "claude-sonnet-5-5", label: "Sonnet 5.5" }]), instanceId: "claude-work", displayName: "Work" };
+    fixture.instances = [claude(), work];
+    const forBot = bot();
+    const opened = open(forBot);
+    expect(pane(opened)!.props.providers.map((provider) => provider.label)).toEqual(["Claude"]);
+    const account = pane(opened)!.props.account as ReactElement<ComponentProps<typeof ClaudeAccountSelect>>;
+    expect(account.type).toBe(ClaudeAccountSelect);
+    expect(account.props.accounts.map((instance) => instance.instanceId)).toEqual(["claude", "claude-work"]);
+    expect(account.props.selectedId).toBe("claude");
+    const html = region(menu(opened.html), "data-simple-models", "data-simple-effort-band");
+    expect(html.indexOf("data-simple-account")).toBeGreaterThan(-1);
+    expect(html.indexOf("data-simple-account")).toBeLessThan(html.indexOf("Opus 5.5<"));
+    expect(html).toContain('<option value="claude-work">Work</option>');
+
+    account.props.onSelect(work);
+    const browsed = render(forBot);
+    expect(labels(browsed)).toEqual(["Sonnet 5.5"]);
+    expect((pane(browsed)!.props.account as ReactElement<ComponentProps<typeof ClaudeAccountSelect>>).props.selectedId).toBe("claude-work");
+    expect(pane(browsed)!.props.providers[0].selected).toBe(true);
+    pane(browsed)!.props.onPick("claude-sonnet-5-5");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", selection: expect.objectContaining({ instanceId: "claude-work", model: "claude-sonnet-5-5" }),
+    }));
+  });
+
+  it("shows no account select for a provider with one account", () => {
+    fixture.instances = [claude(), codex, grok];
+    const opened = open(bot());
+    expect(pane(opened)!.props.account).toBeUndefined();
+    expect(menu(opened.html)).not.toContain("data-simple-account");
+  });
+
+  it("reaches Codex and the ChatGPT plan from the one OpenAI row", () => {
+    const plan: InstanceInfo = {
+      ...engine("chatgpt", "codex", "ChatGPT plan", "subscription", [{ id: "gpt-5.6-plan", label: "GPT-5.6 (plan)" }]),
+      snapshot: { state: "available", version: "1.0.0", authenticated: true, chatgptPlan: true },
+    };
+    fixture.instances = [claude(), codex, plan];
+    const forBot = bot();
+    const opened = open(forBot);
+    const openai = pane(opened)!.props.providers.filter((provider) => provider.label === "OpenAI");
+    expect(openai).toHaveLength(1);
+    pane(opened)!.props.onProvider(openai[0].target);
+    const browsed = render(forBot);
+    expect(labels(browsed)).toEqual(["GPT-5.6"]);
+    const account = pane(browsed)!.props.account as ReactElement<ComponentProps<typeof ClaudeAccountSelect>>;
+    expect(account.props.accounts.map((instance) => instance.displayName)).toEqual(["Codex", "ChatGPT plan"]);
+
+    account.props.onSelect(plan);
+    const onPlan = render(forBot);
+    expect(labels(onPlan)).toEqual(["GPT-5.6 (plan)"]);
+    pane(onPlan)!.props.onPick("gpt-5.6-plan");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", selection: expect.objectContaining({ instanceId: "chatgpt", model: "gpt-5.6-plan" }),
+    }));
+  });
+
+  it("opens a sign-in family on an account that is ready, not on a signed-out first one", () => {
+    const signedOutCodex: InstanceInfo = { ...codex, snapshot: { ...codex.snapshot, authenticated: false } };
+    const plan: InstanceInfo = {
+      ...engine("chatgpt", "codex", "ChatGPT plan", "subscription", [{ id: "gpt-5.6-plan", label: "GPT-5.6 (plan)" }]),
+      snapshot: { state: "available", version: "1.0.0", authenticated: true, chatgptPlan: true },
+    };
+    fixture.instances = [claude(), signedOutCodex, plan];
+    const forBot = bot();
+    const opened = open(forBot);
+    const openai = pane(opened)!.props.providers.find((provider) => provider.label === "OpenAI")!;
+    expect(openai.target.instanceId).toBe("chatgpt");
+    pane(opened)!.props.onProvider(openai.target);
+    const browsed = render(forBot);
+    expect(pane(browsed)!.props.needsSetup).toBeNull();
+    expect(labels(browsed)).toEqual(["GPT-5.6 (plan)"]);
+
+    // The signed-out account is still a select away, and says what it needs.
+    (pane(browsed)!.props.account as ReactElement<ComponentProps<typeof ClaudeAccountSelect>>).props.onSelect(signedOutCodex);
+    const onCodex = render(forBot);
+    expect(pane(onCodex)!.props.needsSetup).toEqual({ name: "Codex" });
+    expect(region(menu(onCodex.html), "data-simple-models", "data-simple-effort-band")).toContain("data-simple-account");
+  });
+
+  it("dims a provider its organisation blocks and says why, with no setup to offer", () => {
+    const blocked: InstanceInfo = { ...openaiKey, policy: { organizationName: "Acme", reason: "Acme allows only company models." } };
+    fixture.instances = [claude(), blocked];
+    const forBot = bot();
+    const opened = open(forBot);
+    const rows = inside(opened).filter((node) => node.props["data-simple-provider"] !== undefined);
+    const row = rows.find((node) => node.props["data-simple-provider"] === "openai")!;
+    expect(row.props["aria-label"]).toBe("OpenAI · API key · Managed by Acme");
+    expect(row.props.title).toBe("OpenAI · Managed by Acme");
+    expect(String(row.props.className)).toContain("opacity-40");
+    expect(String(rows.find((node) => node.props["data-simple-provider"] === "claude")!.props.className)).not.toContain("opacity-40");
+
+    pane(opened)!.props.onProvider(blocked);
+    const list = region(menu(render(forBot).html), "data-simple-models", "data-simple-effort-band");
+    expect(list).toContain("Managed by Acme");
+    expect(list).toContain("Bots cannot use this model provider while this computer is connected to Acme.");
+    expect(list).not.toContain("needs to be set up");
+    expect(list).not.toContain("data-simple-set-up");
+    expect(fixture.refreshModels).not.toHaveBeenCalled();
+  });
+
+  it("tells same-named models apart by their route, even with a twin behind Show all", () => {
+    fixture.instances = [engine("pi", "piAgent", "pi", "custom", [
+      { id: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "anthropic" },
+      { id: "openai/gpt-5.6", label: "GPT-5.6", custom: true, provider: "openai" },
+      { id: "openai/gpt-5.6-mini", label: "GPT-5.6 mini", custom: true, provider: "openai" },
+      { id: "google/gemini-3", label: "Gemini 3", custom: true, provider: "google" },
+      { id: "xai/grok-5", label: "Grok 5", custom: true, provider: "xai" },
+      { id: "amazon-bedrock/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "amazon-bedrock" },
+    ])];
+    const forBot = bot(undefined, "pi", "openai/gpt-5.6");
+    const row = (rendered: ReturnType<typeof render>, name: string) =>
+      inside(rendered).find((node) => node.type === "button" && node.props["aria-label"] === name)!;
+    const route = (node: Node) => nodes(node.props.children).find((child) => child.props["data-simple-route"] !== undefined)?.props.children;
+
+    const opened = open(forBot);
+    expect(labels(opened)).not.toContain("amazon-bedrock");
+    expect(route(row(opened, "Claude Sonnet 4.5 · anthropic"))).toBe("anthropic");
+    // A name the list does not repeat stays a name; its hint still says the route.
+    expect(route(row(opened, "GPT-5.6 · openai"))).toBeUndefined();
+    expect(row(opened, "GPT-5.6 · openai").props.title).toContain("openai");
+
+    pane(opened)!.props.showAll!.onToggle();
+    const all = render(forBot);
+    expect(route(row(all, "Claude Sonnet 4.5 · amazon-bedrock"))).toBe("amazon-bedrock");
+    expect(row(all, "Claude Sonnet 4.5 · amazon-bedrock").props.title).toContain("amazon-bedrock");
+  });
+
+  it("looks for local models again when it browses to a provider that runs them or opens its whole list", () => {
+    const codexMany = engine("codex", "codex", "Codex", "subscription", many(8));
+    fixture.instances = [claude(true, many(8)), codexMany, grok, local];
+    const forBot = bot(undefined, "claude", "model-1");
+    const opened = open(forBot);
+    expect(fixture.refreshModels).not.toHaveBeenCalled();
+    pane(opened)!.props.showAll!.onToggle();
+    expect(fixture.refreshModels).toHaveBeenLastCalledWith("claude");
+
+    // Engines with no local models have none to look for.
+    pane(render(forBot))!.props.onProvider(grok);
+    pane(render(forBot))!.props.onProvider(codexMany);
+    pane(render(forBot))!.props.showAll!.onToggle();
+    expect(fixture.refreshModels).toHaveBeenCalledTimes(1);
+
+    pane(render(forBot))!.props.onProvider(local);
+    expect(fixture.refreshModels).toHaveBeenLastCalledWith("pi");
+    expect(fixture.refreshModels).toHaveBeenCalledTimes(2);
+  });
+
   it("opens AI accounts from the bottom band", () => {
     const opened = open(bot());
     const manage = inside(opened).find((node) => node.props["data-simple-manage"] !== undefined)!;
@@ -418,12 +664,15 @@ describe("the model picker in Simple mode", () => {
     const row = pane(opened)!.props.variantsRow as ReactElement<ComponentProps<typeof ModelVariantRow>>;
     expect(row.type).toBe(ModelVariantRow);
     expect(row.props).toMatchObject({ compact: true, wide: true });
-    expect(row.props.label).toBeUndefined();
     const bottom = region(menu(opened.html), "data-simple-effort-band");
     const select = bottom.slice(bottom.indexOf("<select"), bottom.indexOf(">", bottom.indexOf("<select")));
     expect(select).toContain('aria-label="Reasoning variant"');
     expect(select).toContain("flex-1");
     expect(select).not.toContain("max-w-[65%]");
+    // A closed select shows only its choice ("Use session setting"), so it
+    // keeps a one-word name beside it; the question stays gone.
+    expect(bottom.indexOf(">Reasoning</span>")).toBeGreaterThan(-1);
+    expect(bottom.indexOf(">Reasoning</span>")).toBeLessThan(bottom.indexOf("<select"));
     expect(bottom).not.toContain(">Quick</button>");
     expect(bottom).not.toContain("How hard should");
   });
