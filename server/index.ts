@@ -5686,9 +5686,6 @@ const watchdog = new TurnWatchdog({
     const stalledResourceOwner = turnResourceOwners.get(turn.threadId);
     const stalledGeneration = directTurnGenerationByThread.get(turn.threadId);
     const stalledProviderTurn = directRequestOwners.get(turn.threadId);
-    if (stalledGeneration && stalledProviderTurn?.generation === stalledGeneration && stalledProviderTurn.turnId) {
-      retireProviderTurn(stalledProviderTurn.turnId);
-    }
     cancelDirectTurnDispatch(turn.botId, turn.threadId);
     const stalledVmTarget = localVmThreadTargets.get(turn.threadId);
     revokeInternalCapabilitiesForThread(turn.threadId);
@@ -5726,6 +5723,9 @@ const watchdog = new TurnWatchdog({
     const releaseOwnership = () => {
       if (stalledGeneration && directTurnGenerationByThread.get(turn.threadId) !== stalledGeneration) return;
       if (stalledResourceOwner && turnResourceOwners.get(turn.threadId)?.generation !== stalledResourceOwner.generation) return;
+      if (stalledGeneration && stalledProviderTurn?.generation === stalledGeneration && stalledProviderTurn.turnId) {
+        retireProviderTurn(stalledProviderTurn.turnId);
+      }
       // A goal coordinator can stall before sendTurn reveals its provider
       // turn id. Reusing the room during that ambiguous pre-id window would
       // make old and replacement events indistinguishable. Keep ownership
