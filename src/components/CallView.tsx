@@ -33,6 +33,8 @@ import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPro
 import { track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp } from "@/lib/call-capability";
+import { t } from "@/lib/i18n";
+import { VoiceSetupDialog } from "./VoiceSetupDialog";
 
 /** Spoken answers to a permission card. Anything else is read as a reply
  * to the bot, not as consent — an approval must never be granted by a
@@ -75,13 +77,14 @@ export function CallTargetButton({
   targetId: string;
   targetName: string;
   voices: Array<string | undefined>;
-  /** Agent profile to open when voice setup is missing (rooms choose a member). */
+  /** The agent whose voice the set-up pop-up edits when voice is missing
+   * (rooms choose a member). */
   setupBotId?: string;
   /** Rooms cannot rely on one workspace fallback for multiple speakers. */
   requireExplicitVoices: boolean;
   onStart: () => void;
 }) {
-  const { state, dispatch } = useStore();
+  const { state } = useStore();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const active = useOnCall() === targetId;
   const capabilityHelp = capabilitiesReady
@@ -97,6 +100,15 @@ export function CallTargetButton({
   const unavailable = !active && (!capabilitiesReady || !supported || !voiceReady);
   const voiceSetupRequired = capabilitiesReady && supported && !voiceReady;
   const [helpOpen, setHelpOpen] = useState(false);
+  // Voice set-up opens over the chat instead of the bot's full settings.
+  const [voiceSetupOpen, setVoiceSetupOpen] = useState(false);
+  // In a room the pop-up moves on to the next member without a voice; once
+  // every member has one it stays on the last, instead of jumping back to
+  // the first member (the room's fallback).
+  const [voiceSetupBotId, setVoiceSetupBotId] = useState(setupBotId);
+  if (voiceSetupRequired && setupBotId !== voiceSetupBotId) setVoiceSetupBotId(setupBotId);
+  const shownSetupBotId = voiceSetupRequired ? setupBotId : voiceSetupBotId;
+  const setupBot = shownSetupBotId ? state.bots.find((candidate) => candidate.id === shownSetupBotId) : undefined;
   const helpMotion = useMenuMotion(Boolean(unavailable && helpOpen));
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -144,6 +156,13 @@ export function CallTargetButton({
     };
   }, [helpOpen]);
 
+  // The one way a call starts: this button, or the set-up pop-up's "Start
+  // call" once a voice is ready.
+  const begin = () => {
+    onStart();
+    startCall(targetId);
+  };
+
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -154,8 +173,7 @@ export function CallTargetButton({
             setHelpOpen((open) => !open);
             return;
           }
-          onStart();
-          startCall(targetId);
+          begin();
         }}
         aria-expanded={unavailable ? helpOpen : undefined}
         aria-controls={unavailable ? helpId : undefined}
@@ -205,20 +223,35 @@ export function CallTargetButton({
               Choose This computer
             </button>
           )}
-          {voiceSetupRequired && (
+          {voiceSetupRequired && setupBot && (
             <button
               type="button"
+              aria-haspopup="dialog"
+              data-voice-setup-open
               onClick={() => {
                 setHelpOpen(false);
-                if (setupBotId && setupBotId !== targetId) dispatch({ type: "select", id: setupBotId });
-                dispatch({ type: "toggleSettings", open: true, section: "voice" });
+                setVoiceSetupOpen(true);
               }}
-              className="mt-2.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110"
+              className="mt-2.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink hover:brightness-110"
             >
-              Open agent settings
+              {t("call.voiceSetup.open")}
             </button>
           )}
         </div>
+      )}
+
+      {voiceSetupOpen && setupBot && (
+        <VoiceSetupDialog
+          bot={setupBot}
+          callName={targetName}
+          ready={supported && voiceReady}
+          returnFocusRef={buttonRef}
+          onClose={() => setVoiceSetupOpen(false)}
+          onStartCall={() => {
+            setVoiceSetupOpen(false);
+            begin();
+          }}
+        />
       )}
     </div>
   );

@@ -10,6 +10,7 @@ const fixture = vi.hoisted(() => ({
   onCall: null as string | null,
   dictation: true,
   config: { tts: { configured: true, ready: true } } as Record<string, unknown> | null,
+  bots: [] as unknown[],
   helpShown: false,
   dispatch: vi.fn(),
   startCall: vi.fn(),
@@ -19,7 +20,7 @@ const fixture = vi.hoisted(() => ({
 
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config }, dispatch: fixture.dispatch }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config, bots: fixture.bots }, dispatch: fixture.dispatch }) };
 });
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
@@ -75,6 +76,7 @@ beforeEach(() => {
   fixture.onCall = null;
   fixture.dictation = true;
   fixture.config = { tts: { configured: true, ready: true } };
+  fixture.bots = [bot];
   fixture.helpShown = false;
   fixture.startCall.mockClear();
   fixture.endCall.mockClear();
@@ -118,7 +120,10 @@ describe("composer call button", () => {
     expect(button.props["aria-label"]).toBe("Set up a voice in an agent profile to make calls");
     expect(button.props["aria-controls"]).toBeTruthy();
     expect(html).toContain("Call unavailable");
-    expect(html).toContain("Open agent settings");
+    // Voice set-up is a pop-up now, not a trip to the bot's full settings
+    // (CallView.voiceSetup.test.ts covers it).
+    expect(html).toContain("Set up voice");
+    expect(html).not.toContain("Open agent settings");
     expect(html).toMatch(/role="group" aria-label="Call unavailable" class="[^"]*\bbottom-full\b/);
     button.props.onClick!();
     expect(fixture.startCall).not.toHaveBeenCalled();
