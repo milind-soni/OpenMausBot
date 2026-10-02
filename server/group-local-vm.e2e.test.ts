@@ -753,20 +753,25 @@ describe("Group Local VM ownership on the real isolated server", () => {
       await api("POST", `/api/bots/${bot.id}/messages`, { text: "Hold the VM" });
       const first = computer(await dump());
       rmSync(stateFile + ".latecompleted", { force: true });
-      vmState({ delayCompletion: 8_000, stall: true });
+      rmSync(stateFile + ".completionheld", { force: true });
+      rmSync(stateFile + ".releasecompletion", { force: true });
+      vmState({ holdCompletion: true, stall: true });
       await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes("the turn was stopped"));
       await idle(bot.id);
+      await until(() => existsSync(stateFile + ".completionheld"), Boolean);
       expect((await gate(first)).status).toBe(401);
       vmState(); rmSync(dumpFile, { force: true });
       const threadId = newTask ? (await api("POST", `/api/bots/${bot.id}/tasks`, {})).task.threadId : bot.threadId;
       await api("POST", `/api/bots/${bot.id}/messages`, { text: "Keep using the VM", threadId });
       const next = computer(await dump());
       expect(existsSync(stateFile + ".latecompleted")).toBe(false);
+      writeFileSync(stateFile + ".releasecompletion", "release");
       await until(() => existsSync(stateFile + ".latecompleted"), Boolean);
       await new Promise(resolve => setTimeout(resolve, 100));
       expect((await gate(next)).status).toBe(200);
       expect((await api("GET", "/api/bots?messages=0")).bots.find((entry: any) => entry.id === bot.id).busy).toBe(true);
     } finally {
+      writeFileSync(stateFile + ".releasecompletion", "release");
       vmState({ containers: [] }); writeFileSync(finishFile, "finish");
       await api("POST", `/api/bots/${bot.id}/interrupt`, {});
       await idle(bot.id);
