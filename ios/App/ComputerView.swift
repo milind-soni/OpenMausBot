@@ -41,7 +41,7 @@ struct ComputerView: View {
     @State private var vmProblem: LocalVmProblem?
     /// The live desktop while this phone holds the Local VM, and the lease
     /// it holds it under.
-    @State private var control: (desktop: LocalVmDesktop, leaseId: String)?
+    @State private var control: (desktop: LocalVmDesktop, leaseId: String, client: CompanionClient)?
     @State private var takingControl = false
     /// The take in flight, cancelled if the person leaves before it lands.
     @State private var taking: Task<Void, Never>?
@@ -254,12 +254,12 @@ struct ComputerView: View {
             // was in flight: give the computer straight back instead of
             // opening a desktop nobody is looking at.
             guard !Task.isCancelled, scenePhase == .active else {
-                await session.handBackDetached(bot: current, leaseId: viewer.leaseId)
+                await session.handBackDetached(bot: current, leaseId: viewer.leaseId, client: viewer.client)
                 return
             }
             let desktop = LocalVmDesktop(request: viewer.request, password: viewer.password)
             desktop.start()
-            control = (desktop, viewer.leaseId)
+            control = (desktop, viewer.leaseId, viewer.client)
         } catch is CancellationError {
             return
         } catch {
@@ -271,7 +271,7 @@ struct ComputerView: View {
         guard let taken = control else { return }
         control = nil
         taken.desktop.stop()
-        await session.handBackLocalVm(for: current, leaseId: taken.leaseId)
+        await session.handBackLocalVm(for: current, leaseId: taken.leaseId, client: taken.client)
     }
 
     /// Fetch Local VM stills while this view is on screen. Stops on a 409
