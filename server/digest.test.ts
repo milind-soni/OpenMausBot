@@ -74,14 +74,24 @@ describe("buildTurnDigest", () => {
     ]);
   });
 
-  it("names the shell bucket with its redacted sample when rendered", () => {
+  // The reported line: a cp of a user's home path and two swift -e scripts
+  // were each printed as a tool name. The phones split the tools part after
+  // "×N" / "(N failed)", so nothing may follow the count.
+  it("renders command-titled chips as a bare shell count with no command text", () => {
     const d = buildTurnDigest({
       ...base,
-      activities: [activity('/bin/zsh -lc "pnpm test"', true, "pnpm test")],
+      activities: [
+        activity('cp "/Users/someone/.openmausbot/task-workspaces/9d6ab24f-15b8-45e2/out.png" ~/Desktop/', true, "cp out.png ~/Desktop/"),
+        activity("swift -e 'import AppKit\n// Target 1080 × 1080\nlet size = NSSize(width: 1080, height: 1080)'", true, "swift -e …"),
+        activity("swift -e 'import AppKit\nlet canvas = NSImage()'", true, "swift -e …"),
+        activity("memory_update", true),
+      ],
       memory: [],
     });
-    expect(renderDigest(d)).toContain("shell ×1 (pnpm test)");
-    expect(renderDigest(d)).not.toContain("/bin/zsh");
+    const line = renderDigest(d);
+    expect(line).toContain("tools: shell ×3, memory_update ×1");
+    expect(line).not.toContain("/Users/");
+    expect(line).not.toContain("swift");
   });
 
   it("ignores activity rows from other turns and rows that are not tool calls", () => {

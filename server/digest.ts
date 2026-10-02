@@ -18,7 +18,7 @@ import type { MemoryJournalEntry } from "./memory-journal.ts";
 import type { Message } from "./store.ts";
 
 import type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
-import { SHELL_TOOL, toolIdentity } from "../shared/tool-name.ts";
+import { toolIdentity } from "../shared/tool-name.ts";
 export type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
 
 /** Evidence is observed, not inferred from a provider's brand. In particular,
@@ -127,12 +127,10 @@ function firstSentence(reply: string): string {
 export function renderDigest(d: TurnDigest): string {
   const parts: string[] = ["[digest]"];
   if (d.tools.length) {
-    const tools = d.tools.map((t) => {
-      // "shell ×12" alone loses the turn's work, so the one bucket whose
-      // name was generalised says what it ran — from the redacted sample
-      const ran = t.name === SHELL_TOOL && t.sample ? ` (${fitBytes(t.sample, 120)})` : "";
-      return `${t.name} ×${t.count}${t.failed ? ` (${t.failed} failed)` : ""}${ran}`;
-    }).join(", ");
+    // every entry ends at "×N" or "(N failed)": the phones split the tools
+    // part on exactly that (ios DigestSummary, android TurnDigest), so a
+    // shell bucket's sample stays in the stored digest, not in this line
+    const tools = d.tools.map((t) => `${t.name} ×${t.count}${t.failed ? ` (${t.failed} failed)` : ""}`).join(", ");
     parts.push(`tools: ${tools}${d.toolsDropped ? ` +${d.toolsDropped} more` : ""}${d.hookCoverage === "preview" ? " (from tool previews)" : ""}`);
   } else if (d.hookCoverage === "none") {
     parts.push("no tool activity observed in this turn");
