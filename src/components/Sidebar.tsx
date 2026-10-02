@@ -58,15 +58,30 @@ import { RenameTitle } from "./RenameTitle";
 import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
+import {
+  PINNED_CIRCLE_DRAG_TYPE,
+  draggedPinnedCircle,
+  movePinnedCircle,
+  orderedPinnedCircles,
+  pinnedCircleDragBlocked,
+  pinnedCircleDragPastThreshold,
+  pinnedCircleDropPlace,
+  placePinnedCircle,
+  rankPinnedCircles,
+  samePinnedCircleOrder,
+  samePinnedCircleSet,
+} from "@/lib/pinned-circle-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
 import { orderedThreadList, SidebarThreadRow, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
+  loadPinnedCircleOrder,
   loadSectionOrder,
   loadSidebarAttentionPinned,
   loadSidebarWidth,
   clampSidebarWidth,
   saveCollapsedSections,
+  savePinnedCircleOrder,
   saveSectionOrder,
   saveSidebarAttentionPinned,
   saveSidebarWidth,
@@ -1158,12 +1173,56 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
   );
 }
 
+type PinnedCircleDrop = { id: string; place: "before" | "after"; axis: "x" | "y" };
+
+function circleRenameField(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  const field = target.closest("input, textarea, select, [contenteditable]");
+  if (!field) return false;
+  if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement) return true;
+  return field instanceof HTMLElement && field.isContentEditable;
+}
+
+function circleDragBlocked(target: EventTarget | null): boolean {
+  let selectionInsideCircle = false;
+  if (target instanceof Element && typeof window !== "undefined" && typeof window.getSelection === "function") {
+    const selection = window.getSelection();
+    const root = target.closest("[data-sidebar-pinned-circle]");
+    const node = selection?.anchorNode ?? null;
+    selectionInsideCircle = Boolean(selection && !selection.isCollapsed && root && node && root.contains(node));
+  }
+  return pinnedCircleDragBlocked(circleRenameField(target), selectionInsideCircle);
+}
+
+function pinnedCircleDropClass(axis: "x" | "y", place: "before" | "after"): string {
+  if (axis === "y") return place === "before" ? "shadow-[0_-2px_var(--color-accent)]" : "shadow-[0_2px_var(--color-accent)]";
+  return place === "before" ? "shadow-[-2px_0_var(--color-accent)]" : "shadow-[2px_0_var(--color-accent)]";
+}
+
 function PinnedBotCircle({
   bot,
   onMenu,
+  reorderable,
+  orderIds,
+  dragging,
+  drop,
+  gesture,
+  onDragging,
+  onDropChange,
+  onDragEnd,
+  onReorder,
 }: {
   bot: Bot;
   onMenu: (menu: MenuState) => void;
+  reorderable: boolean;
+  orderIds: string[];
+  dragging: boolean;
+  drop: PinnedCircleDrop | null;
+  gesture: { current: { native: boolean; handled: boolean } };
+  onDragging: (id: string) => void;
+  onDropChange: (next: PinnedCircleDrop | null) => void;
+  onDragEnd: () => void;
+  onReorder: (next: string[], movedId: string) => void;
 }) {
   const { state, dispatch } = useStore();
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
@@ -1173,16 +1232,164 @@ function PinnedBotCircle({
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
   const unread = bot.unread || activityTasks.some((task) => task.unread);
   const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
+  const orderRef = useRef(orderIds);
+  orderRef.current = orderIds;
+  const reorderRef = useRef(onReorder);
+  reorderRef.current = onReorder;
+  const dropChangeRef = useRef(onDropChange);
+  dropChangeRef.current = onDropChange;
+  const draggingRef = useRef(onDragging);
+  draggingRef.current = onDragging;
+  const endDragRef = useRef(onDragEnd);
+  endDragRef.current = onDragEnd;
+  const detachRef = useRef<(() => void) | null>(null);
+  const pressRef = useRef<{ x: number; y: number } | null>(null);
+  const travelRef = useRef(0);
+  const suppressClick = useRef(false);
+  useEffect(() => () => detachRef.current?.(), []);
+  const readingOrderRtl = () => document.documentElement.dir === "rtl";
+  const showDrop = (x: number, y: number) => {
+    const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-sidebar-pinned-circle]");
+    const targetId = hit?.dataset.sidebarPinnedCircle;
+    if (!hit || !targetId || targetId === bot.id || !orderRef.current.includes(targetId)) {
+      dropChangeRef.current(null);
+      return;
+    }
+    dropChangeRef.current({ id: targetId, ...pinnedCircleDropPlace(x, y, hit.getBoundingClientRect(), readingOrderRtl()) });
+  };
   return (
     <button
       type="button"
       data-sidebar-bot-row={bot.id}
+      data-sidebar-pinned-circle={bot.id}
+      draggable={reorderable}
       aria-current={selected ? "page" : undefined}
+      aria-keyshortcuts={reorderable ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
       aria-label={`${bot.name}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`}
       title={bot.name}
-      onClick={() => dispatch({ type: "select", id: bot.id })}
+      onPointerDown={(event) => {
+        detachRef.current?.();
+        if (!reorderable || event.button !== 0 || circleDragBlocked(event.target)) return;
+        const pointerId = event.pointerId;
+        const originX = event.clientX;
+        const originY = event.clientY;
+        pressRef.current = { x: originX, y: originY };
+        travelRef.current = 0;
+        gesture.current.native = false;
+        gesture.current.handled = false;
+        const onMove = (move: PointerEvent) => {
+          if (move.pointerId !== pointerId) return;
+          travelRef.current = Math.hypot(move.clientX - originX, move.clientY - originY);
+          if (!pinnedCircleDragPastThreshold(travelRef.current, 0)) return;
+          draggingRef.current(bot.id);
+          showDrop(move.clientX, move.clientY);
+        };
+        const finish = (up: PointerEvent, commit: boolean) => {
+          if (up.pointerId !== pointerId) return;
+          detach();
+          const past = pinnedCircleDragPastThreshold(travelRef.current, 0);
+          if (past) suppressClick.current = true;
+          if (commit && past && !gesture.current.native && !gesture.current.handled) {
+            const hit = document.elementFromPoint(up.clientX, up.clientY)?.closest<HTMLElement>("[data-sidebar-pinned-circle]");
+            const targetId = hit?.dataset.sidebarPinnedCircle;
+            if (hit && targetId && orderRef.current.includes(targetId)) {
+              gesture.current.handled = true;
+              const { place } = pinnedCircleDropPlace(up.clientX, up.clientY, hit.getBoundingClientRect(), readingOrderRtl());
+              reorderRef.current(placePinnedCircle(orderRef.current, bot.id, targetId, place), bot.id);
+            }
+          }
+          endDragRef.current();
+          window.setTimeout(() => { suppressClick.current = false; }, 0);
+        };
+        const detach = () => {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          window.removeEventListener("pointercancel", onCancel);
+          if (detachRef.current === detach) detachRef.current = null;
+        };
+        const onUp = (event: PointerEvent) => finish(event, true);
+        const onCancel = (event: PointerEvent) => finish(event, false);
+        detachRef.current = detach;
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+        window.addEventListener("pointercancel", onCancel);
+      }}
+      onDragStart={(event) => {
+        const press = pressRef.current;
+        const reported = press
+          ? pinnedCircleDragPastThreshold(event.clientX - press.x, event.clientY - press.y)
+          : false;
+        if (!reorderable || !press || circleDragBlocked(event.target) || !(pinnedCircleDragPastThreshold(travelRef.current, 0) || reported)) {
+          event.preventDefault();
+          return;
+        }
+        event.stopPropagation();
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData(PINNED_CIRCLE_DRAG_TYPE, JSON.stringify({ botId: bot.id }));
+        gesture.current.native = true;
+        gesture.current.handled = false;
+        suppressClick.current = true;
+        draggingRef.current(bot.id);
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes(PINNED_CIRCLE_DRAG_TYPE)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        if (dragging) {
+          dropChangeRef.current(null);
+          return;
+        }
+        const rect = event.currentTarget.getBoundingClientRect();
+        dropChangeRef.current({ id: bot.id, ...pinnedCircleDropPlace(event.clientX, event.clientY, rect, readingOrderRtl()) });
+      }}
+      onDragLeave={(event) => {
+        if (!event.dataTransfer.types.includes(PINNED_CIRCLE_DRAG_TYPE)) return;
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        const grid = event.currentTarget.closest("[data-sidebar-pinned-circles]");
+        if (next instanceof Node && grid?.contains(next)) return;
+        dropChangeRef.current(null);
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.types.includes(PINNED_CIRCLE_DRAG_TYPE)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const from = draggedPinnedCircle(event.dataTransfer.getData(PINNED_CIRCLE_DRAG_TYPE), orderRef.current);
+        if (!from || gesture.current.handled) return;
+        gesture.current.handled = true;
+        gesture.current.native = true;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const { place } = pinnedCircleDropPlace(event.clientX, event.clientY, rect, readingOrderRtl());
+        reorderRef.current(placePinnedCircle(orderRef.current, from, bot.id, place), from);
+      }}
+      onDragEnd={() => {
+        detachRef.current?.();
+        endDragRef.current();
+        window.setTimeout(() => { suppressClick.current = false; }, 0);
+      }}
+      onClick={() => {
+        if (suppressClick.current) {
+          suppressClick.current = false;
+          return;
+        }
+        dispatch({ type: "select", id: bot.id });
+      }}
+      onKeyDown={(event) => {
+        if (!reorderable || circleDragBlocked(event.target)) return;
+        if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        const direction = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+        if (!direction) return;
+        event.preventDefault();
+        onReorder(movePinnedCircle(orderIds, bot.id, direction), bot.id);
+      }}
       onContextMenu={(event) => openBotContextMenu(onMenu, bot.id, event)}
-      className="flex min-w-0 flex-col items-center gap-1 rounded-lg px-1 py-1 text-center outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
+      className={cn(
+        "flex min-w-0 flex-col items-center gap-1 rounded-lg px-1 py-1 text-center outline-none select-none focus-visible:ring-1 focus-visible:ring-accent/60",
+        reorderable && "cursor-grab active:cursor-grabbing",
+        dragging && "opacity-40",
+        drop?.id === bot.id && !dragging && pinnedCircleDropClass(drop.axis, drop.place),
+      )}
     >
       <span className="relative">
         <span className={cn(
@@ -1228,6 +1435,8 @@ function PinnedBotRoster({
   circles,
   quiet,
   query,
+  orderIds,
+  onReorder,
   onMenu,
 }: {
   bots: Bot[];
@@ -1235,17 +1444,58 @@ function PinnedBotRoster({
   circles: boolean;
   quiet: boolean;
   query: string;
+  orderIds: string[];
+  onReorder: (next: string[], movedId: string) => void;
   onMenu: (menu: MenuState) => void;
 }) {
+  const reorderable = circles && density !== "icons" && orderIds.length > 1;
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [drop, setDrop] = useState<PinnedCircleDrop | null>(null);
+  const gesture = useRef({ native: false, handled: false });
+  const endDrag = () => {
+    setDraggingId(null);
+    setDrop(null);
+  };
+  const showDrop = (next: PinnedCircleDrop | null) => {
+    setDrop((current) => {
+      if (!next && !current) return current;
+      if (next && current && next.id === current.id && next.place === current.place && next.axis === current.axis) return current;
+      return next;
+    });
+  };
   if (circles && density !== "icons") {
     return (
       <div
         data-sidebar-pinned-circles=""
         className="grid gap-1 px-1 pb-1"
         style={{ gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))" }}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes(PINNED_CIRCLE_DRAG_TYPE)) return;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.types.includes(PINNED_CIRCLE_DRAG_TYPE)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          endDrag();
+        }}
       >
         {bots.map((bot) => (
-          <PinnedBotCircle key={bot.id} bot={bot} onMenu={onMenu} />
+          <PinnedBotCircle
+            key={bot.id}
+            bot={bot}
+            onMenu={onMenu}
+            reorderable={reorderable}
+            orderIds={orderIds}
+            dragging={draggingId === bot.id}
+            drop={drop}
+            gesture={gesture}
+            onDragging={setDraggingId}
+            onDropChange={showDrop}
+            onDragEnd={endDrag}
+            onReorder={onReorder}
+          />
         ))}
       </div>
     );
@@ -1879,6 +2129,40 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const quietRows = density === "compact";
   const [collapsedSections, setCollapsedSections] = useState<string[]>(() => loadCollapsedSections());
   const [sectionOrder, setSectionOrder] = useState<string[]>(() => loadSectionOrder());
+  const [universalCircleOrder, setUniversalCircleOrder] = useState<string[]>(() => loadPinnedCircleOrder("universal"));
+  const [sectionCircleOrder, setSectionCircleOrder] = useState<string[]>(() => loadPinnedCircleOrder("section"));
+  // Full pin sets, not the search filter. A chief is only in the universal grid.
+  const universalPinnedIds = partitionSidebarBots(
+    state.bots.filter((bot) => !bot.hidden),
+    { universalPins: true },
+  ).pinnedBots.map((bot) => bot.id);
+  const sectionPinnedIds = partitionSidebarBots(
+    state.bots.filter((bot) => !bot.hidden),
+    { universalPins: false },
+  ).pinnedBots.map((bot) => bot.id);
+  const universalPinnedKey = JSON.stringify(universalPinnedIds);
+  const sectionPinnedKey = JSON.stringify(sectionPinnedIds);
+  // Remember today's order once, so existing pins do not jump and a pin after that appends.
+  useEffect(() => {
+    const ids = JSON.parse(universalPinnedKey) as string[];
+    setUniversalCircleOrder((current) => {
+      const next = orderedPinnedCircles(ids, current);
+      if (samePinnedCircleOrder(next, current)) return current;
+      if (next.length === 0 && current.length === 0) return current;
+      savePinnedCircleOrder("universal", next);
+      return next;
+    });
+  }, [universalPinnedKey]);
+  useEffect(() => {
+    const ids = JSON.parse(sectionPinnedKey) as string[];
+    setSectionCircleOrder((current) => {
+      const next = orderedPinnedCircles(ids, current);
+      if (samePinnedCircleOrder(next, current)) return current;
+      if (next.length === 0 && current.length === 0) return current;
+      savePinnedCircleOrder("section", next);
+      return next;
+    });
+  }, [sectionPinnedKey]);
   const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; place: SectionDropPlace } | null>(null);
   const [reorderAnnouncement, setReorderAnnouncement] = useState("");
@@ -2022,6 +2306,17 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     sectionedBots,
     unsectionedBots,
   } = partitionSidebarBots(matchingBots, { universalPins });
+  const samePinSet = samePinnedCircleSet(universalPinnedIds, sectionPinnedIds);
+  const activeSaved = universalPins ? universalCircleOrder : sectionCircleOrder;
+  // Same bots in both grids share one order. Different lists (a pinned chief
+  // is universal-only) keep the order of the grid that was dragged.
+  const savedCircleOrder = !samePinSet
+    ? activeSaved
+    : activeSaved.length > 0
+      ? activeSaved
+      : (universalCircleOrder.length > 0 ? universalCircleOrder : sectionCircleOrder);
+  const circleOrder = orderedPinnedCircles(universalPins ? universalPinnedIds : sectionPinnedIds, savedCircleOrder);
+  const orderedPinnedBots = pinnedCircles && density !== "icons" ? rankPinnedCircles(pinnedBots, circleOrder) : pinnedBots;
   const { botChats, sectionedRooms, unsectionedRooms } = partitionSidebarGroups(visibleGroups);
 
   // User sections keep first-appearance order. The saved layout keeps an
@@ -2082,6 +2377,22 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     announceSectionPosition(id, next);
   };
 
+  const commitPinnedCircleOrder = (next: string[], movedId: string) => {
+    if (samePinnedCircleOrder(next, circleOrder)) return;
+    const grids: Array<"universal" | "section"> = samePinSet ? ["universal", "section"] : [universalPins ? "universal" : "section"];
+    if (grids.includes("universal")) setUniversalCircleOrder(next);
+    if (grids.includes("section")) setSectionCircleOrder(next);
+    for (const grid of grids) savePinnedCircleOrder(grid, next);
+    const position = next.indexOf(movedId);
+    const name = state.bots.find((bot) => bot.id === movedId)?.name;
+    if (!name || position < 0) return;
+    setReorderAnnouncement(t("sidebar.section.moved", {
+      name,
+      position: position + 1,
+      count: next.length,
+    }));
+  };
+
   const resetSectionDrag = () => {
     sectionDragRef.current = { from: null, over: null };
     setDraggingSectionId(null);
@@ -2089,6 +2400,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   };
 
   const updateSectionDropTarget = (event: React.DragEvent<HTMLDivElement>, id: string) => {
+    if (event.dataTransfer.types.includes(PINNED_CIRCLE_DRAG_TYPE) || event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) return;
     if (!layoutInteractive || !sectionDragRef.current.from) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
@@ -2100,7 +2412,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   };
 
   const dropSection = (event: React.DragEvent<HTMLDivElement>) => {
-    if (event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) return;
+    if (event.dataTransfer.types.includes(FOLDER_DRAG_TYPE) || event.dataTransfer.types.includes(PINNED_CIRCLE_DRAG_TYPE)) return;
     event.preventDefault();
     const from =
       event.dataTransfer.getData("application/x-openmausbot-sidebar-section") ||
@@ -2398,11 +2710,13 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             </div>
           )}
           <PinnedBotRoster
-            bots={pinnedBots}
+            bots={orderedPinnedBots}
             density={density}
             circles={pinnedCircles}
             quiet={quietRows}
             query={q}
+            orderIds={circleOrder}
+            onReorder={commitPinnedCircleOrder}
             onMenu={setMenu}
           />
         </div>
@@ -2544,11 +2858,13 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                     ))}
                     {id === PINNED_SECTION_ID ? (
                       <PinnedBotRoster
-                        bots={sectionBotItems}
+                        bots={orderedPinnedBots}
                         density={density}
                         circles={pinnedCircles}
                         quiet={quietRows}
                         query={q}
+                        orderIds={circleOrder}
+                        onReorder={commitPinnedCircleOrder}
                         onMenu={setMenu}
                       />
                     ) : sectionBotItems.map((bot) => (

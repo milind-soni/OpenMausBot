@@ -12,6 +12,10 @@ export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSecti
 export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.v1";
 export const PINNED_CIRCLES_KEY = "openmausbot.pinnedCircles";
 export const UNIVERSAL_PINS_KEY = "openmausbot.universalPins";
+export const PINNED_CIRCLE_ORDER_UNIVERSAL_KEY = "openmausbot.pinnedCircleOrder.universal.v1";
+export const PINNED_CIRCLE_ORDER_SECTION_KEY = "openmausbot.pinnedCircleOrder.section.v1";
+
+export type PinnedCircleGrid = "universal" | "section";
 
 export function parseSidebarDensity(value: string | null): SidebarDensity {
   switch (value) {
@@ -356,4 +360,24 @@ export function saveSectionOrder(
   storage?: Pick<Storage, "setItem"> | null,
 ): void {
   saveStringList(SIDEBAR_SECTION_ORDER_KEY, ids, storage);
+}
+
+function pinnedCircleOrderKey(grid: PinnedCircleGrid): string {
+  return grid === "universal" ? PINNED_CIRCLE_ORDER_UNIVERSAL_KEY : PINNED_CIRCLE_ORDER_SECTION_KEY;
+}
+
+/** Order of one circle grid on this computer. Empty means today's pin order. */
+export function loadPinnedCircleOrder(
+  grid: PinnedCircleGrid,
+  storage?: Pick<Storage, "getItem"> | null,
+): string[] {
+  return loadStringList(pinnedCircleOrderKey(grid), storage);
+}
+
+export function savePinnedCircleOrder(
+  grid: PinnedCircleGrid,
+  ids: string[],
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  saveStringList(pinnedCircleOrderKey(grid), ids, storage);
 }
