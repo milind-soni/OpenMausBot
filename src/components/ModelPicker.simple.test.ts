@@ -101,6 +101,10 @@ function open(forBot: Bot) {
 const pane = (rendered: ReturnType<typeof render>) =>
   rendered.nodes.find((node) => node.type === SimpleModelPane) as ReactElement<ComponentProps<typeof SimpleModelPane>> | undefined;
 const menu = (html: string) => html.slice(html.indexOf("data-model-picker-content"));
+// The pane itself uses no hooks, so its own element tree can be walked too.
+const inside = (rendered: ReturnType<typeof render>) => nodes(SimpleModelPane(pane(rendered)!.props));
+const region = (html: string, marker: string, next?: string) =>
+  html.slice(html.indexOf(marker), next ? html.indexOf(next) : undefined);
 
 beforeEach(() => {
   fixture.advanced = false;
@@ -124,6 +128,53 @@ describe("the model picker in Simple mode", () => {
     for (const step of ["Quick", "Balanced", "Deep", "Max"]) expect(html).toContain(`>${step}</button>`);
     expect(html).not.toContain(">Deeper</button>");
     expect(html).toContain("Use for Scout&#x27;s new chats too");
+  });
+
+  it("lays providers out in a column, models beside them, and effort along the bottom", () => {
+    const html = menu(open(bot("high")).html);
+    const providers = html.indexOf("data-simple-providers");
+    const models = html.indexOf("data-simple-models");
+    const band = html.indexOf("data-simple-effort-band");
+    expect(providers).toBeGreaterThan(-1);
+    expect(models).toBeGreaterThan(providers);
+    expect(band).toBeGreaterThan(models);
+
+    const column = region(html, "data-simple-providers", "data-simple-models");
+    expect(column).toContain(">Claude</span>");
+    expect(column).toContain("data-simple-model-more");
+    expect(column).not.toContain("Opus 5.5");
+    expect(column.indexOf("data-simple-model-more")).toBeGreaterThan(column.indexOf(">Claude</span>"));
+
+    const list = region(html, "data-simple-models", "data-simple-effort-band");
+    expect(list).toContain("Opus 5.5");
+    expect(list).toContain("Sonnet 5.5");
+    expect(list).not.toContain("How hard should Scout think?");
+
+    const bottom = region(html, "data-simple-effort-band");
+    expect(bottom).toContain("How hard should Scout think?");
+    expect(bottom).toContain(">Deep</button>");
+    expect(bottom).toContain("Use for Scout&#x27;s new chats too");
+    expect(bottom).toContain("Manage AI accounts");
+  });
+
+  it("keeps the old footer's words only as More's label", () => {
+    const opened = open(bot());
+    expect(menu(opened.html)).not.toContain(">All models, API keys, local models<");
+    const more = inside(opened).find((node) => node.props["data-simple-model-more"] !== undefined)!;
+    expect(more.props.title).toBe("All models, API keys, local models");
+    expect(more.props["aria-label"]).toContain("All models, API keys, local models");
+  });
+
+  it("marks the browsed provider and switches provider from its row", () => {
+    const opened = open(bot());
+    const rows = inside(opened).filter((node) => node.type === "button" && node.props["aria-pressed"] !== undefined);
+    const claudeRow = rows.find((node) => nodes(node.props.children).some((child) => child.props.children === "Claude"))!;
+    expect(claudeRow.props["aria-pressed"]).toBe(true);
+    const onProvider = vi.fn();
+    const own = SimpleModelPane({ ...pane(opened)!.props, onProvider });
+    const row = nodes(own).find((node) => node.props["aria-pressed"] === true && nodes(node.props.children).some((child) => child.props.children === "Claude"))!;
+    (row.props.onClick as () => void)();
+    expect(onProvider).toHaveBeenCalledWith(expect.objectContaining({ instanceId: "claude" }));
   });
 
   it("names the effort in plain words on the header chip", () => {
@@ -158,9 +209,10 @@ describe("the model picker in Simple mode", () => {
     expect(pane(open(bot("xhigh")))!.props.effort!.levels).toContain("xhigh");
   });
 
-  it("opens the full picker in the same popover from More", () => {
+  it("opens the full picker in the same popover from the More row", () => {
     const forBot = bot();
-    pane(open(forBot))!.props.onMore();
+    const more = inside(open(forBot)).find((node) => node.props["data-simple-model-more"] !== undefined)!;
+    (more.props.onClick as () => void)();
     const full = render(forBot);
     expect(pane(full)).toBeUndefined();
     expect(full.nodes.some((node) => node.type === ModelEngineRail)).toBe(true);
@@ -176,8 +228,36 @@ describe("the model picker in Simple mode", () => {
 
   it("sends a provider that needs sign-in to the full picker's setup", () => {
     fixture.instances = [claude(false)];
-    const simple = pane(open(bot()))!;
+    const opened = open(bot());
+    const simple = pane(opened)!;
     expect(simple.props.needsSetup).toEqual({ name: "Claude" });
+    const html = menu(opened.html);
+    const list = region(html, "data-simple-models", "data-simple-effort-band");
+    expect(list).toContain("Claude needs to be set up before you can use it.");
+    expect(list).toContain(">Set up</button>");
+    expect(list).not.toContain("Opus 5.5");
+    expect(region(html, "data-simple-providers", "data-simple-models")).toContain(">Claude</span>");
+  });
+
+  it("says so when the browsed provider has no models to list", () => {
+    const html = renderToStaticMarkup(createElement(SimpleModelPane, { ...pane(open(bot()))!.props, models: [] }));
+    expect(region(html, "data-simple-models", "data-simple-effort-band")).toContain("No models to show here yet.");
+  });
+
+  it("opens AI accounts from the bottom band", () => {
+    const opened = open(bot());
+    const manage = inside(opened).find((node) => node.props["data-simple-manage"] !== undefined)!;
+    (manage.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleAppSettings", open: true, section: "engines" });
+  });
+
+  it("puts a named-variants control in the band in place of the effort steps", () => {
+    const opened = open(bot());
+    const variants = createElement("span", { "data-variants": "" }, "Reasoning");
+    const html = renderToStaticMarkup(createElement(SimpleModelPane, { ...pane(opened)!.props, variantsRow: variants }));
+    const bottom = region(html, "data-simple-effort-band");
+    expect(bottom).toContain("Reasoning");
+    expect(bottom).not.toContain("How hard should Scout think?");
   });
 
   it("leaves Advanced mode on the full picker", () => {

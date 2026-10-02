@@ -453,6 +453,9 @@ export function ClaudeAccountSelect({ accounts, selectedId, onSelect }: {
   );
 }
 
+const POPOVER_WIDTH = 420;
+const SIMPLE_POPOVER_WIDTH = 520;
+
 export function ModelPicker({
   bot,
   threadId,
@@ -490,19 +493,21 @@ export function ModelPicker({
   const lastClaudeIdRef = useRef<string | null>(null);
   const lastOpenaiIdRef = useRef<string | null>(null);
 
+  // The Simple view lays providers and models side by side, so it is wider.
+  const popoverWidth = !advanced && !fullView ? SIMPLE_POPOVER_WIDTH : POPOVER_WIDTH;
   useLayoutEffect(() => {
     if (!open || contained) return;
     const place = () => {
       const rect = rootRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const width = Math.min(420, window.innerWidth - 32);
+      const width = Math.min(popoverWidth, window.innerWidth - 32);
       setPlacement({ left: Math.max(16, Math.min(rect.right - width, window.innerWidth - width - 16)) - rect.left,
         maxHeight: Math.max(0, Math.min(600, window.innerHeight - rect.bottom - 24)) });
     };
     place();
     window.addEventListener("resize", place);
     return () => window.removeEventListener("resize", place);
-  }, [open, contained]);
+  }, [open, contained, popoverWidth]);
 
   const selection = bot.modelSelection;
   const active = state.instances.find((instance) => instance.instanceId === selection.instanceId);
@@ -800,12 +805,12 @@ export function ModelPicker({
           role="dialog"
           aria-label={t("model.choose")}
           {...motion.exitProps}
-          style={contained ? undefined : placement}
+          style={contained ? undefined : { ...placement, width: popoverWidth }}
           className={cn(
             "flex overflow-hidden rounded-2xl border border-hairline/50 bg-card",
             contained
               ? "relative mt-3 w-full max-h-[min(420px,50dvh)]"
-              : "absolute right-0 top-full z-30 mt-2 w-[420px] max-w-[calc(100vw-2rem)] max-h-[min(600px,calc(100dvh-7rem))] shadow-2xl shadow-black/50",
+              : "absolute right-0 top-full z-30 mt-2 max-w-[calc(100vw-2rem)] max-h-[min(600px,calc(100dvh-7rem))] shadow-2xl shadow-black/50",
             motion.className,
           )}
         >
