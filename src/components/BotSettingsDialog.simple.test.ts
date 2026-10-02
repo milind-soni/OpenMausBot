@@ -190,6 +190,16 @@ describe("the bot settings panel in Simple mode", () => {
     expect(patch).toHaveBeenLastCalledWith({ approvalMode: "ask" });
   });
 
+  it("shows legacy Antigravity Auto as Ask without changing the saved mode", () => {
+    fixture.derived.engine = { ...fixture.derived.engine!, driverKind: "antigravityAgent" };
+    fixture.derived.approvalMode = "auto";
+    const rendered = panel(makeBot({ approvalMode: "auto" }));
+    expect(find(rendered, "data-approval-choice", "ask").props["aria-pressed"]).toBe(true);
+    expect(find(rendered, "data-approval-choice", "auto").props["aria-pressed"]).toBe(false);
+    expect(find(rendered, "data-approval-choice", "auto").props.disabled).toBe(true);
+    expect(patch).not.toHaveBeenCalled();
+  });
+
   it("warns before Decide for me on this computer, as Permissions does", () => {
     const bot = makeBot({ computer: "local" });
     click(find(panel(bot), "data-approval-choice", "auto"));
@@ -223,6 +233,30 @@ describe("the bot settings panel in Simple mode", () => {
     expect(panelProps.onAddSkill).toHaveBeenCalled();
   });
 
+  it("disables every skill switch until a pending toggle settles", async () => {
+    const first = skill("triage", true);
+    const second = skill("summarise", false);
+    fixture.skills.skills = [first, second];
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    fixture.skills.toggle = vi.fn(async (selected) => {
+      fixture.skills.working = selected.name;
+      await pending;
+      fixture.skills.working = "";
+    });
+
+    click(find(panel(makeBot()), "aria-label", "Use triage"));
+    const busy = panel(makeBot());
+    expect(find(busy, "aria-label", "Use triage").props.disabled).toBe(true);
+    expect(find(busy, "aria-label", "Use summarise").props.disabled).toBe(true);
+
+    finish();
+    await pending;
+    const settled = panel(makeBot());
+    expect(find(settled, "aria-label", "Use triage").props.disabled).toBe(false);
+    expect(find(settled, "aria-label", "Use summarise").props.disabled).toBe(false);
+  });
+
   it("has a quiet line when there are no skills", () => {
     expect(panel(makeBot()).html).toContain("No skills yet.");
   });
@@ -242,6 +276,26 @@ describe("the bot settings panel in Simple mode", () => {
     expect(rendered.html).toContain("report.pdf");
     click(find(rendered, "data-library-item", "m1"));
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "focusMessage", threadId: "thread-scout", messageId: "m1" });
+  });
+
+  it("keeps the latest artifact reply and date while preserving each reply's file order", () => {
+    const made = makeBot({ messages: [
+      { id: "old", role: "bot", kind: "text", at: 100, text: "First draft", attachments: [
+        { path: "/tmp/report.pdf", kind: "file", name: "draft.pdf" },
+        { path: "/tmp/old-only.pdf", kind: "file", name: "old-only.pdf" },
+      ] },
+      { id: "latest", role: "bot", kind: "text", at: 200, text: "Updated", attachments: [
+        { path: "/tmp/chart.png", kind: "image" },
+        { path: "/tmp/report.pdf", kind: "file", name: "report.pdf" },
+        { path: "/tmp/notes.md", kind: "file", name: "notes.md" },
+      ] },
+    ] as Message[] });
+    expect(botLibraryItems(made).map(({ name, messageId, at }) => ({ name, messageId, at }))).toEqual([
+      { name: "chart.png", messageId: "latest", at: 200 },
+      { name: "report.pdf", messageId: "latest", at: 200 },
+      { name: "notes.md", messageId: "latest", at: 200 },
+      { name: "old-only.pdf", messageId: "old", at: 100 },
+    ]);
   });
 });
 

@@ -62,6 +62,7 @@ type Node = ReactElement<{
   onFocus?: (event: { target: { select: () => void } }) => void;
   acknowledge?: (seq: number) => void; onDecodeError?: () => void;
   input?: (body: Record<string, unknown>) => void;
+  onSubmit?: (event: { preventDefault: () => void; currentTarget: { elements: { namedItem: (name: string) => { value: string } } } }) => void;
 }>;
 const elements = (node: ReactNode): Node[] => {
   if (!isValidElement(node)) return [];
@@ -449,6 +450,34 @@ describe("live browser control affordance", () => {
     expect([elsewhere.back, elsewhere.reload, elsewhere.newTab].map((node) => node.props.disabled)).toEqual([true, true, true]);
     expect(elsewhere.address.props.readOnly).toBe(true);
     expect(elsewhere.viewport.props.driving).toBe(false);
+  });
+
+  it.each([
+    ["the bot owns the page", { held: false, controlling: false, owned: false }, true, false, false],
+    ["this viewer is still taking control", { held: true, controlling: false, owned: true }, true, false, false],
+    ["another viewer owns the page", { held: true, controlling: true, owned: false }, true, false, false],
+    ["this viewer controls the page", { held: true, controlling: true, owned: true }, true, false, true],
+    ["the connection was lost", { held: true, controlling: true, owned: true }, false, false, false],
+    ["a command is still running", { held: true, controlling: true, owned: true }, true, true, false],
+  ])("requires a granted lease for the typing dialog while %s", (_label, control, connected, pending, ready) => {
+    fixture.control = control;
+    fixture.states = { 4: connected, 6: pending, 9: true };
+    const nodes = renderElements();
+    const open = nodes.find((node) => node.props.children === "Type or paste text…")!;
+    const submit = nodes.find((node) => node.type === "button" && node.props.children === "Type")!;
+    expect(open.props.disabled).toBe(!ready);
+    expect(submit.props.disabled).toBe(!ready);
+    if (!ready) {
+      // A stale dialog stays open with its draft intact until the person
+      // closes it; submitting must never take control and insert into a
+      // field the bot could have changed while the dialog was open.
+      const form = nodes.find((node) => node.type === "form" && elements(node).some((child) => child.type === "button" && child.props.children === "Type"))!;
+      const field = { value: "private@example.test" };
+      form.props.onSubmit!({ preventDefault: vi.fn(), currentTarget: { elements: { namedItem: () => field } } });
+      expect(field.value).toBe("private@example.test");
+      expect(api).not.toHaveBeenCalled();
+      expect(fixture.setters[9]).not.toHaveBeenCalled();
+    }
   });
 
   it("says why profiles are locked while another window holds the browser or an action runs", () => {

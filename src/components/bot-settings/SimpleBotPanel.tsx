@@ -41,7 +41,7 @@ export interface LibraryItem {
 export function botLibraryItems(bot: Bot): LibraryItem[] {
   const groups: LibraryItem[][] = [];
   const seen = new Set<string>();
-  for (const message of visibleMessages(bot)) {
+  for (const message of [...visibleMessages(bot)].reverse()) {
     const items: LibraryItem[] = [];
     groups.push(items);
     if (message.role !== "bot" || message.kind !== "text") continue;
@@ -59,7 +59,7 @@ export function botLibraryItems(bot: Bot): LibraryItem[] {
     for (const file of files) add(file.path, file.name || attachmentBasename(file.path), "file");
   }
   // Newest message first; a message's own files keep the order it gave them.
-  return groups.reverse().flat();
+  return groups.flat();
 }
 
 export function SimpleBotPanel({
@@ -83,6 +83,9 @@ export function SimpleBotPanel({
   const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
   const skills = useManagedSkills(bot);
   const { patch, approvalMode, engine, trustedModesAvailable } = derived;
+  // Match the full selector: old Antigravity Auto still executes as Ask.
+  // Display that behavior without changing the saved mode or granting Full.
+  const displayedApprovalMode = engine?.driverKind === "antigravityAgent" && approvalMode === "auto" ? "ask" : approvalMode;
 
   // Ask is always offered; "Decide for me" is the provider's own Auto, which
   // a few engines do not have.
@@ -98,7 +101,7 @@ export function SimpleBotPanel({
     }
     patch({ approvalMode: mode });
   };
-  const customMode = approvalMode !== "ask" && approvalMode !== "auto";
+  const customMode = displayedApprovalMode !== "ask" && displayedApprovalMode !== "auto";
 
   const library = useMemo(() => (tab === "library" ? botLibraryItems(bot) : []), [tab, bot]);
 
@@ -208,7 +211,7 @@ export function SimpleBotPanel({
                   { mode: "ask", title: t("botSettings.simple.ask"), hint: t("botSettings.simple.askHint"), offered: true },
                   { mode: "auto", title: t("botSettings.simple.decide"), hint: t("botSettings.simple.decideHint"), offered: autoOffered },
                 ] as const).map((choice) => {
-                  const selected = approvalMode === choice.mode;
+                  const selected = displayedApprovalMode === choice.mode;
                   return (
                     <button
                       key={choice.mode}
@@ -260,7 +263,7 @@ export function SimpleBotPanel({
                       <Switch
                         checked={skill.enabled}
                         aria-label={t("botSettings.simple.skillToggle", { name: skill.name })}
-                        disabled={skills.working === skill.name}
+                        disabled={Boolean(skills.working)}
                         onClick={() => void skills.toggle(skill)}
                       />
                     </div>

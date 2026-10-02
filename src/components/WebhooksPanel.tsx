@@ -214,11 +214,16 @@ export function useWebhookActions() {
     loadWebhookCredentials(webhookCredentialStore()),
   );
   const [working, setWorking] = useState<string | null>(null);
+  // A second click can arrive before React paints the shared disabled state.
+  // Claim synchronously, so rotations cannot race and save a revoked URL.
+  const workingRef = useRef(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedKind, setCopiedKind] = useState<"command" | "link">("command");
   const [error, setError] = useState("");
 
   const invoke = async (webhook: WebhookTrigger, action: "toggle" | "delete") => {
+    if (workingRef.current) return;
+    workingRef.current = true;
     setWorking(`${webhook.id}:${action}`);
     setError("");
     try {
@@ -241,15 +246,18 @@ export function useWebhookActions() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      workingRef.current = false;
       setWorking(null);
     }
   };
 
   const createAndCopyCommand = async (webhook: WebhookTrigger, replace = false, copy: "command" | "link" = "command") => {
-    if (replace && !window.confirm("Replace this private URL? Every previously copied command will stop working.")) return;
+    if (workingRef.current) return;
+    workingRef.current = true;
     setWorking(`${webhook.id}:command`);
     setError("");
     try {
+      if (replace && !window.confirm("Replace this private URL? Every previously copied command will stop working.")) return;
       let credential = replace ? undefined : credentials[webhook.id];
       if (!credential) {
         const response = await api(`/api/webhooks/${webhook.id}/rotate`, { method: "POST" });
@@ -266,6 +274,7 @@ export function useWebhookActions() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      workingRef.current = false;
       setWorking(null);
     }
   };

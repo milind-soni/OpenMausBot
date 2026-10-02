@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import type { WebhookTrigger } from "@/lib/webhooks";
+import { setLocale, t } from "@/lib/i18n";
 
 // The pop-up's own state, seeded by call order (effects never run under
 // server rendering): useWebhookActions owns 0–4, the builder 5–10.
@@ -86,7 +87,10 @@ beforeEach(() => {
   vi.stubGlobal("window", { confirm: () => true });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {} });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  setLocale("en");
+  vi.unstubAllGlobals();
+});
 
 describe("Triggers pop-up", () => {
   it("reads as a sentence on glass: When [source] → [bot] should", () => {
@@ -168,5 +172,74 @@ describe("Triggers pop-up", () => {
     const close = tree.find((node) => node.props["aria-label"] === "Close triggers")!;
     (close.props.onClick as () => void)();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleTriggers", open: false });
+  });
+
+  it("disables every row while another trigger action is pending", () => {
+    fixture.webhooks = [webhook("w1"), webhook("w2", { name: "Stripe" })];
+    fixture.overrides.set(1, "w1:command");
+    const { html } = render();
+    // Copy link, switch, copy command, rotate, edit and delete on both rows.
+    expect(html.match(/ disabled=""/g)).toHaveLength(12);
+  });
+
+  it("serializes copy, rotation and other mutations before a pending response returns", async () => {
+    fixture.webhooks = [webhook("w1"), webhook("w2", { name: "Stripe" })];
+    let resolveRotation!: (value: unknown) => void;
+    fixture.api.mockImplementationOnce(() => new Promise((resolve) => { resolveRotation = resolve; }));
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const { nodes: tree } = render();
+    const rows = tree.filter((node) => (node.props.webhook as WebhookTrigger | undefined)?.id);
+    const copy = (index: number) => (rows[index]!.props.onCopy as (kind: "link", replace: boolean) => void)("link", false);
+    copy(0);
+    copy(1);
+    copy(0);
+    (rows[1]!.props.onToggle as () => void)();
+    (rows[1]!.props.onDelete as () => void)();
+    expect(fixture.api).toHaveBeenCalledOnce();
+    expect(writeText).not.toHaveBeenCalled();
+    resolveRotation({ webhook: fixture.webhooks[0], credential: { endpointUrl: "e1", secret: "s1", url: "https://hooks.example/w1" } });
+    await flush();
+    expect(writeText).toHaveBeenCalledWith("https://hooks.example/w1");
+
+    fixture.api.mockResolvedValueOnce({ webhook: fixture.webhooks[1], credential: { endpointUrl: "e2", secret: "s2", url: "https://hooks.example/w2" } });
+    copy(1);
+    await flush();
+    expect(fixture.api).toHaveBeenCalledTimes(2);
+    expect(writeText).toHaveBeenLastCalledWith("https://hooks.example/w2");
+  });
+
+  it("releases the mutation guard after failure or cancelling a rotation", async () => {
+    fixture.webhooks = [webhook("w1")];
+    fixture.api.mockRejectedValueOnce(new Error("Offline"));
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    vi.stubGlobal("window", { confirm });
+    const row = render().nodes.find((node) => (node.props.webhook as WebhookTrigger | undefined)?.id === "w1")!;
+    const copy = row.props.onCopy as (kind: "link", replace: boolean) => void;
+    copy("link", false);
+    await flush();
+    copy("link", true);
+    await flush();
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(fixture.api).toHaveBeenCalledOnce();
+
+    fixture.api.mockResolvedValueOnce({ webhook: fixture.webhooks[0], credential: { endpointUrl: "e", secret: "s", url: "https://hooks.example/w1" } });
+    copy("link", false);
+    await flush();
+    expect(fixture.api).toHaveBeenCalledTimes(2);
+    expect(writeText).toHaveBeenCalledWith("https://hooks.example/w1");
+  });
+
+  it("uses existing translated actions and English fallback keys for the new details", () => {
+    fixture.webhooks = [webhook("w1")];
+    setLocale("de");
+    const { html } = render();
+    expect(html).toContain(t("common.delete"));
+    expect(html).toContain(t("engineSetup.copyCommand"));
+    expect(html).toContain(t("triggers.rotateUrl"));
+    expect(html).not.toContain(">Delete</button>");
+    expect(html).not.toContain(">Copy command</button>");
   });
 });

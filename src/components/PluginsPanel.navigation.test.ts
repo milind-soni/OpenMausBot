@@ -1,4 +1,4 @@
-import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { Children, createElement, isValidElement, type DependencyList, type EffectCallback, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
@@ -14,11 +14,13 @@ const fixture = vi.hoisted(() => ({
   overrides: new Map<number, unknown>(),
   index: 0,
   counting: false,
+  effects: [] as Array<{ effect: EffectCallback; deps?: DependencyList }>,
 }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   return {
     ...react,
+    useEffect: (effect: EffectCallback, deps?: DependencyList) => { fixture.effects.push({ effect, deps }); },
     useState: (initial: unknown) => {
       if (!fixture.counting) return react.useState(initial);
       const index = fixture.index++;
@@ -75,6 +77,7 @@ beforeEach(() => {
   vi.stubGlobal("window", {});
   fixture.surface = "apps";
   fixture.dispatch.mockReset();
+  fixture.effects = [];
   fixture.bots = [];
   fixture.instances = [];
   fixture.overrides = new Map<number, unknown>([
@@ -87,6 +90,58 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Apps pop-up", () => {
+  it("focuses and wraps through visible controls in a narrow window", () => {
+    let active: Control;
+    const focusElement = (element: Control) => { active = element; };
+    class Control {
+      constructor(readonly input = false, public visible = true) {}
+      focus = vi.fn(() => focusElement(this));
+      getClientRects = () => this.visible ? [{}] : [];
+      matches = (selector: string) => selector === "input" && this.input;
+    }
+    const hiddenDesktopSearch = new Control(true, false);
+    const first = new Control();
+    const mobileSearch = new Control(true);
+    const last = new Control();
+    const opener = new Control();
+    active = opener;
+    const pane = Object.assign(new Control(), {
+      querySelectorAll: () => [hiddenDesktopSearch, first, mobileSearch, last],
+    });
+    const listeners = new Map<string, (event: KeyboardEvent) => void>();
+    vi.stubGlobal("HTMLElement", Control);
+    vi.stubGlobal("document", { get activeElement() { return active; } });
+    vi.stubGlobal("window", {
+      addEventListener: (name: string, listener: (event: KeyboardEvent) => void) => listeners.set(name, listener),
+      removeEventListener: (name: string) => listeners.delete(name),
+    });
+    const { nodes: tree } = render();
+    const dialog = tree.find((node) => node.props.role === "dialog")!;
+    (dialog.props.ref as { current: unknown }).current = pane;
+    const cleanup = fixture.effects.find(({ deps }) => deps?.length === 1 && deps[0] === fixture.dispatch)!.effect();
+    expect(mobileSearch.focus).toHaveBeenCalledOnce();
+    expect(hiddenDesktopSearch.focus).not.toHaveBeenCalled();
+
+    const tab = (shiftKey = false) => {
+      const event = { key: "Tab", shiftKey, preventDefault: vi.fn() };
+      listeners.get("keydown")!(event as unknown as KeyboardEvent);
+      return event;
+    };
+    active = last;
+    expect(tab().preventDefault).toHaveBeenCalledOnce();
+    expect(active).toBe(first);
+    expect(tab(true).preventDefault).toHaveBeenCalledOnce();
+    expect(active).toBe(last);
+
+    // A resize can hide whichever search previously held focus.
+    active = hiddenDesktopSearch;
+    expect(tab().preventDefault).toHaveBeenCalledOnce();
+    expect(active).toBe(first);
+    expect(hiddenDesktopSearch.focus).not.toHaveBeenCalled();
+    if (typeof cleanup === "function") cleanup();
+    expect(active).toBe(opener);
+  });
+
   it("is titled Apps and shows app tiles and the MCP servers section on one view", () => {
     const { html } = render();
     expect(html).toContain(">Apps</h2>");

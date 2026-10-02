@@ -315,7 +315,7 @@ function TriggerRow({
     () => webhookActivity(webhook, state.webhookAttempts, state.routineRuns),
     [webhook, state.webhookAttempts, state.routineRuns],
   );
-  const busy = working?.startsWith(`${webhook.id}:`) ?? false;
+  const busy = working !== null;
   // Turning on before the first test request is refused by the server too.
   const waitingForTest = Boolean(webhook.verificationPending && !webhook.enabled);
   const botName = bot?.name ?? t("triggers.deletedBot");
@@ -365,48 +365,48 @@ function TriggerRow({
         <summary className="cursor-pointer text-[12px] font-medium text-ink-secondary hover:text-ink">{t("triggers.advanced")}</summary>
         <div className="mt-3 space-y-3 pb-2 text-[11.5px] leading-relaxed text-ink-secondary">
           <div className="rounded-xl border border-accent-border/30 bg-inset/60 px-3 py-2.5">
-            Send the task in the request: <code className="text-ink">{`{"task":"Check the failed build"}`}</code>. The MAUS keeps its model, tools, permissions, and computer setup.
+            {t("triggers.requestTask")} <code className="text-ink">{JSON.stringify({ task: t("triggers.sampleTask") })}</code>. {t("triggers.keepsSetup")}
           </div>
-          {webhook.prompt ? <p><span className="font-medium text-ink">Default instruction:</span> {webhook.prompt}</p> : <p>The task or message sent with each request becomes the MAUS instruction.</p>}
-          {webhook.eventTypes?.length ? <p><span className="font-medium text-ink">Accepted events:</span> {webhook.eventTypes.join(", ")}</p> : <p>All event types are accepted.</p>}
+          {webhook.prompt ? <p><span className="font-medium text-ink">{t("triggers.defaultInstruction")}</span> {webhook.prompt}</p> : <p>{t("triggers.requestInstruction")}</p>}
+          {webhook.eventTypes?.length ? <p><span className="font-medium text-ink">{t("triggers.acceptedEvents")}</span> {webhook.eventTypes.join(", ")}</p> : <p>{t("triggers.allEvents")}</p>}
           <p className="flex items-center gap-1.5">
             {webhook.runOn === "cloud" ? <Cloud size={12} /> : <Laptop size={12} />}
-            <span className="font-medium text-ink">Runs on:</span> {webhook.runOn === "cloud" ? "Cloud VM" : "This computer"}
+            <span className="font-medium text-ink">{t("routines.drawer.runsOn")}:</span> {t(webhook.runOn === "cloud" ? "triggers.cloudVm" : "routines.runsOn.local")}
           </p>
-          <p><span className="font-medium text-ink">Unfinished tasks at once:</span> {webhook.maxPendingRuns ?? WEBHOOK_DEFAULT_MAX_PENDING_RUNS}. More requests get HTTP 429 until one finishes.</p>
+          <p><span className="font-medium text-ink">{t("triggers.pendingTasks")}</span> {t("triggers.pendingTasksHelp", { count: webhook.maxPendingRuns ?? WEBHOOK_DEFAULT_MAX_PENDING_RUNS })}</p>
           {hasCredential && (
             <pre className="overflow-x-auto rounded-xl bg-inset p-3 font-mono text-[10.5px] whitespace-pre-wrap break-all text-ink-secondary">{command}</pre>
           )}
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy || (!hasCredential && !ingressAvailable)} onClick={() => onCopy("command", false)} className="flex items-center gap-1.5 rounded-lg border border-hairline/50 px-3 py-1.5 text-[11.5px] font-medium text-ink hover:bg-raised disabled:opacity-40">
-              {copied === "command" ? <Check size={12} className="text-success" /> : <Copy size={12} />}{copied === "command" ? "Copied" : "Copy command"}
+              {copied === "command" ? <Check size={12} className="text-success" /> : <Copy size={12} />}{t(copied === "command" ? "triggers.copied" : "engineSetup.copyCommand")}
             </button>
             <button type="button" disabled={busy || !ingressAvailable} onClick={() => onCopy("link", true)} className="flex items-center gap-1.5 rounded-lg border border-hairline/50 px-3 py-1.5 text-[11.5px] font-medium text-ink hover:bg-raised disabled:opacity-40">
-              <RotateCw size={12} />Rotate private URL
+              <RotateCw size={12} />{t("triggers.rotateUrl")}
             </button>
-            <button type="button" onClick={onEdit} className="flex items-center gap-1.5 rounded-lg border border-hairline/50 px-3 py-1.5 text-[11.5px] font-medium text-ink hover:bg-raised">
-              <Pencil size={12} />Edit settings
+            <button type="button" disabled={busy} onClick={onEdit} className="flex items-center gap-1.5 rounded-lg border border-hairline/50 px-3 py-1.5 text-[11.5px] font-medium text-ink hover:bg-raised disabled:opacity-40">
+              <Pencil size={12} />{t("triggers.editSettings")}
             </button>
             <button type="button" disabled={busy} onClick={onDelete} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11.5px] font-medium text-danger hover:bg-danger/10 disabled:opacity-40">
-              <Trash2 size={12} />Delete
+              <Trash2 size={12} />{t("common.delete")}
             </button>
           </div>
           <div>
-            <div className="mb-1 font-medium text-ink">Recent deliveries</div>
+            <div className="mb-1 font-medium text-ink">{t("triggers.recentDeliveries")}</div>
             {activity.length === 0 ? (
-              <p>No requests yet. Copy the link into the other app, or send the command above.</p>
+              <p>{t("triggers.noRequests")}</p>
             ) : (
               <ul className="divide-y divide-hairline/25">
                 {activity.slice(0, 8).map((item) => (
                   <li key={item.id} className="flex items-center gap-2 py-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5"><span className="truncate font-medium text-ink">{item.eventName}</span><span className="shrink-0">· {relativeTime(item.at)}</span></div>
-                      <div className="truncate font-mono text-[10px] text-ink-tertiary">{item.reason || item.preview || "Empty payload"}</div>
+                      <div className="truncate font-mono text-[10px] text-ink-tertiary">{item.reason || item.preview || t("triggers.emptyPayload")}</div>
                     </div>
                     <span className={cn("shrink-0 text-[10.5px] font-medium", outcomeTone(item.outcome, item.run))}>{outcomeLabel(item.outcome, item.run)}</span>
                     {item.run?.threadId && bot && (
                       <button type="button" onClick={() => onOpenChat(item.run!.threadId!)} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[10.5px] hover:bg-raised hover:text-ink">
-                        <ExternalLink size={11} />Open chat
+                        <ExternalLink size={11} />{t("canvas.openChat")}
                       </button>
                     )}
                   </li>

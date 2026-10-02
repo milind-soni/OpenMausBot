@@ -23,6 +23,7 @@ import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { repeatedModelLabels, SimpleModelPane } from "./SimpleModelPane";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { friendlyEffort, simpleEffortLevels } from "@/lib/model-friendly";
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
@@ -490,6 +491,10 @@ export function ModelPicker({
   // Simple mode opens on the plain-words view; a provider's "Set up" (or
   // Advanced mode) shows the full picker in the same popover.
   const advanced = useAdvancedMode();
+  const ownerOrAdmin = useOwnerOrAdmin();
+  // Guests can choose a model for their own Cloud conversation, not change
+  // the shared bot's default. Keep choices thread-only until authority loads.
+  const simpleUpdatesBotDefault = !state.config?.cloudHome || ownerOrAdmin === true;
   const [fullView, setFullView] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
     selection: ModelSelection; updateBotDefault: boolean; name: string } | null>(null);
@@ -655,9 +660,9 @@ export function ModelPicker({
   const pick = (instance: InstanceInfo, model: string) => {
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
-    // Simple mode has no scope choice: a pick is also the bot's default, so
-    // new threads start on what the person chose last.
-    const updateBotDefault = !threadId || scope === "bot" || simpleView;
+    // Simple mode has no scope choice: an owner's pick is also the bot's
+    // default, while a Cloud guest changes only their own conversation.
+    const updateBotDefault = !threadId || (simpleView ? simpleUpdatesBotDefault : scope === "bot");
     const profile = state.bots.find((candidate) => candidate.id === bot.id) ?? bot;
     const targets = updateBotDefault ? [currentTaskBot(profile, threadId ?? bot.threadId), profile] : [bot];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
@@ -753,10 +758,9 @@ export function ModelPicker({
   const simpleEffort = activeLevels.length > 0 ? {
     levels: simpleEffortLevels(activeLevels, selection.effort),
     current: selection.effort,
-    // Only the Simple pane offers these steps, and there a pick is also the
-    // bot's default (no scope choice), exactly like a model pick.
+    // Follow the same Cloud authority rule as a Simple model pick.
     onPick: (level: EffortLevel) => dispatch({ type: "setModel", botId: bot.id, threadId,
-      ...(threadId ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } }),
+      ...(threadId && simpleUpdatesBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } }),
   } : null;
 
   const renderRow = (option: ModelOption) => (
@@ -915,7 +919,7 @@ export function ModelPicker({
               onPick={(model) => railInstance && pick(railInstance, model)}
               variantsRow={active?.capabilities?.modelVariants ? (
                 // A closed select shows only its choice, so it keeps a short name.
-                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId)}
+                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId) && simpleUpdatesBotDefault}
                   label={<span className="shrink-0 text-[12px] font-medium text-ink-secondary">{t("model.simple.reasoning")}</span>} />
               ) : undefined}
               effort={simpleEffort}
