@@ -373,7 +373,12 @@ const support = (run: typeof execCli): AcpSupport => ({
   // Prefer the advertised ACP method. An already-signed-in CLI should accept
   // cursor_login without a browser; a missing method rides the ambient login
   // (CURSOR_API_KEY / `cursor-agent login`) instead of failing the turn.
-  pickAuthMethod: (methods) => (methods.some((m) => m.id === "cursor_login") ? "cursor_login" : null),
+  // A key in the agent's env already authenticates the session, and Cursor's
+  // cursor_login handler would then delete the saved login and open a browser
+  // sign-in once the access token has expired, so it is not sent at all.
+  pickAuthMethod: (methods, env) =>
+    nonBlank(env.CURSOR_API_KEY) || nonBlank(env.CURSOR_AUTH_TOKEN) ? null
+      : methods.some((m) => m.id === "cursor_login") ? "cursor_login" : null,
   authFailure: "continue",
   isAuthenticated: (env, config) => probeCursorAuth(config.cli || "cursor-agent", env, run),
   classifyError: classifyCursorError,
