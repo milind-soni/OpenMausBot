@@ -3181,6 +3181,10 @@ app.whenReady().then(async () => {
     // cannot impersonate the person operating the desktop app.
     installDesktopMutationHeader();
   }
+  // Dev deliberately gets no desktop-owner capability (#1669): the dev
+  // server runs as this same OS user, so any token handoff on disk would be
+  // readable by a full-access bot shell. Dev pinned-pack mutations go
+  // through the paired web session instead.
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   secureCredentials = await loadSecureCredentials();
   // The AssemblyAI key only fed the removed Teach a skill recorder, and its

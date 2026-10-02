@@ -27,7 +27,12 @@ export type LoopbackTrust = "owner" | "service";
 
 export type RequestAuth =
   // `trust` is present only when reduced; an owner request looks as it always did.
-  | { kind: "loopback"; scopes: readonly Scope[]; trust?: "service" }
+  // `capability` is present only when a per-launch secret was validated with a
+  // timing-safe comparison: the desktop owner header or the companion relay.
+  // Person-only boundaries (pinned packs, #1669) accept a session or this
+  // capability — never a bare loopback caller, whose "local" includes every
+  // bot's shell.
+  | { kind: "loopback"; scopes: readonly Scope[]; trust?: "service"; capability?: "desktop-owner" | "companion" }
   | { kind: "session"; session: SessionRecord; via: "bearer" | "cookie" | "ticket"; scopes: readonly Scope[] };
 
 export interface RequestAuthResult {
@@ -518,12 +523,15 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
         !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-openmausbot-companion-device"]) ?? "") ||
         companionDenial({ path, method, authenticated: true })
       ) return deny(403, "forbidden: invalid companion request");
-      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, capability: "companion" }, status: 401, error: "" };
     }
+    const desktopOwnerHeader = headerValue(req.headers[DESKTOP_OWNER_HEADER]);
+    const desktopOwnerCapability =
+      options.loopbackMutationToken !== undefined && secureTokenMatch(desktopOwnerHeader, options.loopbackMutationToken);
     if (
       options.loopbackMutationToken !== undefined &&
       mutatingPublicRoute(method, path) &&
-      !secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken)
+      !desktopOwnerCapability
     ) {
       return deny(403, "forbidden: this change must come from the desktop app or a paired device");
     }
@@ -542,7 +550,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       }
       return { auth: { kind: "loopback", scopes: SERVICE_SCOPES, trust: "service" }, status: 401, error: "" };
     }
-    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, ...(desktopOwnerCapability ? { capability: "desktop-owner" as const } : {}) }, status: 401, error: "" };
   }
 
   if (proxied) {

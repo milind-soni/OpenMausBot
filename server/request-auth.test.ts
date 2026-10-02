@@ -181,6 +181,10 @@ describe("resolveRequestAuth", () => {
       ["POST", "/api/internal/anything"], ["GET", "/api/auth/sessions"],
       ["POST", "/api/not-yet-supported"],
     ]) expect(check(method, path).auth, path).toBeNull();
+    // A validated relay request carries the companion capability: person-
+    // owned boundaries (pinned packs) accept it while it still never grants
+    // the desktop owner header's reach.
+    expect(check("POST", "/api/bots/b/read").auth).toMatchObject({ kind: "loopback", capability: "companion" });
   });
 
   function pairedToken(scopes: Array<"admin" | "client"> = ["admin", "client"]): string {
@@ -544,7 +548,7 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
 
   it("ignores service trust while the desktop capability is in force", () => {
     expect(check("PUT", "/api/config", { trust: "service", desktopToken: "owner-token", headers: { "x-openmausbot-desktop-owner": "owner-token" } }).auth)
-      .toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+      .toEqual({ kind: "loopback", scopes: ["admin", "client"], capability: "desktop-owner" });
   });
 
   it("defaults to service on a hosted workspace, owner elsewhere, and lets the operator choose", () => {

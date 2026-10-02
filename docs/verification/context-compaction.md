@@ -9,6 +9,7 @@ A visible, expandable note explains what was summarized, even with tool chips of
 
 ```sh
 pnpm exec vitest run server/context-compaction.e2e.test.ts
+pnpm exec vitest run server/pinned-instructions.test.ts
 pnpm exec vitest run server/context-rebuild.test.ts server/compaction-summary.test.ts server/context-budget.test.ts server/delta-context.e2e.test.ts
 pnpm exec vitest run server/store.test.ts server/config.test.ts src/components/DigestChip.test.ts
 pnpm test:packaged-server
@@ -33,10 +34,34 @@ Evidence covers:
 - Editing an old message replays its selected branch, not the abandoned summary.
 - Stop aborts a hanging helper without a late record; a new send still works.
 - Private session bookkeeping stays off the task wire shape; stored summaries redact secrets.
+- A pinned instruction pack is re-injected from the system prompt after
+  compaction, the folded exchange stays inside the bounded summary, and
+  disabling the pack removes it from the next turn.
 
 Each API fixture retains exact requests, waits and bounded transcripts in
 `<server-log>.context.json`, prints that location, and closes its exact child and
 temporary home. No live account, computer or user workspace is touched.
+
+## Pinned instruction packs
+
+Pinned packs are person-authored instruction blocks that survive compaction.
+Each pack is a markdown file with `name`, `description` and optional `role` /
+`workspace` frontmatter, managed through `PUT`, `PATCH` and `DELETE` on
+`/api/bots/:id/pinned/:name`. Packs ride the system prompt, which the rebuilt
+session re-sends every turn, so a pack is present before and after compaction
+without being copied into the summary. Disabling a pack removes it from the very
+next turn, compaction or not.
+
+Conditions are static and inspectable: `role` matches the bot's title
+case-insensitively and `workspace` matches a turn working directory at or below
+an absolute path on segment boundaries. Nothing in the conversation can pin,
+edit or drop a pack. The routes are person-facing only, pack bytes are hashed at
+save time, and a workspace file edit that changes the hash blocks injection
+until the person saves the pack again. Allowlist state (enabled flag, version,
+provenance) lives in `DATA_DIR/pinned-state/<botId>/pinned.json`, and injected
+packs share a 16 KiB budget; an over-budget pack is omitted by name, never
+truncated. This slice ships `role` and `workspace` conditions; there is no
+static task-type field on tasks to match yet.
 
 ## Bounds and limitations
 

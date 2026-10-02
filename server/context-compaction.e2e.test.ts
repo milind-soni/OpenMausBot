@@ -134,6 +134,49 @@ it("automatically folds old exchanges while keeping the two latest and the incom
   expect(f.turns().at(-1).resumed).toBe(false);
 }), 70_000);
 
+it("re-injects a pinned instruction pack after compaction while unpinned history folds as before", () => fixture(async f => {
+  // A person pins an unconditional pack: ambient for every turn of this bot.
+  // Nothing in the conversation can load or drop it — that is the point.
+  // Pinned packs are person-only state, so the fixture pairs a real session
+  // for exactly these calls instead of the loopback shell identity.
+  const pairing = await f.api("/api/auth/pairing", { label: "Pinned e2e", scopes: ["admin", "client"] }) as { code: string };
+  const paired = await f.api("/api/auth/pair", { code: pairing.code, label: "Pinned e2e" }) as { token: string };
+  const person = (path: string, body: unknown, method: "PUT" | "PATCH" | "DELETE") =>
+    request(path, { method, body: JSON.stringify(body), headers: { authorization: `Bearer ${paired.token}` } }, f.session.info.url) as Promise<any>;
+  const pinned = await person(`/api/bots/${f.bot.id}/pinned/release-checklist`, {
+    text: "---\nname: release-checklist\ndescription: Standing release gate.\n---\n\nPINNED_RULE run cargo clippy and cargo test before reporting work.\n",
+  }, "PUT");
+  expect(pinned.pack).toMatchObject({ name: "release-checklist", enabled: true, version: 1 });
+  await f.send("OLDER_REQUEST use port 9000");
+  await f.send("CORRECTION use port 9001 instead");
+  const before = f.turns().at(-1);
+  expect(before.system).toContain('<openmaus-pinned id="release-checklist" version=1>');
+  expect(before.system).toContain("PINNED_RULE");
+  await f.compact();
+  await f.idle();
+  await f.send("What port did we settle on?");
+  const after = f.turns().at(-1);
+  // The pack rides the system prompt, which the rebuilt session re-sends:
+  // present in the post-compaction context without surviving in the summary.
+  expect(after.system).toContain('<openmaus-pinned id="release-checklist" version=1>');
+  expect(after.system).toContain("PINNED_RULE");
+  expect(after.resumed).toBe(false);
+  // Unpinned content behaves exactly as today: the folded exchange is gone as
+  // a verbatim turn, quoted at most once inside the bounded summary record.
+  const content = String(after.prompt.message.content);
+  expect(content).toContain("Earlier conversation summary");
+  expect(content.match(/OLDER_REQUEST use port 9000/g)).toHaveLength(1);
+  expect(content).not.toContain("PINNED_RULE");
+  const record = (await f.messages()).filter(m => m.kind === "compaction").at(-1);
+  expect(record.compaction.by).toBe("person");
+  expect(Buffer.byteLength(record.compaction.summary)).toBeLessThanOrEqual(6_000);
+  // The allowlist is the person's alone: disabling the pack removes it from
+  // the very next turn, compaction or not.
+  await person(`/api/bots/${f.bot.id}/pinned/release-checklist`, { enabled: false }, "PATCH");
+  await f.send("And the gate?");
+  expect(f.turns().at(-1).system).not.toContain("PINNED_RULE");
+}), 90_000);
+
 it("Stop cancels a stalled summary without writing a late record or starting an agent", () => fixture(async f => {
   await f.send("Keep this original chat intact");
   const before = await f.messages();
