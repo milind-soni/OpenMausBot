@@ -52,12 +52,12 @@ interface Launched {
 }
 
 /** Start `ui launch` as a real foreground process and wait for its handle. */
-function launch(args: string[]): Promise<Launched> {
+function launch(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<Launched> {
   return new Promise((done, fail) => {
     // Own process group: a timeout must take the launch AND whatever it is
     // running (an `agent-browser install` mid-download) down with it.
     const child = spawn(process.execPath, ["--experimental-strip-types", CLI, "ui", "launch", ...args], {
-      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32",
+      cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32",
     });
     const killGroup = (signal: NodeJS.Signals) => {
       if (child.pid && process.platform !== "win32") {
@@ -312,4 +312,33 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     expect(launched.child.exitCode).toBe(0);
     expect(existsSync(info.dataDir)).toBe(false);
   }, LAUNCH_TIMEOUT_MS + 120_000);
+
+  run("discloses live reasoning and removes it when the turn settles", async () => {
+    const gateDir = mkdtempSync(join(tmpdir(), "omb-thinking-gate-"));
+    const release = join(gateDir, "release");
+    const thinking = "Compare the requested changes and verify the result.";
+    try {
+      launched = await launch(["--mode", "hang"], {
+        ...process.env, FAKE_CLAUDE_THINKING: thinking, FAKE_CLAUDE_RELEASE: release,
+      });
+      const { info } = launched;
+      const evaluate = async (js: string) => (await ui("eval", info.ui, "--js", js)).result;
+      await ui("type", info.ui, "--name", "Message Pepper", "--text", "Inspect the requested changes");
+      await ui("press", info.ui, "--keys", "Enter");
+      await waitUntil(() => evaluate(`document.querySelector('details[aria-live="off"]')?.textContent.includes(${JSON.stringify(thinking)})`), 20_000, "provider thinking to arrive");
+      expect(await evaluate(`document.querySelector('details[aria-live="off"]').open`)).toBe(false);
+      await evaluate(`document.querySelector('details[aria-live="off"] summary').click(); true`);
+      expect(await evaluate(`document.querySelector('details[aria-live="off"]').open`)).toBe(true);
+      mkdirSync(evidenceDir, { recursive: true });
+      await ui("screenshot", info.ui, "--out", join(evidenceDir, "live-reasoning.png"));
+      writeFileSync(release, "finish");
+      await ui("wait-settle", info.ui, "--timeout", "60");
+      expect(await evaluate(`document.querySelector('details[aria-live="off"]') === null`)).toBe(true);
+      const logs = await ui("console", info.ui);
+      expect(logs.messages.filter((message: { type: string }) => message.type === "error")).toEqual([]);
+    } finally {
+      await removeTempDir(gateDir);
+    }
+  }, LAUNCH_TIMEOUT_MS + 120_000);
+
 });

@@ -8,12 +8,12 @@ import type { ModelPicker } from "./ModelPicker";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { dispatch: vi.fn(), canWrite: null as boolean | null, reasoning: "", showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({
+  return { ...original, useStreaming: () => ({ streaming: {}, reasoning: { selected: fixture.reasoning } }), useStore: () => ({
     state: { ...original.initialState, config: fixture.showToolCalls ? { features: { showToolCalls: true } } : null,
       instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test" } as InstanceInfo] },
     dispatch: fixture.dispatch,
@@ -312,5 +312,24 @@ describe("a guest's composer on a Cloud home", () => {
     expect(allowed).toContain("<textarea");
     expect(allowed).toContain('data-testid="citation-toolbar"');
     fixture.canWrite = null;
+  });
+});
+
+
+describe("live reasoning", () => {
+  it("renders provider thinking for the selected busy thread on Windows", () => {
+    fixture.platform = "win32";
+    fixture.reasoning = "Compare the two candidate solutions.";
+    try {
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: true, tasks: [] } }));
+      expect(markup).toContain("Compare the two candidate solutions.");
+      expect(markup).toContain("<summary");
+      expect(markup).not.toMatch(/<details[^>]* open/);
+      const idle = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false, tasks: [] } }));
+      expect(idle).not.toContain("Compare the two candidate solutions.");
+    } finally {
+      fixture.reasoning = "";
+      fixture.platform = "other";
+    }
   });
 });

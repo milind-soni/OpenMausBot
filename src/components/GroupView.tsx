@@ -1,3 +1,4 @@
+import { LiveReasoning } from "@/components/LiveReasoning";
 // A room: several bots + you in one shared thread. The sidebar and call view
 // carry the personality; avatars inside the room stay still so a busy group
 // does not become a wall of competing motion. Plain messages go to the room's
@@ -990,6 +991,7 @@ export function GroupView({ group }: { group: Group }) {
   const { dragStyle: headerDragStyle, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
   const stream = useStreaming();
   const streaming = stream.streaming[group.threadId];
+  const reasoning = stream.reasoning[group.threadId];
   const scrollRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -1148,7 +1150,7 @@ export function GroupView({ group }: { group: Group }) {
     if (!el || !followRef.current) return;
     el.scrollTo({ top: el.scrollHeight });
     previousScrollTop.current = el.scrollTop;
-  }, [group.id, group.messages.length, streaming, group.busyBotId, group.working, composerDock.pad]);
+  }, [group.id, group.messages.length, streaming, reasoning, group.busyBotId, group.working, composerDock.pad]);
 
   // Expanding prepends rows: capture the height first, then after the commit
   // shift scrollTop by the growth so the message under the cursor stays put
@@ -1517,6 +1519,7 @@ export function GroupView({ group }: { group: Group }) {
               </button>
             </div>
           )}
+          {group.busyBotId && <LiveReasoning key={group.threadId} text={reasoning} />}
           {(speaker || presenceVisible) && (
             <TurnPresence
               avatar={

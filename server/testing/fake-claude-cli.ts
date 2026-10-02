@@ -15,6 +15,7 @@
 //                      | api-error (the CLI reports a non-auth API error as
 //                        assistant text, then an error result; no model output)
 //   FAKE_CLAUDE_API_ERROR text for the api-error frame (default: overloaded).
+//   FAKE_CLAUDE_THINKING optional reasoning delta emitted before a held hang turn.
 //   FAKE_CLAUDE_RELEASE with hang: the turn ends normally once this file exists.
 //   FAKE_CLAUDE_DUMP   path to write {argv, env, cwd, prompt, systemPrompt,
 //                      mcpConfig} as JSON,
@@ -568,6 +569,11 @@ const playTurn = (prompt: JsonValue, late = false) => {
   }
 
   if (mode === "hang") {
+    if (process.env.FAKE_CLAUDE_THINKING) {
+      out({ type: "stream_event", event: { type: "content_block_delta", delta: {
+        type: "thinking_delta", thinking: process.env.FAKE_CLAUDE_THINKING,
+      } } });
+    }
     // stay alive until killed — lets tests exercise interrupt + the
     // permission broker while a turn is officially in flight. With
     // FAKE_CLAUDE_RELEASE, the turn ends normally once that file exists.

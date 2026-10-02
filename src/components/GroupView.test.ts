@@ -4,6 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { StoreProvider, type Group, type Message } from "@/state/store";
 
+const streamFixture = vi.hoisted(() => ({ reasoning: {} as Record<string, string> }));
+vi.mock("@/state/store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/state/store")>(),
+  useStreaming: () => ({ streaming: {}, reasoning: streamFixture.reasoning }),
+}));
+
 // Replaced whole: its context default reads window.ogb at import time. An
 // empty caption chrome is the non-Windows layout.
 vi.mock("./DesktopCapabilities", () => ({
@@ -94,4 +100,24 @@ describe("room header", () => {
     expect(controls[1].split(" ")).toEqual(expect.arrayContaining(["@max-3xl/roomhead:ml-auto", "@max-3xl/roomhead:flex-wrap"]));
     expect(markup).toContain("Launch planning");
   });
+});
+
+
+it("shows thinking only for the active room's live speaker", () => {
+  vi.stubGlobal("window", { ogb: undefined });
+  streamFixture.reasoning = { "room-thread": "Compare the release options.", elsewhere: "Other thread thinking" };
+  const room: Group = {
+    id: "room", threadId: "room-thread", name: "Planning", memberIds: [],
+    defaultResponder: { kind: "member", botId: "atlas" }, bulletin: "", unread: false,
+    createdAt: 1, setupCompletedAt: 1, messages: [], busyBotId: "atlas",
+  };
+  try {
+    const renderRoom = (group: Group) => renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupView, { group })));
+    expect(renderRoom(room)).toContain("Compare the release options.");
+    expect(renderRoom(room)).not.toContain("Other thread thinking");
+    expect(renderRoom({ ...room, busyBotId: undefined })).not.toContain("Compare the release options.");
+  } finally {
+    streamFixture.reasoning = {};
+    vi.unstubAllGlobals();
+  }
 });

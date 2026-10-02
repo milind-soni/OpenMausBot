@@ -1,3 +1,4 @@
+import { LiveReasoning } from "@/components/LiveReasoning";
 import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -1509,6 +1510,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               </div>
             </div>
           )}
+          {bot.busy && <LiveReasoning key={bot.threadId} text={reasoning} />}
           <TurnPresence
             avatar={
               // BotAvatar, not a bare MausAvatar: an uploaded profile image
