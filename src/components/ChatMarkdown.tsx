@@ -20,7 +20,7 @@ import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
+import { Check, Copy, Download, FolderOpen, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
 import { remarkMentions, type MentionPeer } from "@/lib/mentions";
 
 import {
@@ -589,6 +589,7 @@ export function MermaidDiagram({ code, streaming }: MermaidDiagramProps) {
 // process' containment check.
 function LocalFileLink({ filePath, children, message }: { filePath: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, undefined, message);
+  const [actionError, setActionError] = useState("");
   if (!message) {
     return <span title="Unavailable legacy file reference" className="break-words text-ink-secondary">{children}</span>;
   }
@@ -599,9 +600,17 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
       : save.state === "failed"
         ? "Retry"
         : null;
+  const reveal = async () => {
+    try {
+      setActionError("");
+      await window.ogb?.revealMessageFile?.(message, filePath);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "That file is unavailable");
+    }
+  };
 
   return (
-    <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
+    <span dir="ltr" className="group/file relative inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
       <button
         type="button"
         onClick={() => void save.save()}
@@ -620,6 +629,12 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
           <Download size={12} className="shrink-0" aria-hidden="true" />
         )}
       </button>
+      {typeof window !== "undefined" && window.ogb?.revealMessageFile && (
+        <span className="pointer-events-none absolute start-0 top-full z-10 inline-flex items-center gap-2 rounded-md border border-hairline bg-card px-2 py-1 opacity-0 shadow-sm transition-opacity group-hover/file:pointer-events-auto group-hover/file:opacity-100 group-focus-within/file:pointer-events-auto group-focus-within/file:opacity-100">
+          <button type="button" onClick={() => void reveal()} title="Reveal in folder" aria-label="Reveal in folder" className="inline-flex items-center gap-0.5 text-[12px] text-accent hover:underline focus-visible:underline"><FolderOpen size={12} aria-hidden="true" />Reveal</button>
+        </span>
+      )}
+      {actionError && <span role="alert" className="text-[12px] text-danger">{actionError}</span>}
       {label && (
         <span
           role={save.state === "failed" ? "alert" : "status"}

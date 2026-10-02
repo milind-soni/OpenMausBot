@@ -15,6 +15,9 @@ export const MESSAGE_FILE_MAX_BYTES = 25 * 1024 * 1024;
 
 export interface OpenedMessageFile {
   handle: FileHandle;
+  path: string;
+  dev: number;
+  ino: number;
   bytes: number;
   name: string;
   mime: string;
@@ -382,7 +385,7 @@ export function mimeFor(path: string): string {
  * this rejects symlink escapes and directory swaps instead of checking a
  * path and then opening a potentially different file.
  */
-export async function openMessageFile(href: string, roots: readonly string[]): Promise<OpenedMessageFile> {
+export async function openMessageFile(href: string, roots: readonly string[], allowLarge = false): Promise<OpenedMessageFile> {
   const requested = referencedPath(href);
   const canonicalRoots = (await Promise.all(roots.map(async (root) => {
     try {
@@ -418,7 +421,7 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
       handle = await open(canonicalBefore, constants.O_RDONLY | noFollow);
       const opened = await handle.stat();
       if (!opened.isFile()) throw statusError(400, "the link does not point to a regular file");
-      if (opened.size > MESSAGE_FILE_MAX_BYTES) {
+      if (!allowLarge && opened.size > MESSAGE_FILE_MAX_BYTES) {
         throw statusError(413, `file exceeds ${MESSAGE_FILE_MAX_BYTES} bytes`);
       }
 
@@ -431,6 +434,9 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
 
       return {
         handle,
+        path: canonicalAfter,
+        dev: opened.dev,
+        ino: opened.ino,
         bytes: opened.size,
         name: basename(canonicalAfter),
         mime: mimeFor(canonicalAfter),

@@ -11745,6 +11745,11 @@ describe("message pages", () => {
     expect(response.headers.get("content-disposition")).toContain("phone%20report.md");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect((await api(
+      "POST",
+      `/api/threads/${threadId}/messages/linked-file-message/file?locate=1`,
+      { path: linkedFile },
+    )).status).toBe(403);
 
     // Merely mentioning the exact same path in prose does not grant a file
     // capability. It must be an actual Markdown/autolink/attachment target.

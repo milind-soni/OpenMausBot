@@ -17919,6 +17919,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // to OpenMausBot's private attachment directory. This is deliberately not
     // a general path reader.
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/file$/);
+    const locatesMessageFile = Boolean(m && method === "POST" && url.searchParams.get("locate") === "1");
+    const ownerHeader = req.headers["x-openmausbot-desktop-owner"];
+    if (locatesMessageFile && (auth.kind !== "loopback" || !desktopMutationToken || typeof ownerHeader !== "string" ||
+      Buffer.byteLength(ownerHeader) !== Buffer.byteLength(desktopMutationToken) ||
+      !timingSafeEqual(Buffer.from(ownerHeader), Buffer.from(desktopMutationToken)))) {
+      return json(res, 403, { error: "file location is available only to this desktop" });
+    }
     const streamsMessageImage = Boolean(
       m && method === "GET" && url.searchParams.get("preview") === "1",
     );
@@ -17980,7 +17987,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         roots = messageFileRootsForThread(senderId, threadId);
       }
 
-      const file = await openMessageFile(href, roots);
+      const file = await openMessageFile(href, roots, locatesMessageFile);
+      if (locatesMessageFile) {
+        await file.handle.close();
+        return json(res, 200, { path: file.path, dev: file.dev, ino: file.ino });
+      }
       if ((streamsMessageImage || botAttachment?.kind === "image") && !file.mime.startsWith("image/")) {
         await file.handle.close();
         return json(res, 415, { error: "only images can be previewed here" });

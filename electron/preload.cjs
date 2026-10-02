@@ -256,6 +256,11 @@ const bridge = {
       const message = String(error?.message ?? error);
       throw new Error(message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
     }),
+  revealMessageFile: (message, filePath) =>
+    ipcRenderer.invoke("desktop:reveal-message-file", message, filePath).catch((error) => {
+      const detail = String(error?.message ?? error);
+      throw new Error(detail.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
+    }),
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 

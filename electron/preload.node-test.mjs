@@ -53,6 +53,7 @@ test("exposes the full local-shell bridge on window.ogb", () => {
   // The settings channel is local-shell only, so it exists on the bridge
   // exactly when the page is local (no --omb-local-origin in argv here).
   assert.equal(typeof exposed.api.onOpenAppSettings, "function");
+  assert.equal(typeof exposed.api.revealMessageFile, "function");
 });
 
 test("onOpenAppSettings subscribes to the exact app:open-settings channel, forwards every emit, and unsubscribes cleanly", () => {
