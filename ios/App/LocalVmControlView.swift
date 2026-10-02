@@ -16,10 +16,12 @@ struct LocalVmControlView: View {
     let handBack: () -> Void
 
     @State private var typing = false
-    /// The keyboard's own appearance, not the button that asked for it: the
-    /// trackpad collapses and grows inside the keyboard's animation, so the
-    /// desktop above, which the keyboard's inset resizes, moves with it
-    /// rather than a beat later.
+    /// The keyboard's own appearance, not the button that asked for it. The
+    /// room the keyboard takes and the trackpad's collapse change in one
+    /// transaction, so the desktop between them shrinks in one motion: left
+    /// to SwiftUI's own keyboard avoidance, the two run on different curves,
+    /// the screen is briefly shorter than the picture needs, and the picture
+    /// narrows for a few frames before growing back.
     @StateObject private var keyboard = KeyboardPresence()
 
     var body: some View {
@@ -39,12 +41,16 @@ struct LocalVmControlView: View {
                         Capsule().fill(Color.white.opacity(0.35)).frame(width: 36, height: 4)
                         Text("Trackpad")
                             .font(.system(size: 15, weight: .semibold))
-                        if !keyboard.visible {
-                            Text("Swipe to move · Tap to click · Hold to drag")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Color.white.opacity(0.6))
-                                .transition(.opacity)
-                        }
+                        // Kept in the layout so the label does not re-centre
+                        // around it. Cut, not faded, as the pad shrinks: a
+                        // fading line rides up over the label while the
+                        // layout moves. It fades back in once the pad has
+                        // grown again.
+                        Text("Swipe to move · Tap to click · Hold to drag")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.white.opacity(0.6))
+                            .opacity(keyboard.visible ? 0 : 1)
+                            .animation(keyboard.visible ? nil : .easeIn(duration: 0.2).delay(0.5), value: keyboard.visible)
                     }
                     .foregroundStyle(Color.white.opacity(0.85))
                     .allowsHitTesting(false)
@@ -59,7 +65,8 @@ struct LocalVmControlView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.bottom, 12 + keyboard.height)
+        .ignoresSafeArea(.keyboard)
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
     }
@@ -357,20 +364,29 @@ private struct KeyCatcher: UIViewRepresentable {
     }
 }
 
-/// Whether the system keyboard is up, changed inside the keyboard's own
-/// animation so views keyed on it move in step with the keyboard.
+/// Whether the system keyboard is up and how much of the window it covers
+/// beyond the bottom safe area, both changed in one animation that follows
+/// the keyboard's own spring, so views keyed on them move in step with it.
 @MainActor
 private final class KeyboardPresence: ObservableObject {
     @Published private(set) var visible = false
+    @Published private(set) var height: CGFloat = 0
     private var observers: [NSObjectProtocol] = []
 
     init() {
         let center = NotificationCenter.default
         for (name, shown) in [(UIResponder.keyboardWillShowNotification, true), (UIResponder.keyboardWillHideNotification, false)] {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
-                let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+                let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
                 MainActor.assumeIsolated {
-                    withAnimation(.easeInOut(duration: max(duration, 0.2))) { self?.visible = shown }
+                    let window = UIApplication.shared.connectedScenes
+                        .compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
+                    let covered = window.map { max(0, $0.bounds.maxY - end.minY - $0.safeAreaInsets.bottom) } ?? 0
+                    // UIKit slides the keyboard on this spring.
+                    withAnimation(.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500)) {
+                        self?.visible = shown
+                        self?.height = shown ? covered : 0
+                    }
                 }
             })
         }
