@@ -1294,6 +1294,12 @@ export function ComputerPanel({
     else if (mode === "browser") updateComputerSelection({ computer: mode, browser: true });
     else updateComputerSelection({ computer: mode });
   };
+  // A pin that keeps this chat away from the grid's choice and will not move
+  // with it: a person's, or one older than the server's record of who set
+  // it. An auto pin moves with the next Works on change, one that matches
+  // Works on changes nothing, and Off wins over any pin.
+  const heldPin = liveTask?.surface && !liveTask.surfaceAuto && profileBot.computer !== "off"
+    && liveTask.surface !== profileBot.computer ? liveTask.surface : undefined;
 
   const tabClass = (active: boolean) => cn(
     "flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] transition-colors",
@@ -1986,16 +1992,30 @@ export function ComputerPanel({
             <p className="mt-3 text-[11.5px] leading-5 text-ink-secondary">
               {t(state.config?.cloudHome ? "computer.simple.autoHintCloudHome" : isMacHost ? "computer.simple.autoHintMac" : "computer.simple.autoHintPc")}
             </p>
-            {/* Simple has no composer chip to change a pin from, so this only
-                names the place, in the grid's words. Nor is there a one-click
-                "Use Auto": the wire task cannot tell a person's pin from one
-                Auto recorded (surfaceSource stays on the server). */}
-            {liveTask?.surface && (
-              <p className="mt-2 text-[11.5px] leading-5 text-ink-secondary" data-testid="place-pinned-note">
-                {t("place.pinnedNoteSimple", {
-                  place: placeOptions.find(({ mode }) => mode === liveTask.surface)?.simpleLabel ?? t(placeLabelKey(liveTask.surface)),
-                })}
-              </p>
+            {/* Simple has no composer chip, so a held pin is named here, in
+                the grid's words, with the way back to the grid's choice. An
+                auto pin gets no note: the person never set it. */}
+            {heldPin && (
+              <div className="mt-2 flex items-center gap-2">
+                <p className="min-w-0 flex-1 text-[11.5px] leading-5 text-ink-secondary" data-testid="place-pinned-note">
+                  {t("place.pinnedNoteSimple", {
+                    place: placeOptions.find(({ mode }) => mode === heldPin)?.simpleLabel ?? t(placeLabelKey(heldPin)),
+                  })}
+                </p>
+                {/* The server refuses a busy thread's place change (409). */}
+                <button
+                  type="button"
+                  disabled={Boolean(bot.busy)}
+                  title={bot.busy ? t("place.busy") : undefined}
+                  onClick={() => dispatch({ type: "updateTask", botId: profileBot.id, threadId: profileBot.threadId, patch: { surface: null } })}
+                  className="shrink-0 rounded-md px-2 py-0.5 text-[11.5px] font-medium leading-5 text-accent-text transition-colors hover:bg-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                  data-testid="place-unpin"
+                >
+                  {t("place.unpinSimple", {
+                    place: placeOptions.find(({ selected }) => selected)?.simpleLabel ?? t(placeLabelKey(profileBot.computer ?? "auto")),
+                  })}
+                </button>
+              </div>
             )}
           </div>
         )}

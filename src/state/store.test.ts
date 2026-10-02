@@ -338,6 +338,20 @@ describe("independent bot threads", () => {
     expect(ungrouped.bots[0]?.tasks?.[1]).toEqual({ ...bot.tasks?.[1], projectId: undefined });
     expect(ungrouped.bots[0]?.tasks?.[0]).toEqual(bot.tasks?.[0]);
   });
+
+  it("drops the machine's mark the moment the person pins or unpins a thread's place", () => {
+    const autoPinned = { ...start(), bots: [{ ...bot, tasks: bot.tasks?.map((task) =>
+      task.threadId === "first" ? { ...task, surface: "browser" as const, surfaceAuto: true as const } : task) }] };
+    const pinned = reducer(autoPinned, { type: "updateTask", botId: bot.id, threadId: "first", patch: { surface: "cloud" } });
+    expect(pinned.bots[0]?.tasks?.[0]?.surface).toBe("cloud");
+    expect(pinned.bots[0]?.tasks?.[0]?.surfaceAuto).toBeUndefined();
+    const unpinned = reducer(autoPinned, { type: "updateTask", botId: bot.id, threadId: "first", patch: { surface: null } });
+    expect(unpinned.bots[0]?.tasks?.[0]?.surface).toBeUndefined();
+    expect(unpinned.bots[0]?.tasks?.[0]?.surfaceAuto).toBeUndefined();
+    // Any other thread edit leaves the machine's record as it is.
+    const listPinned = reducer(autoPinned, { type: "updateTask", botId: bot.id, threadId: "first", patch: { pinned: true } });
+    expect(listPinned.bots[0]?.tasks?.[0]).toMatchObject({ surface: "browser", surfaceAuto: true });
+  });
 });
 
 describe("keyboard shortcuts dialog state", () => {

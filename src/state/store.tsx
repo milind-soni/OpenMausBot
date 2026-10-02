@@ -310,6 +310,11 @@ export interface Task {
    * composer, or by its first Auto turn to the place it reached. Wins over
    * the bot's Works on (except Off); absent = follows the bot. */
   surface?: "cloud" | "vm" | "local" | "browser";
+  /** true when that pin is the machine's own record (an Auto turn's landing
+   * place or the bot's select_computer choice), which the next Works on
+   * change moves; absent on a person's pin or one older than the server's
+   * record of who set it. Server-derived. */
+  surfaceAuto?: true;
   /** set when a bot (not the person) started this thread — its own or a
    * teammate's; the sidebar shows a quiet "opened by <name>" under the title */
   openedBy?: ThreadOpener;
@@ -517,7 +522,8 @@ function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
     ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }),
     ...(archivedAt === undefined ? {} : { archivedAt: archivedAt ?? undefined }),
     ...(snoozedUntil === undefined ? {} : { snoozedUntil: snoozedUntil ?? undefined }),
-    ...(surface === undefined ? {} : { surface: surface ?? undefined }),
+    // A person's pin or unpin is never the machine's record.
+    ...(surface === undefined ? {} : { surface: surface ?? undefined, surfaceAuto: undefined }),
     ...(pinned === undefined ? {} : { pinned: pinned ? true : undefined }) };
 }
 

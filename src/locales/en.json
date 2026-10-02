@@ -3079,6 +3079,7 @@
   "place.unavailable": "Not available for this bot's model or setup",
   "place.pinnedNote": "This conversation is pinned to {place}. Change it from the composer.",
   "place.pinnedNoteSimple": "This chat is pinned to “{place}”.",
+  "place.unpinSimple": "Use {place}",
   "engines.icon.label": "Provider icon",
   "engines.icon.selectAria": "Provider icon for {name}",
   "engines.icon.default": "Default icon",

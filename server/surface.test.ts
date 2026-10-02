@@ -149,7 +149,15 @@ describe("surfacePrompt", () => {
     expect(text).toContain("select the requested available place");
     expect(text).toContain("changing places requires select_computer");
     expect(text).toContain("Never silently replace an explicitly requested VM with the host desktop");
-    expect(text).not.toContain("ask the user to change the conversation's computer selector");
+    expect(text).not.toContain("ask the user to change where this conversation works");
+  });
+
+  it("sends the person to the Computer panel, the place control both interface modes show", () => {
+    const text = surfacePrompt({ computer: "cloud", browser: false }, { pinned: "cloud" });
+    expect(text).toContain("explain the mismatch and ask the user to change where this conversation works in the Computer panel");
+    expect(text).toContain("changing places requires the user's choice in the Computer panel, not a different tool name");
+    // Simple mode has no composer chip, so no selector the person cannot see.
+    expect(text).not.toContain("computer selector");
   });
 
   // Every shape of the paragraph a turn can get: each mount, pinned or not,

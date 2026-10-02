@@ -145,6 +145,9 @@ describe("surface pin provenance against the real server", () => {
     const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
     await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "local" });
     expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    const personPin = await threadState(bot.id, task.threadId);
+    expect(personPin).toMatchObject({ surface: "local" });
+    expect(personPin).not.toHaveProperty("surfaceAuto");
     await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: null });
     const cleared = savedTask(bot.id, task.threadId)!;
     expect(cleared.surface).toBeUndefined();
@@ -276,6 +279,9 @@ describe("surface pin provenance against the real server", () => {
     await until(() => savedTask(bot.id, task.threadId)?.surface === "vm", Boolean);
     expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "vm", surfaceSource: "auto" });
     expect(await threadState(bot.id, task.threadId)).not.toHaveProperty("surfaceSource");
+    // Clients see only that this pin is the machine's own record.
+    expect(await threadState(bot.id, task.threadId)).toMatchObject({ surface: "vm", surfaceAuto: true });
+    expect(savedTask(bot.id, task.threadId)).not.toHaveProperty("surfaceAuto");
     writeFileSync(finishFile, "finish");
     await idle(bot.id, task.threadId);
     await stop();

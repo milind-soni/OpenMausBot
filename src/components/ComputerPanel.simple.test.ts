@@ -2,7 +2,7 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Bot, InstanceInfo, Message } from "@/state/store";
+import type { Bot, InstanceInfo, Message, Task } from "@/state/store";
 import type { FeatureFlagConfig } from "@/lib/feature-flags";
 
 // Same hook-by-call-order harness as ModelPicker.simple.test.ts: the panel's
@@ -371,6 +371,42 @@ describe("A chat pinned to a place", () => {
     fixture.values = [];
     phaseIndex = -1;
     expect(note(render(pinned()))).toBe("This conversation is pinned to Cloud computer. Change it from the composer.");
+  });
+
+  const pinnedOn = (computer: Bot["computer"], task: Partial<Task> = {}) =>
+    makeBot({ computer, tasks: [{ threadId: "thread-scout", title: "", createdAt: 1, surface: "cloud", ...task }] } as Partial<Bot>);
+  const unpin = (rendered: ReturnType<typeof render>) => rendered.nodes.find((node) => node.props["data-testid"] === "place-unpin");
+  const fresh = () => { fixture.values = []; phaseIndex = -1; };
+
+  it("leads a person's pin back to the grid's choice, which Simple has no composer chip for", () => {
+    const button = unpin(render(pinned()))!;
+    expect(text(button.props.children)).toBe("Use Auto");
+    expect(button.props.disabled).toBe(false);
+    (button.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateTask", botId: "scout", threadId: "thread-scout", patch: { surface: null } });
+
+    fresh();
+    expect(text(unpin(render(pinnedOn("local")))!.props.children)).toBe("Use This Mac");
+
+    // Advanced keeps its own note and the composer chip.
+    fixture.advanced = true;
+    fresh();
+    expect(unpin(render(pinned()))).toBeUndefined();
+  });
+
+  it("waits out a running turn, as the server refuses a busy chat's place change", () => {
+    const button = unpin(render(pinnedOn(undefined, { busy: true })))!;
+    expect(button.props.disabled).toBe(true);
+    expect(button.props.title).toBe("Wait for the current turn to finish");
+  });
+
+  it("says nothing of a pin Auto recorded, one matching Works on, or one Off overrides", () => {
+    for (const bot of [pinnedOn(undefined, { surface: "browser", surfaceAuto: true }), pinnedOn("cloud"), pinnedOn("off")]) {
+      fresh();
+      const rendered = render(bot);
+      expect(rendered.nodes.some((node) => node.props["data-testid"] === "place-pinned-note"), JSON.stringify([bot.computer, bot.tasks])).toBe(false);
+      expect(unpin(rendered)).toBeUndefined();
+    }
   });
 });
 

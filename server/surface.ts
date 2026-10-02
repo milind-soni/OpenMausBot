@@ -128,8 +128,15 @@ export function surfaceLabel(surface: Surface): string {
 const RESTATE_SENTENCE =
   " Before your first action on a screen or page in a task, say in one short sentence where you are working, using that same name.";
 
+/** Where a person moves a conversation: the Computer panel is the one place
+ * control both interface modes show (Simple has no composer chip). */
+const PLACE_CONTROL = "the Computer panel";
+/** Without select_computer the person has to switch; with it, surfacePrompt
+ * swaps exactly this phrase for the model's own switch. */
+const ASK_TO_SWITCH = `explain the mismatch and ask the user to change where this conversation works in ${PLACE_CONTROL}`;
+
 const SURFACE_AUTHORITY =
-  " For browser and computer tasks, use OpenMausBot's mounted browser/computer tools first: inspect the target, perform the action, and verify its result before claiming success. Discover deferred tools by their server/name when needed. Do not substitute the provider's own desktop, a shell-launched browser, or another automation path for the selected OpenMausBot surface. Ordinary code and file tasks may still use their normal tools. Announcing an action is not performing it. A request naming another place does not move these tools: this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser. If the requested place differs from the mounted one, explain the mismatch and ask the user to change the conversation's computer selector; never act on a different computer or describe a host window as a VM.";
+  ` For browser and computer tasks, use OpenMausBot's mounted browser/computer tools first: inspect the target, perform the action, and verify its result before claiming success. Discover deferred tools by their server/name when needed. Do not substitute the provider's own desktop, a shell-launched browser, or another automation path for the selected OpenMausBot surface. Ordinary code and file tasks may still use their normal tools. Announcing an action is not performing it. A request naming another place does not move these tools: this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser. If the requested place differs from the mounted one, ${ASK_TO_SWITCH}; never act on a different computer or describe a host window as a VM.`;
 
 /** A Cloud home offers neither this computer nor a Local VM
  * (server/cloud-home.ts), so its bots are told only about the places it has.
@@ -162,13 +169,13 @@ export function surfacePrompt(
       " Everything you do on screen happens in the built-in browser tab; there is no desktop, file or shell computer this turn. If you need the user to sign in, tell them it is in the Browser tab of the Computer panel.";
   }
   if (text) text += RESTATE_SENTENCE + (opts.canSelect
-    ? SURFACE_AUTHORITY.replace("explain the mismatch and ask the user to change the conversation's computer selector", "inspect connected choices with select_computer and select the requested available place; on a pending result end this turn so OpenMausBot can reconnect the correct tools and continue the original request")
+    ? SURFACE_AUTHORITY.replace(ASK_TO_SWITCH, "inspect connected choices with select_computer and select the requested available place; on a pending result end this turn so OpenMausBot can reconnect the correct tools and continue the original request")
     : SURFACE_AUTHORITY);
   else if (!opts.note && !opts.canSelect) {
     text = " No computer or built-in browser tools are mounted this turn. You cannot open apps, click, or inspect a screen through OpenMausBot. If asked for screen work, explain this and ask the user to choose and connect a computer in the Computer panel; do not claim to have opened or checked it.";
   }
   if (opts.pinned) {
-    text += ` This conversation is pinned to ${surfaceLabel(opts.pinned)}; changing places requires ${opts.canSelect ? "select_computer or " : ""}the conversation's computer selector, not a different tool name.`;
+    text += ` This conversation is pinned to ${surfaceLabel(opts.pinned)}; changing places requires ${opts.canSelect ? "select_computer or " : ""}the user's choice in ${PLACE_CONTROL}, not a different tool name.`;
   }
   if (opts.canSelect) text += " For a screen task, use select_computer with no arguments when you need to inspect the actual available targets. Choose the requested place from its result; if the user left the place open, use a suitable available target or surface auto instead of asking them to operate the menu. Browser-only work can stay in Browser; when it needs desktop apps or capabilities the current Browser lacks, select an available Local VM without asking the user to switch it manually. Choose before taking actions, and do not repeat actions already completed if the task must continue elsewhere. OpenMausBot can start an existing configured computer and highlight the selected target. If the right tools are already mounted, use them directly. On a pending switch, end this turn: the original request resumes automatically with the new tools, and then you must carry out the task. Only ask for input for a genuine blocker, such as missing setup, required sign-in or an approval. Never silently replace an explicitly requested VM with the host desktop.";
   if (opts.canSelect) text += " If no suitable computer is running but its provider is configured, select_computer can provision one for this computer task; reuse existing resources first. Do not provision merely for ordinary chat or inspection.";
