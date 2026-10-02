@@ -821,6 +821,9 @@ export function SettingsModal() {
             {section === "cloudAccount" && window.ogb?.cloudAccount && !remoteActive && <CloudAccountSettings linkRequest={state.appSettingsCloudLink} />}
             {section === "general" && (
               <>
+                <div className="rounded-2xl border border-accent-border/40 bg-raised-hover/40 px-1">
+                  <AdvancedModeRow />
+                </div>
                 <ProSettingsCard />
                 <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
                   <ProfileFields />
@@ -852,7 +855,8 @@ export function SettingsModal() {
                   <SkinPicker />
                 </Card>
                 <div>
-                  <AdvancedModeRow />
+                  {/* A paired remote client has no General page; keep the switch reachable. */}
+                  {remoteActive && <AdvancedModeRow />}
                   <FontRow />
                   <SidebarDensityRow />
                   <ShowThreadsRow />
