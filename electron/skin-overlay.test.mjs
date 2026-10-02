@@ -50,4 +50,9 @@ describe("skin overlay chrome", () => {
     expect(skinChrome("does-not-exist")).toEqual(SKIN_CHROME[DEFAULT_SKIN]);
     expect(skinChrome(null)).toEqual(SKIN_CHROME[DEFAULT_SKIN]);
   });
+
+  it("paints Meadow's white page behind the caption buttons", () => {
+    expect(skinChrome("meadow")).toEqual({ color: "#ffffff", symbolColor: "#4d5a52" });
+    expect(isKnownSkin("meadow")).toBe(true);
+  });
 });

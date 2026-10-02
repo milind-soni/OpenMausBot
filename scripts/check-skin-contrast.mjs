@@ -202,34 +202,42 @@ for (const [id, tokens] of skins) {
   if (skinFailed) failed = true;
 }
 
-// The inverted Daylight bubble has its own inherited context: the editor,
-// labels, quotes and file chips explicitly use these tokens, not parent color.
-const daylightBubble = {
-  ...skins.get("daylight"),
-  ...declarations(css.match(/@scope \(\[data-skin="daylight"\]\) to \(\[data-skin\]\)\s*\{\s*\.bg-bubble-user\s*\{([^}]*)\}/)?.[1] ?? ""),
-};
-for (const [fg, bg] of [
-  ["--color-ink", "--color-bubble-user"],
-  ["--color-ink-secondary", "--color-bubble-user"],
-  ["--color-ink", "--color-raised"],
-  ["--color-ink-secondary", "--color-raised-hover"],
-  ["--color-ink-secondary", "--color-inset"],
-  ["--color-ink-tertiary", "--color-bubble-user"],
-  ["--color-ink-tertiary", "--color-raised-hover"],
-  ["--color-ink-tertiary", "--color-inset"],
-  ["--color-accent", "--color-inset"],
-  ["--color-accent-text", "--color-bubble-user"],
-  ["--color-ink", "--color-control"],
-  ["--color-accent-ink", "--color-accent"],
-  ["--color-danger-ink", "--color-danger"],
-  ["--color-success-ink", "--color-success"],
-]) {
-  const ratio = contrast(daylightBubble[fg] ?? "", daylightBubble[bg] ?? "");
-  if (ratio === null || ratio < 4.5) {
+// The inverted bubbles (Daylight's ink-black, Meadow's green-black) have
+// their own inherited context: the editor, labels, quotes and file chips
+// explicitly use these tokens, not parent color.
+for (const skinId of ["daylight", "meadow"]) {
+  const scope = css.match(new RegExp(`@scope \\(\\[data-skin="${skinId}"\\]\\) to \\(\\[data-skin\\]\\)\\s*\\{\\s*\\.bg-bubble-user\\s*\\{([^}]*)\\}`))?.[1];
+  if (!scope) {
     failed = true;
-    console.log(`✗ daylight bubble — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
+    console.log(`✗ ${skinId} bubble — no @scope block for the inverted bubble`);
+    continue;
   }
+  const bubble = { ...skins.get(skinId), ...declarations(scope) };
+  let bubbleFailed = false;
+  for (const [fg, bg] of [
+    ["--color-ink", "--color-bubble-user"],
+    ["--color-ink-secondary", "--color-bubble-user"],
+    ["--color-ink", "--color-raised"],
+    ["--color-ink-secondary", "--color-raised-hover"],
+    ["--color-ink-secondary", "--color-inset"],
+    ["--color-ink-tertiary", "--color-bubble-user"],
+    ["--color-ink-tertiary", "--color-raised-hover"],
+    ["--color-ink-tertiary", "--color-inset"],
+    ["--color-accent", "--color-inset"],
+    ["--color-accent-text", "--color-bubble-user"],
+    ["--color-ink", "--color-control"],
+    ["--color-accent-ink", "--color-accent"],
+    ["--color-danger-ink", "--color-danger"],
+    ["--color-success-ink", "--color-success"],
+  ]) {
+    const ratio = contrast(bubble[fg] ?? "", bubble[bg] ?? "");
+    if (ratio === null || ratio < 4.5) {
+      failed = true;
+      bubbleFailed = true;
+      console.log(`✗ ${skinId} bubble — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
+    }
+  }
+  if (!bubbleFailed) console.log(`✓ ${skinId} bubble — editor, controls and paired fills above 4.5:1`);
 }
 
-if (!failed) console.log("✓ daylight bubble — editor, controls and paired fills above 4.5:1");
 process.exit(failed ? 1 : 0);

@@ -569,6 +569,54 @@
   --radius-xl: 14px;
 }
 
+/* ── Meadow ───────────────────────────────────────────────────────────────
+   The MausBot brand look: a white page, a sidebar washed in the faintest
+   green, mint for the selected row and a calm green accent. Like Daylight,
+   your own bubble is the one dark surface (green-black), so it gets the same
+   @scope treatment further down. The brand green #1f8a52 carries white at
+   only 4.3:1, so the filled accent is one step deeper; the brand green stays
+   as the accent border.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="meadow"] {
+  --code-color-scheme: light;
+  --color-app: #ffffff;           /* the thread */
+  --color-panel: #f6f8f6;         /* sidebar */
+  --color-raised: #e9eeea;
+  --color-raised-hover: #d6efdf;  /* the selected row, mint */
+  --color-card: #f1f5f2;          /* what a bot says */
+  --color-inset: #e7ece8;         /* the search field */
+  --color-control: #dce3de;       /* a chip on a card */
+  --color-hairline: #c9d3cc;
+
+  --color-ink: #0f1a13;
+  --color-ink-secondary: #4d5a52;
+  --color-ink-tertiary: #4f5c54;
+
+  --color-accent: #1a7a48;
+  --color-accent-border: #1f8a52;
+  --color-accent-text: #176b3f;
+  --color-focus: #1a7a48;
+  --color-accent-ink: #ffffff;
+  --color-composer: #ffffff;
+  --color-composer-ring: #e3e9e4;
+  --color-menu: #ffffff;
+  --color-bubble-user: #0f1a13;   /* your own messages, inverted */
+  --color-bubble-user-ink: #ffffff;
+
+  --color-success: #1a7a48;
+  --color-danger: #c02b3a;
+  --color-danger-ink: #ffffff;
+  --color-success-ink: #ffffff;
+  --color-warning: #8a5a00;
+  --color-scrollbar: #c3cdc6;
+  --color-maus-line: #5a675f;
+
+  --font-sans: "Inter", -apple-system, blinkmacsystemfont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 10px;
+  --radius-xl: 16px;
+}
+
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
    re-tokenizing. Scope the scheme to code; native controls keep their styling. */
 .chat-md .shiki {
@@ -1408,6 +1456,30 @@ body {
     --color-danger-ink: #070707;
     --color-success: #63b58a;
     --color-success-ink: #070707;
+  }
+}
+
+/* Meadow's own bubble is green-black on white: the same inverted context as
+   Daylight's, tuned to the green ink. */
+@scope ([data-skin="meadow"]) to ([data-skin]) {
+  .bg-bubble-user {
+    --color-ink: #ffffff;
+    --color-ink-secondary: #c3d6ca;
+    --color-ink-tertiary: #a9bfb1;
+    --color-panel: #142219;
+    --color-inset: #1b2b21;
+    --color-raised: #2a3b30;
+    --color-raised-hover: #35493c;
+    --color-control: #2a3b30;
+    --color-hairline: #5f7266;
+    --color-accent: #7fdca8;
+    --color-accent-text: #7fdca8;
+    --color-accent-ink: #0f1a13;
+    --color-focus: #7fdca8;
+    --color-danger: #ff7788;
+    --color-danger-ink: #0f1a13;
+    --color-success: #7fdca8;
+    --color-success-ink: #0f1a13;
   }
 }
 
