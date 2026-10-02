@@ -167,13 +167,15 @@ function variantLabel(option: ModelVariantOption): string {
 }
 
 /** ACP variant ids are opaque; their model/session declares the available choices. */
-export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false }: {
+export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false, wide = false }: {
   bot: Bot;
   threadId?: string;
   updateBotDefault?: boolean;
   className?: string;
   label?: ReactNode;
   compact?: boolean;
+  /** Compact only: the select spans the whole row (the Simple picker's band). */
+  wide?: boolean;
 }) {
   const { state, dispatch } = useStore();
   const selection = bot.modelSelection;
@@ -198,7 +200,8 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
         <select aria-label="Reasoning variant" disabled={bot.busy}
           value={selection.variant === undefined ? "unset" : missing ? "missing" : String(options.findIndex((option) => option.id === selection.variant))}
           onChange={(event) => choose(options[Number(event.target.value)]?.id)}
-          className="min-w-0 max-w-[65%] rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50">
+          className={cn("min-w-0 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50",
+            wide ? "flex-1" : "max-w-[65%]")}>
           <option value="unset">Use session setting</option>
           {missing && <option value="missing" disabled>{selection.variant} ({unavailable ? "unavailable" : "unverified"})</option>}
           {options.map((option, index) => <option key={option.id} value={String(index)}>{variantLabel(option)}</option>)}
@@ -454,7 +457,10 @@ export function ClaudeAccountSelect({ accounts, selectedId, onSelect }: {
 }
 
 const POPOVER_WIDTH = 420;
-const SIMPLE_POPOVER_WIDTH = 520;
+/** The Simple view's width: a 128px provider column beside the models. */
+export const SIMPLE_POPOVER_WIDTH = 380;
+/** Past this many models, the Simple view's opened list gets a search box. */
+const SIMPLE_SEARCH_AFTER = 12;
 
 export function ModelPicker({
   bot,
@@ -481,8 +487,8 @@ export function ModelPicker({
   const [refreshing, setRefreshing] = useState(false);
   const [probingLocal, setProbingLocal] = useState<string | null>(null);
   const [scope, setScope] = useState<"bot" | "thread">("thread");
-  // Simple mode opens on the plain-words view; "More" (or Advanced mode)
-  // shows the full picker in the same popover.
+  // Simple mode opens on the plain-words view; a provider's "Set up" (or
+  // Advanced mode) shows the full picker in the same popover.
   const advanced = useAdvancedMode();
   const [fullView, setFullView] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
@@ -493,8 +499,9 @@ export function ModelPicker({
   const lastClaudeIdRef = useRef<string | null>(null);
   const lastOpenaiIdRef = useRef<string | null>(null);
 
-  // The Simple view lays providers and models side by side, so it is wider.
-  const popoverWidth = !advanced && !fullView ? SIMPLE_POPOVER_WIDTH : POPOVER_WIDTH;
+  const simpleView = !advanced && !fullView && !contained;
+  // The Simple view has its own, narrower width; the full picker keeps its.
+  const popoverWidth = simpleView ? SIMPLE_POPOVER_WIDTH : POPOVER_WIDTH;
   useLayoutEffect(() => {
     if (!open || contained) return;
     const place = () => {
@@ -590,7 +597,8 @@ export function ModelPicker({
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (query) setQuery("");
-      else if (pane === "custom" && railInstance?.models.options.some((option) => !option.custom)) setPane("main");
+      // The Simple view shows no local pane to step back from.
+      else if (!simpleView && pane === "custom" && railInstance?.models.options.some((option) => !option.custom)) setPane("main");
       else setOpen(false);
     };
     window.addEventListener("mousedown", closeOnOutsideClick);
@@ -599,7 +607,7 @@ export function ModelPicker({
       window.removeEventListener("mousedown", closeOnOutsideClick);
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [open, pane, query, railInstance]);
+  }, [open, pane, query, railInstance, simpleView]);
 
   const resetList = () => {
     setQuery("");
@@ -687,15 +695,26 @@ export function ModelPicker({
     </span>
   );
 
-  const simpleView = !advanced && !fullView && !contained;
+  // Simple mode lists every provider the picker knows, in the rail's order:
+  // sign-ins, then API keys, then local engines.
   const simpleProviders = (() => {
     const groups = railProviders(pickerInstances, railInstance, claudeRailInstance, openaiRailInstance);
-    let cards = groups.subscription.slice(0, 3);
-    // A bot on an API-key or local engine keeps its provider in sight.
-    const selected = [...groups.subscription, ...groups.api, ...groups.custom].find((provider) => provider.selected);
-    if (selected && !cards.includes(selected)) cards = [...cards.slice(0, 2), selected];
-    return cards;
+    return [...groups.subscription, ...groups.api, ...groups.custom];
   })();
+  // Simple mode has no separate local pane: a provider lists its own models,
+  // then the local ones it can run (loaded first). Its own models need the
+  // sign-in local ones do not, so a signed-out engine lists only those.
+  const simpleOfficial = customOnly || needsSignIn(railInstance) ? [] : official;
+  const simpleLocal = partitionCustomModels(custom);
+  const simpleAll = [...simpleOfficial, ...simpleLocal.pinned, ...simpleLocal.rest];
+  const simpleSuggested = railInstance
+    ? suggestedModels(simpleAll, railInstance.models.default, currentModel, COMPACT_MODEL_COUNT)
+    : [];
+  // "Show all" opens the list in place: the suggested rows stay on top.
+  const simpleOpened = [...simpleSuggested, ...simpleAll.filter((option) => !simpleSuggested.includes(option))];
+  const simpleSearch = showAll && simpleAll.length > SIMPLE_SEARCH_AFTER;
+  const simpleQuery = simpleSearch ? query : "";
+  const simpleModels = simpleQuery ? filterCustomModels(simpleOpened, simpleQuery) : showAll ? simpleOpened : simpleSuggested;
   const activeLevels = active?.capabilities?.effortLevels ?? [];
   const simpleEffort = activeLevels.length > 0 ? {
     levels: simpleEffortLevels(activeLevels, selection.effort),
@@ -820,16 +839,26 @@ export function ModelPicker({
               providers={simpleProviders}
               onProvider={selectRail}
               needsSetup={railInstance && (railInstance.policy || blocked) ? { name: simpleProviders.find((provider) => provider.selected)?.label ?? railInstance.displayName } : null}
-              models={pane === "custom" ? [...pinned, ...rest].slice(0, 8) : compactOfficial}
+              onSetUp={() => setFullView(true)}
+              models={simpleModels}
+              query={simpleQuery}
+              showAll={!showAll && simpleAll.length > simpleSuggested.length
+                ? { count: simpleAll.length, onShow: () => setShowAll(true) } : null}
+              search={simpleSearch ? (
+                <ModelSearch
+                  value={query}
+                  local={simpleOfficial.length === 0}
+                  onChange={setQuery}
+                  onEscape={() => (query ? setQuery("") : setOpen(false))}
+                />
+              ) : undefined}
               currentModelId={currentModel}
               onPick={(model) => railInstance && pick(railInstance, model)}
               variantsRow={active?.capabilities?.modelVariants ? (
-                <EffortRow compact bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId && scope === "bot")}
-                  label={<span className="text-[12.5px] font-medium text-ink">Reasoning</span>} />
+                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId && scope === "bot")} />
               ) : undefined}
               effort={simpleEffort}
               newChats={threadId ? { checked: scope === "bot", onChange: (checked) => setScope(checked ? "bot" : "thread") } : null}
-              onMore={() => setFullView(true)}
               onManage={() => {
                 setOpen(false);
                 dispatch({ type: "toggleAppSettings", open: true, section: "engines" });

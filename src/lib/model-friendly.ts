@@ -1,6 +1,6 @@
 // Plain words for the model picker's Simple view. Nothing here changes what
 // is sent to a provider: the friendly names map one-to-one onto the real
-// effort levels, and a blurb is only a hint shown under a model's own name.
+// effort levels, and a blurb is only a hover hint on a model's row.
 import type { EffortLevel } from "../../shared/wire";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
