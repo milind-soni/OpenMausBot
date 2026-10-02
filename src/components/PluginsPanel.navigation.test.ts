@@ -38,7 +38,9 @@ vi.mock("./McpServersPanel", () => ({
   McpServersPanel: ({ embedded }: { embedded?: boolean }) => createElement("div", { "data-embedded": String(Boolean(embedded)) }, "MCP inventory"),
 }));
 vi.mock("./Avatar", () => ({ BotAvatar: ({ bot }: { bot: Bot }) => createElement("span", { "data-avatar": bot.id }) }));
-import { APPS_PREVIEW_COUNT, PluginsPanel, botsUsingService } from "./PluginsPanel";
+import { APPS_PREVIEW_COUNT, PluginsPanel, USED_BY_AVATAR_SIZE, botsUsingService } from "./PluginsPanel";
+import { FACE_BOX } from "./cursor-face-data";
+import { MASCOT_BODIES } from "../../shared/mascot-bodies";
 
 const CARDS = 0;
 const CONFIGURED = 3;
@@ -151,5 +153,46 @@ describe("Apps pop-up", () => {
     const { html } = render();
     expect(html).toContain('aria-label="Used by scout"');
     expect(botsUsingService(fixture.bots as Bot[], fixture.instances as InstanceInfo[], "gmail").map((entry) => entry.id)).toEqual(["scout", "narrow"]);
+  });
+
+  it("keeps each bot's avatar inside its round ring, whatever its shape", () => {
+    fixture.instances = [claude];
+    fixture.bots = [
+      bot("scout"),
+      bot("arrow", { mascotBody: "cursor" }),
+      bot("photo", { avatarUrl: "/api/attachments/photo.webp", avatarCrop: "square" }),
+    ];
+    const { nodes: tree } = render();
+    const rings = tree.filter((node) => node.props["data-used-by-avatar"] !== undefined);
+    expect(rings.map((ring) => ring.props["data-used-by-avatar"])).toEqual(["scout", "arrow", "photo"]);
+    for (const ring of rings) {
+      // a fixed disc that clips, with the avatar centred in it
+      expect(String(ring.props.className).split(" ")).toEqual(expect.arrayContaining([
+        "flex", "size-5", "shrink-0", "items-center", "justify-center", "overflow-hidden", "rounded-full", "bg-menu", "ring-2", "ring-menu",
+      ]));
+      const avatar = Children.only(ring.props.children) as Node;
+      expect(avatar.props.size).toBe(USED_BY_AVATAR_SIZE);
+    }
+  });
+
+  it("draws them small enough that no mascot body reaches the ring", () => {
+    // CursorAvatar's viewBox is the face box plus 15 units on every side.
+    const box = FACE_BOX + 30;
+    const centre = FACE_BOX / 2;
+    for (const body of Object.values(MASCOT_BODIES)) {
+      const d = body.body.match(/ d="([^"]+)"/)![1]!;
+      // Absolute moves and cubics only, so the numbers pair up as points.
+      expect(d.replace(/[-\d.\s]/g, ""), body.id).toMatch(/^[MCZ]+$/);
+      const [x, y, scale] = body.fit.match(/-?\d*\.?\d+/g)!.map(Number) as [number, number, number];
+      const numbers = d.match(/-?\d*\.?\d+/g)!.map(Number);
+      // A cubic stays inside its control points' hull, and distance from the
+      // centre is convex, so the farthest control point bounds the outline.
+      let reach = 0;
+      for (let i = 0; i + 1 < numbers.length; i += 2) {
+        reach = Math.max(reach, Math.hypot(x + numbers[i]! * scale - centre, y + numbers[i + 1]! * scale - centre));
+      }
+      // inside a size-5 ring: a 10px radius
+      expect((reach / box) * USED_BY_AVATAR_SIZE, body.id).toBeLessThan(10);
+    }
   });
 });

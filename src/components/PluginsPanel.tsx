@@ -292,6 +292,12 @@ export type AppsFilter = "all" | "connected" | "mcp";
  * "Show all" button. */
 export const APPS_PREVIEW_COUNT = 48;
 
+/** A "used by" bot avatar, drawn inside its 20px ring (size-5). The farthest
+ * any mascot body reaches from the centre is 0.55 of its box (the shield; a
+ * cursor's tip is 0.54), so at 16px every shape stays a pixel clear of the
+ * circle's edge. */
+export const USED_BY_AVATAR_SIZE = 16;
+
 /** Bots that can use this service's tools today: visible, connected apps
  * on, an engine that mounts them, and a grant that includes the service
  * (no record at all is the legacy every-tool default). */
@@ -905,9 +911,17 @@ export function PluginsPanel() {
                 aria-label={t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") })}
                 role="img"
               >
+                {/* A mascot fills its whole square (a cursor's tip sits in the
+                    corner), so drawn at the ring's own size it poked out of
+                    the circle. Each one sits in a fixed disc that clips, drawn
+                    small enough that every body and uploaded image fits. */}
                 {usedBy.slice(0, 3).map((candidate) => (
-                  <span key={candidate.id} className="rounded-full ring-2 ring-menu">
-                    <BotAvatar bot={candidate} size={20} animated={false} />
+                  <span
+                    key={candidate.id}
+                    data-used-by-avatar={candidate.id}
+                    className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-menu ring-2 ring-menu"
+                  >
+                    <BotAvatar bot={candidate} size={USED_BY_AVATAR_SIZE} animated={false} />
                   </span>
                 ))}
               </span>
