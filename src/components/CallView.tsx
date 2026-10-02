@@ -18,7 +18,7 @@
 // it happens, which is why waiting feels like listening to someone work
 // rather than listening to nothing.
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Loader2, Phone, PhoneOff, X } from "lucide-react";
+import { AudioLines, Loader2, Phone, PhoneOff, X } from "lucide-react";
 
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -43,9 +43,15 @@ const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
 type Phase = "listening" | "sending" | "working" | "speaking";
 const CALL_ENDPOINT_MS = 850;
 
-export function CallButton({ bot }: { bot: Bot }) {
+/** Where a call button sits: the header's icon row (rooms), or the composer's
+ * action row (a bot's chat), where it is a filled circle the size of Send and
+ * its help opens upward, away from the bottom edge of the window. */
+export type CallButtonPlacement = "header" | "composer";
+
+export function CallButton({ bot, placement = "header" }: { bot: Bot; placement?: CallButtonPlacement }) {
   return (
     <CallTargetButton
+      placement={placement}
       targetId={bot.id}
       targetName={bot.name}
       voices={[bot.voice]}
@@ -63,7 +69,9 @@ export function CallTargetButton({
   setupBotId,
   requireExplicitVoices,
   onStart,
+  placement = "header",
 }: {
+  placement?: CallButtonPlacement;
   targetId: string;
   targetName: string;
   voices: Array<string | undefined>;
@@ -93,6 +101,7 @@ export function CallTargetButton({
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const helpId = useId();
+  const composer = placement === "composer";
   const label = active
     ? `Hang up on ${targetName}`
     : !capabilitiesReady
@@ -152,16 +161,24 @@ export function CallTargetButton({
         aria-controls={unavailable ? helpId : undefined}
         aria-label={label}
         title={label}
+        data-call-button={placement}
         className={cn(
-          "relative flex size-9 items-center justify-center rounded-full transition-colors",
+          "relative flex shrink-0 items-center justify-center rounded-full transition-colors",
+          composer ? "size-8" : "size-9",
           active
             ? "bg-danger text-white hover:brightness-110"
-            : unavailable
-              ? "text-ink-tertiary hover:bg-raised hover:text-ink-secondary"
-              : "text-ink-secondary hover:bg-raised hover:text-ink",
+            : composer
+              ? unavailable
+                ? "bg-control text-ink-tertiary hover:text-ink-secondary"
+                : "bg-control text-ink hover:bg-raised"
+              : unavailable
+                ? "text-ink-tertiary hover:bg-raised hover:text-ink-secondary"
+                : "text-ink-secondary hover:bg-raised hover:text-ink",
         )}
       >
-        {active ? <PhoneOff size={17} /> : <Phone size={17} />}
+        {active
+          ? <PhoneOff size={composer ? 15 : 17} />
+          : composer ? <AudioLines size={16} aria-hidden="true" /> : <Phone size={17} />}
         {unavailable && (
           <span className="absolute right-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-app" aria-hidden="true" />
         )}
@@ -172,7 +189,7 @@ export function CallTargetButton({
           id={helpId}
           role="group"
           aria-label="Call unavailable"
-          className={cn("absolute right-0 z-30 mt-1.5 w-[280px] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl", helpMotion.className)} {...helpMotion.exitProps}
+          className={cn("absolute right-0 z-30 w-[280px]", composer ? "bottom-full mb-1.5" : "mt-1.5", "rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl", helpMotion.className)} {...helpMotion.exitProps}
         >
           <div className="text-[13px] font-medium text-ink">Call unavailable</div>
           <div className="mt-1 text-[12px] leading-[1.45] text-ink-secondary">{reason}</div>

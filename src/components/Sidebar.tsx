@@ -105,6 +105,13 @@ import { attentionJumpAction, AttentionThreadRows, crossBotAttentionThreads, Sid
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { ShortcutHint } from "./ShortcutHint";
 import { citationPreviewText } from "@/lib/citations";
+import { useAdvancedMode } from "@/lib/interface-mode";
+
+/** Vertical centre of the macOS traffic lights, in CSS px from the window
+ * top: electron/window-chrome.mjs sets trafficLightPosition.y = 16 and the
+ * buttons are 14px tall. The sidebar's top row is twice this tall so its
+ * centred controls sit on the lights' line. */
+export const MAC_TRAFFIC_LIGHT_CENTER_Y = 23;
 
 const SECTION_LABEL_KEYS: Record<string, LocaleKey> = {
   [PINNED_SECTION_ID]: "sidebar.section.pinned",
@@ -1643,6 +1650,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const deletingRoom = deletingRoomId ? state.groups.find((g) => g.id === deletingRoomId) : undefined;
   const [plusOpen, setPlusOpen] = useState(false);
   const plusMotion = useMenuMotion(plusOpen);
+  const advanced = useAdvancedMode();
   const [attentionOpen, setAttentionOpen] = useState(false);
   const attentionMotion = useMenuMotion(attentionOpen);
   const [attentionPinned, setAttentionPinnedState] = useState(() => loadSidebarAttentionPinned());
@@ -1956,25 +1964,41 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
       )}
     >
-      {/* macOS owns inset traffic lights; Linux/Windows use native chrome. */}
+      {/* One top row: [traffic lights] [server] [drag space] [buttons].
+          macOS owns inset traffic lights; Linux/Windows use native chrome.
+          On macOS the row is twice the lights' centre line tall, so
+          items-center puts every control on that line. The icons rail is too
+          narrow for a row and stacks instead, server switcher underneath. */}
       <div
-        className={cn("flex items-center pt-3.5 pb-1", density === "icons" ? "flex-col gap-1 px-2" : "justify-between px-4")}
-        style={windowDragStyle}
+        data-sidebar-top-row
+        className={cn(
+          "flex items-center",
+          density === "icons" ? "flex-col gap-1 px-2 pt-3.5 pb-1" : "gap-1 px-4",
+          density !== "icons" && !macInset && "h-12",
+        )}
+        style={density !== "icons" && macInset ? { ...windowDragStyle, height: MAC_TRAFFIC_LIGHT_CENTER_Y * 2 } : windowDragStyle}
       >
         {macInset ? (
-          <div className={density === "icons" ? "h-5 w-full" : "w-14"} />
+          <div aria-hidden="true" data-traffic-light-space className={density === "icons" ? "h-5 w-full" : "w-14 shrink-0"} />
         ) : browser ? (
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <span className="size-3 rounded-full bg-[#ff5f57]" />
             <span className="size-3 rounded-full bg-[#febc2e]" />
             <span className="size-3 rounded-full bg-[#28c840]" />
           </div>
-        ) : <div />}
+        ) : null}
+        {density !== "icons" && (
+          // The spacer stays draggable; only the switcher's own button opts out.
+          <div data-sidebar-top-switcher className="flex min-w-0 flex-1 items-center">
+            <DesktopWorkspaceSwitcher inline cloudHome={state.config?.cloudHome === true} owner={cloudOwner} />
+          </div>
+        )}
         <div
-          className={cn("relative flex items-center", density === "icons" ? "flex-col gap-1" : "gap-1")}
+          className={cn("relative flex shrink-0 items-center", density === "icons" ? "flex-col gap-1" : "gap-0.5")}
           style={windowNoDragStyle}
         >
-          {!collapseToIcons && <button
+          {/* Simple mode keeps only "+". Expand stays so an icons rail is never a dead end. */}
+          {!collapseToIcons && (advanced || density === "icons") && <button
             type="button"
             onClick={toggleCollapsed}
             aria-label={density === "icons" ? t("sidebar.density.expand") : t("sidebar.density.collapseAria")}
@@ -1983,7 +2007,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           >
             {density === "icons" ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
           </button>}
-          <div className={density === "icons" ? "relative" : "contents"}>
+          {advanced && <div className={density === "icons" ? "relative" : "contents"}>
             <button
               type="button"
               onClick={() => setAttentionOpen((o) => !o)}
@@ -2025,7 +2049,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                 </div>
               </>
             )}
-          </div>
+          </div>}
           <button
             ref={importReturnRef}
             onClick={() => setPlusOpen((o) => !o)}
@@ -2138,7 +2162,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         }}
       />}
 
-      <DesktopWorkspaceSwitcher compact={density === "icons"} cloudHome={state.config?.cloudHome === true} owner={cloudOwner} />
+      {density === "icons" && <DesktopWorkspaceSwitcher compact cloudHome={state.config?.cloudHome === true} owner={cloudOwner} />}
       <OrganizationIdentity compact={density === "icons"} />
       {/* Search */}
       <div className={cn("pt-1 pb-3", density === "icons" ? "hidden" : "px-3")}>

@@ -92,6 +92,26 @@ describe("thread control placement", () => {
     expect(markup).toContain('data-testid="chat-more"');
   });
 
+  it("hides the All threads picker in Simple mode; the sidebar reaches threads there", () => {
+    fixture.advanced = false;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(markup).not.toContain('aria-label="All threads"');
+    expect(markup).toContain('data-testid="chat-more"');
+    fixture.advanced = true;
+  });
+
+  it.each([true, false])("calls from the composer beside dictation, not the header (advanced %s)", (advanced) => {
+    fixture.advanced = advanced;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const header = markup.slice(markup.indexOf("data-chathead-controls"), markup.indexOf("data-composer-row"));
+    expect(header).not.toContain("data-call-button");
+    expect(markup).not.toContain('data-call-button="header"');
+    const actions = markup.slice(markup.indexOf("data-composer-actions"));
+    expect(actions).toContain('data-call-button="composer"');
+    expect(markup.match(/data-call-button=/g)).toHaveLength(1);
+    fixture.advanced = true;
+  });
+
   it("gives the editor its own row in a narrow chat", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup).toContain("@container/composer");
