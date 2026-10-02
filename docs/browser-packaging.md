@@ -3,8 +3,9 @@
 Desktop installers include the pinned `agent-browser` engine and Chromium
 Headless Shell. A fresh installation needs no separate browser download.
 This is an automation browser, not a headed Google Chrome application.
-Global and per-bot browser permissions remain opt-in; bundling executables
-does not give a bot permission to use them.
+Browser access is on by default, both for the workspace (Settings) and for
+each bot (its computer panel); switching either off withholds the browser,
+and bundling executables never overrides that switch.
 
 ## Package layout and lookup
 

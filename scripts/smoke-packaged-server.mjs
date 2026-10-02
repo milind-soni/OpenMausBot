@@ -276,8 +276,8 @@ if (!proxyReport || proxyReport.error || proxyReport.missing.length > 0) {
 }
 
 if (browserBundle && (browserReport?.error || browserReport?.browserEngine?.kind !== "engine" ||
-  browserReport.browserEngine.version !== browserSpec.engine.version || browserReport.browserEnabled !== false)) {
-  console.error("The fresh-home packaged server did not discover its browser bundle with browser access still opt-in:");
+  browserReport.browserEngine.version !== browserSpec.engine.version || browserReport.browserEnabled !== true)) {
+  console.error("The fresh-home packaged server did not discover its browser bundle with browser access on by default:");
   console.error(JSON.stringify(browserReport, null, 2));
   process.exit(1);
 }
@@ -306,4 +306,4 @@ console.log(`all ${count} spawned proxy paths resolve inside the packaged server
 console.log("packaged MCP stdio server reached the API and flushed its final frames ✓");
 console.log("packaged backup worker exported an encrypted archive ✓");
 if (layerShipped) console.log("packaged server found its enterprise layer inside the server dir ✓");
-if (browserBundle) console.log(`packaged browser discovered without installation; access remains opt-in ✓ ${JSON.stringify(browserReport)}`);
+if (browserBundle) console.log(`packaged browser discovered without installation; access on by default ✓ ${JSON.stringify(browserReport)}`);
