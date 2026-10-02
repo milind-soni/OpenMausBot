@@ -1,8 +1,8 @@
-import { BellDot, CircleAlert, Clock3, Loader2 } from "lucide-react";
+import { BellDot, CircleAlert, Clock3, Loader2, Pin } from "lucide-react";
 import { useStore, type Bot, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { orderedSidebarThreads, orderedThreadList } from "./SidebarThreadRow";
+import { orderedSidebarThreads, orderedThreadList, threadRecency, threadUpdatedLabel } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
 /** Attention is not history browsing: idle conversations never enter this list.
@@ -102,6 +102,29 @@ export function crossBotAttentionThreads(
       : { kind: "bot", botId: botId!, botName: botName!, task });
 }
 
+/** Every pinned thread across every visible bot and room, newest pin first.
+ * The pinned-threads panel's source of truth — reuses the same AttentionThread
+ * shape and jump action as attention, so a pin and an attention item are
+ * never handled by two different code paths. Unlike attention, idle pins are
+ * the common case, not the exception. */
+export function crossBotPinnedThreads(bots: Bot[], groups: Group[], queued: Record<string, unknown[]>): AttentionThread[] {
+  const flat: FlatAttentionEntry[] = [
+    ...bots
+      .filter((bot) => !bot.hidden)
+      .flatMap((bot): FlatAttentionEntry[] => (bot.tasks ?? [])
+        .filter((task) => task.pinned === true && !task.routineRunId)
+        .map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length), botId: bot.id, botName: bot.name }))),
+    ...groups
+      .flatMap((group): FlatAttentionEntry[] => (group.tasks ?? [])
+        .filter((task) => task.pinned === true)
+        .map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length), groupId: group.id, groupName: group.name, groupThreadId: group.threadId }))),
+  ];
+  return orderedThreadList(flat).map(({ botId, botName, groupId, groupName, groupThreadId, ...task }): AttentionThread =>
+    groupId !== undefined
+      ? { kind: "group", groupId, groupName: groupName!, groupThreadId: groupThreadId!, task }
+      : { kind: "bot", botId: botId!, botName: botName!, task });
+}
+
 /** The one row shape for attention entries: title, bot name, status, jump.
  * Shared by the sidebar bell and the picker's attention section so both say
  * it the same way. */
@@ -122,6 +145,29 @@ export function AttentionThreadRows({ entries, onJump }: { entries: AttentionThr
         <span className="min-w-0 flex-1">
           <span className="block truncate">{entry.task.title}</span>
           <span className="block truncate text-[11px] text-ink-secondary">{name} · {status}</span>
+        </span>
+      </button>;
+    })}
+  </>;
+}
+
+/** The pinned-threads panel's row: same identity info as an attention row,
+ * but a plain "owner · updated" byline instead of a status word — most
+ * pins are idle on purpose, not waiting on anyone. */
+export function PinnedThreadRows({ entries, now, onJump }: { entries: AttentionThread[]; now: number; onJump: (entry: AttentionThread) => void }) {
+  return <>
+    {entries.map((entry) => {
+      const name = attentionOwnerName(entry);
+      const updated = threadUpdatedLabel(threadRecency(entry.task), now);
+      const byline = updated ? `${name} · ${updated}` : name;
+      const label = t("sidebar.pinnedThreads.item", { title: entry.task.title, name: byline });
+      return <button key={`${entry.kind}-${entry.kind === "bot" ? entry.botId : entry.groupId}-${entry.task.threadId}`} type="button" aria-label={label} title={label}
+        onClick={() => onJump(entry)}
+        className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[13px] text-ink hover:bg-raised/70">
+        <Pin size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{entry.task.title}</span>
+          <span className="block truncate text-[11px] text-ink-secondary">{byline}</span>
         </span>
       </button>;
     })}

@@ -1142,6 +1142,8 @@
   "attention.item": "{title} · {name} · {status}",
   "attention.pin": "Pin",
   "attention.unpin": "Unpin",
+  "sidebar.pinnedThreads.title": "Pinned threads",
+  "sidebar.pinnedThreads.item": "{title} · {name}",
   "task.search": "Search threads",
   "task.renameAria": "Rename thread",
   "task.renameNamed": "Rename {title}",

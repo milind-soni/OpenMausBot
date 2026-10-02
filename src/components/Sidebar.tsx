@@ -105,8 +105,9 @@ import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { attentionJumpAction, AttentionThreadRows, crossBotAttentionThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { attentionJumpAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
+import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { ShortcutHint } from "./ShortcutHint";
 import { citationPreviewText } from "@/lib/citations";
 
@@ -1607,6 +1608,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   collapseToIcons?: boolean;
 }) {
   const { state, dispatch } = useStore();
+  const now = useRelativeNow();
   const cloudOwner = useCloudOwner(state.config?.cloudHome === true);
   const showThreads = useShowThreads();
   const remoteClient = window.ogb?.remoteClient?.active === true;
@@ -1933,6 +1935,9 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   // same rule and order as the sidebar tree, so the bell can never
   // disagree with it.
   const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups);
+  // Every pinned thread across every bot and room — the thread-level twin
+  // of the built-in pinned-bots section, which only ever covered whole bots.
+  const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
 
   return (
@@ -2164,6 +2169,15 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           entries={attention}
           density={density}
           onUnpin={() => setAttentionPinned(false)}
+          onJump={(entry) => dispatch(attentionJumpAction(entry))}
+        />
+      )}
+
+      {density !== "icons" && (
+        <SidebarPinnedThreadsPanel
+          entries={pinnedThreads}
+          density={density}
+          now={now}
           onJump={(entry) => dispatch(attentionJumpAction(entry))}
         />
       )}
