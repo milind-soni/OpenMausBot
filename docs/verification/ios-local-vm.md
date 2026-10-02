@@ -13,8 +13,10 @@ published as the VM's noVNC port, and the companion sidecar pointed at that
 server. It creates a bot named Vee
 with `computer: "vm"`, checks that
 `POST /api/bots/:id/local-computer/screenshot` returns a PNG, then prints the
-sidecar address and a pairing code. Each capture returns a different synthetic
-desktop (the coloured tile changes), so a refresh is visible. It never reaches a
+sidecar address and a pairing code. The desktop is a captured Local VM session
+(`scripts/testing/fixtures/local-vm-desktop.png`, an XFCE desktop with a terminal
+open and nothing private on it); each capture types one more character at the
+prompt, so a refresh is visible. It never reaches a
 real container runtime, a VM, or the user's OpenMausBot data. Ctrl-C stops the
 server and sidecar and removes the temporary data.
 
@@ -35,7 +37,8 @@ Use a disposable simulator:
    (`GET /state` on the same address lists the device id). The sidecar drops
    the device's connection so it reconnects with the new capability.
 5. Without leaving the view, the idle VM's picture appears at the next
-   30-second check, and the tile changes on each refresh after that. Revoking
+   30-second check, and another character appears at the prompt on each refresh
+   after that. Revoking
    access (`DELETE` on the same address) clears the picture and brings the
    notice back at the next check.
 6. Set another bot's computer to `off` on the harness; its computer view keeps

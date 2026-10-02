@@ -5,11 +5,11 @@
 //
 // Prints the sidecar address and a pairing code for the Simulator, then stays
 // up until Ctrl-C. The synthetic `docker` answers only inspection and the two
-// screenshot execs; each capture returns a different synthetic desktop, so a
-// refresh is visible on the phone. It never reaches a real container runtime,
+// screenshot execs; each capture returns the captured desktop with another
+// character typed at its prompt, so a refresh is visible on the phone. It never reaches a real container runtime,
 // VM, or the user's OpenMausBot data.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,21 +18,30 @@ import { deflateSync } from "node:zlib";
 import { launchVerificationServer, type VerificationServer } from "./control-omb.ts";
 import { fixtureApi } from "./testing/preview-fixture.ts";
 import { fakeVncDesktop } from "./testing/fake-vnc-desktop.ts";
+import { decodePng } from "./testing/png.ts";
 import { createServer as createHttpServer } from "node:http";
 import { BASE_IMAGE_DIGEST, CUA_DRIVER_VERSION, IMAGE, IMAGE_LAYER_VERSION } from "../server/container-computer.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-/** The synthetic desktop: dark background, top panel, one window, and a
- * tile whose colour and position change with `frame`. */
+/** The synthetic desktop: a captured Local VM session (an XFCE desktop with
+ * a terminal open), with `frame` characters typed at the prompt so each
+ * capture is distinct. The capture holds no account or network details. */
+const captured = decodePng(readFileSync(join(root, "scripts/testing/fixtures/local-vm-desktop.png")));
 function scene(frame: number): (x: number, y: number) => [number, number, number] {
-  const tile = ([[0xe8, 0x5d, 0x3f], [0x3f, 0xa7, 0xe8], [0x5c, 0xc4, 0x6a], [0xe8, 0xc2, 0x3f]] as const)[frame % 4];
-  const tileX = 760 + (frame % 4) * 90;
+  // The prompt's block cursor, in terminal cells of 9 by 16 pixels.
+  const cursor = { x: 460, y: 153, w: 8, h: 16, step: 9 };
+  const typed = frame % 4;
   return (x, y) => {
-    if (y < 28) return [0xee, 0xee, 0xee];
-    if (x >= 120 && x < 680 && y >= 120 && y < 520) return y < 150 ? [0xd8, 0xd8, 0xd8] : [0x0b, 0x0b, 0x0b];
-    if (x >= tileX && x < tileX + 80 && y >= 300 && y < 380) return [...tile];
-    return [0x1a, 0x24, 0x36];
+    if (y >= cursor.y && y < cursor.y + cursor.h && x >= cursor.x && x < cursor.x + cursor.step * (typed + 1)) {
+      const cell = Math.floor((x - cursor.x) / cursor.step);
+      const inGlyph = (x - cursor.x) % cursor.step < cursor.w;
+      if (cell === typed) return inGlyph ? [0xff, 0xff, 0xff] : [0, 0, 0];
+      // Typed characters: a lower-case run in the terminal's text colour.
+      const ink = inGlyph && y >= cursor.y + 5 && y < cursor.y + 13 && (x - cursor.x) % cursor.step !== 3;
+      return ink ? [0xd0, 0xd0, 0xd0] : [0, 0, 0];
+    }
+    return captured.pixel(x, y);
   };
 }
 
