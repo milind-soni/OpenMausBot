@@ -73,9 +73,9 @@ export function isProjectEmoji(value: unknown): value is string {
 }
 
 /** One task = one conversation with its own context. Extends the shared
- * wire shape; the extras below are server-private bookkeeping the wire
- * projection (toWireTask) strips. */
-export interface TaskRecord extends WireTask {
+ * wire shape, less the fields the wire projection (toWireTask) derives; the
+ * extras below are server-private bookkeeping that projection strips. */
+export interface TaskRecord extends Omit<WireTask, TaskWireDerivedKeys> {
   /** provider-native continuation per instance, for THIS task only */
   resumeCursors: Record<string, unknown>;
   /** which instance dispatched the most recent turn. A cursor alone can't
@@ -92,7 +92,8 @@ export interface TaskRecord extends WireTask {
   /** Who pinned this conversation's surface: "user" when a person chose it
    * (composer chip or thread setting), "auto" when a turn recorded where
    * it landed. Absent means legacy/unknown: it may be a person's choice,
-   * so only positively identified auto pins yield to Works on changes. */
+   * so only positively identified auto pins yield to Works on changes.
+   * Clients see only whether a pin is an auto pin (WireTask.surfaceAuto). */
   surfaceSource?: "user" | "auto";
 }
 
@@ -100,7 +101,9 @@ export interface TaskRecord extends WireTask {
  * the exactness assertion below fails to compile when either side drifts,
  * so a new server field forces a decision — wire-visible or private here. */
 export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource";
-export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>>;
+/** WireTask fields computed by toWireTask and never stored on a TaskRecord. */
+export type TaskWireDerivedKeys = "surfaceAuto";
+export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>> & Pick<WireTask, TaskWireDerivedKeys>;
 type AssertExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 type AssertSameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : never) : never;
 /** Structural exactness alone lets an optional extra field through (a type
@@ -113,8 +116,10 @@ export const taskWireProjectionIsExact: TaskWireProjectionIsExact = true;
 export function toWireTask(task: TaskRecord): WireTask {
   const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages,
     appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel,
-    surfaceSource: _surfaceSource, ...wire } = task;
-  return wire;
+    surfaceSource, ...wire } = task;
+  // Who pinned stays private. A client learns only whether the pin is the
+  // machine's own record, so it never presents one as the person's choice.
+  return surfaceSource === "auto" && wire.surface !== undefined ? { ...wire, surfaceAuto: true } : wire;
 }
 
 const TASK_PATCH_FIELDS = [

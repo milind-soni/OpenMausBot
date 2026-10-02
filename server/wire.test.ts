@@ -57,6 +57,17 @@ describe("shared wire model", () => {
     expect(fullTask.lastInstanceId).toBe("claude");
   });
 
+  it("tells a client only whether a surface pin is the machine's own record", () => {
+    expect(toWireTask({ ...fullTask, surfaceSource: "auto" })).toEqual({ ...toWireTask(fullTask), surfaceAuto: true });
+    // A person's pin, a pin older than provenance, and no pin carry no flag.
+    expect(toWireTask({ ...fullTask, surfaceSource: "user" })).not.toHaveProperty("surfaceAuto");
+    expect(toWireTask(fullTask)).not.toHaveProperty("surfaceAuto");
+    expect(toWireTask({ ...fullTask, surface: undefined, surfaceSource: "auto" })).not.toHaveProperty("surfaceAuto");
+    for (const surfaceSource of ["auto", "user"] as const) {
+      expect(toWireTask({ ...fullTask, surfaceSource })).not.toHaveProperty("surfaceSource");
+    }
+  });
+
   it("bot and group wire projections stay exact (compile-enforced)", () => {
     // Referencing the guard constants keeps the exactness assertions live:
     // a new BotRecord field fails typecheck until it is declared on WireBot

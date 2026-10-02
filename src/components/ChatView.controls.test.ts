@@ -312,6 +312,16 @@ describe("thread control placement", () => {
     expect(markup).not.toContain("data-test-approval-control");
     delete window.ogb;
   });
+
+  it.each([true, false])("pins a place per conversation from the composer only in Advanced (advanced: %s)", (advanced) => {
+    fixture.advanced = advanced;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const pill = markup.slice(markup.indexOf("rounded-3xl bg-composer"), markup.indexOf("<textarea"));
+    expect(pill.match(/data-testid="place-chip"/g) ?? []).toHaveLength(advanced ? 1 : 0);
+    // Nowhere else in the chat either: Simple follows the bot's Works on.
+    expect(markup.includes("Where this conversation works")).toBe(advanced);
+    fixture.advanced = true;
+  });
 });
 
 // A polite live region on the whole transcript re-reads every change: the

@@ -160,6 +160,12 @@ export interface WireTask {
   turnStartedAt?: number;
   /** Where this conversation works when pinned; absent = follow the bot. */
   surface?: Surface;
+  /** The pin above is the machine's own record (where an Auto turn landed,
+   * or the bot's select_computer choice), not a person's, so the next Works
+   * on change moves it. Derived at projection from the server-private
+   * provenance and never stored; absent on a person's pin and on a pin from
+   * before the server recorded who set it. */
+  surfaceAuto?: true;
   /** what this task has spent, banked once per turn */
   usage?: TaskUsage;
   /** the folder this task's turns run in, pinned on its first turn. */
