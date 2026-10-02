@@ -1,4 +1,5 @@
 import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import {
   AlertTriangle,
   ArrowDown,
@@ -1652,6 +1653,10 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const usage = usageSummary(bot, state.instances);
+  // Simple mode keeps these in sight but locked, so people know where they
+  // live without being handed builder tools by default.
+  const advanced = useAdvancedMode();
+  const advancedOnly = advanced ? undefined : t("chat.advancedOnly");
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
   const hasMessages = messages.length > 0;
   const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
@@ -1687,6 +1692,8 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
       label: t("chat.usage.menu"),
       icon: <Gauge size={16} />,
       separatorBefore: true,
+      heading: advancedOnly,
+      disabled: !advanced,
       trailing: <span title={usage.detail} data-testid="usage-chip" className={cn("tabular-nums text-[12px]", usage.tone === "danger" ? "text-danger" : usage.tone === "warning" ? "text-warning" : "text-ink-secondary")}>{usage.short}</span>,
       onSelect: () => dispatch({ type: "toggleSettings", open: true, section: "usage" }),
     } satisfies SidebarMenuItem] : []),
@@ -1694,8 +1701,10 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
       key: "inspector",
       label: t("chat.inspector"),
       icon: <Bug size={16} />,
-      active: state.inspectorOpen,
+      active: advanced && state.inspectorOpen,
       separatorBefore: !usage,
+      heading: usage ? undefined : advancedOnly,
+      disabled: !advanced,
       onSelect: () => dispatch({ type: "toggleInspector" }),
     } satisfies SidebarMenuItem]),
   ];

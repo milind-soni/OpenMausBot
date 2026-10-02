@@ -8,7 +8,7 @@ import type { ModelPicker } from "./ModelPicker";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -26,6 +26,16 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: fixture.platform }, localComputer: { available: false, reasonCode: fixture.localReasonCode, message: fixture.localMessage } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
+// Record every popover menu's items; the trigger still renders so the markup
+// assertions elsewhere in this file see the same header.
+vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./SidebarPopoverMenu")>(),
+  SidebarPopoverMenu: (props: { ariaLabel: string; items: never[]; renderTrigger: (state: { open: boolean }) => unknown }) => {
+    fixture.menus.push({ ariaLabel: props.ariaLabel, items: props.items });
+    return props.renderTrigger({ open: false });
+  },
+}));
 vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite }));
 vi.mock("./CitationUI", async (importOriginal) => ({
   ...await importOriginal<typeof import("./CitationUI")>(),
@@ -50,6 +60,30 @@ const bot: Bot = {
   tasks: [{ threadId: "selected", title: "Selected", createdAt: 1, busy: false, activity: "idle",
     modelSelection: { instanceId: "test", model: "thread-model" }, approvalMode: "ask" }],
 };
+
+describe("Advanced mode in the header menu", () => {
+  const inspector = () => {
+    fixture.menus = [];
+    renderToStaticMarkup(createElement(ChatView, { bot }));
+    const more = fixture.menus.find((menu) => menu.ariaLabel === "More")!;
+    return more.items.find((item) => item.key === "inspector")!;
+  };
+
+  it("keeps the inspector visible but locked, labelled for Advanced mode, in Simple mode", () => {
+    fixture.advanced = false;
+    const item = inspector();
+    expect(item.disabled).toBe(true);
+    expect(item.heading).toBe("In Advanced mode");
+    fixture.advanced = true;
+  });
+
+  it("leaves the inspector exactly as it was in Advanced mode", () => {
+    fixture.advanced = true;
+    const item = inspector();
+    expect(item.disabled).toBeFalsy();
+    expect(item.heading).toBeUndefined();
+  });
+});
 
 describe("thread control placement", () => {
   it("keeps the full thread picker accessible without the sidebar", () => {
