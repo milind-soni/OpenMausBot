@@ -710,7 +710,7 @@ export function AccessSection({
                 ? "Not available on this Windows machine yet: install the browser engine with `openmausbot browser install`."
                 : browserUnavailableReason(state.config)
               : !browserFeature
-                ? "The built-in browser is switched off under App Settings → Experimental."
+                ? "The built-in browser is switched off under App Settings → Computers."
                 : !canUseBrowser
                   ? "This bot's current model cannot use the built-in browser."
                   : bot.computer === "off"

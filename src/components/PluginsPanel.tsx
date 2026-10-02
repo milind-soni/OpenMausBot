@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2, RefreshCw, Search, TriangleAlert, X } from "lucide-react";
 import { api, useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
@@ -618,7 +619,8 @@ export function PluginsPanel() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+      className="glass-popup-frame"
+      style={glassPopupFrameStyle()}
       onMouseDown={(event) => event.target === event.currentTarget && close()}
     >
       {/* A sibling, not the parent: a backdrop-filter on an ancestor would
@@ -631,7 +633,7 @@ export function PluginsPanel() {
         aria-modal="true"
         aria-labelledby="plugins-title"
         tabIndex={-1}
-        className="glass-surface animate-pop-in relative flex h-[min(780px,calc(100dvh-2rem))] w-full max-w-[1040px] flex-col overflow-hidden rounded-[24px]"
+        className="glass-surface glass-popup animate-pop-in relative flex flex-col overflow-hidden rounded-[24px]"
       >
         <header className="flex flex-col gap-4 px-6 pb-3 pt-6 sm:px-8 sm:pt-7">
           <div className="flex items-start justify-between gap-4">
@@ -769,7 +771,8 @@ export function PluginsPanel() {
           {error && <div role="alert" className="mb-2 mt-1 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</div>}
 
           {filter !== "mcp" && (
-            <section data-apps-grid aria-labelledby="apps-grid-title" className="pt-3">
+            <section data-apps-grid aria-labelledby="apps-grid-title" className="@container pt-3">
+              {/* @container: the tile columns follow the pop-up's width, not the window's (3, then 2, then 1) */}
               <div id="apps-grid-title" className="mb-3 text-[12px] font-medium text-ink-secondary">
                 {filter === "connected"
                   ? t("connectors.section.yours")
@@ -796,7 +799,7 @@ export function PluginsPanel() {
                   <Loader2 size={14} className="animate-spin" /> {t("connectors.loadingCatalog")}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 @lg:grid-cols-2 @3xl:grid-cols-3">
                   {shown.map((card) => renderTile(card))}
                 </div>
               )}

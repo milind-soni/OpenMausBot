@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { glassPopupTopInset } from "./glass-popup";
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "..");
 const css = readFileSync(join(src, "styles.css"), "utf8");
@@ -61,5 +62,37 @@ describe("glass surface", () => {
       // the app from the pane's own blur
       expect(source, file).toContain('className="glass-scrim pointer-events-none absolute inset-0"');
     }
+  });
+
+  it("sits in a safe area clear of the window's own buttons, at every window size", () => {
+    const frame = rule(".glass-popup-frame");
+    expect(frame).toContain("position: fixed");
+    expect(frame).toContain("padding: var(--glass-popup-top, 24px) 24px 24px");
+    const pane = rule(".glass-popup");
+    // min(1040px, 100% - 48px) by min(760px, 100% - top - 24px): the frame's
+    // padding has already taken the insets off
+    expect(pane).toContain("width: min(1040px, 100%)");
+    expect(pane).toContain("height: min(760px, 100%)");
+    // macOS traffic lights and the Windows caption buttons get a 56px top
+    expect(glassPopupTopInset("mac-inset")).toBe(56);
+    expect(glassPopupTopInset("win-caption")).toBe(56);
+    expect(glassPopupTopInset("native")).toBe(24);
+    for (const file of ["SettingsModal.tsx", "PluginsPanel.tsx", "TriggersPanel.tsx"]) {
+      const source = readFileSync(join(src, "components", file), "utf8");
+      expect(source, file).toContain('className="glass-popup-frame"');
+      expect(source, file).toContain("style={glassPopupFrameStyle()}");
+      expect(source, file).toMatch(/className="glass-surface glass-popup /);
+      // no viewport-sized caps left fighting the safe area
+      expect(source, file).not.toMatch(/100dvh/);
+    }
+  });
+
+  it("lets the Apps contents reflow inside the pop-up rather than overflow it", () => {
+    const apps = readFileSync(join(src, "components", "PluginsPanel.tsx"), "utf8");
+    expect(apps).toContain('className="@container pt-3"');
+    expect(apps).toContain("grid grid-cols-1 gap-3 @lg:grid-cols-2 @3xl:grid-cols-3");
+    const mcp = readFileSync(join(src, "components", "McpServersPanel.tsx"), "utf8");
+    expect(mcp).toContain('data-mcp-row className="flex flex-wrap items-center gap-3"');
+    expect(mcp).toContain('data-mcp-row-actions className="ml-auto flex flex-wrap items-center justify-end gap-1"');
   });
 });

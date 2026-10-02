@@ -90,7 +90,8 @@ describe("Apps pop-up", () => {
     expect(html).toContain(">Apps</h2>");
     expect(html).toContain("Connect an app or your own MCP server once. Then choose which bots may use it.");
     expect(html).toContain("glass-surface");
-    expect(html).toContain("lg:grid-cols-3");
+    expect(html).toContain("@container");
+    expect(html).toContain("grid-cols-1 gap-3 @lg:grid-cols-2 @3xl:grid-cols-3");
     for (const slug of ["gmail", "slack", "notion"]) expect(html).toContain(`data-app-tile="${slug}"`);
     // the connected app leads the grid
     expect(html.indexOf('data-app-tile="slack"')).toBeLessThan(html.indexOf('data-app-tile="gmail"'));

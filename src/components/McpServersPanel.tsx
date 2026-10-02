@@ -481,14 +481,16 @@ export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {
       className={embedded ? "" : "min-h-0 flex-1 overflow-y-auto px-6 pb-7 pt-5 sm:px-8"}
     >
       <div className={embedded ? "" : "mx-auto max-w-[840px]"}>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
+        {/* wraps by the room it has, not the window: inside a pop-up a wide
+            window can still leave too little for the intro and the buttons */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-[1_1_280px]">
             <h3 id="mcp-servers-title" className="text-[15px] font-semibold text-ink">{t("mcp.title")}</h3>
-            <p className="mt-1 max-w-[610px] text-[12.5px] leading-relaxed text-ink-secondary">
+            <p className="mt-1 max-w-[610px] break-words text-[12.5px] leading-relaxed text-ink-secondary">
               {t("mcp.subtitle")}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => void load()}
@@ -762,13 +764,13 @@ export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {
                 && (auth === "needs-sign-in" || result?.auth === "required" || (Boolean(server.oauth) && auth !== "signed-in"));
               return (
                 <div key={server.name} className="rounded-2xl border border-hairline/50 bg-card px-4 py-4 sm:px-5">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <div data-mcp-row className="flex flex-wrap items-center gap-3">
                     <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", server.enabled ? "bg-success/10 text-success" : "bg-raised text-ink-secondary")}>
                       {isRemoteMcpListing(server) ? <Globe size={19} /> : <ServerCog size={19} />}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-[14px] font-medium text-ink">{server.name}</span>
+                    <div className="min-w-0 flex-[1_1_220px]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="min-w-0 truncate text-[14px] font-medium text-ink">{server.name}</span>
                         <span className={cn("rounded-full px-2 py-0.5 text-[10.5px]", server.enabled ? "bg-success/10 text-success" : "bg-raised text-ink-secondary")}>{t(server.enabled ? "mcp.badge.on" : "mcp.badge.off")}</span>
                         {auth && <span className={cn("rounded-full px-2 py-0.5 text-[10.5px]", auth === "signed-in" ? "bg-success/10 text-success" : "bg-warning/10 text-warning")}>{t(auth === "signed-in" ? "mcp.auth.signedIn" : "mcp.auth.needsSignIn")}</span>}
                         {server.managedBy && <span className="rounded-full bg-raised px-2 py-0.5 text-[10.5px] text-ink-secondary">{t("policy.managedBy", { organization: server.managedBy })}</span>}
@@ -780,7 +782,7 @@ export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {
                         : server.envKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.secretsSaved", { keys: server.envKeys.join(", ") })}</div>}
                       {isRemoteMcpListing(server) && server.oauth && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t(server.oauth.clientSecretConfigured ? "mcp.oauth.savedWithSecret" : "mcp.oauth.saved", { clientId: server.oauth.clientId })}</div>}
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div data-mcp-row-actions className="ml-auto flex flex-wrap items-center justify-end gap-1">
                       {signingIn === server.name ? (
                         <button type="button" onClick={() => signInAbort.current?.abort()} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">
                           <Loader2 size={14} className="animate-spin" /> {t("mcp.auth.cancel")}

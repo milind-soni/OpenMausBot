@@ -9,6 +9,7 @@ import { ArrowRight, Check, Copy, ExternalLink, Laptop, Cloud, Link2, Loader2, P
 
 import { BotAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
+import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { WEBHOOK_DEFAULT_MAX_PENDING_RUNS, webhookActivationDefaults, type WebhookTrigger, type WebhookTriggerInput } from "@/lib/webhooks";
@@ -145,7 +146,8 @@ export function TriggersPanel() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+      className="glass-popup-frame"
+      style={glassPopupFrameStyle()}
       onMouseDown={(event) => event.target === event.currentTarget && close()}
     >
       {/* A sibling, not the parent: a backdrop-filter on an ancestor would
@@ -157,7 +159,7 @@ export function TriggersPanel() {
         aria-modal="true"
         aria-labelledby="triggers-title"
         tabIndex={-1}
-        className="glass-surface animate-pop-in relative flex max-h-[min(820px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-[24px] outline-none"
+        className="glass-surface glass-popup animate-pop-in relative flex flex-col overflow-hidden rounded-[24px] outline-none"
       >
         <header className="flex items-start justify-between gap-4 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div className="min-w-0">
