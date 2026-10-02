@@ -21,6 +21,9 @@ import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
+import { SimpleModelPane } from "./SimpleModelPane";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { friendlyEffort, simpleEffortLevels } from "@/lib/model-friendly";
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
 
@@ -330,6 +333,43 @@ function ModelSearch({
   );
 }
 
+export type RailProvider = {
+  /** The rail's own entry: one per sign-in family, else one per instance. */
+  instance: InstanceInfo;
+  /** What a click opens: for a sign-in family, the account last browsed. */
+  target: InstanceInfo;
+  label: string;
+  selected: boolean;
+};
+
+/** The providers the rail shows, one button each, folded per sign-in family
+ * and grouped Cloud / API keys / Local. Shared with the Simple view so both
+ * list the same providers the same way. */
+export function railProviders(instances: InstanceInfo[], selectedInstance: InstanceInfo | undefined,
+  claudeInstance: InstanceInfo | undefined, openaiInstance: InstanceInfo | undefined) {
+  const firstOf: Record<SignInFamily, InstanceInfo | undefined> = {
+    claude: instances.find((instance) => isClaudeAccount(instance) && instance.claudeAccount?.isDefault)
+      ?? instances.find(isClaudeAccount),
+    openai: instances.find((instance) => signInFamily(instance) === "openai"),
+  };
+  const opensOn: Record<SignInFamily, InstanceInfo | undefined> = { claude: claudeInstance, openai: openaiInstance };
+  const providers = instances.filter((instance) => {
+    const family = signInFamily(instance);
+    return !family || instance === firstOf[family];
+  });
+  const entry = (instance: InstanceInfo): RailProvider => {
+    const family = signInFamily(instance);
+    return {
+      instance,
+      target: family ? opensOn[family] ?? instance : instance,
+      label: family ? SIGN_IN_FAMILY_LABEL[family] : instance.displayName,
+      selected: family ? signInFamily(selectedInstance) === family : instance.instanceId === selectedInstance?.instanceId,
+    };
+  };
+  const { subscription, api, custom } = splitEngineRail(providers);
+  return { subscription: subscription.map(entry), api: api.map(entry), custom: custom.map(entry) };
+}
+
 export function ModelEngineRail({ instances, selectedInstance, claudeInstance, openaiInstance, onSelect, onAddApiKeys }: {
   instances: InstanceInfo[];
   selectedInstance?: InstanceInfo;
@@ -341,22 +381,8 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
    * has no keys section (a remote client). */
   onAddApiKeys?: () => void;
 }) {
-  const firstOf: Record<SignInFamily, InstanceInfo | undefined> = {
-    claude: instances.find((instance) => isClaudeAccount(instance) && instance.claudeAccount?.isDefault)
-      ?? instances.find(isClaudeAccount),
-    openai: instances.find((instance) => signInFamily(instance) === "openai"),
-  };
-  const opensOn: Record<SignInFamily, InstanceInfo | undefined> = { claude: claudeInstance, openai: openaiInstance };
-  const providers = instances.filter((instance) => {
-    const family = signInFamily(instance);
-    return !family || instance === firstOf[family];
-  });
-  const { subscription, api, custom: local } = splitEngineRail(providers);
-  const railButton = (instance: InstanceInfo) => {
-    const family = signInFamily(instance);
-    const target = family ? opensOn[family] ?? instance : instance;
-    const selected = family ? signInFamily(selectedInstance) === family : instance.instanceId === selectedInstance?.instanceId;
-    const label = family ? SIGN_IN_FAMILY_LABEL[family] : instance.displayName;
+  const { subscription, api, custom: local } = railProviders(instances, selectedInstance, claudeInstance, openaiInstance);
+  const railButton = ({ instance, target, selected, label }: RailProvider) => {
     const attention = needsCli(target) || needsSignIn(target) || Boolean(target.snapshot.update);
     const managedBy = target.policy ? t("policy.managedBy", { organization: target.policy.organizationName }) : undefined;
     return (
@@ -452,6 +478,10 @@ export function ModelPicker({
   const [refreshing, setRefreshing] = useState(false);
   const [probingLocal, setProbingLocal] = useState<string | null>(null);
   const [scope, setScope] = useState<"bot" | "thread">("thread");
+  // Simple mode opens on the plain-words view; "More" (or Advanced mode)
+  // shows the full picker in the same popover.
+  const advanced = useAdvancedMode();
+  const [fullView, setFullView] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
     selection: ModelSelection; updateBotDefault: boolean; name: string } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -652,6 +682,23 @@ export function ModelPicker({
     </span>
   );
 
+  const simpleView = !advanced && !fullView && !contained;
+  const simpleProviders = (() => {
+    const groups = railProviders(pickerInstances, railInstance, claudeRailInstance, openaiRailInstance);
+    let cards = groups.subscription.slice(0, 3);
+    // A bot on an API-key or local engine keeps its provider in sight.
+    const selected = [...groups.subscription, ...groups.api, ...groups.custom].find((provider) => provider.selected);
+    if (selected && !cards.includes(selected)) cards = [...cards.slice(0, 2), selected];
+    return cards;
+  })();
+  const activeLevels = active?.capabilities?.effortLevels ?? [];
+  const simpleEffort = activeLevels.length > 0 ? {
+    levels: simpleEffortLevels(activeLevels, selection.effort),
+    current: selection.effort,
+    onPick: (level: EffortLevel) => dispatch({ type: "setModel", botId: bot.id, threadId,
+      ...(threadId && scope === "bot" ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } }),
+  } : null;
+
   const renderRow = (option: ModelOption) => (
     <ModelRow
       key={option.id}
@@ -674,7 +721,10 @@ export function ModelPicker({
         setRailId(initial?.instanceId ?? null);
         setOpen((wasOpen) => {
           const next = !wasOpen;
-          if (next) openFor(initial);
+          if (next) {
+            openFor(initial);
+            setFullView(false);
+          }
           return next;
         });
       }}
@@ -718,7 +768,7 @@ export function ModelPicker({
           <span data-model-variant className="max-w-[120px] truncate text-ink-secondary">· {selectedVariantLabel}</span>
         ) : selection.effort && (
           <span data-model-effort className="shrink-0 text-ink-secondary">
-            · {effortLabel(selection.effort)}
+            · {advanced ? effortLabel(selection.effort) : friendlyEffort(selection.effort)}
           </span>
         )}
       </span>
@@ -759,6 +809,29 @@ export function ModelPicker({
             motion.className,
           )}
         >
+          {simpleView ? (
+            <SimpleModelPane
+              botName={bot.name}
+              providers={simpleProviders}
+              onProvider={selectRail}
+              needsSetup={railInstance && (railInstance.policy || blocked) ? { name: simpleProviders.find((provider) => provider.selected)?.label ?? railInstance.displayName } : null}
+              models={pane === "custom" ? [...pinned, ...rest].slice(0, 8) : compactOfficial}
+              currentModelId={currentModel}
+              onPick={(model) => railInstance && pick(railInstance, model)}
+              variantsRow={active?.capabilities?.modelVariants ? (
+                <EffortRow compact bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId && scope === "bot")}
+                  label={<span className="text-[12.5px] font-medium text-ink">Reasoning</span>} />
+              ) : undefined}
+              effort={simpleEffort}
+              newChats={threadId ? { checked: scope === "bot", onChange: (checked) => setScope(checked ? "bot" : "thread") } : null}
+              onMore={() => setFullView(true)}
+              onManage={() => {
+                setOpen(false);
+                dispatch({ type: "toggleAppSettings", open: true, section: "engines" });
+              }}
+            />
+          ) : (
+          <>
           {pickerInstances.length > 0 && <ModelEngineRail instances={pickerInstances} selectedInstance={railInstance} claudeInstance={claudeRailInstance} openaiInstance={openaiRailInstance} onSelect={selectRail}
             onAddApiKeys={window.ogb?.remoteClient?.active === true ? undefined : openApiKeys} />}
 
@@ -1025,6 +1098,8 @@ export function ModelPicker({
               )}
             </div>
           </div>
+          </>
+          )}
         </div>
       )}
       <ConfirmDialog
