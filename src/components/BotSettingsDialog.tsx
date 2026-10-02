@@ -3,7 +3,7 @@
 // bot-settings/; this dialog owns only the fetches (overview, system-prompt,
 // history) and which accordion row is expanded.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Search, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, Search, X } from "lucide-react";
 
 import { api, useStore, type Bot } from "@/state/store";
 import type { BotOverview } from "@/lib/bot-overview-types";
@@ -28,10 +28,17 @@ import { HistorySection, type HistoryRow } from "./bot-settings/HistorySection";
 import { UsageSection } from "./bot-settings/UsageSection";
 import { VisibilitySection } from "./bot-settings/VisibilitySection";
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { SimpleBotPanel } from "./bot-settings/SimpleBotPanel";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import type { PromptPreviewData } from "./bot-settings/PromptPreview";
 
 const sectionLabel = (entry: (typeof BOT_SECTIONS)[number]) => (entry.labelKey ? t(entry.labelKey) : entry.label);
+
+// Deep links the Simple panel already answers (a bare open, Edit profile,
+// "Read all" into the instructions) stay on it; any other section opens the
+// full fold-out view at that row.
+const SIMPLE_PANEL_SECTIONS: ReadonlySet<(typeof BOT_SECTIONS)[number]["id"]> = new Set(["overview", "identity", "soul"]);
 
 function sectionMatches(entry: (typeof BOT_SECTIONS)[number], query: string): boolean {
   if (!query) return true;
@@ -56,6 +63,16 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   // this panel is already mounted, including after collapsing the same row.
   const collapsed = !state.botSettingsExpandAccordion;
   const q = query.trim().toLowerCase();
+  // Simple mode opens on the short Details/Library panel; "All settings"
+  // (or a deep link to a section it does not cover) switches to the full
+  // fold-out view for this opening only — App remounts the panel per open.
+  const advanced = useAdvancedMode();
+  const wantsFullView = !collapsed && !SIMPLE_PANEL_SECTIONS.has(section);
+  const [showAll, setShowAll] = useState(wantsFullView);
+  useEffect(() => {
+    if (wantsFullView) setShowAll(true);
+  }, [wantsFullView, section]);
+  const simpleView = !advanced && !showAll;
   // Slack is offered only where the server has an Admin page to link to
   // (a hosted organisation workspace); otherwise its row does not exist.
   const slackUrl = useSlackManagementUrl(bot.id);
@@ -128,7 +145,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   // returning from either editor must reload their overview/prompt too.
   // Await the existing write queue instead of racing a second debounce.
   useEffect(() => {
-    if (section !== "overview") return;
+    if (section !== "overview" || simpleView) return;
     let cancelled = false;
     const fetchOverviewAndPrompt = async () => {
       await flushBotPatches(bot.id);
@@ -157,7 +174,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
     return () => {
       cancelled = true;
     };
-  }, [bot.id, section, factsSignature, state.routines, state.webhooks, flushBotPatches]);
+  }, [bot.id, section, simpleView, factsSignature, state.routines, state.webhooks, flushBotPatches]);
 
   // Read the file-backed history only when its section is opened. A newer
   // load (or leaving History) invalidates older rows, revision, and errors.
@@ -343,7 +360,31 @@ export function BotSettingsDialog({ bot, overlay = false }: {
             : "md:static md:z-auto md:w-[min(420px,42vw)] md:shrink-0",
         )}
       >
-        <div className={cn("flex shrink-0 items-center justify-between px-4 py-3", padClass)}>
+        {simpleView ? (
+          <SimpleBotPanel
+            bot={bot}
+            derived={derived}
+            headerClassName={padClass}
+            onClose={() => dispatch({ type: "toggleSettings", open: false })}
+            onAllSettings={() => setShowAll(true)}
+            onAddSkill={() => {
+              setShowAll(true);
+              dispatch({ type: "toggleSettings", open: true, section: "skills" });
+            }}
+          />
+        ) : <>
+        {!advanced && (
+          <button
+            type="button"
+            data-bot-settings-back
+            onClick={() => setShowAll(false)}
+            className={cn("flex shrink-0 items-center gap-1 self-start px-3 pt-3 text-[13px] text-ink-secondary hover:text-ink", padClass)}
+          >
+            <ChevronLeft size={15} className="pointer-events-none" />
+            {t("botSettings.simple.back")}
+          </button>
+        )}
+        <div className={cn("flex shrink-0 items-center justify-between px-4 py-3", !advanced ? undefined : padClass)}>
           <span id="bot-settings-title" className="truncate text-[15px] font-semibold text-ink">
             {bot.name}
           </span>
@@ -437,6 +478,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
             );
           })}
         </div>
+        </>}
       </aside>
       <ConfirmDialog
         open={rollbackTarget !== null}
