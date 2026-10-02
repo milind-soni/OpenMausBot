@@ -1,4 +1,4 @@
-import { BellDot, CircleAlert, Clock3, Loader2, Pin } from "lucide-react";
+import { BellDot, CircleAlert, Clock3, Loader2, Pin, PinOff, type LucideIcon } from "lucide-react";
 import { useStore, type Bot, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -76,6 +76,31 @@ export function attentionJumpAction(entry: AttentionThread):
     : { type: "switchGroupTask", groupId: entry.groupId, threadId: entry.task.threadId };
 }
 
+/** The unpin action for one entry — same dispatch shape as the thread row's
+ * own context-menu pin toggle (Sidebar.tsx), just reachable without opening
+ * the menu first. */
+export function attentionUnpinAction(entry: AttentionThread):
+  | { type: "updateTask"; botId: string; threadId: string; patch: { pinned: boolean } }
+  | { type: "pinGroupTask"; groupId: string; threadId: string; pinned: boolean; title: string } {
+  if (entry.kind === "bot") return { type: "updateTask", botId: entry.botId, threadId: entry.task.threadId, patch: { pinned: false } };
+  return { type: "pinGroupTask", groupId: entry.groupId, threadId: entry.task.threadId, pinned: false, title: entry.task.title };
+}
+
+/** Whether a task needs the person right now, and how to show it — the one
+ * place that maps waiting/working/teammate-wait/queued/unread to an icon and
+ * word, so the attention rows and the pinned rows never pick different icons
+ * for the same state. */
+export function attentionRowStatus(task: AttentionThread["task"]): { active: boolean; Icon: LucideIcon; colorClass: string; label: string } {
+  const waiting = task.activity === "waiting-on-you";
+  const teammateWait = !waiting && task.waitingForTeammates === true;
+  const working = !waiting && !teammateWait && (task.busy || task.activity === "working");
+  const active = waiting || teammateWait || working || task.queued || task.unread === true;
+  const label = waiting ? t("task.waiting") : working ? t("chat.activity.working") : teammateWait ? t("task.waitingOnTeammate") : task.queued ? t("task.queued") : t("task.unread");
+  const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : BellDot;
+  const colorClass = cn(working && "animate-spin text-success", (waiting || teammateWait) && "text-warning");
+  return { active, Icon, colorClass, label };
+}
+
 type FlatAttentionEntry = Task & {
   queued: boolean; botId?: string; botName?: string; groupId?: string; groupName?: string; groupThreadId?: string;
 };
@@ -131,17 +156,13 @@ export function crossBotPinnedThreads(bots: Bot[], groups: Group[], queued: Reco
 export function AttentionThreadRows({ entries, onJump }: { entries: AttentionThread[]; onJump: (entry: AttentionThread) => void }) {
   return <>
     {entries.map((entry) => {
-      const waiting = entry.task.activity === "waiting-on-you";
-      const teammateWait = !waiting && entry.task.waitingForTeammates === true;
-      const working = !waiting && !teammateWait && (entry.task.busy || entry.task.activity === "working");
-      const status = waiting ? t("task.waiting") : working ? t("chat.activity.working") : teammateWait ? t("task.waitingOnTeammate") : entry.task.queued ? t("task.queued") : t("task.unread");
+      const { Icon, colorClass, label: status } = attentionRowStatus(entry.task);
       const name = attentionOwnerName(entry);
       const label = t("attention.item", { title: entry.task.title, name, status });
-      const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || entry.task.queued ? Clock3 : BellDot;
       return <button key={`${entry.kind}-${entry.kind === "bot" ? entry.botId : entry.groupId}-${entry.task.threadId}`} type="button" aria-label={label} title={label}
         onClick={() => onJump(entry)}
         className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[13px] text-ink hover:bg-raised/70">
-        <Icon size={15} aria-hidden="true" className={cn("shrink-0", working && "animate-spin text-success", waiting && "text-warning", teammateWait && "text-warning")} />
+        <Icon size={15} aria-hidden="true" className={cn("shrink-0", colorClass)} />
         <span className="min-w-0 flex-1">
           <span className="block truncate">{entry.task.title}</span>
           <span className="block truncate text-[11px] text-ink-secondary">{name} · {status}</span>
@@ -151,25 +172,39 @@ export function AttentionThreadRows({ entries, onJump }: { entries: AttentionThr
   </>;
 }
 
-/** The pinned-threads panel's row: same identity info as an attention row,
- * but a plain "owner · updated" byline instead of a status word — most
- * pins are idle on purpose, not waiting on anyone. */
-export function PinnedThreadRows({ entries, now, onJump }: { entries: AttentionThread[]; now: number; onJump: (entry: AttentionThread) => void }) {
+/** The pinned-threads panel's row: same identity info as an attention row.
+ * Most pins are idle on purpose, not waiting on anyone, so idle rows keep a
+ * plain Pin icon and an "owner · updated" byline — but a pin that *is*
+ * currently waiting/working/queued/unread looks exactly like its attention
+ * row twin, so it never looks dead while something is actually happening.
+ * A hover-reveal unpin button sits beside the row, same pattern as the
+ * thread tree's own row actions (SidebarThreadRow.tsx). */
+export function PinnedThreadRows({ entries, now, onJump, onUnpin }: { entries: AttentionThread[]; now: number; onJump: (entry: AttentionThread) => void; onUnpin: (entry: AttentionThread) => void }) {
   return <>
     {entries.map((entry) => {
       const name = attentionOwnerName(entry);
+      const status = attentionRowStatus(entry.task);
       const updated = threadUpdatedLabel(threadRecency(entry.task), now);
-      const byline = updated ? `${name} · ${updated}` : name;
+      const byline = status.active ? `${name} · ${status.label}` : updated ? `${name} · ${updated}` : name;
       const label = t("sidebar.pinnedThreads.item", { title: entry.task.title, name: byline });
-      return <button key={`${entry.kind}-${entry.kind === "bot" ? entry.botId : entry.groupId}-${entry.task.threadId}`} type="button" aria-label={label} title={label}
-        onClick={() => onJump(entry)}
-        className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[13px] text-ink hover:bg-raised/70">
-        <Pin size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate">{entry.task.title}</span>
-          <span className="block truncate text-[11px] text-ink-secondary">{byline}</span>
-        </span>
-      </button>;
+      const unpinLabel = t("sidebar.bot.unpin");
+      const key = `${entry.kind}-${entry.kind === "bot" ? entry.botId : entry.groupId}-${entry.task.threadId}`;
+      const Icon = status.active ? status.Icon : Pin;
+      return <div key={key} className="group/pinned flex w-full items-center">
+        <button type="button" aria-label={label} title={label}
+          onClick={() => onJump(entry)}
+          className="flex min-w-0 flex-1 items-center gap-2.5 px-3.5 py-2 text-left text-[13px] text-ink hover:bg-raised/70">
+          <Icon size={15} aria-hidden="true" className={cn("shrink-0", status.active ? status.colorClass : "text-ink-secondary")} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">{entry.task.title}</span>
+            <span className="block truncate text-[11px] text-ink-secondary">{byline}</span>
+          </span>
+        </button>
+        <button type="button" aria-label={unpinLabel} title={unpinLabel} onClick={() => onUnpin(entry)}
+          className="mr-2 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/pinned:opacity-100 max-md:opacity-70 touch:opacity-70">
+          <PinOff size={13} aria-hidden="true" />
+        </button>
+      </div>;
     })}
   </>;
 }

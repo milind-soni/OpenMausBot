@@ -1,7 +1,9 @@
+import { BellDot, CircleAlert, Clock3, Loader2 } from "lucide-react";
 import { describe, expect, it } from "vitest";
 import type { Bot, Group, GroupTask, Task } from "@/state/store";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { attentionJumpAction, attentionOwnerName, crossBotAttentionThreads, crossBotPinnedThreads, sidebarGroupActivityTasks } from "./SidebarBotActivity";
+import { t } from "@/lib/i18n";
+import { attentionJumpAction, attentionOwnerName, attentionRowStatus, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, sidebarGroupActivityTasks } from "./SidebarBotActivity";
 
 const task = (threadId: string, title: string, extra: Partial<Task>): Task =>
   ({ threadId, title, createdAt: 0, ...extra }) as Task;
@@ -164,5 +166,53 @@ describe("cross-bot pinned threads", () => {
     const alpha = bot("a", "Alpha", "a0", [task("a0", "Pinned chat", { pinned: true })]);
     const [entry] = crossBotPinnedThreads([alpha], [], { a0: [{}] });
     expect(entry.task.queued).toBe(true);
+  });
+});
+
+describe("attentionRowStatus", () => {
+  it("flags a waiting-on-you task active with the CircleAlert icon", () => {
+    const status = attentionRowStatus({ threadId: "t", title: "T", createdAt: 0, queued: false, activity: "waiting-on-you" });
+    expect(status.active).toBe(true);
+    expect(status.label).toBe(t("task.waiting"));
+    expect(status.Icon).toBe(CircleAlert);
+  });
+
+  it("flags a working task active with the spinning Loader2 icon", () => {
+    const status = attentionRowStatus({ threadId: "t", title: "T", createdAt: 0, queued: false, busy: true, activity: "working" });
+    expect(status.active).toBe(true);
+    expect(status.label).toBe(t("chat.activity.working"));
+    expect(status.Icon).toBe(Loader2);
+  });
+
+  it("flags a queued task active with the Clock3 icon", () => {
+    const status = attentionRowStatus({ threadId: "t", title: "T", createdAt: 0, queued: true });
+    expect(status.active).toBe(true);
+    expect(status.label).toBe(t("task.queued"));
+    expect(status.Icon).toBe(Clock3);
+  });
+
+  it("flags an unread task active with the BellDot icon", () => {
+    const status = attentionRowStatus({ threadId: "t", title: "T", createdAt: 0, queued: false, unread: true });
+    expect(status.active).toBe(true);
+    expect(status.label).toBe(t("task.unread"));
+    expect(status.Icon).toBe(BellDot);
+  });
+
+  it("marks a plain idle task inactive", () => {
+    const status = attentionRowStatus({ threadId: "t", title: "T", createdAt: 0, queued: false });
+    expect(status.active).toBe(false);
+  });
+});
+
+describe("attentionUnpinAction", () => {
+  it("unpins a bot thread via updateTask", () => {
+    const [entry] = crossBotPinnedThreads([bot("a", "Alpha", "a0", [task("a0", "Pinned chat", { pinned: true })])], [], {});
+    expect(attentionUnpinAction(entry)).toEqual({ type: "updateTask", botId: "a", threadId: "a0", patch: { pinned: false } });
+  });
+
+  it("unpins a room thread via pinGroupTask", () => {
+    const room = group("g", "Crew", "g0", { tasks: [{ threadId: "g0", title: "Crew", createdAt: 0, pinned: true }] });
+    const [entry] = crossBotPinnedThreads([], [room], {});
+    expect(attentionUnpinAction(entry)).toEqual({ type: "pinGroupTask", groupId: "g", threadId: "g0", pinned: false, title: "Crew" });
   });
 });

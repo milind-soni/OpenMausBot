@@ -8,11 +8,12 @@ import { PinnedThreadRows, type AttentionThread } from "./SidebarBotActivity";
  * search and the bots list — pinned bots already get this top-level view
  * (the built-in Pinned section); pinned threads did not. Renders nothing
  * when there is no pin, so it never costs space it isn't using. */
-export function SidebarPinnedThreadsPanel({ entries, density, now, onJump, collapsed, onToggle }: {
+export function SidebarPinnedThreadsPanel({ entries, density, now, onJump, onUnpin, collapsed, onToggle }: {
   entries: AttentionThread[];
   density: SidebarDensity;
   now: number;
   onJump: (entry: AttentionThread) => void;
+  onUnpin: (entry: AttentionThread) => void;
   collapsed: boolean;
   onToggle: () => void;
 }) {
@@ -41,7 +42,7 @@ export function SidebarPinnedThreadsPanel({ entries, density, now, onJump, colla
       </div>
       {!collapsed && (
         <div className="max-h-56 overflow-y-auto">
-          <PinnedThreadRows entries={entries} now={now} onJump={onJump} />
+          <PinnedThreadRows entries={entries} now={now} onJump={onJump} onUnpin={onUnpin} />
         </div>
       )}
     </section>

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { t } from "@/lib/i18n";
-import type { AttentionThread } from "./SidebarBotActivity";
+import { PinnedThreadRows, type AttentionThread } from "./SidebarBotActivity";
 import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 
 const entry: AttentionThread = {
@@ -25,11 +25,12 @@ function findElement(tree: ReactNode, attribute: string, value: string): ReactEl
 
 function renderPanel(
   entries: AttentionThread[] = [entry],
-  options: { collapsed?: boolean; onToggle?: () => void } = {},
+  options: { collapsed?: boolean; onToggle?: () => void; onUnpin?: (entry: AttentionThread) => void } = {},
 ) {
   let tree: ReactNode;
   const onJump = vi.fn();
   const onToggle = options.onToggle ?? vi.fn();
+  const onUnpin = options.onUnpin ?? vi.fn();
   function Capture() {
     tree = SidebarPinnedThreadsPanel({
       entries,
@@ -38,11 +39,24 @@ function renderPanel(
       onJump,
       collapsed: options.collapsed ?? false,
       onToggle,
+      onUnpin,
     });
     return tree;
   }
   const markup = renderToStaticMarkup(createElement(Capture));
-  return { markup, tree: () => tree as ReactNode, onJump, onToggle };
+  return { markup, tree: () => tree as ReactNode, onJump, onToggle, onUnpin };
+}
+
+function renderRows(entries: AttentionThread[]) {
+  let tree: ReactNode;
+  const onJump = vi.fn();
+  const onUnpin = vi.fn();
+  function Capture() {
+    tree = PinnedThreadRows({ entries, now: 1, onJump, onUnpin });
+    return tree;
+  }
+  const markup = renderToStaticMarkup(createElement(Capture));
+  return { markup, tree: () => tree as ReactNode, onJump, onUnpin };
 }
 
 describe("pinned threads panel", () => {
@@ -73,5 +87,45 @@ describe("pinned threads panel", () => {
     const label = t("sidebar.section.collapse", { name: t("sidebar.pinnedThreads.title") });
     findElement(tree(), "aria-label", label)!.props.onClick!({} as MouseEvent);
     expect(onToggle).toHaveBeenCalledOnce();
+  });
+
+});
+
+describe("pinned thread rows", () => {
+  it("shows the plain Pin icon and a time byline for an idle pinned thread", () => {
+    const { markup } = renderRows([entry]);
+    expect(markup).toContain("lucide-pin ");
+    expect(markup).not.toContain("lucide-circle-alert");
+    expect(markup).not.toContain("lucide-loader");
+    expect(markup).toContain("Atlas · just now");
+  });
+
+  it("shows the live status icon and word for an actively working pinned thread", () => {
+    const working: AttentionThread = {
+      kind: "bot", botId: "atlas", botName: "Atlas",
+      task: { threadId: "pinned-2", title: "Build report", createdAt: 1, queued: false, busy: true, activity: "working" },
+    };
+    const { markup } = renderRows([working]);
+    expect(markup).toContain("lucide-loader");
+    expect(markup).not.toContain("lucide-pin ");
+    expect(markup).toContain("Atlas · " + t("chat.activity.working"));
+  });
+
+  it("shows the waiting icon and word for a pinned thread waiting on the person", () => {
+    const waiting: AttentionThread = {
+      kind: "bot", botId: "atlas", botName: "Atlas",
+      task: { threadId: "pinned-3", title: "Needs approval", createdAt: 1, queued: false, activity: "waiting-on-you" },
+    };
+    const { markup } = renderRows([waiting]);
+    expect(markup).toContain("lucide-circle-alert");
+    expect(markup).toContain("Atlas · " + t("task.waiting"));
+  });
+
+  it("calls onUnpin for the row's own entry, not onJump, from the per-row unpin button", () => {
+    const { tree, onUnpin, onJump } = renderRows([entry]);
+    const label = t("sidebar.bot.unpin");
+    findElement(tree(), "aria-label", label)!.props.onClick!({} as MouseEvent);
+    expect(onUnpin).toHaveBeenCalledWith(entry);
+    expect(onJump).not.toHaveBeenCalled();
   });
 });
