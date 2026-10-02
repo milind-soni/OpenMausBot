@@ -26,14 +26,17 @@ export function SidebarMoreMenu({
   // a default parameter is evaluated per call, so this follows the language
   // the same way every other t() in the rail does
   label = t("sidebar.tools"),
+  tourId = "tools",
 }: {
   items: MoreMenuItem[];
   compact?: boolean;
   label?: string;
+  /** `data-tour` id for the trigger */
+  tourId?: string;
 }) {
   return (
     <SidebarPopoverMenu
-      tourId="tools"
+      tourId={tourId}
       items={items}
       ariaLabel={label}
       openOnHover
