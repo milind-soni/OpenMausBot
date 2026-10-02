@@ -1,0 +1,168 @@
+---
+title: Other model providers
+description: Use OpenRouter, Fireworks AI, DeepSeek, Cline, or your own OpenAI- or Anthropic-compatible service.
+icon: Route
+---
+
+This page covers what works today in each engine and version-specific
+differences with OpenCode 2.x.
+
+## What works today
+
+| Provider | OpenCode | Chat engine | Claude Code | Codex |
+|---|---|---|---|---|
+| OpenRouter | Yes | Yes | Only through Claude Code's own settings | Not yet |
+| Fireworks AI | Yes | Yes | Only through Claude Code's own settings | Not yet |
+| DeepSeek | Yes | Yes | Only through Claude Code's own settings | Not yet |
+| Cline | Yes | Yes | No | No |
+| Your own OpenAI-compatible address | Yes, in OpenCode's config file | Yes | No | Not yet |
+| Your own Anthropic-compatible address | Not tested | No | Only through Claude Code's own settings | No |
+
+"Chat engine" is OpenMausBot's built-in engine for OpenAI-compatible services.
+In a bot's model picker it is called **OpenAI-compatible (OpenRouter / Groq)**
+and, for now, sits in the Local group.
+
+Other engines (Antigravity, Cursor, Gemini, Qwen, Grok, Droid, Kimi, Hermes,
+Pi and custom agents) use their own sign-in.
+
+Keys you export in your shell (`~/.zshrc`, `~/.bashrc`) don't reach the
+desktop app when you open it from the Dock, Finder or an app menu: it copies
+only `PATH` from your shell. Use the steps below instead.
+
+### OpenCode
+
+OpenCode already supports OpenRouter, Fireworks AI, DeepSeek and ClinePass. It
+just needs your key.
+
+1. In a terminal, run `opencode auth login`.
+2. Pick **OpenRouter**, **Fireworks AI**, **DeepSeek** or **ClinePass** and
+   paste your key.
+3. In OpenMausBot, open a bot's model picker, choose OpenCode and press the
+   refresh button (**Refresh models**). The provider's models appear in the
+   list. OpenMausBot reads the model list from an ACP session on both
+   OpenCode 1.x and 2.x.
+
+OpenMausBot uses your normal OpenCode sign-ins and settings, so there is
+nothing to set up inside the app. Sign in with the same OpenCode version that
+your bots use (see [OpenCode 2.x](#opencode-2x)).
+
+**Your own OpenAI-compatible address** (this includes Cline credits, at
+`https://api.cline.bot/api/v1`):
+
+1. Run `opencode auth login`, pick **Other**, type a short ID such as
+   `myrouter`, and paste your key.
+2. Add the provider to `~/.config/opencode/opencode.json`
+   (`%USERPROFILE%\.config\opencode\opencode.json` on Windows):
+
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "provider": {
+       "myrouter": {
+         "npm": "@ai-sdk/openai-compatible",
+         "name": "My router",
+         "options": { "baseURL": "https://router.example.com/v1" },
+         "models": { "model-id": { "name": "Model name" } }
+       }
+     }
+   }
+   ```
+
+   Keep this file plain JSON, with no comments or trailing commas.
+   OpenMausBot edits it when an OpenCode bot uses a model running on this
+   computer.
+
+3. Refresh OpenCode's models in OpenMausBot.
+
+[OpenCode's provider guide](https://opencode.ai/docs/providers/) has more
+examples. OpenCode can also use Anthropic-compatible addresses, but we haven't
+tested that with OpenMausBot.
+
+On a self-hosted server that you start from a terminal, OpenCode also reads
+provider keys exported in that terminal, such as `OPENROUTER_API_KEY`,
+`FIREWORKS_API_KEY`, `DEEPSEEK_API_KEY` or `CLINE_API_KEY`. Keys exported
+this way reach every engine on that server, and any bot that can run commands
+can read them. On OpenCode 2.x this also has a side effect; see below.
+
+### Chat engine
+
+The chat engine uses one provider at a time.
+
+1. Open **Settings → Connections → Model providers**.
+2. Paste your key into **OpenAI-compatible API key** and set
+   **OpenAI-compatible base URL**:
+
+   | Provider | Base URL |
+   |---|---|
+   | OpenRouter | `https://openrouter.ai/api/v1` (the default) |
+   | Fireworks AI | `https://api.fireworks.ai/inference/v1` |
+   | DeepSeek | `https://api.deepseek.com` |
+   | Cline | `https://api.cline.bot/api/v1` |
+   | Anything else | The OpenAI-compatible address your provider gives you, usually ending in `/v1` |
+
+3. Press **Test**. Then pick **OpenAI-compatible (OpenRouter / Groq)** in a
+   bot's model picker and choose a model.
+
+On a server you can set `OPENAI_COMPAT_API_KEY` and `OPENAI_COMPAT_URL`
+instead.
+
+To use more than one provider at once, add extra `openai-compat` engines to
+`config.json` (see [Bring your own engine](https://github.com/milind-soni/OpenMausBot/blob/main/docs/custom-engines.md#any-openai-compatible-endpoint-no-process-at-all)).
+Give each one its own key. An engine without a key uses the key from
+Connections and sends it to that engine's address.
+
+### Claude Code
+
+The app has no place yet to point Claude Code at another provider. The
+**Anthropic API key** in Connections is for Anthropic only.
+
+You can point Claude Code itself at OpenRouter, Fireworks AI or DeepSeek,
+and your Claude bots follow it:
+
+- Put `ANTHROPIC_BASE_URL` and your key in the `env` block of
+  `~/.claude/settings.json`. Fireworks' FireConnect does this for you.
+  OpenRouter's and DeepSeek's guides use shell exports, which the desktop app
+  doesn't see, so copy those lines into the `env` block.
+- If you also set `ANTHROPIC_MODEL` there, that model appears under **Use a
+  local model** in the Claude model picker; pick it. Otherwise bots ask for
+  Claude models, which OpenRouter bills as Claude and DeepSeek replaces with
+  its own model. FireConnect's model list doesn't show up in OpenMausBot, so
+  add `ANTHROPIC_MODEL` yourself. `ANTHROPIC_DEFAULT_*_MODEL` and
+  `CLAUDE_CODE_SUBAGENT_MODEL` aren't carried over.
+- It applies only while no Anthropic API key is saved in Connections.
+- It changes Claude Code everywhere on this computer, not just in
+  OpenMausBot.
+- On a server, use the `env` block too, not exports in the terminal that
+  starts the server. Otherwise an Anthropic key saved in Connections can be
+  sent to that provider.
+
+### Codex
+
+Not yet. Codex bots use your ChatGPT sign-in, or your organisation's models.
+
+## Current limits
+
+There is no shared provider list that configures every engine. Use each
+engine's setup above, and do not assume a key saved for one engine changes
+another engine's sign-in or model list.
+
+## OpenCode 2.x
+
+OpenMausBot installs and tests OpenCode 1.x (the `opencode-ai` npm package).
+OpenCode 2.x is a separate package, `@opencode/cli`, and it also installs a
+command called `opencode`.
+
+- If you installed OpenCode from OpenMausBot's Settings, bots use that copy.
+  Otherwise they use the first `opencode` on your PATH, which is 2.x if you
+  installed `@opencode/cli`. **Settings → Engines** shows the version in use.
+- 2.x works on a best-effort basis. Version-specific differences:
+  - Some 2.x releases have reported missing configured providers in new
+    ACP sessions ([upstream report #50236](https://github.com/anomalyco/opencode/issues/50236)).
+    If a provider is missing, check the installed version and upstream
+    updates before changing your credentials.
+  - When a provider key is set in the environment (for example
+    `OPENROUTER_API_KEY` on a server), 2.x hides OpenCode's free models and
+    makes a paid model the default.
+  - 2.x keeps its sign-ins apart from 1.x, so a sign-in made with one may not
+    be seen by the other. Run `opencode auth login` with the version your bots
+    use.

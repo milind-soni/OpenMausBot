@@ -44,8 +44,20 @@ export function resolveCursorAcpModelId(
   const exact = ids.find((m) => m.modelId!.toLowerCase() === want);
   if (exact) return exact.modelId!;
 
-  const byBase = ids.find((m) => base(m.modelId!) === want);
+  // A base can be advertised several times with different parameters, e.g.
+  // `composer-2.5[fast=false]` and `composer-2.5[fast=true]`. The plain slug
+  // means Standard, so prefer the non-fast variant; a `-fast` slug has no base
+  // of its own and means the fast=true variant of the base without the suffix.
+  const isFast = (id: string) => /[[,]\s*fast\s*=\s*true\s*[\],]/i.test(id);
+  const sameBase = ids.filter((m) => base(m.modelId!) === want);
+  const byBase = sameBase.find((m) => !isFast(m.modelId!)) ?? sameBase[0];
   if (byBase) return byBase.modelId!;
+
+  if (want.endsWith("-fast")) {
+    const stem = want.slice(0, -"-fast".length);
+    const fast = ids.find((m) => base(m.modelId!) === stem && isFast(m.modelId!));
+    if (fast) return fast.modelId!;
+  }
 
   const byName = ids.find((m) => (m.name ?? "").trim().toLowerCase() === want);
   if (byName) return byName.modelId!;

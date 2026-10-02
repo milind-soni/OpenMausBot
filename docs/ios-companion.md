@@ -25,6 +25,8 @@ The first version includes:
 - Approvals and questions, including narrow “always allow” grants.
 - Resumable SSE, streamed reply text, reconnect hydration, and an opt-in live
   Boat computer view. The loopback-only VPS SSH viewer remains desktop-only.
+- On-demand stills of a bot's Local VM, idle or working, for a phone the
+  computer owner has allowed computer access.
 - Markdown rendering and Keychain storage for the phone's pairing trust.
 - Secure completion of supported credential-request cards using iOS Password
   AutoFill and QR-pinned HPKE encryption. Apple Passwords/iCloud Keychain is
@@ -279,6 +281,36 @@ Allowed in the first release:
 - Fetch settled screen images and opt into live screen frames.
 - Request a fresh interactive cloud-desktop viewer only when the computer
   owner has enabled that capability for this specific paired phone.
+- With the same capability, fetch a still of a bot's Local VM
+  (`POST /api/bots/:id/local-computer/screenshot`). The app always passes the
+  conversation's `threadId`, so the harness answers 409 for a conversation
+  that is not on the Local VM. This reads a picture; it cannot start, stop,
+  remove the VM. Like the desktop panel's preview, each capture
+  counts as use of the VM, so an open computer view keeps it from being
+  reclaimed as idle; leaving the view or backgrounding the app stops that.
+- With the same capability, drive the Local VM: take the bot's computer under
+  a device control lease (`POST /api/bots/:id/computer/control`), then
+  `POST /api/bots/:id/local-computer/join?controlLeaseId=…`. The harness answers
+  that only for a loopback caller, only for a conversation on the Local VM,
+  and only to the lease that holds the computer. The sidecar rewrites the
+  loopback noVNC address into its device-scoped relay path, then asks the
+  harness every few seconds whether that lease still holds
+  (`action: "check"`, read-only) and closes the relay when it does not. The
+  phone speaks RFB over the relay. Hand back closes the viewer and releases
+  the lease, and so does backgrounding the app.
+- A phone paired with the server directly (`openmausbot serve` behind
+  Tailscale Serve or a tunnel, no sidecar) drives the Local VM the same way,
+  but the join answers it with the server's own authenticated desktop proxy
+  (`/api/desktop-viewer/local/<target>/websockify`), bound to its control
+  lease, and the VNC password; never the loopback address. The proxy re-checks
+  the lease and the session every few seconds and closes the socket when
+  either lapses; hand back closes it at once. Computer access is the pairing's
+  scope: Full access (`openmausbot pair`) may, chat-only (`--client`) is
+  answered 403 and the app shows computer access as off.
+- Phone control requires per-bot Local VMs. Shared and pool modes are refused
+  on both connection paths until a viewer can reserve its desktop against
+  other bots; a control hold on one bot alone cannot do that. Stills remain
+  available in every mode.
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.

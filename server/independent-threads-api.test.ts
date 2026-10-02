@@ -172,6 +172,30 @@ describe("independent bot tasks through the isolated control surface", () => {
     await control(["messages", "--bot", chief.id, "--limit", "15"]);
   }, 60_000);
 
+  it("reports a deleted one-way recipient thread in its surviving source without restarting the sender", async () => {
+    const sender = (await tool("create_bot", { name: "Independent sender", instance_id: "claude", model: models[0] })).bot;
+    const recipient = (await tool("create_bot", { name: "Independent recipient", instance_id: "claude", model: models[1] })).bot;
+    await control(["send", "--bot", sender.id, "--text", "Prepare independent work."]);
+    const launched = await dump(models[0]);
+    const token = launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const sent = await internal(token, "POST", "/api/internal/threads", {
+      toBotId: recipient.id, title: "Deleted independent work", message: "Own this work.", oneWay: true,
+    });
+    expect(sent.status).toBe(201);
+    const threadId = sent.body.threadId;
+    expect((await api("DELETE", `/api/bots/${recipient.id}/tasks/${threadId}`)).status).toBe(200);
+    writeFileSync(modelFile(models[0], "gate"), "finish sender");
+    expect((await control(["wait", "--bot", sender.id, "--timeout", "15"])).status).toBe("settled");
+    await expect.poll(async () => (await api("GET", `/api/threads/${sender.activeTaskId}/messages`)).body.messages
+      .some((message: any) => message.tool?.ok === false && message.tool.name.includes("deleted before it could start")),
+    { timeout: 5_000 }).toBe(true);
+    expect((await api("GET", `/api/threads/${threadId}/messages`)).status).toBe(404);
+    expect((await botState(recipient.id)).tasks.some((task: any) => task.threadId === threadId)).toBe(false);
+    expect((await botState(sender.id)).busy).toBe(false);
+    expect((await dump(models[0])).pid).toBe(launched.pid);
+    expect(existsSync(modelFile(models[1], "json"))).toBe(false);
+  }, 30_000);
+
   it("replaces the final worked thread with blank context but refuses to delete it while running", async () => {
     const created = await tool("create_bot", { name: "Last thread fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;

@@ -55,3 +55,12 @@ it("hardcoded copy does not bring back the retired workspace and Organisation ph
   });
   expect(offending).toEqual([]);
 });
+
+// The welcome flow is the first copy anyone reads; it speaks in short
+// sentences, not em-dash asides.
+it("English welcome flow copy has no em dashes", () => {
+  const offending = Object.entries(en)
+    .filter(([key, value]) => key.startsWith("onboarding.") && value.includes("—"))
+    .map(([key]) => key);
+  expect(offending).toEqual([]);
+});

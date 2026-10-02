@@ -41,6 +41,7 @@ Use only mapped, tested commands:
 - [Conversation context compaction](context-compaction.md)
 - [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
+- [Per-bot tool selection and local-model checks](tool-selection.md)
 - [OpenCode model variants through ACP](opencode-variants.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
@@ -125,6 +126,9 @@ The [live browser fixture](browser-live.md) mounts the real Browser panel with
 an explicitly selected native engine and Chrome in a disposable home, covering
 watching, takeover, input, and profile switching.
 
+The [Local VM resume fixture](local-vm-resume.md) checks idle stop, restart
+recovery, guarded resume and the stopped-to-ready Computer panel flow.
+
 The [local computer launch regression](local-computer-launch.md) starts the
 host CUA gate through real Electron in a disposable home, without opening the
 desktop app or controlling the user's computer.
@@ -173,6 +177,10 @@ interrupting a newer request.
 
 The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
 search and draft isolation using disposable simulators and an offline fixture.
+
+The [iOS Local VM view](ios-local-vm.md) pairs a disposable simulator with an
+isolated server, companion sidecar and synthetic Local VM to check on-demand
+stills and the per-device computer-access gate.
 
 The [Android stream recovery checks](android-stream-recovery.md) exercise early
 stream closure and fallback through disposable HTTP endpoints.

@@ -890,6 +890,140 @@ public struct CompanionConnectionMetadata: Decodable, Sendable {
     }
 }
 
+/// Who is driving a bot's computer. `owned` is present only when the request
+/// named a control lease, and says whether that lease is the one holding it.
+public struct ComputerControlState: Decodable, Sendable, Equatable {
+    public let held: Bool
+    public let owned: Bool?
+
+    public init(held: Bool, owned: Bool? = nil) {
+        self.held = held
+        self.owned = owned
+    }
+}
+
+/// The Local VM's live desktop, as the sidecar relays it to this device: a
+/// WebSocket path that only this paired device may open, and the VNC password
+/// the desktop asks for. In memory only, like `CloudDesktopSession`; the path
+/// is a short-lived capability.
+public struct LocalVmViewerSession: Decodable, Sendable, Equatable {
+    /// The WebSocket path on the paired computer, without its leading slash:
+    /// `vps-viewer/<32 characters>/websockify` when the companion sidecar
+    /// relays the desktop, `api/desktop-viewer/local/<target>/websockify`
+    /// when the server itself proxies it to a directly paired phone.
+    public let socketPath: String
+    /// What the server's own proxy needs to bind the socket to the control
+    /// lease (`botId`, `controlLeaseId`, and the `threadId` whose VM seat the
+    /// join picked). Empty for a sidecar relay.
+    public let socketQuery: [String: String]
+    public let password: String?
+
+    /// Whether the companion sidecar relays this desktop. The sidecar speaks
+    /// websockify's `binary` subprotocol; the server's proxy negotiates none.
+    public var relayed: Bool { socketPath.hasPrefix("vps-viewer/") }
+
+    private enum CodingKeys: String, CodingKey { case joinUrl, socketPath, password }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let raw = try container.decodeIfPresent(String.self, forKey: .socketPath) {
+            guard let parsed = Self.parseDirect(raw) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .socketPath,
+                    in: container,
+                    debugDescription: "Local VM viewer must be the paired server's own desktop proxy"
+                )
+            }
+            (socketPath, socketQuery) = parsed
+            let password = try container.decodeIfPresent(String.self, forKey: .password)
+            self.password = password?.isEmpty == false ? password : nil
+            return
+        }
+        let raw = try container.decode(String.self, forKey: .joinUrl)
+        guard let parsed = Self.parse(raw) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .joinUrl,
+                in: container,
+                debugDescription: "Local VM viewer must be a relayed path on the paired computer"
+            )
+        }
+        (socketPath, password) = parsed
+        socketQuery = [:]
+    }
+
+    /// Only the sidecar's relay shape is accepted: anything with a scheme or
+    /// host (a loopback address that was not rewritten, or somewhere else
+    /// entirely) is refused rather than dialled.
+    static func parse(_ raw: String) -> (String, String?)? {
+        guard let components = URLComponents(string: raw),
+              components.scheme == nil, components.host == nil,
+              let match = raw.range(of: #"^/vps-viewer/([A-Za-z0-9_-]{32})/"#, options: .regularExpression)
+        else { return nil }
+        let id = raw[match].dropFirst("/vps-viewer/".count).dropLast()
+        let settings = URLComponents(string: "?" + (components.fragment ?? ""))?.queryItems ?? []
+        let expected = "vps-viewer/\(id)/websockify"
+        let path = settings.first { $0.name == "path" }?.value ?? expected
+        guard path == expected else { return nil }
+        let password = settings.first { $0.name == "password" }?.value
+        return (path, password?.isEmpty == false ? password : nil)
+    }
+
+    /// Only the server's own desktop proxy, for a Local VM target, carrying
+    /// nothing but the lease binding. Like `parse`, a scheme or host means
+    /// somewhere other than the paired server and is refused.
+    static func parseDirect(_ raw: String) -> (String, [String: String])? {
+        guard let components = URLComponents(string: raw),
+              components.scheme == nil, components.host == nil, components.fragment == nil,
+              components.path.range(
+                  of: #"^api/desktop-viewer/local/(shared|bot-[a-f0-9]{64}|pool-\d+)/websockify$"#,
+                  options: .regularExpression
+              ) != nil
+        else { return nil }
+        var query: [String: String] = [:]
+        for item in components.queryItems ?? [] {
+            guard ["botId", "threadId", "controlLeaseId"].contains(item.name), let value = item.value, !value.isEmpty,
+                  query[item.name] == nil
+            else { return nil }
+            query[item.name] = value
+        }
+        guard query["botId"] != nil, query["controlLeaseId"] != nil else { return nil }
+        return (components.path, query)
+    }
+}
+
+/// One still of a bot's Local VM, fetched on demand. The harness answers
+/// with a `data:` URL; anything but a PNG or JPEG in base64 is refused rather
+/// than handed to an image decoder.
+public struct LocalVmScreenshot: Decodable, Sendable, Equatable {
+    public let data: Data
+    public let mime: String
+
+    private enum CodingKeys: String, CodingKey { case image }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let raw = try container.decode(String.self, forKey: .image)
+        guard let parsed = Self.parse(raw) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .image,
+                in: container,
+                debugDescription: "Local VM screenshot must be a base64 PNG or JPEG data URL"
+            )
+        }
+        (data, mime) = parsed
+    }
+
+    static func parse(_ raw: String) -> (Data, String)? {
+        for mime in ["image/png", "image/jpeg"] {
+            let prefix = "data:\(mime);base64,"
+            guard raw.hasPrefix(prefix) else { continue }
+            guard let data = Data(base64Encoded: String(raw.dropFirst(prefix.count))), !data.isEmpty else { return nil }
+            return (data, mime)
+        }
+        return nil
+    }
+}
+
 /// A freshly minted provider viewer. It is deliberately not Codable for
 /// persistence: the URL is a short-lived bearer credential and belongs only
 /// in memory for the browser session that requested it.

@@ -591,7 +591,7 @@ describe("stream tickets", () => {
 });
 
 describe("admin scope only (an OMB Cloud home is personal: server/cloud-owner.ts)", () => {
-  const PERSONAL = "Cloud Pro is personal: only your own devices can connect.";
+  const PERSONAL = "OMB Cloud is personal: only your own devices can connect.";
   it("opens, redeems, issues and accepts nothing without admin scope; the owner's devices are unaffected", () => {
     // Made before the rule applies (as a stored session is at boot).
     const earlier = registry.openPairing({ scopes: ["client"], label: "Guest phone" });

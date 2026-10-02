@@ -260,6 +260,15 @@ const toolDefinitions = (externalRuntime: boolean) => [
     }, required: ["bot_ids", "message", "request_key"] },
   },
   {
+    name: "send_to_bot",
+    description: "Send work one way to another bot in a fresh thread. This is cross-bot only: use start_thread to send independent work to yourself. The recipient owns the new thread; its results, failures and questions stay there and never resume you. Use coordinate_bots when you need the result returned here.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      bot_id: { type: "string", description: "One reachable teammate id from list_bots or list_room_targets." },
+      title: { type: "string", description: "A short one-line title, at most 80 characters." },
+      message: { type: "string", description: "Complete instructions; the recipient does not inherit this conversation." },
+    }, required: ["bot_id", "title", "message"] },
+  },
+  {
     name: "list_bots",
     description:
       "List the other bots (agents) you may contact in your own team and any additional teams the owner has explicitly allowed you to coordinate, with their team, model and current status. Call this to discover exact teammate IDs before assigning work or requesting advice through your available coordination tools.",
@@ -825,7 +834,7 @@ const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
 // One teamwork path in room turns; keep all unrelated integrations available.
 // Ordinary direct chats use this same bounded coordinator. Goal-owned turns
 // retain their independent loop and cannot start a second coordinator.
-const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots"]);
+const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots", "send_to_bot"]);
 const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "send_to_thread", "wait_thread"]);
 const EXTERNAL_TOOL_NAMES = new Set(["list_bots", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);

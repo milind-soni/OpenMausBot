@@ -81,6 +81,36 @@ function render(bot: Bot, derived = makeDerived()) {
   );
 }
 
+describe("owner tool selection status", () => {
+  it("distinguishes the legacy catalog from an explicit no-tools selection", () => {
+    expect(render(makeBot())).toContain("All current tools");
+    const empty = render(makeBot({ toolScope: { allow: [] } } as Partial<Bot>));
+    expect(empty).toContain("No tools selected");
+    expect(empty).not.toContain("All current tools</p>");
+    expect(empty).toContain("Existing approvals still apply");
+  });
+
+  it("shows corrupt saved restrictions as a blocked setup, never all tools", () => {
+    const corrupt = render(makeBot({ toolScope: { allow: "native:*" } } as unknown as Partial<Bot>));
+    expect(corrupt).toContain("Invalid saved selection. This bot cannot start until it is repaired.");
+    expect(corrupt).toContain('role="alert"');
+  });
+
+  it("explains native restrictions that the selected engine cannot enforce", () => {
+    const engine = { driverKind: "claudeAgent" } as NonNullable<ReturnType<typeof useBotSettingsDerived>["engine"]>;
+    const markup = render(makeBot({ toolScope: { allow: ["native:read"] } } as Partial<Bot>), makeDerived({ engine }));
+    expect(markup).toContain("This engine cannot limit native tools");
+    expect(markup).toContain("native:*");
+    expect(markup).toContain("will stop before sending a prompt");
+  });
+
+  it("keeps the selection editor disabled while a task is active", () => {
+    const markup = render(makeBot({ busy: true }));
+    expect(markup).toContain('aria-label="Tool selection" disabled=""');
+    expect(markup).toContain("Wait until this bot finishes all active tasks before changing its tool selection.");
+  });
+});
+
 describe("AccessSection always-allowed list", () => {
   it("keeps per-bot MCP changes disabled while any task is active", () => {
     fixture.servers = [{ name: "notes", enabled: true }, { name: "offline", enabled: false }];

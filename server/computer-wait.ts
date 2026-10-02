@@ -2,11 +2,11 @@
 //
 // The chip used to read "Waiting for computer — X / Y is using it; will
 // continue automatically", which people read as an error about a machine
-// they could not see. It is a queue position: this turn is behind one named
-// turn on one desktop, and it starts on its own when that turn ends. Say
-// that, name the holder as a bot running a thread, and keep the same words
-// on every surface (chat chip, room chip, the gate's refusal) so a person
-// who has read it once recognises it everywhere.
+// they could not see. It is a queue position: this turn sits behind a named
+// turn on one desktop — and every turn queued ahead of it — and starts on
+// its own when they finish. Say that, name the holder as a bot running a
+// thread, and keep the same words on every surface (chat chip, room chip,
+// the gate's refusal) so a person who has read it once recognises it everywhere.
 
 /** Who holds the computer this turn is waiting for: a bot and, when the
  * holder is one of its threads, that thread's title; or a room's name. */
@@ -31,10 +31,39 @@ export function computerWaitDuration(ms: number): string {
 const holderPhrase = (holder: ComputerHolder): string =>
   holder.task ? `${holder.name} is running ${holder.task}` : `${holder.name} is using it`;
 
-/** The chip a turn shows while it is queued behind another turn's desktop. */
-export function computerWaitingText(holder?: ComputerHolder | null): string {
-  if (!holder) return "Waiting for its turn on this computer. Starts automatically when it is free.";
-  return `Waiting for its turn on this computer — ${holderPhrase(holder)}. Starts automatically when that finishes.`;
+/** Where this turn sits in the wait, and how long waits here have been
+ * taking, as known when the chip was written (#1652). The estimate is
+ * undefined until the resource has wait history; the chip then simply omits
+ * it — an honest blank beats a made-up number. */
+export interface WaitQueueFact {
+  position?: number;
+  estimateMs?: number;
+}
+
+const ordinal = (position: number): string => {
+  const mod100 = position % 100;
+  const mod10 = position % 10;
+  const suffix = mod100 >= 11 && mod100 <= 13 ? "th" : mod10 === 1 ? "st" : mod10 === 2 ? "nd" : mod10 === 3 ? "rd" : "th";
+  return `${position}${suffix}`;
+};
+
+/** The chip a turn shows while it is queued behind another turn's desktop:
+ * its stable queue position, the holder, and — only once waits here have
+ * history — about how long they have been taking. */
+export function computerWaitingText(holder?: ComputerHolder | null, queue?: WaitQueueFact): string {
+  const position = queue?.position && queue.position > 0 ? queue.position : undefined;
+  const place = position ? ` — ${ordinal(position)} in queue` : "";
+  const estimate = queue?.estimateMs !== undefined ? `; recent waits here have taken ${computerWaitDuration(queue.estimateMs)}` : "";
+  // Behind more than the holder, that turn ending is not this turn's start:
+  // the released seat goes to the front waiter first, so this turn starts
+  // only once every turn ahead of it has finished (#1652).
+  const starts = position && position > 1
+    ? "Starts automatically when the turns ahead finish"
+    : holder
+      ? "Starts automatically when that finishes"
+      : "Starts automatically when it is free";
+  if (!holder) return `Waiting for its turn on this computer${place}. ${starts}${estimate}.`;
+  return `Waiting for its turn on this computer${place} — ${holderPhrase(holder)}. ${starts}${estimate}.`;
 }
 
 /** The resolution appended once the wait landed and this turn holds the
@@ -52,9 +81,10 @@ export function computerStoppedWaitingText(holder: ComputerHolder | null | undef
   return `Stopped waiting for the computer after ${computerWaitDuration(waitedMs)}${who}.`;
 }
 
-/** The error after the wait ceiling: still names who holds it, and says
- * what a person can do — stop that turn, or move this one. */
-export function computerStillBusyText(holder: ComputerHolder | null | undefined, ceilingMs: number): string {
+/** The resolution appended when the wait ceiling parks the turn (#1651):
+ * still names who holds it, but the work is not lost — the turn settled and
+ * resumes on its own when the desktop frees, so nobody has to fix it. */
+export function computerParkedText(holder: ComputerHolder | null | undefined, ceilingMs: number): string {
   const who = holder ? ` — ${holderPhrase(holder).replace(" is running ", " is still running ").replace(" is using it", " is still using it")}` : "";
-  return `Computer is still busy after ${minutes(ceilingMs)}${who}. Stop that turn, or run this on another computer.`;
+  return `Computer still busy after ${minutes(ceilingMs)}${who}. Parked — it continues automatically when the computer is free.`;
 }

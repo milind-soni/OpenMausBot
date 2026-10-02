@@ -131,7 +131,7 @@ describe("included Boat computers", () => {
 
   it("lists the computers with the included wording when the relay rejects its token", async () => {
     rejectCredentials = true;
-    expect((await boat.listManagedBoats({}, [])).problem).toBe("Cloud Pro's included cloud computers aren't available right now. Try again later.");
+    expect((await boat.listManagedBoats({}, [])).problem).toBe("The cloud computers included with your Cloud plan aren't available right now. Try again later.");
     expect((await boat.listManagedBoats({ box: { token: "box_own" } }, [])).problem).toMatch(/update it in Settings/);
   });
 
@@ -195,7 +195,7 @@ describe("waking a sleeping computer", () => {
   it("never asks the person to fix a key they never pasted when the relay rejects the included token", async () => {
     state = "archived";
     resumeReplies = [{ status: 401, body: { ok: false, code: "unauthorized", message: "This cloud computer key is not valid." } }];
-    await expect(boat.readyBoat({}, botId)).rejects.toThrow("Cloud Pro's included cloud computers aren't available right now. Try again later.");
+    await expect(boat.readyBoat({}, botId)).rejects.toThrow("The cloud computers included with your Cloud plan aren't available right now. Try again later.");
     // The same refusal on the person's own key still points them at Settings.
     await expect(boat.readyBoat({ box: { token: "box_own" } }, botId)).rejects.toThrow(/paste a current token/);
   });

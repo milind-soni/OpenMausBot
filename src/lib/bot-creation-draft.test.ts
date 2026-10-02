@@ -3,6 +3,13 @@ import { BotCreationDraft, EMPTY_BOT_DEFAULTS } from "./bot-creation-draft";
 import { api } from "@/state/store";
 
 describe("isolated creation draft", () => {
+  it("clears a selection without exposing a malformed null bot status", async () => {
+    const draft = new BotCreationDraft({ ...EMPTY_BOT_DEFAULTS, profile: { toolScope: { allow: [] } } }, vi.fn());
+    expect(draft.bot).toHaveProperty("toolScope", { allow: [] });
+    await draft.request(`/api/bots/${draft.id}`, { method: "PATCH", body: JSON.stringify({ toolScope: null }) });
+    expect(draft.bot.toolScope).toBeUndefined();
+    expect(draft.export().profile.toolScope).toBeNull();
+  });
   it("keeps profile, memory and routine edits local until commitment", async () => {
     const network = vi.fn();
     const draft = new BotCreationDraft(EMPTY_BOT_DEFAULTS, vi.fn(), network as typeof api);

@@ -65,7 +65,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await click("Sign in to OMB Cloud"); await wait("Security details"); approved = true;
     await wait("Free account"); assert.equal(saved.token, token);
     assert.ok(!(await evaluate("(async () => JSON.stringify(await window.ogb.cloudAccount.state()))()")).includes(token));
-    await click("Get Pro in your browser"); await new Promise(resolve => setTimeout(resolve, 50)); assert.equal(browsers.at(-1), `${origin}/cloud`);
+    await click("Choose a Cloud plan in your browser"); await new Promise(resolve => setTimeout(resolve, 50)); assert.equal(browsers.at(-1), `${origin}/cloud`);
     await wait("Free account"); assert.equal(await evaluate("document.body.innerText.includes('Pro active')"), false);
     entitlement = { plan: "pro", status: "active", expiresAt: Date.now() + 3600_000, version: 1 };
     await click("Refresh"); await wait("Pro active");

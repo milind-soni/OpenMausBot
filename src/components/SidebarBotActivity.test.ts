@@ -1,7 +1,9 @@
+import { BellDot, CircleAlert, Clock3, Loader2 } from "lucide-react";
 import { describe, expect, it } from "vitest";
 import type { Bot, Group, GroupTask, Task } from "@/state/store";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { attentionJumpAction, attentionOwnerName, crossBotAttentionThreads, sidebarGroupActivityTasks } from "./SidebarBotActivity";
+import { t } from "@/lib/i18n";
+import { attentionJumpAction, attentionOwnerName, attentionRowStatus, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, sidebarGroupActivityTasks } from "./SidebarBotActivity";
 
 const task = (threadId: string, title: string, extra: Partial<Task>): Task =>
   ({ threadId, title, createdAt: 0, ...extra }) as Task;
@@ -128,5 +130,113 @@ describe("group attention", () => {
     const alpha = bot("a", "Alpha", "a0", [task("a0", "Unread reply", { unread: true })]);
     const [entry] = crossBotAttentionThreads([alpha], {});
     expect(attentionJumpAction(entry)).toEqual({ type: "switchTask", botId: "a", threadId: "a0" });
+  });
+});
+
+describe("cross-bot pinned threads", () => {
+  it("collects only pinned threads from every bot, newest pin first", () => {
+    const alpha = bot("a", "Alpha", "a0", [
+      task("a0", "Idle chat", {}),
+      task("a1", "Old pin", { pinned: true, updatedAt: 1 }),
+    ]);
+    const beta = bot("b", "Beta", "b0", [
+      task("b0", "Unpinned", {}),
+      task("b1", "New pin", { pinned: true, updatedAt: 2 }),
+    ]);
+    const entries = crossBotPinnedThreads([alpha, beta], [], {});
+    expect(entries.map((entry) => entry.task.threadId)).toEqual(["b1", "a1"]);
+    expect(entries.map((entry) => attentionOwnerName(entry))).toEqual(["Beta", "Alpha"]);
+  });
+
+  it("ignores a pinned routine run and a hidden bot", () => {
+    const visible = bot("v", "Visible", "v0", [task("v0", "Pinned run", { pinned: true, routineRunId: "run-1" })]);
+    const hidden = bot("h", "Hidden", "h0", [task("h0", "Pinned elsewhere", { pinned: true })], { hidden: true });
+    expect(crossBotPinnedThreads([visible, hidden], [], {})).toEqual([]);
+  });
+
+  it("includes a pinned room thread alongside pinned bot threads", () => {
+    const alpha = bot("a", "Alpha", "a0", [task("a0", "Pinned chat", { pinned: true, updatedAt: 1 })]);
+    const room = group("g", "Crew", "g0", { tasks: [{ threadId: "g0", title: "Crew", createdAt: 0, pinned: true, updatedAt: 2 }] });
+    const entries = crossBotPinnedThreads([alpha], [room], {});
+    expect(entries.map((entry) => `${entry.kind}:${entry.task.threadId}`)).toEqual(["group:g0", "bot:a0"]);
+    expect(attentionJumpAction(entries[0])).toEqual({ type: "select", id: "g" });
+  });
+
+  it("marks a pinned thread queued the same way attention does", () => {
+    const alpha = bot("a", "Alpha", "a0", [task("a0", "Pinned chat", { pinned: true })]);
+    const [entry] = crossBotPinnedThreads([alpha], [], { a0: [{}] });
+    expect(entry.task.queued).toBe(true);
+  });
+
+  it("keeps pinned task status independent of the bot's aggregate activity", () => {
+    const alpha = bot("a", "Alpha", "a0", [
+      task("a0", "Idle pin", { pinned: true, busy: false, activity: "idle" }),
+      task("a1", "Working pin", { pinned: true, busy: true, activity: "working" }),
+    ], { busy: true, activity: "waiting-on-you" });
+    const entries = crossBotPinnedThreads([alpha], [], {});
+    expect(attentionRowStatus(entries[0].task).active).toBe(false);
+    expect(attentionRowStatus(entries[1].task).label).toBe(t("chat.activity.working"));
+  });
+
+  it("derives a pinned room's live status without attributing it to an idle sibling", () => {
+    const alpha = bot("a", "Alpha", "a0", [], { activity: "waiting-on-you" });
+    const room = group("g", "Crew", "g0", { busyBotId: "a", unread: true, tasks: [
+      { threadId: "g0", title: "Crew", createdAt: 0, pinned: true },
+      { threadId: "g1", title: "Idle sibling", createdAt: 0, pinned: true },
+    ] });
+    const status = (patch: Partial<Group>) => crossBotPinnedThreads([alpha], [{ ...room, ...patch }], {})
+      .map((entry) => attentionRowStatus(entry.task));
+    expect(status({})[0].label).toBe(t("task.waiting"));
+    expect(status({ busyBotId: null, working: true })[0].label).toBe(t("chat.activity.working"));
+    expect(status({ busyBotId: null })[0].label).toBe(t("task.unread"));
+    expect(status({})[1].active).toBe(false);
+  });
+});
+
+describe("attentionRowStatus", () => {
+  it("flags a waiting-on-you task active with the CircleAlert icon", () => {
+    const status = attentionRowStatus({ threadId: "t", title: "T", createdAt: 0, queued: false, activity: "waiting-on-you" });
+    expect(status.active).toBe(true);
+    expect(status.label).toBe(t("task.waiting"));
+    expect(status.Icon).toBe(CircleAlert);
+  });
+
+  it("flags a working task active with the spinning Loader2 icon", () => {
+    const status = attentionRowStatus({ threadId: "t", title: "T", createdAt: 0, queued: false, busy: true, activity: "working" });
+    expect(status.active).toBe(true);
+    expect(status.label).toBe(t("chat.activity.working"));
+    expect(status.Icon).toBe(Loader2);
+  });
+
+  it("flags a queued task active with the Clock3 icon", () => {
+    const status = attentionRowStatus({ threadId: "t", title: "T", createdAt: 0, queued: true });
+    expect(status.active).toBe(true);
+    expect(status.label).toBe(t("task.queued"));
+    expect(status.Icon).toBe(Clock3);
+  });
+
+  it("flags an unread task active with the BellDot icon", () => {
+    const status = attentionRowStatus({ threadId: "t", title: "T", createdAt: 0, queued: false, unread: true });
+    expect(status.active).toBe(true);
+    expect(status.label).toBe(t("task.unread"));
+    expect(status.Icon).toBe(BellDot);
+  });
+
+  it("marks a plain idle task inactive", () => {
+    const status = attentionRowStatus({ threadId: "t", title: "T", createdAt: 0, queued: false });
+    expect(status.active).toBe(false);
+  });
+});
+
+describe("attentionUnpinAction", () => {
+  it("unpins a bot thread via updateTask", () => {
+    const [entry] = crossBotPinnedThreads([bot("a", "Alpha", "a0", [task("a0", "Pinned chat", { pinned: true })])], [], {});
+    expect(attentionUnpinAction(entry)).toEqual({ type: "updateTask", botId: "a", threadId: "a0", patch: { pinned: false } });
+  });
+
+  it("unpins a room thread via pinGroupTask", () => {
+    const room = group("g", "Crew", "g0", { tasks: [{ threadId: "g0", title: "Crew", createdAt: 0, pinned: true }] });
+    const [entry] = crossBotPinnedThreads([], [room], {});
+    expect(attentionUnpinAction(entry)).toEqual({ type: "pinGroupTask", groupId: "g", threadId: "g0", pinned: false, title: "Crew" });
   });
 });

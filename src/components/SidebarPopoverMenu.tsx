@@ -11,6 +11,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
+import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 
 export interface SidebarMenuItem {
   key: string;
@@ -101,22 +102,7 @@ export function SidebarPopoverMenu({
     setOpen(false);
   };
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
-    const onDown = (event: PointerEvent) => {
-      if (!(event.target instanceof Node)) return;
-      // the guided tour's card floats outside the menu but is talking about it
-      if (event.target instanceof Element && event.target.closest("[data-tour-card]")) return;
-      if (!rootRef.current?.contains(event.target)) close();
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onDown);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onDown);
-    };
-  }, [open]);
+  usePopoverDismiss(open, rootRef, close);
 
   const asking = items.filter((item) => item.attention);
   const attention = asking.length > 0;

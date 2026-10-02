@@ -528,6 +528,34 @@ describe("Copy link", () => {
   });
 });
 
+describe("Refresh permissions", () => {
+  const openMenu = (tree: RowNode) => {
+    (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
+  };
+
+  it("is offered only when the row can refresh, and stays disabled while the thread is working", () => {
+    vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
+    vi.stubGlobal("document", { body: { nodeType: 1 } });
+    const task = { threadId: "t1", title: "Fix the login" };
+    openMenu(renderRow(task, "scout"));
+    expect(buttonWithLabel(renderRow(task, "scout", false), "Refresh permissions")).toBeUndefined();
+
+    const onRefreshPermissions = vi.fn();
+    openMenu(renderRow(task, "scout", true, { onRefreshPermissions }));
+    const offered = buttonWithLabel(renderRow(task, "scout", false, { onRefreshPermissions }), "Refresh permissions");
+    expect(offered?.props?.disabled).toBe(false);
+    expect(offered?.props?.title).toBe("Apply this bot's current approval level and saved approvals to this thread. Other threads stay as they are.");
+    (offered!.props!.onClick as () => void)();
+    expect(onRefreshPermissions).toHaveBeenCalledTimes(1);
+
+    const working = { ...task, activity: "working" as const };
+    openMenu(renderRow(working, "scout", true, { onRefreshPermissions }));
+    const busy = buttonWithLabel(renderRow(working, "scout", false, { onRefreshPermissions }), "Refresh permissions");
+    expect(busy?.props?.disabled).toBe(true);
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("Regenerate title", () => {
   const openMenu = (tree: RowNode) => {
     (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });

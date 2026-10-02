@@ -15,7 +15,7 @@
 //                       session, so its load succeeds.
 //   FAKE_ACP_CACHED_LIVE_LOAD  acknowledge session/load of a live session but
 //                       keep its original MCP credentials, matching Qwen.
-//   FAKE_ACP_MODE   happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | hang | hang-initialize | stall-after-text | no-auth | auth-required | permission | question
+//   FAKE_ACP_MODE   happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | hang | hang-initialize | stall-after-text | unkeyed-tool | no-auth | auth-required | permission | question
 //                   | ask-question-unsupported (send a cursor/ask_question server→client
 //                     request mid-prompt; the driver must answer -32601 method
 //                     not found, and the prompt completes only after that
@@ -48,6 +48,12 @@
 //                   | stall-after-tool (finish a tool call, then go fully
 //                     silent forever: the guard must still fire once no tool
 //                     is running)
+//                   | quiet-then-answer (send nothing for FAKE_ACP_QUIET_MS,
+//                     default 600, then answer — a slow model or a rate-limit
+//                     wait. With QWEN_HOME set, appends FAKE_ACP_QWEN_LOG
+//                     (a JSON array of lines) to Qwen's debug log for this
+//                     session, one line every FAKE_ACP_LOG_EVERY_MS (default
+//                     100), repeating the last, as Qwen does while it retries)
 //                   | lend-question (call list_shared_computers through the
 //                     injected agents MCP, ask a question card, call it again
 //                     once the card is answered, and reply
@@ -73,6 +79,7 @@
 //   FAKE_ACP_RPC_FAILURE_METHOD  initialize, session/new or session/prompt (default).
 //   FAKE_ACP_RPC_FAILURE_GATE  hold the error until this file exists.
 //   FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT  emit text + a tool result before failing.
+//   FAKE_ACP_RPC_FAILURE_AFTER_USAGE  emit scripted usage updates before failing.
 //   FAKE_ACP_LOAD_ERROR  JSON-RPC error object returned by session/load.
 //   FAKE_ACP_MODELS      comma-separated model ids. Enables the opencode-shaped
 //                        surface: session/new and session/load return
@@ -103,6 +110,9 @@
 //                        replay?}, emitted after the named RPC response.
 //   FAKE_ACP_USAGE_ROOT  put the prompt result's usage at the root instead of
 //                        under _meta (what opencode 1.18.18 actually does)
+//   FAKE_ACP_USAGE_UPDATES_FILE  JSON array of numbers, re-read on every
+//                        session/prompt; each is sent as a usage_update
+//                        { used: n, size: 200000 } before the result
 //   FAKE_ACP_MODE_ACK_FILE  path of a file read on every mode switch: while it
 //                        exists, "empty" answers without configOptions (the
 //                        switch cannot be confirmed) and "error" refuses it,
@@ -116,7 +126,7 @@
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
 
@@ -247,6 +257,7 @@ const dumpEnv = Object.fromEntries(
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",
     "XAI_API_KEY",
+    "GROK_AGENT",
     "BOX_TOKEN",
     "OMB_TTS_KEY",
     "OMB_FISH_AUDIO_API_KEY",
@@ -411,11 +422,24 @@ let agentsMcp: McpEntry | null = null;
 // the session this process established, for FAKE_ACP_REJECT_LIVE_LOAD_FILE
 let liveSession: string | null = null;
 let rpcFailure: unknown = null;
+function emitUsageUpdates(): void {
+  const usageFile = process.env.FAKE_ACP_USAGE_UPDATES_FILE;
+  if (usageFile && existsSync(usageFile)) {
+    try {
+      for (const used of JSON.parse(readFileSync(usageFile, "utf8")) as unknown[]) {
+        if (typeof used === "number") {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "usage_update", used, size: 200000 } } });
+        }
+      }
+    } catch {}
+  }
+}
 function failRpc(msg: { method: string; id: unknown }): boolean {
   if (msg.method !== (process.env.FAKE_ACP_RPC_FAILURE_METHOD ?? "session/prompt")) return false;
   const failureFile = process.env.FAKE_ACP_RPC_FAILURE_FILE;
   if (failureFile && existsSync(failureFile)) rpcFailure = JSON.parse(readFileSync(failureFile, "utf8"));
   if (!rpcFailure) return false;
+  if (msg.method === "session/prompt" && process.env.FAKE_ACP_RPC_FAILURE_AFTER_USAGE === "1") emitUsageUpdates();
   if (msg.method === "session/prompt" && process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT === "1") playTurn();
   const fail = () => {
     recordMethod(`${msg.method}.error`);
@@ -592,6 +616,9 @@ function handle(msg: any) {
     case "authenticate":
       result(msg.id, {});
       break;
+    case "_x.ai/mcp/list":
+      result(msg.id, { result: { servers: [], sessionMcpResolved: true } });
+      break;
     case "session/new": {
       if (failRpc(msg)) break;
       if (mode === "auth-required") {
@@ -604,6 +631,7 @@ function handle(msg: any) {
       }
       const servers: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
       if (process.env.FAKE_ACP_DUMP) {
+        writeFileSync(`${process.env.FAKE_ACP_DUMP}.session.json`, JSON.stringify(msg.params));
         dumpState.mcpServers = servers;
         writeFileSync(process.env.FAKE_ACP_DUMP, JSON.stringify(dumpState, null, 2));
       }
@@ -796,6 +824,7 @@ function handle(msg: any) {
         return;
       }
       const complete = () => {
+        emitUsageUpdates();
         recordMethod("session/prompt.result");
         result(
           msg.id,
@@ -806,6 +835,24 @@ function handle(msg: any) {
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
       };
+      if (mode === "quiet-then-answer") {
+        const lines: string[] = process.env.FAKE_ACP_QWEN_LOG ? JSON.parse(process.env.FAKE_ACP_QWEN_LOG) : [];
+        let logTimer: ReturnType<typeof setInterval> | null = null;
+        if (lines.length && process.env.QWEN_HOME && liveSession) {
+          const dir = `${process.env.QWEN_HOME}/debug`;
+          mkdirSync(dir, { recursive: true });
+          let i = 0;
+          logTimer = setInterval(() => {
+            appendFileSync(`${dir}/${liveSession}.txt`, `${new Date().toISOString()} ${lines[Math.min(i++, lines.length - 1)]}\n`);
+          }, Number(process.env.FAKE_ACP_LOG_EVERY_MS ?? 100));
+        }
+        setTimeout(() => {
+          if (logTimer) clearInterval(logTimer);
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
+          complete();
+        }, Number(process.env.FAKE_ACP_QUIET_MS ?? 600));
+        return;
+      }
       if (mode === "slow-tool" || mode === "stall-after-tool") {
         const tool = (update: Record<string, unknown>) =>
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { toolCallId: "tc-slow", ...update } } });
@@ -824,6 +871,16 @@ function handle(msg: any) {
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
           complete();
         }, Number(process.env.FAKE_ACP_TOOL_MS ?? 600));
+        return;
+      }
+      if (mode === "unkeyed-tool") {
+        // An agent that violates the ACP spec by omitting toolCallId: the
+        // turn's lifecycle pair must still carry one stable id so consumers
+        // can pair the start with its completion (#1653 computer-call fence).
+        out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", title: "run", rawInput: { command: "echo done" } } } });
+        out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } } } });
+        out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
+        complete();
         return;
       }
       const promptText = String(msg.params?.prompt?.[0]?.text ?? "");

@@ -38,6 +38,16 @@ export function nextSpotlight(
   return null;
 }
 
+/** A card spotlight whose card is no longer waiting (answered, dismissed or
+ * gone) has nothing left to explain, and its anchor has left the page. The
+ * user has just acted on the card, so the spotlight counts as seen. Without
+ * this the card kept its last position and sat over the reply below it. */
+export function cardAnswered(active: SpotlightId, observation: ChatObservation): boolean {
+  if (active === "spot.approval") return !observation.approvalVisible;
+  if (active === "spot.connector") return !observation.connectorVisible;
+  return false;
+}
+
 /** Which element each spotlight anchors to, by its `data-tour` id. */
 export function anchorFor(id: SpotlightId): string {
   switch (id) {

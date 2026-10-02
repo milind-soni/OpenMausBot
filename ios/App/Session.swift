@@ -58,6 +58,9 @@ final class Session: ObservableObject {
     /// `Connection.canAdminister`. Views hide owner-only controls when this
     /// is false rather than offer buttons the server would answer 403 to.
     var canAdminister: Bool { connection?.canAdminister ?? false }
+    /// Paired with a server directly rather than through the companion
+    /// sidecar: see `Connection.pairedWithServer`.
+    var pairedWithServer: Bool { connection?.pairedWithServer ?? false }
     @Published private(set) var status: Status = .unpaired
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
@@ -1647,6 +1650,108 @@ final class Session: ObservableObject {
         do {
             return try await client.cloudDesktop(botId: bot.id).url
         } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+            throw error
+        }
+    }
+
+    /// Run one call against the active computer, marking the pairing
+    /// unauthorized when the computer says so.
+    private func withClient<T>(_ call: (CompanionClient) async throws -> T) async throws -> T {
+        guard let client else { throw APIError.transport("This computer is offline.") }
+        return try await withClient(client, call: call)
+    }
+
+    /// Run one call against a particular computer. Local VM control holds on
+    /// to the client that granted its lease, so joining the desktop and
+    /// handing back reach that computer even after the phone has switched
+    /// to another one in Settings. While that computer is still the active
+    /// one, the call goes down its current route: a lease must not be
+    /// released through an address the session has since moved away from.
+    private func withClient<T>(_ client: CompanionClient, call: (CompanionClient) async throws -> T) async throws -> T {
+        let client = self.client?.connection.id == client.connection.id ? self.client ?? client : client
+        do {
+            return try await call(client)
+        } catch let error as APIError where error.isUnauthorized {
+            // As for screenshots: a call answered by the computer the phone
+            // has since switched away from must not evict the new session.
+            guard !Task.isCancelled, self.client?.connection.id == client.connection.id else {
+                throw CancellationError()
+            }
+            status = .unauthorized
+            throw error
+        }
+    }
+
+    /// The control lease this phone uses for one bot on one computer. Kept
+    /// across launches, so a session the app never got to hand back (it was
+    /// killed while driving) can be taken again and released, rather than
+    /// leaving the bot locked behind a lease nobody remembers.
+    private func localVmLease(for bot: Bot, on client: CompanionClient) -> String {
+        let key = "localVmControlLease.\(client.connection.id).\(bot.id)"
+        if let saved = UserDefaults.standard.string(forKey: key) { return saved }
+        let lease = "phone-" + UUID().uuidString
+        UserDefaults.standard.set(lease, forKey: key)
+        return lease
+    }
+
+    /// Take the bot's computer under this phone's lease and open its Local
+    /// VM's relayed desktop. Any failure after asking hands the computer
+    /// straight back, so a failed attempt never leaves the bot locked out —
+    /// except when someone else holds it: then there is nothing of ours to
+    /// release, and closing viewers could disturb theirs.
+    ///
+    /// The client that answered the take comes back with the lease: the
+    /// caller hands back through it, so a computer switched away from in
+    /// Settings is still released rather than left paused under our lease.
+    func takeLocalVm(for bot: Bot) async throws -> (request: URLRequest, password: String?, leaseId: String, client: CompanionClient) {
+        guard let client else { throw APIError.transport("This computer is offline.") }
+        let leaseId = localVmLease(for: bot, on: client)
+        var handBackOnFailure = true
+        do {
+            let state = try await withClient(client) { try await $0.computerControl(botId: bot.id, take: true, leaseId: leaseId) }
+            if state.held, state.owned == false {
+                handBackOnFailure = false
+                throw APIError.transport("Someone else is already controlling this computer.")
+            }
+            guard state.held else { throw APIError.transport("The computer could not be taken. Try again.") }
+            return try await withClient(client) { client in
+                let viewer = try await client.localVmViewer(botId: bot.id, threadId: bot.threadId, leaseId: leaseId)
+                return (try client.viewerSocketRequest(viewer), viewer.password, leaseId, client)
+            }
+        } catch {
+            if handBackOnFailure { await handBackDetached(bot: bot, leaseId: leaseId, client: client) }
+            throw error
+        }
+    }
+
+    /// Hand back from a task of its own, so cancelling whatever asked (the
+    /// person left mid-take) cannot cancel the release with it.
+    func handBackDetached(bot: Bot, leaseId: String, client: CompanionClient) async {
+        await Task { await self.handBackLocalVm(for: bot, leaseId: leaseId, client: client) }.value
+    }
+
+    /// Close this device's viewer and release the lease on the computer that
+    /// granted it, finishing even if the app is on its way to the background.
+    /// Best effort: releasing a lease that no longer holds anything is a
+    /// no-op on the harness.
+    func handBackLocalVm(for bot: Bot, leaseId: String, client: CompanionClient) async {
+        let task = UIApplication.shared.beginBackgroundTask(withName: "Hand back the Local VM")
+        defer { if task != .invalid { UIApplication.shared.endBackgroundTask(task) } }
+        _ = try? await withClient(client) { try await $0.closeViewer(botId: bot.id) }
+        _ = try? await withClient(client) { try await $0.computerControl(botId: bot.id, take: false, leaseId: leaseId) }
+    }
+
+    func localVmScreenshot(for bot: Bot) async throws -> LocalVmScreenshot {
+        guard let client else { throw APIError.transport("This computer is offline.") }
+        do {
+            return try await client.localVmScreenshot(botId: bot.id, threadId: bot.threadId)
+        } catch let error as APIError where error.isUnauthorized {
+            // A poll still in flight when the phone switched computers must
+            // not evict the new session with the old token's 401.
+            guard !Task.isCancelled, self.client?.connection.id == client.connection.id else {
+                throw CancellationError()
+            }
             status = .unauthorized
             throw error
         }

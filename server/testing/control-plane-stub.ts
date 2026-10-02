@@ -26,6 +26,9 @@ export interface ControlPlaneStub {
   /** An installation the control plane already knows, as a fleet would create
    * one before starting a container: returns its credential. */
   seedInstallation(name?: string): string;
+  /** Idle reclaim: the endpoint reads as gone until the next provision,
+   * which hands out (and returns here) a new connector token. */
+  reclaim(): string;
   close(): Promise<void>;
 }
 
@@ -44,6 +47,8 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
   const otp = options.otp ?? "24681357";
   const endpointUrl = options.endpointUrl ?? "https://c-stub.openmausbot.invalid";
   const connectorToken = `stub-connector-${randomBytes(48).toString("base64url")}`;
+  let issuedConnectorToken = connectorToken;
+  let reclaimedUntilProvision: string | null = null;
   const accountTokens = new Set<string>();
   const installations = new Map<string, StubInstallation>();
   const calls: string[] = [];
@@ -127,8 +132,12 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
     }
     if (path === "/v1/installations/self/endpoint") {
       if (!byCredential()) return send(401, { error: "unauthorized" });
-      if (method === "GET") return send(200, { endpoint: endpoint() });
-      if (method === "POST") return send(200, { endpoint: endpoint(), connectorToken });
+      if (method === "GET") return send(200, { endpoint: reclaimedUntilProvision ? null : endpoint() });
+      if (method === "POST") {
+        if (reclaimedUntilProvision) issuedConnectorToken = reclaimedUntilProvision;
+        reclaimedUntilProvision = null;
+        return send(200, { endpoint: endpoint(), connectorToken: issuedConnectorToken });
+      }
       if (method === "DELETE") return send(204);
     }
     const one = /^\/v1\/installations\/([^/]+)$/.exec(path);
@@ -153,6 +162,10 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
       const inst: StubInstallation = { id: randomUUID(), clientInstanceId: randomUUID(), name, platform: "linux", appVersion: null, credential: newCredential() };
       installations.set(inst.id, inst);
       return inst.credential;
+    },
+    reclaim: () => {
+      reclaimedUntilProvision = `stub-connector-${randomBytes(48).toString("base64url")}`;
+      return reclaimedUntilProvision;
     },
     close: () => new Promise<void>((done) => server.close(() => done())),
   };

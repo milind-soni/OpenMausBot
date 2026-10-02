@@ -22,6 +22,7 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
 import { Switch } from "../SettingsPrimitives";
 import { ProposalStatus } from "./ProposalStatus";
+import { ToolSelectionCard } from "./ToolSelectionCard";
 import { preloadConnectedApps, type ConnectorInventory } from "../PluginsPanel";
 import {
   classifyConnectorTool,
@@ -700,6 +701,7 @@ export function AccessSection({
       </div>
 
       <McpServersCard bot={bot} patch={patch} />
+      <ToolSelectionCard key={bot.id} bot={bot} engineKind={derived.engine?.driverKind} />
 
       <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
         <div>

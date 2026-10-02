@@ -17,6 +17,9 @@ import {
   type Message,
 } from "@/state/store";
 import { BotAvatar } from "./Avatar";
+import { PlaceIcon } from "./PlaceIcon";
+import { ScreenFrame } from "./ScreenFrame";
+import { effectivePlace, placeLabelKey } from "@/lib/place";
 import { ThreadChip } from "./ThreadChip";
 import { ToolActivity } from "./ToolActivity";
 import { ThreadRefText } from "./ThreadRefs";
@@ -288,6 +291,8 @@ export const Transcript = memo(function Transcript({
             roomActivityVisible(m, showToolCalls) ? (
               isStatusActivity(m) ? <StatusActivityRow message={m} /> : <RoomToolChip message={m} roomId={group.id} />
             ) : null
+          ) : m.kind === "screen" ? (
+            m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null
           ) : m.kind === "compaction" ? (
             <CompactionChip message={m} />
           ) : m.kind === "digest" ? (
@@ -310,6 +315,7 @@ export const Transcript = memo(function Transcript({
                   </>
                 )}
                 <div
+                  data-chat-bubble
                   className={cn(
                     "w-fit max-w-[min(42rem,78%)] rounded-2xl text-[15px] leading-relaxed",
                     !user && m.id === emergingId && "turn-answer",
@@ -1219,22 +1225,41 @@ export function GroupView({ group }: { group: Group }) {
     }
   };
 
-  // Static profile avatars: one per member, a ring + dot on whoever is working.
-  const memberMauses = members.map((b) => (
-    <span
-      key={b.id}
-      title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}
-      className={cn(
-        "relative inline-flex rounded-full",
-        group.busyBotId === b.id && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
-      )}
-    >
-      <BotAvatar bot={b} state={normalizeState(b.mascotExpression) ?? "happy"} size={24} animated={false} />
-      {group.busyBotId === b.id && (
-        <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-app bg-accent" />
-      )}
-    </span>
-  ));
+  // Static profile avatars: one per member, a ring + dot on whoever is
+  // working. A member actively driving a computer/browser session for this
+  // room gets the place icon instead of the plain dot, matching the 1:1
+  // composer's PlaceChip live indicator.
+  const memberMauses = members.map((b) => {
+    const busy = group.busyBotId === b.id;
+    const task = b.tasks?.find((candidate) => candidate.threadId === group.threadId);
+    const effective = busy ? effectivePlace(b, task) : "off";
+    const showPlace = busy && effective !== "off" && effective !== "auto";
+    return (
+      <span
+        key={b.id}
+        title={`${b.name}${busy ? " — working…" : ""}`}
+        className={cn(
+          "relative inline-flex rounded-full",
+          busy && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
+        )}
+      >
+        <BotAvatar bot={b} state={normalizeState(b.mascotExpression) ?? "happy"} size={24} animated={false} />
+        {busy && (
+          showPlace ? (
+            <span
+              className="absolute -right-1 -top-1 flex size-3.5 items-center justify-center rounded-full border border-app bg-accent text-white"
+              role="img"
+              aria-label={t("place.chipAria", { place: t(placeLabelKey(effective)) })}
+            >
+              <PlaceIcon place={effective} size={9} strokeWidth={2.5} aria-hidden="true" />
+            </span>
+          ) : (
+            <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-app bg-accent" />
+          )
+        )}
+      </span>
+    );
+  });
 
   return (
     <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">

@@ -7,6 +7,7 @@ import {
   EMPTY_TEAM_MAP_SNAPSHOT,
   buildTeamMapEdges,
   buildTeamMapSections,
+  teamMapBotCount,
   type TeamMapEdge,
   type TeamMapSnapshot,
 } from "@/lib/team-map";
@@ -322,7 +323,7 @@ export function TeamMapPage() {
           <div className="flex items-center gap-2.5">
             <Network size={18} className="text-ink-secondary" />
             <h1 className="text-[17px] font-semibold">Team map</h1>
-            <span className="ml-1 text-[11px] text-ink-secondary">{t("canvas.botCount", { count: bots.length })}</span>
+            <span className="ml-1 text-[11px] text-ink-secondary">{teamMapBotCount(bots.length)}</span>
           </div>
           <p className="mt-1 text-[12px] text-ink-secondary">{t("canvas.description")}</p>
         </div>

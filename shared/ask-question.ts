@@ -16,6 +16,7 @@
 
 /** The provider tool whose input this module understands. */
 export const ASK_USER_QUESTION_TOOL = "AskUserQuestion";
+export const QUESTION_DISMISS_MESSAGE = "The user closed this question without answering. Use your best judgment and continue.";
 
 /** Caps. Claude Code's own limits are smaller (1-4 questions, 2-4 options);
  * these leave room for a provider that widens them without letting a card
@@ -54,6 +55,32 @@ export interface QuestionRequestCardData {
    * transport). Only drives the agent-composed badge; it never changes
    * how a card is answered. */
   origin?: "tool" | "output";
+}
+
+/** Older live question cards predate requestType and only omit the permission
+ * tool. Keep those actionable too, while excluding other durable proposal
+ * card kinds that share requestId. */
+export function isPersistentQuestionCard(card?: {
+  requestType?: "permission" | "question";
+  questionRequest?: unknown;
+  tool?: string;
+  routineRequest?: unknown;
+  skillRequest?: unknown;
+  profileRequest?: unknown;
+  modelRequest?: unknown;
+  tighteningRequest?: unknown;
+  teamSetupRequest?: unknown;
+} | null): boolean {
+  return Boolean(card && (
+    card.requestType === "question" || card.questionRequest ||
+    (!card.requestType && !card.tool && !card.routineRequest && !card.skillRequest && !card.profileRequest &&
+      !card.modelRequest && !card.tighteningRequest && !card.teamSetupRequest)
+  ));
+}
+
+/** System/provider completion ends the live run, not the human's question. */
+export function shouldSettleRequestCard(card: Parameters<typeof isPersistentQuestionCard>[0], source: "user" | "auto" | "timeout" | "system" | "unavailable" | "peer"): boolean {
+  return !isPersistentQuestionCard(card) || source === "user";
 }
 
 function text(value: unknown, limit: number): string | undefined {

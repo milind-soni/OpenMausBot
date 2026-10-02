@@ -237,6 +237,18 @@ if (argv[0] === "--version") {
   process.exit(0);
 }
 
+if (argv[0] === "--help") {
+  // Lists --autocompact in the option column like the real CLI, unless the
+  // fake stands in for a build without it: FAKE_CLAUDE_AUTOCOMPACT=0, or a
+  // version below the 2.1.122 floor.
+  const [maj = 0, min = 0, pat = 0] = (process.env.FAKE_CLAUDE_VERSION ?? "2.1.232").split(".").map(Number);
+  const has = process.env.FAKE_CLAUDE_AUTOCOMPACT !== "0" && (maj > 2 || (maj === 2 && (min > 1 || (min === 1 && pat >= 122))));
+  process.stdout.write(
+    `Usage: claude [options]\n\nOptions:\n  --model <model>  Model\n${has ? "  --autocompact <tokens>  Compaction window\n" : ""}  -h, --help  Display help\n`,
+  );
+  process.exit(0);
+}
+
 if (argv[0] === "update") {
   if (process.env.FAKE_CLAUDE_UPDATE === "fail") {
     process.stderr.write("fake-claude: simulated update failure\n");
@@ -437,6 +449,13 @@ const finishIfDone = () => {
   if (stdinEnded) process.exit(0);
 };
 
+const finishTurn = () => {
+  runHooks("Stop", { stop_hook_active: false });
+  out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
+  turnRunning = false;
+  finishIfDone();
+};
+
 const playTurn = (prompt: JsonValue, late = false) => {
   turnRunning = true;
   lateContinuation = late;
@@ -572,14 +591,21 @@ const playTurn = (prompt: JsonValue, late = false) => {
     // permission broker while a turn is officially in flight. With
     // FAKE_CLAUDE_RELEASE, the turn ends normally once that file exists.
     const release = process.env.FAKE_CLAUDE_RELEASE;
+    const finishGate = process.env.FAKE_CLAUDE_FINISH_GATE;
     const held = setInterval(() => {
+      if (finishGate && existsSync(finishGate)) {
+        clearInterval(held);
+        out({ type: "assistant", message: { content: [{ type: "text", text: "fixture turn completed" }] } });
+        finishTurn();
+        return;
+      }
       if (!release || !existsSync(release)) return;
       clearInterval(held);
       out({ type: "assistant", message: { content: [{ type: "text", text: "released" }] } });
       out({ type: "result", is_error: false, stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } });
       turnRunning = false;
       finishIfDone();
-    }, 100);
+    }, finishGate ? 10 : 100);
     return;
   }
 

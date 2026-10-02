@@ -2,8 +2,9 @@
 // conversation.
 //
 // The provider CLI mounts this instead of the bot's real MCP server. Every
-// JSON-RPC frame is relayed in both directions untouched, except the response
-// to a `tools/call`: an oversized result is cut to a budget (mcp-trim.ts), the
+// JSON-RPC frame is relayed in both directions. With a tool selection, discovery
+// is filtered and excluded calls are rejected before upstream execution.
+// An oversized `tools/call` result is cut to a budget (mcp-trim.ts), the
 // untrimmed text is written to a file, and the model is told in the result
 // where that file is so it can read or grep the rest with its ordinary tools.
 //
@@ -18,6 +19,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { allowsTool, parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
 import { resolveCliSpawn } from "./env-path.ts";
 import { DEFAULT_RESULT_BUDGET, trimResultText, trimStructured } from "./mcp-trim.ts";
@@ -25,23 +27,64 @@ import { killCliTree } from "./procs.ts";
 
 type Json = Record<string, unknown>;
 
-const NAME = process.env.OMB_GATE_NAME || "mcp";
-const SPILL_DIR = process.env.OMB_GATE_SPILL_DIR || "";
-const BUDGET = Number(process.env.OMB_GATE_BUDGET) > 0 ? Number(process.env.OMB_GATE_BUDGET) : DEFAULT_RESULT_BUDGET;
+/** Codex imports env variables from one shared app-server environment. Each
+ * mount names its own private record; only the variable name reaches argv. */
+function gateEnvironment(): NodeJS.ProcessEnv {
+  if (process.argv.length === 2) return process.env;
+  try {
+    const key = process.argv[3];
+    if (process.argv.length !== 4 || process.argv[2] !== "--config-env" || !key || !/^OMB_GATE_CONFIG_[a-f0-9]{64}$/.test(key)) throw new Error();
+    const value = JSON.parse(process.env[key] ?? "");
+    if (!value || typeof value !== "object" || Array.isArray(value)
+      || !["OMB_GATE_NAME", "OMB_GATE_UPSTREAM", "OMB_GATE_TOOL_SCOPE"].every(name => typeof value[name] === "string")
+      || !Object.entries(value).every(([name, setting]) => GATE_ENV_KEYS.includes(name) && typeof setting === "string")) throw new Error();
+    return value;
+  } catch {
+    process.stderr.write("mcp-gate: invalid private configuration\n"); process.exit(1);
+  }
+}
+/** The gate's own settings never reach the upstream server's environment. */
+const GATE_ENV_KEYS = ["OMB_GATE_NAME", "OMB_GATE_SPILL_DIR", "OMB_GATE_BUDGET", "OMB_GATE_UPSTREAM", "OMB_GATE_SPILL_HINT", "OMB_GATE_TOOL_SCOPE"];
+const gateEnv = gateEnvironment();
+const NAME = gateEnv.OMB_GATE_NAME || "mcp";
+const SPILL_DIR = gateEnv.OMB_GATE_SPILL_DIR || "";
+const rawBudget = Number(gateEnv.OMB_GATE_BUDGET);
+const BUDGET = Number.isFinite(rawBudget) && rawBudget >= 0 ? rawBudget : DEFAULT_RESULT_BUDGET;
 /** Spilled results older than this are swept at startup: they exist for the
  * turn that produced them, not forever. */
 const SPILL_MAX_AGE_MS = 24 * 60 * 60_000;
 /** Whether the model is told where the untrimmed result was saved. Off by
  * default: offering the path measured WORSE than no trimming, because the
  * model reads the file back in. See TrimInput.spillHint. */
-const SPILL_HINT = process.env.OMB_GATE_SPILL_HINT === "1";
-
-/** The gate's own settings never reach the upstream server's environment. */
-const GATE_ENV_KEYS = ["OMB_GATE_NAME", "OMB_GATE_SPILL_DIR", "OMB_GATE_BUDGET", "OMB_GATE_UPSTREAM", "OMB_GATE_SPILL_HINT"];
+const SPILL_HINT = gateEnv.OMB_GATE_SPILL_HINT === "1";
 
 function fail(message: string): never {
   process.stderr.write(`mcp-gate(${NAME}): ${message}\n`);
   process.exit(1);
+}
+
+function toolScope(): ToolScope | undefined {
+  const raw = gateEnv.OMB_GATE_TOOL_SCOPE;
+  if (raw === undefined) return;
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { fail("invalid tool selection JSON"); }
+  const parsed = parseToolScope(value);
+  if (!parsed.ok || parsed.scope === undefined) fail("invalid tool selection; check the bot's Access settings");
+  if (!/^[a-z][a-z0-9_-]{0,31}$/.test(NAME)) fail("invalid MCP server identity for tool selection");
+  return parsed.scope;
+}
+
+function isRecord(value: unknown): value is Json {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function requestKey(id: unknown): string | undefined {
+  return typeof id === "string" || (typeof id === "number" && Number.isFinite(id))
+    ? `${typeof id}:${id}` : undefined;
+}
+
+function rejectRequest(id: unknown, code: number, message: string): void {
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: requestKey(id) ? id : null, error: { code, message } })}\n`);
 }
 
 interface Upstream {
@@ -53,7 +96,7 @@ interface Upstream {
 function upstreamSpec(): Upstream {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(process.env.OMB_GATE_UPSTREAM ?? "");
+    parsed = JSON.parse(gateEnv.OMB_GATE_UPSTREAM ?? "");
   } catch {
     fail("OMB_GATE_UPSTREAM is not valid JSON");
   }
@@ -106,6 +149,7 @@ function spill(tool: string, text: string): string | undefined {
 /** Rewrite one `tools/call` result in place. Returns true when anything was
  * actually trimmed, so the caller can report it on stderr. */
 function trimCallResult(result: Json, tool: string): boolean {
+  if (BUDGET === 0) return false;
   const content = result.content;
   if (!Array.isArray(content)) return false;
 
@@ -140,11 +184,13 @@ function trimCallResult(result: Json, tool: string): boolean {
   return trimmed;
 }
 
+// Validate before starting a process: corrupt policy must never become pass-through.
+const scope = toolScope();
 const spec = upstreamSpec();
 if (SPILL_DIR) sweepSpill(SPILL_DIR);
 
 const childEnv: NodeJS.ProcessEnv = { ...process.env, ...spec.env };
-for (const key of GATE_ENV_KEYS) delete childEnv[key];
+for (const key of Object.keys(childEnv)) if (key.startsWith("OMB_GATE_")) delete childEnv[key];
 
 // The CLI used to spawn this server itself, on every platform, so the gate
 // has to spawn it exactly as well. On Windows CreateProcess cannot exec an
@@ -186,20 +232,42 @@ child.on("error", (error) => {
 });
 child.stderr.pipe(process.stderr);
 
-/** id -> tool name, for the calls whose answers are still in flight. */
-const pending = new Map<string, string>();
+type Pending = { kind: "call"; tool: string } | { kind: "list" | "other" };
+/** JSON-RPC string and numeric IDs are separate, even when their text is equal. */
+const pending = new Map<string, Pending>();
 
 // client -> server: verbatim, but remember which ids are tool calls
 createInterface({ input: process.stdin }).on("line", (line) => {
+  let message: Json | undefined;
   if (line.trim()) {
     try {
-      const message = JSON.parse(line) as Json;
-      if (message.method === "tools/call" && message.id !== undefined && message.id !== null) {
-        const params = message.params as Json | undefined;
-        pending.set(String(message.id), typeof params?.name === "string" ? params.name : "tool");
-      }
+      const parsed: unknown = JSON.parse(line);
+      if (isRecord(parsed)) message = parsed;
     } catch {
-      /* not our business to validate the client's frames */
+      if (scope) return rejectRequest(null, -32700, "Invalid JSON-RPC frame");
+    }
+    if (scope && (!message || message.jsonrpc !== "2.0")) return rejectRequest(message?.id, -32600, "Invalid JSON-RPC frame");
+  }
+  const id = requestKey(message?.id);
+  const params = isRecord(message?.params) ? message.params : undefined;
+  if (scope && message?.method === "tools/call") {
+    if (!id || typeof params?.name !== "string"
+      || (params.arguments !== undefined && !isRecord(params.arguments))) {
+      return rejectRequest(message.id, -32602, "Invalid tool call");
+    }
+    if (!allowsTool(scope, { kind: "mcp", server: NAME, name: params.name })) {
+      return rejectRequest(message.id, -32602, "Tool selection excludes this tool. Check the bot's Access settings.");
+    }
+  }
+  if (scope && message?.method === "tools/list" && !id) {
+    return rejectRequest(message.id, -32600, "Tool listing needs a request ID");
+  }
+  if (id && typeof message?.method === "string") {
+    if (scope && pending.has(id)) fail("duplicate request ID on a restricted connection");
+    if (message.method === "tools/call") {
+      pending.set(id, { kind: "call", tool: typeof params?.name === "string" ? params.name : "tool" });
+    } else if (scope) {
+      pending.set(id, { kind: message.method === "tools/list" ? "list" : "other" });
     }
   }
   child.stdin.write(`${line}\n`);
@@ -211,26 +279,40 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   if (!line.trim()) return;
   let message: Json | undefined;
   try {
-    message = JSON.parse(line) as Json;
+    const parsed: unknown = JSON.parse(line);
+    if (isRecord(parsed)) message = parsed;
   } catch {
     // Not JSON the gate understands. Relay it exactly as it came: a frame the
     // gate cannot read is still the upstream server's answer to give.
+    if (scope) fail("unreadable upstream frame on a restricted connection");
+  }
+  if (!message || (scope && message.jsonrpc !== "2.0")) {
+    if (scope) fail("invalid upstream frame on a restricted connection");
     process.stdout.write(`${line}\n`);
     return;
   }
-  const id = message.id === undefined || message.id === null ? undefined : String(message.id);
-  const tool = id === undefined ? undefined : pending.get(id);
+  const id = typeof message.method === "string" ? undefined : requestKey(message.id);
+  const request = id === undefined ? undefined : pending.get(id);
+  if (scope && id !== undefined && !request) fail("unrequested upstream response on a restricted connection");
   if (id !== undefined) pending.delete(id);
   const result = message.result;
-  if (tool && result && typeof result === "object" && !Array.isArray(result)) {
+  if (scope && request?.kind === "list" && message.error === undefined) {
+    if (!isRecord(result) || !Array.isArray(result.tools)
+      || !result.tools.every((tool: unknown) => isRecord(tool) && typeof tool.name === "string" && tool.name.trim().length > 0)
+      || (result.nextCursor !== undefined && typeof result.nextCursor !== "string")) {
+      return rejectRequest(message.id, -32603, "Invalid tool catalog on a restricted connection");
+    }
+    result.tools = result.tools.filter((tool: Json) => allowsTool(scope, { kind: "mcp", server: NAME, name: tool.name as string }));
+  }
+  if (request?.kind === "call" && isRecord(result)) {
     try {
-      if (trimCallResult(result as Json, tool)) {
-        process.stderr.write(`mcp-gate(${NAME}): trimmed ${tool} to ${BUDGET} chars\n`);
+      if (trimCallResult(result, request.tool)) {
+        process.stderr.write(`mcp-gate(${NAME}): trimmed ${request.tool} to ${BUDGET} chars\n`);
       }
     } catch (error) {
       // A result the trimmer chokes on is relayed whole. Costing context is
       // recoverable; dropping a tool answer is not.
-      process.stderr.write(`mcp-gate(${NAME}): could not trim ${tool}: ${String(error)}\n`);
+      process.stderr.write(`mcp-gate(${NAME}): could not trim ${request.tool}: ${String(error)}\n`);
       process.stdout.write(`${line}\n`);
       return;
     }

@@ -8,6 +8,7 @@ import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.GroupResponder
 import com.openmausbot.companion.core.Message
+import com.openmausbot.companion.core.RoutineRunCard
 import com.openmausbot.companion.core.ModelSelection
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.Reaction
@@ -604,6 +605,13 @@ class MessageActionsTest {
     @Test
     fun `an unknown kind carrying text is copyable, like it is renderable`() {
         assertEquals("hello", MessageActions.copyableText(message(Message.Kind.UNKNOWN, "hello")))
+    }
+
+    @Test
+    fun `a failed routine run copies the error the card shows`() {
+        val run = RoutineRunCard(routineName = "Brief", status = "failed", summary = "old report", error = "boom")
+        val copied = MessageActions.copyableText(message(Message.Kind.ROUTINE_RUN, null).copy(routineRun = run))
+        assertEquals(true, copied?.contains("boom"))
     }
 
     @Test

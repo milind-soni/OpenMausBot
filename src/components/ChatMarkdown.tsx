@@ -20,6 +20,7 @@ import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-from-markdown";
 import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
 import { remarkMentions, type MentionPeer } from "@/lib/mentions";
 
@@ -125,6 +126,17 @@ function remarkWindowsPathDestinations(this: { data(): object }) {
   const data = this.data() as { fromMarkdownExtensions?: unknown[] };
   (data.fromMarkdownExtensions ??= []).push(windowsPathDestinations);
 }
+
+// Reuse the renderer's installed GFM plugin, including literal autolinks.
+const gfmParseData: {
+  micromarkExtensions?: MarkdownParseOptions["extensions"];
+  fromMarkdownExtensions?: MarkdownParseOptions["mdastExtensions"];
+} = {};
+remarkGfm.call({ data: () => gfmParseData });
+const normalizationParseOptions: MarkdownParseOptions = {
+  extensions: gfmParseData.micromarkExtensions,
+  mdastExtensions: [...(gfmParseData.fromMarkdownExtensions ?? []), windowsPathDestinations],
+};
 
 function unwrapLinkedImages() {
   return (tree: { children?: any[] }) => {
@@ -699,59 +711,104 @@ function Spoiler({ children }: { children?: ReactNode }) {
 
 const NO_MENTION_PEERS: readonly MentionPeer[] = [];
 
-// A markdown image resolves its attachment by source offset, so a message
-// holding one must reach the parser byte-for-byte as written.
+// A markdown image resolves its attachment by its original source offset.
 const MARKDOWN_IMAGE = "![";
 
-/** Replace CommonMark fenced code blocks with opaque tokens while text is normalized. */
-function protectFencedCode(text: string, protect: (value: string) => string): string {
-  const opener =
-    /(^|\r?\n)((?: {0,3}>[ \t]?)* {0,3})(?:(`{3,})([^`\r\n]*)|(~{3,})([^\r\n]*))(?:\r?\n|$)/g;
-  let cursor = 0;
-  let tokenized = "";
-  let match: RegExpExecArray | null;
+// A currency sign glued to its code and followed by an amount ("R$ 120",
+// "US$5") is money, never a math delimiter.
+const CURRENCY_DOLLAR = /(?<![$\p{L}\p{N}])(?:R|US|AU|A|CA|C|NZ|HK|SG|S|MX|NT|BZ|Z)\$(?=[ \t\u00a0]?\d)/gu;
 
-  while ((match = opener.exec(text)) !== null) {
-    const fence = match[3] ?? match[5];
-    const fenceCharacter = fence[0];
-    const closer = new RegExp(
-      `(^|\\r?\\n)(?: {0,3}>[ \\t]?)* {0,3}${fenceCharacter}{${fence.length},}[ \\t]*(?=\\r?\\n|$)`,
-      "g",
-    );
-    closer.lastIndex = opener.lastIndex;
-    const closingMatch = closer.exec(text);
-    const end = closingMatch === null
-      ? text.length
-      : closingMatch.index + closingMatch[0].length;
-    tokenized += text.slice(cursor, match.index);
-    tokenized += protect(text.slice(match.index, end));
-    cursor = end;
-    opener.lastIndex = end;
+/** Escape every single `$` that cannot delimit inline math, so prices such as
+ * "$5 and $10" or "R$ 120 ... R$ 120" stay prose instead of turning the text
+ * between them into a formula. Follows Pandoc's rule: an opening `$` is
+ * followed by non-space, a closing `$` is preceded by non-space and not
+ * followed by a digit, and the pair stays inside one paragraph. A `$` that
+ * fails as a closer abandons the open span rather than skipping past it. */
+function escapeLiteralDollars(text: string): string {
+  const display: string[] = [];
+  const hidden = text
+    .replace(/\$\$[\s\S]*?\$\$/g, (math) => `\u0000OMB_MATH_${display.push(math) - 1}\u0000`)
+    .replace(CURRENCY_DOLLAR, (sign) => `${sign.slice(0, -1)}\\$`);
+  const literal = new Set<number>();
+  const singles: number[] = [];
+  for (let i = 0; i < hidden.length; i++) {
+    if (hidden[i] === "\\") i++;
+    else if (hidden[i] === "$") singles.push(i);
   }
-
-  return tokenized + text.slice(cursor);
+  let open: number | null = null;
+  for (const at of singles) {
+    if (open !== null) {
+      const closes = !/\s/.test(hidden[at - 1]) && !/\d/.test(hidden[at + 1] ?? "")
+        && !/\n[ \t]*\n/.test(hidden.slice(open, at));
+      if (closes) { open = null; continue; }
+      literal.add(open);
+    }
+    open = /\S/.test(hidden[at + 1] ?? "") ? at : null;
+    if (open === null) literal.add(at);
+  }
+  if (open !== null) literal.add(open);
+  let escaped = "";
+  for (let i = 0; i < hidden.length; i++) escaped += literal.has(i) ? "\\$" : hidden[i];
+  display.forEach((math, index) => {
+    escaped = escaped.split(`\u0000OMB_MATH_${index}\u0000`).join(math);
+  });
+  return escaped;
 }
 
 /** Convert the TeX delimiters models commonly emit into remark-math syntax.
  * Fenced and inline code are protected so examples such as `\\(x\\)` remain
- * literal. Unmatched delimiters are left untouched while a response streams. */
-export function normalizeMathDelimiters(text: string): string {
-  const protectedCode: string[] = [];
-  const protect = (value: string): string => {
+ * literal. Unmatched delimiters are left untouched while a response streams,
+ * and dollar signs that read as money are escaped. */
+export function normalizeMathDelimiters(text: string, imageOffsets?: Map<number, number>): string {
+  const protectedCode: Array<{ value: string; sourceOffset: number }> = [];
+  const protect = (value: string, sourceOffset: number): string => {
     const token = `\u0000OMB_CODE_${protectedCode.length}\u0000`;
-    protectedCode.push(value);
+    protectedCode.push({ value, sourceOffset });
     return token;
   };
-  const tokenized = protectFencedCode(text, protect)
-    .replace(/(`+)[\s\S]*?\1/g, protect);
-  let normalized = tokenized
+  const spans: Array<{ start: number; end: number }> = [];
+  const imageStarts: number[] = [];
+  const visit = (node: { type: string; children?: any[]; position?: { start: { offset?: number }; end: { offset?: number } } }, protectedParent = false) => {
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    const image = node.type === "image" || node.type === "imageReference";
+    if (image && start !== undefined) imageStarts.push(start);
+    // Explicit links leave their labels available for math normalization;
+    // protect only the trailing destination syntax. Autolinks stay intact.
+    const labelEnd = node.type === "link" && start !== undefined && text[start] === "["
+      ? node.children?.at(-1)?.position?.end.offset : undefined;
+    const protectedNode = node.type === "code" || node.type === "inlineCode" || node.type === "definition" || node.type === "linkReference" || node.type === "link" || (imageOffsets !== undefined && image);
+    if (!protectedParent && protectedNode && start !== undefined && end !== undefined) {
+      spans.push({ start: labelEnd ?? start, end });
+    }
+    node.children?.forEach((child) => visit(child, protectedParent || (protectedNode && labelEnd === undefined)));
+  };
+  visit(fromMarkdown(text, normalizationParseOptions));
+  for (const { start, end } of spans.sort((a, b) => b.start - a.start)) {
+    text = text.slice(0, start) + protect(text.slice(start, end), start) + text.slice(end);
+  }
+  let normalized = text
     .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math: string) => `$$\n${math}\n$$`)
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math: string) => `$${math}$`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math: string) => `$${math.trim()}$`)
     // remark-math treats flow math as a block only when the fences occupy
     // their own lines; accept the compact form models commonly produce.
     .replace(/\$\$[ \t]*([^\n][\s\S]*?)[ \t]*\$\$/g, (_match, math: string) => `$$\n${math}\n$$`);
-  protectedCode.forEach((value, index) => {
-    normalized = normalized.split(`\u0000OMB_CODE_${index}\u0000`).join(value);
+  normalized = escapeLiteralDollars(normalized);
+  let shift = 0;
+  // oxlint-disable-next-line no-control-regex -- restore opaque code and image sentinels
+  normalized = normalized.replace(/\u0000OMB_CODE_(\d+)\u0000/g, (token, index: string, at: number) => {
+    const part = protectedCode[Number(index)];
+    if (!part) return token;
+    const { value, sourceOffset } = part;
+    // A protected reference link can contain images of its own. Their raw
+    // positions stay relative to that unchanged span when it is restored.
+    for (const imageOffset of imageStarts) {
+      if (imageOffset >= sourceOffset && imageOffset < sourceOffset + value.length) {
+        imageOffsets?.set(at + shift + imageOffset - sourceOffset, imageOffset);
+      }
+    }
+    shift += value.length - token.length;
+    return value;
   });
   return normalized;
 }
@@ -767,9 +824,10 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
   // A near-miss table from a model renders as an unreadable run of pipes
   // unless it is repaired before parsing. Table repair moves image source
   // offsets, so image messages skip that repair but still normalize math.
-  const source = normalizeMathDelimiters(text.includes(MARKDOWN_IMAGE)
+  const imageOffsets = text.includes(MARKDOWN_IMAGE) ? new Map<number, number>() : undefined;
+  const source = normalizeMathDelimiters(imageOffsets
     ? text
-    : repairMarkdownTables(text));
+    : repairMarkdownTables(text), imageOffsets);
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
@@ -809,7 +867,7 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
                 openUrl={markdownImageOpenUrl(typeof (props as Record<string, unknown>)["data-open-url"] === "string" ? String((props as Record<string, unknown>)["data-open-url"]) : src)}
                 filePath={filePath}
                 message={filePath ? message : undefined}
-                sourceOffset={sourceOffset}
+                sourceOffset={sourceOffset === undefined ? undefined : imageOffsets?.get(sourceOffset) ?? sourceOffset}
               />
             );
           },

@@ -24,6 +24,7 @@ import {
   beatWidth,
   beatsFor,
   completionPatch,
+  flowDotsShown,
   nextBeat,
   previousBeat,
   type BeatId,
@@ -256,8 +257,11 @@ export function WelcomeFlow({
           )}
         </div>
 
-        {/* keyed so a beat's rise-in plays once per visit, never on re-render */}
-        <div key={beat} className="flex shrink-0 flex-col">
+        {/* keyed so a beat's rise-in plays once per visit, never on re-render.
+            The engines list can outgrow a short window; that beat alone may
+            shrink so its list scrolls and the footer stays in view. Other
+            beats keep their height and the card scrolls instead. */}
+        <div key={beat} className={cn("flex flex-col", beat === "engines" ? "min-h-0" : "shrink-0")}>
           {beat === "hello" && <HelloBeat {...beatProps} hosted={hosted} />}
           {beat === "reel" && <FeatureReel {...beatProps} />}
           {beat === "engines" && <EnginesBeat {...beatProps} hosted={hosted} onOpenOrganisation={onOpenOrganisation} />}
@@ -279,7 +283,7 @@ export function WelcomeFlow({
           ) : (
             <span />
           )}
-          <ProgressDots items={beats.map((id) => ({ id }))} index={current - 1} />
+          {flowDotsShown(beat) ? <ProgressDots items={beats.map((id) => ({ id }))} index={current - 1} /> : <span />}
           <span className="text-[11px] text-ink-secondary" aria-live="polite">
             {t("onboarding.progress", { current, total: beats.length })}
           </span>

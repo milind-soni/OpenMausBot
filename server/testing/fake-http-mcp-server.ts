@@ -19,11 +19,13 @@ export interface FakeHttpMcpOptions {
   /** never answer tools/list (initialize still works) */
   silentTools?: boolean;
   description?: string;
+  tools?: Array<{ name: string; inputSchema: Record<string, unknown> }>;
 }
 
 export interface FakeHttpMcp {
   url: string;
   seenHeaders: IncomingMessage["headers"][];
+  calls: unknown[];
   close(): Promise<void>;
 }
 
@@ -40,7 +42,8 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
   const transport = options.transport ?? "http";
   const seenHeaders: FakeHttpMcp["seenHeaders"] = [];
   const streams = new Set<ServerResponse>();
-  const answerFor = (frame: { id?: unknown; method?: unknown }) => {
+  const calls: unknown[] = [];
+  const answerFor = (frame: { id?: unknown; method?: unknown; params?: unknown }) => {
     if (frame.method === "initialize") {
       return {
         jsonrpc: "2.0",
@@ -52,8 +55,12 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
       return {
         jsonrpc: "2.0",
         id: frame.id,
-        result: { tools: [{ name: "read_notes", description: options.description ?? "Read saved notes" }] },
+        result: { tools: options.tools ?? [{ name: "read_notes", description: options.description ?? "Read saved notes" }] },
       };
+    }
+    if (frame.method === "tools/call" && options.tools) {
+      calls.push(frame.params);
+      return { jsonrpc: "2.0", id: frame.id, result: { content: [{ type: "text", text: "remote execution recorded" }] } };
     }
     return null;
   };
@@ -79,7 +86,7 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
         res.writeHead(req.method === "DELETE" ? 405 : 404).end();
         return;
       }
-      const frame = JSON.parse((await readBody(req)) || "{}") as { id?: unknown; method?: unknown };
+      const frame = JSON.parse((await readBody(req)) || "{}") as { id?: unknown; method?: unknown; params?: unknown };
       // hold the request open: the client's own timeout has to end it
       if (frame.method === "tools/list" && options.silentTools) return;
       const answer = answerFor(frame);
@@ -106,6 +113,7 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
   return {
     url: `http://127.0.0.1:${port}/${transport === "sse" ? "sse" : "mcp"}`,
     seenHeaders,
+    calls,
     close: () => new Promise<void>((resolve) => {
       server.closeAllConnections();
       server.close(() => resolve());

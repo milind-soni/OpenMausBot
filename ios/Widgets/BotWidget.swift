@@ -156,7 +156,7 @@ enum ChatIdentityStore {
             forSecurityApplicationGroupIdentifier: OpenMausSharedConfiguration.appGroupIdentifier
         ), let data = try? Data(contentsOf: directory.appendingPathComponent(fileName)) else { return [:] }
         let identities = (try? JSONDecoder().decode([ChatEntity].self, from: data)) ?? []
-        return Dictionary(uniqueKeysWithValues: identities.map { ($0.id, $0) })
+        return Dictionary(identities.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 }
 

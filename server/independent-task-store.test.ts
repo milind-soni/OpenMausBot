@@ -41,6 +41,44 @@ describe("independent bot task state", () => {
     expect(new Store(selection).tasks(bot.id).every(task => task.approvalMode === "ask")).toBe(true);
   });
 
+  it("refreshes one thread's permissions from the bot default and leaves the rest", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const first = bot.threadId;
+    // The opening thread inherits until it has its own copy. A later thread,
+    // and any thread whose level was chosen in the composer, keeps that copy.
+    store.patchTask(bot.id, first, { approvalMode: "ask", autoApprove: false, alwaysAllow: ["Read"] });
+    const model = store.taskByThread(bot.id, first)?.modelSelection;
+    store.appendMessage(first, { role: "user", kind: "text", text: "Keep this conversation" });
+    const history = store.messagesFor(first);
+    const sibling = store.createTask(bot.id, "Sibling", false)!;
+    store.patchBot(bot.id, { approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"] });
+    expect(store.taskByThread(bot.id, first)).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: ["Read"], modelSelection: model });
+    expect(store.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "ask", alwaysAllow: [] });
+
+    const refreshed = store.refreshTaskPermissions(bot.id, first);
+    expect(refreshed).toMatchObject({ approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"], modelSelection: model });
+    expect(store.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: [] });
+    expect(store.bot(bot.id)).toMatchObject({ approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"] });
+    expect(store.messagesFor(first)).toEqual(history);
+    expect(store.refreshTaskPermissions(bot.id, "missing")).toBeNull();
+
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, first)).toMatchObject({ approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"] });
+    expect(reloaded.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "ask", alwaysAllow: [] });
+    expect(reloaded.messagesFor(first)).toEqual(history);
+
+    reloaded.patchBot(bot.id, {
+      approvalMode: "full",
+      approvalGrant: { requestId: "grant-1", mode: "full", phase: "prepared", threadId: first, threadOnly: true, refreshPermissions: true },
+    });
+    expect(approvalModeFor(reloaded.bot(bot.id)!)).toBe("ask");
+    const caughtUp = reloaded.refreshTaskPermissions(bot.id, sibling.threadId);
+    expect(caughtUp).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: ["Read", "Bash"] });
+    expect(reloaded.taskByThread(bot.id, first)?.approvalMode).toBe("auto");
+    expect(reloaded.bot(bot.id)?.approvalMode).toBe("full");
+  });
+
   it("does not partially elevate any thread when saving the all-threads change fails", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });

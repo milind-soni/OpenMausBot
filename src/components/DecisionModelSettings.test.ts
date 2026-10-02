@@ -133,7 +133,7 @@ describe("DecisionModelSettings", () => {
   it("shows Cloud Pro's included decisions as included, on, with nothing to clear", () => {
     fixture.config = status({ provider: "jev", configured: true, included: true, enabled: true, jobs: { roomRouting: true } });
     const view = render();
-    expect(view.html).toContain("Included with Cloud Pro");
+    expect(view.html).toContain("Included with your Cloud plan");
     expect(view.html).not.toContain("Connected");
     expect(view.html).not.toContain("Not connected");
     expect(view.html).not.toContain("Save a key below to turn this on.");
@@ -152,7 +152,7 @@ describe("DecisionModelSettings", () => {
     fixture.config = status({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
     const view = render();
     expect(view.html).toContain("Connected");
-    expect(view.html).not.toContain("Included with Cloud Pro");
+    expect(view.html).not.toContain("Included with your Cloud plan");
     expect(view.html).toContain("Clear");
     expect(view.save.props.disabled).toBe(false);
   });
@@ -184,9 +184,9 @@ describe("DecisionModelSettings", () => {
     expect(fixture.api).toHaveBeenLastCalledWith("/api/decider/test", { method: "POST", body: "{}" });
     expect(render().html).toContain("Jev answered in 210 ms.");
     for (const [result, text] of [
-      [{ ok: false, reason: "http_error", status: 402 }, "Decisions are included with an active Cloud Pro subscription."],
-      [{ ok: false, reason: "rate_limited", status: 429 }, "Cloud Pro decisions are busy or used up for this month. Try again later."],
-      [{ ok: false, reason: "rejected", status: 401 }, "Cloud Pro did not accept this machine&#x27;s decisions. Try again later."],
+      [{ ok: false, reason: "http_error", status: 402 }, "Decisions are included with an active Cloud subscription."],
+      [{ ok: false, reason: "rate_limited", status: 429 }, "Your Cloud plan&#x27;s decisions are busy or used up for this month. Try again later."],
+      [{ ok: false, reason: "rejected", status: 401 }, "OMB Cloud did not accept this machine&#x27;s decisions. Try again later."],
     ] as const) {
       fixture.api.mockResolvedValueOnce(result);
       click(render().test);

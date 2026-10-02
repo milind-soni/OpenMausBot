@@ -62,6 +62,8 @@ import {
   mergeLocalInject,
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
+import { canUseMcpServer, parseToolScope } from "../../shared/tool-scope.ts";
+import { gateServer, mcpStdioServer, resultBudget } from "../mcp-gate-config.ts";
 
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
@@ -124,6 +126,8 @@ export function piThinkingLevel(effort: EffortLevel): (typeof EFFORT_LEVELS)[num
  * a JSON-RPC 2.0 stdio server the pi-mcp-extension consumes. Returns null when
  * there is nothing to mount (the common case). */
 export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | null {
+  const parsed = parseToolScope(turn.toolScope);
+  if (!parsed.ok) throw new Error(parsed.error);
   const servers: Record<string, unknown> = {};
   if (turn.integrations?.composio) servers.composio = { ...turn.integrations.composio };
   if (turn.integrations?.localComputer) {
@@ -145,6 +149,16 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
       args: [SPAWNED_PROXIES.dweb],
       env: { ...NODE_ENV_FLAG, DWEB_URL: turn.integrations.dweb.url },
     };
+  }
+  if (turn.integrations?.browser) servers.browser = { ...turn.integrations.browser };
+  for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) servers[name] = { ...server, scope: "custom" };
+  for (const [name, server] of Object.entries(servers)) {
+    if (parsed.scope !== undefined && !canUseMcpServer(parsed.scope, name)) { delete servers[name]; continue; }
+    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, budget: name in (turn.integrations?.custom ?? {}) ? resultBudget() : 0, nodeEnv: NODE_ENV_FLAG });
+    const stdio = gated ?? mcpStdioServer(server, { nodeEnv: NODE_ENV_FLAG });
+    if (!stdio) throw new Error("Pi MCP server configuration is invalid");
+    const original = server as { scope?: string };
+    servers[name] = { ...stdio, ...(original.scope ? { scope: original.scope } : {}) };
   }
   return Object.keys(servers).length ? servers : null;
 }
@@ -530,6 +544,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
     const sendTurn = async (turn: SendTurnInput) => {
       const { threadId } = turn;
+      const selection = parseToolScope(turn.toolScope);
+      if (!selection.ok) throw new Error(selection.error);
+      const toolScope = selection.scope;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       // Per-bot Ask/Auto is authoritative for harness turns. Preserve the
       // legacy instance flag only for direct adapter callers that omit it.
@@ -572,10 +589,12 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // into a 0600 temp file removed when the turn settles — never on argv.
       const mcpServers = buildMcpServers(turn);
       let mcpTempDir: string | null = null;
-      if (mcpServers) {
+      let scopeReadyPath: string | undefined;
+      if (mcpServers || toolScope !== undefined) {
         mcpTempDir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-"));
+        if (toolScope !== undefined) scopeReadyPath = join(mcpTempDir, "scope-ready.json");
         try {
-          writeFileSync(join(mcpTempDir, "mcp.json"), JSON.stringify({ mcpServers }), { mode: 0o600 });
+          writeFileSync(join(mcpTempDir, "mcp.json"), JSON.stringify({ mcpServers: mcpServers ?? {}, toolScope, scopeReadyPath, approvalMode: turn.approvalMode }), { mode: 0o600 });
         } catch (err) {
           // A failed write must not leave the temp dir behind — a partial file
           // could still hold the boat token / composio key / comms token.
@@ -587,7 +606,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           throw err;
         }
       }
-      const childArgs = mcpServers ? [...PI_ARGS, "-e", SPAWNED_PROXIES.piMcpExtension] : PI_ARGS;
+      const childArgs = mcpTempDir ? [...PI_ARGS, "-e", SPAWNED_PROXIES.piMcpExtension] : PI_ARGS;
 
       // spawnCli can throw synchronously (unresolvable CLI); if it does, the
       // 0600 temp file with the boat token / composio key / comms token must
@@ -600,7 +619,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             env: piEnvironment({
               ...process.env,
               ...input.environment,
-              ...(mcpServers && mcpTempDir ? { OMB_MCP_CONFIG: join(mcpTempDir, "mcp.json") } : {}),
+              ...(mcpTempDir ? { OMB_MCP_CONFIG: join(mcpTempDir, "mcp.json") } : {}),
             }),
           });
         } catch (err) {
@@ -1046,6 +1065,20 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       }
 
+      if (scopeReadyPath) {
+        let ready = false;
+        try {
+          const receipt = JSON.parse(readFileSync(scopeReadyPath, "utf8")) as { ok?: unknown; toolScope?: unknown };
+          ready = receipt.ok === true && JSON.stringify(receipt.toolScope) === JSON.stringify(toolScope);
+        } catch { /* Missing or malformed readiness is never a grant. */ }
+        if (!ready) {
+          const message = "Pi tool selection enforcement is unavailable. Update Pi and check the OpenMausBot extension before retrying.";
+          emit({ ...base(threadId, turnId), type: "runtime.error", message });
+          settle(false);
+          throw new Error(message);
+        }
+      }
+
       // The stable/volatile split: the full prompt rides only the turn that
       // establishes - or re-instructs, after a soul edit - this pi session,
       // which previously re-sent the whole system prompt on every turn and
@@ -1177,6 +1210,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           computerMcp: true,
           composioMcp: true,
           phoneMcp: true,
+          customMcp: true,
+          browserMcp: true,
           // Host control (the user's real Mac) rides the pi-native permission
           // card (`ctx.ui.confirm` → extension_ui_request) gated in the
           // extension, so it is offered exactly when the other engines offer

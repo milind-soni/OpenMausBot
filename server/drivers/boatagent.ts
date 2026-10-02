@@ -22,6 +22,7 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import { boatCredential, boatProviderApi } from "../included-services.ts";
 import { appendNative } from "./native.ts";
+import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import {
   OMB_ASK_TOOL,
   answerWithoutPreamble,
@@ -143,6 +144,7 @@ export const BoatAgentDriver: ProviderDriver<BoatAgentConfig> = {
     };
 
     const sendTurn = async (turn: SendTurnInput) => {
+      turn = { ...turn, toolScope: assertToolScopeSupported(DRIVER_KIND, turn.toolScope) };
       const { threadId } = turn;
       const computer = turn.integrations?.computer;
       const boxId = computer && (!computer.kind || computer.kind === "box") ? computer.boxId : undefined;

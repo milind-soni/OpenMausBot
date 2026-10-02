@@ -42,12 +42,17 @@ it("shows the live benefits without enrolling, charging or refreshing an account
   expect(html).not.toContain("Coming soon"); expect(api).not.toHaveBeenCalled();
   expect(html).not.toContain('aria-modal="true"');
 });
-it("shows the $49 launch price beside the struck-through $89", () => {
+it("states the $49 launch price and the later $89 as plain text, never as a former price", () => {
   const html = render();
-  expect(html).toContain('<span role="img" aria-label="Was $89, now $49 a month: launch price for the first 100 users"><s class="text-ink-secondary">$89</s> $49/month: launch price for the first 100 users</span>');
+  expect(html).toContain('<p class="mb-3 text-[12.5px]">$49/month — launch price for the first 100 users, then $89/month</p>');
+  // No struck-through or "was" reference price (FTC 16 CFR 233.1, EU 30-day prior-price rule).
+  for (const markup of ["<s>", "<s ", "<del", "<strike", "line-through", 'role="img"']) expect(html).not.toContain(markup);
+  expect(html).not.toMatch(/\bwas\b/i);
   // Below the benefits, above Get Pro.
   expect(html.indexOf("Cloud scheduled tasks")).toBeLessThan(html.indexOf("$49/month"));
   expect(html.indexOf("$49/month")).toBeLessThan(html.indexOf("Get Pro"));
+  // The wording change must not re-show the card to anyone who dismissed it.
+  expect(PRO_DISMISSED).toBe("pro-introduction-dismissed-v2");
 });
 it("shows once more to someone who dismissed the first card, then stays dismissed", async () => {
   storage.set(OLD_DISMISSED, "1");

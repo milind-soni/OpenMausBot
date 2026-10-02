@@ -92,6 +92,19 @@ final class ChatPreferencesTests: XCTestCase {
         guard case .message = rows[1] else { return XCTFail("expected a plain message") }
     }
 
+    func testStatusNoticeIsNeverHiddenOrFolded() {
+        // "Qwen hit a rate limit and is retrying" is the answer to "is it
+        // stuck?", not tool noise.
+        var notice = Message(id: "n", role: .bot, kind: .activity, at: 1)
+        notice.tool = ToolActivity(name: "notice: Qwen is waiting on its model", ok: true)
+        let messages = [activity("a"), activity("b"), notice, activity("c"), activity("d")]
+        XCTAssertEqual(transcriptRows(messages, detail: .hidden).map(\.id), ["n"])
+        let rows = transcriptRows(messages, detail: .reduced)
+        XCTAssertEqual(rows.count, 3)
+        guard case let .message(alone) = rows[1] else { return XCTFail("expected the notice alone") }
+        XCTAssertEqual(alone.id, "n")
+    }
+
     func testReducedBreaksOutAFailureOnItsOwn() {
         // The whole point of reduced: noise folds, failures never do.
         let messages = [activity("a"), activity("b"), activity("c", ok: false), activity("d"), activity("e")]

@@ -4784,6 +4784,276 @@
           }
         }
       }
+    },
+    "Computer access is off for this phone": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O acesso ao computador está desativado para este celular"
+          }
+        }
+      }
+    },
+    "This phone was paired with chat-only access. Pair it again with Full access (openmausbot pair, without --client) to see and control the Local VM.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este celular foi pareado com acesso somente ao chat. Pareie-o de novo com acesso total (openmausbot pair, sem --client) para ver e controlar a VM local."
+          }
+        }
+      }
+    },
+    "Turn on Allow computer view for this phone in OpenMausBot → Settings → Remote access on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ative Permitir ver o computador para este celular em OpenMausBot → Configurações → Acesso remoto no seu computador."
+          }
+        }
+      }
+    },
+    "Can't show the Local VM": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não é possível mostrar a VM local"
+          }
+        }
+      }
+    },
+    "Couldn't refresh: %@": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível atualizar: %@"
+          }
+        }
+      }
+    },
+    "Take control": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assumir o controle"
+          }
+        }
+      }
+    },
+    "The bot pauses its computer work until you hand it back.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O bot pausa o trabalho no computador até você devolver o controle."
+          }
+        }
+      }
+    },
+    "Hand Back": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Devolver"
+          }
+        }
+      }
+    },
+    "Gives the computer back to the bot": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Devolve o computador ao bot"
+          }
+        }
+      }
+    },
+    "Local VM": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VM local"
+          }
+        }
+      }
+    },
+    "Trackpad": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trackpad"
+          }
+        }
+      }
+    },
+    "Swipe to move · Tap to click · Hold to drag": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deslize para mover · Toque para clicar · Segure para arrastar"
+          }
+        }
+      }
+    },
+    "Swipe to move the pointer, tap to click, hold to drag": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deslize para mover o ponteiro, toque para clicar, segure para arrastar"
+          }
+        }
+      }
+    },
+    "Connecting to the Local VM…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectando à VM local…"
+          }
+        }
+      }
+    },
+    "The desktop disconnected": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A área de trabalho se desconectou"
+          }
+        }
+      }
+    },
+    "Show keyboard": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar teclado"
+          }
+        }
+      }
+    },
+    "Hide keyboard": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ocultar teclado"
+          }
+        }
+      }
+    },
+    "More keys": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mais teclas"
+          }
+        }
+      }
+    },
+    "Escape": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esc"
+          }
+        }
+      }
+    },
+    "Tab": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tab"
+          }
+        }
+      }
+    },
+    "Right click": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clique direito"
+          }
+        }
+      }
+    },
+    "Copy (Ctrl+C)": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiar (Ctrl+C)"
+          }
+        }
+      }
+    },
+    "Paste (Ctrl+V)": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colar (Ctrl+V)"
+          }
+        }
+      }
+    },
+    "Select all (Ctrl+A)": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecionar tudo (Ctrl+A)"
+          }
+        }
+      }
+    },
+    "Ctrl+Alt+Del": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ctrl+Alt+Del"
+          }
+        }
+      }
+    },
+    "%@'s Local VM": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VM local de %@"
+          }
+        }
+      }
+    },
+    "Control may have been taken back on the computer, or the connection dropped. Hand back, then take control again.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O controle pode ter sido retomado no computador, ou a conexão caiu. Devolva e assuma o controle de novo."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

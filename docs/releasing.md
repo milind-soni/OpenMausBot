@@ -24,10 +24,12 @@ legacy draft.
 
 The release commit must have passed CI: the **CI passed on the release commit**
 job waits (while the platforms build) for ci.yml's `CI` check on the pinned
-commit and stops the release before any draft if it failed, was cancelled or
-never ran. For a manual run on a commit without a CI run, run **Actions → CI →
-Run workflow** on it first. `ship_without_ci` skips the wait, for emergencies
-only.
+commit and stops the release before any draft if it failed. If that commit
+has no CI run, or a newer merge replaced it, the job runs CI on the commit
+itself on a temporary `release-ci/v<version>` branch. After a flaky failure,
+re-run the failed CI jobs; a release still waiting picks up the new attempt,
+and a release that already stopped needs only `gh run rerun <id> --failed`.
+`ship_without_ci` skips the wait, for emergencies only.
 
 The workflow refuses to overwrite an already-published version. Manual Release
 runs still require `package.json`'s version to be bumped on the selected ref.

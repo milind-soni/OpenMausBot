@@ -41,6 +41,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
   const runOns: string[] = [];
   const triggerSources: string[] = [];
   const taskActivations: boolean[] = [];
+  const taskTitles: string[] = [];
   const goalTasks: Array<{ groupId: string; title: string }> = [];
   const interruptedTurns: Array<{ botId: string; threadId: string; runOn: string }> = [];
   const interruptedGoals: Array<{
@@ -60,6 +61,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     goalState: () => goal,
     createTask: (_botId, _title, activate = false) => {
       taskActivations.push(activate);
+      taskTitles.push(_title);
       return { threadId: `thread-${++task}` };
     },
     createGoalTask: (groupId, title) => {
@@ -94,6 +96,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     runOns,
     triggerSources,
     taskActivations,
+    taskTitles,
     goalTasks,
     interruptedTurns,
     interruptedGoals,
@@ -108,6 +111,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -247,6 +251,28 @@ describe("bounded scheduled overlap and run health", () => {
     }
     expect(() => h.manager.update(routine.id, { overlap: "invalid" as "queue" })).toThrow("skip or queue");
   });
+});
+
+it("names a new routine thread with the local dispatch date and time", async () => {
+  vi.stubEnv("TZ", "UTC");
+  const at = Date.parse("2026-10-01T21:26:00Z");
+  const h = harness(at);
+  const routine = h.manager.create({ name: "Morning brief", prompt: "Summarize", botId: "maus-1",
+    schedule: { type: "once", at } });
+  h.manager.runNow(routine.id);
+  const createTask = h.options.createTask;
+  h.options.createTask = (...args) => { h.setNow(at + 60_000); return createTask(...args); };
+  await h.manager.tick();
+  expect(h.taskTitles).toEqual(["Morning brief · Oct 1, 9:26 PM"]);
+  expect(h.manager.listRuns()[0]).toMatchObject({ routineName: "Morning brief", startedAt: at });
+
+  const long = harness(at);
+  const named = long.manager.create({ name: "x".repeat(100), prompt: "Summarize", botId: "maus-1",
+    schedule: { type: "once", at } });
+  long.manager.runNow(named.id);
+  await long.manager.tick();
+  expect(long.taskTitles[0]).toHaveLength(80);
+  expect(long.taskTitles[0]).toMatch(/ · Oct 1, 9:26 PM$/);
 });
 
 describe("cron routines use the existing persistent scheduler", () => {
@@ -1827,6 +1853,7 @@ describe("RoutineManager", () => {
   });
 
   it("queues behind a busy room goal, then dispatches it into a detached room task", async () => {
+    vi.stubEnv("TZ", "UTC");
     const h = harness();
     h.setGoal("busy");
     const routine = h.manager.create({
@@ -1852,7 +1879,7 @@ describe("RoutineManager", () => {
     h.setGoal("ready");
     await h.manager.tick();
     const run = h.manager.listRuns()[0]!;
-    expect(h.goalTasks).toEqual([{ groupId: "room-1", title: "Team launch" }]);
+    expect(h.goalTasks).toEqual([{ groupId: "room-1", title: "Team launch · Aug 17, 8:01 AM" }]);
     expect(h.startedGoals[0]).toMatchObject({
       groupId: "room-1",
       threadId: "goal-thread-1",

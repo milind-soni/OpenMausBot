@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 export interface TeamMapBot {
   id: string;
   name: string;
@@ -5,7 +7,7 @@ export interface TeamMapBot {
   section?: string;
   chiefOfStaff?: boolean;
   busy?: boolean;
-  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
+  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
 }
 
 export interface TeamMapSnapshot {
@@ -107,4 +109,9 @@ export function teamMapStatus(bot: TeamMapBot): TeamMapStatus {
   if (bot.activity === "dead" || bot.activity === "no-signal") return { label: "No signal", tone: "danger" };
   if (bot.busy || bot.activity === "working") return { label: "Working", tone: "success" };
   return { label: "Ready", tone: "idle" };
+}
+
+/** The header's bot count: "1 bot", else "{count} bots". */
+export function teamMapBotCount(count: number): string {
+  return count === 1 ? t("canvas.botCountOne") : t("canvas.botCount", { count });
 }

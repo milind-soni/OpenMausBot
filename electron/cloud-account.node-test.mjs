@@ -97,6 +97,42 @@ test("active Pro requires a future expiry and free+active is never accepted", as
   }
 });
 
+test("a tier names the paid plan; a missing, unknown or malformed tier never rejects or downgrades it", async t => {
+  const warnings = [], f = await fixture(t, { warn: message => warnings.push(message) }); await f.connect();
+  const paid = { plan: "pro", status: "active", expiresAt: f.now + 3600_000, version: 1 };
+  f.entitlement = paid; assert.deepEqual((await f.client.refresh()).entitlement, paid);
+  for (const tier of ["personal", "pro", "max", "team-2026"]) {
+    f.entitlement = { ...paid, tier }; assert.deepEqual((await f.client.refresh()).entitlement, { ...paid, tier });
+  }
+  for (const tier of ["Max", "", "max\n", "2x", "-max", "m".repeat(25), 5, null, {}, ["max"]]) {
+    f.entitlement = { ...paid, tier }; const state = await f.client.refresh();
+    assert.equal(state.status, "connected"); assert.deepEqual(state.entitlement, paid);
+  }
+  f.entitlement = { plan: "free", status: "inactive", expiresAt: null, version: 2, tier: "Bad tier" };
+  assert.deepEqual((await f.client.refresh()).entitlement, { plan: "free", status: "inactive", expiresAt: null, version: 2 });
+  assert.deepEqual(warnings, []);
+});
+
+test("a plan newer than the app (personal, max) is paid with that tier, told once, never a lockout", async t => {
+  const warnings = [], f = await fixture(t, { warn: message => warnings.push(message) }); await f.connect();
+  const paid = { status: "active", expiresAt: f.now + 3600_000, version: 1 };
+  f.entitlement = { plan: "max", ...paid };
+  assert.deepEqual((await f.client.refresh()).entitlement, { plan: "pro", tier: "max", ...paid });
+  await f.client.refresh(); assert.equal(warnings.length, 1); assert.match(warnings[0], /"max"/);
+  f.entitlement = { plan: "personal", ...paid, tier: "personal" };
+  assert.deepEqual((await f.client.refresh()).entitlement, { plan: "pro", tier: "personal", ...paid }); assert.equal(warnings.length, 2);
+  f.entitlement = { plan: "max", ...paid, tier: "Bad" };
+  assert.deepEqual((await f.client.refresh()).entitlement, { plan: "pro", tier: "max", ...paid });
+  f.entitlement = { plan: "max", status: "inactive", expiresAt: f.now - 1, version: 2 };
+  assert.deepEqual((await f.client.refresh()).entitlement, { plan: "pro", tier: "max", status: "inactive", expiresAt: f.now - 1, version: 2 });
+  assert.equal(warnings.length, 2);
+  // A newer plan gets no exemption from the rest of the checks.
+  for (const invalid of [{ plan: "max", status: "active", expiresAt: null, version: 1 }, { plan: "max", status: "active", expiresAt: f.now, version: 1 },
+    ...["Max", "", "pro ", "m".repeat(25), 5, null].map(plan => ({ plan, ...paid }))]) {
+    f.entitlement = invalid; assert.equal((await f.client.refresh()).status, "unavailable"); assert.equal(f.client.state().entitlement, undefined);
+  }
+});
+
 test("verified status expires after one minute even if a timer has not run; cached Pro is never restored", async t => {
   const f = await fixture(t); await f.connect(); f.entitlement = { plan: "pro", status: "active", expiresAt: f.now + 2000, version: 1 };
   await f.client.refresh(); f.now += 2001;

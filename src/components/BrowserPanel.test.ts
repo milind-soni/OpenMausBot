@@ -608,3 +608,68 @@ describe("implicit browser control", () => {
     cleanup?.();
   });
 });
+
+// MOCA-266: the expand button only ever entered full screen. On macOS that
+// takes the whole window into native full screen, where minimize is disabled,
+// and clicking the button again did nothing.
+describe("browser full screen", () => {
+  const fullscreenDocument = () => {
+    const listeners = new Map<string, () => void>();
+    const doc = {
+      fullscreenElement: null as unknown,
+      exitFullscreen: vi.fn().mockResolvedValue(undefined),
+      addEventListener: vi.fn((name: string, listener: () => void) => { listeners.set(name, listener); }),
+      removeEventListener: vi.fn((name: string) => { listeners.delete(name); }),
+    };
+    vi.stubGlobal("document", doc);
+    return { doc, listeners };
+  };
+  const panelElement = () => {
+    const element = { requestFullscreen: vi.fn().mockResolvedValue(undefined) };
+    (fixture.refs[3] as RefObject<unknown>).current = element;
+    return element;
+  };
+
+  it("leaves full screen on the second click instead of asking for it again", async () => {
+    const { doc } = fullscreenDocument();
+    const nodes = renderElements();
+    const panel = panelElement();
+
+    click(nodes, "Full screen");
+    expect(panel.requestFullscreen).toHaveBeenCalledOnce();
+    doc.fullscreenElement = panel;
+    click(nodes, "Full screen");
+    await settle();
+    expect(doc.exitFullscreen).toHaveBeenCalledOnce();
+    expect(panel.requestFullscreen).toHaveBeenCalledOnce();
+  });
+
+  it("follows the document, so Esc and the window's own controls keep the button right", () => {
+    const { doc, listeners } = fullscreenDocument();
+    renderElements();
+    const panel = panelElement();
+    // useState call order: takeStatus (11) sits just before fullscreen (12).
+    const fullscreenSetter = fixture.setters[12]!;
+    const cleanup = fixture.effects[3]!();
+
+    doc.fullscreenElement = panel;
+    listeners.get("fullscreenchange")!();
+    expect(fullscreenSetter).toHaveBeenLastCalledWith(true);
+    doc.fullscreenElement = null;
+    listeners.get("fullscreenchange")!();
+    expect(fullscreenSetter).toHaveBeenLastCalledWith(false);
+    cleanup?.();
+    expect(listeners.has("fullscreenchange")).toBe(false);
+  });
+
+  it("says when leaving full screen fails", async () => {
+    const { doc } = fullscreenDocument();
+    doc.exitFullscreen.mockRejectedValue(new Error("denied"));
+    const nodes = renderElements();
+    const panel = panelElement();
+    doc.fullscreenElement = panel;
+    click(nodes, "Full screen");
+    await settle();
+    expect(fixture.setters[7]).toHaveBeenLastCalledWith("Could not leave full screen. Press Esc instead.");
+  });
+});

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { collisionFreeDownloadPath, defaultSaveName, resolveSavablePath, withSavableFile } from "./save-file.mjs";
+import { collisionFreeDownloadPath, defaultSaveName, resolveSavablePath, revealDownloadWhenDone, withSavableFile } from "./save-file.mjs";
 
 // Creating a symlink on Windows needs elevation or developer mode, so the
 // symlink cases only run where the runner can actually make one.
@@ -150,7 +151,19 @@ describe("attachment download destination", () => {
     const handler = main.indexOf('session.defaultSession.on("will-download"');
     assert.notEqual(handler, -1);
     assert.match(main.slice(handler), /item\.setSavePath\(collisionFreeDownloadPath\(/);
+    assert.match(main.slice(handler), /revealDownloadWhenDone\(item, /);
     assert.ok(handler < main.indexOf("createWindow();"));
+  });
+
+  it("reveals only a completed download at its actual save path", () => {
+    const revealed = [];
+    for (const state of ["completed", "cancelled", "interrupted"]) {
+      const item = new EventEmitter();
+      item.getSavePath = () => `/downloads/report-${state}.txt`;
+      revealDownloadWhenDone(item, (filePath) => revealed.push(filePath));
+      item.emit("done", {}, state);
+    }
+    assert.deepEqual(revealed, ["/downloads/report-completed.txt"]);
   });
 });
 

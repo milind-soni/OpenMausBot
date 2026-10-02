@@ -68,6 +68,7 @@ export function toScenario(live: LiveScenario, config: LiveConfig): Scenario {
     behavior: live.behavior,
     world: "coordination",
     gates: [...new Set(live.steps.flatMap((step) => (step.kind === "writeGate" ? [step.gate] : [])))],
+    librarySkills: [],
     bots: live.bots.map((bot) => ({ ...bot, turns: [] })),
     steps: live.steps.map((step) =>
       isWaitStep(step) && step.timeoutMs === undefined

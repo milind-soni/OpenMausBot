@@ -478,9 +478,15 @@ object MessageActions {
         // A tool chip is context, a screenshot is pixels, a digest is a log line.
         Message.Kind.ACTIVITY, Message.Kind.SCREEN, Message.Kind.DIGEST -> null
         Message.Kind.COMPACTION -> message.compaction?.summary ?: message.text?.takeIf { it.isNotBlank() }
-        // The run's report is the part worth keeping; the headline without one.
+        // The run's report and error are the parts worth keeping; the headline without either.
         Message.Kind.ROUTINE_RUN -> message.routineRun
-            ?.let { run -> listOfNotNull(run.headline, run.summary?.takeIf { it.isNotBlank() }).joinToString("\n\n") }
+            ?.let { run ->
+                listOfNotNull(
+                    run.headline,
+                    run.summary?.takeIf { it.isNotBlank() },
+                    run.error?.takeIf { it.isNotBlank() },
+                ).joinToString("\n\n")
+            }
             ?: message.text?.takeIf { it.isNotBlank() }
     }
 

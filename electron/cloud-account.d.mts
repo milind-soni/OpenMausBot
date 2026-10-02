@@ -5,8 +5,10 @@ export interface CloudAccountState {
   account?: { id: string; email: string };
   deviceId?: string;
   expiresAt?: number;
-  /** Only a current server-verified session can include an entitlement. */
-  entitlement?: { plan: "free" | "pro"; status: "active" | "inactive"; expiresAt: number | null; version: number };
+  /** Only a current server-verified session can include an entitlement.
+   * `plan` "pro" means any paid plan; `tier` names it ("personal", "pro",
+   * "max", or one newer than this app) when the Admin sends one. */
+  entitlement?: { plan: "free" | "pro"; tier?: string; status: "active" | "inactive"; expiresAt: number | null; version: number };
   verifiedAt?: number;
   verifiedUntil?: number;
   /** The person's Cloud home machine, when their plan has one. */
@@ -66,4 +68,6 @@ export declare function createCloudAccountClient(options: {
   fetch?: typeof fetch;
   now?: () => number;
   onState?: (state: CloudAccountState) => void;
+  /** Told once per plan name this app predates. Defaults to console.warn. */
+  warn?: (message: string) => void;
 }): CloudAccountClient;

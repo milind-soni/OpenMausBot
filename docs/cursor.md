@@ -22,10 +22,14 @@ key.
 2. Sign in with `cursor-agent login`, or set `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`
    in the environment of the Cursor instance.
 
-3. Confirm `cursor-agent --version` works. The binary installs to `~/.local/bin` by
-   default; OpenMausBot already looks there when launched from a GUI.
+3. Confirm `cursor-agent --version` works. Cursor's docs call the command `agent`;
+   the installer adds `cursor-agent` beside it, and OpenMausBot runs that name,
+   because other tools also install an `agent`. The binary installs to
+   `~/.local/bin` by default (`%LOCALAPPDATA%\cursor-agent` on Windows);
+   OpenMausBot already looks in both, so a CLI installed while the app is open
+   is found without restarting.
 
-The engine stays unavailable until the `cursor-agent` executable is on PATH. A
+The engine stays unavailable until the `cursor-agent` executable is found. A
 missing login shows as unauthenticated rather than crashing the fleet.
 
 ## Models

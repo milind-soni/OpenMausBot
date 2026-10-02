@@ -362,6 +362,35 @@ describe("resolveCursorAcpModelId", () => {
     );
   });
 
+  describe("when one base is advertised with and without fast", () => {
+    const FAST_FIRST = [
+      { modelId: "composer-2.5[fast=true]", name: "Composer 2.5 Fast" },
+      { modelId: "composer-2.5[fast=false]", name: "Composer 2.5" },
+    ];
+
+    it("resolves the plain slug to the non-fast variant even when fast is listed first", () => {
+      expect(resolveCursorAcpModelId(FAST_FIRST, "composer-2.5")).toBe("composer-2.5[fast=false]");
+    });
+
+    it("resolves the plain slug to the non-fast variant when it is listed first", () => {
+      expect(resolveCursorAcpModelId([...FAST_FIRST].reverse(), "composer-2.5")).toBe(
+        "composer-2.5[fast=false]",
+      );
+    });
+
+    it("resolves the `-fast` slug to the fast=true variant", () => {
+      expect(resolveCursorAcpModelId(FAST_FIRST, "composer-2.5-fast")).toBe("composer-2.5[fast=true]");
+    });
+
+    it("falls back to the only advertised variant for the plain slug", () => {
+      expect(resolveCursorAcpModelId([FAST_FIRST[0]], "composer-2.5")).toBe("composer-2.5[fast=true]");
+    });
+
+    it("does not map a `-fast` slug onto a non-fast variant", () => {
+      expect(resolveCursorAcpModelId([FAST_FIRST[1]], "composer-2.5-fast")).toBeNull();
+    });
+  });
+
   it("returns null when the agent advertised no models, so the caller keeps the argv slug", () => {
     expect(resolveCursorAcpModelId([], "auto")).toBeNull();
   });

@@ -45,11 +45,19 @@ half hours. Now:
 
 ## Main and releases
 
-Every main commit gets its own CI run and it is never cancelled by the next
-merge, so each commit has a verdict. `release.yml` waits for the `CI` check on
-the commit it ships (overlapping the platform builds) and creates no draft
-unless it passed. A manual release can skip the wait with `ship_without_ci`,
-for emergencies only.
+Main keeps one CI run going and one waiting. Each merge replaces the waiting
+run, and the running one always finishes, so a burst of merges costs two full
+runs instead of one per merge (fifteen queued behind each other in October
+2026, with the release waiting behind them).
+
+`release.yml` ships only a commit whose own `CI` check passed
+(`scripts/release-ci.mjs`, overlapping the platform builds). If main's run for
+that commit was replaced or never ran, the script starts CI on the commit in
+its own lane: a `release-ci/v<version>` branch that no merge can touch,
+deleted afterwards. A red verdict stops the release; re-run the failed CI jobs
+(`gh run rerun <id> --failed`), and the waiting release picks up the new
+attempt. A manual release can skip the wait with `ship_without_ci`, for
+emergencies only.
 
 ## Required check
 

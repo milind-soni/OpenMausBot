@@ -100,6 +100,12 @@ if (process.argv[2] === "login" && process.argv[3] === "status") {
   process.exit(0);
 }
 const calls: Array<{ method: string; params: unknown }> = [];
+// Opt-in config resolution for scope tests; mirror the native -c precedence.
+const mcpOverrides: Record<string, Record<string, unknown>> = {};
+for (let index = 0; process.env.FAKE_CODEX_MCP_OVERRIDES === "1" && index < process.argv.length; index++) {
+  const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.]+)=(.*)$/.exec(process.argv[index]!) : null;
+  if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = JSON.parse(match[3]!);
+}
 let developerInstructions = "";
 let resumedThread: string | null = null;
 let decision: unknown = null;
@@ -357,11 +363,14 @@ process.stdin.on("data", (chunk) => {
                   approval_policy: "never",
                   approvals_reviewer: "auto_review",
                   sandbox_mode: "read-only",
-                  mcp_servers: {
+                  mcp_servers: process.env.FAKE_CODEX_MCP_OVERRIDES === "1" ? mcpOverrides : process.env.FAKE_CODEX_MCP_CONFIG ? JSON.parse(process.env.FAKE_CODEX_MCP_CONFIG) : {
                     harmless_name: { env: { DISPLAY_LABEL: "innocuous-config-secret-7a9c" } },
                   },
                 }),
               developer_instructions: process.env.FAKE_CODEX_INSTRUCTIONS ?? null,
+              ...(process.env.FAKE_CODEX_SHELL_ENVIRONMENT_POLICY ? {
+                shell_environment_policy: JSON.parse(process.env.FAKE_CODEX_SHELL_ENVIRONMENT_POLICY),
+              } : {}),
               // `-c features.<name>=<bool>` overrides, as the real config/read reports them.
               features: Object.fromEntries(process.argv.flatMap((arg, index) => {
                 const match = process.argv[index - 1] === "-c" ? /^features\.(\w+)=(true|false)$/.exec(arg) : null;

@@ -3,6 +3,7 @@ import {
   beatWidth,
   beatsFor,
   cloudSignInDue,
+  flowDotsShown,
   companyModelCount,
   completionPatch,
   EMPTY_ONBOARDING,
@@ -242,5 +243,12 @@ describe("beat machine", () => {
   it("gives the engines beat the widest card", () => {
     expect(beatWidth("engines")).toBeGreaterThan(beatWidth("hello"));
     expect(beatWidth("bot")).toBeGreaterThan(beatWidth("hello"));
+  });
+
+  it("shows one row of dots at a time: the reel's own scene dots replace the flow's", () => {
+    expect(flowDotsShown("reel")).toBe(false);
+    for (const beat of beatsFor({ dictation: true, reel: true }).filter((id) => id !== "reel")) {
+      expect(flowDotsShown(beat)).toBe(true);
+    }
   });
 });

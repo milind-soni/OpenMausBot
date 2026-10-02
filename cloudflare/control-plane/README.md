@@ -87,6 +87,11 @@ Account bearer tokens are rejected.
   recoverable from GET or D1. After an idle reclaim the same call allocates a
   new tunnel behind the **same hostname**, so a paired phone keeps its
   address; it may also take back an endpoint whose reclaim is still pending.
+  The desktop app (Remote access on) and `openmausbot serve --tunnel` ask
+  `GET` every 15 minutes, even while their connector reports ready, and make
+  this call when the endpoint is gone or in `error`; a `401` from `GET` (the
+  90-day installation credential expired) sends them through account
+  recovery, or to a "sign-in expired" prompt.
 - When Cloudflare's tunnel quota (`1045`) or the zone's DNS record quota
   (`81045`) refuses an allocation, `POST` returns
   `503 endpoint_capacity` with `Retry-After: 600`. For the next ten minutes

@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { newBotDefaultsSchema } from "./new-bot-defaults.ts";
+import { newBotDefaultsSchema, resolveBotCreationDefaults } from "./new-bot-defaults.ts";
 import { parseConfigPatch } from "./config.ts";
 
 describe("new-bot templates", () => {
+  it("preserves restricted and empty tool defaults while allowing an explicit owner reset", () => {
+    const defaults = newBotDefaultsSchema.parse({ profile: { toolScope: { allow: ["native:read", "native:read"] } } });
+    expect(defaults.profile).toEqual({ toolScope: { allow: ["native:read"] } });
+    expect(resolveBotCreationDefaults(defaults, {}).profile).toEqual({ toolScope: { allow: ["native:read"] } });
+    expect(resolveBotCreationDefaults(defaults, { settings: { toolScope: { allow: [] } } }).profile).toEqual({ toolScope: { allow: [] } });
+    expect(resolveBotCreationDefaults(defaults, { settings: { toolScope: null } }).profile).toEqual({ toolScope: null });
+    expect(newBotDefaultsSchema.safeParse({ profile: { toolScope: { deny: ["mcp:*:read"] } } }).success).toBe(false);
+  });
   it("stores Full as a preference without accepting reusable consent or identity", () => {
     expect(newBotDefaultsSchema.parse({ profile: { name: "", approvalMode: "full" } }).profile)
       .toEqual({ name: "", approvalMode: "full" });

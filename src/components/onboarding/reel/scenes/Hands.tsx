@@ -1,9 +1,11 @@
-// The "they have hands" scene. One authored moment: the screen waking from
-// black to a live desktop, and the bot's pointer clicking a real button on
-// it. Setup is the chat with the ask and the Computer panel sliding in from
-// the right, drawn as ComputerPanel draws it (the view tabs, the preview
-// status, Open live desktop and Take control). Resolution is the click
-// landing, the tool chip in the chat, and the reply.
+// The "they have hands" scene. One authored moment: the bot's pointer
+// clicking a real button on a live desktop. Setup is the chat with the ask
+// and the Computer panel sliding in from the right, drawn as ComputerPanel
+// draws it (the view tabs, the preview status, Open live desktop and Take
+// control). The panel arrives already connected, the booking page on screen:
+// a spinner and "Starting…" here read as a broken demo, since people often
+// click Next inside the first second. Resolution is the click landing, the
+// tool chip in the chat, and the reply.
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, Hand, Loader2, MousePointer2, Settings2, X } from "lucide-react";
 import { MausAvatar } from "@/components/Avatar";
@@ -131,7 +133,7 @@ export function Hands({ playing, onCue, onEnded, label }: SceneProps) {
           {/* the screen */}
           <div className="relative mx-2.5 aspect-[16/10] overflow-hidden rounded-lg border border-hairline/40 bg-black">
             {/* desktop */}
-            <div className={cn("absolute inset-0 transition-opacity duration-700 ease-[cubic-bezier(0.22,1,0.36,1)]", awake ? "opacity-100" : "opacity-0")}>
+            <div className="absolute inset-0">
               <div className="absolute inset-0 bg-[linear-gradient(135deg,#1f3a5f_0%,#2a5d8c_45%,#6b3fa0_100%)]" />
               <div className="absolute inset-x-0 top-0 flex h-3 items-center justify-between bg-black/30 px-1.5 text-[6px] text-white/80">
                 <span>Ubuntu</span>
@@ -183,20 +185,13 @@ export function Hands({ playing, onCue, onEnded, label }: SceneProps) {
                 <MousePointer2 size={11} className="text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" fill="#fff" />
               </div>
             </div>
-            {/* the screen before it wakes */}
-            {!awake && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-[9px] text-ink-secondary">
-                <Loader2 size={12} className="animate-spin text-accent" />
-                {panel ? "Connecting to the screen…" : ""}
-              </div>
-            )}
           </div>
 
           {/* status and actions, as the panel shows them */}
           <div className="mx-2.5 mt-2 flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-[9.5px] text-ink-secondary">
-              <span className={cn("size-1.5 rounded-full transition-colors duration-300", awake ? "bg-success" : "bg-warning animate-status-pulse")} />
-              {awake ? "Cloud screen connected" : "Starting…"}
+              <span className="size-1.5 rounded-full bg-success" />
+              Cloud screen connected
             </div>
             <div className="flex items-center gap-1">
               <span className="flex items-center gap-1 rounded-md bg-raised px-1.5 py-0.5 text-[9px] text-ink">

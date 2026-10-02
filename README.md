@@ -393,6 +393,8 @@ small; adding a provider is one file in [`server/drivers/`](server/drivers/) plu
 No code needed at all for your own engines: any ACP-speaking CLI or OpenAI-compatible endpoint
 plugs in through config — see [`docs/custom-engines.md`](docs/custom-engines.md).
 Users can add their own MCP tool servers with zero code via [`docs/custom-mcp-servers.md`](docs/custom-mcp-servers.md).
+To run bots on OpenRouter, Fireworks AI, DeepSeek, Cline or your own OpenAI- or Anthropic-compatible provider,
+see [Other model providers](apps/docs/content/docs/providers/model-providers.mdx).
 
 ## Support the project
 

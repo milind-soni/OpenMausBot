@@ -196,6 +196,14 @@ func previewText(of message: Message) -> String {
 /// since Phase 0, the digest and compaction receipts. Hidden together,
 /// because a reader who turned activity off does not want the summary of
 /// exactly those calls either.
+/// A status row the server writes while a turn runs ("notice: Qwen hit a
+/// rate limit and is retrying"). It tells the reader what the bot is doing,
+/// so, like desktop's statusActivity, it is never hidden or folded with the
+/// tool chips.
+public func isStatusNotice(_ message: Message) -> Bool {
+    message.kind == .activity && (message.tool?.name.hasPrefix("notice:") ?? false)
+}
+
 public func isActivityReceipt(_ message: Message) -> Bool {
     switch message.kind {
     case .activity, .digest, .compaction: return true
@@ -257,7 +265,7 @@ public func transcriptRows(_ messages: [Message], detail: ActivityDetail) -> [Tr
             continue
         }
         if hiddenIDs.contains(message.id) { continue }
-        if detail == .hidden && isActivityReceipt(message) { continue }
+        if detail == .hidden && isActivityReceipt(message) && !isStatusNotice(message) { continue }
         // A turn that touched nothing leaves a digest with nothing to show;
         // an empty row would still cost the transcript a gap.
         if message.kind == .digest && DigestSummary(text: message.text ?? "").isEmpty { continue }
@@ -270,7 +278,7 @@ public func transcriptRows(_ messages: [Message], detail: ActivityDetail) -> [Tr
             rows.append(.message(message))
             continue
         }
-        if message.tool?.ok == false {
+        if message.tool?.ok == false || isStatusNotice(message) {
             flush()
             rows.append(.message(message))
             continue

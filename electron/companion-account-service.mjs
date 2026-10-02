@@ -48,6 +48,13 @@ const AUTO_RETRY_CODES = new Set([
  * so the next reconcile must run instead of trusting the saved address. */
 const ENDPOINT_NEEDS_RECONCILE = new Set(["deleting", "deleted", "error"]);
 
+/** Connector states in which the watchdog asks the control plane whether the
+ * saved endpoint still exists. "ready" is included on purpose: the connector
+ * verifies its public route once, so after a long sleep it can still say
+ * "ready" for a tunnel the server reclaimed meanwhile. "unavailable" (no
+ * connector binary) and "stopped" are left alone. */
+const WATCHDOG_CHECK_STATES = new Set(["starting", "ready", "retrying", "error"]);
+
 const defaultSetTimer = (callback, milliseconds) => {
   const timer = setTimeout(callback, milliseconds);
   timer.unref?.();
@@ -706,7 +713,12 @@ export function createCompanionAccountService({
     let endpoint;
     try {
       endpoint = await client.getEndpoint(account.installationCredential);
-    } catch {
+    } catch (error) {
+      // A rejected installation credential (it expires after 90 days) is a
+      // definitive answer too: the saved address can no longer be repaired
+      // with it. Retry recovers through the account session, or shows the
+      // "sign-in expired" state so the person is asked to sign in.
+      if (error instanceof ControlPlaneError && error.status === 401) return retryWork();
       return null;
     }
     if (endpoint && endpoint.url === access.endpoint && !ENDPOINT_NEEDS_RECONCILE.has(endpoint.status)) {
@@ -715,19 +727,24 @@ export function createCompanionAccountService({
     return retryWork();
   };
 
-  /** While the companion is on but its connector cannot come up, ask the
-   * control plane (cheaply, no provider calls) whether the endpoint still
-   * exists. This is how a computer whose idle tunnel was reclaimed while
-   * Remote access was off recovers once the user turns it back on. */
+  /** While the companion is on, ask the control plane (cheaply, no provider
+   * calls) every interval whether the endpoint still exists. This is how a
+   * computer whose idle tunnel was reclaimed recovers on its own: after
+   * Remote access is turned back on, and also when the app kept running
+   * through a long sleep and its connector still reports the old "ready". */
   const watchdogTick = () => {
     watchdogTimer = null;
     if (disposed) return;
     watchdogTimer = setTimer(watchdogTick, endpointCheckIntervalMs);
     if (!companionIsOn() || autoRetryTimer !== null) return;
+    // A sign-in only the person can renew; asking again changes nothing.
+    if (phase?.status === "signed-out") return;
     const connection = managedConnectionState?.() ?? {};
-    // Only a connector that keeps failing; "unavailable" is a missing binary.
-    if (!["retrying", "error"].includes(connection.status)) return;
-    if (lastEndpointCheck !== null && now() - lastEndpointCheck < endpointCheckIntervalMs) return;
+    if (!WATCHDOG_CHECK_STATES.has(connection.status)) return;
+    // Skip only a check that ran recently (restore's launch check, say). A
+    // full-interval comparison would also skip the regular tick whenever the
+    // previous check landed a few milliseconds after its own tick.
+    if (lastEndpointCheck !== null && now() - lastEndpointCheck < endpointCheckIntervalMs / 2) return;
     void serialize(reconcileIfEndpointGone).catch(() => {});
   };
 

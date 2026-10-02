@@ -2280,6 +2280,54 @@ describe("coordinate_bots arguments (room turn)", () => {
     });
   });
 
+  it("sends cross-bot work one way through the existing thread route", async () => {
+    const listed = await roomRpc("tools/list");
+    const send = listed.result.tools.find((tool: { name: string }) => tool.name === "send_to_bot");
+    expect(send.description).toContain("cross-bot only");
+    const previous = threadResponse;
+    threadResponse = { threadId: "thread-sent", title: "Ship it", botId: "bot-helper", botName: "Helper", self: false };
+    try {
+      const result = await roomRpc("tools/call", { name: "send_to_bot", arguments: {
+        bot_id: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.",
+      } });
+      expect(result.result.isError).toBeFalsy();
+      expect(lastThreadBody).toMatchObject({
+        toBotId: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.", oneWay: true,
+      });
+      expect(result.result.content[0].text).toContain("nothing there will resume you");
+    } finally {
+      threadResponse = previous;
+    }
+  });
+
+  it("reports a cross-bot send that is waiting for approval", async () => {
+    const previous = threadResponse;
+    threadResponse = {
+      threadId: "thread-sent", title: "Ship it", botId: "bot-helper", botName: "Helper",
+      self: false, state: "pending", approvalRequired: true,
+    };
+    try {
+      const result = await roomRpc("tools/call", { name: "send_to_bot", arguments: {
+        bot_id: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.",
+      } });
+      expect(result.result.isError).toBeFalsy();
+      expect(result.result.content[0].text).toContain("pending approval");
+      expect(result.result.content[0].text).not.toContain("Ownership moved");
+    } finally {
+      threadResponse = previous;
+    }
+  });
+
+  it("refuses send_to_bot to self without contacting the server", async () => {
+    lastThreadBody = null;
+    const result = await roomRpc("tools/call", { name: "send_to_bot", arguments: {
+      bot_id: "bot-asker", title: "Separate work", message: "Do it.",
+    } });
+    expect(result.result.isError).toBe(true);
+    expect(result.result.content[0].text).toContain("cross-bot only");
+    expect(lastThreadBody).toBeNull();
+  });
+
   it("keeps the documented snake_case key when both spellings arrive", async () => {
     const res = await roomRpc("tools/call", { name: "coordinate_bots", arguments: {
       bot_ids: ["bot-helper"], botIds: ["bot-other"], group_id: "room-right", groupId: "room-wrong",

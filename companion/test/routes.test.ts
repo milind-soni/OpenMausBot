@@ -7,7 +7,7 @@
 // and the one that quietly stopped being true once before.
 import { describe, expect, it } from "vitest";
 
-import { denyReason } from "../src/routes.ts";
+import { denyReason, isCloudDesktopAccess } from "../src/routes.ts";
 
 const ask = (method: string, path: string, authenticated = true) =>
   denyReason({ method, path, authenticated });
@@ -70,6 +70,8 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/computer/control"],
     ["POST", "/api/bots/bot_123/computer/screenshot"],
     ["POST", "/api/bots/bot_123/computer/viewer-close"],
+    ["POST", "/api/bots/bot_123/local-computer/screenshot"],
+    ["POST", "/api/bots/bot_123/local-computer/join"],
     ["POST", "/api/groups/room-1/messages"],
     ["POST", "/api/groups/room-1/interrupt"],
     ["DELETE", "/api/groups/room-1/queue/queue_1"],
@@ -188,6 +190,24 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/bots/bot_123/computer/provision")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/computer/sleep")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/computer/exec")).toBe(false);
+  });
+
+  it("previews a Local VM without reaching its lifecycle", () => {
+    expect(allowed("POST", "/api/bots/bot_123/local-computer/screenshot")).toBe(true);
+    expect(isCloudDesktopAccess("POST", "/api/bots/bot_123/local-computer/screenshot")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/local-computer/screenshot")).toBe(false);
+    expect(allowed("GET", "/api/bots/bot_123/local-computer")).toBe(false);
+    for (const action of ["run", "stop", "remove"]) {
+      expect(allowed("POST", `/api/bots/bot_123/local-computer/${action}`)).toBe(false);
+    }
+    expect(allowed("POST", "/api/local-computer/screenshot")).toBe(false);
+  });
+
+  it("joins a Local VM's live desktop only behind computer access", () => {
+    expect(allowed("POST", "/api/bots/bot_123/local-computer/join")).toBe(true);
+    expect(isCloudDesktopAccess("POST", "/api/bots/bot_123/local-computer/join")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/local-computer/join")).toBe(false);
+    expect(allowed("POST", "/api/local-computer/join")).toBe(false);
   });
 
   it("allows only the exact encrypted credential submission verb", () => {

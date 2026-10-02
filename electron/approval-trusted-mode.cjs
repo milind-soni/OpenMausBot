@@ -8,7 +8,7 @@ function plainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
-function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto = false, threadId, modelSelection, updateBotDefault, threadOnly = false, allThreads = false) {
+function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto = false, threadId, modelSelection, updateBotDefault, threadOnly = false, allThreads = false, refreshPermissions = false) {
   if (typeof requestId !== "string" || !REQUEST_ID.test(requestId)) {
     throw new Error("invalid trusted approval-mode request id");
   }
@@ -35,6 +35,11 @@ function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto
     (!threadOnly && mode !== "full" && mode !== "custom" && modelSelection === undefined))) {
     throw new Error("invalid thread for trusted approval mode");
   }
+  // A refresh copies the bot's saved level onto one thread. It stays
+  // thread-scoped so a lost reply cannot downgrade the bot default.
+  if (typeof refreshPermissions !== "boolean" || (refreshPermissions && (!threadOnly || threadId === undefined || allThreads || modelSelection !== undefined))) {
+    throw new Error("invalid permission refresh");
+  }
   return {
     type: "approval-trusted-mode-set",
     requestId,
@@ -44,6 +49,7 @@ function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto
     ...(threadId !== undefined ? { threadId } : {}),
     ...(threadOnly ? { threadOnly: true } : {}),
     ...(allThreads ? { allThreads: true } : {}),
+    ...(refreshPermissions ? { refreshPermissions: true } : {}),
     ...(modelSelection !== undefined ? { modelSelection, updateBotDefault } : {}),
   };
 }
@@ -124,8 +130,8 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
   const usedRequestIds = new Set();
   const latestRequestByBot = new Map();
 
-  function nextMessage(botId, mode, acknowledgeLocalAuto = false, threadId, modelSelection, updateBotDefault, threadOnly = false, allThreads = false) {
-    const message = trustedApprovalModeRequest(randomId(), botId, mode, acknowledgeLocalAuto, threadId, modelSelection, updateBotDefault, threadOnly, allThreads);
+  function nextMessage(botId, mode, acknowledgeLocalAuto = false, threadId, modelSelection, updateBotDefault, threadOnly = false, allThreads = false, refreshPermissions = false) {
+    const message = trustedApprovalModeRequest(randomId(), botId, mode, acknowledgeLocalAuto, threadId, modelSelection, updateBotDefault, threadOnly, allThreads, refreshPermissions);
     if (usedRequestIds.has(message.requestId)) {
       throw new Error("Trusted approval-mode request id was reused");
     }
@@ -148,7 +154,7 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
     }
     let message;
     try {
-      message = nextMessage(botId, mode, options.acknowledgeLocalAuto ?? false, options.threadId, options.modelSelection, options.updateBotDefault, options.threadOnly ?? false, options.allThreads ?? false);
+      message = nextMessage(botId, mode, options.acknowledgeLocalAuto ?? false, options.threadId, options.modelSelection, options.updateBotDefault, options.threadOnly ?? false, options.allThreads ?? false, options.refreshPermissions ?? false);
     } catch (error) {
       return Promise.reject(error);
     }

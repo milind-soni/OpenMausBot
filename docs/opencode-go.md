@@ -14,6 +14,9 @@ same runtime as the other ACP engines.
 3. Restart OpenMausBot. It reuses OpenCode's existing connections and model
    configuration automatically.
 
+For OpenRouter, Fireworks AI, DeepSeek, Cline or your own provider, see
+[Other model providers](../apps/docs/content/docs/providers/model-providers.mdx).
+
 OpenCode includes anonymous free models. A Zen, Go, OpenRouter, or other
 provider connection expands the catalog according to the installed CLI. An
 OpenCode API key can optionally be stored under Settings → Connections. It is

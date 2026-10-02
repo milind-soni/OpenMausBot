@@ -40,6 +40,18 @@ beforeEach(() => { calls.length = 0; state = { held: false, helpOpen: false }; c
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 
 describe("chat Boat bridge", () => {
+  it("advertises and executes only the selected leased-computer tool", async () => {
+    const signal = new AbortController().signal;
+    const session = await mount(integrations, signal, true, { allow: ["mcp:computer:get_screen_size"] });
+    try {
+      expect(session.definitions.map((tool) => tool.function.name)).toEqual(["computer_get_screen_size"]);
+      await expect(session.execute("computer_exec", { command: "must not run" }, signal)).rejects.toThrow("not advertised");
+      expect(calls).toEqual([]);
+      expect((await session.execute("computer_get_screen_size", {}, signal)).ok).toBe(true);
+      expect(calls.map((call) => call.path)).toEqual(["/control", "/boxes/bx_23456789/commands"]);
+    } finally { await session.close(); }
+  });
+
   it("mounts only with computer support and a leased control gate", async () => {
     const signal = new AbortController().signal;
     const disabled = await mount(integrations, signal);

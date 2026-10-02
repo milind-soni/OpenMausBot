@@ -122,6 +122,16 @@ describe("queueDelegation", () => {
     expect(_pendingCount(from.threadId)).toBe(0);
   });
 
+  it("lets a cross-bot send start a new ownership chain at the depth cap", () => {
+    const result = queueDelegation(commsBus, from, {
+      toBotId: target.id,
+      message: "own this",
+      depth: 1,
+      oneWay: true,
+    }, 1);
+    expect(result.result).toBe("ok");
+  });
+
   it("rejects when the target bot does not exist", () => {
     const result = queueDelegation(commsBus, from, {
       toBotId: "ghost",
@@ -678,6 +688,30 @@ describe("drainDelegations", () => {
     expect(runTargetCalls).toEqual([]);
   });
 
+  it.each(["missing target", "deleted target thread", "deleted source too"] as const)(
+    "reports one-way delivery failure after %s without waking the sender or recreating a thread",
+    async (change) => {
+      const source = store.createTask(from.id, "Source", false)!;
+      const opened = store.createTask(target.id, "Recipient", false)!;
+      const queued = queueDelegation(commsBus, from, {
+        toBotId: target.id, message: "Independent work", depth: 0, oneWay: true,
+        ...(change !== "missing target" ? { targetThreadId: opened.threadId } : {}),
+      }, 1, source.threadId);
+      if (change === "missing target") store.deleteBot(target.id);
+      else store.deleteTask(target.id, opened.threadId);
+      if (change === "deleted source too") store.deleteTask(from.id, source.threadId);
+      const runTarget = vi.fn();
+      const settled = vi.fn();
+      drainDelegations(commsBus, approvalBus, source.threadId, runTarget, settled);
+      await waitFor(() => findDelegationReceipt(queued.id!) && _pendingCount(source.threadId) === 0);
+      expect(runTarget).not.toHaveBeenCalled();
+      expect(settled).not.toHaveBeenCalled();
+      expect(store.messagesFor(opened.threadId)).toEqual([]);
+      if (change === "deleted source too") expect(store.messagesFor(source.threadId)).toEqual([]);
+      else expect(store.messagesFor(source.threadId).some(message => message.tool?.ok === false)).toBe(true);
+    },
+  );
+
   it("auto-allows when alwaysAllow already covers the pair (no card pushed)", async () => {
     store.patchBot(from.id, {
       approvePeerComms: true,
@@ -1157,6 +1191,16 @@ describe("busy waits and expiry", () => {
     discardDelegations(commsBus, from.threadId);
     expect(_pendingCount(from.threadId)).toBe(0);
     expect(findDelegationReceipt(queued.id!)).toMatchObject({ status: "dropped" });
+  });
+
+  it("keeps an accepted one-way send when its source turn fails", () => {
+    const opened = store.createTask(target.id, "Owned work", false)!;
+    queueDelegation(commsBus, from, {
+      toBotId: target.id, message: "keep running", depth: 0,
+      targetThreadId: opened.threadId, oneWay: true,
+    }, 1);
+    discardDelegations(commsBus, from.threadId);
+    expect(_pendingCount(from.threadId)).toBe(1);
   });
 
   it("expires a handoff nobody could take within 24 hours, and wakes the delegator", async () => {

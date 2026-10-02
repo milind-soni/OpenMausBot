@@ -25,10 +25,10 @@
     "OMB_TUNNEL_LIMIT": "1000",
     "OMB_DNS_RECORD_LIMIT": "1000",
     // "on" marks idle tunnels for cleanup; "observe" only logs candidates.
-    "OMB_TUNNEL_RECLAIM": "observe",
+    "OMB_TUNNEL_RECLAIM": "on",
     // Days a tunnel must have been offline (and its installation quiet)
     // before reclaim. Never-connected tunnels use a fixed seven days.
-    "OMB_TUNNEL_OFFLINE_RECLAIM_DAYS": "21",
+    "OMB_TUNNEL_OFFLINE_RECLAIM_DAYS": "14",
     // Cleanup rows per five-minute cron run. 20 needs Workers Paid; use 4 on
     // Workers Free (50 subrequests per invocation).
     "OMB_CLEANUP_SWEEP_LIMIT": "4"

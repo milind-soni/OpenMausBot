@@ -9,6 +9,7 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQuestions, questionChoices } from "../../shared/ask-question.ts";
+import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
@@ -25,6 +26,7 @@ export interface OpenAIChatMessage {
   tool_calls?: ChatToolCall[];
   tool_call_id?: string;
   reasoning_content?: string;
+  reasoning?: string;
   reasoning_details?: Record<string, unknown>[];
 }
 
@@ -91,6 +93,9 @@ interface RuntimeOptions<Config> {
   refreshModels?: () => Promise<void>;
   generateModel?: () => string;
   reasoning?: boolean;
+  /** Field the provider reads replayed reasoning from; Cerebras rejects
+   * `reasoning_content` and takes `reasoning`. */
+  reasoningReplayField?: "reasoning_content" | "reasoning";
   contentText?: (content: unknown) => string;
   billing?: "metered";
   includeUsageInCompleted?: boolean;
@@ -100,6 +105,14 @@ interface RuntimeOptions<Config> {
   tools?: boolean;
   /** Opt-in structured images and harness-authorized computer/browser MCP. */
   computerUse?: boolean;
+  /** Whether a model accepts image parts (default: every model does). A
+   * text-only model keeps the computer and browser tools, whose snapshots
+   * and page reads are text, but never receives a screenshot or attachment. */
+  imageInput?: (model: string) => boolean;
+  /** Smaller models sometimes announce a step ("Checking the page first —")
+   * and end the turn without calling a tool. When set, such a reply gets one
+   * nudge per turn to act; a question, or anything longer, ends the turn. */
+  nudgeAnnouncedAction?: boolean;
 }
 
 const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
@@ -111,6 +124,19 @@ const asError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
 
 class UnsupportedChatToolsError extends Error {}
+
+const NUDGE_ANNOUNCED_ACTION = "You said what you would do next but called no tool. Do it now with your tools, or reply with your final answer if nothing is left to do.";
+
+/** A short reply that only announces a next step, with nothing to answer. */
+export function announcesAction(text: string): boolean {
+  const reply = text.trim();
+  if (!reply || reply.length > 400 || reply.includes("?")) return false;
+  return /(?:[:\u2014\u2013]|\.\.\.|\u2026)$/.test(reply) ||
+    /^(?:checking|let me|i'll|i will|i'm going to|i am going to|opening|pulling|looking|searching|navigating|reading|fetching|loading|now (?:i'll|let me|opening|checking|pulling|reading))\b/i.test(reply);
+}
+
+const TEXT_ONLY_ATTACHMENT_NOTE = "[The person attached image(s), but this model cannot see images. Say so if the request depends on them.]";
+const TEXT_ONLY_SCREENSHOT_NOTE = "[Screenshot not shown: this model cannot see images. Read the page with a snapshot or a text tool instead.]";
 
 function rejectsToolsParameter(status: number, body: string): boolean {
   if (status !== 400 && status !== 422) return false;
@@ -353,6 +379,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     }
   };
 
+  const seesImages = (turn: SendTurnInput) =>
+    options.imageInput?.(turn.model || options.models().default) ?? true;
   const messagesFor = (turn: SendTurnInput): OpenAIChatMessage[] => {
     // The system message is the head of the resent prefix, so only the
     // stable half belongs there: a volatile edit must not re-price the
@@ -373,7 +401,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         role: message.role,
         content: message.text,
       })),
-      { role: "user", content: options.computerUse ? chatUserContent(userTurn) : userTurn.text },
+      { role: "user", content: !options.computerUse ? userTurn.text
+        : seesImages(turn) ? chatUserContent(userTurn)
+        : userTurn.images?.length ? `${userTurn.text}\n\n${TEXT_ONLY_ATTACHMENT_NOTE}` : userTurn.text },
     ];
   };
 
@@ -449,15 +479,20 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let toolFailed = false;
       const denials: string[] = [];
       const seenCalls = new Set<string>();
+      let nudged = false;
       try {
-        tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse);
-        let optionalQuestionOnly = options.tools !== false && tools.definitions.length === 0;
+        const parsed = parseToolScope(turn.toolScope);
+        if (!parsed.ok) throw new Error(parsed.error);
+        const scope = parsed.scope;
+        tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse, scope);
+        const questionAllowed = options.tools !== false && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
+        let optionalQuestionOnly = questionAllowed && tools.definitions.length === 0;
         // The runtime's one built-in tool rides the same list: ask_user is
         // how a chat-completions engine reaches a person. An MCP server that
         // squats the name cannot shadow it — dispatch intercepts the name
         // before validate — but the definition is then skipped so the list
         // never advertises two.
-        if (options.tools !== false && !tools.definitions.some((definition) => definition.function.name === ASK_USER_TOOL)) {
+        if (questionAllowed && !tools.definitions.some((definition) => definition.function.name === ASK_USER_TOOL)) {
           tools.definitions.push(ASK_USER_TOOL_DEFINITION);
         }
         for (let round = 0; round < 16; round++) {
@@ -545,6 +580,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             if (completion.finishReason && completion.finishReason !== "stop") {
               throw new ChatProtocolError(`provider did not finish the response (${completion.finishReason})`);
             }
+            if (options.nudgeAnnouncedAction && !nudged && tools.definitions.length && announcesAction(completion.text)) {
+              nudged = true;
+              messages.push({ role: "assistant", content: completion.text }, { role: "user", content: NUDGE_ANNOUNCED_ACTION });
+              continue;
+            }
             if (toolFailed) {
               stopReason = "tool_error";
               throw new ChatProtocolError("One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.");
@@ -560,7 +600,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           if (seenCalls.size > MAX_CHAT_TOOL_CALLS) throw new ChatProtocolError("tool-call limit reached");
           messages.push({ role: "assistant", content: completion.text || null, tool_calls: completion.toolCalls,
-            ...(completion.protocolReasoning && !reasoningReplayRejected.has(model) ? { reasoning_content: completion.protocolReasoning } : {}),
+            ...(completion.protocolReasoning && !reasoningReplayRejected.has(model) ? { [options.reasoningReplayField ?? "reasoning_content"]: completion.protocolReasoning } : {}),
             ...(completion.protocolReasoningDetails.length ? { reasoning_details: completion.protocolReasoningDetails } : {}),
           });
           const screenshotParts: ChatContentPart[] = [];
@@ -576,6 +616,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               if (!object(args)) throw new ChatProtocolError("tool arguments must be a JSON object");
               const inputPreview = preview(args);
               if (call.function.name === ASK_USER_TOOL) {
+                if (!questionAllowed || !allowsTool(scope, { kind: "native", name: ASK_USER_TOOL })) throw new Error("Tool selection excludes this tool");
                 // A question is the person's card, not a permission, so it is
                 // handled before the gate below: under Full access that gate
                 // would auto-run an unanswered ask, and under Ask it would
@@ -617,6 +658,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 started = true;
                 if (allowed) {
                   result = await tools.execute(call.function.name, args as Record<string, unknown>, abort.signal);
+                  if (result.images?.length && !seesImages(turn)) {
+                    const { images: _dropped, ...rest } = result;
+                    result = { ...rest, text: `${rest.text}\n${TEXT_ONLY_SCREENSHOT_NOTE}` };
+                  }
                   if (result.images?.length) {
                     try {
                       assertImageTransport(options.apiUrl);

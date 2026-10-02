@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   augmentedPath,
+  findCliCandidates,
   harnessHome,
   registerPathDir,
   resetPathCache,
@@ -180,6 +181,53 @@ describe("augmentedPath", () => {
     } finally {
       if (previous === undefined) delete process.env.LOCALAPPDATA;
       else process.env.LOCALAPPDATA = previous;
+      resetPathCacheForTests();
+      rmSync(localAppData, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== "win32")("finds Docker Desktop's bin dir (#2117)", () => {
+    const previous = process.env.ProgramFiles;
+    const programFiles = mkdtempSync(join(tmpdir(), "omb-programfiles-"));
+    try {
+      process.env.ProgramFiles = programFiles;
+      const dockerBin = join(programFiles, "Docker", "Docker", "resources", "bin");
+      mkdirSync(dockerBin, { recursive: true });
+      resetPathCacheForTests();
+      expect(augmentedPath().split(delimiter)).toContain(dockerBin);
+    } finally {
+      if (previous === undefined) delete process.env.ProgramFiles;
+      else process.env.ProgramFiles = previous;
+      resetPathCacheForTests();
+      rmSync(programFiles, { recursive: true, force: true });
+    }
+  });
+
+  // MOCA-272: OMB installs Cursor from Settings with cursor.com's Windows
+  // script, which puts cursor-agent.* (and `agent` copies) in
+  // %LOCALAPPDATA%\cursor-agent and adds that to the user PATH — which a
+  // running app never sees. Simulated so it runs on every platform.
+  it("finds Cursor installed after launch on Windows", () => {
+    const realPlatform = process.platform;
+    const previous = { LOCALAPPDATA: process.env.LOCALAPPDATA, PATHEXT: process.env.PATHEXT };
+    const localAppData = mkdtempSync(join(tmpdir(), "omb-localappdata-"));
+    try {
+      Object.defineProperty(process, "platform", { value: "win32" });
+      process.env.LOCALAPPDATA = localAppData;
+      // The simulated Windows platform still has the host's case-sensitive filesystem.
+      process.env.PATHEXT = ".com;.exe;.bat;.cmd";
+      const cursorDir = join(localAppData, "cursor-agent");
+      mkdirSync(join(cursorDir, "versions", "2026.09.28-64d2043"), { recursive: true });
+      for (const name of ["cursor-agent.cmd", "cursor-agent.ps1", "agent.cmd", "agent.ps1"]) writeFileSync(join(cursorDir, name), "@echo off\n");
+      resetPathCacheForTests();
+      expect(augmentedPath().split(delimiter)).toContain(cursorDir);
+      expect(findCliCandidates("cursor-agent").map((path) => path.toLowerCase())).toContain(join(cursorDir, "cursor-agent.cmd").toLowerCase());
+    } finally {
+      Object.defineProperty(process, "platform", { value: realPlatform });
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
       resetPathCacheForTests();
       rmSync(localAppData, { recursive: true, force: true });
     }

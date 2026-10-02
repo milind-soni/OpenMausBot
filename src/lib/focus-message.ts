@@ -37,7 +37,40 @@ export async function landOnSearchHit(
       dispatch({ type: "threadActive", threadId: hit.threadId, activeLeafId: branch.activeLeafId });
     }
   }
-  dispatch({ type: "focusMessage", threadId: hit.threadId, messageId: hit.messageId });
+  dispatch({
+    type: "focusMessage",
+    threadId: hit.threadId,
+    messageId: hit.messageId,
+    matchText: hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength),
+  });
+}
+
+function matchRange(root: HTMLElement, text: string): Range | null {
+  const needle = text.trim();
+  if (!needle) return null;
+  const nodes: Text[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let rendered = "";
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    nodes.push(node);
+    rendered += node.data;
+  }
+  const pattern = needle.split(/\s+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+  const match = new RegExp(pattern, "iu").exec(rendered);
+  if (!match) return null;
+  const range = document.createRange();
+  let offset = 0;
+  for (const node of nodes) {
+    const end = offset + node.length;
+    if (match.index >= offset && match.index < end) range.setStart(node, match.index - offset);
+    if (match.index + match[0].length <= end) {
+      range.setEnd(node, match.index + match[0].length - offset);
+      return range;
+    }
+    offset = end;
+  }
+  return null;
 }
 
 export function useFocusMessage(threadId: string, ready: boolean) {
@@ -50,11 +83,14 @@ export function useFocusMessage(threadId: string, ready: boolean) {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let flashTimer: ReturnType<typeof setTimeout> | null = null;
+    let scrollFrame: number | null = null;
     let target: HTMLElement | null = null;
+    let highlight: Highlight | null = null;
     const attempt = () => {
       if (cancelled) return;
       const wrapper = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(focus.messageId)}"]`);
-      target = wrapper?.lastElementChild as HTMLElement | null;
+      const row = wrapper?.lastElementChild as HTMLElement | null;
+      target = focus.matchText ? row?.querySelector<HTMLElement>("[data-chat-bubble]") ?? row : row;
       if (!target) {
         if (tries++ < 20) retryTimer = setTimeout(attempt, 100);
         return;
@@ -62,6 +98,20 @@ export function useFocusMessage(threadId: string, ready: boolean) {
       const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
       target.scrollIntoView({ block: "center", behavior: reducedMotion ? "auto" : "smooth" });
       target.classList.add(...FLASH_CLASSES);
+      const textRoots = target.querySelectorAll<HTMLElement>(".chat-md, .chat-text");
+      const textRoot = textRoots.item(textRoots.length - 1) ?? target;
+      const range = matchRange(textRoot, focus.matchText ?? "");
+      if (range && CSS.highlights) {
+        highlight = new Highlight(range);
+        CSS.highlights.set("search-result-text", highlight);
+        scrollFrame = requestAnimationFrame(() => {
+          const scroller = target?.closest<HTMLElement>(".overflow-y-auto");
+          if (!scroller) return;
+          const match = range.getBoundingClientRect();
+          const viewport = scroller.getBoundingClientRect();
+          scroller.scrollTop += match.top + match.height / 2 - viewport.top - viewport.height / 2;
+        });
+      }
       // Consume only after the target is mounted and the flash has begun.
       // `consumed` is intentionally not an effect dependency, so this active
       // flash survives the bookkeeping update while future remounts ignore it.
@@ -73,7 +123,9 @@ export function useFocusMessage(threadId: string, ready: boolean) {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
       if (flashTimer) clearTimeout(flashTimer);
+      if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
       target?.classList.remove(...FLASH_CLASSES);
+      if (highlight && CSS.highlights.get("search-result-text") === highlight) CSS.highlights.delete("search-result-text");
     };
   }, [dispatch, focus?.nonce, focus?.threadId, focus?.messageId, threadId, ready]);
 }

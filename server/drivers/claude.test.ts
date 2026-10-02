@@ -441,6 +441,34 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     scratch = mkdtempSync(join(tmpdir(), "omb-claude-test-"));
   });
 
+  it("refuses an unsupported native selection before launching, even with instance tools and Full access", async () => {
+    const dump = join(scratch, "scope-refused.json"); process.env.FAKE_CLAUDE_DUMP = dump;
+    await create("echo", {}, { tools: ["Read"], disallowedTools: ["Write"] });
+    await expect(instance.adapter.sendTurn({ threadId: "scope-refused", text: "Must not run", toolScope: { allow: ["native:Read", "native:Write"] }, approvalMode: "full", guestConfined: true })).rejects.toThrow(/native tool selection.*not supported/i);
+    expect(existsSync(dump)).toBe(false);
+  });
+
+  it("gates every eligible MCP mount while preserving guest and instance restrictions", async () => {
+    const dump = join(scratch, "scope-mcp.json"); process.env.FAKE_CLAUDE_DUMP = dump;
+    await create("echo", { FAKE_CLAUDE_VERSION: "2.1.284" }, { tools: ["Read"], disallowedTools: ["Write"] });
+    await instance.adapter.sendTurn({ threadId: "scope-mcp", text: "Fixture", approvalMode: "ask", guestConfined: true, toolScope: { allow: ["native:*", "mcp:agents:list_bots"] }, integrations: {
+      agents: { command: "node", args: ["agents"], env: {} }, browser: { command: "node", args: ["browser"], env: {} },
+    } });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain("--restricted");
+    expect(seen.argv[seen.argv.indexOf("--disallowedTools") + 1]).toBe("Write");
+    expect(seen.mcpConfig.mcpServers).not.toHaveProperty("browser");
+    expect(JSON.parse(seen.mcpConfig.mcpServers.agents.env.OMB_GATE_TOOL_SCOPE)).toEqual({ allow: ["native:*", "mcp:agents:list_bots"] });
+  });
+
+  it("refuses native MCP inheritance when a bot has an explicit selection", async () => {
+    const dump = join(scratch, "scope-inherited-mcp.json"); process.env.FAKE_CLAUDE_DUMP = dump;
+    await create();
+    await expect(instance.adapter.sendTurn({ threadId: "scope-inherited-mcp", text: "Must not run", mcpFromUserConfig: true, toolScope: { allow: ["native:*"] } })).rejects.toThrow(/restricted MCP configuration/);
+    expect(existsSync(dump)).toBe(false);
+  });
+
   afterEach(async () => {
     delete process.env.FAKE_CLAUDE_MODE;
     delete process.env.FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS;
@@ -1262,6 +1290,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
   it("compacts the CLI session at a window the harness picks", async () => {
     await create();
+    await instance.snapshot();
     const dump = join(scratch, "compact.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
 
@@ -1434,6 +1463,19 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     });
   });
 
+  it("withholds --autocompact from a CLI above the floor whose --help does not list it", async () => {
+    // 2.1.129 clears the 2.1.122 floor yet rejects the flag ("unknown option")
+    const dump = join(scratch, "no-autocompact-cli.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.129", FAKE_CLAUDE_AUTOCOMPACT: "0" });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-no-autocompact", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--autocompact");
+    expect(seen.argv).toContain("--strict-mcp-config");
+  });
+
   it("keeps only the isolation flag a very old CLI accepts", async () => {
     // 1.0.100: --strict-mcp-config exists (1.0.60), --setting-sources does
     // not yet (1.0.122)
@@ -1475,14 +1517,13 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect((await instance.snapshot()).warning).toBeUndefined();
   });
 
-  it("assumes a current CLI on a turn that runs before any snapshot", async () => {
-    // no CLI start-up of its own: the flags are the default, and the next
-    // snapshot corrects an older install
+  it.each(["2.1.100", "2.1.129", "2.1.267"])("omits unconfirmed --autocompact before a snapshot on Claude %s", async (version) => {
+    // Version alone is insufficient: even some newer builds reject the flag.
     const dump = join(scratch, "unsnapshotted.json");
-    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.100" });
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: version });
     await instance.adapter.sendTurn({ threadId: "t-unsnapshotted", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
-    expect(JSON.parse(readFileSync(dump, "utf8")).argv).toContain("--autocompact");
+    expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
   });
 
   it("maps a CLI version onto the flags it accepts", () => {

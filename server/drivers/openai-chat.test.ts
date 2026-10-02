@@ -2,7 +2,7 @@
 // through the openai-compat driver. MiniMax's api.minimax.io/v1 closes the
 // connection after the finish_reason chunk without ever sending `data: [DONE]`,
 // and reports account failures as HTTP 200 with a JSON `base_resp` body.
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import type { RuntimeEvent } from "../contracts.ts";
 import { GrokDriver } from "./grok.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
+import { MistralDriver } from "./mistral.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -108,11 +109,12 @@ describe("createOpenAIChatRuntime tool approvals", () => {
   const mcpDir: string[] = [];
   afterEach(() => { for (const d of mcpDir.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
-  const toolServer = () => {
+  const toolServer = (receipt?: string): { command: string; args: string[]; env: Record<string, string> } => {
     const dir = mkdtempSync(join(tmpdir(), "omb-chat-approval-"));
     mcpDir.push(dir);
     const script = join(dir, "fake-mcp.mjs");
     writeFileSync(script, `#!/usr/bin/env node
+      import { appendFileSync } from "node:fs";
       const send = (m) => process.stdout.write(JSON.stringify(m) + "\\n");
       let buffer = "";
       process.stdin.setEncoding("utf8");
@@ -124,13 +126,53 @@ describe("createOpenAIChatRuntime tool approvals", () => {
           const m = JSON.parse(line);
           if (m.method === "initialize") send({jsonrpc:"2.0",id:m.id,result:{protocolVersion:"2024-11-05",capabilities:{tools:{}}}});
           else if (m.method === "tools/list") send({jsonrpc:"2.0",id:m.id,result:{tools:[{name:"write",description:"Fixture write",inputSchema:{type:"object",properties:{},additionalProperties:false}}]}});
-          else if (m.method === "tools/call") send({jsonrpc:"2.0",id:m.id,result:{content:[{type:"text",text:"done"}]}});
+          else if (m.method === "tools/call") {
+            if (process.env.RECEIPT) appendFileSync(process.env.RECEIPT, m.params.name + "\\n");
+            send({jsonrpc:"2.0",id:m.id,result:{content:[{type:"text",text:"done"}]}});
+          }
         }
       });
     `);
     chmodSync(script, 0o755);
-    return { command: script, args: [], env: {} };
+    return { command: script, args: [], env: receipt ? { RECEIPT: receipt } : {} };
   };
+
+  it.each(["openai", "grok", "mistral", "minimax"] as const)("scopes %s schemas and blocks a remembered native question even under Full access", async (driver) => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-api-scope-")); mcpDir.push(dir);
+    const receipt = join(dir, "calls.txt");
+    const calls = [
+      { index: 0, id: "selected", type: "function", function: { name: "fx_write", arguments: "{}" } },
+      { index: 1, id: "withheld", type: "function", function: { name: "ask_user", arguments: JSON.stringify({ questions: [{ question: "Must not be shown" }] }) } },
+    ];
+    const first = `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: calls } }] })}\n\n`
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const last = 'data: {"choices":[{"index":0,"delta":{"content":"Finished."}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(bodies.length === 1 ? first : last, { headers: { "content-type": "text/event-stream" } });
+    }));
+    const common = { instanceId: "scope", displayName: "Synthetic scoped engine", enabled: true, environment: { K: "synthetic", XAI_API_KEY: "synthetic", MISTRAL_API_KEY: "synthetic", MINIMAX_API_KEY: "synthetic" } };
+    const instance = driver === "openai" ? await OpenAICompatDriver.create({ ...common, config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }) })
+      : driver === "grok" ? await GrokDriver.create({ ...common, config: GrokDriver.defaultConfig() })
+      : driver === "mistral" ? await MistralDriver.create({ ...common, config: MistralDriver.defaultConfig() })
+      : await MinimaxDriver.create({ ...common, config: MinimaxDriver.defaultConfig() });
+    const events: RuntimeEvent[] = []; instance.adapter.onEvent((event) => events.push(event));
+    try {
+      await instance.adapter.sendTurn({ threadId: "scoped-api", text: "Use only the selected tool.", approvalMode: "full", toolScope: { allow: ["mcp:fx:write"] }, integrations: { custom: { fx: toolServer(receipt) } } });
+      await vi.waitFor(() => expect(bodies.length).toBeGreaterThan(0), { timeout: 10_000 });
+      expect(bodies[0].tools.map((tool: any) => tool.function.name)).toEqual(["fx_write"]);
+      await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
+      expect(events.filter((event) => event.type === "request.opened")).toEqual([]);
+      expect(readFileSync(receipt, "utf8")).toBe("write\n");
+      const withheld = bodies[1].messages.find((message: any) => message.role === "tool" && message.tool_call_id === "withheld");
+      expect(JSON.parse(withheld.content)).toMatchObject({ ok: false });
+      expect(withheld.content).toMatch(/tool selection excludes/i);
+      expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    } finally { await instance.dispose(); }
+  }, 20_000);
 
   const cardRaisedFor = async (approvalMode: "ask" | "full") => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(

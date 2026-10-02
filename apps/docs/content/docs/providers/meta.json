@@ -1,5 +1,5 @@
 {
   "title": "Agent engines",
   "icon": "BrainCircuit",
-  "pages": ["index", "antigravity", "troubleshooting"]
+  "pages": ["index", "model-providers", "antigravity", "troubleshooting"]
 }

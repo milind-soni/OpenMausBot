@@ -23,16 +23,27 @@ function findElement(tree: ReactNode, attribute: string, value: string): ReactEl
   }
 }
 
-function renderPanel(entries: AttentionThread[] = [entry]) {
+function renderPanel(
+  entries: AttentionThread[] = [entry],
+  options: { collapsed?: boolean; onToggle?: () => void } = {},
+) {
   let tree: ReactNode;
   const onUnpin = vi.fn();
   const onJump = vi.fn();
+  const onToggle = options.onToggle ?? vi.fn();
   function Capture() {
-    tree = SidebarAttentionPanel({ entries, density: "comfortable", onUnpin, onJump });
+    tree = SidebarAttentionPanel({
+      entries,
+      density: "comfortable",
+      onUnpin,
+      onJump,
+      collapsed: options.collapsed ?? false,
+      onToggle,
+    });
     return tree;
   }
   const markup = renderToStaticMarkup(createElement(Capture));
-  return { markup, tree: () => tree as ReactNode, onUnpin, onJump };
+  return { markup, tree: () => tree as ReactNode, onUnpin, onJump, onToggle };
 }
 
 describe("pinned attention panel", () => {
@@ -71,5 +82,34 @@ describe("pinned attention panel", () => {
     const { tree, onUnpin } = renderPanel();
     findElement(tree(), "aria-label", "Unpin")!.props.onClick!({} as MouseEvent);
     expect(onUnpin).toHaveBeenCalledOnce();
+  });
+
+  it("hides the rows but keeps the header when collapsed", () => {
+    const { markup } = renderPanel([entry], { collapsed: true });
+    expect(markup).toContain("Active Threads");
+    expect(markup).not.toContain("Review permission");
+    const label = t("sidebar.section.expand", { name: t("attention.title") });
+    expect(markup).toContain('aria-label="' + label + '"');
+    expect(markup).toContain('aria-expanded="false"');
+  });
+
+  it("shows the empty label only when expanded", () => {
+    const { markup } = renderPanel([], { collapsed: true });
+    expect(markup).not.toContain("No active threads");
+  });
+
+  it("toggles from the collapse/expand control", () => {
+    const { tree, onToggle } = renderPanel([entry], { collapsed: false });
+    const label = t("sidebar.section.collapse", { name: t("attention.title") });
+    findElement(tree(), "aria-label", label)!.props.onClick!({} as MouseEvent);
+    expect(onToggle).toHaveBeenCalledOnce();
+  });
+
+  it("disables collapse when search prevents layout changes", () => {
+    const markup = renderToStaticMarkup(createElement(SidebarAttentionPanel, {
+      entries: [entry], density: "comfortable", onUnpin: vi.fn(), onJump: vi.fn(), collapsed: false,
+    }));
+    expect(markup).toMatch(/<button[^>]+disabled=""[^>]+aria-expanded="true"/);
+    expect(markup).toContain("Review permission");
   });
 });

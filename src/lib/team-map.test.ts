@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTeamMapEdges, buildTeamMapSections, teamMapStatus, type TeamMapSnapshot } from "./team-map";
+import { setLocale } from "./i18n";
+import { buildTeamMapEdges, buildTeamMapSections, teamMapBotCount, teamMapStatus, type TeamMapSnapshot } from "./team-map";
 
 const bots = [
   { id: "chief", name: "Atlas", section: "Work", chiefOfStaff: true, busy: true },
@@ -55,5 +56,14 @@ describe("team map projection", () => {
       label: "Waiting for you",
       tone: "warning",
     });
+  });
+});
+
+describe("team map header", () => {
+  it("counts one bot in the singular", () => {
+    setLocale("en");
+    expect(teamMapBotCount(1)).toBe("1 bot");
+    expect(teamMapBotCount(0)).toBe("0 bots");
+    expect(teamMapBotCount(2)).toBe("2 bots");
   });
 });

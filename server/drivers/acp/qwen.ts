@@ -8,6 +8,7 @@ import { join } from "node:path";
 import type { ModelCatalog } from "../../contracts.ts";
 import { qualifiedModelLabel } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
+import { parseQwenLogLine } from "./quiet-status.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -192,6 +193,15 @@ export function resolveQwenTurnModel(model: string | undefined, env: Record<stri
   return matches[0].id;
 }
 
+/** Where Qwen Code 0.24 writes a session's debug log: `<runtime dir>/debug/<session id>.txt`,
+ * the runtime dir being QWEN_RUNTIME_DIR, else QWEN_HOME, else ~/.qwen. */
+export function qwenDebugLogPath(env: Record<string, string | undefined>, sessionId: string): string | null {
+  const off = ["", "0", "false", "off", "no"].includes((env.QWEN_DEBUG_LOG_FILE ?? "").trim().toLowerCase());
+  if (off || !/^[\w-]{1,128}$/.test(sessionId)) return null;
+  const base = env.QWEN_RUNTIME_DIR || env.QWEN_HOME || harnessHome("qwen", env);
+  return join(base, "debug", `${sessionId}.txt`);
+}
+
 /** Qwen Code's own approval ladder, passed through (qwen --help, 0.24):
  * `--approval-mode default` asks, `auto-edit` approves file edits, `auto`
  * runs Qwen's LLM classifier that approves safe actions and blocks risky
@@ -234,6 +244,13 @@ const support: AcpSupport = {
   authFailure: "continue",
   isAuthenticated: () => true,
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
+  // Qwen says nothing over ACP while it retries a rate limit or compresses
+  // its history, but its debug log does. Turn the log on (unless the person
+  // turned it off) and read it while a prompt is quiet.
+  transformEnv: (env) => {
+    if (env.QWEN_DEBUG_LOG_FILE === undefined) env.QWEN_DEBUG_LOG_FILE = "1";
+  },
+  statusLog: { path: qwenDebugLogPath, parse: parseQwenLogLine },
 };
 
 export const QwenAgentDriver = createAcpDriver(support);

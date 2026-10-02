@@ -9,6 +9,7 @@
  * fails compilation until it is either declared here or explicitly listed
  * as server-private. */
 import type { ApprovalMode } from "./approval-mode.ts";
+import type { ToolScope } from "./tool-scope.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop } from "./bot-avatar.ts";
@@ -66,8 +67,11 @@ export type MausColor =
  * ten-face vocabulary still carry those names. */
 export type MausExpression = string;
 
-/** What the bot is doing right now, as the harness sees it. */
-export type BotActivity = "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
+/** What the bot is doing right now, as the harness sees it. `parked.computer`
+ * is task-level only (ADR-2, #1651): a thread whose turn settled at the
+ * computer wait ceiling and resumes when the seat frees. It never elevates
+ * the bot-level activity and never counts as busy. */
+export type BotActivity = "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
 
 /** The bot that opened a thread on itself or a teammate. */
 export interface TaskOpenedBy {
@@ -325,6 +329,8 @@ export interface WireBot {
   memoryUpkeep?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */
   mcpServers?: string[];
+  /** Owner-selected original tool identities. An empty allowlist permits none. */
+  toolScope?: ToolScope;
   /** Id of a named browser profile; absent = the bot's own private session. */
   browserProfile?: string;
   /** Public, package-authored playbooks installed for this bot. */
@@ -482,6 +488,8 @@ export interface OptionCardData {
   title: string;
   subtitle: string;
   options: string[];
+  /** Distinguishes a provider question from an approval after its live run ends. */
+  requestType?: "permission" | "question";
   answered?: string;
   /** What was actually answered, when the answer is words rather than a
    * verdict. */
@@ -641,6 +649,30 @@ export type SteerQueueReason = "capacity" | "group-turn";
 /** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the
  * `bot.queued` frame carries them: threadId → queued items. */
 export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>>;
+
+/** Skills library (features.skillsLibrary) browse surface: one row per
+ * library entry, with the bots currently assigned to it. Version comes
+ * from the org package stamp when one exists; locally imported skills
+ * carry null. */
+export interface SkillsLibrarySkillWire {
+  name: string;
+  description: string;
+  source: string;
+  enabled: boolean;
+  tags: string[];
+  version: string | null;
+  importedAt: string;
+  license?: string;
+  compatibility?: string;
+  warnings: string[];
+  assignedBots: Array<{ id: string; name: string }>;
+}
+
+/** PUT body for a bot's assignment list: the full list, applied
+ * idempotently. */
+export interface BotAssignedSkillsWire {
+  skills: string[];
+}
 
 export type ServerFrame =
   | { kind: "sections"; sections: string[] }

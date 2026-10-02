@@ -262,8 +262,54 @@ const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string, mu
 /** The device-facing handler: refuse a browser, check the allowlist, check
  * the token, then replay the request to the harness over loopback and scrub
  * what comes back. Pairing is the one route that stops here. */
+/** Ask the harness, as the paired device, whether a control lease still
+ * holds a bot's computer. Read-only (`action: "check"`); every failure —
+ * no token yet, a refusal, a timeout, an unreadable answer — is "no". */
+function harnessControlCheck(options: ProxyOptions) {
+  return (deviceId: string, botId: string, controlLeaseId: string): Promise<boolean> => new Promise((resolve) => {
+    const mutationToken = options.mutationToken?.();
+    if (options.mutationToken && !mutationToken) return resolve(false);
+    const body = JSON.stringify({ action: "check", controlLeaseId });
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      "content-type": "application/json",
+      "content-length": String(Buffer.byteLength(body)),
+      "x-openmausbot-companion": "1",
+      "x-openmausbot-companion-device": deviceId,
+    };
+    if (mutationToken) headers["x-openmausbot-companion-auth"] = mutationToken;
+    const request = httpRequest({
+      hostname: "127.0.0.1",
+      port: options.harnessPort,
+      path: `/api/bots/${encodeURIComponent(botId)}/computer/control`,
+      method: "POST",
+      headers,
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      response.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > 16_384) return request.destroy();
+        chunks.push(chunk);
+      });
+      response.once("end", () => {
+        try {
+          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { owned?: unknown };
+          resolve(response.statusCode === 200 && parsed.owned === true);
+        } catch {
+          resolve(false);
+        }
+      });
+      response.once("error", () => resolve(false));
+    });
+    request.setTimeout(5_000, () => request.destroy());
+    request.once("error", () => resolve(false));
+    request.end(body);
+  });
+}
+
 export function createProxyHandler(options: ProxyOptions) {
-  const viewers = new CompanionViewerRelay();
+  const viewers = new CompanionViewerRelay({ checkControl: harnessControlCheck(options) });
   const handle = function handle(req: IncomingMessage, res: ServerResponse): void {
     const path = (req.url ?? "/").split("?")[0];
     const method = req.method ?? "GET";
@@ -293,11 +339,11 @@ export function createProxyHandler(options: ProxyOptions) {
     if (denial) return sendJson(res, denial.status, { error: denial.error });
 
     // Pairing a phone grants the ordinary companion surface, not a browser
-    // session with every credential that may exist inside the cloud desktop.
+    // session with every credential that may exist inside a bot's computer.
     // The computer owner enables this capability per device, off by default.
     if (isCloudDesktopAccess(method, path) && !device?.cloudDesktopAccess) {
       return sendJson(res, 403, {
-        error: "cloud desktop access is off for this device — enable it in OpenMausBot → Settings → Remote access",
+        error: "computer access is off for this device — enable it in OpenMausBot → Settings → Remote access",
       });
     }
 
@@ -570,7 +616,12 @@ export function createProxyHandler(options: ProxyOptions) {
           // JSON.parse handles it fine.
           let text: string;
           try {
-            parsed = viewers.rewriteJoinResponse(path, parsed, device?.id);
+            parsed = viewers.rewriteJoinResponse(
+              path,
+              parsed,
+              device?.id,
+              new URL(req.url ?? "/", "http://companion.invalid").searchParams.get("controlLeaseId"),
+            );
             text = JSON.stringify(scrub(parsed));
           } catch {
             sendJson(res, 502, { error: "the response could not be prepared for this device" });

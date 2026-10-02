@@ -156,6 +156,14 @@ internal fun previewText(message: Message): String = when (message.kind) {
  * Port of `isActivityReceipt` in `ChatPreferences.swift`. A routine-run card is
  * not one: it is the run's result, and it stays whatever the setting.
  */
+/**
+ * A status row the server writes while a turn runs ("notice: Qwen hit a rate
+ * limit and is retrying"). Port of `isStatusNotice` in `ChatPreferences.swift`:
+ * it tells the reader what the bot is doing, so it is never hidden or folded.
+ */
+fun isStatusNotice(message: Message): Boolean =
+    message.kind == Message.Kind.ACTIVITY && message.tool?.name?.startsWith("notice:") == true
+
 fun isActivityReceipt(message: Message): Boolean = when (message.kind) {
     Message.Kind.ACTIVITY, Message.Kind.DIGEST, Message.Kind.COMPACTION -> true
     else -> false
@@ -204,13 +212,13 @@ fun transcriptRows(messages: List<Message>, detail: ActivityDetail): List<Transc
             if (turn != null) {
                 flush()
                 add(turn)
-            } else if (message.id in hiddenIds || (detail == ActivityDetail.HIDDEN && isActivityReceipt(message))) {
+            } else if (message.id in hiddenIds || (detail == ActivityDetail.HIDDEN && isActivityReceipt(message) && !isStatusNotice(message))) {
                 // The reversible turn fold owns narration; Hidden owns tools.
             } else if (detail != ActivityDetail.REDUCED || message.kind != Message.Kind.ACTIVITY) {
                 // The digest lands here too: its own row, never a step in a run.
                 flush()
                 add(TranscriptRow.Single(message))
-            } else if (message.tool?.ok == false) {
+            } else if (message.tool?.ok == false || isStatusNotice(message)) {
                 flush()
                 add(TranscriptRow.Single(message))
             } else {

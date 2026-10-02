@@ -1,8 +1,9 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { removeTempDir } from "../testing/cleanup.ts";
 
 import extension, {
   allocateToolName,
@@ -49,10 +50,10 @@ function createClient(source: string, env: Record<string, string> = {}): StdioMc
   return client;
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
   for (const client of clients.splice(0)) client.dispose();
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of tempDirs.splice(0)) await removeTempDir(dir);
   if (originalMcpConfig === undefined) delete process.env.OMB_MCP_CONFIG;
   else process.env.OMB_MCP_CONFIG = originalMcpConfig;
 });
@@ -231,6 +232,112 @@ describe("StdioMcp", () => {
 });
 
 describe("Pi MCP extension registration", () => {
+  const scopedApi = (initial: string[]) => {
+    let active = initial;
+    const tools: RegisteredTool[] = [];
+    const handlers = new Map<string, (event?: any) => any>();
+    return { tools, handlers, current: () => active, restore: (names: string[]) => { active = names; }, api: {
+      registerTool(tool: RegisteredTool) { tools.push(tool); },
+      on(event: string, handler: (event?: any) => any) { handlers.set(event, handler); },
+      getActiveTools: () => [...active], setActiveTools: (names: string[]) => { active = names; },
+    } };
+  };
+  const scopeConfig = (toolScope: unknown, other = {}) => {
+    const dir = tempDir();
+    process.env.OMB_MCP_CONFIG = join(dir, "scope.json");
+    writeFileSync(process.env.OMB_MCP_CONFIG, JSON.stringify({ toolScope, ...other }));
+    return dir;
+  };
+
+  it("intersects native and package tools before the first turn and after restoration", async () => {
+    scopeConfig({ allow: ["native:read", "native:edit", "native:write"] });
+    const f = scopedApi(["read", "write", "bash", "package_tool"]);
+    await extension(f.api);
+    await f.handlers.get("session_start")?.({});
+    expect(f.current()).toEqual(["read", "write"]);
+    f.restore(["read", "write", "bash", "late_package"]);
+    await f.handlers.get("before_agent_start")?.({});
+    expect(f.current()).toEqual(["read", "write"]);
+    f.restore(["edit", "bash"]);
+    await f.handlers.get("session_switch")?.({});
+    await f.handlers.get("model_select")?.({});
+    expect(f.current()).toEqual(["edit"]);
+    expect(await f.handlers.get("tool_call")?.({ toolName: "bash" })).toMatchObject({ block: true });
+    expect(await f.handlers.get("tool_call")?.({ toolName: "read" })).toBeUndefined();
+    f.restore(["read", "bash"]);
+    const payload = { tools: ["read", "bash", "late_package"].map((name) => ({ type: "function", function: { name, parameters: { type: "object" } } })) };
+    await f.handlers.get("before_provider_request")?.({ payload });
+    expect(payload.tools.map((tool) => tool.function.name)).toEqual(["read"]);
+  });
+
+  it("does not confirm a refused active-tool clamp or restore a tool another extension disabled", async () => {
+    const directory = scopeConfig({ allow: ["native:read", "native:write"] });
+    const readyPath = join(directory, "ready.json");
+    scopeConfig({ allow: ["native:read", "native:write"] }, { scopeReadyPath: readyPath });
+    const refused = scopedApi(["read", "bash"]);
+    refused.api.setActiveTools = () => {};
+    await extension(refused.api);
+    expect(() => refused.handlers.get("session_start")?.({})).toThrow(/enforcement/i);
+    expect(JSON.parse(readFileSync(readyPath, "utf8"))).toEqual({ ok: false });
+    const f = scopedApi(["write"]);
+    await extension(f.api);
+    const payload = { tools: ["read", "write"].map((name) => ({ name, input_schema: { type: "object" } })) };
+    await f.handlers.get("before_provider_request")?.({ payload });
+    expect(payload.tools.map((tool) => tool.name)).toEqual(["write"]);
+  });
+
+  it("makes no-tools explicit and refuses unavailable enforcement APIs or corrupt configuration", async () => {
+    scopeConfig({ allow: [] });
+    const f = scopedApi(["read", "bash"]);
+    await extension(f.api);
+    await f.handlers.get("session_start")?.({});
+    expect(f.current()).toEqual([]);
+    expect(await f.handlers.get("tool_call")?.({ toolName: "read" })).toMatchObject({ block: true });
+    await expect(extension({ registerTool() {}, on() {} })).rejects.toThrow(/enforcement/i);
+    writeFileSync(process.env.OMB_MCP_CONFIG!, "not json");
+    await expect(extension(f.api)).rejects.toThrow(/configuration/i);
+  });
+
+  it("removes declarations if enforcement becomes unavailable after startup", async () => {
+    scopeConfig({ allow: ["native:read"] });
+    const f = scopedApi(["read"]);
+    await extension(f.api);
+    await f.handlers.get("session_start")?.({});
+    f.api.setActiveTools = () => {};
+    f.restore(["read", "bash"]);
+    const payload = { tools: ["read", "bash"].map((name) => ({ type: "function", function: { name } })) };
+    // Pi catches extension exceptions and can keep sending the old payload.
+    // This hook must return a deny-all declaration rather than throw past it.
+    await f.handlers.get("before_provider_request")?.({ payload });
+    expect(payload.tools).toEqual([]);
+  });
+
+  it("filters raw MCP identities and still asks before custom execution", async () => {
+    const receipt = join(tempDir(), "execution.txt");
+    const script = fakeMcpScript(`
+      import { createInterface } from "node:readline";
+      import { writeFileSync } from "node:fs";
+      createInterface({input:process.stdin}).on("line", line => {
+        const m = JSON.parse(line); if (m.id === undefined) return;
+        let result = {};
+        if (m.method === "tools/list") result = {tools:[{name:"read-notes",inputSchema:{type:"object"}},{name:"read_notes",inputSchema:{type:"object"}}]};
+        if (m.method === "tools/call") { writeFileSync(process.env.RECEIPT, m.params.name); result = {content:[{type:"text",text:"selected"}]}; }
+        process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:m.id,result}) + "\\n");
+      });
+    `);
+    scopeConfig({ allow: ["mcp:mail:read-notes"] }, { mcpServers: { mail: { command: process.execPath, args: [script], env: { RECEIPT: receipt }, scope: "custom" } } });
+    const f = scopedApi(["read", "mail_read_notes"]);
+    await extension(f.api);
+    try {
+      expect(f.tools.map((tool) => tool.name)).toEqual(["mail_read_notes"]);
+      const blocked = await f.tools[0].execute("denied", {}, undefined, undefined, { ui: { confirm: async () => false } });
+      expect(blocked.content).toMatchObject([{ text: "Blocked by the user." }]);
+      expect(existsSync(receipt)).toBe(false);
+      await f.tools[0].execute("allowed", {}, undefined, undefined, { ui: { confirm: async () => true } });
+      expect(readFileSync(receipt, "utf8")).toBe("read-notes");
+      expect(await f.handlers.get("tool_call")?.({ toolName: "mail_read_notes_2" })).toMatchObject({ block: true });
+    } finally { await f.handlers.get("session_shutdown")?.(); }
+  });
   it("keeps earlier tools alive when a later registration fails", async () => {
     const script = fakeMcpScript(`
       let buffer = "";

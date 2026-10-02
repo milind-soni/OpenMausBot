@@ -39,7 +39,7 @@ describe("boatErrorMessage", () => {
   it("never asks for a token the person never pasted when Cloud Pro's included one is refused", () => {
     for (const status of [401, 403]) {
       const msg = boatErrorMessage(status, "boat create", { message: "This cloud computer key is not valid." }, true);
-      expect(msg).toBe("Cloud Pro's included cloud computers aren't available right now. Try again later.");
+      expect(msg).toBe("The cloud computers included with your Cloud plan aren't available right now. Try again later.");
       expect(msg).not.toMatch(/box_|paste/);
     }
     // Cloud Pro's own refusals (its limits, its subscription) keep their words.

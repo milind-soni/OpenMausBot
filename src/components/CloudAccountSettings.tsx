@@ -14,6 +14,13 @@ const MACHINE_TEXT = {
   failed: "cloudHome.failed",
 } as const;
 
+const PLAN_LABEL: Record<string, string> = { personal: "Personal", pro: "Pro", max: "Max" };
+/** A paid plan's product name. No tier is an Admin that sells only Pro; a
+ * tier newer than this app reads "Cloud". */
+export function cloudPlanLabel(tier?: string): string {
+  return tier === undefined ? "Pro" : Object.hasOwn(PLAN_LABEL, tier) ? PLAN_LABEL[tier] : "Cloud";
+}
+
 /** The person's Cloud machine: where it stands, and one way in. Status and
  * address come only from the verified native snapshot; the pairing code
  * never reaches this page. A render helper (no hooks), part of the card. */
@@ -43,7 +50,7 @@ export function cloudLinkAction(account: CloudAccountState, link: { arrived: boo
   return null;
 }
 
-/** The public native snapshot carries no credential and cannot activate Pro.
+/** The public native snapshot carries no credential and cannot activate a plan.
  * `linkRequest` is non-zero only while openmausbot://cloud has this open. */
 export function CloudAccountSettings({ linkRequest = 0 }: { linkRequest?: number } = {}) {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
@@ -93,7 +100,7 @@ export function CloudAccountSettings({ linkRequest = 0 }: { linkRequest?: number
   if (!bridge) return <p className="text-[13px] text-ink-secondary">{t("cloudAccount.desktopOnly")}</p>;
   const signed = account && ["connected", "unavailable", "reauth-required"].includes(account.status);
   // Status comes only from the server-verified native snapshot; checkout never sets it.
-  const activePro = account?.status === "connected" && account.entitlement?.plan === "pro" && account.entitlement.status === "active";
+  const activePlan = account?.status === "connected" && account.entitlement?.plan === "pro" && account.entitlement.status === "active";
   const message = account?.message === "signout-local-only" ? t("cloudAccount.signoutLocalOnly")
     : account?.message === "signout-storage-failed" || account?.message === "restore-failed" ? t("cloudAccount.storageFailed")
       : account?.status === "reauth-required" ? t("cloudAccount.reauth")
@@ -114,10 +121,10 @@ export function CloudAccountSettings({ linkRequest = 0 }: { linkRequest?: number
       </div>}
       {signed && <div className="flex flex-col gap-3">
         {account.account && <p className="break-all text-[14px] text-ink">{account.account.email}</p>}
-        {account.status === "connected" && <p role="status" className="text-[15px] font-medium text-ink">{activePro ? t("cloudAccount.pro") : t("cloudAccount.free")}</p>}
+        {account.status === "connected" && <p role="status" className="text-[15px] font-medium text-ink">{activePlan ? t("cloudAccount.pro", { plan: cloudPlanLabel(account.entitlement?.tier) }) : t("cloudAccount.free")}</p>}
         <p className="text-[13px] text-ink-secondary">{t("cloudAccount.purchaseHelp")}</p>
         <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.openDashboard())}>{activePro ? t("cloudAccount.manage") : t("cloudAccount.upgrade")}</button>
+          <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.openDashboard())}>{activePlan ? t("cloudAccount.manage") : t("cloudAccount.upgrade")}</button>
           <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.refresh())}>{t("organization.refresh")}</button>
           {!confirm && <button type="button" disabled={busy} className="ui-button" onClick={() => setConfirm(true)}>{t("cloudAccount.signOut")}</button>}
         </div>

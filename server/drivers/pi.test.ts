@@ -79,6 +79,20 @@ describe("parsePiCatalog", () => {
 });
 
 describe("buildMcpServers", () => {
+  it("mounts a selected custom mail server without unrelated built-ins", () => {
+    const servers = buildMcpServers({ threadId: "selected", text: "Read mail", toolScope: { allow: ["mcp:mail:*"] }, integrations: {
+      agents: { command: "node", args: ["agents"], env: {} },
+      localComputer: { command: "node", args: ["computer"], env: {} },
+      custom: { mail: { command: "node", args: ["mail"], env: { SYNTHETIC: "1" } } },
+    } });
+    expect(Object.keys(servers ?? {})).toEqual(["mail"]);
+    expect(servers?.mail).toMatchObject({ scope: "custom" });
+  });
+
+  it("rejects malformed policy and mounts nothing for native-only selection", () => {
+    expect(() => buildMcpServers({ threadId: "bad", text: "Stop", toolScope: { allow: null } as never })).toThrow(/tool selection/i);
+    expect(buildMcpServers({ threadId: "native", text: "Draft", toolScope: { allow: ["native:read", "native:write"] }, integrations: { agents: { command: "node", args: [], env: {} } } })).toBeNull();
+  });
   it("returns null when there are no integrations", () => {
     expect(buildMcpServers({ threadId: "t", text: "hi" })).toBeNull();
   });
@@ -239,6 +253,17 @@ describe("PiDriver turns (fake CLI)", () => {
   beforeEach(() => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
+  });
+
+  it("refuses a restricted turn when the loaded extension has not confirmed enforcement", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-missing-scope-"));
+    const dump = join(dir, "rpc.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    await expect(instance.adapter.sendTurn({ threadId: "missing-enforcement", text: "Must not reach a provider", toolScope: { allow: [] } })).rejects.toThrow(/tool selection.*enforcement/i);
+    const rows = readFileSync(dump, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(rows.some((row) => row.argv?.includes("-e"))).toBe(true);
+    expect(rows.find((row) => row.argv?.includes("-e"))?.mcpConfig?.toolScope).toEqual({ allow: [] });
+    expect(rows.some((row) => row.prompt !== undefined)).toBe(false);
   });
   afterEach(async () => {
     recorder?.stop();

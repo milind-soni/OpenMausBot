@@ -56,7 +56,7 @@ A Cloud home is personal (`server/cloud-owner.ts`): only the owner's own
 devices connect (the desktop app, a phone, a browser signed in from the Cloud
 page), each with an admin session that the Admin's signed pairing, or one of
 those devices, gave it. The server mints and accepts nothing else, and says
-so in one line, "Cloud Pro is personal: only your own devices can connect.":
+so in one line, "OMB Cloud is personal: only your own devices can connect.":
 
 - `POST /api/auth/pairing` refuses a window without admin scope (Remote
   access offers no chat-only choice there), and `POST /api/auth/pair` and
@@ -728,7 +728,7 @@ computers belong to this machine on every request.
   off.
 - **An included token is never the person's key.** It is never written to
   `config.json`, never sent to a client (Settings sees `configured` and
-  `included: true`, and says "Included with Cloud Pro"), and Settings never
+  `included: true`, and says "Included with your Cloud plan"), and Settings never
   verifies, rotates or clears it. The decision model's **Test** button, with
   no key pasted, makes one tiny call through the relay, never to Jev
   directly. Boat's account-change rules still apply: adding an own Boat key

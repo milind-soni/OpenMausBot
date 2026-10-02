@@ -188,6 +188,7 @@ const __APP_VERSION__: string;
           botId: string,
           mode: import("../../shared/approval-mode").ApprovalMode,
           options?: { acknowledgeLocalAuto?: boolean; threadId?: string; threadOnly?: boolean; allThreads?: boolean;
+            refreshPermissions?: boolean;
             modelSelection?: import("../state/store").ModelSelection; updateBotDefault?: boolean },
         ): Promise<import("../state/store").Bot>;
       };

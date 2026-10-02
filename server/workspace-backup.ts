@@ -44,6 +44,7 @@ const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
   "Saved credentials, provider and MCP connections, managed provider login homes and browser login profiles are not transferred. Destination connections are preserved; reconnect on a new device.",
   "Downloaded tools and caches; these can be installed again.",
+  "Installed dependency folders (node_modules) and symbolic links inside conversation work folders; reinstall or recreate them in the project.",
   "External project folders, CLI login homes, browser session homes, OS keychains, companion devices and other servers.",
   "VM/container disk layers and remote cloud data; durable files inside this workspace are included.",
 ];
@@ -312,6 +313,8 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
   const warnings = ["Stop external editors and managed desktops before exporting; files written outside this server cannot be frozen by the backup gate.", "Conversation text and user files are not redacted and may contain secrets you pasted. Keep the encrypted backup private.", RESTORE_WARNING];
   let bytes = 0;
   let skippedLinks = 0;
+  let skippedDependencies = 0;
+  let skippedWorkLinks = 0;
   try {
     const root = realpathSync(dataDir);
     const sourceDb = join(root, "messages.db");
@@ -340,6 +343,21 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
         if (!validRelative(path)) throw new Error("A workspace filename cannot be safely restored on supported platforms.");
         const source = join(directory, name);
         const stat = lstatSync(source);
+        // Installed dependencies come back from the project's lockfile, can
+        // hold more files than this format allows, and are often a link an
+        // agent made to another checkout's install. Leave them out.
+        if (name === "node_modules" && (stat.isDirectory() || stat.isSymbolicLink())) {
+          skippedDependencies++;
+          continue;
+        }
+        // A conversation's work folder (task-workspaces/<bot>/<thread>) holds
+        // what an agent made there, and agents link things in (another
+        // checkout, a virtualenv). A link's target is not this workspace's
+        // data, so the link is left out rather than failing the backup.
+        if (stat.isSymbolicLink() && path.startsWith("task-workspaces/")) {
+          skippedWorkLinks++;
+          continue;
+        }
         if (stat.isSymbolicLink()) {
           let target: string;
           try { target = realpathSync(source); } catch { throw new Error(`Cannot back up dangling symbolic link: ${path}`); }
@@ -382,6 +400,8 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
     };
     walk(root);
     if (skippedLinks) warnings.push(`${skippedLinks} managed skill discovery link(s) were omitted and are recreated by the app.`);
+    if (skippedDependencies) warnings.push(`${skippedDependencies} installed dependency folder(s) (node_modules) were omitted; reinstall them in the project after restoring.`);
+    if (skippedWorkLinks) warnings.push(`${skippedWorkLinks} symbolic link(s) in conversation work folders were omitted; what they point to is outside this backup.`);
     const summary: WorkspaceBackupSummary = {
       format: "openmaus.workspace-backup", version: 1, id: job.id, createdAt: new Date().toISOString(),
       appVersion: options.appVersion ?? "unknown", files: entries.filter((entry) => entry.type === "file").length,

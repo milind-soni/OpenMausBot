@@ -331,10 +331,31 @@ it("the person's Mac, lent through the real connector, is usable by the owner's 
   Object.assign(questions, clean);
   expect((await api("POST", `/api/bots/${questions.id}/messages`, { token: owner, body: { text: "Read my Mac, then ask me which folder." } })).status).toBe(202);
   const ownersRequest = await asked();
-  expect((await api("POST", `/api/threads/${questions.threadId}/respond`, { token: owner, body: { requestId: ownersRequest, behavior: "answer", message: "Plans" } })).status).toBe(200);
+  // ACP can deliver only an offered option; a 200 alone can also report a
+  // rejected answer, which must not stand in for the owner's accepted words.
+  const answered = await api("POST", `/api/threads/${questions.threadId}/respond`, { token: owner, body: { requestId: ownersRequest, behavior: "answer", message: "Docs" } });
+  expect(answered.status).toBe(200);
+  expect(answered.body.outcome).toBe("answered");
   const kept = await reply();
   expect(computersIn(kept, "before")).toBe(1);
   expect(computersIn(kept, "after")).toBe(1);
+  const accepted = (await api("GET", `/api/threads/${questions.threadId}/messages`, { token: owner })).body.messages.find((message: any) => message.card?.requestId === ownersRequest);
+  expect(accepted.card).toMatchObject({ answered: "answer", answeredText: "Docs", answeredBy: { kind: "session", person: expect.stringMatching(/^p_/) } });
+
+  // A rejected option never reached the bot: keep its question open and
+  // do not pretend those words were delivered, or taint the owner's turn.
+  Object.assign(questions, await newAcpBot("Asking bot 3"));
+  expect((await api("POST", `/api/bots/${questions.id}/messages`, { token: owner, body: { text: "Read my Mac, then ask me which folder." } })).status).toBe(202);
+  const rejectedRequest = await asked();
+  const rejected = await api("POST", `/api/threads/${questions.threadId}/respond`, { token: owner, body: { requestId: rejectedRequest, behavior: "answer", message: "Plans" } });
+  expect(rejected.status).toBe(200);
+  expect(rejected.body.outcome).toBe("rejected");
+  const unaffected = await reply();
+  const retained = (await api("GET", `/api/threads/${questions.threadId}/messages`, { token: owner })).body.messages.find((message: any) => message.card?.requestId === rejectedRequest);
+  expect.soft(retained.card).not.toHaveProperty("answeredText");
+  expect(retained.card).not.toHaveProperty("answered");
+  expect(computersIn(unaffected, "before")).toBe(1);
+  expect.soft(computersIn(unaffected, "after")).toBe(1);
 
   // Stop lending: the status API and the bots see it gone at once.
   connector.revoke(env);

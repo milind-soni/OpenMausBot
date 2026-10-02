@@ -1,20 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  PINNED_CIRCLES_KEY,
   SIDEBAR_ATTENTION_PINNED_KEY,
+  UNIVERSAL_PINS_KEY,
   SIDEBAR_COLLAPSED_SECTIONS_KEY,
   SIDEBAR_DENSITY_KEY,
   SIDEBAR_WIDTH_KEY,
   SIDEBAR_SECTION_ORDER_KEY,
+  clampSidebarWidth,
+  loadPinnedCircles,
+  loadUniversalPins,
   loadSidebarAttentionPinned,
   loadCollapsedSections,
   loadSectionOrder,
   loadSidebarDensity,
   loadSidebarWidth,
-  clampSidebarWidth,
+  parsePinnedCircles,
+  parseUniversalPins,
   parseSidebarAttentionPinned,
   parseSidebarDensity,
   saveCollapsedSections,
+  savePinnedCircles,
+  saveUniversalPins,
   saveSectionOrder,
   saveSidebarAttentionPinned,
   saveSidebarDensity,
@@ -123,6 +131,52 @@ describe("sidebar section preferences", () => {
     expect(loadSectionOrder(storage)).toEqual(ids);
   });
 });
+
+describe("pinned circles preference", () => {
+  it("defaults off, stores the exact flag, and survives blocked storage", () => {
+    expect(parsePinnedCircles("true")).toBe(true);
+    expect(parsePinnedCircles("false")).toBe(false);
+    expect(parsePinnedCircles("yes")).toBe(false);
+    expect(parsePinnedCircles("1")).toBe(false);
+    expect(parsePinnedCircles(null)).toBe(false);
+
+    const setItem = vi.fn();
+    savePinnedCircles(true, { setItem });
+    savePinnedCircles(false, { setItem });
+    expect(setItem).toHaveBeenNthCalledWith(1, PINNED_CIRCLES_KEY, "true");
+    expect(setItem).toHaveBeenNthCalledWith(2, PINNED_CIRCLES_KEY, "false");
+    expect(loadPinnedCircles({ getItem: () => "true" })).toBe(true);
+    expect(loadPinnedCircles({ getItem: () => "false" })).toBe(false);
+    expect(loadPinnedCircles({ getItem: () => "untrusted" })).toBe(false);
+    expect(loadPinnedCircles({ getItem: () => { throw new Error("blocked"); } })).toBe(false);
+    expect(loadPinnedCircles(null)).toBe(false);
+    expect(() => savePinnedCircles(true, { setItem: () => { throw new Error("blocked"); } })).not.toThrow();
+    expect(() => savePinnedCircles(true, null)).not.toThrow();
+  });
+});
+
+describe("universal pins preference", () => {
+  it("defaults off, stores the exact flag, and survives blocked storage", () => {
+    expect(parseUniversalPins("true")).toBe(true);
+    expect(parseUniversalPins("false")).toBe(false);
+    expect(parseUniversalPins("yes")).toBe(false);
+    expect(parseUniversalPins(null)).toBe(false);
+
+    const setItem = vi.fn();
+    saveUniversalPins(true, { setItem });
+    saveUniversalPins(false, { setItem });
+    expect(setItem).toHaveBeenNthCalledWith(1, UNIVERSAL_PINS_KEY, "true");
+    expect(setItem).toHaveBeenNthCalledWith(2, UNIVERSAL_PINS_KEY, "false");
+    expect(loadUniversalPins({ getItem: () => "true" })).toBe(true);
+    expect(loadUniversalPins({ getItem: () => "false" })).toBe(false);
+    expect(loadUniversalPins({ getItem: () => "untrusted" })).toBe(false);
+    expect(loadUniversalPins({ getItem: () => { throw new Error("blocked"); } })).toBe(false);
+    expect(loadUniversalPins(null)).toBe(false);
+    expect(() => saveUniversalPins(true, { setItem: () => { throw new Error("blocked"); } })).not.toThrow();
+    expect(() => saveUniversalPins(true, null)).not.toThrow();
+  });
+});
+
 
 describe("sidebar attention pin preference", () => {
   it("round-trips the pinned flag and defaults to the popover", () => {

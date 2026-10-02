@@ -37,6 +37,58 @@ describe("VPS companion viewer relay", () => {
       { joinUrl: "http://203.0.113.8:6901/vnc.html#password=stolen" },
       "device-1",
     )).toEqual({ joinUrl: "http://203.0.113.8:6901/vnc.html#password=stolen" });
+
+    expect(relay.rewriteJoinResponse(
+      "/api/bots/bot-1/local-computer/run",
+      { joinUrl: "http://127.0.0.1:45679/vnc.html#password=vm-secret" },
+      "device-1",
+    )).toEqual({ joinUrl: "http://127.0.0.1:45679/vnc.html#password=vm-secret" });
+  });
+
+  it("binds a Local VM viewer to its control lease and closes it once that lease lets go", async () => {
+    const vmJoin = { joinUrl: "http://127.0.0.1:45679/vnc.html#password=vm-secret" };
+    // No lease, or nothing to check it with: never handed out.
+    expect(() => new CompanionViewerRelay().rewriteJoinResponse(
+      "/api/bots/bot-1/local-computer/join", vmJoin, "device-1", "phone-lease-0123456789",
+    )).toThrow(/control lease/);
+    let owned = true;
+    const asked: string[] = [];
+    const relay = new CompanionViewerRelay({
+      checkIntervalMs: 10,
+      checkControl: async (deviceId, botId, lease) => {
+        asked.push(`${deviceId}/${botId}/${lease}`);
+        return owned;
+      },
+    });
+    expect(() => relay.rewriteJoinResponse("/api/bots/bot-1/local-computer/join", vmJoin, "device-1", null)).toThrow();
+    expect(() => relay.rewriteJoinResponse("/api/bots/bot-1/local-computer/join", vmJoin, "device-1", "short")).toThrow();
+
+    const vm = relay.rewriteJoinResponse(
+      "/api/bots/bot-1/local-computer/join", vmJoin, "device-1", "phone-lease-0123456789",
+    ) as { joinUrl: string };
+    expect(vm.joinUrl).toMatch(/^\/vps-viewer\/[A-Za-z0-9_-]{32}\/vnc\.html#/);
+    expect(vm.joinUrl).not.toContain("127.0.0.1");
+    const viewerPath = vm.joinUrl.split("#")[0];
+    const device = { id: "device-1", cloudDesktopAccess: true };
+    const status = (path: string) => new Promise<number>((resolve) => {
+      const res = {
+        writeHead: (code: number) => { resolve(code); return res; },
+        end: () => undefined,
+        once: () => res,
+        destroy: () => undefined,
+        headersSent: false,
+      };
+      relay.handleHttp({ url: path, method: "POST", headers: {} } as never, res as never, device);
+    });
+    // POST is refused by method, but only after the session is found (404 otherwise).
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(asked[0]).toBe("device-1/bot-1/phone-lease-0123456789");
+    expect(relay.isViewerPath(viewerPath)).toBe(true);
+
+    owned = false;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    // The session is gone: even a well-formed request for it is not found.
+    expect(await status(viewerPath)).toBe(404);
   });
 
   it("pins HTTP and WebSocket traffic to the session, device, and loopback viewer", async () => {

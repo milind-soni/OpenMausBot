@@ -962,7 +962,7 @@ export function vpsContainerRunArgs(
     // someone opens the panel. unless-stopped survives reboots while still
     // honoring an explicit Stop. The shared hardening check accepts exactly
     // this policy for the VPS caller (and only "no"/unset for the Local VM,
-    // whose desktop cannot safely resume).
+    // whose starts are controlled by OMB's turn lifecycle).
     "--restart",
     "unless-stopped",
     "-e",

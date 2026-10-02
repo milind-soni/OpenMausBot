@@ -1581,14 +1581,17 @@ export class RoutineManager {
         // A webhook is an incoming message, so make its task the bot's live
         // chat immediately. Scheduled work stays in its own task unless the
         // workspace has asked for runs to join the conversation they report to.
+        const startedAt = this.now();
+        const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+        const title = `${run.routineName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`;
         const joined = run.target === "room-goal" ? null : this.options.joinConversation?.(run) || null;
         const task = joined
           ? { threadId: joined }
           : run.target === "room-goal"
           ? run.groupId
-            ? this.options.createGoalTask?.(run.groupId, run.routineName) ?? null
+            ? this.options.createGoalTask?.(run.groupId, title) ?? null
             : null
-          : this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook", run.routineId);
+          : this.options.createTask(run.botId, title, run.triggerSource === "webhook", run.routineId);
         if (!task) {
           this.failRun(run, run.target === "room-goal"
             ? "Could not create a room task for this goal"
@@ -1596,7 +1599,7 @@ export class RoutineManager {
           continue;
         }
         run.threadId = task.threadId;
-        run.startedAt = this.now();
+        run.startedAt = startedAt;
         run.status = "running";
         this.save();
         this.emitRun(run);

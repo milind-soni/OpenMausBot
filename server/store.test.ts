@@ -19,12 +19,147 @@ import { Store, toWireTask, type BotRecord } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
 import { TeamComputers } from "./team-computers.ts";
+import { allowsTool } from "../shared/tool-scope.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
 describe("Store", () => {
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("retains tool selection across restarts and distinguishes clearing from no tools", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Scoped drafter" });
+    store.patchBot(bot.id, { toolScope: { allow: [], deny: ["native:bash", "native:bash"] } } as never);
+    expect(new Store(selection).bot(bot.id)).toMatchObject({ toolScope: { allow: [], deny: ["native:bash"] } });
+    expect(() => store.patchBot(bot.id, { toolScope: { allow: null } } as never)).toThrow(/tool selection/i);
+    store.patchBot(bot.id, { toolScope: undefined } as never);
+    expect(new Store(selection).bot(bot.id)).not.toHaveProperty("toolScope");
+  });
+
+  it.each([undefined, { allow: ["native:read"] }, { deny: ["native:bash"] }])("does not activate a wider tool selection when saving %j fails", (toolScope) => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, { toolScope: { allow: [] }, browser: true });
+    const save = vi.spyOn(store as unknown as { saveBots(): void }, "saveBots")
+      .mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => store.patchBot(bot.id, { toolScope, browser: false })).toThrow("disk full");
+    expect(store.bot(bot.id)).toBe(bot);
+    expect(bot.toolScope).toEqual({ allow: [] });
+    expect(allowsTool(bot.toolScope, { kind: "native", name: "read" })).toBe(false);
+    // A failed widening must not undo a runtime revocation in the same edit.
+    expect(bot.browser).toBe(false);
+    expect(new Store(selection).bot(bot.id)?.toolScope).toEqual({ allow: [] });
+    save.mockRestore();
+    store.patchBot(bot.id, { toolScope });
+    expect(allowsTool(bot.toolScope, { kind: "native", name: "read" })).toBe(true);
+    expect(new Store(selection).bot(bot.id)?.toolScope).toEqual(toolScope);
+  });
+
+  it("keeps tool revocations effective in memory when persistence fails", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const save = vi.spyOn(store as unknown as { saveBots(): void }, "saveBots")
+      .mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => store.patchBot(bot.id, { toolScope: { allow: [] } })).toThrow("disk full");
+    expect(allowsTool(bot.toolScope, { kind: "native", name: "read" })).toBe(false);
+    save.mockRestore();
+  });
+
+  it("does not publish a new restricted bot when its first save fails", () => {
+    const store = new Store(selection);
+    const save = vi.spyOn(store as unknown as { saveBots(): void }, "saveBots")
+      .mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => store.createBot({ name: "Failed restricted creation", toolScope: { allow: [] } })).toThrow("disk full");
+    expect(store.bots).toEqual([]);
+    save.mockRestore();
+    expect(new Store(selection).bots).toEqual([]);
+  });
+
+  it("rejects malformed tool selection before creating a bot", () => {
+    const store = new Store(selection);
+    expect(() => store.createBot({ toolScope: { allow: "all" } } as never)).toThrow(/tool selection/i);
+    expect(store.bots).toEqual([]);
+    expect(new Store(selection).bots).toEqual([]);
+  });
+
+  it("retains corrupt persisted tool selection as denied access instead of inheriting all tools", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Corrupt selection fixture" });
+    const bots = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    bots[0].toolScope = { allow: "all" };
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(bots));
+    const restored = new Store(selection).bot(bot.id)!;
+    expect(restored).toHaveProperty("toolScope", { allow: "all" });
+    expect(allowsTool((restored as unknown as { toolScope: unknown }).toolScope, { kind: "native", name: "read" })).toBe(false);
+  });
+
+  // MOCA-264: a deleted bot stayed in its rooms for good — counted on the
+  // Save button, refused by the roster check on every save, and still the
+  // room's lead.
+  it("takes a deleted bot out of every room it was in and passes its lead role on", () => {
+    const store = new Store(selection);
+    const [ada, ben, cleo] = [store.createBot({}), store.createBot({}), store.createBot({})];
+    const room = store.createGroup("Launch team", [ada.id, ben.id, cleo.id], false);
+    store.patchGroup(room.id, { defaultResponder: { kind: "member", botId: ben.id }, busyBotId: ben.id });
+    const pair = store.createGroup("Ada & Ben", [ada.id, ben.id], true);
+    const changes: unknown[] = [];
+    store.onChange((change) => changes.push(change));
+
+    expect(store.deleteBot(ben.id)).toBe(true);
+    expect(store.group(room.id)).toMatchObject({ memberIds: [ada.id, cleo.id], defaultResponder: { kind: "member", botId: ada.id } });
+    expect(store.group(room.id)?.turnStartedAt).toBeUndefined();
+    expect(store.group(pair.id)?.memberIds).toEqual([ada.id, ben.id]);
+    expect(changes).toContainEqual({ type: "group", groupId: room.id });
+    expect(new Store(selection).group(room.id)?.memberIds).toEqual([ada.id, cleo.id]);
+  });
+
+  it("finishes bot erasure if the room registry cannot persist, then repairs it on restart", () => {
+    const store = new Store(selection);
+    const [ada, ben] = [store.createBot({}), store.createBot({})];
+    const room = store.createGroup("Launch team", [ada.id, ben.id], false);
+    const internals = store as unknown as { saveGroups: () => void };
+    vi.spyOn(internals, "saveGroups").mockImplementationOnce(() => { throw new Error("fixture write failure"); });
+
+    expect(store.deleteBot(ben.id)).toBe(true);
+    expect(store.bot(ben.id)).toBeNull();
+    expect(store.messagesFor(ben.threadId)).toEqual([]);
+    expect(existsSync(soulFile(ben.id))).toBe(false);
+    expect(JSON.parse(readFileSync(join(DATA_DIR, "groups.json"), "utf8"))[0].memberIds).toContain(ben.id);
+    expect(new Store(selection).group(room.id)?.memberIds).toEqual([ada.id]);
+  });
+
+  it("repairs rooms that still list a deleted bot when it starts", () => {
+    const store = new Store(selection);
+    const [ada, cleo] = [store.createBot({}), store.createBot({})];
+    const room = store.createGroup("Launch team", [ada.id, cleo.id], false);
+    const groupsFile = join(DATA_DIR, "groups.json");
+    const saved = JSON.parse(readFileSync(groupsFile, "utf8"));
+    const ghost = "8a2acb50-6276-4ce2-926a-9e112b848acc";
+    Object.assign(saved.find((g: { id: string }) => g.id === room.id), {
+      memberIds: [ghost, ada.id, cleo.id],
+      defaultResponder: { kind: "member", botId: ghost },
+    });
+    writeFileSync(groupsFile, JSON.stringify(saved));
+
+    const restarted = new Store(selection);
+    expect(restarted.group(room.id)).toMatchObject({ memberIds: [ada.id, cleo.id], defaultResponder: { kind: "member", botId: ada.id } });
+    const persisted = JSON.parse(readFileSync(groupsFile, "utf8")).find((g: { id: string }) => g.id === room.id);
+    expect(persisted.memberIds).toEqual([ada.id, cleo.id]);
+  });
+
+  it("never empties rooms when the bot list cannot be read", () => {
+    const store = new Store(selection);
+    const [ada, cleo] = [store.createBot({}), store.createBot({})];
+    const room = store.createGroup("Launch team", [ada.id, cleo.id], false);
+    const groupsFile = join(DATA_DIR, "groups.json");
+    const before = readFileSync(groupsFile, "utf8");
+    writeFileSync(join(DATA_DIR, "bots.json"), "{ not json");
+
+    expect(new Store(selection).group(room.id)?.memberIds).toEqual([ada.id, cleo.id]);
+    expect(JSON.parse(readFileSync(groupsFile, "utf8")).find((g: { id: string }) => g.id === room.id).memberIds)
+      .toEqual(JSON.parse(before).find((g: { id: string }) => g.id === room.id).memberIds);
   });
 
   it("renames populated teams without changing members, conversations, grants or computer identity", () => {

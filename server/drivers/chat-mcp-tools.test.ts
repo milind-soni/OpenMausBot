@@ -1,10 +1,12 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { crc32 } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
 import { ChatToolSessionError, mountChatTools, type ChatToolSession } from "./chat-mcp-tools.ts";
+import type { ToolScope } from "../../shared/tool-scope.ts";
+import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 
 const dirs: string[] = [];
 const sessions: ChatToolSession[] = [];
@@ -48,8 +50,8 @@ function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
   return {
     dir, receipt, controller, server,
     read: () => JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; path: string; omb: Record<string, string>; calls: Array<{ method: string; params?: { name?: string; arguments?: unknown } }> },
-    async mount(computerUse = false, localComputer = false) {
-      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { audit: server } }, controller.signal, computerUse);
+    async mount(computerUse = false, localComputer = false, toolScope?: ToolScope) {
+      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { audit: server } }, controller.signal, computerUse, toolScope);
       sessions.push(session);
       return session;
     },
@@ -68,6 +70,51 @@ afterEach(async () => {
 });
 
 describe("Chat MCP session", () => {
+  it("starts no server when the owner selected no MCP tools", async () => {
+    const f = fixture();
+    const session = await f.mount(false, false, { allow: ["native:ask_user"] });
+    expect(session.definitions).toEqual([]);
+    expect(existsSync(f.receipt)).toBe(false);
+  });
+
+  it("filters original identities before catalog limits, alias conversion and schema compilation", async () => {
+    const f = fixture(`if (message.method === "tools/list") {
+      reply(message, {tools:[
+        {name:"read-notes",inputSchema:schema},
+        {name:"read_notes",inputSchema:{$ref:"https://example.invalid/private"}},
+        ...Array.from({length:129}, (_,i) => ({name:"excluded"+i,inputSchema:{type:"object"},description:"withheld-description"}))
+      ]}); return;
+    }`);
+    const session = await f.mount(false, false, { allow: ["mcp:audit:read-notes"] });
+    expect(session.definitions).toEqual([{ type: "function", function: { name: "audit_read_notes", description: "Configured MCP tool", parameters: schema } }]);
+    await expect(session.execute("audit_read_notes_2", { value: "blocked" }, f.controller.signal)).rejects.toThrow("not advertised");
+    expect(f.read().calls.filter((call) => call.method === "tools/call")).toEqual([]);
+    await session.execute("audit_read_notes", { value: "allowed" }, f.controller.signal);
+    expect(f.read().calls.filter((call) => call.method === "tools/call").map((call) => call.params)).toEqual([{ name: "read-notes", arguments: { value: "allowed" } }]);
+  });
+
+  it.each(["http", "sse"] as const)("executes only selected tools through a custom %s server", async (transport) => {
+    const remote = await startFakeHttpMcp({ transport, requireHeader: { name: "authorization", value: "Bearer synthetic" }, tools: [
+      { name: "read", inputSchema: schema }, { name: "write", inputSchema: schema },
+    ] });
+    const controller = new AbortController(); controllers.push(controller);
+    let session: ChatToolSession | undefined;
+    try {
+      session = await mountChatTools({ custom: { mail: { type: transport, url: remote.url, headers: { authorization: "Bearer synthetic" } } } }, controller.signal, false, { allow: ["mcp:mail:read"] });
+      expect(session.definitions.map((tool) => tool.function.name)).toEqual(["mail_read"]);
+      await expect(session.execute("mail_write", { value: "blocked" }, controller.signal)).rejects.toThrow("not advertised");
+      expect(remote.calls).toEqual([]);
+      await expect(session.execute("mail_read", { value: "selected" }, controller.signal)).resolves.toMatchObject({ ok: true, text: "remote execution recorded" });
+      expect(remote.calls).toEqual([{ name: "read", arguments: { value: "selected" } }]);
+    } finally { await session?.close(); await remote.close(); }
+  });
+
+  it("rejects corrupt selection before starting any MCP process", async () => {
+    const f = fixture();
+    await expect(f.mount(false, false, { allow: null } as never)).rejects.toThrow(/tool selection/i);
+    expect(existsSync(f.receipt)).toBe(false);
+  });
+
   it("discovers without executing, preserves schemas and validates before forwarding original arguments", async () => {
     const f = fixture();
     const session = await f.mount();
@@ -82,6 +129,21 @@ describe("Chat MCP session", () => {
     await session.close();
     expect(alive(pid)).toBe(false);
     await expect(session.execute("audit_write", { value: "again" }, f.controller.signal)).rejects.toThrow("closed");
+  });
+
+  it.each([
+    ["browser", true],
+    ["custom", false],
+  ] as const)("drops a blank url for agent_browser_read only on the built-in browser (%s)", async (mountAs, dropped) => {
+    const readSchema = { type: "object", properties: { url: { type: "string" } }, additionalProperties: false };
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:[{name:"agent_browser_read",description:"Omit url to read the active tab.",inputSchema:schema}]}); continue; }`, readSchema);
+    const session = await mountChatTools(mountAs === "browser" ? { browser: f.server } : { custom: { browser: f.server } }, f.controller.signal, true);
+    sessions.push(session);
+    const name = session.definitions[0]!.function.name;
+    await session.execute(name, { url: " " }, f.controller.signal);
+    await session.execute(name, { url: "https://example.com" }, f.controller.signal);
+    const calls = f.read().calls.filter((call) => call.method === "tools/call").map((call) => call.params?.arguments);
+    expect(calls).toEqual([dropped ? {} : { url: " " }, { url: "https://example.com" }]);
   });
 
   it("starts servers with the widened PATH rather than the bare one the desktop shell inherits", async () => {

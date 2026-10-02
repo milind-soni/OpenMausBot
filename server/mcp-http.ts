@@ -30,6 +30,7 @@ interface JsonRpcMessage {
   jsonrpc?: unknown;
   id?: unknown;
   method?: unknown;
+  params?: unknown;
   result?: unknown;
   error?: unknown;
 }
@@ -41,6 +42,19 @@ interface Pending {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Validate private proxy configuration without including secrets in errors. */
+export function remoteMcpSpec(value: unknown): RemoteMcpSpec | undefined {
+  if (!isRecord(value) || (value.type !== "http" && value.type !== "sse") || typeof value.url !== "string") return;
+  try {
+    const url = new URL(value.url);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return;
+    const headers = value.headers ?? {};
+    if (!isRecord(headers) || !Object.values(headers).every((header) => typeof header === "string")) return;
+    new Headers(headers as Record<string, string>);
+    return { type: value.type, url: value.url, headers: headers as Record<string, string> };
+  } catch { return; }
 }
 
 function unwrap(message: JsonRpcMessage): unknown {
@@ -88,6 +102,7 @@ async function readSse(
   response: Response,
   signal: AbortSignal,
   onEvent: (event: SseEvent) => "stop" | undefined,
+  maxBytes = MAX_BODY_BYTES,
 ): Promise<void> {
   const reader = response.body?.getReader();
   if (!reader) throw new McpHttpError("protocol", "empty event stream");
@@ -101,7 +116,7 @@ async function readSse(
       const { value, done } = await reader.read();
       if (done) return;
       bytes += value.byteLength;
-      if (bytes > MAX_BODY_BYTES) throw new McpHttpError("protocol", "event stream too large");
+      if (bytes > maxBytes) throw new McpHttpError("protocol", "event stream too large");
       buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, "\n");
       let separator: number;
       while ((separator = buffer.indexOf("\n\n")) !== -1) {
@@ -119,7 +134,7 @@ async function readSse(
   }
 }
 
-async function readBounded(response: Response): Promise<string> {
+async function readBounded(response: Response, maxBytes = MAX_BODY_BYTES): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return "";
   const decoder = new TextDecoder();
@@ -129,7 +144,7 @@ async function readBounded(response: Response): Promise<string> {
     const { value, done } = await reader.read();
     if (done) return text + decoder.decode();
     bytes += value.byteLength;
-    if (bytes > MAX_BODY_BYTES) {
+    if (bytes > maxBytes) {
       await reader.cancel().catch(() => {});
       throw new McpHttpError("protocol", "response too large");
     }
@@ -144,6 +159,8 @@ function drain(response: Response): void {
 export class RemoteMcpClient {
   private readonly target: RemoteMcpSpec;
   private readonly fetchImpl: typeof fetch;
+  private readonly maxBytes: number;
+  private readonly onNotification: ((message: JsonRpcMessage) => void) | undefined;
   private sessionId: string | null = null;
   private protocolVersion: string | null = null;
   private nextId = 1;
@@ -153,9 +170,11 @@ export class RemoteMcpClient {
   private sseEndpoint: Promise<string> | null = null;
   private readonly sseAbort = new AbortController();
 
-  constructor(target: RemoteMcpSpec, options: { fetch?: typeof fetch } = {}) {
+  constructor(target: RemoteMcpSpec, options: { fetch?: typeof fetch; maxBytes?: number; onNotification?: (message: JsonRpcMessage) => void } = {}) {
     this.target = target;
     this.fetchImpl = options.fetch ?? fetch;
+    this.maxBytes = options.maxBytes ?? MAX_BODY_BYTES;
+    this.onNotification = options.onNotification;
   }
 
   /** The MCP handshake: initialize, then the initialized notification. */
@@ -172,9 +191,15 @@ export class RemoteMcpClient {
 
   request(method: string, params: unknown, signal: AbortSignal): Promise<unknown> {
     if (this.closed) return Promise.reject(new McpHttpError("protocol", "client closed"));
+    if (signal.aborted) return Promise.reject(new McpHttpError("network", "aborted"));
     const id = this.nextId++;
     const frame = { jsonrpc: "2.0", id, method, ...(params === undefined ? {} : { params }) };
-    return this.target.type === "sse" ? this.sseRequest(id, frame, signal) : this.streamableRequest(id, frame, signal);
+    const onAbort = () => {
+      void this.notify("notifications/cancelled", { requestId: id, reason: "Request cancelled" }, AbortSignal.timeout(2_000)).catch(() => {});
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    const reply = this.target.type === "sse" ? this.sseRequest(id, frame, signal) : this.streamableRequest(id, frame, signal);
+    return reply.finally(() => signal.removeEventListener("abort", onAbort));
   }
 
   async notify(method: string, params: unknown, signal: AbortSignal): Promise<void> {
@@ -242,7 +267,8 @@ export class RemoteMcpClient {
     const response = await this.post(this.target.url, frame, signal);
     const type = (response.headers.get("content-type") ?? "").toLowerCase();
     if (type.startsWith("application/json")) {
-      const parsed = parseMessage(await readBounded(response));
+      const parsed = parseMessage(await readBounded(response, this.maxBytes));
+      this.deliverNotifications(parsed);
       const message = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).find((entry) => entry.id === id);
       if (!message) throw new McpHttpError("protocol", "response did not answer the request");
       return unwrap(message);
@@ -252,11 +278,12 @@ export class RemoteMcpClient {
       await readSse(response, signal, (event) => {
         if (event.event !== "message") return undefined;
         const parsed = parseMessage(event.data);
+        this.deliverNotifications(parsed);
         const message = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).find((entry) => entry.id === id);
         if (!message) return undefined;
         found = message;
         return "stop";
-      });
+      }, this.maxBytes);
       if (signal.aborted) throw new McpHttpError("network", "aborted");
       if (!found) throw new McpHttpError("protocol", "event stream ended without the response");
       return unwrap(found);
@@ -304,6 +331,7 @@ export class RemoteMcpClient {
             }
             if (event.event !== "message") return undefined;
             const parsed = parseMessage(event.data);
+            this.deliverNotifications(parsed);
             for (const message of Array.isArray(parsed) ? parsed : parsed ? [parsed] : []) {
               const entry = typeof message.id === "number" ? this.pending.get(message.id) : undefined;
               if (!entry) continue;
@@ -315,7 +343,7 @@ export class RemoteMcpClient {
               }
             }
             return undefined;
-          });
+          }, this.maxBytes);
           fail(new McpHttpError("network", "event stream ended"));
         })
         .catch((error: unknown) => {
@@ -354,5 +382,11 @@ export class RemoteMcpClient {
         reject(error instanceof Error ? error : new McpHttpError("network", String(error)));
       });
     });
+  }
+
+  private deliverNotifications(parsed: JsonRpcMessage | JsonRpcMessage[] | null): void {
+    for (const message of Array.isArray(parsed) ? parsed : parsed ? [parsed] : []) {
+      if (typeof message.method === "string" && message.id === undefined) this.onNotification?.(message);
+    }
   }
 }

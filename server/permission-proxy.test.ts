@@ -11,6 +11,7 @@
 // the tool, and a headless run has no dialog, so the click is discarded
 // ("The user did not answer the questions.").
 import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -71,6 +72,19 @@ describe("permission proxy", () => {
   /** The tool result the CLI would read, parsed. */
   const resultJson = (res: any) => JSON.parse(res.result.content[0].text);
 
+  const startProxy = (socketPath: string, env?: NodeJS.ProcessEnv) => {
+    proxy = spawn(process.execPath, ["--experimental-strip-types", PROXY, socketPath], { stdio: ["pipe", "pipe", "pipe"], env });
+    let out = "";
+    proxy.stdout!.on("data", (chunk) => {
+      out += chunk; let nl;
+      while ((nl = out.indexOf("\n")) !== -1) {
+        const line = out.slice(0, nl); out = out.slice(nl + 1);
+        if (!line.trim()) continue;
+        try { const msg = JSON.parse(line); if (msg.id != null) results.set(msg.id, msg); } catch { /* non-protocol frame */ }
+      }
+    });
+  };
+
   beforeEach(async () => {
     scratch = mkdtempSync(join(tmpdir(), "omb-perm-proxy-"));
     asks = [];
@@ -98,25 +112,7 @@ describe("permission proxy", () => {
     });
     await new Promise<void>((resolve) => broker.listen(socketPath, resolve));
 
-    proxy = spawn(process.execPath, ["--experimental-strip-types", PROXY, socketPath], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let out = "";
-    proxy.stdout!.on("data", (chunk) => {
-      out += chunk;
-      let nl;
-      while ((nl = out.indexOf("\n")) !== -1) {
-        const line = out.slice(0, nl);
-        out = out.slice(nl + 1);
-        if (!line.trim()) continue;
-        try {
-          const msg = JSON.parse(line);
-          if (msg.id != null) results.set(msg.id, msg);
-        } catch {
-          /* not our frame */
-        }
-      }
-    });
+    startProxy(socketPath);
     rpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
     await waitFor(1);
   }, 20_000);
@@ -126,6 +122,18 @@ describe("permission proxy", () => {
     proxy?.kill();
     await new Promise<void>((resolve) => broker.close(() => resolve()));
     removeTempDir(scratch);
+  });
+
+  it("withholds an excluded question without losing the CLI permission callback", async () => {
+    const exited = once(proxy, "exit"); proxy.kill(); await exited; results.clear();
+    startProxy(brokerSocketPath(scratch, "test"), { ...process.env, OMB_PERMISSION_TOOL_SCOPE: JSON.stringify({ allow: ["native:*"] }) });
+    rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    expect((await waitFor(2)).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["approve"]);
+    rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "ask_user", arguments: { question: "Must not ask" } } });
+    expect((await waitFor(3)).result.content[0].text).toContain("excluded"); expect(asks).toEqual([]);
+    answerWith = () => ({ behavior: "allow" });
+    rpc({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "approve", arguments: { tool_name: "Read", input: {} } } });
+    expect(resultJson(await waitFor(4)).behavior).toBe("allow"); expect(asks).toHaveLength(1);
   });
 
   it("exposes approve and ask_user", async () => {

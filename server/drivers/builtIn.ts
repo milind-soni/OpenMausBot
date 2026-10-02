@@ -18,6 +18,7 @@ import { HermesAgentDriver } from "./acp/hermes.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { PiDriver } from "./pi.ts";
 import { MistralDriver } from "./mistral.ts";
+import { CerebrasDriver } from "./cerebras.ts";
 import { MinimaxDriver } from "./minimax.ts";
 
 export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
@@ -39,4 +40,5 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   BoatAgentDriver,
   MinimaxDriver,
   MistralDriver,
+  CerebrasDriver,
 ];

@@ -9,6 +9,8 @@ import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { chatImage, type ChatImagePart } from "./chat-images.ts";
 import { ChatBoatClient } from "./chat-boat-tools.ts";
+import { mcpStdioServer } from "../mcp-gate-config.ts";
+import { allowsTool, canUseMcpServer, parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
 
 export interface ChatToolDefinition {
   type: "function";
@@ -172,7 +174,7 @@ class ChatMcpClient {
     }
   }
 
-  async tools(signal: AbortSignal): Promise<unknown[]> {
+  async tools(signal: AbortSignal, include: (tool: unknown) => boolean = () => true): Promise<unknown[]> {
     const deadline = Date.now() + STARTUP_MS;
     const remaining = () => {
       if (Date.now() >= deadline) throw new Error("MCP startup timed out");
@@ -190,7 +192,7 @@ class ChatMcpClient {
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const result = await this.call("tools/list", cursor ? { cursor } : {}, signal, remaining());
       if (!object(result) || !Array.isArray(result.tools)) throw new Error("MCP tools/list returned an invalid result");
-      tools.push(...result.tools);
+      tools.push(...result.tools.filter(include));
       if (tools.length > TOOL_COUNT) throw new Error("MCP tool count exceeds the 128-tool limit");
       if (result.nextCursor === undefined) return tools;
       if (typeof result.nextCursor !== "string" || !result.nextCursor || cursors.has(result.nextCursor)) throw new Error("MCP tools/list returned an invalid pagination cursor");
@@ -238,17 +240,38 @@ function boundedText(value: string): string {
   return `${bytes.subarray(0, end).toString()}\n[MCP result truncated at 50KB; request less output.]`;
 }
 
-export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false): Promise<ChatToolSession> {
+/** Optional fields a tool documents as "omit to use the default", where a
+ * blank string is an error instead. Smaller models fill optional fields with
+ * "" rather than leaving them out; dropping the blank restores the documented
+ * call. agent_browser_read: "Omit url to read the active tab." */
+const BUILT_IN_BROWSER_BLANK_MEANS_OMITTED: Record<string, readonly string[]> = {
+  agent_browser_read: ["url"],
+};
+
+function omitBlankDefaults(builtInBrowser: boolean, tool: string, args: unknown) {
+  if (!builtInBrowser || !object(args)) return;
+  for (const field of BUILT_IN_BROWSER_BLANK_MEANS_OMITTED[tool] ?? []) {
+    const value = args[field];
+    if (typeof value === "string" && !value.trim()) delete args[field];
+  }
+}
+
+export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope): Promise<ChatToolSession> {
+  const parsed = parseToolScope(toolScope);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const scope = parsed.scope;
   const servers: Array<[string, Server | BoatDescriptor]> = [];
-  if (computerUse && integrations?.computer) servers.push(["computer", integrations.computer]);
-  if (computerUse && integrations?.localComputer) servers.push(["computer", integrations.localComputer]);
-  if (computerUse && integrations?.browser) servers.push(["browser", integrations.browser]);
-  if (integrations?.agents) servers.push(["agents", integrations.agents]);
-  if (integrations?.composio) servers.push(["composio", integrations.composio]);
-  // this client starts its servers and talks over stdio; a remote (url)
-  // entry is skipped here and reaches Claude and Codex bots
+  const eligible = (server: string) => scope === undefined || canUseMcpServer(scope, server);
+  if (computerUse && integrations?.computer && eligible("computer")) servers.push(["computer", integrations.computer]);
+  if (computerUse && integrations?.localComputer && eligible("computer")) servers.push(["computer", integrations.localComputer]);
+  if (computerUse && integrations?.browser && eligible("browser")) servers.push(["browser", integrations.browser]);
+  if (integrations?.agents && eligible("agents")) servers.push(["agents", integrations.agents]);
+  if (integrations?.composio && eligible("composio")) servers.push(["composio", integrations.composio]);
   for (const [name, server] of Object.entries(integrations?.custom ?? {})) {
-    if ("command" in server) servers.push([name, server]);
+    if (!eligible(name)) continue;
+    const stdio = mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } });
+    if (!stdio) throw new Error("MCP server configuration is invalid");
+    servers.push([name, { command: stdio.command, args: stdio.args ?? [], env: stdio.env ?? {} }]);
   }
   if (servers.length > 32) throw new Error("MCP server count exceeds the 32-server limit");
   const clients: Array<ChatMcpClient | ChatBoatClient> = [];
@@ -266,7 +289,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const cancel = () => { void close().catch(() => {}); };
   signal.addEventListener("abort", cancel, { once: true });
   const definitions: ChatToolDefinition[] = [];
-  const registered = new Map<string, { client: ChatMcpClient | ChatBoatClient; name: string; schema: ValidateFunction }>();
+  const registered = new Map<string, { client: ChatMcpClient | ChatBoatClient; server: string; builtInBrowser: boolean; name: string; schema: ValidateFunction }>();
   try {
     if (signal.aborted) throw aborted();
     // Start independent servers concurrently; consume results in config order
@@ -277,11 +300,13 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       // image delivery, including custom servers. Text stays bounded below.
       const client = "boxId" in descriptor ? new ChatBoatClient(descriptor) : new ChatMcpClient(descriptor, computerUse);
       clients.push(client);
-      return { name, client, tools: await client.tools(signal) };
+      const include = (tool: unknown) => scope === undefined || (object(tool) && typeof tool.name === "string" && allowsTool(scope, { kind: "mcp", server: name, name: tool.name }));
+      const tools = client instanceof ChatMcpClient ? await client.tools(signal, include) : (await client.tools()).filter(include);
+      return { name, client, builtInBrowser: descriptor === integrations?.browser, tools };
     }));
     for (const mount of mounts) {
       if (mount.status === "rejected") throw mount.reason;
-      const { name: server, client, tools } = mount.value;
+      const { name: server, client, builtInBrowser, tools } = mount.value;
       const originalNames = new Set<string>();
       for (const tool of tools) {
         if (!object(tool) || typeof tool.name !== "string" || !tool.name.trim() || originalNames.has(tool.name)) throw new Error("MCP server advertised an invalid or duplicate tool name");
@@ -302,7 +327,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         const base = `${server}_${tool.name}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "mcp_tool";
         let name = base;
         for (let index = 2; registered.has(name); index += 1) { const suffix = `_${index}`; name = base.slice(0, 64 - suffix.length) + suffix; }
-        registered.set(name, { client, name: tool.name, schema });
+        registered.set(name, { client, server, builtInBrowser, name: tool.name, schema });
         definitions.push({ type: "function", function: { name, description, parameters } });
         if (Buffer.byteLength(JSON.stringify(definitions)) > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
       }
@@ -313,6 +338,8 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if (closed || signal.aborted) throw new ChatToolSessionError("MCP session closed");
     const tool = registered.get(name);
     if (!tool) throw new Error("The requested tool was not advertised for this turn");
+    if (scope !== undefined && !allowsTool(scope, { kind: "mcp", server: tool.server, name: tool.name })) throw new Error("Tool selection excludes this tool");
+    omitBlankDefaults(tool.builtInBrowser, tool.name, args);
     if (!object(args) || !tool.schema(args)) throw new Error("Tool arguments do not match the advertised input schema; use its required fields and types");
   };
   return {

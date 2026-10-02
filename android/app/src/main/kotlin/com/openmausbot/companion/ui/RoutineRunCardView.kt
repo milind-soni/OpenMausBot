@@ -161,7 +161,9 @@ internal fun RoutineRunCardView(message: Message, openRun: (() -> Unit)?) {
         }
 
         run.error?.takeIf { it.isNotBlank() }?.let { error ->
-            Text(error.trim(), fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+            SelectionContainer {
+                Text(error.trim(), fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 }

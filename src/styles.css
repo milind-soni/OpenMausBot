@@ -25,6 +25,10 @@
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
+::highlight(search-result-text) {
+  color: var(--color-ink);
+  background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
 .mention-editor-mirror {
   /* Match the native textarea's direction independently for each paragraph. */
   unicode-bidi: plaintext;
@@ -621,6 +625,20 @@
    re-tokenizing. Scope the scheme to code; native controls keep their styling. */
 .chat-md .shiki {
   color-scheme: var(--code-color-scheme);
+}
+
+/* Keep KaTeX's formula layout intact, but scroll long formulas inside the
+   bubble instead of letting them overflow it. */
+.chat-md .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.chat-md :not(.katex-display) > .katex {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  vertical-align: middle;
 }
 
 /* Plain-text message bodies (user turns, webhook tasks, error fallbacks) are

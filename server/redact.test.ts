@@ -9,6 +9,12 @@ import { redactSecrets } from "./redact.ts";
 const flat = (value: unknown) => JSON.stringify(value);
 
 describe("redactSecrets", () => {
+  it("omits private MCP descriptors even when a credential uses an ordinary header name", () => {
+    const descriptor = JSON.stringify({ url: "https://example.test/mcp", headers: { "x-tenant": "private-synthetic-value" } });
+    const logged = redactSecrets({ params: { mcpServers: [{ env: [{ name: "OMB_GATE_UPSTREAM", value: descriptor }] }] }, env: { OMB_REMOTE_MCP_SERVER: descriptor } });
+    expect(flat(logged)).not.toContain("private-synthetic-value");
+    expect(flat(logged)).toContain("OMB_GATE_UPSTREAM");
+  });
   it("masks the tokens in an ACP session/new, keeping the shape", () => {
     const sessionNew = {
       jsonrpc: "2.0",

@@ -4,9 +4,11 @@
 // what a tool may put into a model's context is written once. The gate itself
 // is mcp-gate.ts; the policy it applies is mcp-trim.ts.
 import { join } from "node:path";
+import { parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
 import { DATA_DIR } from "./config.ts";
 import { DEFAULT_RESULT_BUDGET } from "./mcp-trim.ts";
+import { remoteMcpSpec } from "./mcp-http.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 /** Characters of a single tool result allowed into context, or 0 to mount
@@ -33,11 +35,24 @@ export interface StdioServer {
   [key: string]: unknown;
 }
 
+/** Use the existing remote client when an engine requires a stdio descriptor. */
+export function mcpStdioServer(server: unknown, options: { nodeEnv?: Record<string, string>; execPath?: string } = {}): StdioServer | null {
+  if (!server || typeof server !== "object" || Array.isArray(server)) return null;
+  const spec = server as StdioServer;
+  if (typeof spec.command === "string" && spec.command) return spec;
+  const remote = remoteMcpSpec(server);
+  if (!remote) return null;
+  return {
+    command: options.execPath ?? process.execPath,
+    args: [SPAWNED_PROXIES.mcpRemote],
+    env: { ...options.nodeEnv, OMB_REMOTE_MCP_SERVER: JSON.stringify(remote) },
+  };
+}
+
 /** The gated form of one bot-owned server, or null to mount it unchanged.
  *
- * Only a stdio server can be gated: the gate stands between two processes,
- * and there is no process to stand between for an http/sse entry. Those are
- * mounted as they were — a known gap, not a silent one.
+ * An explicit selection also wraps remote servers in the stdio facade.
+ * Unrestricted remote servers keep their existing native transport.
  *
  * The upstream spec travels in the gate's `env`, which means it travels inside
  * the same 0600 MCP config file the driver already writes for exactly this
@@ -48,24 +63,40 @@ export function gateServer(input: {
   server: unknown;
   threadId: string;
   budget: number;
+  toolScope?: ToolScope;
   /** node flags the harness spawns its own helpers with */
   nodeEnv?: Record<string, string>;
   execPath?: string;
+  /** Private per-mount configuration for engines that share one child env. */
+  configEnvName?: string;
 }): { command: string; args: string[]; env: Record<string, string> } | null {
   const { name, server, budget } = input;
-  if (budget <= 0) return null;
-  if (!server || typeof server !== "object" || Array.isArray(server)) return null;
-  const spec = server as StdioServer;
-  if (typeof spec.command !== "string" || !spec.command) return null;
+  const parsed = parseToolScope(input.toolScope);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const scoped = parsed.scope !== undefined;
+  if (budget <= 0 && !scoped) return null;
+  if (!scoped && remoteMcpSpec(server)) return null;
+  const spec = mcpStdioServer(server, input);
+  if (!spec) {
+    if (scoped) throw new Error("Tool selection requires a supported MCP server.");
+    return null;
+  }
+  const env = {
+    OMB_GATE_NAME: name,
+    OMB_GATE_UPSTREAM: JSON.stringify({ command: spec.command, args: spec.args ?? [], env: spec.env ?? {} }),
+    OMB_GATE_SPILL_DIR: spillDir(input.threadId),
+    OMB_GATE_BUDGET: String(budget),
+    ...(scoped ? { OMB_GATE_TOOL_SCOPE: JSON.stringify(parsed.scope) } : {}),
+  };
+  if (input.configEnvName && (!scoped || !/^OMB_GATE_CONFIG_[a-f0-9]{64}$/.test(input.configEnvName))) {
+    throw new Error("Invalid private MCP gate configuration.");
+  }
   return {
     command: input.execPath ?? process.execPath,
-    args: [SPAWNED_PROXIES.mcpGate],
+    args: [SPAWNED_PROXIES.mcpGate, ...(input.configEnvName ? ["--config-env", input.configEnvName] : [])],
     env: {
       ...input.nodeEnv,
-      OMB_GATE_NAME: name,
-      OMB_GATE_UPSTREAM: JSON.stringify({ command: spec.command, args: spec.args ?? [], env: spec.env ?? {} }),
-      OMB_GATE_SPILL_DIR: spillDir(input.threadId),
-      OMB_GATE_BUDGET: String(budget),
+      ...(input.configEnvName ? { [input.configEnvName]: JSON.stringify(env) } : env),
     },
   };
 }

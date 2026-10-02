@@ -300,11 +300,21 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     // Room confirmations also sit over the mobile drawer. Escape must cancel
     // just that confirmation, leaving the drawer and its room intact.
     preview = await mountPreview({ info: { url: info!.url } }, {
-      entry: "/scripts/testing/sidebar-preview.tsx", route: "/__sidebar-room-delete.html", title: "Room deletion drawer regression", logLevel: "silent",
+      entry: "/__slow-sidebar-entry.js", route: "/__sidebar-room-delete.html", title: "Room deletion drawer regression", logLevel: "silent",
+      extraRoutes: [{ path: "/__slow-sidebar-entry.js", handler: async (_req, res) => {
+        // Hold the actual sidebar import beyond expect.poll's default window,
+        // reproducing a cold preview without replacing its UI or server.
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        res.setHeader("content-type", "application/javascript");
+        res.end('import "/scripts/testing/sidebar-preview.tsx";');
+      } }],
     });
     await ui("eval", "--js", `location.href = ${JSON.stringify(preview.previewUrl)}; true`);
     const roomMenu = async () => {
-      await expect.poll(snapshot).toContain("Drawer: open");
+      // The new preview must load its module and initial server state first.
+      await expect.poll(snapshot, { timeout: 15_000 }).toContain("Drawer: open");
+      await expect.poll(() => evaluate(`Boolean(document.querySelector('[data-sidebar-group-row="${group.id}"]'))`),
+        { timeout: 10_000 }).toBe(true);
       await ui("eval", "--js", `document.querySelector('[data-sidebar-group-row="${group.id}"]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 120, clientY: 250 })); true`);
       await click("Delete group chat");
       await expect.poll(snapshot).toContain('alertdialog "Delete Sidebar room?"');

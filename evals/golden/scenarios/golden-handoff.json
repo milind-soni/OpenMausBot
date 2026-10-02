@@ -81,6 +81,7 @@
     "redactor": 1
   },
   "id": "golden-handoff",
+  "librarySkills": [],
   "steps": [
     {
       "bot": "bot1",

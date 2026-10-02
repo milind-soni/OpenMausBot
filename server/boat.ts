@@ -1064,9 +1064,9 @@ export async function verifyToken(token: string): Promise<{ ok: true } | { ok: f
   }
 }
 
-/** A rejected Cloud Pro relay token: nothing the person pasted, so nothing
- * for them to fix in Settings. */
-const INCLUDED_BOAT_UNAVAILABLE = "Cloud Pro's included cloud computers aren't available right now. Try again later.";
+/** A rejected Cloud relay token: nothing the person pasted, so nothing
+ * for them to fix in Settings. Plan-neutral: every Cloud plan includes them. */
+const INCLUDED_BOAT_UNAVAILABLE = "The cloud computers included with your Cloud plan aren't available right now. Try again later.";
 
 /** Turn a provider refusal into something a person can act on. The
  * provider's own message is better than anything we can invent — it knows

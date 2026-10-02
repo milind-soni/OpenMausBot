@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, EllipsisVertical, Globe, Hand, Loader2, Maximize2, Plus, RotateCw, UserRound, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, EllipsisVertical, Globe, Hand, Loader2, Maximize2, Minimize2, Plus, RotateCw, UserRound, X } from "lucide-react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { api, useStore, type Bot } from "@/state/store";
@@ -34,6 +34,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
   const [showTyping, setShowTyping] = useState(false);
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const [takeStatus, setTakeStatus] = useState<BrowserTakeStatus>("");
+  const [fullscreen, setFullscreen] = useState(false);
   const viewer = useRef("");
   const generation = useRef(0);
   const pendingOperation = useRef<number | null>(null);
@@ -199,6 +200,21 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
     };
   }, [bot.id, bot.browserProfile, attempt, action]);
 
+  // On macOS a full-screen element takes the whole window into native full
+  // screen, where minimize is disabled. The button has to lead back out, and
+  // it follows the document so Esc, the green button and View > Toggle Full
+  // Screen keep it honest too (MOCA-266).
+  useEffect(() => {
+    const update = () => setFullscreen(Boolean(panel.current) && document.fullscreenElement === panel.current);
+    document.addEventListener("fullscreenchange", update);
+    return () => document.removeEventListener("fullscreenchange", update);
+  }, []);
+  const toggleFullscreen = () => {
+    const leaving = Boolean(panel.current) && document.fullscreenElement === panel.current;
+    const request = leaving ? document.exitFullscreen() : panel.current?.requestFullscreen();
+    void request?.catch(() => setError(leaving ? "Could not leave full screen. Press Esc instead." : "Full screen is unavailable in this browser."));
+  };
+
   const execute = async (body: Record<string, unknown>) => {
     if (pendingOperation.current !== null) return;
     const expected = viewer.current;
@@ -242,7 +258,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
         </div>) : <div className="flex items-center gap-2 rounded-xl bg-inset px-3 py-2 text-[12px] text-ink-secondary"><Globe size={13} />New tab</div>}
         <button className={`${button} shrink-0`} disabled={!commandsReady} aria-label="New tab" title="New tab" onClick={() => command({ type: "tab-new" })}><Plus size={17} /></button>
       </div>
-      <button className={button} title="Full screen" aria-label="Full screen" onClick={() => { void panel.current?.requestFullscreen().catch(() => setError("Full screen is unavailable in this browser.")); }}><Maximize2 size={16} /></button>
+      <button className={button} title={fullscreen ? "Exit full screen" : "Full screen"} aria-label={fullscreen ? "Exit full screen" : "Full screen"} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
       {/* Profiles can't switch while this window holds the browser: opening them hands it back now, not after the idle wait. */}
       <button className={`${button} rounded-xl bg-inset p-2`} title={`Browser profile: ${profileName}`} aria-label="Browser profiles" aria-expanded={showProfiles} onClick={() => { browserControl.current?.handBack(); setShowProfiles(true); }}><UserRound size={16} /></button>
     </div>

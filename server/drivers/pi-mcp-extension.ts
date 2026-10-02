@@ -13,7 +13,8 @@
 // that exactly.
 import { Type, type TObjectOptions, type TSchema, type TSchemaOptions } from "typebox";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { allowsTool, canUseMcpServer, parseToolScope, type ToolIdentity } from "../../shared/tool-scope.ts";
 
 interface McpServerDef {
   command: string;
@@ -26,6 +27,9 @@ interface McpServerDef {
 
 interface McpConfig {
   mcpServers?: Record<string, McpServerDef>;
+  toolScope?: unknown;
+  scopeReadyPath?: string;
+  approvalMode?: string;
 }
 
 interface McpTool {
@@ -72,7 +76,9 @@ interface PiToolDefinition {
  * loaded by the user's installed Pi, which supplies the real implementation. */
 interface PiExtensionApi {
   registerTool(definition: PiToolDefinition): void;
-  on(event: "session_shutdown", handler: () => void): void;
+  on(event: string, handler: (event?: Record<string, unknown>, context?: { abort?(): void }) => unknown): void;
+  getActiveTools?(): string[];
+  setActiveTools?(names: string[]): void;
 }
 
 const MCP_STARTUP_TIMEOUT_MS = 8_000;
@@ -543,12 +549,69 @@ export default async function (pi: PiExtensionApi): Promise<void> {
   try {
     config = JSON.parse(readFileSync(configPath, "utf8")) as McpConfig;
   } catch {
-    return;
+    throw new Error("OpenMausBot Pi MCP configuration could not be read");
   }
+  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("OpenMausBot Pi MCP configuration is invalid");
+  const parsed = parseToolScope(config.toolScope);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const scope = parsed.scope;
+  if (scope !== undefined && (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function")) throw new Error("Pi tool selection enforcement APIs are unavailable");
 
   const used = new Set<string>();
+  const identities = new Map<string, ToolIdentity>();
+  let enforcementFailed = false;
   const clients: StdioMcp[] = [];
-  const serverEntries = Object.entries(config.mcpServers ?? {});
+  const serverEntries = Object.entries(config.mcpServers ?? {}).filter(([name]) => scope === undefined || canUseMcpServer(scope, name));
+
+  if (scope !== undefined) {
+    const allowed = (name: string) => allowsTool(scope, identities.get(name) ?? { kind: "native", name });
+    const intersect = () => {
+      if (enforcementFailed) throw new Error("Pi tool selection enforcement is unavailable");
+      try {
+        const active = pi.getActiveTools!();
+        if (!Array.isArray(active) || active.some((name) => typeof name !== "string")) throw new Error("Pi tool selection enforcement returned an invalid catalog");
+        const requested = new Set(active.filter(allowed));
+        pi.setActiveTools!([...requested]);
+        const selected = pi.getActiveTools!();
+        if (!Array.isArray(selected) || selected.some((name) => !requested.has(name))) throw new Error("Pi tool selection enforcement did not apply the active-tool restriction");
+        if (config.scopeReadyPath) writeFileSync(config.scopeReadyPath, JSON.stringify({ ok: true, toolScope: scope }), { mode: 0o600 });
+        return selected;
+      } catch (error) {
+        enforcementFailed = true;
+        if (config.scopeReadyPath) {
+          try { writeFileSync(config.scopeReadyPath, JSON.stringify({ ok: false }), { mode: 0o600 }); } catch { /* A failed receipt cannot grant access. */ }
+        }
+        throw error;
+      }
+    };
+    for (const event of ["session_start", "session_switch", "model_select", "before_agent_start", "context"]) pi.on(event, () => { intersect(); });
+    pi.on("tool_call", (event) => !enforcementFailed && typeof event?.toolName === "string" && allowed(event.toolName) ? undefined : { block: true, reason: "Tool selection excludes this tool" });
+    // Providers serialize tools before this hook. Filter that final payload as
+    // well, so late package activation cannot restore withheld declarations.
+    pi.on("before_provider_request", (event, context) => {
+      let selected = new Set<string>();
+      try { selected = new Set(intersect()); } catch {
+        // Pi catches hook errors. Keep the returned payload empty even when
+        // abort is unavailable, and block every subsequent execution.
+        try { context?.abort?.(); } catch { /* The deny-all payload still applies. */ }
+      }
+      const declared = (name: string) => selected.has(name) && allowed(name);
+      const payload = event?.payload;
+      if (!payload || typeof payload !== "object") return payload;
+      const body = payload as { tools?: unknown[] };
+      if (Array.isArray(body.tools)) body.tools = body.tools.flatMap((value) => {
+        if (!value || typeof value !== "object") return [];
+        const tool = value as { name?: string; function?: { name?: string }; functionDeclarations?: Array<{ name?: string }> };
+        if (Array.isArray(tool.functionDeclarations)) {
+          const functionDeclarations = tool.functionDeclarations.filter((declaration) => typeof declaration.name === "string" && declared(declaration.name));
+          return functionDeclarations.length ? [{ ...tool, functionDeclarations }] : [];
+        }
+        const name = tool.function?.name ?? tool.name;
+        return typeof name === "string" && declared(name) ? [tool] : [];
+      });
+      return payload;
+    });
+  }
 
   // Mount independent servers concurrently so one slow integration cannot
   // consume the startup timeout once per server. Registration remains in
@@ -573,7 +636,7 @@ export default async function (pi: PiExtensionApi): Promise<void> {
   for (const mount of mounts) {
     if (!mount.client || !mount.def || !mount.tools) continue;
     const { serverName, def, client, tools } = mount;
-    const gated = def.scope === "local-computer";
+    const gated = def.scope === "local-computer" || (def.scope === "custom" && config.approvalMode !== "full");
     let registered = 0;
 
     for (const tool of tools) {
@@ -582,6 +645,8 @@ export default async function (pi: PiExtensionApi): Promise<void> {
         continue;
       }
       const toolName = tool.name;
+      const identity: ToolIdentity = { kind: "mcp", server: serverName, name: toolName };
+      if (scope !== undefined && !allowsTool(scope, identity)) continue;
       const name = allocateToolName(serverName, toolName, used);
       try {
         const parameters = toTypebox(tool.inputSchema);
@@ -591,13 +656,14 @@ export default async function (pi: PiExtensionApi): Promise<void> {
           description: typeof tool.description === "string" ? tool.description : `${toolName} (MCP tool from ${serverName})`,
           parameters,
           async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+            if (scope !== undefined && (enforcementFailed || !allowsTool(scope, identity))) throw new Error("Tool selection excludes this tool");
             // Host tools ask first, using pi's native permission card
             // (ctx.ui.confirm → extension_ui_request → Allow/Deny card). This
             // mirrors ACP's session/request_permission and Codex's elicitation.
             if (gated) {
               const detail = summarizeParams(params);
               const allowed = await ctx.ui.confirm(
-                `Allow ${toolName} on your computer?`,
+                def.scope === "local-computer" ? `Allow ${toolName} on your computer?` : `Allow ${serverName}:${toolName}?`,
                 detail || `Run ${serverName}:${toolName}`,
               );
               if (!allowed) {
@@ -618,6 +684,7 @@ export default async function (pi: PiExtensionApi): Promise<void> {
           },
         });
         used.add(name);
+        identities.set(name, identity);
         registered += 1;
       } catch (err) {
         // One malformed tool must not dispose the client behind tools that

@@ -68,7 +68,7 @@ describe("provider key rows", () => {
     });
     withBox({ configured: true, included: true });
     const included = render(createElement(ApiKeyRow, { section: "box" }));
-    expect(included).toContain("Included with Cloud Pro");
+    expect(included).toContain("Included with your Cloud plan");
     expect(included).not.toContain("Configured");
     // an own key can still be added, and there is nothing to remove
     expect(included).toContain('placeholder="Paste your Boat API key"');
@@ -77,7 +77,7 @@ describe("provider key rows", () => {
     withBox({ configured: true });
     const own = render(createElement(ApiKeyRow, { section: "box" }));
     expect(own).toContain("Configured");
-    expect(own).not.toContain("Included with Cloud Pro");
+    expect(own).not.toContain("Included with your Cloud plan");
   });
 
   it("warns about per-token billing only while the Anthropic key runs every Claude bot", () => {

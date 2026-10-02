@@ -76,6 +76,13 @@ describe("BoatAgentDriver turns (fake API)", () => {
     ensureDirs();
   });
 
+  it("refuses restricted remote-agent turns before posting a prompt", async () => {
+    const prompts: string[] = [];
+    restoreFetch = installFakeBoat([], prompts); await create();
+    await expect(instance.adapter.sendTurn({ threadId: "scoped", text: "Must not run", integrations: { computer }, toolScope: { allow: ["native:*", "mcp:notes:read"] } })).rejects.toThrow(/tool selection.*not supported/i);
+    expect(prompts).toEqual([]);
+  });
+
   afterEach(async () => {
     recorder?.stop();
     await instance?.dispose();

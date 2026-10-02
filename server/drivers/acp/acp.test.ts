@@ -17,7 +17,8 @@ import { ensureDirs, NATIVE_DIR } from "../../config.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { TurnNotStartedError } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
-import { createAcpDriver, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
+import { promptSplitFingerprints, writePromptSplitReceipt } from "../prompt-split.ts";
+import { createAcpDriver, DEFAULT_ACP_PROMPT_IDLE_MS, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
 import { GrokAgentDriver, grokAcceptsUnadvertisedImages } from "./grok.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { KimiAgentDriver } from "./kimi.ts";
@@ -26,6 +27,7 @@ import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import * as procs from "../../procs.ts";
+import * as quietStatus from "./quiet-status.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
 
@@ -233,6 +235,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_RPC_FAILURE_FILE;
     delete process.env.FAKE_ACP_RPC_FAILURE_METHOD;
     delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT;
+    delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_USAGE;
     delete process.env.FAKE_ACP_LOAD_ERROR;
     delete process.env.FAKE_ACP_ALLOW_ALWAYS;
     delete process.env.FAKE_ACP_PERMISSION_ANSWER;
@@ -254,8 +257,15 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_IMAGE_CAPABILITY;
     delete process.env.FAKE_ACP_GROK_VERSION;
     delete process.env.FAKE_ACP_TOOL_MS;
+    delete process.env.FAKE_ACP_USAGE_UPDATES_FILE;
     delete process.env.FAKE_ACP_DUMP_PROMPT;
     delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+    delete process.env.OMB_ACP_QUIET_NOTICE_MS;
+    delete process.env.OMB_ACP_QUIET_TICK_MS;
+    delete process.env.FAKE_ACP_QUIET_MS;
+    delete process.env.FAKE_ACP_QWEN_LOG;
+    delete process.env.FAKE_ACP_LOG_EVERY_MS;
+    delete process.env.QWEN_HOME;
     delete process.env.OMB_ACP_SESSION_IDLE_MS;
     delete process.env.OMB_ACP_SESSION_IDLE_MIN_MS;
     delete process.env.FAKE_ACP_LAUNCH_COUNT_FILE;
@@ -286,6 +296,20 @@ describe("ACP turns (fake CLI)", () => {
     const error = recorder.events.find((event) => event.type === "runtime.error");
     expect(error?.message).toContain(missing);
     expect(error?.message).not.toContain("managed-alias");
+  });
+
+  it("pairs an unkeyed tool call's lifecycle events on one stable itemId", async () => {
+    await create(GrokAgentDriver, "unkeyed-tool");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-unkeyed-tool", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const started = recorder.events.find((e) => e.type === "item.started" && e.itemType === "tool");
+    const completed = recorder.events.find((e) => e.type === "item.completed" && e.itemType === "tool");
+    // The agent sent no toolCallId: without a synthetic id the completion
+    // would be dropped by the itemId guard and the #1653 computer-call
+    // fence would hold the seat until settle.
+    expect(typeof started?.itemId).toBe("string");
+    expect(started?.itemId).toBeTruthy();
+    expect(completed?.itemId).toBe(started?.itemId);
   });
 
   it("normalizes a full turn into the canonical event sequence", async () => {
@@ -408,6 +432,119 @@ describe("ACP turns (fake CLI)", () => {
     expect(messages[0]).toBe(full + "\n\nturn 0");
     for (let i = 1; i <= 8; i++) expect(messages[i]).toBe("turn " + i);
     expect(messages[9]).toBe(full + "\n\nturn 9");
+  });
+
+  // One split-prompt thread: usage() sets the context sizes the fake reports
+  // on the next turn, and send() returns the prompt text the agent received.
+  const FULL = "Standing rules.\n\nMemory: likes quiet hours.";
+  const usageThread = async (name: string) => {
+    const dump = join(scratch, `acp-${name}.json`);
+    const usageFile = join(scratch, `acp-${name}-usage.json`);
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    process.env.FAKE_ACP_USAGE_UPDATES_FILE = usageFile;
+    writeFileSync(usageFile, "[]");
+    await create();
+    const threadId = `t-acp-${name}-` + randomUUID();
+    const usage = (...used: number[]) => writeFileSync(usageFile, JSON.stringify(used));
+    const send = async (text: string, ok = true) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text,
+        system: FULL,
+        systemStable: "Standing rules.",
+        systemVolatile: "Memory: likes quiet hours.",
+      });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok });
+      return (JSON.parse(readFileSync(dump + ".prompt.json", "utf8")) as Array<{ type: string; text: string }>)[0]?.text;
+    };
+    return { threadId, usage, send };
+  };
+
+  it("re-anchors the full prompt on the turn after the reported context collapses", async () => {
+    const { usage, send } = await usageThread("compaction");
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    usage(100000);
+    expect(await send("turn 2")).toBe("turn 2");
+    // the context collapses mid-turn (120000 -> 45000), so the next turn is full
+    usage(120000, 45000);
+    expect(await send("turn 3")).toBe("turn 3");
+    usage();
+    expect(await send("turn 4")).toBe(FULL + "\n\nturn 4");
+    expect(await send("turn 5")).toBe("turn 5");
+  });
+
+  it("keeps the split through an ordinary context dip", async () => {
+    const { usage, send } = await usageThread("ordinary-dip");
+    usage(108641);
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    // a 17% dip is an ordinary step, not a compaction
+    usage(90258);
+    expect(await send("turn 2")).toBe("turn 2");
+    expect(await send("turn 3")).toBe("turn 3");
+  });
+
+  it("detects a collapse against the previous turn's context", async () => {
+    const { usage, send } = await usageThread("cross-turn");
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    usage(150000);
+    expect(await send("turn 2")).toBe("turn 2");
+    // compaction before the first report: a collapse against last turn's peak
+    usage(50000);
+    expect(await send("turn 3")).toBe("turn 3");
+    usage();
+    expect(await send("turn 4")).toBe(FULL + "\n\nturn 4");
+  });
+
+  it("detects a cumulative collapse against an earlier turn's high-water mark", async () => {
+    const { usage, send } = await usageThread("cumulative-collapse");
+    usage(100000, 75000);
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    // Neither adjacent dip exceeds 40%, but the total fall from the peak does.
+    usage(50000);
+    expect(await send("turn 2")).toBe("turn 2");
+    usage();
+    expect(await send("turn 3")).toBe(FULL + "\n\nturn 3");
+    expect(await send("turn 4")).toBe("turn 4");
+  });
+
+  it.each([40000, 75000])("invalidates a rejected prompt's receipt only after compaction (usage: %s)", async (used) => {
+    const failureFile = join(scratch, "compaction-failure.json");
+    process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;
+    process.env.FAKE_ACP_RPC_FAILURE_AFTER_USAGE = "1";
+    const { usage, send } = await usageThread("rejected-compaction");
+    usage(100000);
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    usage(used);
+    writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error after compaction" }));
+    expect(await send("turn 2", false)).toBe("turn 2");
+    unlinkSync(failureFile);
+    usage();
+    expect(await send("turn 3")).toBe(used < 60000 ? FULL + "\n\nturn 3" : "turn 3");
+    expect(await send("turn 4")).toBe("turn 4");
+  });
+
+  it("ignores a zero usage report", async () => {
+    const { usage, send } = await usageThread("zero-usage");
+    usage(150000);
+    expect(await send("turn 1")).toBe(FULL + "\n\nturn 1");
+    // zero is not a measurement: no trigger, and the peak stays
+    usage(0);
+    expect(await send("turn 2")).toBe("turn 2");
+    expect(await send("turn 3")).toBe("turn 3");
+  });
+
+  it("never triggers from a receipt written before lastUsed existed", async () => {
+    const { threadId, usage, send } = await usageThread("legacy-receipt");
+    // a legacy receipt has no lastUsed, so a low first reading is no collapse
+    writePromptSplitReceipt(
+      "grokAgent",
+      JSON.stringify([threadId, "fake-acp-session"]),
+      promptSplitFingerprints("Standing rules.", "Memory: likes quiet hours."),
+    );
+    usage(50000);
+    expect(await send("turn 1")).toBe("turn 1");
+    expect(await send("turn 2")).toBe("turn 2");
   });
 
   it("fails clearly when an image-capable adapter meets an older ACP runtime", async () => {
@@ -1281,6 +1418,50 @@ describe("ACP turns (fake CLI)", () => {
     expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "rpc_error" });
     expect(recorder.events.find(e => e.type === "runtime.error")?.message).toMatch(/no tool running/i);
     expect(instance.adapter.hasSession("t-stall-tool")).toBe(false);
+  });
+
+  // A quiet agent is not a black box: the person is told what it is doing.
+  it("tells the person what a quiet agent is doing, then finishes the turn", async () => {
+    // Test the driver's notices, not how fast this OS starts ps/PowerShell.
+    // The process probe has its own checks in quiet-status.test.ts.
+    vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 1 });
+    process.env.OMB_ACP_QUIET_NOTICE_MS = "150";
+    process.env.OMB_ACP_QUIET_TICK_MS = "50";
+    process.env.FAKE_ACP_QUIET_MS = "700";
+    await create(GrokAgentDriver, "quiet-then-answer");
+    await instance.adapter.sendTurn({ threadId: "t-quiet", text: "go" });
+    expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: true });
+    const notices = recorder.events.filter(e => e.type === "runtime.notice") as Array<{ message: string }>;
+    expect(notices.length).toBeGreaterThanOrEqual(1);
+    expect(notices[0].message).toMatch(/^Grok (is waiting on its model|is busy|has sent nothing)/);
+    expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
+  });
+
+  it("reads Qwen's debug log: a logged rate-limit retry is reported and keeps the turn alive", async () => {
+    vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 1 });
+    process.env.QWEN_HOME = scratch;
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "400";
+    process.env.OMB_ACP_QUIET_NOTICE_MS = "150";
+    process.env.OMB_ACP_QUIET_TICK_MS = "50";
+    process.env.FAKE_ACP_QUIET_MS = "1200";
+    process.env.FAKE_ACP_QWEN_LOG = JSON.stringify([
+      "[ERROR] [OPENAI_ERROR] OpenAI API Error: 429 rate limited {",
+      "[WARN] [RETRY] Attempt 1 failed with status 429. Retrying after explicit delay of 20000ms... {",
+    ]);
+    await create(QwenAgentDriver, "quiet-then-answer");
+    await instance.adapter.sendTurn({ threadId: "t-qwen-retry", text: "go" });
+    // silent on the wire three times longer than the idle limit, yet alive
+    expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: true });
+    const notices = (recorder.events.filter(e => e.type === "runtime.notice") as Array<{ message: string }>).map(n => n.message);
+    expect(notices.some(m => /Qwen hit a rate limit \(HTTP 429\) and is retrying \(attempt 2\)\. Next try in 20 s\./.test(m))).toBe(true);
+    expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
+  });
+
+  // Qwen Code goes quiet for minutes while it compresses history, backs off
+  // a rate limit (up to 5 min a wait) or waits on one model request (its SDK
+  // allows 600 s). At 180 s the guard cut those turns off mid-work.
+  it("defaults the prompt idle guard above an agent's longest normal silence", () => {
+    expect(DEFAULT_ACP_PROMPT_IDLE_MS).toBeGreaterThan(600_000);
   });
 
   it("an agent that goes silent mid-answer is failed and closed by the prompt idle guard", async () => {

@@ -79,8 +79,8 @@ it("runs structured MCP calls through real harness approval and continuation, pr
     const frame = (delta: unknown, finish_reason: string | null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
     res.writeHead(200, { "content-type": "text/event-stream" });
     if (toolResult) {
-      res.end(frame({ content: scenario === "allow" ? "The artifact was created." : "The operation was denied." }, "stop") + "data: [DONE]\n\n");
-    } else if (scenario === "text" || scenario === "ordinary" || scenario === "tools-off") {
+      res.end(frame({ content: ["allow", "selected"].includes(scenario) ? "The artifact was created." : "The operation was denied." }, "stop") + "data: [DONE]\n\n");
+    } else if (["text", "ordinary", "scope-empty", "tools-off"].includes(scenario)) {
       res.end(frame({ content: scenario === "text" ? JSON.stringify(call) : "Hello from the fixture." }, "stop") + "data: [DONE]\n\n");
     } else {
       // Arguments arrive across events, and are only valid JSON when joined.
@@ -116,7 +116,7 @@ it("runs structured MCP calls through real harness approval and continuation, pr
     await api("PATCH", "/api/config", { openaiCompat: { key: "synthetic-fixture-key", url: `http://127.0.0.1:${address.port}/v1`, model: "fixture-model" } });
     const mcpScript = join(fixture.info.dataDir, "fixture-mcp.mjs");
     writeFileSync(mcpScript, MCP_FIXTURE);
-    for (const mode of ["allow", "deny", "cancel", "text", "ordinary", "tools-off"]) {
+    for (const mode of ["allow", "deny", "cancel", "text", "ordinary", "selected", "scope-empty", "tools-off"]) {
       scenario = mode;
       const artifact = join(fixture.info.dataDir, `${mode}-artifact.txt`);
       const startupMarker = join(fixture.info.dataDir, `${mode}-mcp-started.txt`);
@@ -132,6 +132,9 @@ it("runs structured MCP calls through real harness approval and continuation, pr
       const { bot } = await control(["new-bot", "--name", `API tool ${mode}`]);
       await control(["set-model", "--bot", bot.id, "--instance", "openaiCompat", "--model", "fixture-model"]);
       await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: [mode], description: "Verification assistant", soul: "Use structured tools when an operation is requested." });
+      if (mode === "selected" || mode === "scope-empty") {
+        await api("PATCH", `/api/bots/${bot.id}`, { toolScope: { allow: mode === "selected" ? [`mcp:${mode}:write_file`] : [] } });
+      }
       const memoryDirectory = join(fixture.info.dataDir, "workspaces", bot.id);
       mkdirSync(memoryDirectory, { recursive: true });
       writeFileSync(join(memoryDirectory, "MEMORY.md"), "# Memory\n- Fixture prefers concise replies.\n");
@@ -139,7 +142,7 @@ it("runs structured MCP calls through real harness approval and continuation, pr
       expect((await control(["send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Write the verification artifact if a structured tool is requested."])).success).toBe(true);
       const wait = () => control(["wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "20"]);
       let settled = await wait();
-      if (["allow", "deny", "cancel"].includes(mode)) {
+      if (["allow", "deny", "cancel", "selected"].includes(mode)) {
         expect(settled.status, JSON.stringify({ tools: requests[before]?.tools?.map((tool) => tool.function.name), messages: settled.messages })).toBe("needs-user");
         expect(existsSync(artifact)).toBe(false);
         expect(requests).toHaveLength(before + 1);
@@ -148,7 +151,7 @@ it("runs structured MCP calls through real harness approval and continuation, pr
         const card = current.messages.find((message: any) => message.card?.requestId && !message.card.answered)?.card;
         expect(card?.requestId).toBeTruthy();
         if (mode === "cancel") await control(["interrupt", "--bot", bot.id, "--task", bot.activeTaskId]);
-        else await api("POST", `/api/bots/${bot.id}/respond`, { threadId: bot.activeTaskId, requestId: card.requestId, behavior: mode });
+        else await api("POST", `/api/bots/${bot.id}/respond`, { threadId: bot.activeTaskId, requestId: card.requestId, behavior: mode === "selected" ? "allow" : mode });
         settled = await wait();
       }
       const messages = await control(["messages", "--bot", bot.id, "--task", bot.activeTaskId, "--limit", "20"]);
@@ -157,7 +160,7 @@ it("runs structured MCP calls through real harness approval and continuation, pr
       expect(first.all).not.toContain("update it with your file tools");
       expect(first.all).not.toContain("File locations for this bot");
       expect(first.all).not.toContain("read its exact SKILL.md path above with your file tools");
-      if (mode === "allow" || mode === "deny") {
+      if (mode === "allow" || mode === "deny" || mode === "selected") {
         expect(requests).toHaveLength(before + 2);
         const continued = requests[before + 1]!;
         // The tool continuation resends the same prefix byte for byte, and
@@ -166,11 +169,12 @@ it("runs structured MCP calls through real harness approval and continuation, pr
         const result = continued.messages.find((message) => message.role === "tool");
         expect(result?.tool_call_id).toBe("fixture-call");
         expect(continued.messages.some((message) => message.role === "assistant" && message.tool_calls?.some((call) => call.id === result?.tool_call_id))).toBe(true);
-        if (mode === "allow") {
+        if (mode === "allow" || mode === "selected") {
           expect(settled.status).toBe("settled");
           expect(readFileSync(artifact, "utf8")).toBe("verified");
           expect(result?.content).toContain("created verification artifact");
           expect(messages.messages.some((message: any) => message.text?.includes("The artifact was created."))).toBe(true);
+          if (mode === "selected") expect(requests[before]!.tools?.map((tool) => tool.function.name)).toEqual(["selected_write_file"]);
         } else {
           expect(settled.status).toBe("failed");
           expect(result?.content).toMatch(/denied/i);
@@ -185,12 +189,14 @@ it("runs structured MCP calls through real harness approval and continuation, pr
         } else expect(settled.status).toBe("settled");
         if (mode === "text") expect(messages.messages.some((message: any) => message.text?.includes("fixture-call"))).toBe(true);
       }
-      if (mode === "tools-off") {
+      if (mode === "tools-off" || mode === "scope-empty") {
         expect(requests[before]).not.toHaveProperty("tools");
         expect(existsSync(startupMarker)).toBe(false);
-        expect(first.all).not.toContain("Use memory_update");
-        expect(first.all).not.toContain("session_search tool");
-        expect(first.all).not.toContain("The user also added an MCP server");
+        if (mode === "tools-off") {
+          expect(first.all).not.toContain("Use memory_update");
+          expect(first.all).not.toContain("session_search tool");
+          expect(first.all).not.toContain("The user also added an MCP server");
+        }
         expect(messages.messages.some((message: any) => message.tool || message.card)).toBe(false);
       }
       evidence.push({ scenario: mode, status: settled.status, artifactExists: existsSync(artifact), completionRequests: requests.length - before, mcpStarted: existsSync(startupMarker) });

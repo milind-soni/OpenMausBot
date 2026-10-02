@@ -144,6 +144,8 @@ describe("ProfileRequestService", () => {
     expect(store.messagesFor(bot.threadId)).toHaveLength(0);
     expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, changes: { approvalMode: "full" }, reason: "requested" }))
       .toThrow("unsupported profile field");
+    expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, changes: { toolScope: null }, reason: "requested" }))
+      .toThrow("unsupported profile field");
     vi.spyOn(store, "patchBotProfile").mockImplementationOnce(() => { throw new Error("profile write failed"); });
     expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, changes: { name: "Kiwi" }, reason: "requested" }))
       .toThrow("profile write failed");

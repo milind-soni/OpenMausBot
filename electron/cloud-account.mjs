@@ -5,6 +5,7 @@ export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
 const TOKEN = /^omc_[A-Za-z0-9_-]{43}$/;
 const CODE = /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/;
 const PRIVATE_CODE = /^[A-Za-z0-9_-]{43}$/;
+const TIER = /^[a-z][a-z0-9-]{0,23}$/;
 const REFRESH_MS = 60_000;
 // Never accept an address from the renderer. Tests explicitly inject loopback.
 export function cloudOrigin(value = CLOUD_ORIGIN, fixture = false) {
@@ -25,11 +26,12 @@ const timestamp = value => Number.isSafeInteger(value) && value > 0;
  * local settings or companion state is changed by this client. */
 export function createCloudAccountClient({ store, openBrowser, platform, deviceName, appVersion,
   origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout }) {
+  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message) }) {
   origin = cloudOrigin(origin, fixture);
   let grant = null, issued = null, cleanup = null, pending = null, cleanupNeeded = false;
   let value = { status: "signed-out" }, generation = 0, timer = null, closed = false, clearing = null, refreshing = null;
   let verifiedUntil = 0, restoring = false, controller = new AbortController();
+  const newerPlans = new Set();
   const view = (status, message) => ({ status, ...(message ? { message } : {}), ...(grant ? { account: grant.account, deviceId: grant.device.id, expiresAt: grant.expiresAt } : {}) });
   const state = () => structuredClone(value.status === "connected" && now() >= verifiedUntil ? view("unavailable", "verification-expired") : value);
   const publish = next => { value = next; onState(state()); return state(); };
@@ -69,11 +71,18 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (saved?.origin !== origin || !TOKEN.test(saved.token)) throw new Error("Invalid Cloud credential.");
     return { origin, token: saved.token, ...identity({ ...saved, cloudContractVersion: 1 }) };
   }
+  /** `plan` stays "free" or "pro" (any paid plan); `tier` names the paid plan
+   * when the Admin says. A plan newer than this app ("personal", "max") is
+   * paid with that tier, never a lockout; a malformed tier is no tier. */
   function entitlement(input) {
-    if (!input || !["free", "pro"].includes(input.plan) || !["active", "inactive"].includes(input.status) ||
+    const newer = typeof input?.plan === "string" && !["free", "pro"].includes(input.plan) && TIER.test(input.plan);
+    if (!input || !(newer || ["free", "pro"].includes(input.plan)) || !["active", "inactive"].includes(input.status) ||
       !(input.expiresAt === null || timestamp(input.expiresAt)) || !Number.isSafeInteger(input.version) || input.version < 0) throw new Error("Invalid Cloud entitlement.");
-    if (input.status === "active" && (input.plan !== "pro" || input.expiresAt === null || input.expiresAt <= now())) throw new Error("Invalid active Cloud entitlement.");
-    return { plan: input.plan, status: input.status,
+    const plan = input.plan === "free" ? "free" : "pro";
+    if (input.status === "active" && (plan !== "pro" || input.expiresAt === null || input.expiresAt <= now())) throw new Error("Invalid active Cloud entitlement.");
+    if (newer && !newerPlans.has(input.plan)) { newerPlans.add(input.plan); warn(`[cloud] OMB Cloud sent plan "${input.plan}", newer than this app; treating it as paid.`); }
+    const tier = typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : newer ? input.plan : undefined;
+    return { plan, ...(tier ? { tier } : {}), status: input.status,
       expiresAt: input.expiresAt, version: input.version };
   }
   async function revoke(previous) {

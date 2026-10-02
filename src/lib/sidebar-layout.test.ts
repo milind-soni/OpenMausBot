@@ -81,6 +81,24 @@ describe("sidebar virtual sections", () => {
     expect(parts.pinnedBots).toEqual([]);
   });
 
+  it("lifts pinned bots from every group when pins are universal", () => {
+    const workChief = { id: "work-chief", chiefOfStaff: true, section: "Work", pinned: true };
+    const home = { id: "home", section: "Home", pinned: true };
+    const looseChief = { id: "loose", chiefOfStaff: true, pinned: true };
+    const stay = { id: "stay", section: "Work" };
+    const hidden = { id: "hidden", section: "Home", pinned: true, hidden: true };
+    const parts = partitionSidebarBots(
+      [workChief, home, looseChief, stay, hidden],
+      { universalPins: true },
+    );
+    expect(parts.pinnedBots.map((bot) => bot.id)).toEqual(["work-chief", "home", "loose"]);
+    expect(parts.sectionChiefs).toEqual([]);
+    expect(parts.unsectionedChief).toBeNull();
+    expect(parts.sectionedBots).toEqual([stay]);
+    expect(workChief.section).toBe("Work");
+    expect(home.section).toBe("Home");
+  });
+
   it("forces filtered and icon-only views open and non-reorderable", () => {
     expect(sidebarLayoutInteractive("comfortable", "")).toBe(true);
     expect(sidebarLayoutInteractive("comfortable", "writer")).toBe(false);

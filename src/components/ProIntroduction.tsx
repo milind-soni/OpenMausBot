@@ -14,9 +14,11 @@ import { t } from "@/lib/i18n";
 // more. After that, updates and replaying the welcome tour never reset it.
 export const PRO_DISMISSED = "pro-introduction-dismissed-v2";
 
-/** The launch price, and the regular price shown struck through beside it. */
+/** The launch price, and the price after the launch offer. Both are plain
+ * text: never a struck-through or "was" former price (FTC 16 CFR 233.1 and
+ * the EU 30-day prior-price rule). */
 export const PRO_LAUNCH_PRICE = "$49";
-export const PRO_REGULAR_PRICE = "$89";
+export const PRO_LATER_PRICE = "$89";
 
 export function proOfferAvailable(account: CloudAccountState | null): boolean {
   return account?.status === "signed-out" || (account?.status === "connected" && account.entitlement?.plan === "free");
@@ -81,11 +83,7 @@ export function ProIntroductionCard({ onDismiss }: { onDismiss: () => void }) {
       <li className="flex items-center gap-2.5"><Monitor size={17} className="shrink-0 text-ink-secondary" aria-hidden="true" />{t("pro.computers")}</li>
       <li className="flex items-center gap-2.5"><CalendarClock size={17} className="shrink-0 text-ink-secondary" aria-hidden="true" />{t("pro.schedule")}</li>
     </ul>
-    <p className="mb-3 text-[12.5px]">
-      <span role="img" aria-label={t("pro.launchPriceLabel", { was: PRO_REGULAR_PRICE, price: PRO_LAUNCH_PRICE })}>
-        <s className="text-ink-secondary">{PRO_REGULAR_PRICE}</s> {t("pro.launchPrice", { price: PRO_LAUNCH_PRICE })}
-      </span>
-    </p>
+    <p className="mb-3 text-[12.5px]">{t("pro.launchPrice", { price: PRO_LAUNCH_PRICE, laterPrice: PRO_LATER_PRICE })}</p>
     <div className="flex flex-wrap items-center gap-3">
       <ProLink onOpened={onDismiss} />
       <button type="button" className="py-2 text-[12px] text-ink-secondary hover:text-ink" onClick={onDismiss}>{t("pro.noThanks")}</button>

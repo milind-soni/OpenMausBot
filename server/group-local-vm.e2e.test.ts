@@ -13,7 +13,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 let child: ChildProcess;
-let startServer: () => Promise<void>;
+let startServer: (computerWaitMaxMs?: number) => Promise<void>;
 let fixtureHome = "";
 let base = "";
 let stateFile = "";
@@ -105,7 +105,7 @@ beforeAll(async () => {
   }, computer: { driver: "boxAgent", config: { pollMs: 10 } } } }));
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
-  startServer = async () => {
+  startServer = async (computerWaitMaxMs) => {
     child = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href, join(ROOT, "server/index.ts")], {
       cwd: ROOT, env: {
         PATH: dirname(process.execPath), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
@@ -114,6 +114,7 @@ beforeAll(async () => {
         TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
         OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
         OMB_BOX_API: `http://127.0.0.1:${boatPort}`,
+        ...(computerWaitMaxMs ? { OMB_COMPUTER_WAIT_MAX_MS: String(computerWaitMaxMs) } : {}),
         OMB_USER_DATA: join(fixtureHome, "user-data"),
       }, stdio: ["ignore", "pipe", "pipe"],
     });
@@ -133,12 +134,27 @@ afterAll(async () => {
   if (boatServer) await new Promise<void>(resolve => boatServer.close(() => resolve()));
   if (fixtureHome) await removeTempDir(fixtureHome);
 });
-const rooms: string[] = [];
-afterEach(async () => {
-  vmState();
-  writeFileSync(finishFile, "finish");
-  for (const id of rooms.splice(0)) await stop(id);
-});
+const rooms = new Map<string, string[]>();
+async function cleanupRooms() {
+  const pending = [...rooms];
+  rooms.clear();
+  const errors: unknown[] = [];
+  const attempt = async (operation: () => unknown | Promise<unknown>) => {
+    try { await operation(); } catch (error) { errors.push(error); }
+  };
+  // Stop before releasing shared fixture gates: a cancelled setup must not
+  // dispatch just as the next test starts using the same dump and finish files.
+  for (const [id] of pending) await attempt(() => stop(id));
+  await attempt(() => vmState());
+  await attempt(() => writeFileSync(finishFile, "finish"));
+  for (const [id, members] of pending) {
+    for (const botId of members) await attempt(() => idle(botId));
+    await attempt(() => api("DELETE", `/api/groups/${id}`));
+    for (const botId of members) await attempt(() => api("DELETE", `/api/bots/${botId}`));
+  }
+  if (errors.length) throw new AggregateError(errors, "Fixture room cleanup failed");
+}
+afterEach(cleanupRooms);
 async function room() {
   vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
   const bots = [];
@@ -149,13 +165,93 @@ async function room() {
   }
   const { group } = await api("POST", "/api/groups", { name: "Fixture VM room", memberIds: bots.map(b => b.id),
     setup: { bulletin: "", defaultResponder: { kind: "member", botId: bots[0].id } } });
-  rooms.push(group.id);
+  rooms.set(group.id, bots.map(bot => bot.id));
   return { bots, group };
 }
 const send = (id: string) => api("POST", `/api/groups/${id}/messages`, { text: "Reply once." });
 const stop = (id: string) => api("POST", `/api/groups/${id}/interrupt`, {});
 
+describe("Local VM stop and resume", () => {
+  it("stops an idle shared VM without deleting it, remembers why across restart, and starts it again", async () => {
+    vmState({ containers: ["shared"], idleMs: 300 });
+    await api("PATCH", "/api/config", { localVm: { mode: "shared", idleTimeoutMinutes: 5 } });
+    const { bot } = await api("POST", "/api/bots", { name: "Resume fixture", computer: "vm" });
+    await until(() => api("GET", "/api/local-computer"), s => s.container === "stopped");
+    expect((await api("GET", "/api/local-computer")).stop_reason).toBe("idle");
+    const stopped = JSON.parse(readFileSync(stateFile, "utf8"));
+    expect(stopped.containers).toEqual(["shared"]);
+    expect(stopped.actions).toEqual([{ action: "stop", target: "shared" }]);
+    vmState({ ...stopped, idleMs: 60_000 });
+    await waitForExit(child, { signal: "SIGTERM" });
+    await startServer();
+    expect((await api("GET", `/api/bots/${bot.id}/local-computer`)).stop_reason).toBe("idle");
+    const started = await api("POST", "/api/local-computer/start", {});
+    expect(started.ready).toBe(true);
+    expect((await api("GET", "/api/local-computer")).stop_reason).toBeNull();
+    expect(JSON.parse(readFileSync(stateFile, "utf8")).actions).toEqual([
+      { action: "stop", target: "shared" }, { action: "start", target: "shared" },
+    ]);
+    await api("DELETE", `/api/bots/${bot.id}`);
+  });
+
+  it("resumes an existing per-bot VM even at the instance cap", async () => {
+    vmState({ containers: [] });
+    await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 1 } });
+    const { bot } = await api("POST", "/api/bots", { name: "Per-bot resume", computer: "vm" });
+    await api("POST", `/api/bots/${bot.id}/local-computer/run`, {});
+    await api("POST", `/api/bots/${bot.id}/local-computer/stop`, {});
+    expect((await api("POST", `/api/bots/${bot.id}/local-computer/start`, {})).ready).toBe(true);
+    await api("POST", `/api/bots/${bot.id}/local-computer/stop`, {});
+    await api("PATCH", `/api/bots/${bot.id}`, { computer: null, browser: false });
+    rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "Use the existing computer." });
+    expect(computer(await dump())).toBeTruthy();
+    writeFileSync(finishFile, "finish");
+    await idle(bot.id);
+    expect(JSON.parse(readFileSync(stateFile, "utf8")).actions.map((entry: any) => entry.action)).toEqual([
+      "run", "stop", "start", "stop", "start",
+    ]);
+    await api("DELETE", `/api/bots/${bot.id}`);
+    await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+  });
+});
+
 describe("Group Local VM ownership on the real isolated server", () => {
+  it("cleans the remaining rooms after one cleanup operation fails", async () => {
+    rooms.set("missing-fixture-room", []);
+    const current = await room();
+    await send(current.group.id);
+    const previous = computer(await dump());
+    expect((await gate(previous)).status).toBe(200);
+
+    await expect(cleanupRooms()).rejects.toThrow(AggregateError);
+    const state = await api("GET", "/api/bots?messages=0");
+    expect(rooms.size).toBe(0);
+    expect(state.groups.some((group: any) => group.id === current.group.id)).toBe(false);
+    expect(state.bots.some((bot: any) => current.bots.some(member => member.id === bot.id))).toBe(false);
+    expect((await gate(previous)).status).toBe(401);
+  });
+
+  it("removes an interrupted fixture room before another room takes the shared desktop", async () => {
+    const first = await room();
+    await send(first.group.id);
+    const previous = computer(await dump());
+    expect((await gate(previous)).status).toBe(200);
+
+    await cleanupRooms();
+    const state = await api("GET", "/api/bots?messages=0");
+    expect(state.groups.some((group: any) => group.id === first.group.id)).toBe(false);
+    expect(state.bots.some((bot: any) => first.bots.some(member => member.id === bot.id))).toBe(false);
+    expect((await gate(previous)).status).toBe(401);
+
+    const next = await room();
+    await send(next.group.id);
+    const current = computer(await dump());
+    expect(current.env.OMB_CONTROL_URL).toContain(next.bots[0].id);
+    expect((await gate(current)).status).toBe(200);
+    expect((await gate(previous)).status).toBe(401);
+  });
+
   it.each([false, true])("provisions concurrent cold pool seats (existing per-bot desktops: %s)", async (existingPerBot) => {
     vmState({ containers: [] });
     rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
@@ -243,7 +339,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect(created.workspace_path.startsWith(fixtureHome)).toBe(true);
       const saved = join(created.workspace_path, "saved.txt");
       writeFileSync(saved, "survives idle removal");
-      // Idle cleanup removes only this container; its workspace survives.
+      // Older versions removed idle containers; keep that recovery path working.
       await api("POST", `/api/bots/${returning.id}/local-computer/remove`, {});
       await api("POST", `/api/bots/${holder.id}/local-computer/run`, {});
       await waitForExit(child, { signal: "SIGTERM" });
@@ -618,6 +714,68 @@ describe("Group Local VM ownership on the real isolated server", () => {
     }
   });
 
+  it.each(["shared", "per-bot"])("recovers a direct %s VM after a missing completion", async (mode) => {
+    vmState();
+    await api("PATCH", "/api/config", { localVm: { mode, maxInstances: 2 } });
+    const { bot } = await api("POST", "/api/bots", { name: `Stalled ${mode} VM` });
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm", browser: false });
+      rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Hold the VM" });
+      const first = computer(await dump());
+      expect((await gate(first)).status).toBe(200);
+      vmState({ dropCompletion: true, stall: true });
+      await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes("the turn was stopped"));
+      await idle(bot.id);
+      expect((await gate(first)).status).toBe(401);
+      vmState(); rmSync(dumpFile, { force: true });
+      const { task } = await api("POST", `/api/bots/${bot.id}/tasks`, {});
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Use the VM again", threadId: task.threadId });
+      const next = computer(await dump());
+      expect((await gate(next)).status).toBe(200);
+    } finally {
+      vmState({ containers: [] }); writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+      await idle(bot.id);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      if (mode === "per-bot") await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+      vmState();
+    }
+  }, 40_000);
+
+  it.each([["shared", false], ["shared", true], ["per-bot", false], ["per-bot", true]] as const)("keeps a replacement %s VM turn after a late completion (new task: %s)", async (mode, newTask) => {
+    vmState();
+    await api("PATCH", "/api/config", { localVm: { mode, maxInstances: 2 } });
+    const { bot } = await api("POST", "/api/bots", { name: "Late VM completion" });
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm", browser: false });
+      rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Hold the VM" });
+      const first = computer(await dump());
+      rmSync(stateFile + ".latecompleted", { force: true });
+      vmState({ delayCompletion: 8_000, stall: true });
+      await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes("the turn was stopped"));
+      await idle(bot.id);
+      expect((await gate(first)).status).toBe(401);
+      vmState(); rmSync(dumpFile, { force: true });
+      const threadId = newTask ? (await api("POST", `/api/bots/${bot.id}/tasks`, {})).task.threadId : bot.threadId;
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Keep using the VM", threadId });
+      const next = computer(await dump());
+      expect(existsSync(stateFile + ".latecompleted")).toBe(false);
+      await until(() => existsSync(stateFile + ".latecompleted"), Boolean);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect((await gate(next)).status).toBe(200);
+      expect((await api("GET", "/api/bots?messages=0")).bots.find((entry: any) => entry.id === bot.id).busy).toBe(true);
+    } finally {
+      vmState({ containers: [] }); writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+      await idle(bot.id);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      if (mode === "per-bot") await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+      vmState();
+    }
+  }, 30_000);
+
   // Linux accepts only its own validated runtime descriptor, which a fixture
   // cannot forge; the macOS and Windows descriptor is a plain file.
   it.skipIf(process.platform === "linux")("mounts a channel speaker's own This computer destination behind the control gate", async () => {
@@ -793,6 +951,52 @@ describe("Group Local VM ownership on the real isolated server", () => {
     expect(body).toEqual({ held: false, helpOpen: false });
     await stop(group.id); await idle(bots[0].id);
   });
+
+  it("parks an eager Auto VM wait and resumes with its computer after the holder stops", async () => {
+    await waitForExit(child, { signal: "SIGTERM" });
+    await startServer(2_000);
+    vmState({ containers: ["shared"] });
+    rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: holder } = await api("POST", "/api/bots", { name: "Eager Auto VM holder", computer: "vm", browser: false });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Eager Auto VM waiter", browser: false });
+    try {
+      await api("GET", "/api/local-computer");
+      await api("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the shared VM" });
+      const mountedHolder = computer(await dump());
+      expect((await gate(mountedHolder)).status).toBe(200);
+      rmSync(dumpFile, { force: true });
+      // The container can stop outside the app while its provider turn still
+      // holds the seat. Auto must eagerly wait before waking this known VM.
+      vmState({ containers: ["shared"], stopped: ["shared"] });
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "Use the stopped shared VM when available" });
+      await until(async () => JSON.stringify((await api("GET", `/api/threads/${auto.threadId}/messages`)).messages)
+        .includes("Parked — it continues automatically when the computer is free"), Boolean);
+      const parked = await until(() => api("GET", "/api/bots?messages=0"), state => {
+        const task = state.bots.find((bot: any) => bot.id === auto.id)?.tasks.find((task: any) => task.threadId === auto.threadId);
+        return task?.activity === "parked.computer" || existsSync(dumpFile);
+      });
+      const task = parked.bots.find((bot: any) => bot.id === auto.id).tasks.find((task: any) => task.threadId === auto.threadId);
+      expect(task).toMatchObject({ busy: false, activity: "parked.computer" });
+      expect(existsSync(dumpFile)).toBe(false);
+      expect(JSON.parse(readFileSync(stateFile, "utf8")).actions ?? []).toEqual([]);
+      await api("POST", `/api/bots/${holder.id}/interrupt`, { threadId: holder.threadId });
+      await idle(holder.id);
+      const resumed = await dump();
+      expect(computer(resumed)).toBeTruthy();
+      expect(resumed).toMatchObject({ prompt: { message: { content: expect.stringContaining("Continue the task that parked waiting for it") } } });
+      expect(JSON.parse(readFileSync(stateFile, "utf8")).actions).toEqual([{ action: "start", target: "shared" }]);
+      expect((await gate(computer(resumed))).status).toBe(200);
+    } finally {
+      for (const bot of [auto, holder]) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId });
+        await idle(bot.id);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+      vmState();
+      await waitForExit(child, { signal: "SIGTERM" });
+      await startServer();
+    }
+  }, 60_000);
 
   it("runs a screen-less Auto turn to completion while another thread holds the Local VM (issue #1361 AC1)", async () => {
     vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });

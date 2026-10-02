@@ -52,6 +52,48 @@ describe("buildTurnDigest", () => {
     ]);
   });
 
+  // Codex titles a commandExecution chip with the whole command line and ACP
+  // prefers rawInput.command over the tool's name, so the chip title is a
+  // command, not a tool identity. Keying the digest on it leaked the command
+  // (paths, ids) into a row that is FTS-indexed and replayed into rebuilt
+  // context, and made counts meaningless: every distinct command was its own
+  // bucket, so a turn that ran one tool twelve times never said so.
+  it("buckets command-titled chips under one shell tool instead of the command line", () => {
+    const d = buildTurnDigest({
+      ...base,
+      activities: [
+        activity('/bin/zsh -lc "jq \'.routines[]?\' ~/.openmausbot/bots/main/routines.json"', true, "jq '.routines[]?' routines.json"),
+        activity('/bin/zsh -lc "rg -n todo src/"', true, "rg -n todo src/"),
+        activity("list_routines", true),
+      ],
+      memory: [],
+    });
+    expect(d.tools).toEqual([
+      { name: "shell", count: 2, failed: 0, sample: "jq '.routines[]?' routines.json" },
+      { name: "list_routines", count: 1, failed: 0 },
+    ]);
+  });
+
+  // The reported line: a cp of a user's home path and two swift -e scripts
+  // were each printed as a tool name. The phones split the tools part after
+  // "×N" / "(N failed)", so nothing may follow the count.
+  it("renders command-titled chips as a bare shell count with no command text", () => {
+    const d = buildTurnDigest({
+      ...base,
+      activities: [
+        activity('cp "/Users/someone/.openmausbot/task-workspaces/9d6ab24f-15b8-45e2/out.png" ~/Desktop/', true, "cp out.png ~/Desktop/"),
+        activity("swift -e 'import AppKit\n// Target 1080 × 1080\nlet size = NSSize(width: 1080, height: 1080)'", true, "swift -e …"),
+        activity("swift -e 'import AppKit\nlet canvas = NSImage()'", true, "swift -e …"),
+        activity("memory_update", true),
+      ],
+      memory: [],
+    });
+    const line = renderDigest(d);
+    expect(line).toContain("tools: shell ×3, memory_update ×1");
+    expect(line).not.toContain("/Users/");
+    expect(line).not.toContain("swift");
+  });
+
   it("ignores activity rows from other turns and rows that are not tool calls", () => {
     const d = buildTurnDigest({
       ...base,

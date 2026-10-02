@@ -28,15 +28,17 @@ function gateNeeds(runtime: string) {
 }
 
 describe("CI concurrency", () => {
-  it("supersedes old PR checks but lets every main and merge-queue run finish", () => {
+  it("supersedes old PR checks but never cancels a running main or merge-queue run", () => {
     expect(workflow.on.push.branches).toEqual(["main"]);
     expect(workflow.on).toHaveProperty("merge_group");
     expect(workflow.concurrency["cancel-in-progress"]).toBe("${{ github.event_name == 'pull_request' }}");
   });
 
-  it("gives each main commit, PR and merge-queue entry its own group", () => {
+  it("keeps main to one running and one waiting run, apart from PR and merge-queue groups", () => {
+    // One group for every main push: GitHub keeps the running run and only
+    // the newest waiting one, so a burst of merges cannot pile up full runs.
     expect(workflow.concurrency.group).toBe(
-      "ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.event_name == 'push' && github.sha || github.ref }}",
+      "ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.ref }}",
     );
   });
 
@@ -80,11 +82,14 @@ describe("CI concurrency", () => {
     const release = parse(readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"));
     expect(release.jobs.assemble.needs).toContain("ci");
     expect(release.jobs.ci.needs).toBe("prepare");
-    const wait = release.jobs.ci.steps[0];
+    expect(release.jobs.ci.permissions).toEqual({ actions: "write", contents: "write" });
+    const wait = release.jobs.ci.steps.find((step: { run?: string }) => step.run === "node scripts/release-ci.mjs");
     expect(wait.if).toBe("${{ !inputs.ship_without_ci }}");
-    expect(wait.run).toContain("actions/workflows/ci.yml/runs?head_sha=$SHA");
-    expect(wait.run).toContain(`select(.name == "${workflow.jobs.gate.name}")`);
-    expect(wait.run).toContain('[ "$gate" = success ] && exit 0');
+    expect(wait.env).toMatchObject({ SHA: "${{ needs.prepare.outputs.sha }}", VERSION: "${{ needs.prepare.outputs.version }}" });
+    // The script reads ci.yml's gate by its job name.
+    expect(readFileSync(new URL("./release-ci.mjs", import.meta.url), "utf8")).toContain(`job.name === "${workflow.jobs.gate.name}"`);
+    // The release lane is a branch, so its runs get their own concurrency group.
+    expect(workflow.on).toHaveProperty("workflow_dispatch");
   });
 
   it.each(requiredRuntimeJobs)("fails closed for every required %s outcome", (job) => {
@@ -129,6 +134,13 @@ describe("CI concurrency", () => {
         expect(job.needs).toEqual(["control-plane"]);
         expect(job.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/main'");
         expect(workflow.jobs.gate.needs).not.toContain(name);
+        // Without the Cloudflare token the deploy is skipped with a warning, not failed:
+        // every step after the token check waits on it.
+        const [check, ...rest] = job.steps as { id?: string; if?: string; env?: Record<string, string>; run?: string }[];
+        expect(check.id).toBe("token");
+        expect(check.env).toEqual({ CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}" });
+        expect(check.run).toContain("::warning");
+        for (const step of rest) expect(step.if).toBe("steps.token.outputs.present == 'true'");
         continue;
       }
       expect(job.needs).toBe("static");
