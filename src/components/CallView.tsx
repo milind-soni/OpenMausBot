@@ -84,9 +84,14 @@ export function CallTargetButton({
   requireExplicitVoices: boolean;
   onStart: () => void;
 }) {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const active = useOnCall() === targetId;
+  // Paired to another computer, the voice engine and its key stay on the
+  // host, and the pairing takes agent changes only through the profile route
+  // the remote agent settings save with. There, voice set-up opens those
+  // settings, as it always did, instead of the pop-up.
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   const capabilityHelp = capabilitiesReady
     ? callCapabilityHelp(capabilities, Boolean(window.ogb?.speechStart))
     : null;
@@ -226,10 +231,16 @@ export function CallTargetButton({
           {voiceSetupRequired && setupBot && (
             <button
               type="button"
-              aria-haspopup="dialog"
+              aria-haspopup={remoteClient ? undefined : "dialog"}
               data-voice-setup-open
               onClick={() => {
                 setHelpOpen(false);
+                if (remoteClient) {
+                  // In a room the agent is a member: open its chat first.
+                  if (setupBot.id !== targetId) dispatch({ type: "select", id: setupBot.id });
+                  dispatch({ type: "toggleSettings", open: true, section: "voice" });
+                  return;
+                }
                 setVoiceSetupOpen(true);
               }}
               className="mt-2.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink hover:brightness-110"

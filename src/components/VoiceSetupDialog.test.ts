@@ -76,8 +76,18 @@ class FakeElement {
   focus = vi.fn();
   contains = vi.fn(() => true);
   getClientRects = () => [{}];
-  querySelector = vi.fn((): FakeElement | null => null);
+  querySelector = vi.fn((_selector: string): FakeElement | null => null);
   querySelectorAll = vi.fn((): FakeElement[] => []);
+}
+const VOICE_PICKER = "select[data-voice-picker]:not([disabled])";
+const FIRST_FIELD = "input:not([disabled]), select:not([disabled])";
+/** A pane holding these fields, found the way a browser would. */
+function paneWith(fields: { voicePicker?: FakeElement; firstField?: FakeElement }) {
+  const pane = new FakeElement();
+  pane.querySelector.mockImplementation((selector) =>
+    (selector === VOICE_PICKER ? fields.voicePicker : selector === FIRST_FIELD ? fields.firstField : undefined) ?? null,
+  );
+  return pane;
 }
 
 beforeEach(() => {
@@ -162,12 +172,13 @@ describe("voice set-up pop-up", () => {
       removeEventListener: (type: string) => listeners.delete(type),
     });
     const view = render({ returnFocusRef: { current: callButton as unknown as HTMLElement } });
-    const pane = new FakeElement();
-    pane.querySelector.mockReturnValue(keyField);
+    // No key saved yet, so no voice picker: the key field comes first.
+    const pane = paneWith({ firstField: keyField });
     (byAttribute(view, "role", "dialog").props.ref as RefObject<unknown>).current = pane;
 
     const cleanup = fixture.effects.at(-1)!();
-    expect(pane.querySelector).toHaveBeenCalledWith("input:not([disabled]), select:not([disabled])");
+    expect(pane.querySelector).toHaveBeenCalledWith(VOICE_PICKER);
+    expect(pane.querySelector).toHaveBeenCalledWith(FIRST_FIELD);
     expect(keyField.focus).toHaveBeenCalledOnce();
 
     // A key some other layer already handled is not ours.
@@ -182,6 +193,45 @@ describe("voice set-up pop-up", () => {
     expect(listeners.has("keydown")).toBe(false);
     expect(callButton.focus).toHaveBeenCalledOnce();
     expect(opener.focus).not.toHaveBeenCalled();
+  });
+
+  it("starts on the voice picker once the key is saved, not in the key field", () => {
+    vi.stubGlobal("HTMLElement", FakeElement);
+    vi.stubGlobal("document", { body: {}, activeElement: null });
+    vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    const view = render();
+    // The key field stays (to replace the key), ahead of the picker.
+    const keyField = new FakeElement();
+    const voicePicker = new FakeElement();
+    const pane = paneWith({ voicePicker, firstField: keyField });
+    (byAttribute(view, "role", "dialog").props.ref as RefObject<unknown>).current = pane;
+
+    fixture.effects.at(-1)!();
+    expect(voicePicker.focus).toHaveBeenCalledOnce();
+    expect(keyField.focus).not.toHaveBeenCalled();
+    expect(pane.focus).not.toHaveBeenCalled();
+  });
+
+  it("finds the voice picker where VoiceSettings draws it, which is only once the engine is set up", async () => {
+    const actual = await vi.importActual<typeof import("./VoiceSettings")>("./VoiceSettings");
+    const card = () => renderToStaticMarkup(createElement(actual.VoiceSettings, { bot: pepper, onPatch: () => {} }));
+    const key = 'aria-label="ElevenLabs key"';
+    const pickerTag = (html: string) => html.match(/<select\b[^>]*>/g)?.find((tag) => tag.includes("data-voice-picker"));
+
+    // No ElevenLabs key yet: its field, and no picker.
+    fixture.config = { tts: { configured: false, provider: "elevenlabs" } };
+    const needsKey = card();
+    expect(needsKey).toContain(key);
+    expect(pickerTag(needsKey)).toBeUndefined();
+
+    // Key saved: the field is still there, first, and Pepper's voice picker
+    // follows it.
+    fixture.config = { tts: { configured: true, provider: "elevenlabs" } };
+    const needsVoice = card();
+    const tag = pickerTag(needsVoice);
+    expect(tag).toContain('aria-label="Pepper&#x27;s voice"');
+    expect(needsVoice.indexOf(key)).toBeGreaterThan(-1);
+    expect(needsVoice.indexOf(key)).toBeLessThan(needsVoice.indexOf(tag!));
   });
 
   it("keeps Tab inside, and brings focus back when it has fallen out", () => {

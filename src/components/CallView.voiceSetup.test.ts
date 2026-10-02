@@ -209,6 +209,49 @@ describe("setting up a voice from the call button", () => {
     expect(fixture.startCall).toHaveBeenCalledWith("room-1");
   });
 
+  it("opens the remote agent settings instead on a desktop paired to another computer", () => {
+    // This Mac speaks with the host's voices; the host has a key but no
+    // default voice, and Pepper has none of its own.
+    vi.stubGlobal("window", { ogb: { speechStart: () => {}, remoteClient: { active: true } } });
+    fixture.config = { tts: { configured: true, ready: false } };
+    click(find(render(), "data-call-button"));
+    const help = render();
+    expect(help.html).toContain("Set up voice");
+    const setUp = find(help, "data-voice-setup-open");
+    // A side panel, not a dialog.
+    expect(setUp.props["aria-haspopup"]).toBeUndefined();
+    click(setUp);
+    // The pop-up's saves (the bot update, the voice config) are refused by
+    // the pairing; the remote agent settings save through the host's
+    // profile route, so the button opens those, as it always did.
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "toggleSettings", open: true, section: "voice" }]]);
+    const after = render();
+    expect(after.html).not.toContain("data-voice-setup-stub");
+    expect(after.html).not.toContain("Call unavailable");
+    expect(fixture.dialog).toBeNull();
+    expect(fixture.startCall).not.toHaveBeenCalled();
+  });
+
+  it("opens the member's chat first from a room on a paired desktop", () => {
+    vi.stubGlobal("window", { ogb: { speechStart: () => {}, remoteClient: { active: true } } });
+    fixture.config = { tts: { configured: true, ready: true } };
+    const room: Props = {
+      targetId: "room-1",
+      targetName: "Standup",
+      voices: ["voice-1", undefined],
+      setupBotId: "pepper",
+      requireExplicitVoices: true,
+      onStart: () => {},
+    };
+    click(find(render(room), "data-call-button"));
+    click(find(render(room), "data-voice-setup-open"));
+    expect(fixture.dispatch.mock.calls).toEqual([
+      [{ type: "select", id: "pepper" }],
+      [{ type: "toggleSettings", open: true, section: "voice" }],
+    ]);
+    expect(render(room).html).not.toContain("data-voice-setup-stub");
+  });
+
   it("keeps Choose This computer as the help when the device is the problem", () => {
     fixture.dictation = { available: false, reasonCode: "remote-server" };
     click(find(render(), "data-call-button"));

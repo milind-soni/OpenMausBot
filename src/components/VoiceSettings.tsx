@@ -423,6 +423,7 @@ export function VoiceSettings({
               value={selectedVoice}
               onChange={(e) => chooseVoice(e.target.value)}
               aria-label={`${bot.name}'s voice`}
+              data-voice-picker
               className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:outline-none"
             >
               <option value="">

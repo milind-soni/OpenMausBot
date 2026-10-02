@@ -4,6 +4,11 @@
 // VoiceSettings card in a small glass pop-up over the chat, with the bot's
 // full Voice section one link away, and the call one click away once a
 // voice is ready.
+//
+// It saves the way the bot's own settings do (the bot update and the
+// workspace voice config). A desktop paired to another computer can't make
+// those writes (the host keeps the engine and its key), so the call help
+// opens the remote agent settings there instead of this.
 import { useEffect, useId, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { CheckCircle2, ChevronRight, Loader2, Phone, X } from "lucide-react";
@@ -17,6 +22,8 @@ import { useBotSettingsDerived } from "./bot-settings/useBotSettingsDerived";
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+const VOICE_PICKER = "select[data-voice-picker]:not([disabled])";
+const FIRST_FIELD = "input:not([disabled]), select:not([disabled])";
 
 export function VoiceSetupDialog({
   bot,
@@ -56,8 +63,14 @@ export function VoiceSetupDialog({
       Array.from(dialog?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []).filter(
         (element) => element.getClientRects().length > 0,
       );
-    // Straight to the key field when one is missing; else the voice picker.
-    (dialog?.querySelector<HTMLElement>("input:not([disabled]), select:not([disabled])") ?? dialog)?.focus();
+    // The voice picker shows once the engine is set up (its key saved, its
+    // server address set), and then a voice is what's missing: start there.
+    // Until then, start in the first field: the key, or the server address.
+    (
+      dialog?.querySelector<HTMLElement>(VOICE_PICKER) ??
+      dialog?.querySelector<HTMLElement>(FIRST_FIELD) ??
+      dialog
+    )?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing) return;
       if (event.key === "Escape") {
