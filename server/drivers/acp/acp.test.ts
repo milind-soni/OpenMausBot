@@ -1290,7 +1290,12 @@ describe("ACP turns (fake CLI)", () => {
   });
 
   // A quiet agent is not a black box: the person is told what it is doing.
-  it("tells the person what a quiet agent is doing, then finishes the turn", async () => {
+  // Not on Windows: there each probe is a PowerShell process that takes one
+  // to three seconds to start, longer than these tests' sub-second quiet
+  // windows (the real guard ticks every 15 s and waits minutes, so the
+  // probe's speed does not matter there).
+  const quietProbeIsFast = process.platform !== "win32";
+  it.runIf(quietProbeIsFast)("tells the person what a quiet agent is doing, then finishes the turn", async () => {
     process.env.OMB_ACP_QUIET_NOTICE_MS = "150";
     process.env.OMB_ACP_QUIET_TICK_MS = "50";
     process.env.FAKE_ACP_QUIET_MS = "700";
@@ -1303,7 +1308,7 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
   });
 
-  it("reads Qwen's debug log: a logged rate-limit retry is reported and keeps the turn alive", async () => {
+  it.runIf(quietProbeIsFast)("reads Qwen's debug log: a logged rate-limit retry is reported and keeps the turn alive", async () => {
     process.env.QWEN_HOME = scratch;
     process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "400";
     process.env.OMB_ACP_QUIET_NOTICE_MS = "150";

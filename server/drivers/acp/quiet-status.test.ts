@@ -126,7 +126,12 @@ describe("process probe", () => {
     await new Promise<void>((resolve) => socket.once("connect", () => resolve()));
     try {
       const sample = await sampleProcessTree(process.pid);
-      expect(sample.cpuMs).toBeGreaterThan(0);
+      // Found, not "unknown". macOS `ps` prints TIME to the hundredth of a
+      // second; Linux procps prints whole seconds, so a test worker that has
+      // used under a second of CPU honestly reads 0 there.
+      expect(sample.cpuMs).not.toBeNull();
+      expect(sample.cpuMs!).toBeGreaterThanOrEqual(0);
+      if (process.platform === "darwin") expect(sample.cpuMs!).toBeGreaterThan(0);
       // lsof may be missing on a minimal Linux box: unknown, never zero
       if (sample.connections !== null) expect(sample.connections).toBeGreaterThanOrEqual(1);
     } finally {
