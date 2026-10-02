@@ -19,8 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -214,6 +212,7 @@ private fun UpdateRow(update: ChatUpdate, face: MausState, onOpen: () -> Unit) {
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
     var answering by remember(update.id) { mutableStateOf(false) }
+    val layout by LocalCompanion.current.chatPreferences.approvalLayout.collectAsState()
     val card = update.card
 
     Row(
@@ -259,32 +258,22 @@ private fun UpdateRow(update: ChatUpdate, face: MausState, onOpen: () -> Unit) {
                 } else {
                     // The answers are the card's own options, exactly as the chat
                     // screen draws them — never a choice invented here.
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(top = 6.dp),
-                    ) {
-                        card.options.forEach { option ->
-                            val refusal = ApprovalChoices.emphasis(option) == OptionEmphasis.SECONDARY
-                            Button(
-                                onClick = {
-                                    haptics.play(TactileAction.CHOOSE_APPROVAL)
-                                    answering = true
-                                    scope.launch {
-                                        ApprovalAnswers.choose(session, update.chat, card, option)
-                                        answering = false
-                                    }
-                                },
-                                enabled = !answering,
-                                colors = if (refusal) {
-                                    ButtonDefaults.filledTonalButtonColors()
-                                } else {
-                                    ButtonDefaults.buttonColors()
-                                },
-                            ) {
-                                Text(option, fontSize = 13.sp)
+                    UpdateApprovalButtons(
+                        options = card.options,
+                        layout = layout,
+                        enabled = !answering,
+                        onChoose = { option ->
+                            haptics.play(TactileAction.CHOOSE_APPROVAL)
+                            answering = true
+                            scope.launch {
+                                try {
+                                    ApprovalAnswers.choose(session, update.chat, card, option)
+                                } finally {
+                                    answering = false
+                                }
                             }
-                        }
-                    }
+                        },
+                    )
                 }
             }
         }

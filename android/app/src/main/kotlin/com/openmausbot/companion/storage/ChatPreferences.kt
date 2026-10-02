@@ -7,6 +7,7 @@ import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.QuickReply
 import com.openmausbot.companion.core.RosterDensity
+import com.openmausbot.companion.ui.ApprovalLayout
 import com.openmausbot.companion.ui.AppearanceSkin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +48,15 @@ class ChatPreferences(
      */
     private val _rosterDensity = MutableStateFlow(RosterDensity.fromWire(prefs.getString(ROSTER_DENSITY, null)))
     val rosterDensity: StateFlow<RosterDensity> = _rosterDensity.asStateFlow()
+
+    private val _approvalLayout = MutableStateFlow(ApprovalLayout.fromWire(prefs.getString(APPROVAL_LAYOUT, null)))
+    val approvalLayout: StateFlow<ApprovalLayout> = _approvalLayout.asStateFlow()
+
+    fun setApprovalLayout(layout: ApprovalLayout) {
+        if (_approvalLayout.value == layout && prefs.contains(APPROVAL_LAYOUT)) return
+        prefs.edit().putString(APPROVAL_LAYOUT, layout.wireValue).commit()
+        _approvalLayout.value = layout
+    }
 
     fun setActivityDetail(detail: ActivityDetail) {
         if (_activityDetail.value == detail && prefs.contains(ACTIVITY_DETAIL)) return
@@ -107,6 +117,7 @@ class ChatPreferences(
     companion object {
         const val NAME = "openmaus.chat-preferences"
         const val FILE = "$NAME.xml"
+        private const val APPROVAL_LAYOUT = "companion.prefs.approvalLayout"
         private const val ACTIVITY_DETAIL = "companion.prefs.activityDetail"
         private const val QUICK_REPLIES = "companion.prefs.quickReplies"
         private const val APPEARANCE_SKIN = "companion.prefs.appearanceSkin"

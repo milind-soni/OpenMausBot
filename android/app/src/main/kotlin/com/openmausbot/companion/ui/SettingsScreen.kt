@@ -82,6 +82,7 @@ fun SettingsScreen(
     val notifications by environment.notifications.access.collectAsState()
     val activityDetail by environment.chatPreferences.activityDetail.collectAsState()
     val appearanceSkin by environment.chatPreferences.appearanceSkin.collectAsState()
+    val approvalLayout by environment.chatPreferences.approvalLayout.collectAsState()
     val rosterDensity by environment.chatPreferences.rosterDensity.collectAsState()
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
@@ -97,6 +98,7 @@ fun SettingsScreen(
     var pendingComputerRemoval by remember { mutableStateOf<Connection?>(null) }
     var choosingActivity by remember { mutableStateOf(false) }
     var choosingAppearance by remember { mutableStateOf(false) }
+    var choosingApprovalLayout by remember { mutableStateOf(false) }
     var choosingDensity by remember { mutableStateOf(false) }
     var editingQuickReplies by remember { mutableStateOf(false) }
 
@@ -238,6 +240,9 @@ fun SettingsScreen(
                 SettingsButton("Change activity detail") { choosingActivity = true }
                 SettingsButton("Quick replies") { editingQuickReplies = true }
                 Footnote(activityDetail.caption)
+                SettingsRow("Approval buttons", approvalLayout.label)
+                SettingsButton("Change approval layout") { choosingApprovalLayout = true }
+                Footnote(approvalLayout.caption)
             }
 
             // Per device, like the desktop's sidebar density: a phone and a
@@ -399,6 +404,18 @@ fun SettingsScreen(
             caption = { it.caption },
             onChoose = environment.chatPreferences::setActivityDetail,
             onDismiss = { choosingActivity = false },
+        )
+    }
+
+    if (choosingApprovalLayout) {
+        ChoiceDialog(
+            title = "Approval buttons",
+            options = ApprovalLayout.entries,
+            selected = approvalLayout,
+            label = { it.label },
+            caption = { it.caption },
+            onChoose = environment.chatPreferences::setApprovalLayout,
+            onDismiss = { choosingApprovalLayout = false },
         )
     }
 

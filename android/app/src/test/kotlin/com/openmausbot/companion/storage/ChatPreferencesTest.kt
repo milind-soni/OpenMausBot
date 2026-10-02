@@ -11,6 +11,7 @@ import com.openmausbot.companion.ui.room
 import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.QuickReply
 import com.openmausbot.companion.core.RosterDensity
+import com.openmausbot.companion.ui.ApprovalLayout
 import com.openmausbot.companion.ui.AppearanceSkin
 import com.openmausbot.companion.ui.cssHexToArgb
 import kotlin.test.assertEquals
@@ -29,6 +30,19 @@ class ChatPreferencesTest {
     private fun store(name: String): ChatPreferences = ChatPreferences(
         context.getSharedPreferences(name, Context.MODE_PRIVATE),
     )
+
+    @Test
+    fun `approval layout survives relaunch and unknown values preserve the standard layout`() {
+        val name = "approval-layout"
+        assertEquals(ApprovalLayout.STANDARD, store(name).approvalLayout.value)
+        for (layout in ApprovalLayout.entries) {
+            store(name).setApprovalLayout(layout)
+            assertEquals(layout, store(name).approvalLayout.value)
+        }
+        context.getSharedPreferences(name, Context.MODE_PRIVATE).edit()
+            .putString("companion.prefs.approvalLayout", "future").commit()
+        assertEquals(ApprovalLayout.STANDARD, store(name).approvalLayout.value)
+    }
 
     @Test
     fun `activity detail survives a new preferences instance`() {
