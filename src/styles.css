@@ -720,6 +720,64 @@ body {
   }
 }
 
+/* Liquid glass: the surface for centred pop-ups (Settings, Apps, Triggers).
+   Every value is derived from the active skin's own tokens, so each of the
+   nine skins gets a glass of its own colour and no skin block changes. The
+   app behind stays visible, blurred, through a light scrim. Unlayered so a
+   leftover `bg-panel` on the same element cannot win. */
+.glass-surface {
+  background: color-mix(in srgb, var(--color-menu) 62%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  backdrop-filter: blur(28px) saturate(170%);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 16%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, white 4%, transparent),
+    0 24px 64px -12px color-mix(in srgb, black 45%, transparent),
+    0 2px 8px color-mix(in srgb, black 12%, transparent);
+}
+/* Cards and rails sitting on the glass: a second, thinner pane. */
+.glass-card {
+  background: color-mix(in srgb, var(--color-card) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
+}
+/* Existing pages dropped onto glass (every Settings page) keep their markup;
+   their solid cards turn into the same thinner pane. */
+.glass-surface .bg-card {
+  background-color: color-mix(in srgb, var(--color-card) 60%, transparent);
+}
+.glass-rail {
+  background: color-mix(in srgb, var(--color-app) 22%, transparent);
+}
+/* Behind a glass pop-up: dim a little and blur, never black out. */
+.glass-scrim {
+  background: color-mix(in srgb, black 28%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-surface {
+    background: var(--color-menu);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .glass-card,
+  .glass-surface .bg-card { background: var(--color-card); }
+  .glass-rail { background: var(--color-app); }
+  .glass-scrim {
+    background: color-mix(in srgb, black 50%, transparent);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (forced-colors: active) {
+  .glass-surface,
+  .glass-card {
+    background: Canvas;
+    border-color: CanvasText;
+  }
+}
+
 /* Keep focus visible after components clear the browser outline. These
    unlayered rules outrank Tailwind utilities without needing !important. */
 :focus-visible {
