@@ -107,12 +107,15 @@ function bot(effort?: EffortLevel, instanceId = "claude", model = "claude-opus-5
   };
 }
 
-function render(forBot: Bot) {
+function render(forBot: Bot, options: { contained?: boolean } = {}) {
   fixture.values.length = Math.min(fixture.values.length, fixture.own);
   let tree: ReactNode = null;
   function Capture() {
     fixture.index = 0;
-    tree = ModelPicker({ bot: forBot, threadId: forBot.threadId });
+    // The bot panel's Default model is contained and edits the bot, not a thread.
+    tree = options.contained
+      ? ModelPicker({ bot: forBot, contained: true, label: "Default model" })
+      : ModelPicker({ bot: forBot, threadId: forBot.threadId });
     fixture.own = fixture.index;
     return tree;
   }
@@ -120,10 +123,10 @@ function render(forBot: Bot) {
   return { html, nodes: nodes(tree) };
 }
 
-function open(forBot: Bot) {
-  const trigger = render(forBot).nodes.find((node) => node.props["data-tour"] === "model")!;
+function open(forBot: Bot, options: { contained?: boolean } = {}) {
+  const trigger = render(forBot, options).nodes.find((node) => node.props["data-tour"] === "model")!;
   (trigger.props.onClick as () => void)();
-  return render(forBot);
+  return render(forBot, options);
 }
 
 const pane = (rendered: ReturnType<typeof render>) =>
@@ -157,7 +160,7 @@ describe("the model picker in Simple mode", () => {
     expect(html).toContain("Opus 5.5");
     for (const step of ["Quick", "Balanced", "Deep", "Max"]) expect(html).toContain(`>${step}</button>`);
     expect(html).not.toContain(">Deeper</button>");
-    expect(html).toContain("Use for Scout&#x27;s new chats too");
+    expect(html).not.toContain("new chats too"); // every pick is also the bot's default
   });
 
   it("is a narrow popover, and the full picker keeps its own width", () => {
@@ -190,7 +193,7 @@ describe("the model picker in Simple mode", () => {
 
     const bottom = region(html, "data-simple-effort-band");
     expect(bottom).toContain(">Deep</button>");
-    expect(bottom).toContain("Use for Scout&#x27;s new chats too");
+    expect(bottom).not.toContain("new chats too");
     expect(bottom).toContain("Manage AI accounts");
   });
 
@@ -416,24 +419,52 @@ describe("the model picker in Simple mode", () => {
     expect(render(bot("high")).html).toContain("· High");
   });
 
-  it("changes only this chat by default, and the bot's default when asked", () => {
+  it("makes every pick the bot's default too, so new threads start on it, with no checkbox", () => {
     const forBot = bot();
-    pane(open(forBot))!.props.onPick("claude-sonnet-5-5");
+    const opened = open(forBot);
+    expect(menu(opened.html)).not.toContain("new chats too");
+    expect(opened.html).not.toContain('type="checkbox"');
+    pane(opened)!.props.onPick("claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
-      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: false,
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
       selection: expect.objectContaining({ instanceId: "claude", model: "claude-sonnet-5-5" }),
     }));
+  });
 
-    const reopened = open(forBot);
-    pane(reopened)!.props.newChats!.onChange(true);
-    pane(render(forBot))!.props.onPick("claude-haiku-4-5-20251001");
-    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ updateBotDefault: true }));
+  it("keeps the Advanced picker's own scope choice (this thread unless asked)", () => {
+    fixture.advanced = true;
+    const opened = open(bot());
+    expect(pane(opened)).toBeUndefined();
+    expect(opened.html).toContain("Only this thread");
+  });
+
+  it("shows the Simple pane inline for the bot panel's Default model and edits the bot's default", () => {
+    const forBot = bot();
+    const opened = open(forBot, { contained: true });
+    const simple = pane(opened)!;
+    expect(simple).toBeDefined();
+    expect(opened.html).toContain("Default model");
+    // In-flow, not a floating popover: it sits under the trigger inside the panel.
+    const content = opened.nodes.find((node) => node.props["data-model-picker-content"] !== undefined)!;
+    expect(String(content.props.className)).toContain("relative");
+    expect(String(content.props.className)).not.toContain("absolute");
+    simple.props.onPick("claude-haiku-4-5-20251001");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
+      selection: expect.objectContaining({ model: "claude-haiku-4-5-20251001" }),
+    }));
+    simple.props.effort!.onPick("max");
+    // No thread: the effort goes to the bot's default, as the full Model section's row does.
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({
+      type: "setModel", botId: "scout", threadId: undefined,
+      selection: expect.objectContaining({ effort: "max" }),
+    });
   });
 
   it("writes the real effort level behind a friendly step", () => {
     pane(open(bot()))!.props.effort!.onPick("high");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({
-      type: "setModel", botId: "scout", threadId: "thread-scout",
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
       selection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high" },
     });
   });

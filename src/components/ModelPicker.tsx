@@ -499,7 +499,9 @@ export function ModelPicker({
   const lastClaudeIdRef = useRef<string | null>(null);
   const lastOpenaiIdRef = useRef<string | null>(null);
 
-  const simpleView = !advanced && !fullView && !contained;
+  // Simple mode shows the plain-words pane in the chat header's popover and
+  // inline where the picker is contained (the bot panel's Default model).
+  const simpleView = !advanced && !fullView;
   // The Simple view has its own, narrower width; the full picker keeps its.
   const popoverWidth = simpleView ? SIMPLE_POPOVER_WIDTH : POPOVER_WIDTH;
   useLayoutEffect(() => {
@@ -653,7 +655,9 @@ export function ModelPicker({
   const pick = (instance: InstanceInfo, model: string) => {
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
-    const updateBotDefault = !threadId || scope === "bot";
+    // Simple mode has no scope choice: a pick is also the bot's default, so
+    // new threads start on what the person chose last.
+    const updateBotDefault = !threadId || scope === "bot" || simpleView;
     const profile = state.bots.find((candidate) => candidate.id === bot.id) ?? bot;
     const targets = updateBotDefault ? [currentTaskBot(profile, threadId ?? bot.threadId), profile] : [bot];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
@@ -749,8 +753,10 @@ export function ModelPicker({
   const simpleEffort = activeLevels.length > 0 ? {
     levels: simpleEffortLevels(activeLevels, selection.effort),
     current: selection.effort,
+    // Only the Simple pane offers these steps, and there a pick is also the
+    // bot's default (no scope choice), exactly like a model pick.
     onPick: (level: EffortLevel) => dispatch({ type: "setModel", botId: bot.id, threadId,
-      ...(threadId && scope === "bot" ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } }),
+      ...(threadId ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } }),
   } : null;
 
   const renderRow = (option: ModelOption) => (
@@ -865,7 +871,6 @@ export function ModelPicker({
         >
           {simpleView ? (
             <SimpleModelPane
-              botName={bot.name}
               providers={simpleProviders}
               onProvider={browseSimple}
               account={railInstance && simpleAccounts.length > 1 ? (
@@ -910,11 +915,10 @@ export function ModelPicker({
               onPick={(model) => railInstance && pick(railInstance, model)}
               variantsRow={active?.capabilities?.modelVariants ? (
                 // A closed select shows only its choice, so it keeps a short name.
-                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId && scope === "bot")}
+                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId)}
                   label={<span className="shrink-0 text-[12px] font-medium text-ink-secondary">{t("model.simple.reasoning")}</span>} />
               ) : undefined}
               effort={simpleEffort}
-              newChats={threadId ? { checked: scope === "bot", onChange: (checked) => setScope(checked ? "bot" : "thread") } : null}
               onManage={() => {
                 setOpen(false);
                 dispatch({ type: "toggleAppSettings", open: true, section: "engines" });

@@ -16,6 +16,7 @@ import { approvalModeOptionsFor } from "../ApprovalModeSelector";
 import { collectMessageFiles, splitMessageAttachments } from "../AttachmentGallery";
 import { BotAvatar } from "../Avatar";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
+import { ModelPicker } from "../ModelPicker";
 import { Switch } from "../SettingsPrimitives";
 import { SoulField } from "../SoulField";
 import { SkillReviewDialog, useManagedSkills } from "./SkillsSection";
@@ -187,6 +188,18 @@ export function SimpleBotPanel({
                 placeholder: t("botSettings.simple.instructionsPlaceholder", { name: bot.name }),
               }}
             />
+
+            {/* The bot's default model, in the same plain-words picker as the
+                chat header, shown in place (a floating popover would be
+                clipped by this scrolling panel). A pick is the bot's default:
+                groups and new threads start on it, like the full Model section. */}
+            <div data-simple-default-model>
+              <ModelPicker
+                bot={bot}
+                contained
+                label={<span className="text-[12px] text-ink-secondary">{t("botSettings.simple.defaultModel")}</span>}
+              />
+            </div>
 
             <div>
               <div className={labelCls}>{t("botSettings.simple.beforeActs", { name: bot.name })}</div>

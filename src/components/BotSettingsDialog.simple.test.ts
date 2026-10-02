@@ -72,6 +72,7 @@ const { BotSettingsDialog } = await import("./BotSettingsDialog");
 const { SimpleBotPanel, botLibraryItems } = await import("./bot-settings/SimpleBotPanel");
 const { SoulField } = await import("./SoulField");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
+const { ModelPicker } = await import("./ModelPicker");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -148,6 +149,22 @@ describe("the bot settings panel in Simple mode", () => {
     expect(html).toContain("Decide for me");
     expect(html).toContain("All settings");
     expect(html).not.toContain("SOUL.md");
+  });
+
+  it("sets the bot's default model between Instructions and Before acts, in the inline picker", () => {
+    const bot = makeBot();
+    const rendered = panel(bot);
+    const picker = rendered.nodes.find((node) => node.type === ModelPicker)!;
+    expect(picker).toBeDefined();
+    // Contained (in place, never clipped by the scrolling panel) and on the
+    // bot itself, with no thread: a pick is the bot's default.
+    expect(picker.props.contained).toBe(true);
+    expect(picker.props.bot).toBe(bot);
+    expect(picker.props.threadId).toBeUndefined();
+    const { html } = rendered;
+    const at = (text: string) => html.indexOf(text);
+    expect(at(">Instructions</label>")).toBeLessThan(at("Default model"));
+    expect(at("Default model")).toBeLessThan(at("Before Scout acts"));
   });
 
   it("saves name, job and instructions through the same bot patch", () => {

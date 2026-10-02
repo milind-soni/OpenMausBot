@@ -35,7 +35,6 @@ function providerName(provider: RailProvider): string {
 }
 
 export function SimpleModelPane({
-  botName,
   providers,
   onProvider,
   account,
@@ -54,10 +53,8 @@ export function SimpleModelPane({
   onPick,
   effort,
   variantsRow,
-  newChats,
   onManage,
 }: {
-  botName: string;
   providers: RailProvider[];
   onProvider: (instance: InstanceInfo) => void;
   /** A sign-in with several accounts: the switch between them. */
@@ -89,8 +86,6 @@ export function SimpleModelPane({
   effort?: { levels: EffortLevel[]; current?: EffortLevel; onPick: (level: EffortLevel) => void } | null;
   /** Engines that name their reasoning modes keep their own control. */
   variantsRow?: ReactNode;
-  /** Only in a thread: whether the pick also becomes the bot's default. */
-  newChats?: { checked: boolean; onChange: (checked: boolean) => void } | null;
   onManage: () => void;
 }) {
   const row = "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
@@ -271,18 +266,7 @@ export function SimpleModelPane({
           </div>
         ))}
 
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-          {newChats ? (
-            <label className="flex min-w-0 cursor-pointer items-center gap-2 text-[12px] text-ink">
-              <input
-                type="checkbox"
-                checked={newChats.checked}
-                onChange={(event) => newChats.onChange(event.target.checked)}
-                className="size-4 shrink-0 accent-[var(--color-accent)]"
-              />
-              {t("model.simple.newChats", { name: botName })}
-            </label>
-          ) : <span />}
+        <div className="flex items-center justify-end">
           <button
             type="button"
             data-simple-manage
