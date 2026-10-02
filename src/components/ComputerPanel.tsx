@@ -1204,7 +1204,7 @@ export function ComputerPanel({
   };
 
   // Simple mode's Browser tab when the browser is off: the same installation
-  // switch as Settings → Experimental → Built-in browser, plus this bot's own
+  // switch as Settings → Computers → Built-in browser, plus this bot's own
   // browser switch, turned on together.
   const browserCanTurnOn = browserAvailableHere || state.config?.browserEngine?.installable === true;
   const [browserTurningOn, setBrowserTurningOn] = useState(false);

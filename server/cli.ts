@@ -814,7 +814,7 @@ export async function runBrowser(options: CliOptions, io: CliIo = defaultIo()): 
     if (process.platform === "linux" && !options.withDeps) io.error("on Linux, install Chrome's system libraries with `sudo openmausbot browser install --with-deps`, then retry `openmausbot browser install` as the user running serve");
     return 1;
   }
-  io.log("browser installed for this user and data directory; run serve as the same user, then enable it under Settings → Experimental and per bot");
+  io.log("browser installed for this user and data directory; run serve as the same user, then enable it under Settings → Computers and per bot");
   if (process.platform === "linux" && options.withDeps) io.log("if serve runs as another user, run `openmausbot browser install` from that user's login shell too");
   return 0;
 }

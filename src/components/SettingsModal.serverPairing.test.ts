@@ -11,6 +11,8 @@ import { SettingsModal } from "./SettingsModal";
 // being paired against. MOCA-84 then found the remote-client case needs it
 // too. These tests pin the card as always offered; the server decides who may act.
 const fixture = vi.hoisted(() => ({ section: "companion" as AppSettingsSection, config: undefined as { cloudHome?: boolean } | undefined }));
+// Pinned to Advanced: these cover the Advanced rail; Simple has its own suite.
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
 
 vi.mock("@/state/store", async (importOriginal) => ({
