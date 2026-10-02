@@ -5,7 +5,7 @@
 // asks before registering — the classic miss is a path the terminal sees
 // but this GUI app can't.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { Check, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
@@ -17,6 +17,7 @@ import { EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSe
 import { AddClaudeAccount, ClaudeAccountSettings } from "./ClaudeAccountSettings";
 import { AddChatGptAccount, CodexAccountSettings } from "./CodexAccountSettings";
 import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
+import { Select } from "./Select";
 
 interface ProbeResult {
   ok: boolean;
@@ -112,24 +113,21 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
   return (
     <div className="mt-2.5 flex flex-col gap-2">
       {candidates !== null && candidates.length > 0 && (
-        <div className="relative">
-          <select
-            value={manual.trim() ? "" : selected}
-            onChange={(e) => {
-              setSelected(e.target.value);
-              setManual("");
-            }}
-            aria-label={t("engines.detectedAria", { name: instance.displayName })}
-            disabled={busy}
-            className="w-full appearance-none rounded-lg border border-hairline/40 bg-inset px-3 py-2 pr-8 font-mono text-[12px] text-ink focus:outline-none disabled:opacity-50"
-          >
-            <option value="">{t("engines.selectBinary")}</option>
-            {candidates.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
-          <ChevronDown size={13} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-secondary" />
-        </div>
+        <Select
+          className="w-full font-mono"
+          value={manual.trim() ? "" : selected}
+          onChange={(e) => {
+            setSelected(e.target.value);
+            setManual("");
+          }}
+          aria-label={t("engines.detectedAria", { name: instance.displayName })}
+          disabled={busy}
+        >
+          <option value="">{t("engines.selectBinary")}</option>
+          {candidates.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </Select>
       )}
       <input
         type="text"

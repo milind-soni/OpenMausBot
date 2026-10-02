@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { ACTIVITY_WHATS, activityQuery, describeEntry, formatValue, whoLabel, type ActivityEntry, type ActivityFilters, type ActivityWhat } from "@/lib/activity";
 import type { LocaleKey } from "@/locales";
+import { Select } from "./Select";
 import { Card } from "./SettingsPrimitives";
 
 const inputClass = "rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none [color-scheme:dark]";
@@ -95,9 +96,9 @@ export function ActivitySection() {
         </label>
         <label className="flex flex-col gap-1 text-[12px] text-ink-secondary">
           {t("activity.what")}
-          <select value={filters.what} onChange={(e) => set({ what: e.target.value as ActivityWhat })} className={inputClass}>
+          <Select value={filters.what} onChange={(e) => set({ what: e.target.value as ActivityWhat })}>
             {ACTIVITY_WHATS.map((what) => <option key={what} value={what}>{t(`activity.what.${what}` as LocaleKey)}</option>)}
-          </select>
+          </Select>
         </label>
         <label className="flex flex-col gap-1 text-[12px] text-ink-secondary">
           {t("activity.from")}

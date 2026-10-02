@@ -23,6 +23,7 @@ import { updateMcpServers } from "@/lib/mcp-servers";
 import { completeMcpSignIn, mcpSignInLink, runMcpSignIn, type McpSignInStatus } from "@/lib/mcp-sign-in";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 
+import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
 
 /** A server this computer starts (a command) or one reached at a URL —
@@ -630,14 +631,14 @@ export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {
                   </label>
                   <label className="block">
                     <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.type")}</span>
-                    <select
+                    <Select
                       value={draft.type}
                       onChange={(event) => setDraft((current) => ({ ...current, type: event.target.value === "sse" ? "sse" : "http" }))}
-                      className="mt-1.5 w-full rounded-lg border border-hairline/60 bg-raised px-3 py-2.5 text-[13px] text-ink outline-none focus:border-accent"
+                      className="mt-1.5 w-full"
                     >
                       <option value="http">{t("mcp.type.http")}</option>
                       <option value="sse">{t("mcp.type.sse")}</option>
-                    </select>
+                    </Select>
                   </label>
                   <label className="block sm:col-span-2">
                     <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.headers")}</span>

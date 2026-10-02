@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Circle, Loader2, RotateCcw, ShieldCheck, Smartphone, Usb } from "lucide-react";
 import { usePageVisible } from "@/lib/page-visible";
 import { t } from "@/lib/i18n";
+import { Select } from "./Select";
 import type { AndroidDeviceInput, AndroidDeviceStatus, AndroidUsbDevice } from "@/types/ogb";
 
 type UnitPoint = { x: number; y: number };
@@ -211,17 +212,17 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
           </span>
         </div>
         {status.devices.length > 1 && (
-          <select
+          <Select
             value={selected.serial}
             onChange={(event) => setSerial(event.target.value)}
-            className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12px] text-ink"
+            className="mt-3 w-full"
           >
             {status.devices.map((device) => (
               <option key={device.serial} value={device.serial}>
                 {deviceLabel(device)} · {device.state}
               </option>
             ))}
-          </select>
+          </Select>
         )}
       </div>
 

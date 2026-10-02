@@ -15,6 +15,7 @@ import { skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags
 import { Switch } from "../SettingsPrimitives";
 import { inputCls } from "./field";
 import { OrgSkillsCard } from "./OrgSkillsCard";
+import { Select } from "../Select";
 
 export interface ManagedSkill {
   name: string;
@@ -412,18 +413,19 @@ export function SkillsSection({ bot }: { bot: Bot }) {
           <div className="mt-3 flex flex-col gap-1.5">
             {libraryPool.length > 0 ? (
               <div className="flex items-center gap-2">
-                <select
+                <Select
+                  size="lg"
                   aria-label="Add a skill from the library"
                   value={addFromLibrary}
                   disabled={Boolean(working)}
                   onChange={(e) => setAddFromLibrary(e.target.value)}
-                  className={inputCls + " truncate"}
+                  className="flex-1"
                 >
                   <option value="">Add a skill from the library…</option>
                   {libraryPool.map((skill) => (
                     <option key={skill.name} value={skill.name}>{skill.name}</option>
                   ))}
-                </select>
+                </Select>
                 <button
                   type="button"
                   disabled={!addFromLibrary || Boolean(working)}

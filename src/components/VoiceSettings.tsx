@@ -21,6 +21,7 @@ import {
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { voiceKeyDraftValue, type VoiceKeyDraft } from "@/lib/voice-key-draft";
+import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
 
 const SAMPLE = "Morning. Overnight the tests went green, and I left two notes for you in the thread.";
@@ -340,19 +341,19 @@ export function VoiceSettings({
       {!workspaceConfigurationLocked && provider === "fish" && (
         <div className="mt-4">
           <div className="mb-1.5 text-[13px] text-ink-secondary">{t("voice.fish.model")}</div>
-          <select
+          <Select
             value={tts.fishModel ?? "s2.1-pro"}
             onChange={(e) => saveFishModel(e.target.value as FishModel)}
             disabled={savingFishModel}
             aria-label={t("voice.fish.model")}
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:outline-none disabled:opacity-50"
+            className="w-full"
           >
             {FISH_MODELS.map((option) => (
               <option key={option.value} value={option.value}>
                 {t(option.label)}
               </option>
             ))}
-          </select>
+          </Select>
           <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">{t("voice.fish.modelHint")}</div>
         </div>
       )}
@@ -419,12 +420,12 @@ export function VoiceSettings({
         <div className="mt-4">
           <div className="mb-1.5 text-[13px] text-ink-secondary">Voice</div>
           <div className="flex gap-2">
-            <select
+            <Select
               value={selectedVoice}
               onChange={(e) => chooseVoice(e.target.value)}
               aria-label={`${bot.name}'s voice`}
               data-voice-picker
-              className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:outline-none"
+              className="w-full"
             >
               <option value="">
                 {loadingVoices
@@ -444,7 +445,7 @@ export function VoiceSettings({
                   {v.description ? ` — ${v.description}` : ""}
                 </option>
               ))}
-            </select>
+            </Select>
             <button
               onClick={() => void speaker.speak(SAMPLE, { voiceId: bot.voice, botId: bot.id })}
               disabled={!ready}

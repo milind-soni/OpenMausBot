@@ -14,6 +14,7 @@ vi.mock("react", async (importOriginal) => ({
   useRef: (value: unknown) => ({ current: value }),
 }));
 import { ProviderIconPicker } from "./ProviderIconPicker";
+import { Select } from "./Select";
 
 function elements(root: ReactNode): Array<{ type: unknown; props: Record<string, unknown> }> {
   if (Array.isArray(root)) return root.flatMap(elements);
@@ -32,7 +33,7 @@ let images: Array<{ onload: () => void; onerror: () => void }>;
 function controls() {
   const nodes = elements(ProviderIconPicker({ instance }));
   const upload = nodes.find((node) => node.type === "input")!.props.onChange as (event: ChangeEvent<HTMLInputElement>) => void;
-  const select = nodes.find((node) => node.type === "select")!.props.onChange as (event: ChangeEvent<HTMLSelectElement>) => void;
+  const select = nodes.find((node) => node.type === Select)!.props.onChange as (event: ChangeEvent<HTMLSelectElement>) => void;
   const reset = nodes.find((node) => node.type === "button")!.props.onClick as () => void;
   return {
     upload: () => upload({ currentTarget: { files: [new File([png], "icon.png", { type: "image/png" })], value: "icon.png" } } as unknown as ChangeEvent<HTMLInputElement>),
@@ -105,7 +106,7 @@ it("uses the selected locale for visible labels and accessible names", () => {
     setLocale(code);
     const nodes = elements(ProviderIconPicker({ instance }));
     expect(nodes[0].props["aria-label"]).toBe(t("engines.icon.label"));
-    expect(nodes.find((node) => node.type === "select")!.props["aria-label"]).toBe(t("engines.icon.selectAria", { name: "Work" }));
+    expect(nodes.find((node) => node.type === Select)!.props["aria-label"]).toBe(t("engines.icon.selectAria", { name: "Work" }));
     expect(nodes.find((node) => node.type === "input")!.props["aria-label"]).toBe(t("engines.icon.uploadAria", { name: "Work" }));
     expect(nodes.find((node) => node.type === "p")!.props.children).toBe(t("engines.icon.help"));
     if (code !== "en") expect(nodes[0].props["aria-label"]).not.toBe("Provider icon");

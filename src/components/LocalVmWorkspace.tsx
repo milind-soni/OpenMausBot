@@ -17,6 +17,7 @@ import {
 import { api, useStore, type Action, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { transitionComputerControlLease } from "@/lib/computer-control";
+import { Select } from "./Select";
 import {
   initialLocalVmWorkspaceSlots,
   nativeViewOverlayIntersects,
@@ -428,12 +429,13 @@ function LocalVmPane({
           <label className="sr-only" htmlFor={`local-vm-slot-${index}`}>
             Local VM for pane {index + 1}
           </label>
-          <select
+          <Select
+            size="sm"
             id={`local-vm-slot-${index}`}
             value={bot?.id ?? ""}
             onChange={(event) => onSelect(event.target.value || null)}
             disabled={controlPending}
-            className="w-full truncate rounded-lg border border-hairline/50 bg-card px-2.5 py-1.5 text-[13px] font-medium text-ink outline-none focus:border-accent/70"
+            className="w-full"
           >
             <option value="">Choose a Local VM bot</option>
             {bots.map((candidate) => (
@@ -441,7 +443,7 @@ function LocalVmPane({
                 {candidate.name}
               </option>
             ))}
-          </select>
+          </Select>
           <div className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-secondary">
             <span
               className={cn(

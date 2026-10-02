@@ -62,7 +62,7 @@ describe("Settings → General", () => {
 
   it("offers a labeled compact section picker without removing desktop navigation", async () => {
     const html = await renderSettings();
-    expect(html).toMatch(/<select[^>]*aria-label="Settings"[^>]*sm:hidden/);
+    expect(html).toMatch(/<div class="[^"]*sm:hidden[^"]*"><select[^>]*aria-label="Settings"/);
     expect(html).toContain('<option value="companion">Remote access</option>');
     expect(html).toMatch(/<nav[^>]*hidden[^>]*sm:flex/);
     expect(html).toContain('id="app-settings-title" class="sr-only"');

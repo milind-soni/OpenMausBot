@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
 import { Laptop, Loader2, Unplug } from "lucide-react";
+import { Select } from "./Select";
 import { Card } from "./SettingsPrimitives";
 
 const inputClass =
@@ -132,18 +133,18 @@ export function RemoteComputerSection() {
           {environments && bridge ? (
             <label className="flex flex-col gap-1.5 text-[12px] text-ink-secondary">
               {t("remote.client.connectionType")}
-              <select
+              <Select
                 value={connection}
                 disabled={busy}
                 onChange={(event) => {
                   setConnection(event.target.value as "server" | "companion");
                   setError("");
                 }}
-                className={inputClass}
+                className="w-full"
               >
                 <option value="server">{t("remote.client.server.option")}</option>
                 <option value="companion">{t("remote.client.companion.option")}</option>
-              </select>
+              </Select>
             </label>
           ) : null}
           {serverMode ? (

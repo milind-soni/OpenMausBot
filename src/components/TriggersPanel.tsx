@@ -27,6 +27,7 @@ import {
   useWebhookActions,
   webhookActivity,
 } from "./WebhooksPanel";
+import { Select } from "./Select";
 
 /** What can start a trigger. Picking one only names the trigger: every
  * source is the same private URL underneath. Brand names stay as written. */
@@ -60,9 +61,6 @@ export function triggerInput(draft: { source: string; customName: string; botId:
     maxPendingRuns: null,
   };
 }
-
-const selectClass =
-  "min-h-9 max-w-full rounded-xl border border-hairline/40 bg-control/70 px-3 py-1.5 text-[13.5px] font-medium text-ink focus:border-focus";
 
 export function TriggersPanel() {
   const { state, dispatch } = useStore();
@@ -184,11 +182,11 @@ export function TriggersPanel() {
             <div className="flex flex-wrap items-center gap-2 text-[14px] text-ink">
               <Zap size={16} className="shrink-0 text-accent-text" aria-hidden="true" />
               <span className="font-medium">{t("triggers.when")}</span>
-              <select aria-label={t("triggers.sourceAria")} value={source} onChange={(event) => setSource(event.target.value)} className={selectClass}>
+              <Select aria-label={t("triggers.sourceAria")} value={source} onChange={(event) => setSource(event.target.value)} className="max-w-full">
                 {TRIGGER_SOURCES.map((entry) => (
                   <option key={entry.id} value={entry.id}>{triggerSourceLabel(entry.id)}</option>
                 ))}
-              </select>
+              </Select>
               {source === "custom" && (
                 <input
                   value={customName}
@@ -200,11 +198,11 @@ export function TriggersPanel() {
                 />
               )}
               <ArrowRight size={15} className="shrink-0 text-ink-tertiary" aria-hidden="true" />
-              <select aria-label={t("triggers.botAria")} value={chosenBot} disabled={bots.length === 0} onChange={(event) => setBotId(event.target.value)} className={selectClass}>
+              <Select aria-label={t("triggers.botAria")} value={chosenBot} disabled={bots.length === 0} onChange={(event) => setBotId(event.target.value)} className="max-w-full">
                 {bots.map((bot) => (
                   <option key={bot.id} value={bot.id}>{bot.name}</option>
                 ))}
-              </select>
+              </Select>
               <span className="font-medium">{t("triggers.should")}</span>
             </div>
             <textarea

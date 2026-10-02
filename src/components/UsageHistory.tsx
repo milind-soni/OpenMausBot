@@ -8,6 +8,7 @@ import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { cachedUsageNote, formatTokens, formatUsd, hasFiniteCost, headlineTokens, tokensColumnLabel } from "@/lib/usage";
+import { Select } from "./Select";
 import { Card } from "./SettingsPrimitives";
 import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 
@@ -167,16 +168,16 @@ export function UsageHistory({ load = fetchUsage }: { load?: typeof fetchUsage }
     <UsageBudgetCards budget={summary?.budget ?? null} />
     <Card title={t("usage.history.title")} subtitle={t("usage.history.subtitle")}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <select
+        <Select
+          size="sm"
           value={period}
           onChange={(event) => setPeriod(event.target.value as UsagePeriod)}
           aria-label={t("usage.history.period")}
-          className="rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12.5px] text-ink focus:outline-none"
         >
           <option value="month">{t("usage.history.thisMonth")}</option>
           <option value="lastMonth">{t("usage.history.lastMonth")}</option>
           <option value="days30">{t("usage.history.last30Days")}</option>
-        </select>
+        </Select>
         <div role="tablist" aria-label={t("usage.history.groupBy")} className="flex flex-wrap gap-1">
           {USAGE_GROUPINGS.map((option) => (
             <button
