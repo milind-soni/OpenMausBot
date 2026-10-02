@@ -974,7 +974,7 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
     });
   }, [selected, currentProjectId]);
   useSnoozeExpiry(tasks);
-  // Pin, then newest update. Search keeps the same order among matches.
+  // Pin, then newest person message or completed reply. Search keeps the same order among matches.
   const visibleTasks = orderedThreadList(visibleSidebarThreads(tasks, bot.threadId, query, projects, showAll));
   // A folder rises with the thread of its that sits highest in that order.
   // An empty index sorts last. Saved order breaks ties, and still governs

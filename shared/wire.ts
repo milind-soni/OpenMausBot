@@ -137,6 +137,7 @@ export interface WireTask {
   /** Epoch ms of the newest message, or createdAt when the thread has none.
    * Server-derived. Clients must not write it. */
   updatedAt?: number;
+  lastThreadOrderAt?: number;
   /** When the person snoozed this thread. 0 means "until new activity" and
    * the store clears it the moment the thread wakes; a future epoch ms means
    * "until then" and reads treat an expired value as absent, so no timer or
@@ -472,6 +473,9 @@ export interface WireMessage {
   queueId?: string;
 }
 
+export const movesThreadToTop = (message: Pick<WireMessage, "role" | "kind" | "peerAsk" | "turnId" | "turnTerminal">): boolean =>
+  message.role === "user" ? !message.peerAsk : message.kind === "text" && (message.turnTerminal === true || !message.turnId);
+
 export interface OptionCardData {
   title: string;
   subtitle: string;
@@ -572,6 +576,7 @@ export interface GroupTask {
   pinned?: boolean;
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
+  lastThreadOrderAt?: number;
   /** The first message already drove a title attempt for this thread, so a
    * later one does not rename a room the person may have retitled. */
   titleFromFirstMessage?: true;

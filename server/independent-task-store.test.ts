@@ -569,4 +569,23 @@ describe("independent bot task state", () => {
     const restarted = new Store(selection);
     expect(restarted.taskByThread(bot.id, task.threadId)?.updatedAt).toBe(message.at);
   });
+
+  it("tracks completed replies and person messages for thread ordering across restarts", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const task = store.createTask(bot.id, "Notes")!;
+    const at = task.createdAt;
+    store.appendMessage(task.threadId, { role: "bot", kind: "text", text: "Thinking", turnId: "turn-1", at: at + 10 });
+    store.appendMessage(task.threadId, { role: "user", kind: "text", text: "Peer", peerAsk: { botId: "peer", name: "Peer" }, at: at + 20 });
+    expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBeUndefined();
+    const reply = store.appendMessage(task.threadId, { role: "bot", kind: "text", text: "Working", turnId: "turn-1", at: at + 25 });
+    expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBeUndefined();
+    store.patchMessage(task.threadId, reply.id, { turnTerminal: true });
+    expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 25);
+    expect(new Store(selection).taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 25);
+    store.appendMessage(task.threadId, { role: "user", kind: "text", text: "Hello", at: at + 30 });
+    store.appendMessage(task.threadId, { role: "bot", kind: "activity", text: "Working", at: at + 40 });
+    expect(store.taskByThread(bot.id, task.threadId)).toMatchObject({ lastThreadOrderAt: at + 30, updatedAt: at + 40 });
+    expect(new Store(selection).taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 30);
+  });
 });
