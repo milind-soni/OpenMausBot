@@ -109,7 +109,7 @@ export function ProIntroduction({ quiet = false }: { quiet?: boolean }) {
   const setup = state.welcomeOpen || state.tourOpen || (Boolean(record?.completedAt) && currentStep(record) !== null)
     || welcomeDue(state.config, { remoteClient: false, legacyDone: emailGateDone() });
   if (!available || dismissed || hintSeen(record, PRO_DISMISSED) || !state.connected || !state.config || setup || busy || quiet
-    || state.appSettingsOpen || state.settingsOpen || state.newBotOpen || state.pluginsOpen || state.shortcutsOpen
+    || state.appSettingsOpen || state.settingsOpen || state.newBotOpen || state.pluginsOpen || state.triggersOpen || state.shortcutsOpen
     || (updater && !["idle", "checking"].includes(updater.status))) return null;
 
   const dismiss = () => {

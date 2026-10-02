@@ -31,7 +31,7 @@ import {
 import { WEBHOOK_DEFAULT_MAX_PENDING_RUNS, WEBHOOK_MAX_PENDING_RUNS_LIMIT, webhookActivationDefaults, webhookMaxPendingRunsInput, type WebhookAttempt, type WebhookCredential, type WebhookTrigger, type WebhookTriggerInput } from "@/lib/webhooks";
 import { api, useStore, type Bot } from "@/state/store";
 
-function relativeTime(at?: number) {
+export function relativeTime(at?: number) {
   if (!at) return "Never";
   const elapsed = Math.max(0, Date.now() - at);
   if (elapsed < 60_000) return "Just now";
@@ -48,26 +48,26 @@ function deliverySummary(run: RoutineRun) {
   return { eventName, preview: payload.slice(0, 240) };
 }
 
-function suggestedName(prompt: string, bot?: Bot) {
+export function suggestedName(prompt: string, bot?: Bot) {
   const first = prompt.trim().split(/[.!?\n]/)[0]?.trim().slice(0, 60);
   return first || `${bot?.name ?? "MAUS"} webhook`;
 }
 
-function statusFor(webhook: WebhookTrigger) {
+export function statusFor(webhook: WebhookTrigger) {
   if (webhook.verificationPending) return { label: "Waiting for test", tone: "text-accent", dot: "bg-accent animate-pulse" };
   if (webhook.verifiedAt && !webhook.enabled) return { label: "Ready to enable", tone: "text-warning", dot: "bg-warning" };
   if (webhook.enabled) return { label: "Active", tone: "text-success", dot: "bg-success" };
   return { label: "Paused", tone: "text-ink-secondary", dot: "bg-ink-secondary/50" };
 }
 
-function outcomeTone(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
+export function outcomeTone(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
   if (outcome === "rejected" || run?.status === "failed" || run?.status === "missed") return "text-danger";
   if (run && ["queued", "running", "waiting"].includes(run.status)) return "text-accent";
   if (run?.status === "completed" || outcome === "captured" || outcome === "accepted") return "text-success";
   return "text-ink-secondary";
 }
 
-function outcomeLabel(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
+export function outcomeLabel(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
   if (run) return run.status === "waiting" ? "Needs you" : run.status[0]!.toUpperCase() + run.status.slice(1);
   if (outcome === "captured") return "Test received";
   if (outcome === "duplicate") return "Duplicate";
@@ -76,11 +76,11 @@ function outcomeLabel(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
   return "Accepted";
 }
 
-function terminalCommand(credential: WebhookCredential) {
+export function terminalCommand(credential: WebhookCredential) {
   return `curl -sS '${credential.url}' --json '{"task":"A customer wrote: This app saved me hours. Write a short thank-you reply."}'`;
 }
 
-function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: WebhookTrigger; bots: Bot[]; onClose: () => void; onCredential: (credential: WebhookCredential, webhookId: string) => void }) {
+export function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: WebhookTrigger; bots: Bot[]; onClose: () => void; onCredential: (credential: WebhookCredential, webhookId: string) => void }) {
   const { state, dispatch } = useStore();
   const [botId, setBotId] = useState(webhook?.botId ?? bots[0]?.id ?? "");
   const [name, setName] = useState(webhook?.name ?? "");
@@ -178,67 +178,45 @@ function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: Web
   );
 }
 
-interface ActivityItem { id: string; at: number; outcome: WebhookAttempt["outcome"]; eventName: string; preview: string; reason?: string; run?: RoutineRun }
+export interface ActivityItem { id: string; at: number; outcome: WebhookAttempt["outcome"]; eventName: string; preview: string; reason?: string; run?: RoutineRun }
 
-/** A destination-first webhook view: choose a MAUS endpoint on the left, then
- * either copy its setup command or inspect its deliveries on the right. */
-export function WebhooksPanel({
-  bots,
-  createRequest,
-  onCreateHandled,
-}: {
-  bots: Bot[];
-  createRequest: number;
-  onCreateHandled: () => void;
-}) {
-  const { state, dispatch } = useStore();
-  const [editor, setEditor] = useState<WebhookTrigger | "new" | null>(null);
+/** Recent deliveries for one webhook: recorded attempts, plus runs from
+ * before attempts were recorded. Newest first, at most 30. */
+export function webhookActivity(webhook: WebhookTrigger, webhookAttempts: WebhookAttempt[], routineRuns: RoutineRun[]): ActivityItem[] {
+  const runById = new Map(routineRuns.map((run) => [run.id, run]));
+  const attemptsByRun = new Set(webhookAttempts.map((attempt) => attempt.runId).filter(Boolean));
+  const attempts = webhookAttempts
+    .filter((attempt) => attempt.webhookId === webhook.id)
+    .map((attempt) => ({
+      id: attempt.id,
+      at: attempt.receivedAt,
+      outcome: attempt.outcome,
+      eventName: attempt.eventName || (attempt.outcome === "rejected" ? "Rejected request" : "Webhook event"),
+      preview: attempt.preview || "",
+      reason: attempt.reason,
+      run: attempt.runId ? runById.get(attempt.runId) : undefined,
+    }));
+  const legacy = routineRuns
+    .filter((run) => run.webhookId === webhook.id && !attemptsByRun.has(run.id))
+    .map((run) => {
+      const summary = deliverySummary(run);
+      return { id: run.id, at: run.scheduledFor, outcome: "accepted" as const, eventName: summary.eventName, preview: summary.preview, run };
+    });
+  return [...attempts, ...legacy].sort((a, b) => b.at - a.at).slice(0, 30);
+}
+
+/** Pause/enable, delete, and the private-URL copy, shared by the Automations
+ * page's Webhooks tab and the Triggers pop-up. `copy: "link"` puts the
+ * private URL itself on the clipboard; the default is the terminal command. */
+export function useWebhookActions() {
+  const { dispatch } = useStore();
   const [credentials, setCredentials] = useState<Record<string, WebhookCredential>>(() =>
     loadWebhookCredentials(webhookCredentialStore()),
   );
-  const [selectedId, setSelectedId] = useState<string | null>(state.webhooks[0]?.id ?? null);
-  const [tab, setTab] = useState<"setup" | "activity">("setup");
   const [working, setWorking] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedKind, setCopiedKind] = useState<"command" | "link">("command");
   const [error, setError] = useState("");
-  const runById = useMemo(() => new Map(state.routineRuns.map((run) => [run.id, run])), [state.routineRuns]);
-
-  useEffect(() => {
-    if (!state.webhooks.length) setSelectedId(null);
-    else if (!selectedId || !state.webhooks.some((webhook) => webhook.id === selectedId)) setSelectedId(state.webhooks[0]!.id);
-  }, [selectedId, state.webhooks]);
-
-  useEffect(() => {
-    if (createRequest > 0) {
-      setEditor("new");
-      onCreateHandled();
-    }
-  }, [createRequest, onCreateHandled]);
-
-  const selected = state.webhooks.find((webhook) => webhook.id === selectedId) ?? null;
-  const selectedBot = selected ? bots.find((bot) => bot.id === selected.botId) : undefined;
-  const attemptsByRun = useMemo(() => new Set(state.webhookAttempts.map((attempt) => attempt.runId).filter(Boolean)), [state.webhookAttempts]);
-  const activity = useMemo<ActivityItem[]>(() => {
-    if (!selected) return [];
-    const attempts = state.webhookAttempts
-      .filter((attempt) => attempt.webhookId === selected.id)
-      .map((attempt) => ({
-        id: attempt.id,
-        at: attempt.receivedAt,
-        outcome: attempt.outcome,
-        eventName: attempt.eventName || (attempt.outcome === "rejected" ? "Rejected request" : "Webhook event"),
-        preview: attempt.preview || "",
-        reason: attempt.reason,
-        run: attempt.runId ? runById.get(attempt.runId) : undefined,
-      }));
-    const legacy = state.routineRuns
-      .filter((run) => run.webhookId === selected.id && !attemptsByRun.has(run.id))
-      .map((run) => {
-        const summary = deliverySummary(run);
-        return { id: run.id, at: run.scheduledFor, outcome: "accepted" as const, eventName: summary.eventName, preview: summary.preview, run };
-      });
-    return [...attempts, ...legacy].sort((a, b) => b.at - a.at).slice(0, 30);
-  }, [attemptsByRun, runById, selected, state.routineRuns, state.webhookAttempts]);
 
   const invoke = async (webhook: WebhookTrigger, action: "toggle" | "delete") => {
     setWorking(`${webhook.id}:${action}`);
@@ -267,7 +245,7 @@ export function WebhooksPanel({
     }
   };
 
-  const createAndCopyCommand = async (webhook: WebhookTrigger, replace = false) => {
+  const createAndCopyCommand = async (webhook: WebhookTrigger, replace = false, copy: "command" | "link" = "command") => {
     if (replace && !window.confirm("Replace this private URL? Every previously copied command will stop working.")) return;
     setWorking(`${webhook.id}:command`);
     setError("");
@@ -281,8 +259,9 @@ export function WebhooksPanel({
         saveWebhookCredential(webhookCredentialStore(), webhook.id, credential!);
       }
       if (!credential) throw new Error("Could not create a terminal command");
-      await navigator.clipboard.writeText(terminalCommand(credential));
+      await navigator.clipboard.writeText(copy === "link" ? credential.url : terminalCommand(credential));
       setCopiedId(webhook.id);
+      setCopiedKind(copy);
       setTimeout(() => setCopiedId((current) => current === webhook.id ? null : current), 1_800);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -290,6 +269,50 @@ export function WebhooksPanel({
       setWorking(null);
     }
   };
+
+  const rememberCredential = (webhookId: string, credential: WebhookCredential) => {
+    saveWebhookCredential(webhookCredentialStore(), webhookId, credential);
+    setCredentials((current) => ({ ...current, [webhookId]: credential }));
+  };
+
+  return { credentials, setCredentials, rememberCredential, working, copiedId, copiedKind, error, setError, invoke, createAndCopyCommand };
+}
+
+/** A destination-first webhook view: choose a MAUS endpoint on the left, then
+ * either copy its setup command or inspect its deliveries on the right. */
+export function WebhooksPanel({
+  bots,
+  createRequest,
+  onCreateHandled,
+}: {
+  bots: Bot[];
+  createRequest: number;
+  onCreateHandled: () => void;
+}) {
+  const { state, dispatch } = useStore();
+  const [editor, setEditor] = useState<WebhookTrigger | "new" | null>(null);
+  const { credentials, setCredentials, working, copiedId, error, setError, invoke, createAndCopyCommand } = useWebhookActions();
+  const [selectedId, setSelectedId] = useState<string | null>(state.webhooks[0]?.id ?? null);
+  const [tab, setTab] = useState<"setup" | "activity">("setup");
+
+  useEffect(() => {
+    if (!state.webhooks.length) setSelectedId(null);
+    else if (!selectedId || !state.webhooks.some((webhook) => webhook.id === selectedId)) setSelectedId(state.webhooks[0]!.id);
+  }, [selectedId, state.webhooks]);
+
+  useEffect(() => {
+    if (createRequest > 0) {
+      setEditor("new");
+      onCreateHandled();
+    }
+  }, [createRequest, onCreateHandled]);
+
+  const selected = state.webhooks.find((webhook) => webhook.id === selectedId) ?? null;
+  const selectedBot = selected ? bots.find((bot) => bot.id === selected.botId) : undefined;
+  const activity = useMemo<ActivityItem[]>(
+    () => selected ? webhookActivity(selected, state.webhookAttempts, state.routineRuns) : [],
+    [selected, state.routineRuns, state.webhookAttempts],
+  );
 
   const ingress = state.webhookIngress;
   const credential = selected ? credentials[selected.id] : undefined;
