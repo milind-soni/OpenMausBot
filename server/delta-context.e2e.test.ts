@@ -221,9 +221,9 @@ it("offers a result that lands mid-turn after its source was stopped to the next
 // the next turn offers it once more, saying the session may already have it.
 it("offers a message steered into a running turn to the next turn once, marked as possibly already seen", () => fixture(async (f) => {
   await warmUp(f);
-  f.plan[f.chief.id] = { reply: "Working", gateFile: f.gate("turn") };
+  f.plan[f.chief.id] = { reply: "Working", readyFile: f.gate("turn-ready"), gateFile: f.gate("turn") };
   await f.send("Start on the report.");
-  await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => existsSync(f.gate("turn-ready")), { timeout: 15_000 }).toBe(true);
   expect((await f.send("STEERED_MID_TURN also cover costs")).steered).toBe(true);
   f.open(f.gate("turn"));
   await f.wait();
@@ -267,7 +267,7 @@ it("offers the results again when the person stops the return turn before the pr
   await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 20_000 }).toBe("completed");
   await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status, { timeout: 20_000 }).toBe("running");
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
-  await f.wait();
+  await f.idle();
 
   // Whether the stopped fixture records a turn of its own depends on the
   // order the platform tears its process tree down in: when its MCP child
@@ -539,6 +539,8 @@ it("gives a replacement session the full assignment when a result returns after 
   await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(3);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.role === "bot" && m.text === "4"), { timeout: 10_000 }).toBe(true);
   f.setMode();
+  await expect.poll(() => cursor(f), { timeout: 15_000 }).toBeTruthy();
+  await expect.poll(() => cursor(f), { timeout: 15_000 }).not.toBe(original);
   const replacement = cursor(f);
   f.open(f.gate("lead"));
   await f.wait();
@@ -687,11 +689,11 @@ it("gives an engine switched in while a teammate works the full assignment when 
 // ── Acceptance: what counts as the provider having the message ──
 
 it("does not offer a message or steer the person stopped before any reply again", () => fixture(async (f) => {
-  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { reply: "never shown", gateFile: f.gate("slow") }, { reply: "Listed" }] };
+  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { readyFile: f.gate("slow-ready"), reply: "never shown", gateFile: f.gate("slow") }, { reply: "Listed" }] };
   await f.send("Warm up.");
   await f.wait();
   await f.send("STOPPED_ASK please drop the staging database");
-  await expect.poll(() => f.consumed(), { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => existsSync(f.gate("slow-ready")), { timeout: 15_000 }).toBe(true);
   expect((await f.send("STOPPED_STEER and the backups")).steered).toBe(true);
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.idle();
@@ -759,11 +761,11 @@ it("does not offer a message again that the person steered out of the queue into
   writeFileSync(refuseLiveSteers, "refuse live steers until the queue is lifted");
   return fixture(async (f) => {
     await f.useModel("codex");
-    f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { reply: "never shown", gateFile: f.gate("slow") }, { reply: "Listed" }] };
+    f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { readyFile: f.gate("slow-ready"), reply: "never shown", gateFile: f.gate("slow") }, { reply: "Listed" }] };
     await f.send("Warm up.");
     await f.wait();
     await f.send("Start on the report.");
-    await expect.poll(() => f.codexLaunches().length, { timeout: 15_000 }).toBe(2);
+    await expect.poll(() => existsSync(f.gate("slow-ready")), { timeout: 15_000 }).toBe(true);
     // The engine refuses the live steer, so the words wait in the queue.
     const queued = await f.send("QUEUED_STEER also cover costs");
     expect(queued.queued).toBe(true);
@@ -802,11 +804,11 @@ it("offers the results again when the provider reports an API error instead of a
 it("does not hand the model a queued follow-up that a restart recovered with an unknown outcome", () => fixture(async (f) => {
   await f.api("/api/config", { threads: { maxConcurrentPerBot: 1 } }, "PATCH");
   const other = (await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Second conversation" })).task.threadId;
-  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { reply: "Held", gateFile: f.gate("hold") }, { reply: "never", gateFile: f.gate("never") }] };
+  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { readyFile: f.gate("hold-ready"), reply: "Held", gateFile: f.gate("hold") }, { reply: "never", gateFile: f.gate("never") }] };
   await f.send("Warm up.", other);
   await f.wait(other);
   await f.send("Hold the only slot.");
-  await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => existsSync(f.gate("hold-ready")), { timeout: 15_000 }).toBe(true);
   expect((await f.send("RECOVERED_FOLLOWUP deploy it", other)).queued).toBe(true);
   f.open(f.gate("hold"));
   await expect.poll(() => f.consumed(), { timeout: 15_000 }).toBe(3);

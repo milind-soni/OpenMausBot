@@ -1,7 +1,7 @@
 // Scripted provider fixture that exercises the REAL injected agents MCP proxy.
 // The plan and evidence are confined to the isolated launcher's temporary home.
 import { spawn } from "node:child_process";
-import { appendFileSync, readFileSync, existsSync } from "node:fs";
+import { appendFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { waitForExit } from "./cleanup.ts";
 
@@ -100,6 +100,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
         if (Boolean(response.error || response.result?.isError) !== Boolean(step.expectError)) throw new Error(`Unexpected tool outcome: ${JSON.stringify(response)}`);
       }
       if (typeof plan.progress === "string") progress?.(plan.progress);
+      if (plan.readyFile) writeFileSync(plan.readyFile, "ready");
       // All MCP calls have completed. An explicit test gate is owned by the
       // parent test's timeout, not the transport deadline: long conversation
       // fixtures may deliberately keep a teammate waiting across many turns.
