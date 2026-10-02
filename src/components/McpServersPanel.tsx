@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
-  CirclePower,
   ClipboardPaste,
   FlaskConical,
   Globe,
@@ -194,7 +193,9 @@ function draftFor(server: McpServerListing): McpDraft {
   };
 }
 
-export function McpServersPanel() {
+/** `embedded`: a section of the Apps pop-up's one scrolling view, rather
+ * than a page that owns its own scroll. */
+export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const { state: store } = useStore();
   // While enrolled with custom servers off, only approved servers can be added.
   const policy = store.config?.managedPolicy;
@@ -474,11 +475,15 @@ export function McpServersPanel() {
   const secretKept = Boolean(savedOAuth?.clientSecretConfigured && !draft.oauthForgetSecret);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-7 pt-5 sm:px-8">
-      <div className="mx-auto max-w-[840px]">
+    <section
+      data-mcp-servers
+      aria-labelledby="mcp-servers-title"
+      className={embedded ? "" : "min-h-0 flex-1 overflow-y-auto px-6 pb-7 pt-5 sm:px-8"}
+    >
+      <div className={embedded ? "" : "mx-auto max-w-[840px]"}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h3 className="text-[15px] font-semibold text-ink">{t("mcp.title")}</h3>
+            <h3 id="mcp-servers-title" className="text-[15px] font-semibold text-ink">{t("mcp.title")}</h3>
             <p className="mt-1 max-w-[610px] text-[12.5px] leading-relaxed text-ink-secondary">
               {t("mcp.subtitle")}
             </p>
@@ -518,7 +523,7 @@ export function McpServersPanel() {
               }}
               className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-white disabled:opacity-40"
             >
-              <Plus size={14} /> {t("mcp.addServer")}
+              <Plus size={14} /> {t(embedded ? "apps.mcp.add" : "mcp.addServer")}
             </button>
           </div>
         </div>
@@ -792,14 +797,21 @@ export function McpServersPanel() {
                       <button type="button" disabled={busy !== null} onClick={() => void test(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
                         {busy === `test:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />} {t("mcp.test")}
                       </button>
-                      <button type="button" disabled={busy !== null} onClick={() => void toggle(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label={t("mcp.toggleAria", {
-                        name: server.name,
-                        state: t(server.enabled ? "mcp.state.off" : "mcp.state.on"),
-                      })}>
-                        {busy === `toggle:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <CirclePower size={14} />} {t(server.enabled ? "mcp.turnOff" : "mcp.turnOn")}
-                      </button>
                       <button type="button" disabled={busy !== null} onClick={() => { setEditing(server.name); setDraft(draftFor(server)); setError(null); setNotice(null); }} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label={t("mcp.editAria", { name: server.name })}><Pencil size={14} /></button>
                       <button type="button" disabled={busy !== null} onClick={() => void remove(server)} className="rounded-lg p-2 text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40" aria-label={t("mcp.removeAria", { name: server.name })}><Trash2 size={14} /></button>
+                      <span className="ml-1 flex items-center">
+                        {busy === `toggle:${server.name}` && <Loader2 size={13} className="mr-1.5 animate-spin text-ink-secondary" />}
+                        <Switch
+                          checked={server.enabled}
+                          disabled={busy !== null}
+                          onClick={() => void toggle(server)}
+                          aria-label={t("mcp.toggleAria", {
+                            name: server.name,
+                            state: t(server.enabled ? "mcp.state.off" : "mcp.state.on"),
+                          })}
+                          className="disabled:opacity-40"
+                        />
+                      </span>
                     </div>
                   </div>
                   {signingIn === server.name && (
@@ -843,7 +855,7 @@ export function McpServersPanel() {
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 
