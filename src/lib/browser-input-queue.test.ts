@@ -46,6 +46,20 @@ describe("bounded browser input queue", () => {
     expect(send.mock.calls.map(([body]) => body)).toEqual([key("keyDown"), key("keyUp"), up]);
   });
 
+  it("counts unsent input and settles without discarding movement", async () => {
+    const first = deferred();
+    const send = vi.fn<(body: Record<string, unknown>) => Promise<void>>().mockResolvedValue();
+    send.mockImplementationOnce(() => first.promise);
+    const queue = createBrowserInputQueue(send, vi.fn());
+    expect(queue.size()).toBe(0);
+    queue.enqueue(key("keyDown")); queue.enqueue(move(1)); queue.enqueue(key("keyUp"));
+    expect(queue.size()).toBe(3);
+    const settled = queue.settle();
+    first.resolve(); await settled;
+    expect(send.mock.calls.map(([body]) => body)).toEqual([key("keyDown"), move(1), key("keyUp")]);
+    expect(queue.size()).toBe(0);
+  });
+
   it("invalidates old unsent input and ignores old errors after reconnect", async () => {
     let fail!: (cause: Error) => void;
     const first = new Promise<void>((_, reject) => { fail = reject; });
@@ -69,7 +83,7 @@ describe("bounded browser input queue", () => {
     queue.enqueue(key("keyDown", "held")); queue.enqueue(key("keyUp", "held"));
     for (let n = 0; n < 40; n++) queue.enqueue(key("keyDown", String(n)));
     queue.enqueue(up);
-    expect(onError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining("Release control and reconnect") }));
+    expect(onError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining("Reconnect the view before typing again") }));
     first.resolve(); await queue.drain();
     expect(send.mock.calls.map(([body]) => body)).toEqual([key("keyDown", "held"), key("keyUp", "held"), up]);
     queue.clear(); queue.enqueue(key("keyDown", "after reconnect")); await queue.drain();
