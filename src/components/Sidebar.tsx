@@ -80,6 +80,7 @@ import {
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
   PINNED_SECTION_ID,
+  PINNED_THREADS_SECTION_ID,
   mergeSectionOrder,
   moveSection,
   orderedSidebarSections,
@@ -2179,6 +2180,8 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           density={density}
           now={now}
           onJump={(entry) => dispatch(attentionJumpAction(entry))}
+          collapsed={sectionCollapsed(PINNED_THREADS_SECTION_ID)}
+          onToggle={() => toggleSection(PINNED_THREADS_SECTION_ID)}
         />
       )}
 
