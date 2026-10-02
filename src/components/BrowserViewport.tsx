@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { t } from "@/lib/i18n";
 
 export interface BrowserFrame {
   seq: number; data: string; format?: "jpeg" | "png";
@@ -7,6 +8,7 @@ export interface BrowserFrame {
 export type BrowserInput = (body: Record<string, unknown>) => void;
 const modifiers = (e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) =>
   Number(e.altKey) + Number(e.ctrlKey) * 2 + Number(e.metaKey) * 4 + Number(e.shiftKey) * 8;
+const MODIFIER_KEYS = new Set(["Alt", "Control", "Meta", "Shift"]);
 
 /** Map only the contained image, not its letterboxing, into the frame's CSS
  * coordinate space. Status events can describe a newer viewport than these pixels. */
@@ -60,6 +62,10 @@ export function BrowserViewport({ frame, width, height, driving, input: sendInpu
   const src = `data:image/${frame.format === "png" ? "png" : "jpeg"};base64,${frame.data}`;
   const pressed = useMemo(() => createBrowserPressedInputs(sendInput), [sendInput]);
   const input = pressed.send;
+  // Tabbing through the app passes over the page: until the person clicks or
+  // types in it, Tab moves focus on instead of reaching the page (and taking
+  // the browser from the bot). Focus leaving resets it.
+  const engaged = useRef(false);
   useLayoutEffect(() => {
     if (!driving) pressed.release();
     return pressed.release;
@@ -107,17 +113,18 @@ export function BrowserViewport({ frame, width, height, driving, input: sendInpu
   return <>
     <img ref={screen} src={src} alt="Live bot browser" draggable={false} tabIndex={driving ? 0 : -1}
       title={driving ? "Shift+Escape returns to the browser address bar." : undefined}
-      aria-description={driving ? "Keyboard input goes to the remote page. Press Shift+Escape to return to the browser address bar." : undefined}
+      aria-description={driving ? t("browser.viewport.keysHint") : undefined}
       aria-keyshortcuts={driving ? "Shift+Escape" : undefined}
       className={`block h-full w-full object-contain select-none outline-none focus:ring-2 focus:ring-inset focus:ring-accent ${driving ? "cursor-default touch-none" : "cursor-not-allowed"}`}
       onLoad={rendered} onError={onDecodeError}
-      onBlur={pressed.release}
+      onBlur={() => { engaged.current = false; pressed.release(); }}
       onContextMenu={(e) => { if (driving) e.preventDefault(); }}
       onPointerDown={(e) => {
         if (!driving) return;
         const at = point(e.clientX, e.clientY);
         if (!at) return;
         e.preventDefault(); e.currentTarget.focus(); e.currentTarget.setPointerCapture(e.pointerId);
+        engaged.current = true;
         input({ type: "input_mouse", eventType: "mousePressed", ...at, button: e.button === 2 ? "right" : e.button === 1 ? "middle" : "left", clickCount: Math.min(3, e.detail || 1), modifiers: modifiers(e) });
       }}
       onPointerUp={(e) => {
@@ -138,6 +145,8 @@ export function BrowserViewport({ frame, width, height, driving, input: sendInpu
         if (e.key === "Escape" && e.shiftKey) {
           e.preventDefault(); e.stopPropagation(); pressed.release(); onReturnToToolbar(); return;
         }
+        if (e.key === "Tab" && !engaged.current) return;
+        if (!MODIFIER_KEYS.has(e.key)) engaged.current = true;
         // Native paste supplies actual clipboard text via onPaste below.
         if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") return;
         e.preventDefault();
@@ -146,9 +155,10 @@ export function BrowserViewport({ frame, width, height, driving, input: sendInpu
       onKeyUp={(e) => {
         if (!driving || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v")) return;
         if (e.key === "Escape" && e.shiftKey) { e.preventDefault(); e.stopPropagation(); return; }
+        if (e.key === "Tab" && !engaged.current) return;
         e.preventDefault(); input({ type: "input_keyboard", eventType: "keyUp", key: e.key, code: e.code, windowsVirtualKeyCode: e.keyCode, modifiers: modifiers(e) });
       }}
-      onPaste={(e) => { if (driving) { e.preventDefault(); input({ type: "input_keyboard", eventType: "char", text: e.clipboardData.getData("text/plain").slice(0, 4096) }); } }}
+      onPaste={(e) => { if (driving) { e.preventDefault(); engaged.current = true; input({ type: "input_keyboard", eventType: "char", text: e.clipboardData.getData("text/plain").slice(0, 4096) }); } }}
     />
   </>;
 }

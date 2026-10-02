@@ -137,6 +137,49 @@ describe("taking browser control implicitly", () => {
     expect(quick.options.onTakeStatus.mock.calls.map(([status]) => status)).toEqual(["pending", ""]);
   });
 
+  it("drops what the person aimed at the page when the grant waited for the bot's own action", async () => {
+    const h = harness();
+    const take = deferred();
+    h.options.take.mockImplementationOnce(async () => { await take.promise; return { ok: true, waited: true }; });
+    const navigate = { type: "navigate", url: "https://example.com/" };
+    h.interact({ input: press }, { input: lift }, { input: key("keyDown") }, { command: navigate });
+    take.resolve(); await settle();
+    // Only the toolbar action that means the same on any page still runs.
+    expect(h.sent).toEqual([["command", navigate]]);
+    expect(h.options.onTakeStatus).toHaveBeenLastCalledWith("stale");
+    // The key's release never reaches the page that never saw it go down.
+    h.interact({ input: key("keyUp") });
+    expect(h.queue.enqueue).not.toHaveBeenCalled();
+    // The next click is the person's own, on the page as it is now.
+    h.interact({ input: press });
+    expect(h.queue.enqueue).toHaveBeenLastCalledWith(press);
+    expect(h.options.onTakeStatus).toHaveBeenLastCalledWith("");
+    expect(h.options.take).toHaveBeenCalledOnce();
+  });
+
+  it("drops page-relative toolbar actions after a waited grant, and says nothing when nothing was lost", async () => {
+    const h = harness();
+    h.options.take.mockResolvedValueOnce({ ok: true, waited: true });
+    h.interact({ command: { type: "back" } }); await settle();
+    expect(h.sent).toEqual([]);
+    expect(h.options.onTakeStatus).toHaveBeenLastCalledWith("stale");
+    const quiet = harness();
+    quiet.options.take.mockResolvedValueOnce({ ok: true, waited: true });
+    quiet.interact({ command: { type: "tab-new" } }, { input: hover }); await settle();
+    expect(quiet.sent).toEqual([["command", { type: "tab-new" }]]);
+    expect(quiet.options.onTakeStatus).toHaveBeenLastCalledWith("");
+  });
+
+  it("keeps one toolbar action while a take waits, so repeated clicks do not pile up", async () => {
+    const h = harness();
+    const take = deferred();
+    h.options.take.mockImplementationOnce(() => take.promise);
+    h.interact({ command: { type: "back" } }, { command: { type: "back" } }, { input: press }, { input: lift },
+      { command: { type: "tab-new" } });
+    take.resolve(); await settle();
+    expect(h.sent).toEqual([["command", { type: "back" }], ["input", press], ["input", lift]]);
+  });
+
   it("does not take control for page input after the input queue halted", async () => {
     const h = harness();
     h.queue.stopped.mockReturnValue(true);
@@ -301,6 +344,57 @@ describe("handing browser control back", () => {
     const watching = harness();
     watching.control.leave();
     expect(watching.options.release).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a Cmd shortcut whose key-up macOS never sends", [key("keyDown", "Meta"), { ...key("keyDown", "c"), modifiers: 4 }, key("keyUp", "Meta")]],
+    ["a discrete key the server sends as one press", [key("keyDown", "Enter")]],
+  ])("hands back after %s", async (_name, inputs) => {
+    vi.useFakeTimers();
+    const h = harness();
+    for (const input of inputs) h.interact({ input });
+    await settle();
+    vi.advanceTimersByTime(BROWSER_HAND_BACK_MS); await settle();
+    expect(h.options.release).toHaveBeenCalledOnce();
+  });
+
+  it("hands back at once when asked (switching profiles), or as soon as a running action ends", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.interact({ input: press }, { input: lift }); await settle();
+    h.control.handBack();
+    vi.advanceTimersByTime(0); await settle();
+    expect(h.options.release).toHaveBeenCalledOnce();
+    const busy = harness();
+    busy.interact({ input: press }, { input: lift }); await settle();
+    const reload = deferred();
+    busy.options.command.mockImplementationOnce(async () => { busy.server.busy = true; await reload.promise; busy.server.busy = false; });
+    busy.interact({ command: { type: "reload" } });
+    busy.control.handBack();
+    vi.advanceTimersByTime(0); await settle();
+    expect(busy.options.release).not.toHaveBeenCalled();
+    reload.resolve(); await settle();
+    vi.advanceTimersByTime(0); await settle();
+    expect(busy.options.release).toHaveBeenCalledOnce();
+    // Taking control again goes back to the normal idle wait.
+    busy.interact({ input: press }, { input: lift }); await settle();
+    vi.advanceTimersByTime(BROWSER_HAND_BACK_MS - 1); await settle();
+    expect(busy.options.take).toHaveBeenCalledTimes(2);
+    expect(busy.options.release).toHaveBeenCalledOnce();
+  });
+
+  it("keeps control while the typing dialog is open, then waits the usual idle time", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.interact({ input: press }, { input: lift }); await settle();
+    h.control.hold(true);
+    vi.advanceTimersByTime(60_000); await settle();
+    expect(h.options.release).not.toHaveBeenCalled();
+    h.control.hold(false);
+    vi.advanceTimersByTime(BROWSER_HAND_BACK_MS - 1); await settle();
+    expect(h.options.release).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1); await settle();
+    expect(h.options.release).toHaveBeenCalledOnce();
   });
 
   it("does nothing once closed: no late flush, status, error or hand-back", async () => {

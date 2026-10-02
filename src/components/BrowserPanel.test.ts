@@ -57,6 +57,7 @@ const bot = { id: "pepper", name: "Pepper" } as Bot;
 const render = () => renderToStaticMarkup(createElement(LiveBrowser, { bot }));
 type Node = ReactElement<{
   children?: ReactNode; "aria-label"?: string; ref?: RefObject<HTMLInputElement | null>;
+  disabled?: boolean; readOnly?: boolean; driving?: boolean;
   onReturnToToolbar?: () => void; onClick?: (event: unknown) => void; onProfileChanged?: () => void;
   onFocus?: (event: { target: { select: () => void } }) => void;
   acknowledge?: (seq: number) => void; onDecodeError?: () => void;
@@ -392,22 +393,74 @@ describe("live browser control affordance", () => {
     expect(html).toContain("Restart browser…");
   });
 
-  it("shows a status chip, not a control, only while this viewer holds the browser", () => {
-    expect(render()).not.toContain("You’re using the browser");
+  // The status floats over the live view, so its words show at any panel width
+  // and it never takes a click from the page.
+  const status = (html: string) => /<div role="status"([^>]*)>(.*?)<\/div><\/div><dialog/.exec(html)!;
+
+  it("shows a status pill, not a control, over the page only while this viewer holds the browser", () => {
+    expect(status(render())[2]).toBe("");
     fixture.control = { held: true, controlling: true, owned: true };
     fixture.frame = { seq: 1, data: "fixture", viewerId: "current-viewer", generation: 1 };
-    const html = render();
-    const chip = /<div role="status"[^>]*>(.*?)<\/div>/.exec(html)![1]!;
-    expect(chip).toContain("You’re using the browser");
-    expect(chip).toContain('title="Pepper is paused while you use the browser.');
-    expect(chip).not.toMatch(/<button|<a /);
+    const [, attributes, pill] = status(render());
+    expect(attributes).toContain("pointer-events-none");
+    expect(pill).toContain("You’re using the browser");
+    expect(pill).toContain('aria-description="Pepper’s browser tools are paused while you use it. Control goes back to Pepper after a few seconds without input."');
+    expect(pill).not.toMatch(/<button|<a |sr-only/);
   });
 
-  it("says it is waiting for the bot once a take is slow", () => {
+  it("says, in words, that it is waiting for the bot once a take is slow", () => {
     fixture.states = { 11: "slow" };
-    const html = render();
-    expect(html).toContain("Waiting for Pepper to finish…");
-    expect(html).not.toContain("You’re using the browser");
+    const [, , pill] = status(render());
+    expect(pill).toContain("Waiting for Pepper to finish…");
+    expect(pill).not.toMatch(/sr-only|You’re using the browser/);
+  });
+
+  it("says when input made while the bot finished was not sent", () => {
+    fixture.states = { 11: "stale" };
+    fixture.control = { held: true, controlling: true, owned: true };
+    const [, , pill] = status(render());
+    expect(pill).toContain("Pepper was busy, so that wasn’t sent. Try again.");
+    expect(pill).not.toContain("You’re using the browser");
+  });
+
+  it("keeps the toolbar and page usable while the bot has the browser, but not while another window holds it", () => {
+    fixture.states = { 4: true };
+    fixture.frame = { seq: 1, data: "fixture", viewerId: "current-viewer", generation: 1 };
+    const controls = () => {
+      fixture.setters = []; // fixture.states index this render's useState calls
+      const nodes = renderElements();
+      const find = (label: string) => nodes.find((node) => node.props["aria-label"] === label)!;
+      return { back: find("Back"), reload: find("Reload page"), newTab: find("New tab"), address: find("Browser address"),
+        viewport: nodes.find((node) => node.type === BrowserViewport)! };
+    };
+    const watching = controls();
+    expect([watching.back, watching.reload, watching.newTab].map((node) => node.props.disabled)).toEqual([false, false, false]);
+    expect(watching.address.props.readOnly).toBe(false);
+    expect(watching.viewport.props.driving).toBe(true);
+    // A pending take holds toolbar actions back, while page input still reaches the take.
+    fixture.states = { 4: true, 11: "pending" };
+    const taking = controls();
+    expect([taking.back, taking.reload, taking.newTab].map((node) => node.props.disabled)).toEqual([true, true, true]);
+    expect(taking.address.props.readOnly).toBe(true);
+    expect(taking.viewport.props.driving).toBe(true);
+    fixture.states = { 4: true };
+    fixture.control = { held: true, controlling: false, owned: false };
+    const elsewhere = controls();
+    expect([elsewhere.back, elsewhere.reload, elsewhere.newTab].map((node) => node.props.disabled)).toEqual([true, true, true]);
+    expect(elsewhere.address.props.readOnly).toBe(true);
+    expect(elsewhere.viewport.props.driving).toBe(false);
+  });
+
+  it("says why profiles are locked while another window holds the browser or an action runs", () => {
+    const fresh = () => { fixture.setters = []; return render(); };
+    expect(fresh()).not.toMatch(/Another window is using this browser|Profiles unlock/);
+    fixture.control = { held: true, controlling: false, owned: false };
+    expect(fresh()).toContain("Another window is using this browser. Switch profiles once it’s done.");
+    // An idle hold of its own needs no line: opening the profiles hands it back.
+    fixture.control = { held: true, controlling: true, owned: true };
+    expect(fresh()).not.toMatch(/Another window is using this browser|Profiles unlock/);
+    fixture.states = { 6: true };
+    expect(fresh()).toContain("Profiles unlock once the current browser action finishes.");
   });
 
   it("keeps the page while its own take waits but hides it while another window holds it", () => {
@@ -437,7 +490,7 @@ describe("implicit browser control", () => {
     const cleanup = fixture.effects[2]!();
     const source = FixtureEventSource.instances[0]!;
     source.emit("ready", { viewerId: "current-viewer" });
-    return { cleanup, source, input: nodes.find((node) => node.type === BrowserViewport)!.props.input! };
+    return { cleanup, source, nodes, input: nodes.find((node) => node.type === BrowserViewport)!.props.input! };
   };
 
   it("takes control on the first click and sends that click exactly once after the take", async () => {
@@ -498,6 +551,53 @@ describe("implicit browser control", () => {
     held.input(press); await settleAll();
     held.cleanup?.();
     expect(sentTypes()).toEqual(["take"]);
+  });
+
+  it("drops a click made while the bot finished its own action and says so, then takes the next click", async () => {
+    const { cleanup, input } = connectViewer();
+    vi.mocked(api).mockResolvedValueOnce({ ok: true, waited: true });
+    input(press); input(lift); await settleAll();
+    expect(fixture.queues[0]!.enqueue).not.toHaveBeenCalled();
+    expect(fixture.setters[11]).toHaveBeenLastCalledWith("stale");
+    input(press);
+    expect(fixture.queues[0]!.enqueue).toHaveBeenCalledExactlyOnceWith(press);
+    expect(fixture.setters[11]).toHaveBeenLastCalledWith("");
+    expect(sentTypes()).toEqual(["take"]);
+    cleanup?.();
+  });
+
+  it("runs a toolbar action clicked twice during a slow take only once", async () => {
+    const nodes = renderElements();
+    const cleanup = fixture.effects[2]!();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "current-viewer" });
+    const take = deferred();
+    vi.mocked(api).mockReturnValueOnce(take.promise);
+    click(nodes, "Back"); click(nodes, "Back"); await settleAll();
+    take.resolve(); await settleAll();
+    expect(sentTypes()).toEqual(["take", "back"]);
+    cleanup?.();
+  });
+
+  it("hands the browser back as soon as the profiles open, not after the idle wait", async () => {
+    vi.useFakeTimers();
+    const { cleanup, input, nodes } = connectViewer();
+    input(press); input(lift); await settleAll();
+    expect(sentTypes()).toEqual(["take"]);
+    click(nodes, "Browser profiles");
+    vi.advanceTimersByTime(0); await settleAll();
+    expect(sentTypes()).toEqual(["take", "release"]);
+    cleanup?.();
+  });
+
+  it("keeps control while the typing dialog is open", async () => {
+    vi.useFakeTimers();
+    fixture.states = { 9: true };
+    const { cleanup, input } = connectViewer();
+    input(press); input(lift); await settleAll();
+    fixture.effects[1]!();
+    vi.advanceTimersByTime(60_000); await settleAll();
+    expect(sentTypes()).toEqual(["take"]);
+    cleanup?.();
   });
 
   it("does not contest another window's hold", async () => {

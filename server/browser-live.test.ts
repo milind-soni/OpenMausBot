@@ -70,6 +70,7 @@ beforeEach(() => {
     }),
     release: vi.fn((session: string, owner: string) => { if (held.get(session) === owner) held.delete(session); }),
     abandonHumanInput: vi.fn(),
+    interrupted: vi.fn(() => false),
     withHumanAction: vi.fn(async (_session: string, _owner: string, fn: () => unknown) => fn()),
   } as unknown as BrowserRuntime;
   live = new BrowserLive({ runtime });
@@ -304,7 +305,7 @@ describe("authenticated browser viewer relay", () => {
   });
   it("requires a viewer-specific human lease and releases only its own control on disconnect", async () => {
     const a = await open(); const b = await open({ botId: "bot-b" });
-    await expect(a.action({ type: "navigate", url: "https://example.com" })).rejects.toThrow("Take control");
+    await expect(a.action({ type: "navigate", url: "https://example.com" })).rejects.toThrow("Browser control changed");
     await a.action({ type: "take" });
     await expect(b.action({ type: "take" })).rejects.toThrow("Another browser");
     b.socket.close();
@@ -449,6 +450,27 @@ describe("authenticated browser viewer relay", () => {
     expect(JSON.parse(nativeInput.mock.calls[0]![1].body)).toEqual({ action: "press", key: "Enter" });
     await a.action({ type: "release" });
     await expect(runtime.withAgentAction("profile-a", async () => true)).rejects.toThrow("Restart");
+  });
+  it("points an interrupted browser at Restart browser…, never at a take-control button", async () => {
+    runtime = new BrowserRuntime(); live = new BrowserLive({ runtime });
+    const a = await open(); await a.action({ type: "take" });
+    nativeInput.mockImplementationOnce(async () => Response.json({ success: false }));
+    await expect(a.action({ type: "input_keyboard", eventType: "keyDown", key: "Enter" })).rejects.toThrow("could not confirm this input");
+    await expect(a.action({ type: "back" })).rejects.toThrow("Choose Restart browser… in the browser menu");
+    await a.action({ type: "release" });
+    await expect(a.action({ type: "take" })).rejects.toThrow("Choose Restart browser… in the browser menu");
+  });
+  it("tells the panel when a take had to wait for the bot's own action", async () => {
+    runtime = new BrowserRuntime(); live = new BrowserLive({ runtime });
+    const a = await open();
+    expect(await a.action({ type: "take" })).toEqual({ ok: true, waited: false });
+    await a.action({ type: "release" });
+    let finish!: () => void;
+    const agent = runtime.withAgentAction("profile-a", () => new Promise<boolean>((resolve) => { finish = () => resolve(true); }));
+    const discarded = expect(agent).rejects.toThrow("paused");
+    const taking = a.action({ type: "take" });
+    finish(); await discarded;
+    expect(await taking).toEqual({ ok: true, waited: true });
   });
   it("releases Shift-only printable keys even when keyUp contains no text", async () => {
     const a = await open(); await a.action({ type: "take" });

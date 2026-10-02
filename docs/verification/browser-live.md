@@ -18,22 +18,32 @@ UI and harness, then removes its temporary data; the server log remains.
    no “coming next” card and no Take control button. While the bot has the
    browser, nothing is sent until you interact; hovering never takes it.
 2. Enter the printed test-page URL and press Enter. That first interaction
-   takes the browser from the bot (the toolbar shows a hand: “You’re using the
-   browser”), then navigates; it is sent exactly once. If the bot is mid-action,
-   “Waiting for Pepper to finish…” shows first and the input lands afterwards.
+   takes the browser from the bot (a pill over the top of the page reads
+   “You’re using the browser”, at every panel width), then navigates; it is
+   sent exactly once. If the bot is mid-action, “Waiting for Pepper to
+   finish…” shows first; when the bot's action finishes first, clicks and keys
+   made while waiting are dropped, not replayed on a page that may have moved
+   (the pill says “Pepper was busy, so that wasn’t sent. Try again.”), while
+   an address you entered still opens. Toolbar buttons wait out the take, so
+   a repeated click runs once.
    In the name field, type `AdaX`, press Backspace, then Enter. The streamed
    page must show `Hello, Ada`. Check arrows and Delete, Tab into the notes
    field and enter multiple lines, then open the dialog and close it with
    Escape. These must affect the remote page, not only the surrounding UI.
    Shift+Escape returns focus to the address field without sending Escape to
    the page; keyboard-only users must still be able to reach the toolbar.
-3. Stop for 8 seconds: control returns to the bot and the hand disappears.
+   Tabbing through the panel passes over the live page without taking it;
+   only clicking or typing in the page sends Tab there.
+3. Stop for 8 seconds: control returns to the bot and the pill disappears.
+   A Cmd shortcut such as Cmd+C must not delay that. Keep **Type or paste
+   text…** open past 8 seconds: control stays yours until it closes.
    Holding a mouse button or key down must never hand back. Reconnect the
    view, then leave it connected for at least 30 seconds on the same static
    image. It must not stall waiting for an ACK. The page remains intact and
    the bot keeps it; click into the page and confirm editing and Enter still
    work after reconnecting.
-4. The single profile button opens the switcher. Create a shared profile,
+4. The single profile button opens the switcher, handing the browser back at
+   once if you were using it, so the switcher unlocks. Create a shared profile,
    switch to it (a clean browser), then back to Own browser. The previous page
    remains. Rename a shared profile without changing its identity. Confirmed
    deletion clears its bot references without deleting another profile's data.
