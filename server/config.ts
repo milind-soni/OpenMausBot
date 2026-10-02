@@ -317,11 +317,15 @@ const featureConfigSchema = z.object({
    * enabled; a one-shot that fails or answers junk leaves the first-message
   * snippet in place — see llmThreadTitlesEnabled. */
   llmThreadTitles: z.boolean().optional(),
+  /** Prototype: routines may execute a reviewed script in a sandboxed child
+   * instead of an LLM turn (ADR: docs/design/adr-d2-scripted-routine-sandbox.md).
+   * Server-only and off until explicitly enabled by hand, because the
+   * runtime is proven by a canary in plain-Node parent modes only. */
+  scriptedRoutines: z.boolean().optional(),
   /** Before each turn, passages from the bot's own memory files and earlier
    * conversations that share words with the message ride into the turn.
    * Read-only; on unless explicitly switched off — see autoRecallEnabled. */
-  autoRecall: z.boolean().optional(),
-  /** Idle release for computer claims (#1653): a desktop seat that stays
+  autoRecall: z.boolean().optional(),  /** Idle release for computer claims (#1653): a desktop seat that stays
    * screen-quiet for 90 seconds is released to waiting turns while its
    * holder's turn still lives; the previous holder re-claims directly
    * for 10 minutes and yields to an occupied seat. Off until baked; see
@@ -624,8 +628,7 @@ export interface AppConfig {
    * seats shared by all conversations, with per-thread affinity (#1654). */
   localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; autoRecall?: boolean; computerClaimIdleRelease?: boolean; cloudOverflow?: boolean; routinesInConversation?: boolean };
-  /** #1655: consented cloud overflow for local computer waits. The cost is
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; scriptedRoutines?: boolean; computerClaimIdleRelease?: boolean; cloudOverflow?: boolean; autoRecall?: boolean; routinesInConversation?: boolean };  /** #1655: consented cloud overflow for local computer waits. The cost is
    * the operator's own per-second rate; unset keeps the feature inert. */
   cloudOverflow?: { perSecondCostUsd?: number; idleStopMs?: number; allowlistedThreads?: string[] };
   /** First-run progress; see onboardingConfigSchema. */
@@ -882,6 +885,14 @@ export function llmThreadTitlesEnabled(cfg: AppConfig): boolean {
   return cfg.features?.llmThreadTitles === true;
 }
 
+/** Prototype gate for scripted routine runs (D2 sandbox). Off unless an
+ * explicit `true` is set by hand in ~/.openmausbot/config.json
+ * (`{"features": {"scriptedRoutines": true}}`) and the server restarts.
+ * Server-only: the Electron-embedded parent stays dark until its packaged
+ * build passes the runtime canary (ADR section 10). */
+export function scriptedRoutinesEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.scriptedRoutines === true;
+}
 /** Idle release for computer claims (#1653): a whole-turn desktop hold
  * ends after a screen-quiet window (default 90 seconds, screen-poller
  * frames excluded) instead of at turn settle, and the previous holder
