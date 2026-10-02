@@ -11,8 +11,11 @@ function AlwaysOn() {
 
 /** `inline` is the small pill that shares the sidebar's top row with the
  * traffic lights and the header buttons: icon, short name, tiny chevron,
- * truncating to whatever width the row leaves it. It brings no row padding
- * of its own; the row places it.
+ * truncating to whatever width the row leaves it (and clipping, never
+ * spilling onto the buttons, in the narrowest rows). It brings no row padding
+ * of its own; the row places it at the right beside the buttons and, being
+ * `relative`, anchors its error note to the row's right end so the note stays
+ * inside the sidebar.
  *
  * The dropdown is native: a remote workspace cannot choose a destination
  * itself or read the other workspaces saved on this computer. Outside the
@@ -56,16 +59,16 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, clou
     setError(""); setOpen(true);
     void bridge.menu().catch(() => setError("Could not open the server list. Try the Server menu.")).finally(() => setOpen(false));
   };
-  if (inline) return <div data-workspace-switcher="inline" className="relative flex min-w-0">
+  if (inline) return <div data-workspace-switcher="inline" className="flex min-w-0">
     <button type="button" aria-label={`Switch server: ${shown}`} aria-haspopup="menu" aria-expanded={open} data-cloud-home-indicator={cloudHome || undefined}
       title={title} onClick={openMenu}
-      className="flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 text-left text-[12.5px] font-medium text-ink hover:bg-control focus-visible:outline focus-visible:outline-accent"
+      className="flex h-7 min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md px-1.5 text-left text-[12.5px] font-medium text-ink hover:bg-control focus-visible:outline focus-visible:outline-accent"
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
       <Icon size={14} aria-hidden="true" className="shrink-0 text-ink-secondary" />
       <span className="min-w-0 truncate">{name}</span>
       <ChevronDown size={11} aria-hidden="true" className="shrink-0 text-ink-secondary" />
     </button>
-    {error && <p role="alert" className="absolute left-0 top-full z-40 mt-1 w-56 rounded-md bg-menu px-2 py-1 text-[11px] text-danger shadow-lg">{error}</p>}
+    {error && <p role="alert" className="absolute right-2 top-full z-40 mt-1 w-56 max-w-[calc(100%-1rem)] rounded-md bg-menu px-2 py-1 text-[11px] text-danger shadow-lg">{error}</p>}
   </div>;
   return <div className={cn("py-1.5", compact ? "px-2" : "px-3")}>
     <button type="button" aria-label={`Switch server: ${shown}`} aria-haspopup="menu" aria-expanded={open} data-cloud-home-indicator={cloudHome || undefined}

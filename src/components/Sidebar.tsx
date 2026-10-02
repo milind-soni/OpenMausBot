@@ -1964,37 +1964,49 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
       )}
     >
-      {/* One top row: [traffic lights] [server] [drag space] [buttons].
+      {/* One top row: [traffic lights] [drag space] [server] [buttons].
           macOS owns inset traffic lights; Linux/Windows use native chrome.
           On macOS the row is twice the lights' centre line tall, so
-          items-center puts every control on that line. The icons rail is too
-          narrow for a row and stacks instead, server switcher underneath. */}
+          items-center puts every control on that line. The server switcher
+          sits at the right, just left of the buttons, so the left stays an
+          empty drag region clear of the lights; in a narrow sidebar the
+          switcher truncates first and the buttons never wrap. The row is
+          `relative` so the switcher's error note hangs inside the sidebar.
+          The icons rail is too narrow for a row and stacks instead, server
+          switcher underneath. */}
       <div
         data-sidebar-top-row
         className={cn(
           "flex items-center",
-          density === "icons" ? "flex-col gap-1 px-2 pt-3.5 pb-1" : "gap-1 px-4",
+          density === "icons" ? "flex-col gap-1 px-2 pt-3.5 pb-1" : "relative pl-4 pr-2",
           density !== "icons" && !macInset && "h-12",
         )}
         style={density !== "icons" && macInset ? { ...windowDragStyle, height: MAC_TRAFFIC_LIGHT_CENTER_Y * 2 } : windowDragStyle}
       >
         {macInset ? (
-          <div aria-hidden="true" data-traffic-light-space className={density === "icons" ? "h-5 w-full" : "w-14 shrink-0"} />
+          // The lights span 16-76px on macOS 26; from the row's 16px inset this
+          // ends 12px past them, so nothing clickable starts before 88px.
+          <div aria-hidden="true" data-traffic-light-space className={density === "icons" ? "h-5 w-full" : "w-[72px] shrink-0"} />
         ) : browser ? (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className={cn("flex shrink-0 items-center gap-2", density !== "icons" && "mr-3")}>
             <span className="size-3 rounded-full bg-[#ff5f57]" />
             <span className="size-3 rounded-full bg-[#febc2e]" />
             <span className="size-3 rounded-full bg-[#28c840]" />
           </div>
         ) : null}
-        {density !== "icons" && (
-          // The spacer stays draggable; only the switcher's own button opts out.
-          <div data-sidebar-top-switcher className="flex min-w-0 flex-1 items-center">
+        {density !== "icons" && <>
+          {/* Empty, so it stays a drag region; it takes the slack, which keeps
+              the switcher beside the buttons. */}
+          <div data-sidebar-top-spacer className="min-w-0 flex-1" />
+          {/* Gives way first when the row is tight (the name truncates); only
+              the switcher's own button opts out of the drag region. */}
+          <div data-sidebar-top-switcher className="flex min-w-0 max-w-[140px] items-center">
             <DesktopWorkspaceSwitcher inline cloudHome={state.config?.cloudHome === true} owner={cloudOwner} />
           </div>
-        )}
+        </>}
         <div
-          className={cn("relative flex shrink-0 items-center", density === "icons" ? "flex-col gap-1" : "gap-0.5")}
+          data-sidebar-top-buttons
+          className={cn("relative flex shrink-0 items-center", density === "icons" ? "flex-col gap-1" : "ml-0.5 gap-0.5")}
           style={windowNoDragStyle}
         >
           {/* Simple mode keeps only "+". Expand stays so an icons rail is never a dead end. */}
