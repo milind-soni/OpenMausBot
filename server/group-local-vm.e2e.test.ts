@@ -618,6 +618,68 @@ describe("Group Local VM ownership on the real isolated server", () => {
     }
   });
 
+  it.each(["shared", "per-bot"])("recovers a direct %s VM after a missing completion", async (mode) => {
+    vmState();
+    await api("PATCH", "/api/config", { localVm: { mode, maxInstances: 2 } });
+    const { bot } = await api("POST", "/api/bots", { name: `Stalled ${mode} VM` });
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm", browser: false });
+      rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Hold the VM" });
+      const first = computer(await dump());
+      expect((await gate(first)).status).toBe(200);
+      vmState({ dropCompletion: true, stall: true });
+      await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes("the turn was stopped"));
+      await idle(bot.id);
+      expect((await gate(first)).status).toBe(401);
+      vmState(); rmSync(dumpFile, { force: true });
+      const { task } = await api("POST", `/api/bots/${bot.id}/tasks`, {});
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Use the VM again", threadId: task.threadId });
+      const next = computer(await dump());
+      expect((await gate(next)).status).toBe(200);
+    } finally {
+      vmState({ containers: [] }); writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+      await idle(bot.id);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      if (mode === "per-bot") await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+      vmState();
+    }
+  }, 40_000);
+
+  it.each([["shared", false], ["shared", true], ["per-bot", false], ["per-bot", true]] as const)("keeps a replacement %s VM turn after a late completion (new task: %s)", async (mode, newTask) => {
+    vmState();
+    await api("PATCH", "/api/config", { localVm: { mode, maxInstances: 2 } });
+    const { bot } = await api("POST", "/api/bots", { name: "Late VM completion" });
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm", browser: false });
+      rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Hold the VM" });
+      const first = computer(await dump());
+      rmSync(stateFile + ".latecompleted", { force: true });
+      vmState({ delayCompletion: 8_000, stall: true });
+      await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes("the turn was stopped"));
+      await idle(bot.id);
+      expect((await gate(first)).status).toBe(401);
+      vmState(); rmSync(dumpFile, { force: true });
+      const threadId = newTask ? (await api("POST", `/api/bots/${bot.id}/tasks`, {})).task.threadId : bot.threadId;
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Keep using the VM", threadId });
+      const next = computer(await dump());
+      expect(existsSync(stateFile + ".latecompleted")).toBe(false);
+      await until(() => existsSync(stateFile + ".latecompleted"), Boolean);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect((await gate(next)).status).toBe(200);
+      expect((await api("GET", "/api/bots?messages=0")).bots.find((entry: any) => entry.id === bot.id).busy).toBe(true);
+    } finally {
+      vmState({ containers: [] }); writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+      await idle(bot.id);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      if (mode === "per-bot") await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+      vmState();
+    }
+  }, 30_000);
+
   // Linux accepts only its own validated runtime descriptor, which a fixture
   // cannot forge; the macOS and Windows descriptor is a plain file.
   it.skipIf(process.platform === "linux")("mounts a channel speaker's own This computer destination behind the control gate", async () => {

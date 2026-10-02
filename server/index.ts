@@ -5685,10 +5685,12 @@ const watchdog = new TurnWatchdog({
   onStall: (turn) => {
     const stalledResourceOwner = turnResourceOwners.get(turn.threadId);
     const stalledGeneration = directTurnGenerationByThread.get(turn.threadId);
+    const stalledProviderTurn = directRequestOwners.get(turn.threadId);
+    if (stalledGeneration && stalledProviderTurn?.generation === stalledGeneration && stalledProviderTurn.turnId) {
+      retireProviderTurn(stalledProviderTurn.turnId);
+    }
     cancelDirectTurnDispatch(turn.botId, turn.threadId);
-    // Room targets carry an invocation identity; only those claims belong
-    // to the room grace cleanup added here.
-    const stalledVmTarget = groupSpeakers.has(turn.threadId) ? localVmThreadTargets.get(turn.threadId) : undefined;
+    const stalledVmTarget = localVmThreadTargets.get(turn.threadId);
     revokeInternalCapabilitiesForThread(turn.threadId);
     repeats.settle(turn.threadId);
     const bot = botForThread(turn.botId, turn.threadId);
@@ -5738,7 +5740,8 @@ const watchdog = new TurnWatchdog({
       }
       const group = store.groupByThread(turn.threadId);
       const speaker = groupSpeakers.get(turn.threadId);
-      if (group && group.busyBotId === turn.botId && speaker?.botId === turn.botId) {
+      const stalledRoomSpeaker = group && group.busyBotId === turn.botId && speaker?.botId === turn.botId;
+      if (stalledRoomSpeaker) {
         groupSpeakers.delete(turn.threadId);
         store.patchGroup(group.id, { busyBotId: null, unread: true });
       }
@@ -5746,7 +5749,7 @@ const watchdog = new TurnWatchdog({
       // computer claim. The generation checks above protect replacements.
       releaseTurnResources(stalledResourceOwner);
       const currentBot = store.bot(turn.botId);
-      if (currentBot?.busy) {
+      if (currentBot?.busy && (threadBusy(currentBot.id, turn.threadId) || stalledRoomSpeaker)) {
         stopScreenPoller(currentBot.id, turn.threadId);
         vpsThreadEnded(currentBot.id, turn.threadId);
         if (store.taskByThread(currentBot.id, turn.threadId)) store.setTaskActivity(currentBot.id, turn.threadId, "idle");
@@ -9284,7 +9287,7 @@ async function startTurn(
        * desktop, not whatever localVmTargetForBot resolves to by the time
        * the first screen call arrives. */
       const claimAutoLocalVm = async (claimThreadId: string, pinnedTarget?: LocalVmTarget): Promise<{ target: LocalVmTarget; runtime: Runtime }> => {
-        const localVmTarget = pinnedTarget ?? localVmTargetForThread(bot.id, claimThreadId);
+        const localVmTarget = pinnedTarget ?? localVmThreadTargets.get(claimThreadId) ?? { ...localVmTargetForThread(bot.id, claimThreadId) };
         await bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
         if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
           throw new Error("this Local VM is being started, stopped, or replaced — wait for setup to finish");
@@ -9307,6 +9310,7 @@ async function startTurn(
         // without this the exclusive lease would sit held for the rest of a
         // turn that never got the VM — the very serialisation #1361 removes.
         const dropLease = () => {
+          if (localVmThreadTargets.get(claimThreadId) !== localVmTarget) return;
           localVmLeaseFor(localVmTarget).release(claimThreadId);
           if (localVmActiveThreads.get(localVmTarget.key) === claimThreadId) localVmActiveThreads.delete(localVmTarget.key);
           localVmThreadTargets.delete(claimThreadId);
@@ -9396,7 +9400,7 @@ async function startTurn(
           const poolCandidate = poolLocalVmTarget(localVmSeatPool.candidate(threadId, localVmPoolSeatHolder));
           if (!localVmSeen.has(poolCandidate.key) && !opts?.automationSource) return false;
         }
-        const localVmTarget = localVmTargetForThread(bot.id, threadId);
+        const localVmTarget = { ...localVmTargetForThread(bot.id, threadId) };
         let lazyReadyVm: { runtime: Runtime } | null = null;
         if (!strict) {
           // Nothing this process has ever seen for this target, and nobody is
@@ -9468,7 +9472,7 @@ async function startTurn(
           return true;
         } catch (error) {
           if (strict) throw error;
-          releaseLocalVmThread(threadId);
+          if (directTurnGenerationByThread.get(threadId) === dispatchClaimId) releaseLocalVmThread(threadId);
           return false;
         }
       };

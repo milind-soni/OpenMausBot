@@ -52,6 +52,11 @@ registerHooks({
       return { ...result, source: `import { readFileSync as readVmClock } from 'node:fs';\n` +
         String(result.source).replaceAll('Date.now()', `(Date.now() + (JSON.parse(readVmClock(${JSON.stringify(state)}, 'utf8')).clockOffset || 0))`) };
     }
+    if (url.endsWith('/drivers/claude.ts')) {
+      return { ...result, source: `import { readFileSync as readVmEvents, writeFileSync as writeVmEvent } from 'node:fs';\n` +
+        String(result.source).replace('for (const l of Array.from(listeners)) l(event);',
+          `if (event.type === 'turn.completed') {\n        const fixture = JSON.parse(readVmEvents(${JSON.stringify(state)}, 'utf8'));\n        if (fixture.dropCompletion) return;\n        if (fixture.delayCompletion) { setTimeout(() => { writeVmEvent(${JSON.stringify(state)} + '.latecompleted', event.turnId ?? ''); for (const l of Array.from(listeners)) l(event); }, fixture.delayCompletion); return; }\n      }\n      for (const l of Array.from(listeners)) l(event);`) };
+    }
     if (url.endsWith('/turn-watchdog.ts')) {
       return { ...result, source: `import { readFileSync as readVmWatch } from 'node:fs';\n` +
         String(result.source).replace('this.opts = opts;', 'this.opts = { ...opts, checkMs: 30 };')
