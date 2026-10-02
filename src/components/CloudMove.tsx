@@ -8,11 +8,11 @@ import { Card } from "./SettingsPrimitives";
 // Settings → OMB Cloud, and the one-time card on an empty Cloud's own page.
 // Both only read main's snapshot and call its argument-free bridge.
 
-const RUNNING = new Set<CloudMoveState["phase"]>(["preparing", "exporting", "uploading", "checking", "replacing", "restarting"]);
+const RUNNING = new Set<CloudMoveState["phase"]>(["preparing", "growing", "exporting", "uploading", "checking", "replacing", "restarting"]);
 // Until the Cloud starts replacing its workspace, a move can still stop.
-const CANCELLABLE = new Set<CloudMoveState["phase"]>(["preparing", "exporting", "uploading", "checking"]);
+const CANCELLABLE = new Set<CloudMoveState["phase"]>(["preparing", "growing", "exporting", "uploading", "checking"]);
 const PHASE: Record<string, LocaleKey> = {
-  preparing: "cloudMove.phase.preparing", exporting: "cloudMove.phase.exporting", uploading: "cloudMove.phase.uploading",
+  preparing: "cloudMove.phase.preparing", growing: "cloudMove.phase.growing", exporting: "cloudMove.phase.exporting", uploading: "cloudMove.phase.uploading",
   checking: "cloudMove.phase.checking", replacing: "cloudMove.phase.replacing", restarting: "cloudMove.phase.restarting",
 };
 const ERROR: Record<string, LocaleKey> = {
@@ -28,13 +28,31 @@ export const formatMoveBytes = (value: number) => {
   return `${new Intl.NumberFormat(activeLocale(), { maximumFractionDigits: power === 3 ? 1 : 0 }).format(value / 1024 ** power)} ${["", "KB", "MB", "GB"][power]}`;
 };
 
-/** The person-facing sentence for a failed move. */
+/** The person-facing sentence for a failed move: what happened, and the next step. */
 export function cloudMoveErrorText(error: CloudMoveState["error"]): string {
   if (!error) return "";
+  const needed = error.neededBytes;
   if (error.code === "cloud_full") {
-    return error.freeBytes !== undefined && error.neededBytes !== undefined
-      ? t("cloudMove.error.cloudFull", { free: formatMoveBytes(error.freeBytes), needed: formatMoveBytes(error.neededBytes) })
+    // More than the plan's whole disk: only a larger plan (or, on the largest, we) can take it.
+    if (error.maxBytes !== undefined && needed !== undefined && needed > error.maxBytes) {
+      return t(error.largest ? "cloudMove.error.planFullLargest" : "cloudMove.error.planFull", { needed: formatMoveBytes(needed), max: formatMoveBytes(error.maxBytes) });
+    }
+    // More than this Cloud's disk now, and the Admin does not say it can grow: removing files will not do it.
+    if (error.maxBytes === undefined && error.volumeBytes !== undefined && needed !== undefined && needed > error.volumeBytes) {
+      return t("cloudMove.error.growUnsupported", { needed: formatMoveBytes(needed) });
+    }
+    // The disk could hold it: what is already on the Cloud is in the way.
+    return error.freeBytes !== undefined && needed !== undefined
+      ? t("cloudMove.error.cloudFull", { free: formatMoveBytes(error.freeBytes), needed: formatMoveBytes(needed) })
       : t("cloudMove.error.cloudFullPlain");
+  }
+  // This Admin cannot grow the disk for a move: no "try again".
+  if (error.code === "cloud_grow_unsupported") {
+    return needed !== undefined ? t("cloudMove.error.growUnsupported", { needed: formatMoveBytes(needed) }) : t("cloudMove.error.growUnsupportedPlain");
+  }
+  // It fits the plan's disk, which could not grow for it just now.
+  if (error.code === "cloud_grow_unavailable") {
+    return error.maxBytes !== undefined ? t("cloudMove.error.growUnavailable", { max: formatMoveBytes(error.maxBytes) }) : t("cloudMove.error.cloudFullPlain");
   }
   if (error.code === "restore_failed") return t("cloudMove.error.notReplaced", { detail: error.message });
   const key = ERROR[error.code];
@@ -93,6 +111,20 @@ function outcome(state: CloudMoveState): string | null {
   return null;
 }
 
+/** After a move: what is not running yet on the Cloud, and the phone. */
+export function moveNextSteps(state: CloudMoveState): string[] {
+  if (state.phase !== "done" || state.action === "restore") return [];
+  return [...(state.routines ? [t("cloudMove.doneRoutines", { count: state.routines })] : []), t("cloudMove.donePhone")];
+}
+
+/** Before a move that cannot fit even at the plan's largest disk: say so now. */
+export function moveFitNote(overview: CloudMoveOverview | null): string | null {
+  const fit = overview?.fit;
+  if (fit?.fit !== "never") return null;
+  return cloudMoveErrorText({ code: "cloud_full", message: "", freeBytes: fit.freeBytes, neededBytes: fit.neededBytes,
+    ...(fit.maxBytes ? { maxBytes: fit.maxBytes } : {}), ...(fit.largest ? { largest: true as const } : {}), ...(fit.volumeBytes ? { volumeBytes: fit.volumeBytes } : {}) });
+}
+
 /** Settings → OMB Cloud, below "Your Cloud" once it is Ready. */
 export function CloudMoveSettings() {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudMove;
@@ -101,7 +133,7 @@ export function CloudMoveSettings() {
   const running = RUNNING.has(state.phase);
   const local = overview?.local, cloud = overview?.cloud;
   const previous = cloud?.previous;
-  const done = outcome(state);
+  const done = outcome(state), next = moveNextSteps(state), fitNote = running || state.phase === "failed" ? null : moveFitNote(overview);
   const date = previous ? new Intl.DateTimeFormat(activeLocale(), { dateStyle: "medium", timeStyle: "short" }).format(new Date(previous.createdAt)) : "";
   return <Card title={t("cloudMove.title")} subtitle={t("cloudMove.intro")}>
     <div data-cloud-move={state.phase} className="flex flex-col items-start gap-3">
@@ -112,7 +144,9 @@ export function CloudMoveSettings() {
       {!running && cloud && !cloud.empty && <p role="note" className="text-[13px] text-ink">{t("cloudMove.replaceWarning", { bots: cloud.contents.bots, chats: cloud.contents.chats })}</p>}
       {!running && !cloud && <p className="text-[12px] text-ink-secondary">{t("cloudMove.replaceMaybe")}</p>}
       {running && <MoveProgress state={state} />}
+      {fitNote && <p role="note" className="text-[13px] text-ink">{fitNote}</p>}
       {done && <p role="status" className="text-[13px] text-ink">{done}</p>}
+      {next.map(line => <p key={line} className="text-[13px] text-ink-secondary">{line}</p>)}
       {state.phase === "failed" && <p role="alert" className="text-[13px] text-danger">{cloudMoveErrorText(state.error)}</p>}
       {state.phase === "failed" && state.resumable && <p className="text-[12px] text-ink-secondary">{t("cloudMove.resumeNote")}</p>}
       <div className="flex flex-wrap gap-2">
@@ -143,6 +177,8 @@ export function cloudMoveOffer(bridge: CloudMoveBridge, move: CloudMoveHandle, o
       : t("cloudMove.intro")}</p>}
     {!running && <p className="mt-1 text-[12px] text-ink-secondary">{t("cloudMove.signIn")}</p>}
     {running && <div className="mt-2"><MoveProgress state={state} /></div>}
+    {state.phase === "done" && outcome(state) && <p role="status" className="mt-2 text-[13px] text-ink">{outcome(state)}</p>}
+    {moveNextSteps(state).map(line => <p key={line} className="mt-1 text-[12px] text-ink-secondary">{line}</p>)}
     {state.phase === "failed" && <p role="alert" className="mt-2 text-[13px] text-danger">{cloudMoveErrorText(state.error)}</p>}
     <div className="mt-3 flex flex-wrap gap-2">
       {!running && <button type="button" disabled={pending} className="ui-button" onClick={() => { on.start(); act(() => bridge.start()); }}>

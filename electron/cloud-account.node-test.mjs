@@ -12,24 +12,32 @@ async function until(check) { for (let i = 0; i < 200; i++) { if (check()) retur
 async function fixture(t, options = {}) {
   const f = { now: 1_800_000_000_000, requests: [], browsers: [], states: [], saved: null, approved: false, revoked: false,
     sessionStatus: 200, invalidIdentity: false, invalidEntitlement: false, badUrl: false, failWrite: false, slowToken: null,
-    entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 }, timer: null };
+    entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 }, timer: null, delay: null, cloud: undefined, expiresIn: 600,
+    disk: { status: 404, body: "<!doctype html>not here" }, sessionPage: null, sessionError: null, tokenPage: null };
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "fixture-device" }, account: { id: "fixture-account", email: "person@example.test" } });
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     f.requests.push({ route: req.url, method: req.method, token: req.headers.authorization, body });
     const send = (status, data) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(data)); };
     if (req.url === "/api/cloud/desktop/authorize") return send(201, { cloudContractVersion: 1, deviceCode: "A".repeat(43), userCode: "ABCDE-FGHJK",
-      verificationUriComplete: f.badUrl ? "https://untrusted.example.test" : `${f.origin}/cloud/desktop?code=ABCDE-FGHJK`, expiresIn: 600, interval: 5 });
+      verificationUriComplete: f.badUrl ? "https://untrusted.example.test" : `${f.origin}/cloud/desktop?code=ABCDE-FGHJK`, expiresIn: f.expiresIn, interval: 5 });
+    if (req.url === "/api/cloud/desktop/disk" && req.headers.authorization === `Bearer ${accessToken}`) {
+      if (typeof f.disk.body === "string") { res.writeHead(f.disk.status, { "content-type": "text/html" }); return res.end(f.disk.body); }
+      return send(f.disk.status, f.disk.body);
+    }
     if (req.url === "/api/cloud/desktop/token") {
+      if (f.tokenPage) { res.writeHead(f.tokenPage, { "content-type": "text/html" }); return res.end("<!doctype html>Just a moment"); }
       if (f.slowToken) await f.slowToken;
       return f.approved ? send(200, { ...identity(), accessToken }) : send(400, { error: "authorization_pending" });
     }
     if (req.url === "/api/cloud/desktop/session" && req.headers.authorization === `Bearer ${accessToken}`) {
-      if (req.method === "DELETE") { if (f.sessionStatus === 503) return send(503, { error: "unavailable" }); f.revoked = true; return send(200, { revoked: true }); }
+      if (req.method === "DELETE") { if (f.sessionPage) { res.writeHead(f.sessionPage, { "content-type": "text/html" }); return res.end("<!doctype html>Attention required"); } if (f.sessionStatus === 503) return send(503, { error: "unavailable" }); f.revoked = true; return send(200, { revoked: true }); }
       if (f.revoked) return send(401, { error: "invalid_token" });
+      if (f.sessionPage) { res.writeHead(f.sessionPage, { "content-type": "text/html" }); return res.end("<!doctype html>Attention required"); }
+      if (f.sessionError) return send(f.sessionError.status, f.sessionError.body);
       if (f.sessionStatus !== 200) return send(f.sessionStatus, { error: "unavailable" });
       return send(200, { ...identity(), ...(f.invalidIdentity ? { account: { id: "someone-else", email: "other@example.test" } } : {}),
-        entitlement: f.invalidEntitlement ? { plan: "pro", status: "active" } : f.entitlement });
+        entitlement: f.invalidEntitlement ? { plan: "pro", status: "active" } : f.entitlement, ...(f.cloud === undefined ? {} : { cloud: f.cloud }) });
     }
     send(404, { error: "not_found" });
   });
@@ -38,7 +46,7 @@ async function fixture(t, options = {}) {
   f.client = createCloudAccountClient({ origin: f.origin, fixture: true, deviceName: "Fixture computer", platform: "darwin", appVersion: "0.1.fixture", now: () => f.now,
     store: { read: async () => f.saved, write: async value => { if (f.failWrite) throw new Error("fixture storage failure"); f.saved = structuredClone(value); } },
     openBrowser: async url => { f.browsers.push(url); }, onState: state => f.states.push(state),
-    setTimer: callback => { f.timer = callback; return 1; }, clearTimer: () => { f.timer = null; }, ...options });
+    setTimer: (callback, delay) => { f.timer = callback; f.delay = delay; return 1; }, clearTimer: () => { f.timer = null; f.delay = null; }, ...options });
   f.tick = () => { const callback = f.timer; assert.ok(callback); f.timer = null; callback(); };
   f.connect = async () => { await f.client.begin(); f.approved = true; f.tick(); await until(() => f.client.state().status === "connected"); };
   t.after(async () => { f.client.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
@@ -76,25 +84,68 @@ test("checkout/browser return cannot activate Pro; only refreshed server state c
   assert.equal((await f.client.refresh()).status, "reauth-required"); assert.equal(f.client.state().entitlement, undefined);
 });
 
-test("network errors, malformed entitlements and changed identity fail closed without clearing local account data", async t => {
-  const f = await fixture(t); await f.connect(); f.entitlement = { plan: "pro", status: "active", expiresAt: f.now + 3600_000, version: 1 };
-  await f.client.refresh(); f.sessionStatus = 503;
-  assert.equal((await f.client.refresh()).status, "unavailable"); assert.equal(f.client.state().entitlement, undefined); assert.equal(f.saved.token, accessToken);
+test("a failed check keeps the last verified answer (never a malformed one), says so quietly, and changed identity ends access", async t => {
+  const f = await fixture(t); await f.connect();
+  const paid = { plan: "pro", tier: "max", status: "active", expiresAt: f.now + 3 * 3600_000, version: 1 };
+  f.entitlement = paid; await f.client.refresh(); f.sessionStatus = 503;
+  // One dropped check is not news: the plan, the Cloud and Connect stay.
+  let state = await f.client.refresh();
+  assert.equal(state.status, "connected"); assert.deepEqual(state.entitlement, paid); assert.equal(state.checking, undefined); assert.equal(f.saved.token, accessToken);
+  // Repeated failures: still the last verified answer, now quietly "checking".
+  state = await f.client.refresh();
+  assert.equal(state.status, "connected"); assert.deepEqual(state.entitlement, paid); assert.equal(state.checking, true);
+  // A malformed answer is a failed check too: never adopted.
   f.sessionStatus = 200; f.invalidEntitlement = true;
-  assert.equal((await f.client.refresh()).status, "unavailable"); assert.equal(f.client.state().entitlement, undefined);
-  f.invalidEntitlement = false; f.invalidIdentity = true;
-  assert.equal((await f.client.refresh()).status, "reauth-required"); assert.equal(f.client.state().entitlement, undefined);
+  state = await f.client.refresh(); assert.equal(state.status, "connected"); assert.deepEqual(state.entitlement, paid);
+  // An answer clears "checking".
+  f.invalidEntitlement = false; state = await f.client.refresh(); assert.equal(state.checking, undefined); assert.deepEqual(state.entitlement, paid);
+  // A long outage: unavailable, with no entitlement, but the plan last verified is still named.
+  f.sessionStatus = 503; await f.client.refresh(); f.now += 15 * 60_000;
+  state = f.client.state(); assert.equal(state.status, "unavailable"); assert.equal(state.entitlement, undefined); assert.deepEqual(state.lastPlan, { tier: "max", active: true });
+  f.sessionStatus = 200; f.invalidIdentity = true;
+  state = await f.client.refresh(); assert.equal(state.status, "reauth-required"); assert.equal(state.message, "access-ended"); assert.equal(state.entitlement, undefined);
+  assert.deepEqual(state.lastPlan, { tier: "max", active: true });
+});
+
+test("a successful re-check never shows anything but the verified plan, and runs well before the answer stops counting", async t => {
+  const f = await fixture(t); await f.connect();
+  f.entitlement = { plan: "pro", status: "active", expiresAt: f.now + 3 * 3600_000, version: 1 };
+  await f.client.refresh();
+  assert.ok(f.delay <= 60_000, "next check within a minute");
+  assert.ok(f.client.state().verifiedUntil - f.now >= 10 * 60_000, "the answer counts for several checks");
+  const before = f.states.length;
+  for (let i = 0; i < 3; i++) { f.now += f.delay; f.tick(); await until(() => f.states.length > before + i); }
+  assert.deepEqual(f.states.slice(before).map(state => `${state.status}:${state.entitlement?.plan}`), ["connected:pro", "connected:pro", "connected:pro"]);
+});
+
+test("while the Cloud is set up, or a payment is being linked, progress is asked for every 15 seconds", async t => {
+  const f = await fixture(t); await f.connect();
+  f.entitlement = { plan: "pro", status: "active", expiresAt: f.now + 3 * 3600_000, version: 1 };
+  f.cloud = { state: "setting_up", setup: { step: "storage", slow: true } };
+  let state = await f.client.refresh();
+  assert.deepEqual(state.machine, { status: "provisioning", setup: { step: "storage", slow: true } }); assert.equal(f.delay, 15_000);
+  f.cloud = null; await f.client.refresh(); assert.equal(f.delay, 15_000, "paid with no Cloud listed yet: setting up");
+  f.cloud = { state: "ready", origin: "https://home-7f3k2.fly.dev", disk: { gb: 20, maxGb: 100 } };
+  state = await f.client.refresh(); assert.deepEqual(state.machine.disk, { gb: 20, maxGb: 100 }); assert.equal(f.delay, 60_000);
+  f.entitlement = { plan: "free", status: "inactive", expiresAt: null, version: 2 };
+  f.cloud = { purchase: { state: "confirming", plan: "personal", paidAt: f.now - 60_000 } };
+  state = await f.client.refresh();
+  assert.deepEqual(state.purchase, { state: "confirming", tier: "personal", paidAt: f.now - 60_000 }); assert.equal(state.entitlement.plan, "free"); assert.equal(f.delay, 15_000);
 });
 
 test("active Pro requires a future expiry and free+active is never accepted", async t => {
   const f = await fixture(t); await f.connect();
+  const free = f.client.state().entitlement;
   for (const invalid of [
     { plan: "pro", status: "active", expiresAt: null, version: 1 },
     { plan: "pro", status: "active", expiresAt: f.now, version: 1 },
     { plan: "free", status: "active", expiresAt: f.now + 3600_000, version: 1 },
   ]) {
-    f.entitlement = invalid; assert.equal((await f.client.refresh()).status, "unavailable"); assert.equal(f.client.state().entitlement, undefined);
+    f.entitlement = invalid; const state = await f.client.refresh();
+    assert.equal(state.status, "connected"); assert.deepEqual(state.entitlement, free);
   }
+  // With no verified answer to keep, it is unavailable.
+  f.now += 15 * 60_000; assert.equal(f.client.state().status, "unavailable"); assert.equal(f.client.state().entitlement, undefined);
 });
 
 test("a tier names the paid plan; a missing, unknown or malformed tier never rejects or downgrades it", async t => {
@@ -126,23 +177,123 @@ test("a plan newer than the app (personal, max) is paid with that tier, told onc
   f.entitlement = { plan: "max", status: "inactive", expiresAt: f.now - 1, version: 2 };
   assert.deepEqual((await f.client.refresh()).entitlement, { plan: "pro", tier: "max", status: "inactive", expiresAt: f.now - 1, version: 2 });
   assert.equal(warnings.length, 2);
-  // A newer plan gets no exemption from the rest of the checks.
+  // A newer plan gets no exemption from the rest of the checks: each is a failed check, never adopted.
+  const kept = f.client.state().entitlement;
   for (const invalid of [{ plan: "max", status: "active", expiresAt: null, version: 1 }, { plan: "max", status: "active", expiresAt: f.now, version: 1 },
     ...["Max", "", "pro ", "m".repeat(25), 5, null].map(plan => ({ plan, ...paid }))]) {
-    f.entitlement = invalid; assert.equal((await f.client.refresh()).status, "unavailable"); assert.equal(f.client.state().entitlement, undefined);
+    f.entitlement = invalid; assert.deepEqual((await f.client.refresh()).entitlement, kept);
   }
 });
 
-test("verified status expires after one minute even if a timer has not run; cached Pro is never restored", async t => {
+test("a verified answer stops counting at the plan's own expiry or after 15 minutes without a check; cached Pro is never restored", async t => {
   const f = await fixture(t); await f.connect(); f.entitlement = { plan: "pro", status: "active", expiresAt: f.now + 2000, version: 1 };
   await f.client.refresh(); f.now += 2001;
   assert.equal(f.client.state().status, "unavailable"); assert.equal(f.client.state().entitlement, undefined);
+  assert.deepEqual(f.client.state().lastPlan, { active: true }, "the plan is still named while it is checked");
   await f.client.refresh(); assert.equal(f.client.state().status, "unavailable");
   f.entitlement = { plan: "pro", status: "inactive", expiresAt: f.now - 1, version: 2 };
   await f.client.refresh(); assert.equal(f.client.state().entitlement.status, "inactive");
-  f.now += 60_001; assert.equal(f.client.state().entitlement, undefined);
+  f.now += 15 * 60_000 - 1; assert.equal(f.client.state().entitlement.status, "inactive");
+  f.now += 1; assert.equal(f.client.state().entitlement, undefined);
   f.saved.entitlement = { plan: "pro", status: "active", expiresAt: null, version: 999 }; f.sessionStatus = 503;
-  await f.client.start(); assert.equal(f.client.state().entitlement, undefined);
+  await f.client.start(); assert.equal(f.client.state().entitlement, undefined); assert.equal(f.client.state().status, "unavailable");
+});
+
+test("the plan hint is saved for display only, follows the verified plan, and is gone with the sign-in", async t => {
+  const f = await fixture(t); await f.connect();
+  assert.equal(f.saved.planHint, undefined, "a free account saves no plan");
+  f.entitlement = { plan: "pro", tier: "personal", status: "active", expiresAt: f.now + 3600_000, version: 1 };
+  await f.client.refresh(); assert.deepEqual(f.saved.planHint, { tier: "personal", active: true }); assert.equal(f.saved.entitlement, undefined);
+  // Restored offline: named, but nothing is active and nothing is verified.
+  f.sessionStatus = 503; f.client.close();
+  const restored = await fixture(t); restored.saved = { ...f.saved, origin: restored.origin }; restored.sessionStatus = 503;
+  const state = await restored.client.start();
+  assert.equal(state.status, "unavailable"); assert.equal(state.entitlement, undefined); assert.deepEqual(state.lastPlan, { tier: "personal", active: true });
+  // A malformed hint is no hint.
+  const odd = await fixture(t); odd.saved = { ...f.saved, origin: odd.origin, planHint: { tier: "<b>", active: "yes" } }; odd.sessionStatus = 503;
+  assert.equal((await odd.client.start()).lastPlan, undefined);
+  restored.sessionStatus = 200; restored.entitlement = { plan: "free", status: "inactive", expiresAt: null, version: 2 };
+  await restored.client.refresh(); assert.equal(restored.saved.planHint, undefined);
+  await restored.client.signOut(); assert.equal(restored.saved, null); assert.equal(restored.client.state().lastPlan, undefined);
+});
+
+test("before a saved sign-in is read, nobody is signed out; with none, signed out plainly", async t => {
+  const f = await fixture(t);
+  assert.deepEqual(f.client.state(), { status: "signed-out", message: "restoring" });
+  assert.deepEqual(await f.client.start(), { status: "signed-out" });
+});
+
+test("a sign-in that reached its end asks to sign in again, keeps the plan, and starts the new one without showing signed out", async t => {
+  const f = await fixture(t); await f.connect();
+  f.entitlement = { plan: "pro", tier: "max", status: "active", expiresAt: f.now + 40 * 86400_000, version: 1 };
+  await f.client.refresh();
+  await assert.rejects(f.client.signInAgain(), /still signed in/);
+  f.now += 86400_000 + 1;
+  // Even before a check runs, the state says so.
+  assert.equal(f.client.state().status, "reauth-required"); assert.equal(f.client.state().message, "expired");
+  const ended = await f.client.refresh();
+  assert.equal(ended.status, "reauth-required"); assert.equal(ended.message, "expired"); assert.deepEqual(ended.lastPlan, { tier: "max", active: true });
+  assert.equal(ended.entitlement, undefined);
+  const before = f.states.length, browsers = f.browsers.length;
+  const next = await f.client.signInAgain();
+  assert.equal(next.status, "connecting"); assert.equal(next.enrollment.userCode, "ABCDE-FGHJK");
+  assert.ok(f.states.slice(before).every(state => state.status === "connecting"), "never signed out in between");
+  assert.equal(f.browsers.length, browsers + 1); assert.equal(f.saved, null);
+  f.revoked = false; f.tick(); await until(() => f.client.state().status === "connected");
+  assert.equal(f.saved.token, accessToken);
+});
+
+test("the sign-in code may last up to 30 minutes, no longer", async t => {
+  const f = await fixture(t); f.expiresIn = 900;
+  const state = await f.client.begin(); assert.equal(state.enrollment.expiresAt, f.now + 900_000);
+  await f.client.cancel();
+  const g = await fixture(t); g.expiresIn = 1801;
+  assert.equal((await g.client.begin()).message, "signin-failed");
+});
+
+test("only the Admin's own answer ends a sign-in: a 401/403 page from in between is a failed check", async t => {
+  const f = await fixture(t); await f.connect();
+  const paid = { plan: "pro", tier: "max", status: "active", expiresAt: f.now + 3 * 3600_000, version: 1 };
+  f.entitlement = paid; await f.client.refresh();
+  // A firewall or bot-check page (Cloudflare serves cloud.openmausbot.com).
+  f.sessionPage = 403;
+  let state = await f.client.refresh();
+  assert.equal(state.status, "connected"); assert.deepEqual(state.entitlement, paid); assert.equal(state.checking, undefined);
+  f.sessionPage = 401; state = await f.client.refresh();
+  assert.equal(state.status, "connected"); assert.equal(state.checking, true); assert.equal(f.saved.token, accessToken);
+  // A JSON 403 that is not about the sign-in (a wrong origin) does not end it either.
+  f.sessionPage = null; f.sessionError = { status: 403, body: { error: "invalid_origin" } };
+  state = await f.client.refresh(); assert.equal(state.status, "connected"); assert.deepEqual(state.entitlement, paid);
+  // The Admin's own "invalid_token": sign in again, the plan still named.
+  f.sessionError = { status: 401, body: { error: "invalid_token" } };
+  state = await f.client.refresh(); assert.equal(state.status, "reauth-required"); assert.equal(state.message, "access-ended");
+  assert.deepEqual(state.lastPlan, { tier: "max", active: true });
+  assert.ok(!f.requests.some(row => row.method === "DELETE"));
+});
+
+test("a page from in between during sign-in keeps waiting for the approval", async t => {
+  const f = await fixture(t);
+  await f.client.begin();
+  f.tokenPage = 403; f.tick();
+  await until(() => f.requests.some(row => row.route.endsWith("/token")) && f.timer);
+  assert.equal(f.client.state().status, "connecting"); assert.equal(f.client.state().enrollment.userCode, "ABCDE-FGHJK");
+  f.tokenPage = null; f.approved = true; f.tick();
+  await until(() => f.client.state().status === "connected");
+});
+
+test("growing the Cloud's disk: an Admin without it says so, a size over the plan is refused, and a grown disk is reported", async t => {
+  const f = await fixture(t);
+  await assert.rejects(f.client.growDisk(20), /not ready/);
+  await f.connect();
+  assert.deepEqual(await f.client.growDisk(20), { supported: false });
+  f.disk = { status: 405, body: { error: "method" } }; assert.deepEqual(await f.client.growDisk(20), { supported: false });
+  f.disk = { status: 422, body: { error: "over the plan's disk" } }; assert.deepEqual(await f.client.growDisk(200), { supported: true, refused: true });
+  f.disk = { status: 200, body: { disk: { gb: 20, maxGb: 100 } } }; assert.deepEqual(await f.client.growDisk(20), { supported: true, disk: { gb: 20, maxGb: 100 } });
+  f.disk = { status: 200, body: { disk: { gb: 0, maxGb: 100 } } }; await assert.rejects(f.client.growDisk(20), /Invalid/);
+  f.disk = { status: 500, body: { error: "down" } }; await assert.rejects(f.client.growDisk(20));
+  await assert.rejects(f.client.growDisk(0), /Invalid/);
+  const body = JSON.parse(f.requests.filter(row => row.route.endsWith("/disk")).at(-1).body);
+  assert.deepEqual(body, { sizeGb: 20 });
 });
 
 test("sign-out durably forgets personal Cloud and revokes only its credential; offline revocation is disclosed", async t => {
@@ -153,6 +304,9 @@ test("sign-out durably forgets personal Cloud and revokes only its credential; o
   assert.ok(f.requests.every(row => row.route.startsWith("/api/cloud/desktop/")));
   f.revoked = false; await f.connect(); f.sessionStatus = 503;
   assert.equal((await f.client.signOut()).message, "signout-local-only"); assert.equal(f.saved, null);
+  // A 403 page from in between (a firewall) revoked nothing: it is disclosed, never taken as done.
+  f.sessionStatus = 200; await f.connect(); f.sessionPage = 403;
+  assert.equal((await f.client.signOut()).message, "signout-local-only"); assert.equal(f.revoked, false);
 });
 
 test("failed durable sign-out blocks reconnect until cleanup succeeds", async t => {

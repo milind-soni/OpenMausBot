@@ -35,10 +35,10 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 // helpers here. Main enforces the same rule on the sensitive channels.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-// cloudMove and cloudLending: main answers them on a remote page only when
-// that page is the person's own verified Cloud in this window (Move to
-// Cloud's card and the Cloud's setup checklist).
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending"]);
+// cloudMove, cloudLending and cloudPlan: main answers them on a remote page
+// only when that page is the person's own verified Cloud in this window (Move
+// to Cloud's card, the Cloud's setup checklist, and its Settings' plan line).
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan"]);
 
 // Sandboxed preload cannot import TS or sibling modules. Keep this list in
 // parity with shared/workspace-backup-client.ts (covered by the preload test).
@@ -295,6 +295,7 @@ const bridge = {
   cloudAccount: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-account:state"),
     begin: () => ipcRenderer.invoke("cloud-account:begin"),
+    signInAgain: () => ipcRenderer.invoke("cloud-account:signInAgain"),
     reopen: () => ipcRenderer.invoke("cloud-account:reopen"),
     cancel: () => ipcRenderer.invoke("cloud-account:cancel"),
     refresh: () => ipcRenderer.invoke("cloud-account:refresh"),
@@ -335,6 +336,16 @@ const bridge = {
    * shows the switch and changes nothing. */
   cloudLending: process.argv.includes("--omb-company-desktop=1") ? {
     open: () => ipcRenderer.invoke("cloud-lending:open"),
+  } : undefined,
+  /** The plan, read only, in Settings on the person's own Cloud: its name and
+   * whether it is active, Manage (the Cloud dashboard in the browser) and
+   * back to this computer. No arguments; a remote page acts only on a click. */
+  cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
+    state: () => ipcRenderer.invoke("cloud-plan:state"),
+    manage: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-plan:manage") : Promise.reject(new Error("Choose Manage to open your Cloud dashboard.")),
+    useThisComputer: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-plan:local") : Promise.reject(new Error("Choose Use this computer to switch.")),
   } : undefined,
   organization: process.argv.includes("--omb-company-desktop=1") ? {
     settingsOpened: () => ipcRenderer.invoke("organization:settings-opened"),

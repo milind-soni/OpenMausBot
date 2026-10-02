@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
-  beginUpload, CLOUD_MOVE_MAX_BYTES, CLOUD_MOVE_SPACE_MARGIN, completedUpload, isEmptyWorkspace, moveSpaceNeeded, noteMoveRestore,
+  beginUpload, totalVolumeBytes, CLOUD_MOVE_MAX_BYTES, CLOUD_MOVE_SPACE_MARGIN, completedUpload, isEmptyWorkspace, moveSpaceNeeded, noteMoveRestore,
   prepareNextPreviousCloud, previousCloud, stagePreviousCloud, tidyCloudMoveStorage, uploadStatus, validUploadDeclaration, workspaceContents,
   workspaceMoveSize, writeUploadPart,
 } from "./cloud-move.ts";
@@ -177,7 +177,7 @@ it("once a move's restore is installed, deletes its safety copy and staged files
 // ── the routes ──────────────────────────────────────────────────────────
 let server: Server | undefined;
 afterEach(async () => { await new Promise<void>((done) => server ? server.close(() => done()) : done()); server = undefined; });
-async function routes(options: { cloudHome?: boolean; freeBytes?: number | (() => number); exclusive?: <T>(work: () => Promise<T>) => Promise<T> } = {}) {
+async function routes(options: { cloudHome?: boolean; freeBytes?: number | (() => number); volumeBytes?: () => number; exclusive?: <T>(work: () => Promise<T>) => Promise<T> } = {}) {
   const sessions = new SessionRegistry({ file: join(dataDir, "sessions.json") });
   const owner = sessions.issue({ label: "Owner's app", scopes: ["admin", "client"] });
   const phone = sessions.issue({ label: "Phone", scopes: ["client"] });
@@ -189,6 +189,7 @@ async function routes(options: { cloudHome?: boolean; freeBytes?: number | (() =
     exclusive: options.exclusive ?? ((work) => work()), authorized: (req, auth) => authenticate(req).auth?.kind === auth.kind,
     status: () => ({ busy: false, pendingRestore: false }), restart: () => restarts.push(Date.now()),
     freeBytes: () => typeof options.freeBytes === "function" ? options.freeBytes() : options.freeBytes ?? 1024 ** 4, gateRetryMs: 0, restartDelayMs: 0,
+    ...(options.volumeBytes ? { volumeBytes: options.volumeBytes } : {}),
   });
   server = createServer(async (req, res) => {
     const gate = authenticate(req);
@@ -379,3 +380,17 @@ it("reports what backups hold on the volume", async () => {
   expect(status.previous.bytes).toBeGreaterThan(0);
   expect(status.heldBytes).toBeGreaterThanOrEqual(status.previous.bytes);
 }, 60_000);
+
+it("tells the app how many routines are on here (they arrive paused) and how large the Cloud's volume is", async () => {
+  writeFileSync(join(dataDir, "routines.json"), JSON.stringify({ version: 1, routines: [{ id: "a", enabled: true }, { id: "b", enabled: false }, { id: "c" }], runs: [] }));
+  const cloud = await routes({ volumeBytes: () => 20 * 1024 ** 3 });
+  expect((await cloud.call("GET", "/api/cloud-move/estimate", cloud.owner)).body).toMatchObject({ routines: 2 });
+  expect((await cloud.call("GET", "/api/cloud-move", cloud.owner)).body).toMatchObject({ volumeBytes: 20 * 1024 ** 3 });
+  server!.close(); server = undefined;
+  // A volume that cannot be measured says nothing; a broken routines file counts none.
+  writeFileSync(join(dataDir, "routines.json"), "{");
+  const odd = await routes({ volumeBytes: () => { throw new Error("statfs failed"); } });
+  expect((await odd.call("GET", "/api/cloud-move/estimate", odd.owner)).body).toMatchObject({ routines: 0 });
+  expect((await odd.call("GET", "/api/cloud-move", odd.owner)).body.volumeBytes).toBeNull();
+  expect(totalVolumeBytes(dataDir)).toBeGreaterThan(0);
+});

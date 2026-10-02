@@ -47,7 +47,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
-import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegationInheritsFullAccess } from "./auto-approve.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegatedApprovalMode } from "./auto-approve.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import type { CommandAllowlistCandidate, CommandAllowlistResponse } from "../shared/command-allowlist.ts";
 import { updateClaudeCli } from "./claude-update.ts";
@@ -3893,9 +3893,9 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
  * this too, but no provider dispatch or later permission callback relies on
  * persistence having been produced exclusively by that route. Delegation
  * uses the receiving bot's grant, never the sender's (approvalModeForOrigin) —
- * with one deliberate exception: a Chief of Staff with Full access makes the
- * threads it delegates Full too (delegatedFullAccess), so the grant the
- * person gave the Chief covers the work the Chief hands out. */
+ * with one deliberate exception: a Chief of Staff's level flows down to the
+ * threads it delegates (delegatedLevel), so the level the person gave the
+ * Chief covers the work the Chief hands out. */
 const approvalModeForTurn = (bot: BotRecord, peerInitiated = false, threadId = bot.threadId): ApprovalMode => {
   // On a Cloud home a turn a guest drives runs in Ask, whatever the bot's
   // own level. Judged by the conversation the turn runs in (a room's, for a
@@ -3908,53 +3908,67 @@ const approvalModeForTurn = (bot: BotRecord, peerInitiated = false, threadId = b
   return mode;
 };
 
-/** Full belongs to the requesting conversation, not whichever sibling is
+/** A level belongs to the requesting conversation, not whichever sibling is
  * selected in the UI or the bot's default for future conversations. */
-function fullAccessForSource(botId: string, threadId: string): boolean {
+function sourceApprovalMode(botId: string, threadId: string): ApprovalMode {
   const owner = connectorThread(botId, threadId);
-  if (!owner) return false;
+  if (!owner) return "ask";
   const bot = store.projectBotForTask(botId, threadId) ?? owner.bot;
   // Origin changes Custom to Auto, never Full; no live-turn state is needed.
-  return approvalModeForTurn(bot, false, threadId) === "full";
+  return approvalModeForTurn(bot, false, threadId);
+}
+
+function fullAccessForSource(botId: string, threadId: string): boolean {
+  return sourceApprovalMode(botId, threadId) === "full";
 }
 
 function peerReviewRequired(bot: BotRecord, threadId: string): boolean {
   return Boolean(bot.approvePeerComms && !fullAccessForSource(bot.id, threadId));
 }
 
-/** Full access flows down a Chief of Staff's delegation. The person gave the
- * Chief Full access so its work runs without prompts; a teammate stopping
- * that same work to ask defeats the grant — and in practice the person was
- * answering every one of those cards, all day, for the whole team. So a
- * teammate a Full-access Chief delegates to runs Full for that work: the
- * recipient switches, whatever its own level says. The recipient's engine
- * has to implement Full (supportsApprovalMode); otherwise the work keeps the
- * recipient's own level, as before. Only a Chief passes access on — an
- * ordinary bot's delegation still uses the recipient's setting. */
-function delegatedFullAccess(from: BotRecord, fromThreadId: string, target: BotRecord): boolean {
-  return delegationInheritsFullAccess({
+/** A Chief of Staff's level flows down its delegation. The person set the
+ * Chief's level so its work runs that way; a teammate the Chief brings in
+ * starting at "Ask for approval" meant switching every such thread by hand,
+ * all day, for the whole team. So a teammate a Chief delegates to starts at
+ * the Chief's level for that work: Auto-accept edits, Approve for me or Full
+ * access (delegatedApprovalMode: never lower than the teammate's own level,
+ * capped at what its engine implements). Only a Chief passes its level on —
+ * an ordinary bot's delegation still uses the recipient's setting. Returns
+ * null to keep the recipient's own level. */
+function delegatedLevel(from: BotRecord, fromThreadId: string, target: BotRecord, recipientMode: ApprovalMode): ApprovalMode | null {
+  return delegatedApprovalMode({
     senderIsChief: Boolean(from.chiefOfStaff),
-    senderHasFullAccess: fullAccessForSource(from.id, fromThreadId),
+    senderMode: sourceApprovalMode(from.id, fromThreadId),
     sameBot: from.id === target.id,
+    recipientMode,
     recipientDriverKind: registry.cliTarget(target.modelSelection.instanceId)?.driverKind,
   });
 }
 
-/** Make a delegated thread Full and say so in it once, so the level the
- * chip shows and the level the turns run at agree, and the person can see
- * where the access came from. */
-function grantDelegatedFullAccess(from: BotRecord, target: BotRecord, threadId: string): void {
-  if (store.taskByThread(target.id, threadId)?.approvalMode === "full") return;
-  store.patchTask(target.id, threadId, { approvalMode: "full", autoApprove: false, alwaysAllow: [] });
+/** The teammate's own level for a thread of its own, before any delegation. */
+function ownThreadLevel(target: BotRecord, threadId: string): ApprovalMode {
+  return approvalModeForTurn(store.projectBotForTask(target.id, threadId) ?? target, false, threadId);
+}
+
+const DELEGATED_LEVEL_NAMES: Partial<Record<ApprovalMode, string>> = { edits: "Auto-accept edits", auto: "Approve for me", full: "Full access" };
+
+/** Start a thread the Chief opened at the Chief's level, and say so in it
+ * once, so the level the chip shows and the level the turns run at agree,
+ * and the person can see where it came from (and change it there). */
+function applyDelegatedLevel(from: BotRecord, fromThreadId: string, target: BotRecord, threadId: string): void {
+  const level = delegatedLevel(from, fromThreadId, target, ownThreadLevel(target, threadId));
+  if (!level || store.taskByThread(target.id, threadId)?.approvalMode === level) return;
+  store.patchTask(target.id, threadId, { approvalMode: level, autoApprove: false, alwaysAllow: [] });
+  const name = DELEGATED_LEVEL_NAMES[level] ?? level;
   store.appendMessage(threadId, {
     role: "bot",
     kind: "activity",
-    tool: { name: `Full access — delegated by ${from.name}, a Chief of Staff with Full access`, ok: true },
+    tool: { name: `${name} — delegated by ${from.name}, a Chief of Staff on ${name}`, ok: true },
   });
 }
 
-/** A room member's level for one turn. Work a Full-access Chief hands out
- * in a room runs Full for that turn: the room thread is shared, so the
+/** A room member's level for one turn. Work a Chief hands out in a room runs
+ * at the Chief's level for that turn: the room thread is shared, so the
  * level is not stored on it — it rides the handoff. */
 function roomTurnApprovalMode(bot: BotRecord, threadId: string, orchestration?: GroupTurnOrchestration): ApprovalMode {
   // On a Cloud home a room turn a guest drives runs in Ask (cloudGuestDriven).
@@ -3962,8 +3976,8 @@ function roomTurnApprovalMode(bot: BotRecord, threadId: string, orchestration?: 
   const handoff = orchestration?.roomHandoffId ? roomHandoffs.nodes.get(orchestration.roomHandoffId) : undefined;
   const source = handoff?.parentId ? roomHandoffs.nodes.get(handoff.parentId) : undefined;
   const from = source ? store.bot(source.botId) : undefined;
-  if (from && source && delegatedFullAccess(from, source.threadId, bot)) return "full";
-  return approvalModeForTurn(bot, Boolean(orchestration?.roomHandoffId), threadId);
+  const own = approvalModeForTurn(bot, Boolean(orchestration?.roomHandoffId), threadId);
+  return (from && source && delegatedLevel(from, source.threadId, bot, own)) || own;
 }
 
 /** Privileged approval-mode transitions are deliberately absent from the
@@ -15208,7 +15222,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // paired session with the right scope.
     if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/.well-known/") && serveStatic(res, path)) return;
     if (method === "GET" && path === "/.well-known/openmausbot/environment") {
-      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled() }));
+      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME) }));
     }
     const domainCheck = /^\/\.well-known\/openmausbot\/domain-check\/([a-f0-9]{64})$/.exec(path);
     if (method === "GET" && domainCheck) {
@@ -15300,7 +15314,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         console.warn(`pairing refused from ${requestSource(req)}: ${result.error}`);
         return json(res, result.status, { error: result.error });
       }
-      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled() });
+      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME) });
       if (wantsCookie) {
         // A browser sign-in replaces this browser's own session here, if it had one, rather than leaving it behind.
         const previous = browser ? sessions.authenticate(parseCookies(req.headers.cookie).get(SESSION_COOKIE)) : null;
@@ -17135,9 +17149,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                   false, undefined, { botId: internalSender.id, name: internalSender.name, kind: "work", at: Date.now() });
                 if (!task) throw new Error("The recipient no longer exists");
                 target.threadId = createdThread = task.threadId;
-                if (delegatedFullAccess(internalSender, internalCapability.threadId, store.bot(target.botId)!)) {
-                  grantDelegatedFullAccess(internalSender, store.bot(target.botId)!, target.threadId);
-                }
+                applyDelegatedLevel(internalSender, internalCapability.threadId, store.bot(target.botId)!, target.threadId);
               }
               const { node, duplicate } = roomHandoffs.enqueue(address, internalCapability.generation, internalCapability.roomHandoffId,
                 target, parsed.data.requestKey + ":" + target.botId, parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "",
@@ -17481,7 +17493,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!task) return json(res, 500, { error: "couldn't create that thread" });
         // The work is still for the person whose request the opener is on.
         threadStarters.set(task.threadId, openerFrom(fromThreadId));
-        if (delegatedFullAccess(from, fromThreadId, target)) grantDelegatedFullAccess(from, target, task.threadId);
+        applyDelegatedLevel(from, fromThreadId, target, task.threadId);
         const sourceUrl = threadRefUrl({ botId: owner.group?.id ?? from.id, threadId: fromThreadId });
         const queued = queueDelegation(
           commsBus,

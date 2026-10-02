@@ -193,7 +193,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect(peerTurn.permissionMode).toBe("bypassPermissions");
     expect((await bots()).find(bot => bot.id === peer.id).approvalMode ?? "ask").toBe("ask");
     expect(await unanswered(peerTurn.threadId)).toHaveLength(0);
-    expect((await messages(peerTurn.threadId)).some(message => message.kind === "activity" && /^Full access — delegated by Clive, a Chief of Staff with Full access$/.test(message.tool?.name ?? ""))).toBe(true);
+    expect((await messages(peerTurn.threadId)).some(message => message.kind === "activity" && /^Full access — delegated by Clive, a Chief of Staff on Full access$/.test(message.tool?.name ?? ""))).toBe(true);
     evidence.push({ delegatedFullAccess: { peerThreadId: peerTurn.threadId, permissionMode: peerTurn.permissionMode } });
 
     const askTurn = await run(chief, ask.threadId, "Prepare a profile change, routine, named skill, and specialist for review in this Ask task.", [

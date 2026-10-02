@@ -22,8 +22,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
   backupsBytes, beginUpload, CLOUD_MOVE_MAX_BYTES, CLOUD_MOVE_MAX_PART_BYTES, CLOUD_MOVE_PART_BYTES, completedUpload, discardNextPreviousCloud,
-  discardUpload, forgetMoveRestore, freeVolumeBytes, isEmptyWorkspace, moveSpaceNeeded, noteMoveRestore, prepareNextPreviousCloud,
-  previousCloud, previousCloudArchiveBytes, removeMoveFiles, stagePreviousCloud, tidyCloudMoveStorage, uploadStatus, validUploadDeclaration,
+  discardUpload, enabledRoutineCount, forgetMoveRestore, freeVolumeBytes, isEmptyWorkspace, moveSpaceNeeded, noteMoveRestore, prepareNextPreviousCloud,
+  previousCloud, previousCloudArchiveBytes, removeMoveFiles, stagePreviousCloud, tidyCloudMoveStorage, totalVolumeBytes, uploadStatus, validUploadDeclaration,
   workspaceContents, workspaceMoveSize, writeUploadPart, type PreviousCloud,
 } from "./cloud-move.ts";
 import { commitPendingWorkspaceRestore, createWorkspaceBackup, stageWorkspaceBackup } from "./workspace-backup.ts";
@@ -56,10 +56,12 @@ export function createCloudMoveRoutes(options: {
   /** Stop so the launcher starts this server again; startup installs the restore. */
   restart: () => void;
   freeBytes?: (path: string) => number;
+  volumeBytes?: (path: string) => number;
   restartDelayMs?: number;
   gateRetryMs?: number;
 }) {
   const freeBytes = options.freeBytes ?? freeVolumeBytes;
+  const volumeBytes = (path: string): number | null => { try { return (options.volumeBytes ?? totalVolumeBytes)(path); } catch { return null; } };
   // A move's restore that startup has installed keeps no safety copy or
   // staged files; an abandoned upload goes after a day.
   if (options.cloudHome) {
@@ -148,7 +150,7 @@ export function createCloudMoveRoutes(options: {
     try {
       if (!auth.scopes.includes("admin")) throw failure("Only the owner can move a workspace.", 403);
       if (method === "GET" && path === `${CLOUD_MOVE_PREFIX}/estimate`) {
-        json(res, 200, { ...workspaceContents(options.dataDir), ...workspaceMoveSize(options.dataDir), maxBytes: CLOUD_MOVE_MAX_BYTES });
+        json(res, 200, { ...workspaceContents(options.dataDir), ...workspaceMoveSize(options.dataDir), routines: enabledRoutineCount(options.dataDir), maxBytes: CLOUD_MOVE_MAX_BYTES });
         return true;
       }
       if (!options.cloudHome) throw failure("Only an OMB Cloud home receives a moved workspace.", 404);
@@ -158,7 +160,7 @@ export function createCloudMoveRoutes(options: {
         const contents = workspaceContents(options.dataDir);
         if (!held || held.at + HELD_CACHE_MS < Date.now()) held = { at: Date.now(), bytes: backupsBytes(options.dataDir) };
         json(res, 200, {
-          contents, empty: isEmptyWorkspace(contents), freeBytes: freeBytes(options.dataDir), maxBytes: CLOUD_MOVE_MAX_BYTES,
+          contents, empty: isEmptyWorkspace(contents), freeBytes: freeBytes(options.dataDir), volumeBytes: volumeBytes(options.dataDir), maxBytes: CLOUD_MOVE_MAX_BYTES,
           partBytes: CLOUD_MOVE_PART_BYTES, upload: uploadStatus(options.dataDir), previous: previousCloud(options.dataDir), job,
           // What backups and the previous Cloud hold on the volume.
           heldBytes: held.bytes,

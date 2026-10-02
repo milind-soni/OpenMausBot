@@ -7,7 +7,7 @@
 // Desktop and self-hosted installs never see it; they keep the welcome flow.
 import { useEffect, useState } from "react";
 import { CheckCircle2, Circle, Cloud } from "lucide-react";
-import { cloudMoveOffer, CloudMoveSuggestion, useCloudMove } from "@/components/CloudMove";
+import { cloudMoveOffer, CloudMoveSuggestion, moveNextSteps, useCloudMove } from "@/components/CloudMove";
 import { engineReady } from "@/components/EngineLibrary";
 import { cn } from "@/lib/cn";
 import { CLOUD_SETUP_HIDDEN, CLOUD_SETUP_MOVE_SKIPPED, cloudSetupItems, cloudSetupStage, type CloudSetupItem, type CloudSetupStep } from "@/lib/cloud-setup";
@@ -140,6 +140,8 @@ export function CloudSetup({ viewer }: { viewer: WelcomeViewer | null }) {
           ? <button type="button" aria-expanded={false} onClick={() => setChosen(item.id)} className="block w-full text-left text-[13px] text-ink hover:text-accent">{title}</button>
           : <p className={cn("text-[13px]", pending ? "font-medium text-ink" : "text-ink-secondary")}>{title}</p>}
         {open && details(item.id)}
+        {/* Moved: what does not run yet on the Cloud, and the phone. */}
+        {item.id === "move" && item.status === "done" && moveNextSteps(move.state).map(line => <p key={line} className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{line}</p>)}
       </div>
     </li>;
   };

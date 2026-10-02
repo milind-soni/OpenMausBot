@@ -9,7 +9,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useRef: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = { current: initial }; return f.values[index]; },
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
-import { CloudMoveSettings, CloudMoveSuggestion, cloudMoveErrorText } from "./CloudMove";
+import { CloudMoveSettings, CloudMoveSuggestion, cloudMoveErrorText, moveFitNote, moveNextSteps } from "./CloudMove";
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; disabled?: boolean }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
@@ -96,7 +96,7 @@ it("reports a full Cloud with both sizes, and continues a stopped upload", async
   await ready(settings);
   push({ phase: "failed", action: "move", resumable: true, error: { code: "cloud_full", message: "", freeBytes: 2 * 1024 ** 3, neededBytes: 6 * 1024 ** 3 } });
   const { html } = render(settings);
-  expect(html).toContain("Your Cloud has 2 GB free and this move needs about 6 GB. Nothing was moved.");
+  expect(html).toContain("Your Cloud has 2 GB free and this move needs about 6 GB. Nothing was moved. Make room on your Cloud");
   expect(button(settings, "Continue the move")).toBeTruthy();
   expect(html).toContain("What was already uploaded stays on your Cloud for up to a day");
   expect(cloudMoveErrorText({ code: "restore_failed", message: "Wait for bot turns to finish." }))
@@ -106,10 +106,53 @@ it("reports a full Cloud with both sizes, and continues a stopped upload", async
     .toBe("The move did not finish: A workspace file changed during backup. Stop its writer and retry.");
 });
 
-it("reports what was moved when it is done", async () => {
+it("reports what was moved when it is done, then what is not running yet there, and the phone", async () => {
   await ready(settings);
-  push({ phase: "done", action: "move", moved: { bots: 4, rooms: 1, chats: 37 } });
-  expect(render(settings).html).toContain("Moved to your Cloud: 4 bots and 37 chats.");
+  push({ phase: "done", action: "move", moved: { bots: 4, rooms: 1, chats: 37 }, routines: 3 });
+  const html = render(settings).html;
+  expect(html).toContain("Moved to your Cloud: 4 bots and 37 chats.");
+  expect(html).toContain("Routines arrive paused: 3 were on here. Turn on the ones you want in each bot");
+  expect(html).toContain("so nothing runs twice");
+  expect(html).toContain("Your phone is still paired with this computer");
+  expect(html.indexOf("Moved to your Cloud")).toBeLessThan(html.indexOf("Routines arrive paused: 3"));
+  // No routines on here: only the phone. A swap back is not a move.
+  expect(moveNextSteps({ phase: "done", action: "move", moved: { bots: 1, rooms: 0, chats: 1 } })).toEqual([expect.stringContaining("Your phone")]);
+  expect(moveNextSteps({ phase: "done", action: "restore" })).toEqual([]);
+  expect(moveNextSteps({ phase: "failed", action: "move" })).toEqual([]);
+});
+
+it("a plan whose disk grows makes room first; a move that cannot fit says so before it starts, with the next step", async () => {
+  await ready(settings);
+  push({ phase: "growing", action: "move" });
+  let html = render(settings).html;
+  expect(html).toContain("Making room on your Cloud for this move…"); expect(button(settings, "Stop the move")).toBeTruthy();
+  expect(cloudMoveErrorText({ code: "cloud_grow_unavailable", message: "", maxBytes: 100 * 1024 ** 3 }))
+    .toBe("Your Cloud's disk grows as it fills, up to 100 GB, but it could not make room for this move just now. Nothing was moved. Try again in a few minutes; if it still can't, tell us through Send Feedback and we'll make room.");
+  expect(cloudMoveErrorText({ code: "cloud_full", message: "", freeBytes: 9 * 1024 ** 3, neededBytes: 11 * 1024 ** 3, maxBytes: 10 * 1024 ** 3 }))
+    .toBe("This move needs about 11 GB of room on your Cloud while it installs, and your plan's disk holds 10 GB. Nothing was moved. A plan with a larger disk can take it: see your Cloud dashboard.");
+  // The plan's disk would hold it; what is on the Cloud is in the way: make room, never "a larger plan".
+  const GB = 1024 ** 3;
+  const used = cloudMoveErrorText({ code: "cloud_full", message: "", freeBytes: 15 * GB, neededBytes: 19.8 * GB, maxBytes: 50 * GB });
+  expect(used).toBe("Your Cloud has 15 GB free and this move needs about 19.8 GB. Nothing was moved. Make room on your Cloud (for example, remove large files there), then try again.");
+  // The largest plan is never pointed at a larger one.
+  const largest = cloudMoveErrorText({ code: "cloud_full", message: "", freeBytes: 90 * GB, neededBytes: 120 * GB, maxBytes: 100 * GB, largest: true });
+  expect(largest).toContain("the largest there is"); expect(largest).toContain("Send Feedback"); expect(largest).not.toContain("larger disk");
+  // An Admin that cannot grow the disk for a move: no "try again" that cannot work.
+  const unsupported = cloudMoveErrorText({ code: "cloud_grow_unsupported", message: "", freeBytes: 9 * GB, neededBytes: 20 * GB, maxBytes: 100 * GB });
+  expect(unsupported).toBe("This move needs about 20 GB of room on your Cloud while it installs, more than your Cloud can make room for yet. Nothing was moved. Tell us through Send Feedback and we'll make room.");
+  expect(cloudMoveErrorText({ code: "cloud_grow_unsupported", message: "" })).not.toMatch(/try again/i);
+  // Today's Admin (no disk word): more than the Cloud's whole disk is not "remove files"; less is.
+  expect(cloudMoveErrorText({ code: "cloud_full", message: "", freeBytes: 8.9 * GB, neededBytes: 10.5 * GB, volumeBytes: 10 * GB })).toBe(unsupported.replace("20 GB", "10.5 GB"));
+  expect(cloudMoveErrorText({ code: "cloud_full", message: "", freeBytes: 2 * GB, neededBytes: 5 * GB, volumeBytes: 10 * GB })).toContain("Make room on your Cloud");
+  expect(moveFitNote(overview({ fit: { fit: "never", neededBytes: 19.8 * GB, freeBytes: 15 * GB, maxBytes: 50 * GB } }))).not.toContain("larger disk");
+  expect(moveFitNote(overview({ fit: { fit: "never", neededBytes: 10.5 * GB, freeBytes: 8.9 * GB, volumeBytes: 10 * GB } }))).toContain("Tell us through Send Feedback");
+  expect(moveFitNote(overview({ fit: { fit: "never", neededBytes: 120 * GB, freeBytes: 90 * GB, maxBytes: 100 * GB, largest: true } }))).toContain("the largest there is");
+  f.values = []; push = () => {};
+  await ready(settings, overview({ fit: { fit: "never", neededBytes: 11 * 1024 ** 3, freeBytes: 9 * 1024 ** 3, maxBytes: 10 * 1024 ** 3 } }));
+  html = render(settings).html; expect(html).toContain("disk holds 10 GB. Nothing was moved.");
+  f.values = [];
+  await ready(settings, overview({ fit: { fit: "grow", neededBytes: 11 * 1024 ** 3, freeBytes: 9 * 1024 ** 3, maxBytes: 100 * 1024 ** 3, sizeGb: 20 } }));
+  html = render(settings).html; expect(html).not.toContain("Nothing was moved"); expect(button(settings, "Move to Cloud")).toBeTruthy();
 });
 
 it("is not offered to a companion connected to another computer", async () => {

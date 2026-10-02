@@ -95,6 +95,23 @@ export function freeVolumeBytes(path: string): number {
   return free > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(free);
 }
 
+/** The whole volume, so the app can tell how far a disk that grows may still grow. */
+export function totalVolumeBytes(path: string): number {
+  const disk = statfsSync(path, { bigint: true });
+  const total = disk.blocks * disk.bsize;
+  return total > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(total);
+}
+
+/** Routines switched on in this workspace. A move brings them paused, so the
+ * app says how many to turn on there. */
+export function enabledRoutineCount(dataDir: string): number {
+  try {
+    const value: unknown = JSON.parse(readFileSync(join(dataDir, "routines.json"), "utf8"));
+    const routines = value && typeof value === "object" ? (value as { routines?: unknown }).routines : undefined;
+    return Array.isArray(routines) ? routines.filter((routine) => routine && typeof routine === "object" && (routine as { enabled?: unknown }).enabled !== false).length : 0;
+  } catch { return 0; }
+}
+
 /** Peak extra space a move of `upload` bytes needs: the upload, its decrypted
  * copy and its staged files exist together while it is checked; the restore
  * then installs from the staged copy. Replacing a workspace first backs it up

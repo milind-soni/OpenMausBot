@@ -47,7 +47,7 @@ export function cloudSetupStage(facts: Omit<CloudSetupFacts, "move" | "lend">): 
 }
 
 // A move started or stopped here stays in view, with its progress or error.
-const UNDER_WAY = new Set<CloudMoveState["phase"]>(["preparing", "exporting", "uploading", "checking", "replacing", "restarting", "failed"]);
+const UNDER_WAY = new Set<CloudMoveState["phase"]>(["preparing", "growing", "exporting", "uploading", "checking", "replacing", "restarting", "failed"]);
 
 /** Bringing this computer's bots: offered only while main suggests it (the
  * desktop app, an empty Cloud, a computer with work to bring). Done after a

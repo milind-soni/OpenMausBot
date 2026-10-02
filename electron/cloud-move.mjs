@@ -29,6 +29,9 @@ export const CLOUD_MOVE_MAX_BYTES = 10 * 1024 ** 3 + 256 * 1024 ** 2;
 const PART_BYTES = 16 * 1024 ** 2;
 const MAX_PART_BYTES = 64 * 1024 ** 2;
 const SPACE_MARGIN = 256 * 1024 ** 2;
+const GB = 1024 ** 3;
+/** A Cloud whose disk grows does so in steps of this size (openmaus-cloud VOLUME_EXTEND). */
+const DISK_STEP_GB = 10;
 // A failed upload keeps its archive this long, so Try again continues it.
 const REUSE_MS = 30 * 60_000;
 const UUID = /^[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/;
@@ -56,10 +59,33 @@ export function cloudPageSenderAllowed(event, { contents, homeOrigin, activeOrig
   try { return new URL(event.senderFrame.url).origin === homeOrigin; } catch { return false; }
 }
 
-/** What the Cloud and this computer hold, as shown before a move. */
+/** What the Cloud and this computer hold, as shown before a move.
+ * `routines`: how many are switched on here (they arrive paused); a server
+ * from before it was counted does not say. */
 export function parseMoveEstimate(value) {
   if (!record(value) || !["bots", "rooms", "chats", "bytes", "files"].every(key => count(value[key]))) return null;
-  return { bots: value.bots, rooms: value.rooms, chats: value.chats, bytes: value.bytes, files: value.files };
+  return { bots: value.bots, rooms: value.rooms, chats: value.chats, bytes: value.bytes, files: value.files, ...(count(value.routines) ? { routines: value.routines } : {}) };
+}
+
+/** Whether a move of `localBytes` fits on the Cloud: `now`; once its disk
+ * grows (`grow`: a plan whose disk grows as it fills, up to `disk.maxBytes`,
+ * with `sizeGb` the size to ask for); or `never`, not even at the plan's
+ * largest disk. The room a move needs is the Cloud's own rule (three times
+ * the upload while it is checked and installed, and a margin); the Cloud
+ * checks again, exactly, before anything is uploaded. */
+export function moveFit({ localBytes, freeBytes, uploadReceived = 0, volumeBytes = null, disk = null }) {
+  const neededBytes = 3 * localBytes + SPACE_MARGIN, available = freeBytes + uploadReceived;
+  const maxBytes = count(disk?.maxBytes) && disk.maxBytes > 0 ? disk.maxBytes : null;
+  const volume = [volumeBytes, disk?.volumeBytes, disk?.startBytes].find(value => count(value) && value > 0) ?? null;
+  if (available >= neededBytes) return { fit: "now", neededBytes, freeBytes: available };
+  const room = maxBytes && volume && maxBytes > volume ? maxBytes - volume : 0;
+  if (room > 0 && available + room >= neededBytes) {
+    const sizeGb = Math.min(Math.floor(maxBytes / GB), Math.ceil((volume + neededBytes - available) / GB / DISK_STEP_GB) * DISK_STEP_GB);
+    return { fit: "grow", neededBytes, freeBytes: available, maxBytes, sizeGb };
+  }
+  // What it is up against: the plan's whole disk (`maxBytes`, `largest` on the
+  // top plan) or, when the Admin does not say, this Cloud's disk as it is now.
+  return { fit: "never", neededBytes, freeBytes: available, ...(maxBytes ? { maxBytes, ...(disk?.largest === true ? { largest: true } : {}) } : volume ? { volumeBytes: volume } : {}) };
 }
 export function parseCloudMoveStatus(value) {
   if (!record(value) || !record(value.contents) || !["bots", "rooms", "chats"].every(key => count(value.contents[key])) ||
@@ -69,6 +95,8 @@ export function parseCloudMoveStatus(value) {
   return {
     contents: { bots: value.contents.bots, rooms: value.contents.rooms, chats: value.contents.chats },
     empty: value.empty, freeBytes: value.freeBytes, previous,
+    // The whole volume, from a Cloud that says (null from an older one).
+    volumeBytes: count(value.volumeBytes) && value.volumeBytes > 0 ? value.volumeBytes : null,
     // A stored part of an earlier upload: space the next upload frees first.
     uploadReceived: record(value.upload) && count(value.upload.received) ? value.upload.received : 0,
     heldBytes: count(value.heldBytes) ? value.heldBytes : null,
@@ -98,8 +126,12 @@ const sentence = value => typeof value === "string" && value.trim()
   ? value.replace(/[\x00-\x1f\x7f]+/g, " ").trim().slice(0, 300) : undefined;
 
 /** One move at a time; `state()` is what Settings and the Cloud's card show. */
+/** `cloudDisk()`: the disk the person's plan has and may grow to
+ * (cloud-home.mjs cloudPlanDisk), or null. `growCloud(sizeGb)`: ask OMB Cloud
+ * to grow it now (cloud-account.mjs growDisk). */
 export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tempRoot, availableBytes, now = Date.now, sleep = defaultSleep,
-  onState = () => {}, retryDelaysMs = [1_000, 3_000, 8_000, 15_000, 30_000], pollMs = 2_000, restartTimeoutMs = 10 * 60_000, jobTimeoutMs = 3 * 3600_000 }) {
+  onState = () => {}, retryDelaysMs = [1_000, 3_000, 8_000, 15_000, 30_000], pollMs = 2_000, restartTimeoutMs = 10 * 60_000, jobTimeoutMs = 3 * 3600_000,
+  cloudDisk = () => null, growCloud = async () => ({ supported: false }), growTimeoutMs = 5 * 60_000 }) {
   if (typeof localRequest !== "function" || typeof pairHome !== "function" || typeof tempRoot !== "string" || !isAbsolute(tempRoot) ||
     resolve(tempRoot) === parse(resolve(tempRoot)).root || typeof availableBytes !== "function") throw new Error("Move to Cloud needs its requests and a private temporary folder.");
   let value = { phase: "idle" }, running = false, controller = null, committing = false, prepared = null;
@@ -323,6 +355,29 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
     }
   }
 
+  /** The plan's disk can hold the move, but today's disk cannot: ask OMB
+   * Cloud to grow it now, then wait until the Cloud has the room. */
+  async function makeRoom(session, fit, signal) {
+    publish({ phase: "growing", action: "move" });
+    const details = { freeBytes: fit.freeBytes, neededBytes: fit.neededBytes, maxBytes: fit.maxBytes };
+    let answer = null;
+    // No answer (offline, a slip): trying again later can work.
+    try { answer = await growCloud(fit.sizeGb); } catch { signal.throwIfAborted(); fail("cloud_grow_unavailable", "Your Cloud could not make room for this move just now.", details); }
+    signal.throwIfAborted();
+    // This Admin cannot grow a disk for a move: trying again will not help.
+    if (!answer?.supported) fail("cloud_grow_unsupported", "Your Cloud can't make room for a move this size yet.", details);
+    if (answer.refused) fail("cloud_full", "Your Cloud does not have enough space for this move.", details);
+    const deadline = now() + growTimeoutMs;
+    for (;;) {
+      await sleep(pollMs, signal);
+      let status = null;
+      // A Cloud whose disk grew may restart: no answer for a moment is expected.
+      try { status = await cloudStatus(session, signal); } catch (error) { if (signal.aborted || error?.code === "access_changed") throw error; }
+      if (status && status.freeBytes + status.uploadReceived >= fit.neededBytes) return;
+      if (now() > deadline) fail("cloud_grow_unavailable", "Your Cloud could not make room for this move in time.", details);
+    }
+  }
+
   function classify(error, signal) {
     return error instanceof CloudMoveError && !(signal?.aborted && error.code !== "cancelled") ? error
       : signal?.aborted ? new CloudMoveError("cancelled", "The move was stopped. Your Cloud's workspace was not replaced.")
@@ -364,10 +419,16 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
       if (cloud.pendingRestore || cloud.busy || cloud.job?.state === "running") fail("cloud_busy", "Your Cloud is busy. Try again in a minute.");
       if (local.bytes > CLOUD_MOVE_MAX_BYTES) fail("too_large", "This workspace is larger than a move can carry.");
       // The Cloud checks again, exactly (its own backup included), before the
-      // upload starts. A stored part of an earlier upload is freed first.
-      if (cloud.freeBytes + cloud.uploadReceived < 3 * local.bytes + SPACE_MARGIN) {
-        fail("cloud_full", "Your Cloud does not have enough free space for this move.", { freeBytes: cloud.freeBytes + cloud.uploadReceived, neededBytes: 3 * local.bytes + SPACE_MARGIN });
+      // upload starts. A stored part of an earlier upload is freed first. A
+      // plan whose disk grows is measured at its largest disk, not today's.
+      let disk = null;
+      try { disk = cloudDisk(); } catch { /* today's free space only */ }
+      const fit = moveFit({ localBytes: local.bytes, freeBytes: cloud.freeBytes, uploadReceived: cloud.uploadReceived, volumeBytes: cloud.volumeBytes, disk });
+      if (fit.fit === "never") {
+        const details = { ...fit }; delete details.fit;
+        fail("cloud_full", "Your Cloud does not have enough free space for this move.", details);
       }
+      if (fit.fit === "grow") await makeRoom(session, fit, signal);
       const archived = await archive(local, signal);
       await upload(session, archived, signal);
       publish({ phase: "checking", action: "move" });
@@ -390,7 +451,8 @@ export function createCloudMove({ localRequest, pairHome, fetchImpl = fetch, tem
       }
       await disposeArchive();
       const after = await waitForRestart(session, "restore", { id: preview.id }, signal);
-      return publish({ phase: "done", action: "move", moved: after.contents, previous: Boolean(after.previous) });
+      // Routines arrive paused; the done message says how many to turn on there.
+      return publish({ phase: "done", action: "move", moved: after.contents, previous: Boolean(after.previous), ...(local.routines > 0 ? { routines: local.routines } : {}) });
     }),
     /** Swap back: the previous Cloud returns, and what the Cloud has now
      * becomes the previous Cloud, so this can be undone the same way. */

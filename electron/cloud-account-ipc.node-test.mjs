@@ -5,7 +5,7 @@ import vm from "node:vm";
 import localOrigin from "./local-origin.cjs";
 import environments from "./environments.cjs";
 
-const origin = "http://127.0.0.1:48993", methods = ["state", "begin", "reopen", "cancel", "refresh", "signOut", "openDashboard"];
+const origin = "http://127.0.0.1:48993", methods = ["state", "begin", "signInAgain", "reopen", "cancel", "refresh", "signOut", "openDashboard"];
 const bridgeMethods = [...methods, "connectHome"];
 function preload({ enabled = true, remote = false } = {}) {
   let bridge; const invoked = [];

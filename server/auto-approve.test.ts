@@ -12,7 +12,7 @@ import {
   approvalModeForOrigin,
   autoVerdict,
   deliverFullAccessApproval,
-  delegationInheritsFullAccess,
+  delegatedApprovalMode,
 } from "./auto-approve.ts";
 
 describe("Full access delivery", () => {
@@ -129,21 +129,38 @@ describe("tools that ask a person", () => {
   });
 });
 
-describe("delegationInheritsFullAccess", () => {
-  const base = { senderIsChief: true, senderHasFullAccess: true, sameBot: false, recipientDriverKind: "claudeAgent" };
+describe("delegatedApprovalMode", () => {
+  const base = { senderIsChief: true, senderMode: "full" as const, sameBot: false, recipientMode: "ask" as const, recipientDriverKind: "claudeAgent" };
   it("passes a Full-access Chief's access to the teammate it delegates to", () => {
-    expect(delegationInheritsFullAccess(base)).toBe(true);
+    expect(delegatedApprovalMode(base)).toBe("full");
     for (const recipientDriverKind of ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo"]) {
-      expect(delegationInheritsFullAccess({ ...base, recipientDriverKind })).toBe(true);
+      expect(delegatedApprovalMode({ ...base, recipientDriverKind })).toBe("full");
     }
   });
-  it("passes nothing on from an ordinary bot, a Chief without Full access, or a bot to itself", () => {
-    expect(delegationInheritsFullAccess({ ...base, senderIsChief: false })).toBe(false);
-    expect(delegationInheritsFullAccess({ ...base, senderHasFullAccess: false })).toBe(false);
-    expect(delegationInheritsFullAccess({ ...base, sameBot: true })).toBe(false);
+  it("passes an Approve-for-me or Auto-accept-edits Chief's level on too", () => {
+    expect(delegatedApprovalMode({ ...base, senderMode: "auto" })).toBe("auto");
+    expect(delegatedApprovalMode({ ...base, senderMode: "edits" })).toBe("edits");
+    // A Chief's own Custom config reads as Approve for me for a teammate.
+    expect(delegatedApprovalMode({ ...base, senderMode: "custom", recipientDriverKind: "codex" })).toBe("auto");
   });
-  it("leaves a teammate whose engine has no Full mode on its own level", () => {
-    expect(delegationInheritsFullAccess({ ...base, recipientDriverKind: "hermes" })).toBe(false);
-    expect(delegationInheritsFullAccess({ ...base, recipientDriverKind: undefined })).toBe(false);
+  it("passes nothing on from an ordinary bot, a Chief on Ask, or a bot to itself", () => {
+    expect(delegatedApprovalMode({ ...base, senderIsChief: false })).toBeNull();
+    expect(delegatedApprovalMode({ ...base, senderMode: "ask" })).toBeNull();
+    expect(delegatedApprovalMode({ ...base, sameBot: true })).toBeNull();
+  });
+  it("never lowers a teammate, and leaves one on Custom with its own config", () => {
+    expect(delegatedApprovalMode({ ...base, senderMode: "auto", recipientMode: "full" })).toBeNull();
+    expect(delegatedApprovalMode({ ...base, senderMode: "auto", recipientMode: "auto" })).toBeNull();
+    expect(delegatedApprovalMode({ ...base, senderMode: "full", recipientMode: "auto" })).toBe("full");
+    expect(delegatedApprovalMode({ ...base, senderMode: "edits", recipientMode: "auto" })).toBeNull();
+    expect(delegatedApprovalMode({ ...base, recipientMode: "custom", recipientDriverKind: "codex" })).toBeNull();
+  });
+  it("steps down to the next level the teammate's engine has", () => {
+    // No Full mode (hermes): the Chief's Full becomes Approve for me.
+    expect(delegatedApprovalMode({ ...base, recipientDriverKind: "hermes" })).toBe("auto");
+    expect(delegatedApprovalMode({ ...base, recipientDriverKind: undefined })).toBe("auto");
+    // Codex has no Auto-accept edits (its Ask already writes the workspace).
+    expect(delegatedApprovalMode({ ...base, senderMode: "edits", recipientDriverKind: "codex" })).toBeNull();
+    expect(delegatedApprovalMode({ ...base, senderMode: "auto", recipientDriverKind: "codex" })).toBe("auto");
   });
 });

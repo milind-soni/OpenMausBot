@@ -132,6 +132,10 @@ describe("environment identity", () => {
       .not.toHaveProperty("sharedComputers");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities)
       .toEqual({ remoteSessions: true, sharedComputers: true, selfUpdate: "desktop-managed", emailSignIn: false });
+    // An OMB Cloud home says so, so its pairing page points to the app's Connect to my Cloud.
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true }).capabilities)
+      .toEqual({ remoteSessions: true, cloudHome: true, selfUpdate: "operator", emailSignIn: false });
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: false }).capabilities).not.toHaveProperty("cloudHome");
   });
 
   it("falls back to the checkout's package.json version, then to unknown", () => {
