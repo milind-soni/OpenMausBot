@@ -1,8 +1,8 @@
 // The places at the foot of the sidebar, as direct rows: Routines (the
 // Automations page), Triggers and Apps (the two glass pop-ups). They used to
 // hide behind a hover "Tools" menu; three rows cost little and each is one
-// click instead of a hover and a click. Team map is an Advanced-mode place,
-// so in Advanced mode a small Tools menu keeps it one gesture away.
+// click instead of a hover and a click. Team map is an Advanced-mode place:
+// a fourth row there, no menu.
 import { CalendarDays, Network, Puzzle, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -13,7 +13,6 @@ import { isRoutineProblemRun } from "@/lib/routines";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
 
-import { SidebarMoreMenu } from "./SidebarMoreMenu";
 
 function NavRow({
   id,
@@ -99,29 +98,17 @@ export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
         icon={(active) => <Puzzle size={iconSize} className={tone(active)} />}
         onClick={() => dispatch({ type: "togglePlugins", open: true })}
       />
-      {advanced && (iconsOnly ? (
+      {advanced && (
         <NavRow
           id="team-map"
           label={t("sidebar.nav.teamMap")}
-          iconsOnly
+          tourId="team-tools"
+          iconsOnly={iconsOnly}
           active={state.activeView === "team-map"}
           icon={(active) => <Network size={iconSize} className={tone(active)} />}
           onClick={() => dispatch({ type: "showTeamMap" })}
         />
-      ) : (
-        <SidebarMoreMenu
-          tourId="team-tools"
-          items={[
-            {
-              key: "team-map",
-              label: t("sidebar.nav.teamMap"),
-              icon: <Network size={18} />,
-              active: state.activeView === "team-map",
-              onSelect: () => dispatch({ type: "showTeamMap" }),
-            },
-          ]}
-        />
-      ))}
+      )}
     </nav>
   );
 }

@@ -211,7 +211,8 @@ describe("Computer panel tabs", () => {
     expect(tabs(render(makeBot()))).toEqual(["Computer", "Routines", "Android", "Browser"]);
     fixture.config = {};
     fixture.android = false;
-    expect(tabs(render(makeBot()))).toEqual(["Computer", "Routines"]);
+    // The Browser tab now stays in Advanced too, with its own switch.
+    expect(tabs(render(makeBot()))).toEqual(["Computer", "Routines", "Browser"]);
   });
 
   it("reads a Routines view stored by Advanced as the Computer tab in Simple", () => {
@@ -251,7 +252,7 @@ describe("Simple Browser tab with the browser off", () => {
     const rendered = render(makeBot());
     expect(rendered.html).toContain("The browser is off");
     expect(rendered.html).not.toContain("BROWSER-PANEL");
-    (rendered.button("Turn on the browser")!.props.onClick as () => void)();
+    (browserSwitch(rendered).props.onClick as () => void)();
     await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "configStatus", config: { features: { browser: true } } }));
     expect(fixture.api).toHaveBeenCalledWith("/api/config", {
       method: "PATCH",
@@ -262,7 +263,8 @@ describe("Simple Browser tab with the browser off", () => {
   it("turns on this bot's own browser switch when only that is off", async () => {
     fixture.view.current = "browser";
     const rendered = render(makeBot({ browser: false }));
-    (rendered.button("Turn on the browser")!.props.onClick as () => void)();
+    expect(browserSwitch(rendered).props.checked).toBe(false);
+    (browserSwitch(rendered).props.onClick as () => void)();
     await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateBot", botId: "scout", patch: { browser: true } }));
     expect(fixture.api).not.toHaveBeenCalled();
   });
@@ -272,14 +274,32 @@ describe("Simple Browser tab with the browser off", () => {
     fixture.config = { features: { browser: false }, browserEngine: { kind: "unavailable", reason: "No engine here." } };
     const rendered = render(makeBot());
     expect(rendered.html).toContain("No engine here.");
-    expect(rendered.button("Turn on the browser")).toBeUndefined();
+    expect(browserSwitch(rendered).props.disabled).toBe(true);
   });
 
-  it("shows the real browser once it is on", () => {
+  it("shows the real browser once it is on, under a switch that turns it off for this bot only", () => {
     fixture.view.current = "browser";
-    expect(render(makeBot()).html).toContain("BROWSER-PANEL");
+    const rendered = render(makeBot());
+    expect(rendered.html).toContain("BROWSER-PANEL");
+    expect(browserSwitch(rendered).props.checked).toBe(true);
+    (browserSwitch(rendered).props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateBot", botId: "scout", patch: { browser: false } });
+    expect(fixture.api).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Browser tab and its switch in Advanced mode when the browser is off", () => {
+    fixture.advanced = true;
+    fixture.view.current = "browser";
+    fixture.config = { features: { browser: false }, browserEngine: { kind: "engine" } };
+    const rendered = render(makeBot());
+    expect(rendered.html).toContain("The browser is off");
+    expect(browserSwitch(rendered).props.checked).toBe(false);
   });
 });
+
+function browserSwitch(rendered: ReturnType<typeof render>) {
+  return rendered.nodes.find((node) => node.props["aria-label"] === "Let Scout use a browser")!;
+}
 
 describe("Where the bot works", () => {
   it("offers six places in a 3-column grid with plain names", () => {

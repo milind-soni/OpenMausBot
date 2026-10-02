@@ -438,7 +438,7 @@ beforeAll(async () => {
     JSON.stringify({
       // generated titles are opt-in; this suite turns them on because it
       // owns the one-shot's reply file (FAKE_CLAUDE_TEXT_FILE below)
-      features: { llmThreadTitles: true },
+      features: { llmThreadTitles: true, browser: false }, // written when the browser was opt-in
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },

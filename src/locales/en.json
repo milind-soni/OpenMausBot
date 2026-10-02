@@ -2463,6 +2463,7 @@
   "routines.repeat.weekdays": "Weekdays",
   "routines.repeat.weekly": "Every week",
   "computer.tab.android": "Android",
+  "computer.browserSwitch.title": "Let {name} use a browser",
   "computer.tab.browser": "Browser",
   "computer.tab.files": "Files",
   "computer.closePanel": "Close",

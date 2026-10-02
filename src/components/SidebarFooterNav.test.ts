@@ -72,15 +72,15 @@ describe("sidebar footer places", () => {
     expect(html.indexOf('data-testid="routines-attention"')).toBeLessThan(html.indexOf('data-sidebar-nav="triggers"'));
   });
 
-  it("keeps Team map one gesture away in Advanced mode", () => {
+  it("shows Team map as its own row in Advanced mode, with no Tools menu", () => {
     fixture.advanced = true;
-    const { nodes: tree } = render("comfortable");
-    const menu = tree.find((node) => node.type === SidebarMoreMenu)!;
-    const items = menu.props.items as Array<{ key: string; label: string; onSelect: () => void }>;
-    expect(items.map((item) => item.label)).toEqual(["Team map"]);
-    items[0]!.onSelect();
+    const { nodes: tree, html } = render("comfortable");
+    expect(tree.some((node) => node.type === SidebarMoreMenu)).toBe(false);
+    expect(html).toContain(">Team map</span>");
+    expect(html).not.toContain(">Tools<");
+    const row = tree.find((node) => node.props.id === "team-map")!;
+    (row.props.onClick as () => void)();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "showTeamMap" });
-    expect(menu.props.tourId).not.toBe("tools");
   });
 
   it("draws icons with tooltips in the avatars-only density", () => {

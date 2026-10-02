@@ -8,7 +8,7 @@ import type { ModelPicker } from "./ModelPicker";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -26,6 +26,10 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: fixture.platform }, localComputer: { available: false, reasonCode: fixture.localReasonCode, message: fixture.localMessage } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/thread-preferences")>(),
+  useShowThreads: () => fixture.showThreads,
+}));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 // Record every popover menu's items; the trigger still renders so the markup
 // assertions elsewhere in this file see the same header.
@@ -86,14 +90,8 @@ describe("Advanced mode in the header menu", () => {
 });
 
 describe("thread control placement", () => {
-  it("keeps the full thread picker accessible without the sidebar", () => {
-    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
-    expect(markup).toContain('aria-label="All threads"');
-    expect(markup).toContain('data-testid="chat-more"');
-  });
-
-  it("hides the All threads picker in Simple mode; the sidebar reaches threads there", () => {
-    fixture.advanced = false;
+  it.each([true, false])("leaves All threads to the sidebar in both modes (advanced: %s)", (advanced) => {
+    fixture.advanced = advanced;
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup).not.toContain('aria-label="All threads"');
     expect(markup).toContain('data-testid="chat-more"');

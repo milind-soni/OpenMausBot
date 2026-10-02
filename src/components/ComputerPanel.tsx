@@ -9,6 +9,7 @@ import { cloudRunner } from "@/lib/remote-desktop";
 // its profile default owns lifecycle actions and the Works on picker.
 // An inherited team Boat is shown as a shared resource, managed from Team map;
 // it must never fall back to this host or become a private Cloud selection.
+import { Switch } from "./SettingsPrimitives";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import {
@@ -448,11 +449,11 @@ export function ComputerPanel({
   useEffect(() => {
     // Simple mode keeps the Browser tab when the browser is off: it explains
     // how to turn it on instead of disappearing.
-    if ((!androidConnected && panelView === "android") || (advanced && !browserEnabled && panelView === "browser")) {
+    if (!androidConnected && panelView === "android") {
       setPanelView("computer");
       writeComputerPanelView(bot.id, "computer");
     }
-  }, [advanced, androidConnected, bot.id, browserEnabled, panelView]);
+  }, [androidConnected, bot.id, panelView]);
   useEffect(() => {
     vmReadinessAttempts.current = 0;
   }, [bot.id, bot.computer]);
@@ -1228,6 +1229,28 @@ export function ComputerPanel({
     }
   };
 
+  // Turning it off is this bot's own switch; the app-wide one stays on for
+  // every other bot. Turning on (above) flips both when needed.
+  const turnOffBrowser = () => {
+    setError(null);
+    dispatch({ type: "updateBot", botId: profileBot.id, patch: { browser: false } });
+  };
+  const browserSwitchRow = (
+    <div data-testid="browser-switch-row" className="mb-3 flex items-center gap-3 rounded-xl bg-card px-3 py-2.5">
+      <Globe size={15} className="shrink-0 text-ink-secondary" aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium text-ink">{t("computer.browserSwitch.title", { name: bot.name })}</div>
+        {!browserCanTurnOn && <div className="text-[11.5px] text-ink-secondary">{browserUnavailableReason(state.config)}</div>}
+      </div>
+      <Switch
+        checked={browserEnabled}
+        disabled={browserTurningOn || (!browserEnabled && !browserCanTurnOn)}
+        aria-label={t("computer.browserSwitch.title", { name: bot.name })}
+        onClick={() => (browserEnabled ? turnOffBrowser() : void turnOnBrowser())}
+      />
+    </div>
+  );
+
   // The six Works-on places, shared by the Advanced cards and the Simple grid
   // so both run exactly the same availability rules and selection actions.
   const isMacHost = capabilities.host.platform === "darwin";
@@ -1370,7 +1393,7 @@ export function ComputerPanel({
               <Smartphone size={13} /> {t("computer.tab.android")}
             </button>
             )}
-            {(browserEnabled || !advanced) && (
+            {(
             <button
               data-tour="computer-browser"
               onClick={() => {
@@ -1411,6 +1434,7 @@ export function ComputerPanel({
         </div>
       ) : panelView === "browser" && browserEnabled ? (
         <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
+          {browserSwitchRow}
           <BrowserPanel bot={bot} />
           {errorText && (
             <div role="alert" className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
@@ -1418,25 +1442,15 @@ export function ComputerPanel({
             </div>
           )}
         </div>
-      ) : panelView === "browser" && !advanced ? (
+      ) : panelView === "browser" ? (
         <div className="flex-1 overflow-y-auto px-5 pb-5" data-testid="browser-off">
+          {browserSwitchRow}
           <div className="mt-2 flex flex-col items-center gap-3 rounded-xl bg-card px-6 py-8 text-center">
             <Globe size={22} className="text-ink-secondary" aria-hidden="true" />
             <div className="text-[14px] font-medium text-ink">{t("computer.browserOff.title")}</div>
             <p className="text-[12px] leading-5 text-ink-secondary">
               {browserCanTurnOn ? t("computer.browserOff.body", { name: bot.name }) : browserUnavailableReason(state.config)}
             </p>
-            {browserCanTurnOn && (
-              <button
-                type="button"
-                onClick={() => void turnOnBrowser()}
-                disabled={browserTurningOn}
-                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-accent-ink hover:brightness-110 disabled:opacity-50"
-              >
-                {browserTurningOn && <Loader2 size={13} className="animate-spin" />}
-                {t("computer.browserOff.turnOn")}
-              </button>
-            )}
             {errorText && (
               <div role="alert" className="w-full rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
                 {errorText}
