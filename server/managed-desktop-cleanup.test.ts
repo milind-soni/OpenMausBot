@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { IdleReleasePolicy } from "./claim-idle.ts";
+import { TurnResources } from "./turn-resources.ts";
 
 // Execute the actual cleanup functions without importing index.ts, which would
 // start a server. State and adapters are synthetic; this is an ownership-race
@@ -23,6 +25,7 @@ function section(start: string, end: string) {
   return source.slice(from, to);
 }
 const code = ts.transpileModule([
+  section("function cancelComputerResume(", "function registerComputerResume("),
   section("async function interruptDirectThread(", "/** Stop left teammates"),
   section("function releaseTurnResources(", "async function bindTurnComputer("),
   section("async function stopCompanyInstances(", "async function persistProviderInstance("),
@@ -49,6 +52,12 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
   const autoVmClaims = new Map<string, { owner: { threadId: string; generation: string } }>();
   const started = new Map<string, ReturnType<typeof deferred>>(), interrupted = new Map<string, ReturnType<typeof deferred>>();
   const interruptCalls: string[] = [], cancelled: string[] = [], revoked: string[] = [], messages: string[] = [], settled: string[] = [], detached: string[] = [];
+  // The parked-resume seam (#1651): releaseTurnResources queues the drain
+  // when a parked turn waits behind the release. Recorded stubs, so the
+  // extracted code runs against the same names the real module sees.
+  const pendingComputerResumes = new Map<string, { threadId: string }>();
+  const resumeDrains: number[] = [];
+  const microtasks: Array<() => void> = [];
   for (const threadId of threadIds) {
     const bot = { id: threadId, busy: true, modelSelection: { instanceId: "company" } };
     bots.set(threadId, bot); tasks.set(threadId, { threadId, busy: true });
@@ -92,6 +101,9 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
     closeOpenApprovals: (threadId: string) => approvals.delete(threadId),
     finalizeDelegationWatch() {}, routines: { failThread() {} },
     settleDirectFollowup: (generation: string) => settled.push(generation),
+    pendingComputerResumes,
+    drainComputerResumes: () => { resumeDrains.push(pendingComputerResumes.size); },
+    queueMicrotask: (run: () => void) => { microtasks.push(run); },
   });
   context.runningTurnInstance = (bot: Bot) => context.registry.get(bot.modelSelection.instanceId);
   vm.runInContext(code, context, { filename: "index.ts (Company cleanup ownership fixture)" });
@@ -99,6 +111,8 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
     bots, tasks, groups, owners, directBots, speakers, vmLeases, approvals, screens, watched,
     autoVmClaims,
     interruptCalls, cancelled, revoked, messages, settled, detached,
+    pendingComputerResumes, resumeDrains, microtasks,
+    flushMicrotasks: () => { for (const run of microtasks.splice(0)) run(); },
     context,
     stop: () => context.stopCompanyInstances(["company"]) as Promise<void>,
     interrupt: (threadId: string) => context.interruptDirectThread(threadId, threadId) as Promise<void>,
@@ -202,6 +216,145 @@ for (const kind of ["direct", "group"] as const) {
     expect(f.detached).toEqual(["company"]);
   });
 }
+
+it("queues the parked-computer resume drain only when a parked turn waits behind the release", async () => {
+  const quiet = fixture("direct"), quietStop = quiet.stop();
+  await quiet.started("first"); quiet.finish("first"); await quietStop;
+  expect(quiet.resumeDrains).toEqual([]);
+  expect(quiet.microtasks).toEqual([]);
+
+  const f = fixture("direct"), stopping = f.stop();
+  f.pendingComputerResumes.set("parked", { threadId: "parked" });
+  await f.started("first"); f.finish("first"); await stopping;
+  expect(f.owners.has("first")).toBe(false);
+  f.flushMicrotasks();
+  expect(f.resumeDrains).toEqual([1]);
+});
+
+// The parked-resume drain's own semantics (#1651), same extraction technique
+// as the cleanup fixture above: which entries survive which drain. The lazy
+// park registers its resume before its interrupt lands, so a drain inside
+// that settle window sees the thread busy under the parked turn's own
+// generation and must keep the entry.
+const resumeDrainCode = ts.transpileModule([
+  section("/** A turn parked at the computer wait ceiling", "function markComputerResumeFailed("),
+  section("function drainComputerResumes(", "type SecretResumeEntry"),
+].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+
+function resumeDrainFixture(resources?: TurnResources) {
+  const dispatched: string[] = [];
+  const state = { threadExists: true, busy: false, seatFree: true, latestUser: "u1" };
+  const activeInternalGenerationByThread = new Map<string, string>([["t", "g1"]]);
+  const context = vm.createContext({
+    setTimeout, clearTimeout,
+    connectorThread: () => (state.threadExists ? { bot: { id: "b" } } : null),
+    store: { activePath: () => [{ role: "user", id: state.latestUser }] },
+    threadBusy: () => state.busy,
+    // The drain's admission precheck calls these on the real path. The
+    // fixture models one direct thread with no group turn, so admission
+    // reduces to the same thread-busy fact the drain already reads above.
+    canAdmitDirectTurn: () => !state.busy,
+    activeGroupTurnForBot: () => false,
+    turnResources: resources ?? { free: () => state.seatFree },
+    activeInternalGenerationByThread,
+    dispatchComputerResume: (entry: { threadId: string }) => { dispatched.push(entry.threadId); },
+    queueMicrotask: (run: () => void) => { run(); },
+  });
+  vm.runInContext(resumeDrainCode, context, { filename: "index.ts (parked resume drain fixture)" });
+  return {
+    dispatched,
+    activeInternalGenerationByThread,
+    state,
+    register: (overrides: Partial<{ generation: string; afterMessageId: string }> = {}) =>
+      context.registerComputerResume({ botId: "b", threadId: "t", resource: "computer:host", generation: "g1", afterMessageId: "u1", ...overrides }),
+    drain: () => context.drainComputerResumes(),
+  };
+}
+
+it("dispatches a parked resume immediately when the seat is already free at registration", () => {
+  const f = resumeDrainFixture();
+  f.register();
+  expect(f.dispatched).toEqual(["t"]);
+});
+
+it("wakes parked work after an idle claim expires without another claim or release", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(0);
+  try {
+    const resources = new TurnResources();
+    const holder = { threadId: "holder", generation: "h" };
+    resources.claim("computer:host", holder, { idle: new IdleReleasePolicy(2_000, 10_000) });
+    const f = resumeDrainFixture(resources);
+    f.register();
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(f.dispatched).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect(f.dispatched).toEqual(["t"]);
+    expect(resources.reclaimHolder("computer:host")).toEqual(holder);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("keeps a parked resume through its own busy settle window and dispatches on the next drain", () => {
+  const f = resumeDrainFixture();
+  // The lazy-claim park registers while its turn is still settling: busy
+  // under the SAME generation. A drain here must not drop the entry.
+  f.state.busy = true;
+  f.register();
+  f.drain();
+  expect(f.dispatched).toEqual([]);
+  // The settle lands (turn completes, thread idle); the next drain — its
+  // completion, or any later release — continues the parked work.
+  f.state.busy = false;
+  f.drain();
+  expect(f.dispatched).toEqual(["t"]);
+});
+
+it("keeps a parked resume while another turn still holds the seat, then dispatches when it frees", () => {
+  const f = resumeDrainFixture();
+  f.state.seatFree = false;
+  f.register();
+  f.drain();
+  expect(f.dispatched).toEqual([]);
+  f.state.seatFree = true;
+  f.drain();
+  expect(f.dispatched).toEqual(["t"]);
+});
+
+it("drops a superseded parked resume when a newer user message arrived", () => {
+  const f = resumeDrainFixture();
+  f.state.latestUser = "u2";
+  f.register();
+  f.drain();
+  expect(f.dispatched).toEqual([]);
+  f.state.latestUser = "u1";
+  f.drain();
+  expect(f.dispatched).toEqual([]);
+});
+
+it("drops a parked resume when a newer generation owns the thread", () => {
+  const f = resumeDrainFixture();
+  f.activeInternalGenerationByThread.set("t", "g2");
+  f.register();
+  f.drain();
+  expect(f.dispatched).toEqual([]);
+  f.activeInternalGenerationByThread.set("t", "g1");
+  f.drain();
+  expect(f.dispatched).toEqual([]);
+});
+
+it("drops a parked resume whose thread no longer exists", () => {
+  const f = resumeDrainFixture();
+  f.state.threadExists = false;
+  f.register();
+  f.drain();
+  expect(f.dispatched).toEqual([]);
+  f.state.threadExists = true;
+  f.drain();
+  expect(f.dispatched).toEqual([]);
+});
 
 it("quitting disposes Company instances without interrupting turns or writing connection-changed cards", async () => {
   const f = fixture("direct");

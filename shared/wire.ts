@@ -66,8 +66,11 @@ export type MausColor =
  * ten-face vocabulary still carry those names. */
 export type MausExpression = string;
 
-/** What the bot is doing right now, as the harness sees it. */
-export type BotActivity = "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
+/** What the bot is doing right now, as the harness sees it. `parked.computer`
+ * is task-level only (ADR-2, #1651): a thread whose turn settled at the
+ * computer wait ceiling and resumes when the seat frees. It never elevates
+ * the bot-level activity and never counts as busy. */
+export type BotActivity = "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
 
 /** The bot that opened a thread on itself or a teammate. */
 export interface TaskOpenedBy {

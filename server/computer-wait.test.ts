@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   computerFreeAfterText,
-  computerStillBusyText,
+  computerParkedText,
   computerStoppedWaitingText,
   computerWaitDuration,
   computerWaitingText,
@@ -45,13 +45,15 @@ describe("computer wait wording", () => {
     expect(computerWaitDuration(90_000)).toBe("2 minutes");
   });
 
-  it("names the holder and a way out when the wait gives up", () => {
-    expect(computerStillBusyText({ name: "TCPR operator", task: "TCPR 3 hour capacity refill" }, 30 * 60_000)).toBe(
-      "Computer is still busy after 30 minutes — TCPR operator is still running TCPR 3 hour capacity refill. Stop that turn, or run this on another computer.",
+  it("names the holder and says the work continues when the wait parks", () => {
+    expect(computerParkedText({ name: "TCPR operator", task: "TCPR 3 hour capacity refill" }, 30 * 60_000)).toBe(
+      "Computer still busy after 30 minutes — TCPR operator is still running TCPR 3 hour capacity refill. Parked — it continues automatically when the computer is free.",
     );
-    expect(computerStillBusyText({ name: "Ada" }, 30 * 60_000)).toBe(
-      "Computer is still busy after 30 minutes — Ada is still using it. Stop that turn, or run this on another computer.",
+    expect(computerParkedText({ name: "Ada" }, 30 * 60_000)).toBe(
+      "Computer still busy after 30 minutes — Ada is still using it. Parked — it continues automatically when the computer is free.",
     );
-    expect(computerStillBusyText(undefined, 45_000)).toBe("Computer is still busy after 45 seconds. Stop that turn, or run this on another computer.");
+    expect(computerParkedText(undefined, 45_000)).toBe(
+      "Computer still busy after 45 seconds. Parked — it continues automatically when the computer is free.",
+    );
   });
 });

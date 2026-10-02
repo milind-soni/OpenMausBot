@@ -84,8 +84,10 @@ export type RuntimeEvent = RuntimeEventBase &
         /** How long the turn actually waited. */
         waitedMs: number;
         /** acquired: the claim landed; stopped: the turn was stopped or
-         * cancelled while waiting; gave_up: the wait ceiling fired. */
-        outcome: "acquired" | "gave_up" | "stopped";
+         * cancelled while waiting; parked: the wait ceiling settled the turn
+         * for resume (#1651); gave_up: the pre-parking ceiling, kept so
+         * recorded logs still replay. */
+        outcome: "acquired" | "gave_up" | "parked" | "stopped";
       }
     | {
         type: "item.started";

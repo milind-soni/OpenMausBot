@@ -52,9 +52,10 @@ export function computerStoppedWaitingText(holder: ComputerHolder | null | undef
   return `Stopped waiting for the computer after ${computerWaitDuration(waitedMs)}${who}.`;
 }
 
-/** The error after the wait ceiling: still names who holds it, and says
- * what a person can do — stop that turn, or move this one. */
-export function computerStillBusyText(holder: ComputerHolder | null | undefined, ceilingMs: number): string {
+/** The resolution appended when the wait ceiling parks the turn (#1651):
+ * still names who holds it, but the work is not lost — the turn settled and
+ * resumes on its own when the desktop frees, so nobody has to fix it. */
+export function computerParkedText(holder: ComputerHolder | null | undefined, ceilingMs: number): string {
   const who = holder ? ` — ${holderPhrase(holder).replace(" is running ", " is still running ").replace(" is using it", " is still using it")}` : "";
-  return `Computer is still busy after ${minutes(ceilingMs)}${who}. Stop that turn, or run this on another computer.`;
+  return `Computer still busy after ${minutes(ceilingMs)}${who}. Parked — it continues automatically when the computer is free.`;
 }

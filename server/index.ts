@@ -482,7 +482,7 @@ import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { startAutoVmClaim, type AutoVmClaimTable } from "./auto-vm-claims.ts";
-import { computerFreeAfterText, computerStillBusyText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
+import { computerFreeAfterText, computerParkedText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
 import { CloudOverflowConsent, CloudSeatLease, cloudOverflowAction, cloudOverflowConsentText, cloudOverflowOfferText, cloudSeatStartedText, cloudSeatStoppedText, type CloudOverflowSituation } from "./cloud-overflow.ts";
 import { modelContextWindow } from "./model-context-window.ts";
 import { parseSurface, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt, type Surface } from "./surface.ts";
@@ -2376,7 +2376,21 @@ type DirectTurnDispatchClaim = {
   phase: "setup" | "dispatching";
 };
 class DirectTurnSetupCancelled extends Error {}
-class ComputerWaitGaveUp extends Error {}
+/** The computer wait ceiling fired (ADR-2, #1651). The turn parks — settled
+ * with a registered resume — instead of failing; the carried resource names
+ * the seat the resume must wait to free. */
+class ComputerWaitParked extends Error {
+  readonly resource: string;
+  /** The parked turn's generation: the drain distinguishes the turn's own
+   * settle window (keep, retry later) from a newer turn that superseded it
+   * (delete). */
+  readonly generation: string;
+  constructor(message: string, resource: string, generation: string) {
+    super(message);
+    this.resource = resource;
+    this.generation = generation;
+  }
+}
 const directTurnDispatchClaims = new Map<string, DirectTurnDispatchClaim>();
 const directTurnGenerationByThread = new Map<string, string>();
 // Only the latest direct request per thread is retained. A fresh user turn
@@ -2593,6 +2607,9 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
     stopScreenPoller(teamTurn.botId, owner.threadId);
     teamComputerTurns.delete(owner.threadId);
   }
+  // A freed seat is the parked-resume drain's trigger (#1651). Deferred past
+  // this synchronous settle so the drain reads post-cleanup state.
+  if (pendingComputerResumes.size > 0) queueMicrotask(drainComputerResumes);
 }
 
 async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = false): Promise<void> {
@@ -2607,7 +2624,7 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
   // bot running a titled thread, or a room. Read once, when the wait begins.
   let holder: ComputerHolder | undefined;
   let holderThreadRef: { botId: string; threadId: string; title: string } | undefined;
-  const deadline = Date.now() + GROUP_GOAL_WAIT_MAX_MS;
+  const deadline = Date.now() + COMPUTER_WAIT_MAX_MS;
   // The wait is history the transcript keeps (#1647): the waiting chip stays
   // exactly as written, a resolution line is appended beside it, and the
   // turn.wait_* events carry the same facts for the inspector log.
@@ -2628,19 +2645,18 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
       createdAt: new Date().toISOString(),
     };
   };
-  const endWait = (outcome: "acquired" | "gave_up" | "stopped") => {
+  const endWait = (outcome: "acquired" | "parked" | "stopped") => {
     if (!waitingMessage || waitEnded) return;
     waitEnded = true;
     const waitedMs = waitedSince === undefined ? 0 : Date.now() - waitedSince;
     const text = outcome === "acquired"
       ? computerFreeAfterText(holder, waitedMs)
-      : outcome === "gave_up"
-        ? computerStillBusyText(holder, waitedMs)
+      : outcome === "parked"
+        ? computerParkedText(holder, COMPUTER_WAIT_MAX_MS)
         : computerStoppedWaitingText(holder, waitedMs);
     store.appendMessage(owner.threadId, {
       role: "bot", kind: "activity",
-      ...(outcome === "gave_up" ? { turnSucceeded: false } : {}),
-      tool: { name: text, ok: outcome !== "gave_up" },
+      tool: { name: text, ok: true },
       ...(holderThreadRef ? { threadRef: holderThreadRef } : {}),
     });
     bus.publish({
@@ -2705,8 +2721,12 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
       }
       sweepIdleCloudSeats();
       if (Date.now() >= deadline) {
-        endWait("gave_up");
-        throw new ComputerWaitGaveUp(computerStillBusyText(holder, GROUP_GOAL_WAIT_MAX_MS));
+        // ADR-2 (#1651): the ceiling parks the turn — settled, with a
+        // registered resume — instead of failing it. The owner mark lets the
+        // live lazy-claim rejection path park the same way.
+        endWait("parked");
+        owner.computerParkedOn = resource;
+        throw new ComputerWaitParked(computerParkedText(holder, COMPUTER_WAIT_MAX_MS), resource, owner.generation);
       }
       await new Promise<void>(resolve => setTimeout(resolve, 100));
     }
@@ -2809,7 +2829,8 @@ function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
   return task;
 }
 
-async function interruptDirectThread(botId: string, threadId: string): Promise<void> {
+async function interruptDirectThread(botId: string, threadId: string, preserveComputerResume = false): Promise<void> {
+  if (!preserveComputerResume) cancelComputerResume(threadId);
   const requestOwner = directRequestOwners.get(threadId);
   if (requestOwner) {
     requestOwner.stopped = true;
@@ -2850,7 +2871,7 @@ function noteTeammatesLeftRunning(botId: string, threadId: string, running: Room
 }
 
 async function interruptAllDirectThreads(botId: string): Promise<void> {
-  const threads = store.tasks(botId).filter((task) => task.busy || directTurnDispatchClaims.has(task.threadId) || roomHandoffs.activeDirect(task.threadId));
+  const threads = store.tasks(botId).filter((task) => task.busy || directTurnDispatchClaims.has(task.threadId) || roomHandoffs.activeDirect(task.threadId) || pendingComputerResumes.has(task.threadId));
   // Revoke every sibling before yielding to any provider teardown.
   for (const task of threads) {
     cancelDirectTurnDispatch(botId, task.threadId);
@@ -5052,6 +5073,7 @@ function cancelGroupTurnOperations(
   },
 ) {
   cancelTeamSetupResumesForThread(threadId);
+  cancelComputerResume(threadId);
   roomHandoffs.cancelRoom(groupId, threadId);
   for (const operation of groupTurnOperations.get(groupId) ?? []) {
     if (operation.threadId !== threadId) continue;
@@ -5073,10 +5095,15 @@ function groupProviderHandshakeSettled(operation: GroupTurnOperation): void {
   clearCancelledProviderHandshake(operation.threadId, `group:${operation.id}`);
 }
 
-function activeGroupTurnForBot(botId: string): { group: GroupRecord; threadId: string } | null {
+function activeGroupTurnForBot(
+  botId: string,
+  // The computer-resume callback's own operation is registered before it
+  // runs; without this exclusion that operation would block its own resume.
+  except?: GroupTurnOperation,
+): { group: GroupRecord; threadId: string } | null {
   for (const group of store.groups) {
     for (const operation of groupTurnOperations.get(group.id) ?? []) {
-      if (!operation.cancelled && operation.botIds.has(botId)) {
+      if (operation !== except && !operation.cancelled && operation.botIds.has(botId)) {
         return { group, threadId: operation.threadId };
       }
     }
@@ -5675,6 +5702,9 @@ const ASK_BOT_TIMEOUT_MS = Math.max(5_000, Number(process.env.OMB_ASK_BOT_TIMEOU
 // free up and reassigns, and a chat round moves on with a chip that says so —
 // the wait ends as data, not as a dead room. Tests shrink it.
 const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
+// ADR-2 (#1651): the computer wait has its own ceiling, decoupled from the
+// room cap above, and the deadline parks the turn instead of failing it.
+const COMPUTER_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_COMPUTER_WAIT_MAX_MS) || 30 * 60_000);
 // Reassigning around a busy teammate is bounded too: after this many
 // exhausted waits in one run the team is blocked on availability, not stuck.
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
@@ -5758,6 +5788,7 @@ const watchdog = new TurnWatchdog({
         // connector and credential continuations.
         drainQueuedSends();
         drainConnectorResumes();
+        drainComputerResumes();
         drainSecretResumes();
         drainTeamSetupResumes();
       }
@@ -7472,9 +7503,13 @@ bus.subscribe((event: RuntimeEvent) => {
       // interrupted the turn; Claude settles that interrupt as
       // exit_before_result, not "interrupted", so this generation's marker
       // keeps the same failure from reporting a second incident.
+      // A turn parked at the computer ceiling (#1651) settles itself the
+      // same way: interrupted for a resume, not broken.
       const lazyClaimAlreadyReported = event.stopReason === "exit_before_result" &&
         turnResourceOwners.get(event.threadId)?.lazyClaimFailureReported === true;
-      if (!event.ok && event.stopReason !== "interrupted" && !lazyClaimAlreadyReported && !routines?.runForThread(event.threadId)) {
+      const computerParked = event.stopReason === "exit_before_result" &&
+        turnResourceOwners.get(event.threadId)?.computerParkedOn !== undefined;
+      if (!event.ok && event.stopReason !== "interrupted" && !lazyClaimAlreadyReported && !computerParked && !routines?.runForThread(event.threadId)) {
         const broken = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
         if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: event.stopReason?.trim() || "the run ended without a result" });
       }
@@ -7502,7 +7537,7 @@ bus.subscribe((event: RuntimeEvent) => {
           releaseTurnResources(resourceOwner);
           if (!isCurrent()) return;
           if (store.taskByThread(bot.id, event.threadId)?.activity !== "dead") {
-            store.setTaskActivity(bot.id, event.threadId, "idle");
+            store.setTaskActivity(bot.id, event.threadId, resourceOwner?.computerParkedOn !== undefined ? "parked.computer" : "idle");
           }
           directTurnBots.delete(event.threadId);
           if (continueComputerSelection(event.threadId, generation, event.ok)) return;
@@ -7512,6 +7547,7 @@ bus.subscribe((event: RuntimeEvent) => {
             retryDelegationsWaitingOn(bot.id);
             drainQueuedSends();
             drainConnectorResumes();
+            drainComputerResumes();
             drainSecretResumes();
             drainTeamSetupResumes();
             drainDelegationWakes();
@@ -8993,6 +9029,7 @@ async function startTurn(
         retryDelegationsWaitingOn(bot.id);
         drainQueuedSends();
         drainConnectorResumes();
+        drainComputerResumes();
         drainSecretResumes();
         drainTeamSetupResumes();
         drainDelegationWakes();
@@ -9360,6 +9397,22 @@ async function startTurn(
       // the dispatch-failure rules (person-started turns only).
       const surfaceLazyClaimRejection = (label: string) => (failure: string) => {
         if (activeInternalGenerationByThread.get(threadId) !== resourceOwner.generation || !threadBusy(bot.id, threadId)) return;
+        // The wait ceiling parked this turn (#1651): register the resume and
+        // settle the live turn. No error entry, no incident — the parked chip
+        // the wait appended is the whole story. The slot still fails, so the
+        // gate keeps refusing screen calls for the rest of this generation
+        // while the interrupt lands.
+        if (resourceOwner.computerParkedOn) {
+          registerComputerResume({
+            botId: bot.id,
+            threadId,
+            resource: resourceOwner.computerParkedOn,
+            generation: resourceOwner.generation,
+            afterMessageId: store.activePath(threadId).findLast((entry) => entry.role === "user")?.id,
+          });
+          void interruptDirectThread(bot.id, threadId, true).catch(() => {});
+          return;
+        }
         const message = `computer unavailable — ${label} could not be claimed for this turn (${failure})`;
         store.appendMessage(threadId, {
           role: "bot",
@@ -9923,6 +9976,7 @@ async function startTurn(
         retryDelegationsWaitingOn(bot.id);
         drainQueuedSends();
         drainConnectorResumes();
+        drainComputerResumes();
         drainSecretResumes();
         drainTeamSetupResumes();
         drainDelegationWakes();
@@ -9965,6 +10019,7 @@ async function startTurn(
         if (ownsLatestGeneration) {
           drainQueuedSends();
           drainConnectorResumes();
+          drainComputerResumes();
           drainSecretResumes();
           drainTeamSetupResumes();
           drainDelegationWakes();
@@ -9973,6 +10028,31 @@ async function startTurn(
       }
       if (!ownsLatestGeneration) {
         settleDirectFollowup(dispatchClaimId);
+        return;
+      }
+      if (e instanceof ComputerWaitParked) {
+        settleDirectFollowup(dispatchClaimId, { ok: false, text: e.message });
+        registerComputerResume({
+          botId: bot.id,
+          threadId,
+          resource: e.resource,
+          generation: e.generation,
+          afterMessageId: store.activePath(threadId).findLast((entry) => entry.role === "user")?.id,
+        });
+        // Settled as parked, not failed (#1651): the chip the wait appended
+        // is the whole transcript story, and the registered resume owns what
+        // happens next on this thread.
+        if (store.taskByThread(bot.id, threadId)?.activity !== "dead") {
+          store.setTaskActivity(bot.id, threadId, "parked.computer");
+        }
+        directTurnBots.delete(threadId);
+        retryDelegationsWaitingOn(bot.id);
+        drainQueuedSends();
+        drainConnectorResumes();
+        drainComputerResumes();
+        drainSecretResumes();
+        drainTeamSetupResumes();
+        drainDelegationWakes();
         return;
       }
       let message = e instanceof Error ? e.message : String(e);
@@ -10016,9 +10096,9 @@ async function startTurn(
         } else if (refusal) message = `Automatic recovery unavailable: ${refusal} Original error: ${message}`;
       }
       settleDirectFollowup(dispatchClaimId, { ok: false, text: message });
-      // The wait already wrote its failure resolution; keep all dispatch
-      // failure bookkeeping below without adding the same error twice.
-      if (!(e instanceof ComputerWaitGaveUp)) store.appendMessage(threadId, {
+      // The wait ceiling parks and returns above, so any error reaching here
+      // never wrote a transcript line — record the dispatch failure once.
+      store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
         turnSucceeded: false,
@@ -10048,6 +10128,7 @@ async function startTurn(
       // drain would strand anything queued behind this turn
       drainQueuedSends();
       drainConnectorResumes();
+      drainComputerResumes();
       drainSecretResumes();
       drainTeamSetupResumes();
       drainDelegationWakes();
@@ -11270,6 +11351,7 @@ type GroupMemberTurnOutcome =
   | "timed_out"
   | "cancelled"
   | "busy"
+  | "parked"
   | "unavailable";
 type GroupTurnOrchestration = {
   roomHandoffId?: string;
@@ -12197,6 +12279,7 @@ async function runGroupMemberTurn(
     watchdog.settle(threadId);
     drainQueuedSends();
     drainConnectorResumes();
+    drainComputerResumes();
     drainSecretResumes();
     drainTeamSetupResumes();
     return false;
@@ -12226,6 +12309,7 @@ async function runGroupMemberTurn(
         retryDelegationsWaitingOn(bot.id);
         drainQueuedSends();
         drainConnectorResumes();
+        drainComputerResumes();
         drainSecretResumes();
         drainTeamSetupResumes();
       }
@@ -12252,6 +12336,7 @@ async function runGroupMemberTurn(
     // queued while this bot briefly owned the room must be retried now.
     drainQueuedSends();
     drainConnectorResumes();
+    drainComputerResumes();
     drainSecretResumes();
     drainTeamSetupResumes();
   }
@@ -12330,9 +12415,29 @@ async function runGroupMemberTurn(
     if (error instanceof DirectTurnSetupCancelled) return false;
     const isSpendCap = typeof error === "object" && error !== null && (error as { code?: string }).code === "spend_cap";
     const isVariantError = typeof error === "object" && error !== null && (error as { code?: string }).code === "unsupported_model_variant";
+    if (error instanceof ComputerWaitParked) {
+      registerComputerResume({
+        botId: bot.id,
+        threadId,
+        resource: error.resource,
+        generation: error.generation,
+        afterMessageId: store.activePath(threadId).findLast((entry) => entry.role === "user")?.id,
+      });
+      // The room settles with the parked chip the wait appended (#1651);
+      // the registered resume re-runs the speaker turn through the group
+      // queue once the seat frees. "parked" is its own outcome, not "busy":
+      // the member never ran, an in-step retry would only wait the ceiling
+      // out again and burn goal turns, and the goal loop routes around the
+      // member while the registered resume owns the re-run.
+      if (orchestration) {
+        orchestration.result.outcome = "parked";
+        orchestration.result.stopReason = `${bot.name} parked waiting for the computer`;
+      }
+      return false;
+    }
     if (!roomSpeaker && !isSpendCap && !isVariantError) throw error;
     const message = error instanceof Error ? error.message : "Local VM setup failed";
-    if (!(error instanceof ComputerWaitGaveUp)) store.appendMessage(threadId, {
+    store.appendMessage(threadId, {
       role: "bot", kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
       tool: { name: `error: ${message}`, ok: false },
@@ -12363,6 +12468,7 @@ async function runGroupMemberTurn(
       }
       drainQueuedSends();
       drainConnectorResumes();
+      drainComputerResumes();
       drainSecretResumes();
       drainTeamSetupResumes();
     }
@@ -12442,6 +12548,12 @@ async function runGroupGoalStep(args: {
           },
         },
       );
+      // Busy here is a lost claim race — a 1:1 re-claiming the bot between
+      // the wait settling and this turn starting — so wait and retry
+      // in-step. A parked member is deliberately absent from both this
+      // retry and the transient one below: the computer seat is still held,
+      // an immediate retry would wait the ceiling out again while the
+      // registered resume already owns re-running the member.
       if (result.outcome === "busy") continue;
       // One retry for a transient provider failure: a 13-turn goal must not
       // die on a single blip at turn 11. The retry claims the bot again and
@@ -12562,6 +12674,18 @@ async function runGroupGoalOperation(args: {
       );
       return;
     }
+    if (coordinatorResult.outcome === "parked") {
+      // The lead parked at the computer wait ceiling: like lead-busy, the
+      // run cannot route around them, but the parked lead turn itself
+      // resumes through the registered entry once the seat frees.
+      finishGroupGoalRun(
+        args.groupId,
+        args.operation,
+        "blocked",
+        `${coordinatorResult.stopReason ?? `${args.coordinator.name} parked waiting for the computer`} — send the goal again when the computer is free.`,
+      );
+      return;
+    }
     if (!coordinatorResult.ran || coordinatorResult.outcome !== "settled") {
       const reason = coordinatorResult.stopReason?.trim().slice(0, 120);
       finishGroupGoalRun(
@@ -12645,9 +12769,10 @@ async function runGroupGoalOperation(args: {
       );
       return;
     }
-    if (workerResult.outcome === "busy") {
-      // bounded: a team that keeps landing on busy teammates is blocked, not
-      // looping — three exhausted waits per run, then stop and say so
+    if (workerResult.outcome === "busy" || workerResult.outcome === "parked") {
+      // bounded: a team that keeps landing on busy or computer-parked
+      // teammates is blocked, not looping — three exhausted waits per run,
+      // then stop and say so
       waitExhaustions += 1;
       if (waitExhaustions >= GROUP_GOAL_MAX_WAIT_EXHAUSTIONS) {
         finishGroupGoalRun(
@@ -13658,6 +13783,163 @@ function drainConnectorResumes() {
   }
 }
 
+/** A turn parked at the computer wait ceiling (#1651): settled, with this
+ * entry registered until the seat it queued on frees. Mirrors the connector
+ * and secret resume tables. */
+type ComputerResumeEntry = {
+  botId: string;
+  threadId: string;
+  /** The seat the turn parked on; the drain fires only when it frees. */
+  resource: string;
+  /** The parked turn's generation. A drain that sees the thread busy under
+   * THIS generation is inside the turn's own settle window (the lazy-claim
+   * park registers before its interrupt lands) and must keep the entry; a
+   * different generation means a newer turn superseded the parked work. */
+  generation: string;
+  /** The newest user message when the turn parked. A later ask replaces the
+   * parked work instead of racing it, so the drain drops a superseded entry. */
+  afterMessageId?: string;
+};
+const pendingComputerResumes = new Map<string, ComputerResumeEntry>();
+let computerResumeTimer: ReturnType<typeof setTimeout> | undefined;
+
+function cancelComputerResume(threadId: string): void {
+  const entry = pendingComputerResumes.get(threadId);
+  pendingComputerResumes.delete(threadId);
+  // Stop may arrive while the parked provider is still settling. Clear its
+  // marker too, so completion cannot put the canceled task back in parked.
+  const owner = turnResourceOwners.get(threadId);
+  if (owner) delete owner.computerParkedOn;
+  if (entry && store.taskByThread(entry.botId, threadId)?.activity === "parked.computer") {
+    store.setTaskActivity(entry.botId, threadId, "idle");
+  }
+}
+
+function registerComputerResume(entry: ComputerResumeEntry, drainNow = true): void {
+  // One per thread: the newest park replaces an older one.
+  pendingComputerResumes.set(entry.threadId, entry);
+  if (drainNow) {
+    // The seat may already be free (it freed before this park registered):
+    // an idle install would otherwise never drain. #1651.
+    queueMicrotask(drainComputerResumes);
+    return;
+  }
+  // A blocked retry re-reads the same admission state until it changes, so
+  // it belongs on the one-second timer; a microtask here would spin.
+  if (!computerResumeTimer) {
+    computerResumeTimer = setTimeout(drainComputerResumes, 1_000);
+    computerResumeTimer.unref();
+  }
+}
+
+function markComputerResumeFailed(entry: ComputerResumeEntry, message: string): void {
+  const owner = connectorThread(entry.botId, entry.threadId);
+  if (!owner) return;
+  store.appendMessage(entry.threadId, {
+    role: "bot", kind: "activity",
+    ...(owner.group ? { from: { botId: owner.bot.id, name: owner.bot.name, color: owner.bot.color } } : {}),
+    tool: { name: `Parked turn could not continue: ${message.slice(0, 160)}`, ok: false },
+  });
+}
+
+function dispatchComputerResume(entry: ComputerResumeEntry): void {
+  const owner = connectorThread(entry.botId, entry.threadId);
+  if (!owner) return;
+  const prompt = "OpenMausBot computer update: the computer this conversation waited for is free again. Continue the task that parked waiting for it.";
+  if (owner.group) {
+    const groupId = owner.group.id;
+    const operation = beginGroupTurnOperation(groupId, entry.threadId, [entry.botId]);
+    const previous = groupQueues.get(groupId) ?? Promise.resolve();
+    const next = previous.then(async () => {
+      if (operation.cancelled) return;
+      const current = connectorThread(entry.botId, entry.threadId);
+      if (!current?.group) return;
+      // Only ANOTHER live group turn for this bot blocks the resume. The
+      // whole-bot busy flag is true whenever the bot's 1:1 thread runs and
+      // must not park a room resume; this callback's own operation is
+      // registered already and is excluded above.
+      if (activeGroupTurnForBot(entry.botId, operation)) {
+        registerComputerResume(entry, false);
+        return;
+      }
+      await runGroupMemberTurn(
+        current.group.id,
+        entry.threadId,
+        entry.botId,
+        0,
+        new Set(),
+        prompt,
+        (message) => markComputerResumeFailed(entry, message),
+        () => operation.cancelled,
+        () => groupProviderHandshakeStarted(operation),
+        () => groupProviderHandshakeSettled(operation),
+      );
+    });
+    const tracked = next.finally(() => finishGroupTurnOperation(groupId, operation));
+    groupQueues.set(
+      groupId,
+      tracked.catch((error) => {
+        markComputerResumeFailed(entry, error instanceof Error ? error.message : String(error));
+      }),
+    );
+    return;
+  }
+  void startTurn(entry.botId, prompt, {
+    threadId: entry.threadId,
+    cardContinuation: true,
+    onDispatchError: (message) => markComputerResumeFailed(entry, message),
+  }).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isTurnAdmissionBlocked(error)) registerComputerResume(entry, false);
+    else markComputerResumeFailed(entry, message);
+  });
+}
+
+function drainComputerResumes(): void {
+  clearTimeout(computerResumeTimer);
+  computerResumeTimer = undefined;
+  for (const [key, entry] of pendingComputerResumes) {
+    const owner = connectorThread(entry.botId, entry.threadId);
+    if (!owner) {
+      pendingComputerResumes.delete(key);
+      continue;
+    }
+    // A newer ask replaced the parked work: the resume is stale, not blocked.
+    const latestUser = store.activePath(entry.threadId).findLast((message) => message.role === "user")?.id;
+    if (entry.afterMessageId !== undefined && latestUser !== entry.afterMessageId) {
+      pendingComputerResumes.delete(key);
+      continue;
+    }
+    // A newer generation owns the thread — a new turn superseded the parked
+    // one — so the parked resume is stale too. The parked turn's OWN
+    // generation is still current while it settles: the lazy-claim park
+    // registers its resume before the interrupt lands, and a drain in that
+    // window must keep the entry (#1651), not read busy as superseded.
+    const activeGeneration = activeInternalGenerationByThread.get(entry.threadId);
+    if (activeGeneration !== undefined && activeGeneration !== entry.generation) {
+      pendingComputerResumes.delete(key);
+      continue;
+    }
+    // Busy under the parked generation: the turn is still settling. Keep the
+    // entry; the next drain (its completion, the next release) dispatches.
+    if (threadBusy(entry.botId, entry.threadId)) continue;
+    // Admission before dispatch: a resume startTurn would refuse must wait
+    // on the timer, not bounce through the rejection handler back into a
+    // drain microtask. Direct resumes share startTurn's own test; a room
+    // resume only waits behind another live group turn for the bot.
+    if (owner.group ? Boolean(activeGroupTurnForBot(entry.botId)) : !canAdmitDirectTurn(entry.botId, entry.threadId)) continue;
+    if (!turnResources.free(entry.resource)) continue;
+    pendingComputerResumes.delete(key);
+    dispatchComputerResume(entry);
+  }
+  // ponytail: one wake-up per second only while work is parked; use exact
+  // claim-deadline scheduling if sub-second resume latency becomes necessary.
+  if (pendingComputerResumes.size) {
+    computerResumeTimer = setTimeout(drainComputerResumes, 1_000);
+    computerResumeTimer.unref();
+  }
+}
+
 type SecretResumeEntry = {
   botId: string;
   threadId: string;
@@ -13921,6 +14203,7 @@ bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
   if (event.type === "turn.completed") {
     drainConnectorResumes();
+    drainComputerResumes();
     drainSecretResumes();
     drainTeamSetupResumes();
   }
@@ -14456,6 +14739,7 @@ async function reloadProviders() {
   // queued behind them drains now — onto the freshly loaded fleet
   drainQueuedSends();
   drainConnectorResumes();
+  drainComputerResumes();
   drainSecretResumes();
   drainTeamSetupResumes();
 }
@@ -22990,6 +23274,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             drainQueuedSends();
             drainDelegationWakes();
             drainConnectorResumes();
+            drainComputerResumes();
             drainSecretResumes();
             drainTeamSetupResumes();
           }
