@@ -22,20 +22,28 @@ struct LocalVmControlView: View {
             header
             screen
                 .frame(maxHeight: .infinity)
+            // The desktop is drawn as wide as the phone, so on a phone it
+            // needs only a couple of hundred points of height. With the
+            // keyboard up, a full-size trackpad is what squeezes it below
+            // that; a short one leaves the picture at full width and keeps a
+            // click within reach, which typing into a desktop needs often.
             Trackpad(desktop: desktop)
-                .frame(height: 230)
+                .frame(height: typing ? 96 : 230)
                 .overlay {
-                    VStack(spacing: 6) {
+                    VStack(spacing: typing ? 4 : 6) {
                         Capsule().fill(Color.white.opacity(0.35)).frame(width: 36, height: 4)
                         Text("Trackpad")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text("Swipe to move · Tap to click · Hold to drag")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color.white.opacity(0.6))
+                            .font(.system(size: typing ? 13 : 15, weight: .semibold))
+                        if !typing {
+                            Text("Swipe to move · Tap to click · Hold to drag")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.white.opacity(0.6))
+                        }
                     }
                     .foregroundStyle(Color.white.opacity(0.85))
                     .allowsHitTesting(false)
                 }
+                .animation(.snappy(duration: 0.25), value: typing)
                 .accessibilityElement()
                 .accessibilityLabel("Trackpad")
                 .accessibilityHint("Swipe to move the pointer, tap to click, hold to drag")
