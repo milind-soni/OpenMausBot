@@ -16,6 +16,11 @@ struct LocalVmControlView: View {
     let handBack: () -> Void
 
     @State private var typing = false
+    /// The keyboard's own appearance, not the button that asked for it: the
+    /// trackpad collapses and grows inside the keyboard's animation, so the
+    /// desktop above, which the keyboard's inset resizes, moves with it
+    /// rather than a beat later.
+    @StateObject private var keyboard = KeyboardPresence()
 
     var body: some View {
         VStack(spacing: 14) {
@@ -28,22 +33,22 @@ struct LocalVmControlView: View {
             // that; a short one leaves the picture at full width and keeps a
             // click within reach, which typing into a desktop needs often.
             Trackpad(desktop: desktop)
-                .frame(height: typing ? 96 : 230)
+                .frame(height: keyboard.visible ? 96 : 230)
                 .overlay {
-                    VStack(spacing: typing ? 4 : 6) {
+                    VStack(spacing: 6) {
                         Capsule().fill(Color.white.opacity(0.35)).frame(width: 36, height: 4)
                         Text("Trackpad")
-                            .font(.system(size: typing ? 13 : 15, weight: .semibold))
-                        if !typing {
+                            .font(.system(size: 15, weight: .semibold))
+                        if !keyboard.visible {
                             Text("Swipe to move · Tap to click · Hold to drag")
                                 .font(.system(size: 12))
                                 .foregroundStyle(Color.white.opacity(0.6))
+                                .transition(.opacity)
                         }
                     }
                     .foregroundStyle(Color.white.opacity(0.85))
                     .allowsHitTesting(false)
                 }
-                .animation(.snappy(duration: 0.25), value: typing)
                 .accessibilityElement()
                 .accessibilityLabel("Trackpad")
                 .accessibilityHint("Swipe to move the pointer, tap to click, hold to drag")
@@ -306,8 +311,13 @@ private struct KeyCatcher: UIViewRepresentable {
 
     func updateUIView(_ view: KeyInputView, context: Context) {
         context.coordinator.binding = $active
-        if active, !view.isFirstResponder { view.becomeFirstResponder() }
-        if !active, view.isFirstResponder { view.resignFirstResponder() }
+        // Outside SwiftUI's update pass: a responder change made during it
+        // can be dropped, and then the keyboard never comes.
+        let active = active
+        DispatchQueue.main.async {
+            if active, !view.isFirstResponder { view.becomeFirstResponder() }
+            if !active, view.isFirstResponder { view.resignFirstResponder() }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(binding: $active) }
@@ -344,5 +354,29 @@ private struct KeyCatcher: UIViewRepresentable {
             if resigned { onResign?() }
             return resigned
         }
+    }
+}
+
+/// Whether the system keyboard is up, changed inside the keyboard's own
+/// animation so views keyed on it move in step with the keyboard.
+@MainActor
+private final class KeyboardPresence: ObservableObject {
+    @Published private(set) var visible = false
+    private var observers: [NSObjectProtocol] = []
+
+    init() {
+        let center = NotificationCenter.default
+        for (name, shown) in [(UIResponder.keyboardWillShowNotification, true), (UIResponder.keyboardWillHideNotification, false)] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+                MainActor.assumeIsolated {
+                    withAnimation(.easeInOut(duration: max(duration, 0.2))) { self?.visible = shown }
+                }
+            })
+        }
+    }
+
+    deinit {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
     }
 }
