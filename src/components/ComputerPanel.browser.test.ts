@@ -11,6 +11,8 @@ const fixture = vi.hoisted(() => {
   vi.stubGlobal("localStorage", { getItem: () => view.current });
   return { config: {} as FeatureFlagConfig & { cloudHome?: boolean }, view };
 });
+// These cover the Advanced panel; ComputerPanel.simple.test.ts covers Simple.
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   useStore: () => ({
