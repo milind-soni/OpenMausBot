@@ -359,6 +359,21 @@ describe("Where the bot works", () => {
   });
 });
 
+describe("A chat pinned to a place", () => {
+  const pinned = () => makeBot({ tasks: [{ threadId: "thread-scout", title: "", createdAt: 1, surface: "cloud" }] } as Partial<Bot>);
+  const note = (rendered: ReturnType<typeof render>) =>
+    text(rendered.nodes.find((node) => node.props["data-testid"] === "place-pinned-note")!.props.children);
+
+  it("names the place in the grid's words, without pointing Simple at a composer chip it no longer has", () => {
+    expect(note(render(pinned()))).toBe("This chat is pinned to “Cloud box”.");
+
+    fixture.advanced = true;
+    fixture.values = [];
+    phaseIndex = -1;
+    expect(note(render(pinned()))).toBe("This conversation is pinned to Cloud computer. Change it from the composer.");
+  });
+});
+
 describe("Technical controls", () => {
   const cloud = () => makeBot({ computer: "cloud" });
 

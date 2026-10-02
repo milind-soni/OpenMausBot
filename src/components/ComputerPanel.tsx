@@ -1986,9 +1986,15 @@ export function ComputerPanel({
             <p className="mt-3 text-[11.5px] leading-5 text-ink-secondary">
               {t(state.config?.cloudHome ? "computer.simple.autoHintCloudHome" : isMacHost ? "computer.simple.autoHintMac" : "computer.simple.autoHintPc")}
             </p>
+            {/* Simple has no composer chip to change a pin from, so this only
+                names the place, in the grid's words. Nor is there a one-click
+                "Use Auto": the wire task cannot tell a person's pin from one
+                Auto recorded (surfaceSource stays on the server). */}
             {liveTask?.surface && (
               <p className="mt-2 text-[11.5px] leading-5 text-ink-secondary" data-testid="place-pinned-note">
-                {t("place.pinnedNote", { place: t(placeLabelKey(liveTask.surface)) })}
+                {t("place.pinnedNoteSimple", {
+                  place: placeOptions.find(({ mode }) => mode === liveTask.surface)?.simpleLabel ?? t(placeLabelKey(liveTask.surface)),
+                })}
               </p>
             )}
           </div>

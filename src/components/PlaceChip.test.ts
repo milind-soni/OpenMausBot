@@ -4,7 +4,12 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 vi.stubGlobal("window", {});
-const fixture = vi.hoisted(() => ({ config: null as unknown }));
+const fixture = vi.hoisted(() => ({ config: null as unknown, menuOpen: false }));
+// Static markup never runs the click that opens the menu; this renders it open.
+vi.mock("./MenuMotion", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./MenuMotion")>(),
+  useMenuMotion: () => ({ shown: fixture.menuOpen, closing: false, className: "", exitProps: {} }),
+}));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
@@ -66,6 +71,46 @@ describe("PlaceChip composer trigger", () => {
     expect(html).toContain('aria-label="Where this conversation works: This computer"');
     expect(html).toContain("This computer — From this bot&#x27;s Works on setting");
     expect(html).not.toMatch(/<span class="truncate">This computer<\/span>/);
+  });
+});
+
+describe("the menu's first row", () => {
+  afterEach(() => { fixture.menuOpen = false; });
+  /** The open menu's radio rows: whether each is checked, and its words. */
+  const rows = (props: Partial<ComponentProps<typeof PlaceChip>>) => {
+    fixture.menuOpen = true;
+    const html = renderToStaticMarkup(createElement(PlaceChip, { bot, live: false, onPin: () => {}, ...props }));
+    return {
+      html,
+      rows: html.split('role="menuitemradio"').slice(1).map((row) => ({
+        checked: row.startsWith(' aria-checked="true"'),
+        text: row.slice(row.indexOf(">") + 1, row.indexOf("</button>"))
+          .replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ").trim(),
+      })),
+    };
+  };
+
+  it("is Auto itself for a bot on Auto, selected while the conversation has no pin", () => {
+    const { html, rows: menu } = rows({ bot: { ...bot, computer: undefined } });
+    expect(menu[0]).toEqual({ checked: true, text: "Auto Picks the right place for each task" });
+    expect(html).not.toContain("Follow this bot");
+    expect(html).toContain('aria-label="Where this conversation works: Auto"');
+    // Auto once, then the four places as before: no second Auto row.
+    expect(menu).toHaveLength(5);
+    expect(menu.filter((row) => row.text.startsWith("Auto"))).toHaveLength(1);
+  });
+
+  it("stays Auto, unchecked, when the conversation is pinned elsewhere", () => {
+    const { html, rows: menu } = rows({ bot: { ...bot, computer: undefined }, task: { surface: "vm" } });
+    expect(menu[0]).toEqual({ checked: false, text: "Auto Picks the right place for each task" });
+    expect(menu.find((row) => row.checked)?.text).toBe("Local VM Isolated local desktop");
+    expect(html).toContain('aria-label="Where this conversation works: Local VM"');
+  });
+
+  it("keeps following the bot's setting when the bot works on a specific place", () => {
+    const { html, rows: menu } = rows({ bot: { ...bot, computer: "local" } });
+    expect(menu[0]).toEqual({ checked: true, text: "Follow this bot's setting Currently This computer" });
+    expect(html).not.toContain("Picks the right place for each task");
   });
 });
 
