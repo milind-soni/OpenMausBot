@@ -1775,7 +1775,8 @@ public struct CompanionClient: Sendable {
     /// conversation is not on the Local VM rather than picturing a computer it
     /// isn't using (and, in pool mode, pictures that thread's own VM). The
     /// sidecar requires the same per-device computer access as the cloud
-    /// desktop, and answers 403 while it is off.
+    /// desktop, and answers 403 while it is off; a server paired directly
+    /// answers 403 to a chat-only pairing.
     public func localVmScreenshot(botId: String, threadId: String) async throws -> LocalVmScreenshot {
         guard Self.validRouteID(botId), Self.validRouteID(threadId) else { throw APIError.badURL }
         var request = try makeRequest(
@@ -1806,9 +1807,10 @@ public struct CompanionClient: Sendable {
         )
     }
 
-    /// The Local VM's live desktop, relayed by the sidecar. The harness grants
-    /// it only to the lease that holds the computer, and the sidecar closes
-    /// the relay as soon as that lease stops holding it.
+    /// The Local VM's live desktop, relayed by the sidecar or, on a phone
+    /// paired with the server directly, proxied by the server itself. The
+    /// harness grants it only to the lease that holds the computer, and the
+    /// relay or proxy closes as soon as that lease stops holding it.
     public func localVmViewer(botId: String, threadId: String, leaseId: String) async throws -> LocalVmViewerSession {
         guard Self.validRouteID(botId), Self.validRouteID(threadId), Self.validRouteID(leaseId),
               (16...120).contains(leaseId.count)
@@ -1830,24 +1832,30 @@ public struct CompanionClient: Sendable {
     /// Close this device's relayed viewers for the bot.
     public func closeViewer(botId: String) async throws {
         guard Self.validRouteID(botId) else { throw APIError.badURL }
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/computer/viewer-close"))
+        // The harness takes computer mutations as JSON only; without a body
+        // it answers 415 and closes nothing.
+        try await send(try makeRequest("POST", "/api/bots/\(botId)/computer/viewer-close", body: [:]))
     }
 
-    /// The authenticated WebSocket request for a relayed viewer: same host and
-    /// token as every other call, `ws` or `wss` to match.
+    /// The authenticated WebSocket request for a Local VM viewer, relayed or
+    /// proxied: same host and token as every other call, `ws` or `wss` to
+    /// match.
     public func viewerSocketRequest(_ viewer: LocalVmViewerSession) throws -> URLRequest {
         guard let base = connection.baseURL,
               var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
         else { throw APIError.badURL }
         components.scheme = components.scheme == "https" ? "wss" : "ws"
         components.path = "/" + viewer.socketPath
-        components.query = nil
+        let query = viewer.socketQuery.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        components.queryItems = query.isEmpty ? nil : query
         guard let url = components.url else { throw APIError.badURL }
         var request = URLRequest(url: url)
         request.timeoutInterval = requestTimeout
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        // websockify carries RFB in binary frames.
-        request.setValue("binary", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        // websockify carries RFB in binary frames, and the sidecar relays
+        // that subprotocol. The server's own proxy answers without one, and
+        // a handshake that asked for one would be refused.
+        if viewer.relayed { request.setValue("binary", forHTTPHeaderField: "Sec-WebSocket-Protocol") }
         return request
     }
 

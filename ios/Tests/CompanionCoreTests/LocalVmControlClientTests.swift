@@ -82,6 +82,15 @@ final class LocalVmControlClientTests: XCTestCase {
         XCTAssertEqual(released["action"], "release")
     }
 
+    func testClosesTheViewerAsAJsonMutation() async throws {
+        LocalVmControlStub.responseBody = Data(#"{"closed":true}"#.utf8)
+        try await client().closeViewer(botId: "bot_1")
+        let request = try XCTUnwrap(LocalVmControlStub.capturedRequest)
+        XCTAssertEqual(request.url?.path, "/api/bots/bot_1/computer/viewer-close")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(LocalVmControlStub.capturedBody, Data("{}".utf8))
+    }
+
     func testRefusesALeaseTheHarnessWouldReject() async {
         do {
             _ = try await client().computerControl(botId: "bot_1", take: true, leaseId: "short")
@@ -107,6 +116,59 @@ final class LocalVmControlClientTests: XCTestCase {
         XCTAssertEqual(socket.url?.absoluteString, "ws://127.0.0.1:8810/vps-viewer/\(relayID)/websockify")
         XCTAssertEqual(socket.value(forHTTPHeaderField: "Authorization"), "Bearer paired-token")
         XCTAssertEqual(socket.value(forHTTPHeaderField: "Sec-WebSocket-Protocol"), "binary")
+    }
+
+    func testJoinsThroughTheServersOwnProxyWhenPairedDirectly() async throws {
+        let lease = "phone-lease-0123456789"
+        LocalVmControlStub.responseBody = try JSONSerialization.data(withJSONObject: [
+            "socketPath": "api/desktop-viewer/local/shared/websockify?botId=bot_1&threadId=th-2&controlLeaseId=\(lease)",
+            "password": "vm-secret",
+        ])
+        let viewer = try await client(host: "bot.tail0a93.ts.net").localVmViewer(botId: "bot_1", threadId: "th-2", leaseId: lease)
+        XCTAssertEqual(viewer.socketPath, "api/desktop-viewer/local/shared/websockify")
+        XCTAssertEqual(viewer.socketQuery, ["botId": "bot_1", "threadId": "th-2", "controlLeaseId": lease])
+        XCTAssertEqual(viewer.password, "vm-secret")
+        XCTAssertFalse(viewer.relayed)
+
+        let socket = try client(host: "bot.tail0a93.ts.net").viewerSocketRequest(viewer)
+        XCTAssertEqual(
+            socket.url?.absoluteString,
+            "ws://bot.tail0a93.ts.net:8810/api/desktop-viewer/local/shared/websockify?botId=bot_1&controlLeaseId=\(lease)&threadId=th-2"
+        )
+        XCTAssertEqual(socket.value(forHTTPHeaderField: "Authorization"), "Bearer paired-token")
+        // The server's proxy negotiates no subprotocol; asking for one would fail the handshake.
+        XCTAssertNil(socket.value(forHTTPHeaderField: "Sec-WebSocket-Protocol"))
+    }
+
+    func testAcceptsOnlyTheServersDesktopProxyShape() {
+        let lease = "phone-lease-0123456789"
+        let bound = "botId=bot_1&controlLeaseId=\(lease)"
+        for raw in [
+            "http://127.0.0.1:45679/vnc.html#password=vm-secret",
+            "https://desktop.example/api/desktop-viewer/local/shared/websockify?\(bound)",
+            "//evil.example/api/desktop-viewer/local/shared/websockify?\(bound)",
+            "api/desktop-viewer/local/shared/websockify",
+            "api/desktop-viewer/local/shared/websockify?botId=bot_1",
+            "api/desktop-viewer/local/shared/websockify?\(bound)&host=evil.example",
+            "api/desktop-viewer/local/shared/websockify?\(bound)&botId=bot_2",
+            "api/desktop-viewer/local/shared/websockify?\(bound)&threadId=",
+            "api/desktop-viewer/local/127.0.0.1:22/websockify?\(bound)",
+            "api/desktop-viewer/vps/bot_1/websockify?\(bound)",
+            "api/desktop-viewer/local/shared?\(bound)",
+            "api/desktop-viewer/local/shared/websockify?\(bound)#password=x",
+        ] {
+            XCTAssertNil(LocalVmViewerSession.parseDirect(raw), raw)
+        }
+        let hash = String(repeating: "0", count: 64)
+        for target in ["shared", "bot-\(hash)", "pool-3"] {
+            let parsed = LocalVmViewerSession.parseDirect("api/desktop-viewer/local/\(target)/websockify?\(bound)")
+            XCTAssertEqual(parsed?.0, "api/desktop-viewer/local/\(target)/websockify")
+            XCTAssertEqual(parsed?.1, ["botId": "bot_1", "controlLeaseId": lease])
+        }
+        XCTAssertEqual(
+            LocalVmViewerSession.parseDirect("api/desktop-viewer/local/pool-3/websockify?\(bound)&threadId=th-2")?.1,
+            ["botId": "bot_1", "threadId": "th-2", "controlLeaseId": lease]
+        )
     }
 
     func testAcceptsOnlyTheSidecarsRelayShape() {

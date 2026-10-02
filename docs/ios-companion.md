@@ -299,6 +299,15 @@ Allowed in the first release:
   phone speaks RFB over the relay. Hand back closes the viewer and releases
   the lease, and so does backgrounding the app. In shared Local VM mode the
   hold pauses only this bot, as it does on the Mac.
+- A phone paired with the server directly (`openmausbot serve` behind
+  Tailscale Serve or a tunnel, no sidecar) drives the Local VM the same way,
+  but the join answers it with the server's own authenticated desktop proxy
+  (`/api/desktop-viewer/local/<target>/websockify`), bound to its control
+  lease, and the VNC password; never the loopback address. The proxy re-checks
+  the lease and the session every few seconds and closes the socket when
+  either lapses; hand back closes it at once. Computer access is the pairing's
+  scope: Full access (`openmausbot pair`) may, chat-only (`--client`) is
+  answered 403 and the app shows computer access as off.
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.

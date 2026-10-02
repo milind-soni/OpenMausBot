@@ -5345,6 +5345,17 @@ const desktopViewer = createDesktopViewer({
     });
   },
   live: auth => auth.kind === "loopback" || sessions.isLive(auth.session.id),
+  // A phone paired with this server directly drives a bot's Local VM through
+  // this proxy under its control lease (see the local-computer join route).
+  // The lease must hold the bot's computer, and that computer must be the
+  // desktop being viewed: a lease on one bot opens no other bot's VM.
+  lease: (id, botId, controlLeaseId, threadId) => {
+    const bot = store.bot(botId);
+    if (!bot || viewerTargetId(localVmTargetForStatus(bot.id, threadId)) !== id) return;
+    const key = botComputerControlKey(bot);
+    const holds = () => computerControl.ownsLease(key, controlLeaseId);
+    return holds() ? holds : undefined;
+  },
 });
 function closeSessionStreams(sessionId: string): void {
   browserLive.closeForOwner(sessionId);
@@ -21786,16 +21797,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         image: await containerComputerScreenshot(undefined, undefined, target),
       });
     }
-    // The Local VM's own noVNC address, for the companion sidecar to relay to
-    // a paired phone the owner has allowed computer access (the sidecar
-    // checks that). Only a loopback caller gets it — the address carries the
-    // VNC password — and only for the control lease that holds this bot's
-    // computer right now. The sidecar keeps re-checking that lease with
-    // `action: "check"` and cuts the relay when it no longer holds, so the
-    // phone never drives the VM alongside the bot.
+    // The Local VM's live desktop for a phone, granted only to the control
+    // lease that holds this bot's computer right now. Two callers:
+    //
+    // The companion sidecar (a loopback caller) gets the VM's own noVNC
+    // address, VNC password included, relays it to a paired phone the owner
+    // has allowed computer access, keeps re-checking the lease with
+    // `action: "check"`, and cuts the relay when it no longer holds.
+    //
+    // A phone paired with this server directly (`openmausbot serve`, no
+    // sidecar) never sees that address. It gets this server's own
+    // authenticated desktop proxy, bound to its lease: the proxy re-checks
+    // the lease and the session every few seconds and closes the socket when
+    // either lapses. Reaching here at all took the admin scope, which a
+    // chat-only pairing (`openmausbot pair --client`) does not have, so
+    // computer access is the same explicit choice the owner's browser makes.
     m = path.match(/^\/api\/bots\/([\w-]+)\/local-computer\/join$/);
     if (m && method === "POST") {
-      if (auth.kind !== "loopback") return json(res, 404, { error: "not found" });
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
@@ -21819,7 +21837,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       localVmIdleFor(target).touch();
       res.setHeader("cache-control", "private, no-store");
-      return json(res, 200, { joinUrl: status.viewer_url });
+      if (auth.kind === "loopback") return json(res, 200, { joinUrl: status.viewer_url });
+      const socket = new URLSearchParams({ botId: bot.id, ...(threadId ? { threadId } : {}), controlLeaseId: lease.data });
+      return json(res, 200, {
+        socketPath: `api/desktop-viewer/${viewerTargetId(target)}/websockify?${socket}`,
+        password: new URLSearchParams(new URL(status.viewer_url).hash.slice(1)).get("password"),
+      });
     }
 
     // identity handshake for the packaged app's port fallback: the forked
@@ -23377,7 +23400,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      return json(res, 200, bot.cloudBackend === "vps" ? vps.closeVpsDesktopTunnel(bot.id) : { closed: false });
+      // A directly paired phone's Local VM desktop runs through this server's
+      // own proxy under its lease on this bot; hand-back closes it here, ahead
+      // of the lease re-check. The session's other viewers are left alone.
+      const closedViewers = auth.kind === "session" ? desktopViewer.closeForOwner(auth.session.id, bot.id) : 0;
+      if (bot.cloudBackend === "vps") return json(res, 200, vps.closeVpsDesktopTunnel(bot.id));
+      return json(res, 200, { closed: closedViewers > 0 });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/(provision|join|sleep|exec|screenshot|remove)$/);
     if (m && method === "POST") {

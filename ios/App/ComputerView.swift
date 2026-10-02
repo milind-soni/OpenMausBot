@@ -305,8 +305,11 @@ struct ComputerView: View {
                     vmProblem = nil
                 } catch let APIError.status(code, message) {
                     switch code {
-                    case 403 where message?.contains("computer access is off") == true:
-                        // Revoked or never granted: stop showing the old picture.
+                    case 403 where message?.contains("computer access is off") == true
+                        || (message?.contains("admin scope") == true && session.pairedWithServer):
+                        // Revoked or never granted (or, on a server paired
+                        // directly, a chat-only pairing): stop showing the
+                        // old picture.
                         polled = nil
                         vmProblem = .accessOff
                     case 404:
@@ -333,6 +336,12 @@ struct ComputerView: View {
     @ViewBuilder
     private var waiting: some View {
         switch vmProblem {
+        case .accessOff where session.pairedWithServer:
+            notice(
+                systemImage: "lock.display",
+                title: "Computer access is off for this phone",
+                detail: Text("This phone was paired with chat-only access. Pair it again with Full access (openmausbot pair, without --client) to see and control the Local VM.")
+            )
         case .accessOff:
             notice(
                 systemImage: "lock.display",

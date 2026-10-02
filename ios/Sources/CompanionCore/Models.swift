@@ -907,14 +907,38 @@ public struct ComputerControlState: Decodable, Sendable, Equatable {
 /// the desktop asks for. In memory only, like `CloudDesktopSession`; the path
 /// is a short-lived capability.
 public struct LocalVmViewerSession: Decodable, Sendable, Equatable {
-    /// e.g. `vps-viewer/<32 characters>/websockify`, relative to the sidecar.
+    /// The WebSocket path on the paired computer, without its leading slash:
+    /// `vps-viewer/<32 characters>/websockify` when the companion sidecar
+    /// relays the desktop, `api/desktop-viewer/local/<target>/websockify`
+    /// when the server itself proxies it to a directly paired phone.
     public let socketPath: String
+    /// What the server's own proxy needs to bind the socket to the control
+    /// lease (`botId`, `controlLeaseId`, and the `threadId` whose VM seat the
+    /// join picked). Empty for a sidecar relay.
+    public let socketQuery: [String: String]
     public let password: String?
 
-    private enum CodingKeys: String, CodingKey { case joinUrl }
+    /// Whether the companion sidecar relays this desktop. The sidecar speaks
+    /// websockify's `binary` subprotocol; the server's proxy negotiates none.
+    public var relayed: Bool { socketPath.hasPrefix("vps-viewer/") }
+
+    private enum CodingKeys: String, CodingKey { case joinUrl, socketPath, password }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let raw = try container.decodeIfPresent(String.self, forKey: .socketPath) {
+            guard let parsed = Self.parseDirect(raw) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .socketPath,
+                    in: container,
+                    debugDescription: "Local VM viewer must be the paired server's own desktop proxy"
+                )
+            }
+            (socketPath, socketQuery) = parsed
+            let password = try container.decodeIfPresent(String.self, forKey: .password)
+            self.password = password?.isEmpty == false ? password : nil
+            return
+        }
         let raw = try container.decode(String.self, forKey: .joinUrl)
         guard let parsed = Self.parse(raw) else {
             throw DecodingError.dataCorruptedError(
@@ -924,6 +948,7 @@ public struct LocalVmViewerSession: Decodable, Sendable, Equatable {
             )
         }
         (socketPath, password) = parsed
+        socketQuery = [:]
     }
 
     /// Only the sidecar's relay shape is accepted: anything with a scheme or
@@ -941,6 +966,28 @@ public struct LocalVmViewerSession: Decodable, Sendable, Equatable {
         guard path == expected else { return nil }
         let password = settings.first { $0.name == "password" }?.value
         return (path, password?.isEmpty == false ? password : nil)
+    }
+
+    /// Only the server's own desktop proxy, for a Local VM target, carrying
+    /// nothing but the lease binding. Like `parse`, a scheme or host means
+    /// somewhere other than the paired server and is refused.
+    static func parseDirect(_ raw: String) -> (String, [String: String])? {
+        guard let components = URLComponents(string: raw),
+              components.scheme == nil, components.host == nil, components.fragment == nil,
+              components.path.range(
+                  of: #"^api/desktop-viewer/local/(shared|bot-[a-f0-9]{64}|pool-\d+)/websockify$"#,
+                  options: .regularExpression
+              ) != nil
+        else { return nil }
+        var query: [String: String] = [:]
+        for item in components.queryItems ?? [] {
+            guard ["botId", "threadId", "controlLeaseId"].contains(item.name), let value = item.value, !value.isEmpty,
+                  query[item.name] == nil
+            else { return nil }
+            query[item.name] = value
+        }
+        guard query["botId"] != nil, query["controlLeaseId"] != nil else { return nil }
+        return (components.path, query)
     }
 }
 

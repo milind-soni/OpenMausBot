@@ -61,3 +61,49 @@ the join and relay rewrite by `companion/test/viewer-relay.test.ts` and
 `ios/Tests/CompanionCoreTests/LocalVmScreenshotClientTests.swift` and
 `LocalVmControlClientTests.swift`; and the VNC protocol, byte for byte, by
 `RFBTests.swift`.
+
+## Phones paired with the server directly
+
+A phone paired with `openmausbot serve` itself (a headless server, reached over
+Tailscale Serve or a tunnel) has no companion sidecar, so nothing rewrites the
+VM's noVNC address for it. The join route answers such a phone differently: a
+path on the server's own authenticated desktop proxy
+(`/api/desktop-viewer/local/shared/websockify` for the shared VM; per-bot and
+pool targets likewise), bound to the phone's control lease and to the
+conversation whose VM seat the join picked, plus the VNC password. The phone never sees a loopback address, and the
+proxy re-checks the lease and the session every few seconds and closes the
+socket when either lapses. Computer access is the pairing's scope: a Full
+access pairing (`openmausbot pair`) may; a chat-only one (`--client`) is
+answered 403, which the phone shows as computer access being off.
+
+Check it against the same fixture, talking to the printed `harness` address
+rather than the sidecar. With `BOT` and `THREAD` from the fixture's output and
+`LEASE` any name of 16 to 120 URL-safe characters:
+
+1. Pair a phone session: `POST /api/auth/pairing` with `{}` (loopback is the
+   owner), then `POST /api/auth/pair` with the code. Use its token as a bearer
+   below. Pair a second one with `{"scopes":["client"]}` for the chat-only case.
+2. Chat-only: `POST /api/bots/BOT/local-computer/join?threadId=THREAD&controlLeaseId=LEASE`
+   and a WebSocket upgrade of
+   `/api/desktop-viewer/local/shared/websockify?botId=BOT&threadId=THREAD&controlLeaseId=LEASE`
+   both answer 403.
+3. Full access, before taking control: the join answers 409 "Take control of
+   this computer first", and so does the proxy.
+4. `POST /api/bots/BOT/computer/control` with `{"action":"take","controlLeaseId":"LEASE"}`,
+   then the join: 200 with `socketPath` and `password`, and no `joinUrl` or
+   `127.0.0.1` anywhere in the body.
+5. Upgrade `/` + `socketPath` with the bearer: 101, and the first bytes are the
+   desktop's `RFB 003.008` greeting. The events address shows one connection
+   and `controlHeld: true`.
+6. `POST /api/bots/BOT/computer/viewer-close` answers `{"closed":true}` and the
+   socket closes at once; a viewer-close for another bot leaves it open. Open it again, then release the lease
+   (`{"action":"release","controlLeaseId":"LEASE"}`): the socket closes within
+   about five seconds, and both the join and the proxy answer 409 again.
+   `POST /api/auth/logout` on the phone's session closes an open socket
+   immediately.
+7. The sidecar path is unchanged: the same join from loopback, without a
+   bearer, still returns the raw `joinUrl` for the sidecar to rewrite.
+
+The proxy's lease binding is covered by `server/routes/desktop-viewer.test.ts`
+and the route's answers to direct sessions by `server/index.test.ts`; the
+phone's acceptance of only this proxy shape by `LocalVmControlClientTests.swift`.

@@ -8494,6 +8494,64 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("lets a phone paired directly with Full access ask for the Local VM desktop under its lease, and nobody else", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const lease = "phone-lease-0123456789";
+    const owner = await asPairedPerson("Owner's phone");
+    const chatOnlyWindow = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+    const chatOnlyPaired = await fetch(`${BASE}/api/auth/pair`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: chatOnlyWindow.body.code }),
+    });
+    const chatOnlyToken = ((await chatOnlyPaired.json()) as any).token as string;
+    const asChatOnly = async (method: string, path: string, payload?: unknown) => {
+      const res = await fetch(`${BASE}${path}`, {
+        method, headers: { authorization: `Bearer ${chatOnlyToken}`, ...(payload ? { "content-type": "application/json" } : {}) },
+        body: payload ? JSON.stringify(payload) : undefined,
+      });
+      return { status: res.status, body: await res.json() as any };
+    };
+    const join = `/api/bots/${bot.id}/local-computer/join?controlLeaseId=${lease}`;
+    const proxy = `/api/desktop-viewer/local/shared?botId=${bot.id}&controlLeaseId=${lease}`;
+    try {
+      // Chat-only: no computer access at all, on every step of the way.
+      expect((await asChatOnly("POST", `/api/bots/${bot.id}/computer/control`, { action: "take", controlLeaseId: lease })).status).toBe(403);
+      expect((await asChatOnly("POST", join, {})).status).toBe(403);
+      expect((await asChatOnly("GET", proxy)).status).toBe(403);
+      expect((await asChatOnly("POST", `/api/bots/${bot.id}/computer/viewer-close`, {})).status).toBe(403);
+
+      // Full access, but not holding the computer: no desktop.
+      const unheld = await owner.call("POST", join, {});
+      expect(unheld.status).toBe(409);
+      expect(unheld.body.error).toMatch(/take control/i);
+      const unheldProxy = await owner.call("GET", proxy);
+      expect(unheldProxy.status).toBe(409);
+      expect(unheldProxy.body.error).toMatch(/take control/i);
+
+      // Holding it: the join reaches the VM (which this suite cannot start)
+      // and the proxy is bound to this lease; neither hands out an address.
+      expect((await owner.call("POST", `/api/bots/${bot.id}/computer/control`, { action: "take", controlLeaseId: lease })).body)
+        .toMatchObject({ held: true, owned: true });
+      const notReady = await owner.call("POST", join, {});
+      expect(notReady.status).toBe(409);
+      expect(notReady.body.error).not.toMatch(/take control/i);
+      expect(notReady.body.joinUrl).toBeUndefined();
+      expect(notReady.body.socketPath).toBeUndefined();
+      const boundProxy = await owner.call("GET", proxy);
+      expect(boundProxy.status).toBe(409);
+      expect(boundProxy.body.error).not.toMatch(/take control/i);
+      // Another bot's lease, or a lease that is not this one, holds nothing here.
+      expect((await owner.call("GET", `/api/desktop-viewer/local/shared?botId=${bot.id}&controlLeaseId=phone-lease-9876543210`)).status).toBe(409);
+
+      // Hand back: closing the viewer is allowed and idempotent, and the proxy refuses again.
+      expect((await owner.call("POST", `/api/bots/${bot.id}/computer/viewer-close`, {})).body).toEqual({ closed: false });
+      await owner.call("POST", `/api/bots/${bot.id}/computer/control`, { action: "release", controlLeaseId: lease });
+      expect((await owner.call("GET", proxy)).status).toBe(409);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" }).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
+  });
+
   it("keeps shared Local VM mode by default and resolves isolated targets per bot when enabled", async () => {
     const first = (await api("POST", "/api/bots")).body.bot;
     const second = (await api("POST", "/api/bots")).body.bot;

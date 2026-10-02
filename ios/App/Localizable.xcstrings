@@ -4795,6 +4795,16 @@
         }
       }
     },
+    "This phone was paired with chat-only access. Pair it again with Full access (openmausbot pair, without --client) to see and control the Local VM.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este celular foi pareado com acesso somente ao chat. Pareie-o de novo com acesso total (openmausbot pair, sem --client) para ver e controlar a VM local."
+          }
+        }
+      }
+    },
     "Turn on Allow computer view for this phone in OpenMausBot → Settings → Remote access on your computer.": {
       "localizations": {
         "pt-BR": {
