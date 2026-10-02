@@ -1,3 +1,5 @@
+import { t } from "@/lib/i18n";
+
 type Input = Record<string, unknown>;
 const movement = (body: Input) => body.type === "input_mouse" && ["mouseMoved", "mouseWheel"].includes(String(body.eventType));
 const release = (body: Input) => (body.type === "input_mouse" && body.eventType === "mouseReleased") || (body.type === "input_keyboard" && body.eventType === "keyUp");
@@ -43,7 +45,7 @@ export function createBrowserInputQueue(send: (body: Input) => Promise<void>, on
         const replaceable = queue.findIndex(movement);
         if (replaceable >= 0) queue.splice(replaceable, 1);
         else {
-          halt(new Error("Browser input stopped because the connection is too slow. Release control and reconnect before typing again."));
+          halt(new Error(t("browser.input.tooSlow")));
           if (!release(body) || queue.length >= 32) return;
         }
       }
@@ -55,6 +57,10 @@ export function createBrowserInputQueue(send: (body: Input) => Promise<void>, on
       queue = queue.filter((body) => !movement(body));
       while (active || queue.length) { run(); await active; }
     },
+    /** Waits until everything queued, movement included, has been sent. */
+    async settle() { while (active || queue.length) { run(); await active; } },
+    /** Inputs not yet confirmed: queued plus the one in flight. */
+    size() { return queue.length + (active ? 1 : 0); },
     clear() { generation++; queue = []; stopped = false; },
     /** Halted queues drop input silently; callers keep the halt banner up. */
     stopped() { return stopped; },

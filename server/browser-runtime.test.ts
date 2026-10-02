@@ -67,6 +67,23 @@ describe("browser takeover gate", () => {
     await expect(value.withAgentAction("s", async () => "safe screenshot")).resolves.toBe("safe screenshot");
   });
 
+  it("says whether a take waited for the bot's action, and when an interruption needs a restart", async () => {
+    const value = runtime();
+    await expect(value.take("s", "owner")).resolves.toBe(false);
+    value.release("s", "owner");
+    const action = deferred();
+    const pending = value.withAgentAction("s", () => action.promise);
+    const observed = expect(pending).rejects.toThrow(/paused/);
+    const taking = value.take("s", "owner");
+    action.resolve(); await observed;
+    await expect(taking).resolves.toBe(true);
+    expect(value.interrupted("s")).toBe(false);
+    await expect(value.withHumanAction("s", "owner", async () => { throw new Error("navigation timed out"); })).rejects.toThrow(/timed out/);
+    expect(value.interrupted("s")).toBe(true);
+    await value.close("s");
+    expect(value.interrupted("s")).toBe(false);
+  });
+
   it("release cancels an in-flight take and does not grant control afterwards", async () => {
     const value = runtime();
     const action = deferred();

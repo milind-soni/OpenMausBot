@@ -131,6 +131,34 @@ describe("browser viewport input forwarding", () => {
     expect(input).toHaveBeenCalledTimes(2);
   });
 
+  it("lets Tab move focus past the page until the person clicks or types in it", () => {
+    const { input, props, screen } = viewport();
+    const keyEvent = (key: string, code: string, keyCode: number, shiftKey = false) => ({ key, code, keyCode, altKey: false, ctrlKey: false,
+      metaKey: false, shiftKey, nativeEvent: { isComposing: false }, preventDefault: vi.fn(), stopPropagation: vi.fn() }) as unknown as KeyboardEvent<HTMLImageElement>;
+    const tab = keyEvent("Tab", "Tab", 9);
+    const shiftTab = keyEvent("Tab", "Tab", 9, true);
+    props.onKeyDown!(tab); props.onKeyUp!(tab);
+    // A lone Shift does not count as typing in the page, so Shift+Tab still moves on.
+    props.onKeyDown!(keyEvent("Shift", "ShiftLeft", 16, true)); props.onKeyDown!(shiftTab);
+    expect(tab.preventDefault).not.toHaveBeenCalled();
+    expect(shiftTab.preventDefault).not.toHaveBeenCalled();
+    expect(input.mock.calls.map(([body]) => body.key)).toEqual(["Shift"]);
+    props.onKeyDown!(keyEvent("a", "KeyA", 65));
+    const inPage = keyEvent("Tab", "Tab", 9);
+    props.onKeyDown!(inPage);
+    expect(inPage.preventDefault).toHaveBeenCalledOnce();
+    expect(input).toHaveBeenLastCalledWith(expect.objectContaining({ eventType: "keyDown", key: "Tab" }));
+    // Leaving the page resets it; a click in the page counts as using it again.
+    props.onBlur!({} as never);
+    input.mockClear();
+    props.onKeyDown!(tab);
+    expect(input).not.toHaveBeenCalled();
+    props.onPointerDown!({ button: 0, clientX: 20, clientY: 30, currentTarget: screen, preventDefault: vi.fn() } as unknown as PointerEvent<HTMLImageElement>);
+    props.onKeyDown!(tab);
+    expect(input).toHaveBeenLastCalledWith(expect.objectContaining({ eventType: "keyDown", key: "Tab" }));
+    expect(props["aria-description"]).toContain("until then Tab moves on");
+  });
+
   it("does not send keyboard or pointer input while just watching", () => {
     const { input, onReturnToToolbar, props } = viewport(false);
     const event = { key: "Escape", nativeEvent: { isComposing: false } } as KeyboardEvent<HTMLImageElement>;

@@ -364,13 +364,16 @@ export class BrowserRuntime {
     return method === "tools/call" ? this.withAgentAction(session, invoke) : invoke();
   }
 
-  async take(session: string, owner: string): Promise<void> {
+  /** Resolves true when the grant had to wait for the bot's own browser
+   * action to finish: the page may have changed since the person aimed. */
+  async take(session: string, owner: string): Promise<boolean> {
     if (!owner) throw new Error("Browser control requires an owner.");
     const gate = this.gate(session);
     if (gate.closing || gate.releasing) throw new Error("Browser control is changing. Try again shortly.");
     if (gate.owner !== null && gate.owner !== owner) throw new Error("Another person controls this browser.");
     gate.owner = owner; // synchronous: no new agent work slips in while draining.
     gate.ready = false;
+    const waited = gate.agents > 0;
     await new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
         clearTimeout(timer);
@@ -388,6 +391,7 @@ export class BrowserRuntime {
       gate.changed.add(check);
       check();
     });
+    return waited;
   }
 
   canControl(session: string, owner: string): boolean {
@@ -396,6 +400,9 @@ export class BrowserRuntime {
   }
 
   heldBy(session: string): string | null { return this.gates.get(session)?.owner ?? null; }
+
+  /** An interrupted action left the browser's state unknown; only a restart clears it. */
+  interrupted(session: string): boolean { return this.gates.get(session)?.uncertain === true; }
 
   /** A disconnected viewer may leave a physical key/button pressed. Never
    * let an agent inherit that input state; explicit restart clears it. */

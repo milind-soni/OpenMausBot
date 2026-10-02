@@ -12,6 +12,9 @@ const HEARTBEAT_MS = 10_000;
 // The native press resolver supplies the virtual key codes and Enter/Tab text
 // that its raw input_keyboard relay omits. Keep unknown keys literal.
 const DISCRETE_KEYS = new Set(["Backspace", "Enter", "Tab", "Escape", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
+// The panel has no take-control button: interacting takes control, and an
+// interrupted action is recovered from the panel's menu.
+const RESTART_NEEDED = "A browser action was interrupted. Choose Restart browser… in the browser menu before continuing.";
 
 export class BrowserLiveError extends Error {
   readonly status: number;
@@ -464,13 +467,15 @@ export class BrowserLive {
       try {
         const taking = this.runtime.take(viewer.session, viewer.id);
         this.control(viewer.session);
-        await taking;
+        // waited: the bot's own action finished first, so input the person
+        // aimed at the page before the grant may no longer fit it.
+        const waited = await taking;
         if (!this.current(viewer)) { this.close(viewer); throw new BrowserLiveError("This browser view closed.", 409); }
-        return { ok: true };
-      } catch { throw new BrowserLiveError("Another browser view or bot action is using this browser. Try again shortly.", 409); }
+        return { ok: true, waited: waited === true };
+      } catch { throw this.refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly."); }
       finally { this.control(viewer.session); }
     }
-    if (!this.runtime.canControl(viewer.session, viewer.id)) throw new BrowserLiveError("Take control of this browser before interacting.", 409);
+    if (!this.runtime.canControl(viewer.session, viewer.id)) throw this.refusal(viewer, "Browser control changed. Try again.");
     if (viewer.pendingActions >= 32) throw new BrowserLiveError("Too many browser actions are pending. Try again shortly.", 429);
     viewer.pendingActions += 1;
     try {
@@ -480,8 +485,13 @@ export class BrowserLive {
         else if (action.type === "command") await this.command(viewer, action.args);
       });
       return { ok: true };
-    } catch (error) { throw error instanceof BrowserLiveError ? error : new BrowserLiveError("Browser control changed. Take control again to continue.", 409); }
+    } catch (error) { throw error instanceof BrowserLiveError ? error : this.refusal(viewer, "Browser control changed. Try again."); }
     finally { viewer.pendingActions -= 1; this.control(viewer.session); }
+  }
+
+  /** Why this viewer cannot act now: an interrupted browser needs a restart. */
+  private refusal(viewer: Viewer, otherwise: string): BrowserLiveError {
+    return new BrowserLiveError(this.runtime.interrupted(viewer.session) ? RESTART_NEEDED : otherwise, 409);
   }
 
   closeForSession(session: string): void { for (const viewer of this.viewers.values()) if (viewer.session === session) this.close(viewer); }
