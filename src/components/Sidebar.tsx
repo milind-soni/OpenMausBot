@@ -76,6 +76,7 @@ import {
   type SidebarDensity,
 } from "@/lib/sidebar-preferences";
 import {
+  ATTENTION_SECTION_ID,
   BOT_CHATS_SECTION_ID,
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
@@ -2165,6 +2166,8 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           density={density}
           onUnpin={() => setAttentionPinned(false)}
           onJump={(entry) => dispatch(attentionJumpAction(entry))}
+          collapsed={sectionCollapsed(ATTENTION_SECTION_ID)}
+          onToggle={() => toggleSection(ATTENTION_SECTION_ID)}
         />
       )}
 

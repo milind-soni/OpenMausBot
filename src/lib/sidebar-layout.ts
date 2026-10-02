@@ -4,6 +4,7 @@ export const PINNED_SECTION_ID = "builtin:pinned";
 export const CHANNELS_SECTION_ID = "builtin:channels";
 export const BOT_CHATS_SECTION_ID = "builtin:bot-chats";
 export const BOTS_SECTION_ID = "builtin:bots";
+export const ATTENTION_SECTION_ID = "builtin:attention";
 
 const USER_SECTION_PREFIX = "section:";
 
