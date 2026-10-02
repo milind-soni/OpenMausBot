@@ -43,6 +43,8 @@ struct ComputerView: View {
     /// it holds it under.
     @State private var control: (desktop: LocalVmDesktop, leaseId: String)?
     @State private var takingControl = false
+    /// The take in flight, cancelled if the person leaves before it lands.
+    @State private var taking: Task<Void, Never>?
     @State private var controlError: String?
 
     private enum LocalVmProblem: Equatable {
@@ -175,6 +177,9 @@ struct ComputerView: View {
         }
         .onDisappear {
             session.stopWatchingScreen(of: bot.id)
+            // A take still in flight is abandoned; when it lands it hands
+            // the computer straight back.
+            taking?.cancel()
         }
         .onValueChange(of: frame?.png) { png in
             if png != nil { streamFrameAt = Date() }
@@ -200,7 +205,9 @@ struct ComputerView: View {
         // switched away gives the computer back rather than leaving the bot
         // locked out behind a lease nobody is using.
         .onValueChange(of: scenePhase) { phase in
-            if phase == .background, control != nil { Task { await handBack() } }
+            guard phase == .background else { return }
+            taking?.cancel()
+            if control != nil { Task { await handBack() } }
         }
     }
 
@@ -216,7 +223,7 @@ struct ComputerView: View {
                     .multilineTextAlignment(.center)
             }
             Button {
-                Task { await takeControl() }
+                taking = Task { await takeControl() }
             } label: {
                 if takingControl {
                     ProgressView().tint(.white).frame(maxWidth: .infinity)
@@ -243,11 +250,20 @@ struct ComputerView: View {
         defer { takingControl = false }
         do {
             let viewer = try await session.takeLocalVm(for: current)
+            // The person left (or the app went to the background) while this
+            // was in flight: give the computer straight back instead of
+            // opening a desktop nobody is looking at.
+            guard !Task.isCancelled, scenePhase == .active else {
+                await session.handBackDetached(bot: current, leaseId: viewer.leaseId)
+                return
+            }
             let desktop = LocalVmDesktop(request: viewer.request, password: viewer.password)
             desktop.start()
             control = (desktop, viewer.leaseId)
+        } catch is CancellationError {
+            return
         } catch {
-            controlError = error.localizedDescription
+            if !Task.isCancelled { controlError = error.localizedDescription }
         }
     }
 

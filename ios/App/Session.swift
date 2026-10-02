@@ -1683,22 +1683,33 @@ final class Session: ObservableObject {
 
     /// Take the bot's computer under this phone's lease and open its Local
     /// VM's relayed desktop. Any failure after asking hands the computer
-    /// straight back, so a failed attempt never leaves the bot locked out.
+    /// straight back, so a failed attempt never leaves the bot locked out —
+    /// except when someone else holds it: then there is nothing of ours to
+    /// release, and closing viewers could disturb theirs.
     func takeLocalVm(for bot: Bot) async throws -> (request: URLRequest, password: String?, leaseId: String) {
         let leaseId = localVmLease(for: bot)
+        var handBackOnFailure = true
         do {
             let state = try await withClient { try await $0.computerControl(botId: bot.id, take: true, leaseId: leaseId) }
-            guard state.held, state.owned != false else {
+            if state.held, state.owned == false {
+                handBackOnFailure = false
                 throw APIError.transport("Someone else is already controlling this computer.")
             }
+            guard state.held else { throw APIError.transport("The computer could not be taken. Try again.") }
             return try await withClient { client in
                 let viewer = try await client.localVmViewer(botId: bot.id, threadId: bot.threadId, leaseId: leaseId)
                 return (try client.viewerSocketRequest(viewer), viewer.password, leaseId)
             }
         } catch {
-            await handBackLocalVm(for: bot, leaseId: leaseId)
+            if handBackOnFailure { await handBackDetached(bot: bot, leaseId: leaseId) }
             throw error
         }
+    }
+
+    /// Hand back from a task of its own, so cancelling whatever asked (the
+    /// person left mid-take) cannot cancel the release with it.
+    func handBackDetached(bot: Bot, leaseId: String) async {
+        await Task { await self.handBackLocalVm(for: bot, leaseId: leaseId) }.value
     }
 
     /// Close this device's viewer and release the lease, finishing even if
