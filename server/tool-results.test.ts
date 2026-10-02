@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { ToolResults, TOOL_RESULT_MAX_CHARS, TOOL_RESULT_PREVIEW_CHARS, TOOL_RESULT_TTL_MS } from "./tool-results.ts";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ToolResults, TOOL_RESULT_DURABLE_MS, TOOL_RESULT_MAX_CHARS, TOOL_RESULT_PREVIEW_CHARS, TOOL_RESULT_TTL_MS } from "./tool-results.ts";
+import { shouldTriageResult } from "./tool-triage.ts";
 
 const owner = { botId: "a", threadId: "chat" };
 
@@ -74,5 +78,81 @@ describe("temporary agent tool results", () => {
     const oldest = results.save({ botId: "global", threadId: "old" }, text);
     for (let i = 0; i < 43; i++) results.save({ botId: "global", threadId: String(i) }, text);
     expect(results.read({ botId: "global", threadId: "old" }, oldest.id, 0)).toBeNull();
+  });
+});
+
+describe("durable spill for triaged results", () => {
+  const spillOwner = { botId: "bot", threadId: "thread/durable" };
+  let durableDir: string;
+
+  beforeEach(() => { durableDir = mkdtempSync(join(tmpdir(), "omb-tool-results-")); });
+  afterEach(() => rmSync(durableDir, { recursive: true, force: true }));
+
+  it("keeps a triaged result readable after its cache entry expires", () => {
+    let now = Date.now();
+    const results = new ToolResults(() => now, { durableDir });
+    const saved = results.save(spillOwner, "x".repeat(30_000), false, true);
+    now += TOOL_RESULT_TTL_MS + 1;
+    const revived = results.read(spillOwner, saved.id, 0);
+    expect(revived?.text.slice(0, 5)).toBe("xxxxx");
+    expect(revived?.nextOffset).toBe(TOOL_RESULT_PREVIEW_CHARS);
+    expect(revived?.truncated).toBe(false);
+  });
+
+  it("writes nothing under durableDir unless the save qualifies for triage", () => {
+    const results = new ToolResults(Date.now, { durableDir });
+    const qualify = (flagged: boolean, text: string) => shouldTriageResult({ triage: flagged }, text, 6_000);
+    results.save(spillOwner, "x".repeat(24_000), false, qualify(true, "x".repeat(24_000)));
+    results.save(spillOwner, "x".repeat(30_000), false, qualify(false, "x".repeat(30_000)));
+    expect(existsSync(durableDir) ? readdirSync(durableDir) : []).toEqual([]);
+    const saved = results.save(spillOwner, "x".repeat(24_001), false, qualify(true, "x".repeat(24_001)));
+    expect(existsSync(join(durableDir, "thread-durable", `${saved.id}.json`))).toBe(true);
+  });
+
+  it("re-checks ownership from the spilled record, never the path", () => {
+    let now = Date.now();
+    const results = new ToolResults(() => now, { durableDir });
+    const saved = results.save(spillOwner, "x".repeat(30_000), false, true);
+    now += TOOL_RESULT_TTL_MS + 1;
+    const restarted = new ToolResults(() => now, { durableDir });
+    expect(restarted.read({ ...spillOwner, botId: "peer" }, saved.id, 0)).toBeNull();
+    expect(restarted.read({ ...spillOwner, threadId: "thread/other" }, saved.id, 0)).toBeNull();
+    expect(restarted.read(spillOwner, saved.id, 0)?.text.length).toBe(TOOL_RESULT_PREVIEW_CHARS);
+  });
+
+  it("writes the spill private and leaves the default cache pure memory", () => {
+    let now = Date.now();
+    const results = new ToolResults(() => now, { durableDir });
+    const saved = results.save(spillOwner, "x".repeat(30_000), false, true);
+    const file = join(durableDir, "thread-durable", `${saved.id}.json`);
+    // Windows collapses permission bits to a read-only flag (a writable file
+    // reports 0o666), so the exact 0600 contract is asserted where the
+    // filesystem honors POSIX modes; there, the spill simply has to exist.
+    if (process.platform === "win32") expect(() => statSync(file)).not.toThrow();
+    else expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(new ToolResults().save(spillOwner, "x".repeat(30_000), false, true).id).toMatch(/^r-/);
+    expect(new ToolResults(() => now + TOOL_RESULT_TTL_MS + 1).read(spillOwner, saved.id, 0)).toBeNull();
+  });
+
+  it("drops spilled threads after their retention window", () => {
+    // Retention compares each file's own mtime against the clock, exactly
+    // as production does across real days; backdate the spill to age it out.
+    let now = Date.now();
+    const results = new ToolResults(() => now, { durableDir });
+    const saved = results.save(spillOwner, "x".repeat(30_000), false, true);
+    const stale = new Date(Date.now() - TOOL_RESULT_DURABLE_MS - 24 * 60 * 60_000);
+    const threadDir = join(durableDir, "thread-durable");
+    utimesSync(join(threadDir, `${saved.id}.json`), stale, stale);
+    utimesSync(threadDir, stale, stale);
+    now += 60 * 60_000 + 1;
+    // Past retention the spilled copy is unreadable even before the sweep;
+    // the live cache entry above still serves until it expires.
+    expect(new ToolResults(Date.now, { durableDir }).read(spillOwner, saved.id, 0)).toBeNull();
+    const kept = results.save({ botId: "bot", threadId: "fresh" }, "y".repeat(30_000), false, true);
+    expect(readdirSync(durableDir)).toEqual(["fresh"]);
+    expect(results.read({ botId: "bot", threadId: "fresh" }, kept.id, 0)?.text.slice(0, 5)).toBe("yyyyy");
+    // The sweep only reclaims past-retention directories, never live ones.
+    results.save({ botId: "bot", threadId: "newer" }, "z".repeat(30_000), false, true);
+    expect(readdirSync(durableDir).sort()).toEqual(["fresh", "newer"]);
   });
 });

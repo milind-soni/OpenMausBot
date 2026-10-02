@@ -42,3 +42,30 @@ it("does not repeat the operation or claim failure when storing its output fails
   expect(reply).toContain("The original operation was not retried");
   expect(reply).not.toContain(id);
 });
+
+it("replaces the preview with a checked summary and points at offset 0", async () => {
+  const summary = "Status: 3 pods running; pod-7 is failing image pull.";
+  const save = vi.fn().mockResolvedValue({ id, summary });
+  const reply = await boundedAgentResult("x".repeat(30_000), save);
+  expect(reply.startsWith(summary)).toBe(true);
+  expect(reply).toContain(`OpenMausBot summarized this large tool result: 30,000 → ${summary.length.toLocaleString("en-US")} characters`);
+  expect(reply).toContain(`read it with tool_result_read id "${id}" and offset 0`);
+  expect(reply).toContain("A summarized result is cached for one hour; restart or cache pressure can drop it, and its durable copy extends retrieval up to 30 days");
+  expect(reply).not.toContain("showing the first");
+  expect(reply.length).toBeLessThan(1_000);
+});
+
+it("admits the storage limit on a summarized truncated result", async () => {
+  const save = vi.fn().mockResolvedValue({ id, summary: "s", truncated: true });
+  const reply = await boundedAgentResult("x".repeat(TOOL_RESULT_MAX_CHARS * 2), save);
+  expect(reply).toContain("saved in full up to the storage limit");
+  expect(reply).not.toContain("saved in full;");
+});
+
+it.each([["empty string", ""], ["blank", "   "], ["non-string", 42]])("ignores a missing summary (%s) and keeps today's preview", async (_name, summary) => {
+  const save = vi.fn().mockResolvedValue({ id, summary, truncated: false });
+  const reply = await boundedAgentResult("x".repeat(30_000), save);
+  expect(reply).toContain("showing the first");
+  expect(reply).toContain(`offset 16000`);
+  expect(reply).not.toContain("summarized this large tool result");
+});
