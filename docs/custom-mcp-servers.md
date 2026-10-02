@@ -85,6 +85,30 @@ the server's address. Sign-in with a registered app always uses that port; if
 another program holds it, sign-in stops and says so. Changing the client ID
 or the scopes signs the server out; a new secret for the same app does not.
 
+### Example: give your bots web search
+
+A good first URL server is You.com's search server, because the free profile
+needs no token at all. Add a URL server with the address
+
+```
+https://api.you.com/mcp?profile=free
+```
+
+leave the headers empty, and press **Test** — the handshake completes and the
+server advertises `you-search` (web search) and `you-discover` (a directory of
+other MCP servers). The free profile is read-only and rate-limited to 100
+searches a day; there is no key, so none is stored. Turn the server on and
+every compatible bot can search the web on its next task — `you-search` results
+arrive like any other tool result, through the approval cards.
+
+If the free limits are too small, [you.com/platform](https://you.com/platform)
+issues an API key with a higher quota and the `you-contents` tool for
+full-page extraction. Add the same address without `?profile=free` and one
+header line, `Authorization: Bearer <your key>` — the key is kept write-only
+like every other header value. `you-research` (multi-step cited reports) is
+served by its own dedicated server, `https://api.you.com/mcp/research` — add
+it the same way, with the same header.
+
 ### Import and choose tools per bot
 
 **Paste config** accepts an `mcpServers` JSON block, a server-name map, or a
