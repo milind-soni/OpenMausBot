@@ -68,13 +68,20 @@ A phone paired with `openmausbot serve` itself (a headless server, reached over
 Tailscale Serve or a tunnel) has no companion sidecar, so nothing rewrites the
 VM's noVNC address for it. The join route answers such a phone differently: a
 path on the server's own authenticated desktop proxy
-(`/api/desktop-viewer/local/shared/websockify` for the shared VM; per-bot and
-pool targets likewise), bound to the phone's control lease and to the
+(`/api/desktop-viewer/local/shared/websockify` for the shared VM; per-bot
+targets likewise), bound to the phone's control lease and to the
 conversation whose VM seat the join picked, plus the VNC password. The phone never sees a loopback address, and the
 proxy re-checks the lease and the session every few seconds and closes the
 socket when either lapses. Computer access is the pairing's scope: a Full
 access pairing (`openmausbot pair`) may; a chat-only one (`--client`) is
 answered 403, which the phone shows as computer access being off.
+
+Phone control is unavailable in pool mode, through either connection path.
+A bot's control hold does not reserve a pool seat against other bots. The
+join route refuses pool mode, and the desktop proxy independently refuses
+lease-bound pool URLs before reading credentials or opening a socket.
+Shared and per-bot desktops remain supported. Reserving a pool seat for the
+whole viewer lifetime is required before enabling interactive pool viewers.
 
 Check it against the same fixture, talking to the printed `harness` address
 rather than the sidecar. With `BOT` and `THREAD` from the fixture's output and

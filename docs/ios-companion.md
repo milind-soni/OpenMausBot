@@ -308,6 +308,9 @@ Allowed in the first release:
   either lapses; hand back closes it at once. Computer access is the pairing's
   scope: Full access (`openmausbot pair`) may, chat-only (`--client`) is
   answered 403 and the app shows computer access as off.
+- Phone control supports shared and per-bot Local VMs. Pool mode is refused
+  on both connection paths until a viewer can reserve its seat against
+  other bots; a control hold on one bot alone cannot do that.
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.

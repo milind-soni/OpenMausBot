@@ -337,6 +337,20 @@ it("uses the same authenticated proxy for VPS and releases only its own connecti
 const lease = "phone-lease-0123456789";
 const bound = (query = `botId=test-bot&controlLeaseId=${lease}`) => `${base}/websockify?${query}`;
 
+it("refuses phone control of a pool seat even with a valid bot lease", async () => {
+  const target = viewerTargetId(poolLocalVmTarget(1));
+  leases.add(leaseKey(target, "test-bot", lease));
+  const query = `botId=test-bot&threadId=th-1&controlLeaseId=${lease}`;
+  for (const response of [
+    await open(`/api/desktop-viewer/${target}/websockify?${query}`),
+    await get(`/api/desktop-viewer/${target}?${query}`),
+  ]) {
+    expect(response.status).toBe(409);
+    expect(JSON.stringify(response.body)).toContain("pooled Local VMs");
+  }
+  expect(inspected).toEqual([]);
+});
+
 it("opens a lease-bound viewer only while that lease holds the bot's computer", async () => {
   const refused = await open(bound());
   expect(refused.status).toBe(409);

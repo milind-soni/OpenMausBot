@@ -8552,6 +8552,30 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("refuses Local VM phone joins in pool mode for direct and companion callers", async () => {
+    const { mode, maxInstances } = (await api("GET", "/api/config")).body.localVm;
+    const previous = { mode, maxInstances };
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const owner = await asPairedPerson("Pool viewer phone");
+    const lease = "phone-pool-lease-0123456789";
+    try {
+      expect((await api("PATCH", "/api/config", { localVm: { ...previous, mode: "pool" } })).status).toBe(200);
+      expect((await owner.call("POST", `/api/bots/${bot.id}/computer/control`, { action: "take", controlLeaseId: lease })).body.owned).toBe(true);
+      const join = `/api/bots/${bot.id}/local-computer/join?controlLeaseId=${lease}`;
+      for (const response of [await owner.call("POST", join, {}), await api("POST", join, {})]) {
+        expect(response.status).toBe(409);
+        expect(response.body.error).toContain("pooled Local VMs");
+        expect(response.body.joinUrl).toBeUndefined();
+        expect(response.body.socketPath).toBeUndefined();
+        expect(response.body.password).toBeUndefined();
+      }
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release", controlLeaseId: lease });
+      await api("PATCH", "/api/config", { localVm: previous });
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("keeps shared Local VM mode by default and resolves isolated targets per bot when enabled", async () => {
     const first = (await api("POST", "/api/bots")).body.bot;
     const second = (await api("POST", "/api/bots")).body.bot;

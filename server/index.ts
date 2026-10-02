@@ -21823,6 +21823,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (threadId && await computerPreviewSurface(bot, threadId) !== "vm") {
         return json(res, 409, { error: "This conversation is not using the Local VM" });
       }
+      // A bot's human-control hold does not reserve a pool seat. Until a
+      // viewer can own that seat, another bot could drive the same desktop.
+      if (localVmMode(cfg) === "pool") {
+        return json(res, 409, { error: "Phone control is not available for pooled Local VMs. Use shared or per-bot mode in Settings → Computers." });
+      }
       const lease = controlLeaseIdSchema.safeParse(url.searchParams.get("controlLeaseId") ?? undefined);
       if (!lease.success) return json(res, 400, { error: "controlLeaseId is required" });
       const controlBot = store.bot(bot.id);

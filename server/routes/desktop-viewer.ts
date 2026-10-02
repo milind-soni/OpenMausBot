@@ -41,10 +41,9 @@ export function createDesktopViewer(deps: {
   live: (auth: RequestAuth) => boolean;
   /** Bind a viewer to a control lease: a phone driving the Local VM directly,
    * without the companion sidecar. Answers nothing unless `controlLeaseId`
-   * holds `botId`'s computer right now and the target is that computer (for
-   * `threadId`'s seat, in pool mode); otherwise a probe that says whether the
-   * lease still holds. The seat is settled once, at open: a pool seat's
-   * affinity can lapse under a live viewer without the lease changing hands. */
+   * holds `botId`'s computer right now and the target is that computer;
+   * otherwise a probe that says whether the lease still holds. Pool targets
+   * are refused before this callback because a bot hold cannot reserve a seat. */
   lease?: (id: string, botId: string, controlLeaseId: string, threadId?: string) => (() => boolean) | undefined;
 }) {
   const upgrades = new Map<IncomingMessage, Upgrade>();
@@ -109,6 +108,11 @@ export function createDesktopViewer(deps: {
       return json(res, 400, { error: "botId, threadId or controlLeaseId is not valid" });
     }
     if (botId === null && threadId !== undefined) return json(res, 400, { error: "threadId needs botId and controlLeaseId" });
+    // Do not let a saved or constructed socket URL bypass the join refusal:
+    // a bot's control lease does not exclude other users of a pooled seat.
+    if (botId !== null && match[1].startsWith("local/pool-")) {
+      return json(res, 409, { error: "Phone control is not available for pooled Local VMs. Use shared or per-bot mode in Settings → Computers." });
+    }
     const bound = botId === null ? undefined : deps.lease!(match[1], botId, controlLeaseId!, threadId);
     if (botId !== null && !bound) return json(res, 409, { error: "Take control of this computer first" });
     const holds = () => bound?.() ?? true;
