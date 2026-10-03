@@ -457,13 +457,11 @@ export function importThread(threadId: string, messages: Message[], activeLeafId
   });
 }
 
-/** Persist a new message and the branch head as one crash-safe mutation.
- * The head is the new message unless the caller passes another one: a
- * message inserted behind newer ones leaves the head where it was. */
-export function appendMessage(threadId: string, message: Message, activeLeafId: string | null = message.id): void {
+/** Persist a new message and the branch head as one crash-safe mutation. */
+export function appendMessage(threadId: string, message: Message): void {
   transaction(() => {
     insertMessage(threadId, message);
-    setActiveLeaf(threadId, activeLeafId);
+    setActiveLeaf(threadId, message.id);
   });
 }
 
