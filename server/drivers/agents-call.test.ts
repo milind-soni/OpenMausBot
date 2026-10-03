@@ -138,6 +138,53 @@ describe("add_mcp_server", () => {
   });
 });
 
+describe("propose_mcp_server", () => {
+  it("forwards the proposal and tells the model to end the turn while the card is pending", async () => {
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const args = { action: "add", name: "Notes", command: "npx", env: { NOTES_TOKEN: "super-secret" }, reason: "The user asked." };
+    const result = await callTool("propose_mcp_server", args, context({
+      client: {
+        api: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return { requestId: "r1", state: "pending", summary: "Add MCP server “notes”? · add" };
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(result.text).toContain("A confirmation card is now visible to the user for the change to MCP server “notes”.");
+    expect(result.text).toContain("End this turn and wait");
+    expect(result.text).not.toContain("super-secret");
+    expect(calls).toEqual([{
+      path: "/api/internal/mcp-server-requests",
+      body: { fromBotId: "bot-voice", fromThreadId: "thread-voice", proposal: args },
+    }]);
+  });
+
+  it("reports an applied Full Access change without asking for another confirmation", async () => {
+    const result = await callTool("propose_mcp_server", { action: "disable", name: "notes", reason: "Off." }, context({
+      client: {
+        api: async () => ({ requestId: "r1", state: "applied", summary: "Turn off MCP server “notes”? · disable", result: { claimed: true, state: "applied", action: "disable", name: "notes" } }),
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(result.text).toContain("Applied the change to MCP server “notes”.");
+    expect(result.text).toContain("No additional confirmation is needed.");
+  });
+
+  it("returns the route's teaching refusal as a tool error", async () => {
+    const refusal = 'There is no enabled field. Use action "enable" or "disable" for the on/off switch. Example: {"action":"enable","name":"notes","reason":"The user asked to turn it on."}';
+    const result = await callTool("propose_mcp_server", { action: "add", name: "notes", command: "npx", enabled: true, reason: "x" }, context({
+      client: {
+        api: async () => { throw new Error(refusal); },
+        apiResponse: async () => ({ ok: false, status: 400, body: {} }),
+      },
+    }));
+    expect(result).toEqual({ text: refusal, isError: true });
+  });
+});
+
 describe("propose_profile", () => {
   it("rejects a non-boolean toggle without proposing the valid half", async () => {
     const calls: Array<{ path: string; body: any }> = [];

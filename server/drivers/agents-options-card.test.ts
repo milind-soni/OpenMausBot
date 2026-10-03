@@ -13,6 +13,7 @@ function profile(overrides: Partial<CatalogProfile> = {}): CatalogProfile {
     sharedComputers: false,
     voiceNotes: false,
     cloudHome: false,
+    mcpServerProposals: false,
     botId: WATCHER_OPTIONS_CARD_BOT_ID,
     ...overrides,
   };

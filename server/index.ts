@@ -235,6 +235,7 @@ import {
   parseMcpServerMutation,
   parseMcpServersImport,
   parseStoredMcpServer,
+  type StoredMcpServer,
 } from "./mcp-registry.ts";
 import { McpOAuthError, McpSignInError, McpOAuthManager, mcpOAuthRedirectUri, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
 import { probeMcpServer } from "./mcp-probe.ts";
@@ -472,6 +473,8 @@ import { createOptionsCard } from "./options-card.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
 import { ModelRequestService } from "./model-requests.ts";
+import { McpServerRequestError, McpServerRequestService } from "./mcp-server-requests.ts";
+import { createMcpServerRequestRoutes } from "./routes/mcp-server-requests.ts";
 import { TighteningRequestService } from "./tightening-requests.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
@@ -615,7 +618,7 @@ import {
 // Keep these two last: a route module may import any server module, and
 // loading the table after everything above leaves module start-up order as is.
 import { json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
-import { ROUTES, dispatchRoutes } from "./routes/table.ts";
+import { INTERNAL_ROUTES, ROUTES, dispatchRoutes } from "./routes/table.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
@@ -2405,6 +2408,9 @@ function agentsIntegration(
       OMB_OWN_THREAD_CREATION: ownThreadCreation ? "1" : "0",
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
       OMB_MEMORY_ENABLED: store.bot(botId)?.memoryEnabled === false ? "0" : "1",
+      // Only an active Chief is shown propose_mcp_server; its route refuses
+      // everyone else regardless.
+      OMB_MCP_SERVER_PROPOSALS: store.bot(botId)?.chiefOfStaff && !store.bot(botId)?.hidden ? "1" : "0",
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
       OMB_SHARED_COMPUTERS_ENABLED: lendingEnabled() ? "1" : "0",
@@ -11666,6 +11672,47 @@ const profileRequests = new ProfileRequestService({
   // A Chief may change a section peer; anyone else only itself. Re-checked at confirm.
   validateTarget: chiefPeerTargetRule("profile"),
 });
+/** propose_mcp_server is a Chief's tool: refused for anyone else at the
+ * route, and re-checked when its card is confirmed. */
+function mcpServerProposerRefusal(botId: string): string | null {
+  const bot = store.bot(botId);
+  return bot?.chiefOfStaff && !bot.hidden ? null : "Only an active Chief of Staff can propose MCP server changes.";
+}
+const mcpServerRequests = new McpServerRequestService({
+  store,
+  servers: () => cfg.mcpServers ?? {},
+  // The settings routes' own write path, under their single-flight lock:
+  // cfg.mcpServers updates in memory and the next turn picks it up, so no
+  // restart. Their side effects follow: a removed server's sign-in is
+  // forgotten, and an edit applies the same invalidation rule as PUT.
+  commit: (next, change) => {
+    if (mcpConfigBusy) throw new McpServerRequestError("MCP servers are already being updated.", 409);
+    mcpConfigBusy = true;
+    try {
+      persistMcpServers(next);
+      if (change.action === "remove") mcpOAuth.forget(change.name);
+      else if (change.action === "update" && change.before && change.after) forgetMovedMcpSignIn(change.name, change.before, change.after);
+    } finally {
+      mcpConfigBusy = false;
+    }
+  },
+  policyRefusal: mcpPolicyRefusal,
+  authorize: mcpServerProposerRefusal,
+  autoApply: fullAccessForSource,
+  canPersist: proposalPersistence,
+});
+INTERNAL_ROUTES.push(createMcpServerRequestRoutes({
+  requests: mcpServerRequests,
+  bot: (id) => store.bot(id),
+  proposerRefusal: mcpServerProposerRefusal,
+  sourceConversation: (botId, threadId) => {
+    const owner = connectorThread(botId, threadId);
+    return owner ? { group: Boolean(owner.group) } : null;
+  },
+  recordDecision: ({ applied, ...row }) => appendDecision(DATA_DIR, {
+    ...row, tool: "propose_mcp_server", decision: applied ? "auto-approved" : "card-shown", source: applied ? "full-access" : "mcp-server",
+  }),
+}));
 const modelRequests = new ModelRequestService({
   store,
   autoApply: fullAccessForSource,
@@ -11974,6 +12021,40 @@ function resolveAndSendProfile(
     if (target) broadcast({ kind: "bot", bot: wireBot(target) });
     json(res, 200, {
       ok: true, outcome: "allowed-once", profileFields: result.fields,
+      ...(result.settlementPending ? { settlementPending: true, message: result.message } : {}),
+    });
+    return true;
+  }
+  if (result.state === "invalid") { json(res, result.status, { error: result.error }); return true; }
+  if (result.state === "already_settled") {
+    json(res, 200, { ok: true, outcome: result.behavior === "allow" ? "allowed-once" : "rejected", alreadySettled: true });
+    return true;
+  }
+  json(res, 200, { ok: true, outcome: "rejected" });
+  return true;
+}
+
+function resolveAndSendMcpServer(
+  res: ServerResponse,
+  args: { botId: string; botName?: string; threadId: string; requestId: string; behavior: string },
+): boolean {
+  const card = store.messagesFor(args.threadId).find(
+    (message) => message.card?.requestId === args.requestId && message.card.mcpServerRequest,
+  )?.card;
+  if (!card) return false;
+  const result = mcpServerRequests.resolve(args);
+  if (!result.claimed) return false;
+  if (result.state === "applied" || result.state === "denied") {
+    // The subtitle names env and header keys, never their values.
+    appendDecision(DATA_DIR, {
+      threadId: args.threadId, requestId: args.requestId, botId: args.botId, botName: args.botName,
+      tool: "propose_mcp_server", summary: card.subtitle,
+      decision: result.state === "applied" ? "user-approved" : "user-denied", source: "user",
+    });
+  }
+  if (result.state === "applied") {
+    json(res, 200, {
+      ok: true, outcome: "allowed-once", mcpServer: { action: result.action, name: result.name },
       ...(result.settlementPending ? { settlementPending: true, message: result.message } : {}),
     });
     return true;
@@ -14190,11 +14271,11 @@ function proposalPersistence(botId: string, threadId: string) {
   if (fullAccessForSource(botId, threadId)) return { ok: true as const };
   // Only cards on the visible branch can be acted on from the composer.
   // Abandoned branches must not permanently consume the proposal quota.
-  // Routine, profile, default-model, tightening and team-setup proposals
-  // share one budget per bot per thread, so one thread cannot pile up 8 of each.
+  // Routine, profile, default-model, tightening, team-setup and MCP server
+  // proposals share one budget per bot per thread, so one thread cannot pile up 8 of each.
   const openRequests = store.activePath(threadId).filter(
     (message) =>
-      (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId || message.card?.modelRequest?.botId === botId || message.card?.tighteningRequest?.botId === botId || message.card?.teamSetupRequest?.botId === botId) &&
+      (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId || message.card?.modelRequest?.botId === botId || message.card?.tighteningRequest?.botId === botId || message.card?.teamSetupRequest?.botId === botId || message.card?.mcpServerRequest?.botId === botId) &&
       !message.card.answered &&
       !message.card.dismissed && !message.card.expired,
   ).length;
@@ -15305,6 +15386,19 @@ function engineMcpServers(bot: BotRecord) {
   return withoutPendingSignIn(managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers)), mcpOAuth);
 }
 
+/** A sign-in belongs to one address and one sign-in app with its scopes; a
+ * token never follows an edited entry elsewhere (a new secret for the same
+ * app keeps it). Any other edit (a new header, say) drops a sign-in request
+ * that has no tokens behind it; the next Test asks again if it still applies. */
+function forgetMovedMcpSignIn(name: string, before: StoredMcpServer, after: StoredMcpServer): void {
+  const url = (server: StoredMcpServer) => isRemoteMcpServer(server) ? server.url : null;
+  const app = (server: StoredMcpServer) => isRemoteMcpServer(server) && server.oauth
+    ? JSON.stringify([server.oauth.clientId, server.oauth.scopes ?? []]) : null;
+  const next = url(after);
+  if (url(before) !== next || app(before) !== app(after)
+    || (next && mcpOAuth.authState(name, next) === "needs-sign-in")) mcpOAuth.forget(name);
+}
+
 function persistMcpServers(next: Record<string, unknown>): void {
   saveConfig({ mcpServers: next });
   // Do not reload the provider fleet: integrations are assembled from cfg at
@@ -16321,6 +16415,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
+      // Internal routes in server/routes run here, behind the checks above.
+      if (await dispatchRoutes(INTERNAL_ROUTES, { req, res, url, path, method, auth, json, readBody: () => readInternalBody() })) return;
       // Where an entry came from, as the person will read it in MEMORY.md:
       // the room or the thread title, never a bare id unless nothing else
       // names the conversation.
@@ -22468,6 +22564,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           requestId: String(body.requestId),
           behavior,
         })) return;
+        if (resolveAndSendMcpServer(res, {
+          botId: bot.id,
+          botName: bot.name,
+          threadId: bot.threadId,
+          requestId: String(body.requestId),
+          behavior,
+        })) return;
         if (resolveAndSendTightening(res, {
           botId: bot.id,
           botName: bot.name,
@@ -22600,6 +22703,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (resolveAndSendModel(res, {
             botId: modelBotId,
             botName: modelOwner?.name,
+            threadId,
+            requestId,
+            behavior,
+          })) return;
+        }
+        const mcpServerCard = store.messagesFor(threadId).find(
+          (message) => message.card?.requestId === requestId && message.card.mcpServerRequest,
+        );
+        if (mcpServerCard?.card?.mcpServerRequest) {
+          const mcpServerBotId = mcpServerCard.from?.botId ?? store.botByThread(threadId)?.id;
+          if (!mcpServerBotId) return json(res, 400, { error: "this MCP server request has no valid owner" });
+          if (resolveAndSendMcpServer(res, {
+            botId: mcpServerBotId,
+            botName: store.bot(mcpServerBotId)?.name,
             threadId,
             requestId,
             behavior,
@@ -24155,16 +24272,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const refusal = mcpPolicyRefusal(name, parsed.server);
         if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         persistMcpServers({ ...current, [name]: parsed.server });
-        // a sign-in belongs to one address; a token never follows the entry elsewhere
-        const before = isRemoteMcpServer(existing.server) ? existing.server.url : null;
-        const after = isRemoteMcpServer(parsed.server) ? parsed.server.url : null;
-        // ...and to one sign-in app with its scopes; a new secret for the same app keeps it
-        const app = (server: typeof existing.server) => isRemoteMcpServer(server) && server.oauth
-          ? JSON.stringify([server.oauth.clientId, server.oauth.scopes ?? []]) : null;
-        // Any other edit (a new header, say) drops a sign-in request that has
-        // no tokens behind it; the next Test asks again if it still applies.
-        if (before !== after || app(existing.server) !== app(parsed.server)
-          || (after && mcpOAuth.authState(name, after) === "needs-sign-in")) mcpOAuth.forget(name);
+        forgetMovedMcpSignIn(name, existing.server, parsed.server);
         return json(res, 200, mcpServerResponse());
       } finally {
         mcpConfigBusy = false;

@@ -7941,6 +7941,64 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("lets only a Chief propose an MCP server, and applies the confirmed card without a restart", async () => {
+    const chief = (await api("POST", "/api/bots", { name: "Mcp Chief" })).body.bot;
+    const member = (await api("POST", "/api/bots", { name: "Mcp Member" })).body.bot;
+    const secret = "chief-proposed-secret-that-must-never-render";
+    const propose = async (bot: { id: string; threadId: string }, proposal: unknown) => {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const response = await fetch(`${BASE}/api/internal/mcp-server-requests`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, proposal }),
+      });
+      return { status: response.status, body: await response.json() as any };
+    };
+    const proposal = { action: "add", name: "chiefnotes", command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: secret }, reason: "The user asked." };
+    try {
+      const refused = await propose(member, proposal);
+      expect(refused).toEqual({ status: 403, body: { error: "Only an active Chief of Staff can propose MCP server changes." } });
+
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
+      const proposed = await propose(chief, proposal);
+      expect(proposed.status).toBe(201);
+      expect(proposed.body).toMatchObject({ state: "pending", title: "Add MCP server “chiefnotes”?" });
+      expect(JSON.stringify(proposed.body)).not.toContain(secret);
+      const listedBefore = await api("GET", "/api/mcp/servers");
+      expect(listedBefore.body.servers.some((server: { name: string }) => server.name === "chiefnotes")).toBe(false);
+      const fleet = (await api("GET", "/api/bots")).body;
+      const card = fleet.bots.find((bot: { id: string }) => bot.id === chief.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposed.body.requestId);
+      expect(card?.card).toMatchObject({ tool: "propose_mcp_server", options: ["Confirm", "Cancel"], mcpServerRequest: { action: "add", name: "chiefnotes" } });
+      expect(JSON.stringify(fleet)).not.toContain(secret);
+
+      const confirmed = await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: proposed.body.requestId, behavior: "allow" });
+      expect(confirmed.body).toMatchObject({ ok: true, outcome: "allowed-once", mcpServer: { action: "add", name: "chiefnotes" } });
+      const again = await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: proposed.body.requestId, behavior: "allow" });
+      expect(again.body).toMatchObject({ ok: true, alreadySettled: true });
+
+      const listed = await api("GET", "/api/mcp/servers");
+      expect(listed.body.servers).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "chiefnotes", command: "npx", enabled: false, envKeys: ["NOTES_TOKEN"] }),
+      ]));
+      expect(JSON.stringify(listed.body)).not.toContain(secret);
+      const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+      expect(disk.mcpServers.chiefnotes).toEqual({ command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: secret }, enabled: false });
+      expect(JSON.stringify((await api("GET", "/api/bots")).body)).not.toContain(secret);
+      // config.json is the one place the value belongs: not the transcript,
+      // the decision log, or any event file.
+      const leaks = (readdirSync(join(home, ".openmausbot"), { recursive: true, withFileTypes: true }))
+        .filter((entry) => entry.isFile() && entry.name !== "config.json")
+        .map((entry) => join(entry.parentPath, entry.name))
+        .filter((file) => readFileSync(file).includes(secret));
+      expect(leaks).toEqual([]);
+    } finally {
+      await api("DELETE", "/api/mcp/servers/chiefnotes").catch(() => undefined);
+      await api("DELETE", `/api/bots/${chief.id}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${member.id}`).catch(() => undefined);
+    }
+  });
+
   it("manages and probes a url MCP server, and the Claude Code servers switch", async () => {
     const secret = "Bearer mcp-header-that-must-never-render";
     const fake = await startFakeHttpMcp({ requireHeader: { name: "Authorization", value: secret } });

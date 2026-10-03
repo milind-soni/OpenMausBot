@@ -27,6 +27,12 @@ export type RouteHandler = (ctx: RouteContext) => Promise<typeof PASS | void>;
 
 export const ROUTES: RouteHandler[] = [];
 
+/** Routes a bot's agents proxy calls under /api/internal/. index.ts runs these
+ * inside its internal block, after the bot capability is checked, with
+ * `readBody` bound to its lease- and sender-checking reader; never in ROUTES,
+ * which runs before that check. */
+export const INTERNAL_ROUTES: RouteHandler[] = [];
+
 /** Runs handlers in order until one answers; true means stop routing. A
  * handler that wrote a response but returned PASS by mistake still counts as
  * answered, so the request can never reach a second handler. */

@@ -53,7 +53,7 @@ export type DecisionKind =
  * never answer, `auto-fallback` a card shown after delivery failed, `routine`
  * a durable chat scheduling proposal, `skill` a staged learned-skill card,
  * `profile` a bot proposed a profile change, `model` a bot proposed a default-model
- * switch, `user` the human's answer, and
+ * switch, `mcp-server` a Chief proposed a custom MCP server change, `user` the human's answer, and
  * auto-review sources the isolated model reviewer. connector-scope rows
  * come from the connected-app grants verdict: the person pre-decided them
  * by editing a bot's connectorTools, so the call itself needed no card. */
@@ -66,6 +66,7 @@ export type DecisionSource =
   | "profile"
   | "model"
   | "tightening"
+  | "mcp-server"
   | "user"
   | "connector-scope"
   | "outbound"

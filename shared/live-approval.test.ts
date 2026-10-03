@@ -20,6 +20,11 @@ describe("liveCardKind", () => {
     expect(liveDecisionRefusal(card({ requestId: "r1", tool: "update_model", modelRequest: {} as OptionCardData["modelRequest"] })))
       .toBe("This request is reviewed on screen.");
   });
+  it("never lets a spoken yes turn on an MCP server", () => {
+    const mcp = card({ requestId: "r1", tool: "propose_mcp_server", mcpServerRequest: {} as OptionCardData["mcpServerRequest"] });
+    expect(liveCardKind(mcp)).toBe("review");
+    expect(liveDecisionRefusal(mcp)).toBe("This request is reviewed on screen.");
+  });
   it("ignores settled cards and cards without a request", () => {
     expect(liveCardKind(card({ requestId: "r1", tool: "Bash", answered: "allow" }))).toBeNull();
     expect(liveCardKind(card({ requestId: "r1", tool: "Bash", dismissed: true }))).toBeNull();

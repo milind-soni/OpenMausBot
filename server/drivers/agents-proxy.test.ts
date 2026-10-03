@@ -12,6 +12,7 @@ import { childEnv } from "../testing/omb-env.ts";
 import { ToolResults } from "../tool-results.ts";
 import { waitForExit } from "../testing/cleanup.ts";
 import type { PeerDeliveryReceipt } from "../peer-delivery.ts";
+import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
 const TOKEN = "test-comms-token";
@@ -2365,5 +2366,29 @@ describe("coordinate_bots arguments (room turn)", () => {
     expect(text).toContain("botIds");
     expect(text).toContain("message");
     expect(lastCoordinateBody).toBeNull();
+  });
+});
+
+describe("propose_mcp_server catalog", () => {
+  const names = (env: NodeJS.ProcessEnv) => availableTools(catalogProfileFromEnv({ OMB_BOT_ID: "bot-a", ...env })).map((tool) => tool.name);
+
+  it("is hidden by default and shown only to a Chief of Staff profile", () => {
+    expect(names({})).not.toContain("propose_mcp_server");
+    expect(names({ OMB_ROOM_TURN: "1" })).not.toContain("propose_mcp_server");
+    expect(names({ OMB_MCP_SERVER_PROPOSALS: "1" })).toContain("propose_mcp_server");
+    expect(names({ OMB_MCP_SERVER_PROPOSALS: "1", OMB_ROOM_TURN: "1" })).toContain("propose_mcp_server");
+    expect(names({ OMB_MCP_SERVER_PROPOSALS: "1", OMB_EXTERNAL_RUNTIME: "1" })).not.toContain("propose_mcp_server");
+    // The older tool stays for everyone, unchanged.
+    expect(names({})).toContain("add_mcp_server");
+  });
+
+  it("advertises one flat object with no on/off field", () => {
+    const tool = availableTools(catalogProfileFromEnv({ OMB_MCP_SERVER_PROPOSALS: "1" })).find((entry) => entry.name === "propose_mcp_server")!;
+    expect(JSON.stringify(tool.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
+    expect(tool.inputSchema).toMatchObject({ type: "object", additionalProperties: false, required: ["action", "name", "reason"] });
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(["action", "name", "reason", "command", "args", "env", "url", "type", "headers", "oauth"]);
+    expect(tool.description).toContain("Chief of Staff only");
+    expect(tool.description).toContain("always wait for the user's click, even with Full Access");
+    expect(tool.description).toMatch(/This does not elevate another bot's execution permissions\.$/);
   });
 });

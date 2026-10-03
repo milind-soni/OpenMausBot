@@ -70,11 +70,12 @@ export function isPersistentQuestionCard(card?: {
   modelRequest?: unknown;
   tighteningRequest?: unknown;
   teamSetupRequest?: unknown;
+  mcpServerRequest?: unknown;
 } | null): boolean {
   return Boolean(card && (
     card.requestType === "question" || card.questionRequest ||
     (!card.requestType && !card.tool && !card.routineRequest && !card.skillRequest && !card.profileRequest &&
-      !card.modelRequest && !card.tighteningRequest && !card.teamSetupRequest)
+      !card.modelRequest && !card.tighteningRequest && !card.teamSetupRequest && !card.mcpServerRequest)
   ));
 }
 

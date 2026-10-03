@@ -1345,5 +1345,20 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       text: `Saved MCP server “${serverName}”${where} switched off. It stays off in MCP server settings until the user turns it on.${local}${named ? ` ${named}` : ""}`,
     };
   }
+  if (name === "propose_mcp_server") {
+    // The harness coerces and validates the proposal, and its refusals
+    // carry a literal example; this side only forwards it.
+    let r: Json;
+    try {
+      r = await api("/api/internal/mcp-server-requests", {
+        method: "POST",
+        body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, proposal: args }),
+      });
+    } catch (error) {
+      return { text: error instanceof Error ? error.message : String(error), isError: true };
+    }
+    const serverName = typeof args.name === "string" && args.name.trim() ? args.name.trim().toLowerCase() : "the MCP server";
+    return confirmationResult(r, `the change to MCP server “${serverName}”`, "MCP server");
+  }
   return { text: `Unknown tool: ${name}`, isError: true };
 }

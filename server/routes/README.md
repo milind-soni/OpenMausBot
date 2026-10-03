@@ -12,6 +12,8 @@ lower its number in that test.
   Inside one module, keep a literal path ahead of a pattern that would also match it.
 - `handleRequest` runs the table right after the auth gate, so handlers are already authenticated.
   Scope rules stay keyed by path in `server/request-auth.ts`.
+- A route a bot's agents proxy calls (`/api/internal/...`) goes in `INTERNAL_ROUTES` instead. `index.ts` runs that
+  table only after the bot capability check, and its `readBody` refuses an expired turn or a different sender.
 - `RouteContext` carries `req`, `res`, `url`, `path`, `method`, `auth`, `json`, `readBody`; the rest is `deps`.
 - Type-only imports must be `import type` (or an inline `type`): the server runs on type stripping, so
   a bare type import passes `tsc` and crashes at boot.

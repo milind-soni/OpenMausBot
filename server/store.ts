@@ -24,6 +24,7 @@ import { redactSecretsInText } from "./redact.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode } from "../shared/approval-mode.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
+import type { McpServerRequestSpec } from "../shared/mcp-server-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
 import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
@@ -278,6 +279,24 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
         reason: redactSecretsInText(card.profileRequest.reason),
         before: scrubChanges(card.profileRequest.before),
         changes: scrubChanges(card.profileRequest.changes),
+      };
+    }
+    // An MCP server proposal carries names, never secret values; its free
+    // text (reason and the launch spec) is scrubbed here too, so a caller
+    // that skipped the service's own redaction cannot bypass this boundary.
+    if (card.mcpServerRequest) {
+      const scrubSpec = (spec: McpServerRequestSpec): McpServerRequestSpec => ({
+        ...spec,
+        ...(spec.command !== undefined ? { command: redactSecretsInText(spec.command) } : {}),
+        ...(spec.args ? { args: spec.args.map((arg) => redactSecretsInText(arg)) } : {}),
+        ...(spec.url !== undefined ? { url: redactSecretsInText(spec.url) } : {}),
+      });
+      const { before, after } = card.mcpServerRequest;
+      card.mcpServerRequest = {
+        ...card.mcpServerRequest,
+        reason: redactSecretsInText(card.mcpServerRequest.reason),
+        ...(before ? { before: scrubSpec(before) } : {}),
+        ...(after ? { after: scrubSpec(after) } : {}),
       };
     }
     out.card = card;

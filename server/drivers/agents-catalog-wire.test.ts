@@ -79,6 +79,11 @@ function profiles(): Record<string, Profile> {
   for (const name of ["direct+skills+shared+voice", "room+own-thread+skills+shared+voice"]) {
     all[`${name}+cloud-home`] = { family: all[name]!.family, env: { ...all[name]!.env, OMB_CLOUD_HOME: "1" } };
   }
+  // An active Chief of Staff is shown propose_mcp_server on top of any of
+  // these; the fullest ones are pinned, and are the family goldens.
+  for (const name of ["direct+skills+shared+voice", "room+own-thread+skills+shared+voice"]) {
+    all[`${name}+chief`] = { family: all[name]!.family, env: { ...all[name]!.env, OMB_MCP_SERVER_PROPOSALS: "1" } };
+  }
   all.external = { family: "external", env: { OMB_EXTERNAL_RUNTIME: "1" } };
   // The external switch wins over every other one; pin that it still does.
   all["external+everything"] = {
@@ -91,6 +96,7 @@ function profiles(): Record<string, Profile> {
       OMB_SHARED_COMPUTERS_ENABLED: "1",
       OMB_VOICE_NOTES: "1",
       OMB_CLOUD_HOME: "1",
+      OMB_MCP_SERVER_PROPOSALS: "1",
     },
   };
   return all;
@@ -100,7 +106,7 @@ const PROFILES = profiles();
 /** The profile of each family that mounts the most: checked in whole, as
  * readable JSON. Every other profile is a by-name subset of one of these and
  * is pinned by tool names, byte count and sha256 in profiles.json. */
-const FULL = { direct: "direct+skills+shared+voice", room: "room+own-thread+skills+shared+voice", external: "external" } as const;
+const FULL = { direct: "direct+skills+shared+voice+chief", room: "room+own-thread+skills+shared+voice+chief", external: "external" } as const;
 
 /** Bytes measured when the budget was last set. A profile may not exceed this
  * by more than 2%, and may not undercut it by more than 2% either: a smaller
@@ -132,6 +138,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "room+own-thread+skills+shared+voice": 52222,
   "direct+skills+shared+voice+cloud-home": 51580,
   "room+own-thread+skills+shared+voice+cloud-home": 51296,
+  "direct+skills+shared+voice+chief": 56178,
+  "room+own-thread+skills+shared+voice+chief": 55894,
   "external": 3030,
   "external+everything": 3030,
 };
@@ -250,6 +258,19 @@ describe("agents proxy tools/list golden", () => {
       const surface = select(wires[name]!).inputSchema.properties.surface;
       expect(surface.enum).toEqual(["auto", "cloud", "browser"]);
       expect(surface.description).not.toMatch(/\b(?:vm|local) =/);
+    }
+  });
+
+  it("shows propose_mcp_server to a Chief of Staff only, and nothing else changes", () => {
+    const chief = Object.keys(PROFILES).filter((name) => name.endsWith("+chief"));
+    expect(chief).toHaveLength(2);
+    for (const name of chief) {
+      const base = toolsOf(wires[name.slice(0, -"+chief".length)]!).map((tool) => tool.name);
+      expect(base).not.toContain("propose_mcp_server");
+      expect(toolsOf(wires[name]!).map((tool) => tool.name)).toEqual([...base, "propose_mcp_server"]);
+    }
+    for (const [name, wire] of Object.entries(wires)) {
+      if (!name.endsWith("+chief")) expect(toolsOf(wire).map((tool) => tool.name), name).not.toContain("propose_mcp_server");
     }
   });
 
