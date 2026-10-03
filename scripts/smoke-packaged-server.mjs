@@ -43,6 +43,9 @@ const port = 21000 + Math.floor(Math.random() * 9000);
 // OMB_SMOKE_DIST lets the release workflow aim this at a packaged app's
 // Resources/server tree instead of the repo build.
 try {
+  // A desktop install can live beneath a user's CommonJS package scope.
+  // Only metadata shipped with the server may establish its ESM format.
+  writeFileSync(join(staging, "package.json"), '{"type":"commonjs"}\n');
   cpSync(process.env.OMB_SMOKE_DIST ?? join(root, "dist-server"), join(staging, "server"), { recursive: true });
   if (browserBundle) cpSync(resolve(browserBundle), join(staging, "browser-engine"), { recursive: true });
 } catch (error) {
