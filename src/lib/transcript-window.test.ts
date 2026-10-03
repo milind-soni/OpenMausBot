@@ -4,6 +4,7 @@ import {
   TRANSCRIPT_WINDOW_SIZE,
   expandWindowStart,
   focusWindowRange,
+  followWindowStart,
   resolveTranscriptWindow,
   tailWindowStart,
 } from "./transcript-window";
@@ -25,6 +26,24 @@ describe("tailWindowStart", () => {
 
   it("is zero for an empty thread", () => {
     expect(tailWindowStart(0)).toBe(0);
+  });
+});
+
+describe("followWindowStart", () => {
+  const turn = (asked: number, total: number) =>
+    Array.from({ length: total }, (_, i) => ({ role: i === asked ? "user" : "bot" }));
+
+  it("is the tail window when the newest message is inside it", () => {
+    expect(followWindowStart(turn(250, 300))).toBe(180);
+  });
+
+  it("stops at the newest message when a long turn follows it", () => {
+    expect(followWindowStart(turn(30, 300))).toBe(30);
+  });
+
+  it("is the tail window when the person has not written", () => {
+    expect(followWindowStart(turn(-1, 300))).toBe(180);
+    expect(followWindowStart([])).toBe(0);
   });
 });
 
