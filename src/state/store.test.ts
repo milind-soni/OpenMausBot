@@ -5,7 +5,6 @@ import {
   ApiError,
   CLOUD_LINK_SETTINGS,
   configStatusFromFrame,
-  createStreamDeltaBuffer,
   currentTaskBot,
   initialState,
   liveCallFromFrame,
@@ -18,6 +17,7 @@ import {
   pinBotThreadAction,
   reducer,
   requestConfirmedBotDeletion,
+  runtimeFrameAction,
   visibleMessages,
   visibleNotificationThread,
   type AppState,
@@ -87,57 +87,6 @@ describe("composer thread approval persistence", () => {
     await persistTaskApproval("bot", "thread", { approvalMode: "ask", confirmFullAccess: true }, undefined, request);
     expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({ approvalMode: "ask" });
     await expect(persistTaskApproval("bot", "thread", { approvalMode: "full", confirmFullAccess: true }, { setMode: vi.fn().mockRejectedValue(new Error("gone")) }, request)).rejects.toThrow("gone");
-  });
-});
-
-describe("stream delta flushing", () => {
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
-  const prepare = () => {
-    vi.useFakeTimers();
-    const frames = new Map<number, FrameRequestCallback>();
-    let next = 0;
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.set(++next, callback); return next; });
-    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
-    const flushed = vi.fn();
-    return { buffer: createStreamDeltaBuffer(flushed), frames, flushed };
-  };
-
-  it("drains a paused animation frame on the timer without duplication", () => {
-    const { buffer, frames, flushed } = prepare();
-    buffer.push("a", "assistant_text", "hello");
-    buffer.push("a", "assistant_text", " world");
-    buffer.push("b", "reasoning_text", "thinking");
-    expect(flushed).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(100);
-    expect(flushed).toHaveBeenCalledExactlyOnceWith([
-      ["a", { text: "hello world", reasoning: "" }], ["b", { text: "", reasoning: "thinking" }],
-    ]);
-    expect(frames.size).toBe(0);
-    vi.advanceTimersByTime(1_000);
-    expect(flushed).toHaveBeenCalledTimes(1);
-  });
-
-  it("flushes oversized chunks in full even when timers and frames are paused", () => {
-    const { buffer, flushed } = prepare();
-    const text = "🙂".repeat(40_000);
-    buffer.push("a", "assistant_text", text);
-    expect(flushed).toHaveBeenCalledExactlyOnceWith([["a", { text, reasoning: "" }]]);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("clears only the settled task and cancels pending work on disposal", () => {
-    const { buffer, frames, flushed } = prepare();
-    buffer.push("a", "assistant_text", "already in transcript");
-    buffer.push("b", "assistant_text", "still streaming");
-    buffer.clear("a");
-    frames.values().next().value!(0);
-    expect(flushed).toHaveBeenCalledExactlyOnceWith([["b", { text: "still streaming", reasoning: "" }]]);
-    buffer.push("b", "reasoning_text", "unmounted");
-    buffer.dispose();
-    expect(frames.size).toBe(0);
-    expect(vi.getTimerCount()).toBe(0);
-    vi.advanceTimersByTime(1_000);
-    expect(flushed).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -2336,6 +2285,25 @@ describe("conversation model variant discoveries", () => {
   const run = (state: AppState, event: RuntimeEvent) => reducer(state, { type: "modelVariantRuntime", event });
   const discovery = (variants: ModelVariantState = { options: [{ id: "minimal", label: "Minimal" }], currentValue: "minimal" }, threadId = "first", turnId = "turn-1"): RuntimeEvent =>
     ({ ...base(threadId, turnId), type: "session.model-variants", model: selection.model, variants });
+
+  // The desktop shows a reply once it is finished, so a streamed delta has
+  // nothing to update; only the model-variant fold reads runtime frames.
+  it("ignores reply and reasoning deltas but still folds model-variant frames", () => {
+    const apply = (state: AppState, event: RuntimeEvent) => {
+      const action = runtimeFrameAction(event);
+      return action ? reducer(state, action) : state;
+    };
+    let state = apply(start(), { ...base(), type: "turn.started" });
+    for (const streamKind of ["assistant_text", "reasoning_text"] as const) {
+      const delta: RuntimeEvent = { ...base(), type: "content.delta", streamKind, delta: "partial" };
+      expect(runtimeFrameAction(delta)).toBeNull();
+      expect(apply(state, delta)).toBe(state);
+    }
+    state = apply(state, discovery());
+    expect(state.modelVariantSessions.first.variants?.currentValue).toBe("minimal");
+    state = apply(state, { ...base(), type: "turn.completed", ok: true });
+    expect(state.modelVariantSessions.first.acceptingUpdates).toBe(false);
+  });
 
   it("keeps capabilities on their thread, separate from catalog and persisted choices", () => {
     let state = run(start(), { ...base(), type: "turn.started" });

@@ -175,29 +175,18 @@ keeping a second screenshot.
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/thinking-timer-ui.e2e.test.ts
 ```
 
-## Paused-frame stream buffering
+## In-flight reply text
 
-`scripts/testing/stream-buffer.e2e.test.ts` launches the same isolated server,
-Vite and disposable browser session, mounting the real `StoreProvider` with a
-fixture-only text/reasoning probe. It pauses `requestAnimationFrame`, sends
-through the shared control surface, and holds the fake CLI's final frames
-until both intermediate channels reach the renderer. After settlement it
-asserts exactly one complete reply and empty stream channels, including after
-the fallback timer could fire. This probes state; the current app's active-turn
-tail displays presence rather than partial text/reasoning.
+The desktop shows a reply once it is finished; while a turn runs, the chat
+shows the bot's busy state. The renderer keeps no streamed text:
+`runtimeFrameAction` in `src/state/store.tsx` passes only the model-variant
+frames on, and `src/state/store.test.ts` checks that a reply or reasoning
+delta leaves the store state unchanged. `src/components/ChatView.follow.test.ts`
+checks that the finished reply still moves a following transcript to its end.
 
 ```sh
-OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/stream-buffer.e2e.test.ts
-pnpm exec vitest run src/state/store.test.ts
+pnpm exec vitest run src/state/store.test.ts src/components/ChatView.follow.test.ts
 ```
-
-Only the **pending buffer** is drained: once per frame, after 100ms when timers
-run, or at 64 × 1024 UTF-16 characters (not bytes). The size test also pauses
-timers and proves an oversized chunk is flushed intact. Total accumulated
-output is intentionally unbounded; no output is truncated and this is not a
-hard memory cap. Fully suspended browser execution cannot run either callback.
-The fixture prints a persistent `.stream.json` evidence path after closing its
-browser and server and removing its temporary data.
 
 ## Bot setup and MCP access recipe
 

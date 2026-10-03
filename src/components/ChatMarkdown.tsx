@@ -2,11 +2,8 @@
 // strikethrough, autolinks) with a chromed code block — language label, copy
 // button, lazy Shiki highlighting. Model output never reaches the DOM as raw
 // HTML: no rehype-raw, so HTML in the text renders as text; Shiki's output is
-// generator-escaped. While a message is still streaming, a code block renders
-// as plain <pre> until its content has held still for STREAM_SETTLE_MS (the
-// fence is very likely complete), then highlights and caches — so the settled
-// bubble, a fresh component instance, mounts straight from cache instead of
-// popping from plain to highlighted.
+// generator-escaped. A message renders once it is finished, so a code block
+// highlights straight away and caches the result for the next mount.
 //
 // Bidi: message text is written in the user's or the model's language, which
 // is independent of the UI language, so every block resolves its own
@@ -38,24 +35,17 @@ import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext }
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
-// blocks; keys are content-hashed and capped. Streamed partials may land here
-// under their own hash — harmless (never collides with the final content's
-// key, and the cap evicts it), and the final content's entry is exactly what
-// makes the settled bubble render highlighted on mount.
+// blocks; keys are content-hashed and capped.
 const highlightCache = new Map<string, string>();
 const CACHE_MAX = 200;
 // rendered mermaid SVGs, keyed by skin scheme + content hash so revisiting a
 // thread re-mounts straight from cache — same idea as highlightCache, smaller
-// cap because SVGs are bigger than token streams
+// cap because SVGs are bigger than highlighted code
 const mermaidCache = new Map<string, string>();
 const MERMAID_CACHE_MAX = 50;
 // every mermaid.render() call needs an id no earlier call used, including the
 // calls that failed and may have left an orphan element behind
 let mermaidRenderId = 0;
-// how long a streaming block's content must be unchanged before we spend a
-// tokenize on it — long enough to skip per-token churn mid-fence, short
-// enough that the highlight lands before the stream settles
-const STREAM_SETTLE_MS = 250;
 const hash = (s: string) => {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
@@ -212,8 +202,6 @@ export interface CodeBlockProps {
   code: string;
   /** Language identifier from markdown fence, e.g. "ts", "python". */
   lang: string;
-  /** Whether the parent message is still actively receiving tokens. */
-  streaming: boolean;
 }
 
 /**
@@ -221,10 +209,10 @@ export interface CodeBlockProps {
  * Features syntax highlighting with Shiki, language normalization badge,
  * line count indicator, word wrap toggle, and accessible clipboard copy with status feedback.
  *
- * @param props - Component props containing code string, language identifier, and streaming flag.
+ * @param props - Component props containing code string and language identifier.
  * @returns Rendered code block element.
  */
-export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
+export function CodeBlock({ code, lang }: CodeBlockProps) {
   // a block highlighted before (revisiting a thread) paints highlighted in
   // its first frame instead of plain first and highlighted after the effect
   const [html, setHtml] = useState<string | null>(() => highlightCache.get(highlightKey(lang, code)) ?? null);
@@ -248,47 +236,33 @@ export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
     const cached = highlightCache.get(key);
     if (cached) return setHtml(cached);
     let alive = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const highlight = () => {
-      import("shiki")
-        .then((shiki) =>
-          shiki.codeToHtml(code, {
-            lang: lang || "text",
-            themes: {
-              light: "github-light-default",
-              dark: "github-dark-default",
-            },
-            defaultColor: "light-dark()",
-          }),
-        )
-        .then((out) => {
-          if (!alive) return;
-          if (highlightCache.size >= CACHE_MAX) {
-            const first = highlightCache.keys().next().value;
-            if (first) highlightCache.delete(first);
-          }
-          highlightCache.set(key, out);
-          setHtml(out);
-        })
-        .catch(() => {
-          /* unknown language or shiki failed — the plain <pre> stays */
-        });
-    };
-    if (streaming) {
-      // any earlier highlight is of a shorter snapshot — drop it so the
-      // growing plain <pre> shows the real content, then wait for the block
-      // to hold still. The effect re-runs (and this cleanup clears the timer)
-      // on every content change, which is the debounce.
-      setHtml(null);
-      timer = setTimeout(highlight, STREAM_SETTLE_MS);
-    } else {
-      highlight();
-    }
+    import("shiki")
+      .then((shiki) =>
+        shiki.codeToHtml(code, {
+          lang: lang || "text",
+          themes: {
+            light: "github-light-default",
+            dark: "github-dark-default",
+          },
+          defaultColor: "light-dark()",
+        }),
+      )
+      .then((out) => {
+        if (!alive) return;
+        if (highlightCache.size >= CACHE_MAX) {
+          const first = highlightCache.keys().next().value;
+          if (first) highlightCache.delete(first);
+        }
+        highlightCache.set(key, out);
+        setHtml(out);
+      })
+      .catch(() => {
+        /* unknown language or shiki failed — the plain <pre> stays */
+      });
     return () => {
       alive = false;
-      if (timer !== undefined) clearTimeout(timer);
     };
-  }, [code, lang, streaming]);
+  }, [code, lang]);
 
   const copy = () => {
     if (!navigator.clipboard?.writeText) return;
@@ -418,8 +392,6 @@ function mermaidScheme(element: HTMLElement | null): "dark" | "light" {
 export interface MermaidDiagramProps {
   /** Mermaid diagram source from a fenced code block. */
   code: string;
-  /** Whether the parent message is still actively receiving tokens. */
-  streaming: boolean;
 }
 
 const MERMAID_FONT = '"Inter", -apple-system, BlinkMacSystemFont, "SF UI Text", "Segoe UI", system-ui, sans-serif';
@@ -430,13 +402,12 @@ const MERMAID_FONT = '"Inter", -apple-system, BlinkMacSystemFont, "SF UI Text", 
  * actually appears — the same lazy pattern Shiki uses. The SVG
  * mermaid.render() returns under securityLevel "strict" is the only thing
  * injected; a diagram that fails to parse falls back to its source with the
- * error above it, and a still-streaming block stays plain source so a
- * half-arrived diagram never flashes a parse error.
+ * error above it.
  *
- * @param props - Component props containing the mermaid source and streaming flag.
+ * @param props - Component props containing the mermaid source.
  * @returns Rendered diagram, or the source with the parse error.
  */
-export function MermaidDiagram({ code, streaming }: MermaidDiagramProps) {
+export function MermaidDiagram({ code }: MermaidDiagramProps) {
   const frame = useRef<HTMLDivElement | null>(null);
   const [skinEpoch, setSkinEpoch] = useState(0);
   // a diagram drawn before paints in its first frame, in the page's scheme;
@@ -470,52 +441,37 @@ export function MermaidDiagram({ code, streaming }: MermaidDiagramProps) {
       return;
     }
     let alive = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const render = () => {
-      import("mermaid")
-        .then((module) => {
-          mermaidRenderId += 1;
-          module.default.initialize({
-            startOnLoad: false,
-            securityLevel: "strict",
-            suppressErrorRendering: true,
-            theme: scheme === "light" ? "default" : "dark",
-            fontFamily: MERMAID_FONT,
-          });
-          return module.default.render(`omb-mermaid-${mermaidRenderId}`, code);
-        })
-        .then((out) => {
-          if (!alive) return;
-          if (mermaidCache.size >= MERMAID_CACHE_MAX) {
-            const first = mermaidCache.keys().next().value;
-            if (first) mermaidCache.delete(first);
-          }
-          mermaidCache.set(key, out.svg);
-          setSvg(out.svg);
-          setError(null);
-        })
-        .catch((cause: unknown) => {
-          // a streaming diagram is probably just incomplete: keep the source
-          // up and stay quiet until the stream settles and re-runs this effect
-          if (!alive || streaming) return;
-          const message = cause instanceof Error ? cause.message : String(cause);
-          setError(message.length > 300 ? `${message.slice(0, 300)}…` : message);
+    import("mermaid")
+      .then((module) => {
+        mermaidRenderId += 1;
+        module.default.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          suppressErrorRendering: true,
+          theme: scheme === "light" ? "default" : "dark",
+          fontFamily: MERMAID_FONT,
         });
-    };
-    if (streaming) {
-      // an earlier render is of a shorter snapshot — drop it so the growing
-      // source shows the real content, then wait for the block to hold still
-      setSvg(null);
-      setError(null);
-      timer = setTimeout(render, STREAM_SETTLE_MS);
-    } else {
-      render();
-    }
+        return module.default.render(`omb-mermaid-${mermaidRenderId}`, code);
+      })
+      .then((out) => {
+        if (!alive) return;
+        if (mermaidCache.size >= MERMAID_CACHE_MAX) {
+          const first = mermaidCache.keys().next().value;
+          if (first) mermaidCache.delete(first);
+        }
+        mermaidCache.set(key, out.svg);
+        setSvg(out.svg);
+        setError(null);
+      })
+      .catch((cause: unknown) => {
+        if (!alive) return;
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setError(message.length > 300 ? `${message.slice(0, 300)}…` : message);
+      });
     return () => {
       alive = false;
-      if (timer !== undefined) clearTimeout(timer);
     };
-  }, [code, streaming, skinEpoch]);
+  }, [code, skinEpoch]);
 
   useEffect(() => {
     return () => {
@@ -769,8 +725,8 @@ function escapeLiteralDollars(text: string): string {
 
 /** Convert the TeX delimiters models commonly emit into remark-math syntax.
  * Fenced and inline code are protected so examples such as `\\(x\\)` remain
- * literal. Unmatched delimiters are left untouched while a response streams,
- * and dollar signs that read as money are escaped. */
+ * literal. Unmatched delimiters are left untouched, and dollar signs that
+ * read as money are escaped. */
 export function normalizeMathDelimiters(text: string, imageOffsets?: Map<number, number>): string {
   const protectedCode: Array<{ value: string; sourceOffset: number }> = [];
   const protect = (value: string, sourceOffset: number): string => {
@@ -832,7 +788,6 @@ export function normalizeMathDelimiters(text: string, imageOffsets?: Map<number,
  * away and build it again (code highlights, wrap, copy, spoiler and save
  * state included). Per-message values reach them through this context. */
 interface MessageScope {
-  streaming: boolean;
   message?: MessageAttachmentContext;
   /** markdown image offsets after math normalization → offsets in the stored text */
   imageOffsets?: Map<number, number>;
@@ -840,10 +795,9 @@ interface MessageScope {
   currentBotId?: string;
 }
 
-const MessageScopeContext = createContext<MessageScope>({ streaming: false, threads: [] });
+const MessageScopeContext = createContext<MessageScope>({ threads: [] });
 
 function MarkdownCode({ children }: { children?: ReactNode }) {
-  const { streaming } = useContext(MessageScopeContext);
   // fenced code arrives as <pre><code class="language-x">…</code></pre>
   const child: any = Array.isArray(children) ? children[0] : children;
   const className: string = child?.props?.className ?? "";
@@ -856,9 +810,9 @@ function MarkdownCode({ children }: { children?: ReactNode }) {
   // a mermaid fence is a picture, not a program: hand it to the
   // diagram renderer instead of the highlighter
   if (lang.trim().toLowerCase() === "mermaid") {
-    return <MermaidDiagram code={code} streaming={streaming} />;
+    return <MermaidDiagram code={code} />;
   }
-  return <CodeBlock code={code} lang={lang} streaming={streaming} />;
+  return <CodeBlock code={code} lang={lang} />;
 }
 
 function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
@@ -989,8 +943,8 @@ const MAY_LINK_THREAD = /#|openmausbot/i;
 const NO_THREAD_REFS: ThreadRefsValue = { threads: [] };
 
 /** Render message Markdown with math, protected code, scoped attachments, and mentions. */
-function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
-  text: string; streaming?: boolean; message?: MessageAttachmentContext;
+function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
+  text: string; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
 }) {
   // "#Title" mentions link to the threads the person can see (ThreadRefs);
@@ -1007,7 +961,7 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
     ? text
     : repairMarkdownTables(text), imageOffsets);
   return (
-    <MessageScopeContext.Provider value={{ streaming, message, imageOffsets, threads, currentBotId }}>
+    <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId }}>
       <div className="chat-md min-w-0 [&>*+*]:mt-2">
         <Markdown
           remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
@@ -1041,7 +995,6 @@ export const ChatMarkdown = memo(ChatMarkdownComponent, (previous, next) => (
   previous.text === next.text
   && samePeers(previous.mentionPeers ?? NO_MENTION_PEERS, next.mentionPeers ?? NO_MENTION_PEERS)
   && previous.everyone === next.everyone
-  && Boolean(previous.streaming) === Boolean(next.streaming)
   && previous.message?.threadId === next.message?.threadId
   && previous.message?.messageId === next.message?.messageId
 ));

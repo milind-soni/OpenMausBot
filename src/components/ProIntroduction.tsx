@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUpRight, CalendarClock, Cloud, Crown, Monitor, Sparkles, X } from "lucide-react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
-import { api, CLOUD_LINK_SETTINGS, useStore, useStreaming } from "@/state/store";
+import { api, CLOUD_LINK_SETTINGS, useStore } from "@/state/store";
 import { openExternalLink, PRICING_URL, PRO_URL } from "@/lib/app-links";
 import { buyOfferAllowed, cloudPlanLine, cloudPlanView, type CloudPlanView } from "@/lib/cloud-plan";
 import { emailGateDone } from "@/lib/analytics";
@@ -136,7 +136,6 @@ export function ProIntroductionCard({ onDismiss, onSignIn }: { onDismiss: () => 
 
 export function ProIntroduction({ quiet = false }: { quiet?: boolean }) {
   const { state, dispatch } = useStore();
-  const { streaming } = useStreaming();
   const view = useCloudPlan();
   const available = view !== null && buyOfferAllowed(view);
   const updater = useUpdaterState();
@@ -147,8 +146,7 @@ export function ProIntroduction({ quiet = false }: { quiet?: boolean }) {
   const [signingIn, setSigningIn] = useState(false);
   const record = state.config?.onboarding;
   const busy = state.bots.some(bot => bot.busy || bot.tasks?.some(task => task.busy))
-    || state.groups.some(group => group.working || group.busyBotId)
-    || Object.keys(streaming).length > 0;
+    || state.groups.some(group => group.working || group.busyBotId);
   const setup = state.welcomeOpen || state.tourOpen || (Boolean(record?.completedAt) && currentStep(record) !== null)
     || welcomeDue(state.config, { remoteClient: false, legacyDone: emailGateDone() });
   if (!available || dismissed || signingIn || hintSeen(record, PRO_DISMISSED) || !state.connected || !state.config || setup || busy || quiet

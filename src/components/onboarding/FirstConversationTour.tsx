@@ -12,7 +12,7 @@ import { currentStep } from "@/lib/guided-tour";
 import { anchorFor, cardAnswered, nextSpotlight, placementFor, tourComplete, type ChatObservation, type SpotlightId } from "@/lib/first-conversation";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
-import { api, useStore, useStreaming } from "@/state/store";
+import { api, useStore } from "@/state/store";
 import { Spotlight } from "./Spotlight";
 
 const COPY: Record<SpotlightId, { key: "onboarding.spot.composer" | "onboarding.spot.model" | "onboarding.spot.approval" | "onboarding.spot.connector"; mascot: MausState }> = {
@@ -24,7 +24,6 @@ const COPY: Record<SpotlightId, { key: "onboarding.spot.composer" | "onboarding.
 
 export function FirstConversationTour({ quiet = false }: { quiet?: boolean }) {
   const { state, dispatch } = useStore();
-  const { streaming } = useStreaming();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const record = state.config?.onboarding;
   // the guided tour covers the composer and the model chip; this watcher
@@ -36,7 +35,7 @@ export function FirstConversationTour({ quiet = false }: { quiet?: boolean }) {
   const sawBusy = useRef(false);
 
   const bot = state.bots.find((b) => b.id === state.selectedId) ?? null;
-  const busy = Boolean(bot?.busy) || Boolean(bot && streaming[bot.threadId]);
+  const busy = Boolean(bot?.busy);
 
   // a reply has finished once the bot was busy and then stopped
   useEffect(() => {

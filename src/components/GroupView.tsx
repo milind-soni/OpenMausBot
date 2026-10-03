@@ -8,7 +8,6 @@ import { ArrowDown, Check, ChevronDown, ChevronRight, Folder, FolderOpen, Loader
 import {
   api,
   useStore,
-  useStreaming,
   formatTime,
   openNotificationTarget,
   type Bot,
@@ -995,8 +994,6 @@ export function GroupView({ group }: { group: Group }) {
   // Same Windows caption handling as ChatView: drag on the header, shift the
   // right-hand controls below the renderer-drawn caption buttons.
   const { dragStyle: headerDragStyle, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
-  const stream = useStreaming();
-  const streaming = stream.streaming[group.threadId];
   const scrollRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -1155,7 +1152,7 @@ export function GroupView({ group }: { group: Group }) {
     if (!el || !followRef.current) return;
     el.scrollTo({ top: el.scrollHeight });
     previousScrollTop.current = el.scrollTop;
-  }, [group.id, group.messages.length, streaming, group.busyBotId, group.working, composerDock.pad]);
+  }, [group.id, group.messages.length, group.busyBotId, group.working, composerDock.pad]);
 
   // Expanding prepends rows: capture the height first, then after the commit
   // shift scrollTop by the growth so the message under the cursor stays put

@@ -33,7 +33,6 @@ import {
   api,
   currentTaskBot,
   useStore,
-  useStreaming,
   formatTime,
   messageVersions,
   openNotificationTarget,
@@ -688,12 +687,10 @@ function ActivityChip({ message, place = "auto" }: { message: Message; place?: E
   return <ToolActivity tool={tool} place={toolPlace(tool.name, place)} />;
 }
 
-/** The settled transcript, memoized as one unit: during streaming every
- * frame re-renders ChatView, but all of these props keep their identity
- * (bot/messages only change on real message events), so the whole list —
- * every markdown tree, every code block — bails out of React work and only
- * the streaming tail below it commits. This is the t3code structural-sharing
- * idea at component granularity. */
+/** The settled transcript, memoized as one unit: when ChatView re-renders
+ * for something outside the transcript, all of these props keep their
+ * identity (bot/messages only change on real message events), so the whole
+ * list — every markdown tree, every code block — bails out of React work. */
 const MessagesList = memo(function MessagesList({
   bot,
   messages,
@@ -987,9 +984,6 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   // A guest on an OMB Cloud home writes only in conversations it opened.
   const canWrite = useCanWriteIn(bot.threadId);
 
-  const stream = useStreaming();
-  const streaming = stream.streaming[bot.threadId];
-  const reasoning = stream.reasoning[bot.threadId];
   const provisioning = state.provisioning[bot.id];
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const [findOpen, setFindOpen] = useState(false);
@@ -1193,7 +1187,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     if (!el || !followRef.current) return;
     el.scrollTo({ top: el.scrollHeight });
     previousScrollTop.current = el.scrollTop;
-  }, [bot.id, messages.length, streaming, reasoning, bot.busy, composerDock.pad]);
+  }, [bot.id, messages.length, bot.busy, composerDock.pad]);
 
   // Expanding prepends rows: capture the height first, then after the commit
   // shift scrollTop by the growth so the message under the cursor stays put

@@ -13,7 +13,6 @@ vi.mock("@/state/store", async (importOriginal) => {
   return {
     ...original,
     useStore: () => ({ state: { ...original.initialState, ...fixture.state }, dispatch: fixture.dispatch }),
-    useStreaming: () => ({ streaming: {} }),
   };
 });
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({

@@ -103,7 +103,7 @@ describe("math rendering", () => {
 
   it("keeps code dollar signs and malformed TeX delimiters literal", () => {
     const text = "`const price = '$5'`\n\n```tex\n\\(not rendered\\)\n```\n\nUnclosed \\(x";
-    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text, streaming: true }));
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
     expect(html).not.toContain('class="katex"');
     expect(normalizeMathDelimiters(text)).toBe(text);
   });
@@ -550,7 +550,7 @@ describe("ChatMarkdown code blocks", () => {
     ["averylongunknownlanguageidentifier", "Averylongunknownlanguageidentifier"],
   ])("lets the %s badge shrink without wrapping the count or controls", (lang, label) => {
     const html = renderToStaticMarkup(createElement(CodeBlock, {
-      code: "first\nsecond", lang, streaming: false,
+      code: "first\nsecond", lang,
     }));
     const badge = html.match(/<span[^>]*title="[^"]*"[^>]*>/)?.[0];
     expect(badge).toContain(`title="${label}"`);
@@ -610,7 +610,6 @@ describe("ChatMarkdown code blocks", () => {
     const html = renderToStaticMarkup(createElement(CodeBlock, {
       code: "line1\nline2\nline3\n",
       lang: "py",
-      streaming: false,
     }));
 
     expect(html).toContain("Python");
@@ -718,7 +717,6 @@ describe("bidi: message content carries its own direction", () => {
     const fenced = renderToStaticMarkup(createElement(CodeBlock, {
       code: "const total = items[0].count + 1;",
       lang: "ts",
-      streaming: false,
     }));
     expect(fenced).toContain('<div dir="ltr"');
   });

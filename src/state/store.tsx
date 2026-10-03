@@ -10,7 +10,6 @@ import {
   useMemo,
   useReducer,
   useRef,
-  useState,
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
@@ -2753,74 +2752,14 @@ export async function loadSnapshotBoundary<Key extends string>(
   return chat.status === "fulfilled";
 }
 
-/** Per-frame stream state lives in its OWN context: token frames update only
- * the components that read this hook (the chat's streaming tail), while every
- * useStore consumer — sidebar, mascots, pickers, the settled transcript —
- * keeps its render tree untouched during a stream. */
-interface StreamState {
-  /** in-flight assistant text per threadId */
-  streaming: Record<string, string>;
-  /** in-flight extended thinking per threadId (ephemeral) */
-  reasoning: Record<string, string>;
-}
-const EMPTY_STREAM: StreamState = { streaming: {}, reasoning: {} };
-const StreamContext = createContext<StreamState>(EMPTY_STREAM);
-
-type PendingDelta = { text: string; reasoning: string };
-
-/** Paint once per frame, but keep draining when a hidden tab pauses rAF.
- * Flush pending chunks at 64 Ki UTF-16 characters or a 100ms fallback timer.
- * Accumulated output remains intact and unbounded; this is not a memory cap. */
-export function createStreamDeltaBuffer(onFlush: (entries: Array<[string, PendingDelta]>) => void) {
-  const buffer = new Map<string, PendingDelta>();
-  let frame: number | null = null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let characters = 0;
-  const cancel = () => {
-    if (frame !== null) cancelAnimationFrame(frame);
-    frame = null;
-    clearTimeout(timer);
-    timer = undefined;
-  };
-  const flush = () => {
-    cancel();
-    if (!buffer.size) return;
-    const entries = [...buffer];
-    buffer.clear();
-    characters = 0;
-    onFlush(entries);
-  };
-  return {
-    push(threadId: string, kind: string, delta: string) {
-      if (kind !== "assistant_text" && kind !== "reasoning_text") return;
-      const entry = buffer.get(threadId) ?? { text: "", reasoning: "" };
-      if (kind === "assistant_text") entry.text += delta;
-      else entry.reasoning += delta;
-      buffer.set(threadId, entry);
-      characters += delta.length;
-      if (characters >= 64 * 1024) flush();
-      else if (frame === null) {
-        frame = requestAnimationFrame(flush);
-        timer = setTimeout(flush, 100);
-      }
-    },
-    clear(threadId: string) {
-      const entry = buffer.get(threadId);
-      if (entry) characters -= entry.text.length + entry.reasoning.length;
-      buffer.delete(threadId);
-      if (!buffer.size) cancel();
-    },
-    flush,
-    dispose() {
-      cancel();
-      buffer.clear();
-      characters = 0;
-    },
-  };
-}
-
-export function useStreaming() {
-  return useContext(StreamContext);
+/** The desktop shows a reply once it is finished (the turn's busy state is
+ * what a reader sees while it works), so it keeps no in-flight reply text: a
+ * streamed delta changes nothing here. Runtime frames feed only the
+ * model-variant fold. */
+export function runtimeFrameAction(event: RuntimeEvent): Action | null {
+  return event.type === "turn.started" || event.type === "session.model-variants" || event.type === "turn.completed"
+    ? { type: "modelVariantRuntime", event }
+    : null;
 }
 
 const StoreContext = createContext<{
@@ -2843,39 +2782,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, rawDispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
-  // per-frame stream-delta batching (see the "runtime" SSE case); stream
-  // state is intentionally OUTSIDE the reducer so token frames re-render
-  // only StreamContext consumers
-  const [stream, setStream] = useState<StreamState>(EMPTY_STREAM);
-  const deltaBuffer = useMemo(() => createStreamDeltaBuffer((entries) => {
-    setStream((prev) => {
-      const streaming = { ...prev.streaming };
-      const reasoning = { ...prev.reasoning };
-      for (const [threadId, d] of entries) {
-        if (d.text) streaming[threadId] = (streaming[threadId] ?? "") + d.text;
-        if (d.reasoning) reasoning[threadId] = (reasoning[threadId] ?? "") + d.reasoning;
-      }
-      return { streaming, reasoning };
-    });
-  }), []);
-  const flushDeltas = deltaBuffer.flush;
-  const clearStream = (threadId: string) => {
-    // Drop the thread's un-flushed deltas too: the settled message that
-    // triggered this clear already contains them. Without this, the pending
-    // rAF re-creates a "ghost" stream bubble holding the tail fragment —
-    // it renders below any card/chip that settled next (so a permission
-    // card looks glued to the top), keeps the caret blinking while the bot
-    // is actually waiting, and the next block's deltas append onto the
-    // duplicated tail instead of starting a fresh bubble.
-    deltaBuffer.clear(threadId);
-    setStream((prev) => {
-      if (!(threadId in prev.streaming) && !(threadId in prev.reasoning)) return prev;
-      const { [threadId]: _s, ...streaming } = prev.streaming;
-      const { [threadId]: _r, ...reasoning } = prev.reasoning;
-      return { streaming, reasoning };
-    });
-  };
-
   const botPatchQueue = useMemo(
     () =>
       createBotPatchQueue({
@@ -3926,9 +3832,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               queueId: frame.message.queueId,
             });
           }
-          // a settled assistant bubble replaces the in-flight stream
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
-            clearStream(frame.threadId);
             // Auto-speak lives HERE rather than in the chat view so a bot
             // you switched away from still reads its answer out — which is
             // the whole point of listening while you do something else. A
@@ -3952,8 +3856,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "thread":
           rawDispatch({ type: "threadActive", threadId: frame.threadId, activeLeafId: frame.activeLeafId });
-          // a rewind also invalidates any half-streamed text from the old branch
-          clearStream(frame.threadId);
           break;
         case "bot": {
           const bot = frame.bot as BotAnnouncement;
@@ -4021,17 +3923,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rawDispatch({ type: "webhookDeleted", webhookId: frame.webhookId });
           break;
         case "runtime": {
-          const event = frame.event;
-          if (event.type === "turn.started" || event.type === "session.model-variants" || event.type === "turn.completed") {
-            rawDispatch({ type: "modelVariantRuntime", event });
-          }
-          if (event.type === "content.delta") {
-            deltaBuffer.push(event.threadId, event.streamKind, event.delta);
-          } else if (event.type === "turn.completed") {
-            // flush any buffered tail before clearing so no tokens are lost
-            flushDeltas();
-            clearStream(event.threadId);
-          }
+          const action = runtimeFrameAction(frame.event);
+          if (action) rawDispatch(action);
           break;
         }
         case "screen":
@@ -4094,7 +3987,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
     return () => {
       alive = false;
-      deltaBuffer.dispose();
       clearTimeout(hydrationFallback);
       for (const refresh of peripheralRefresh.values()) {
         if (refresh.timer) clearTimeout(refresh.timer);
@@ -4146,11 +4038,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => ({ state, dispatch, flushBotPatches, refreshInstances, refreshModels }),
     [state, dispatch, flushBotPatches, refreshInstances, refreshModels],
   );
-  return (
-    <StoreContext.Provider value={value}>
-      <StreamContext.Provider value={stream}>{children}</StreamContext.Provider>
-    </StoreContext.Provider>
-  );
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
 export function useStore() {
