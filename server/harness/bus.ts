@@ -4,6 +4,13 @@
 // a per-thread canonical NDJSON log (the debugging trick both upstream and
 // agentcal lean on), and delivered to subscribers (the SSE endpoint and
 // the server-side message folder).
+//
+// Streamed text is merged here, once, for every engine on every kind of
+// install: a provider sends a reply as hundreds of small text deltas, and
+// each would otherwise be its own log line, listener call and SSE frame. The
+// bus holds a thread's text for at most DELTA_MERGE_MS and publishes it as
+// one delta, sooner when anything else happens on that thread, so the order
+// of events never changes.
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -15,10 +22,23 @@ import { newId, type ProviderInstance, type RuntimeEvent, type RuntimeEventListe
 const INCOMPLETE_LOG_MESSAGE =
   "Canonical event history is incomplete: OpenMausBot could not write one or more events to disk. Live updates will continue.";
 
+/** How long a thread's streamed text waits to be merged with what follows. */
+const DELTA_MERGE_MS = 50;
+
+type TextDelta = Extract<RuntimeEvent, { type: "content.delta" }>;
+
+/** Two deltas are one stream when only their text, id and time differ. */
+function sameStream(a: TextDelta, b: TextDelta): boolean {
+  return a.provider === b.provider && a.providerInstanceId === b.providerInstanceId && a.turnId === b.turnId &&
+    a.itemId === b.itemId && a.streamKind === b.streamKind && a.synthetic === b.synthetic;
+}
+
 export class EventBus {
   private listeners = new Set<RuntimeEventListener>();
   private unsubscribes = new Map<string, () => void>();
   private pendingLogWarnings = new Map<string, RuntimeEvent>();
+  /** Per thread: the streamed text not yet published, and when it goes. */
+  private pendingText = new Map<string, { event: TextDelta; timer: ReturnType<typeof setTimeout> }>();
   private readonly appendLog: typeof appendFileSync;
 
   constructor(appendLog: typeof appendFileSync = appendFileSync) {
@@ -42,6 +62,40 @@ export class EventBus {
   }
 
   publish(event: RuntimeEvent) {
+    const pending = this.pendingText.get(event.threadId);
+    if (event.type === "content.delta") {
+      if (pending && sameStream(pending.event, event)) {
+        pending.event = { ...pending.event, delta: pending.event.delta + event.delta };
+        return;
+      }
+      if (pending) this.flushThread(event.threadId);
+      const timer = setTimeout(() => this.flushThread(event.threadId), DELTA_MERGE_MS);
+      timer.unref?.();
+      this.pendingText.set(event.threadId, { event, timer });
+      return;
+    }
+    if (pending) this.flushThread(event.threadId);
+    this.write(event);
+  }
+
+  /** Publish every thread's waiting text now. The server calls this as the
+   * process exits; detach and detachAll call it for the engines they drop. */
+  flush(instanceId?: string) {
+    for (const [threadId, pending] of Array.from(this.pendingText)) {
+      if (instanceId === undefined || pending.event.providerInstanceId === instanceId) this.flushThread(threadId);
+    }
+  }
+
+  private flushThread(threadId: string) {
+    const pending = this.pendingText.get(threadId);
+    if (!pending) return;
+    // gone from the map before delivery: a listener may publish on this thread
+    this.pendingText.delete(threadId);
+    clearTimeout(pending.timer);
+    this.write(pending.event);
+  }
+
+  private write(event: RuntimeEvent) {
     const pendingWarning = this.pendingLogWarnings.get(event.threadId);
     const persistedEvents = pendingWarning ? [pendingWarning, redactSecrets(event)] : [redactSecrets(event)];
     try {
@@ -97,10 +151,12 @@ export class EventBus {
 
   detachAll() {
     for (const id of this.unsubscribes.keys()) this.detach(id);
+    this.flush();
   }
 
   detach(instanceId: string) {
     this.unsubscribes.get(instanceId)?.();
     this.unsubscribes.delete(instanceId);
+    this.flush(instanceId);
   }
 }
