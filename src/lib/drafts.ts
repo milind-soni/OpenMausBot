@@ -1,6 +1,7 @@
 // Unsent composer input, kept per task. Switching tasks unmounts the Composer
-// and its local state. Drafts live in localStorage, so coming back to a task — in this
-// session or after a restart — finds what you were typing still there.
+// and its local state. Drafts live in memory and are saved to localStorage, so
+// coming back to a task — in this session or after a restart — finds what you
+// were typing still there.
 import { useCallback, useEffect, useState, useSyncExternalStore, type SetStateAction } from "react";
 import { isAttachment, type Attachment } from "./composer-attachments.js";
 
@@ -46,10 +47,11 @@ let failedSendSequence = 0;
 type Values = Record<string, unknown>;
 type Store = Pick<Storage, "getItem" | "setItem"> | undefined;
 
-// localStorage is normally authoritative, but it can be unavailable or reject
-// writes (private browsing, a full quota, hardened environments). Keep the
-// same per-store snapshot in memory so an upload completing outside React can
-// merge with the live draft instead of replacing it with an empty fallback.
+// Memory answers every read once a draft is loaded; localStorage is the copy
+// that outlives a restart, and it can be unavailable or reject writes (private
+// browsing, a full quota, hardened environments). Keeping the per-store
+// snapshot in memory also lets an upload completing outside React merge with
+// the live draft instead of replacing it with an empty fallback.
 const fallbackTextDrafts = new Map<string, string>();
 const fallbackAttachmentDrafts = new Map<string, Attachment[]>();
 const textDraftsByStore = new WeakMap<object, Map<string, string>>();
@@ -94,15 +96,53 @@ export function getDraft(store: Store, id: string): string {
 
 export function setDraft(store: Store, id: string, text: string): void {
   memoryFor(store, textDraftsByStore, fallbackTextDrafts).set(id, text);
-  const drafts = read(store, KEY);
-  // an emptied composer drops its entry rather than storing "" forever
-  if (text) drafts[id] = text;
-  else delete drafts[id];
-  try {
-    store?.setItem(KEY, JSON.stringify(drafts));
-  } catch {
-    /* quota / private mode — the draft just doesn't outlive the mount */
+  if (store) saveDraftLater(store, id);
+}
+
+// Every keystroke changes the draft, but storage holds all drafts as one JSON
+// map, and rewriting it per keystroke costs most when another chat holds a
+// large paste. Storage catches up when typing pauses, when the window loses
+// focus or closes, and when the composer switches thread.
+const SAVE_DELAY_MS = 500;
+const unsavedDrafts = new Map<NonNullable<Store>, Set<string>>();
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let savingOnPageExit = false;
+
+function saveDraftLater(store: NonNullable<Store>, id: string): void {
+  const ids = unsavedDrafts.get(store) ?? new Set<string>();
+  ids.add(id);
+  unsavedDrafts.set(store, ids);
+  // Node (the server tests) has no window; there the timer alone saves.
+  const page = (globalThis as { window?: EventTarget }).window;
+  if (!savingOnPageExit && page) {
+    savingOnPageExit = true;
+    page.addEventListener("blur", saveDrafts);
+    page.addEventListener("pagehide", saveDrafts);
   }
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveDrafts, SAVE_DELAY_MS);
+}
+
+function saveDrafts(): void {
+  clearTimeout(saveTimer);
+  saveTimer = undefined;
+  for (const [store, ids] of unsavedDrafts) {
+    const memory = memoryFor(store, textDraftsByStore, fallbackTextDrafts);
+    // Re-read so drafts another window saved stay; write only what changed here.
+    const drafts = read(store, KEY);
+    for (const id of ids) {
+      const text = memory.get(id);
+      // an emptied composer drops its entry rather than storing "" forever
+      if (text) drafts[id] = text;
+      else delete drafts[id];
+    }
+    try {
+      store.setItem(KEY, JSON.stringify(drafts));
+    } catch {
+      /* quota / private mode — the draft just doesn't outlive the page */
+    }
+  }
+  unsavedDrafts.clear();
 }
 
 export function getDraftChannelMode(store: Store, id: string): ChannelMode {
@@ -513,7 +553,11 @@ export function useDraft(id: string, legacyId?: string): [string, (next: string)
     // Close the render-to-effect race: a rejected request may have restored
     // storage after this mount initialized but before its listener attached.
     setText(getDraft(store, id));
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      // Switching thread or leaving the chat saves what was typed right away.
+      saveDrafts();
+    };
   }, [id, store]);
   return [text, set];
 }
