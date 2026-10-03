@@ -99,23 +99,15 @@ import { effectivePlace, toolPlace, type EffectivePlace } from "@/lib/place";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
-import { useFocusMessage } from "@/lib/focus-message";
 import { groupTranscript, isStatusActivity } from "@/lib/activity-runs";
 import { StatusActivityRow } from "@/components/StatusActivityRow";
 import { ActivityRun } from "./ActivityRun";
 import { TurnNarrationRun } from "./TurnNarrationRun";
 import { webhookMessageView } from "@/lib/webhook-message";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
-import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow, useBottomFollowResize } from "@/lib/bottom-follow";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
-import {
-  TRANSCRIPT_WINDOW_SIZE,
-  expandWindowStart,
-  focusWindowRange,
-  resolveTranscriptWindow,
-  tailWindowStart,
-} from "@/lib/transcript-window";
+import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
 import { appendComposerDraft, appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
 import { citationPreviewText, splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
@@ -977,8 +969,6 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   // WindowCaptionButtons); this header is the window drag region, and the
   // icon row shifts below the 26px-tall corner the buttons occupy.
   const { dragStyle: headerDragStyle, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const transcriptRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
   // A guest on an OMB Cloud home writes only in conversations it opened.
@@ -1024,34 +1014,28 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const lastRunStep = recordedRun.at(-1);
   const showRunCard = useShowRunCard();
 
-  // Windowed transcript: only a tail of the thread mounts (screenshots make
-  // full threads DOM-heavy). The boundary is anchored per bot+task; a
-  // render-phase reset re-tails it on switch so the old thread's boundary
-  // never flashes into the new one. Everything derived below (lastBotTextId,
+  // Only a tail of the thread mounts; everything derived below (lastBotTextId,
   // lastUserMessage, working dots) stays computed from the FULL list.
-  const transcriptKey = `${bot.id}:${bot.threadId}`;
-  const [transcriptWindow, setTranscriptWindow] = useState<{
-    key: string;
-    start: number;
-    end: number | null;
-  }>(() => ({
-    key: transcriptKey,
-    start: tailWindowStart(messages.length),
-    end: null,
-  }));
-  if (transcriptWindow.key !== transcriptKey) {
-    setTranscriptWindow({ key: transcriptKey, start: tailWindowStart(messages.length), end: null });
-  }
   const {
-    visible: windowedMessages,
+    scrollRef,
+    transcriptRef,
+    transcriptKey,
+    following,
+    windowedMessages,
     hiddenCount,
     laterCount,
-    startIndex,
-    endIndex,
-  } = useMemo(
-    () => resolveTranscriptWindow(messages, transcriptWindow.start, TRANSCRIPT_WINDOW_SIZE, transcriptWindow.end),
-    [messages, transcriptWindow.start, transcriptWindow.end],
-  );
+    olderPending,
+    showEarlier,
+    showLater,
+    loadOlder,
+    jumpToLatest,
+    scrollHandlers,
+  } = useTranscriptViewport({
+    ownerId: bot.id,
+    threadId: bot.threadId,
+    messages,
+    pinOn: [bot.busy, composerDock.pad],
+  });
 
   const lastBotTextId = useMemo(
     () => [...messages].reverse().find((m) => m.role === "bot" && m.kind === "text")?.id,
@@ -1142,135 +1126,6 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: lastUserMessage.id, text: lastUserMessage.text });
     }
   }, [lastUserMessage, bot.busy, bot.id, bot.threadId, dispatch]);
-
-  // Scroll pinning: follow the bottom while the user hasn't scrolled away.
-  // Follow breaks ONLY on an upward user gesture (wheel/touch), never on
-  // scroll position checks — streamed content growth flickers "at bottom"
-  // false for a frame, and breaking there kills follow permanently
-  // (upstream-verified failure). Scrolling back to the end re-arms it.
-  const [follow, setFollow] = useState(true);
-  const followRef = useRef(true);
-  const previousScrollTop = useRef(0);
-  const touchY = useRef(0);
-
-  const setBottomFollow = useCallback((next: boolean) => {
-    followRef.current = next;
-    setFollow(next);
-  }, []);
-  useBottomFollowResize(scrollRef, transcriptRef, followRef, transcriptKey);
-
-  useEffect(() => setBottomFollow(true), [bot.id, setBottomFollow]);
-
-  // A search result may be hundreds of rows before the mounted tail. Open a
-  // bounded window around it first; useFocusMessage then scrolls and flashes
-  // the row after React commits that window.
-  const appliedFocus = useRef<number | null>(null);
-  useEffect(() => {
-    const focus = state.focusMessage;
-    if (!focus || focus.consumed || focus.threadId !== bot.threadId || appliedFocus.current === focus.nonce) return;
-    const targetIndex = messages.findIndex((message) => message.id === focus.messageId);
-    if (targetIndex < 0) return;
-    appliedFocus.current = focus.nonce;
-    const range = focusWindowRange(messages.length, targetIndex);
-    setBottomFollow(false);
-    setTranscriptWindow({ key: transcriptKey, start: range.start, end: range.end });
-  }, [bot.threadId, messages, setBottomFollow, state.focusMessage, transcriptKey]);
-  useFocusMessage(bot.threadId, messages.length > 0);
-
-  // deps track the FULL messages.length, so expanding the window (which only
-  // changes windowedMessages) can never re-trigger this bottom scrollTo.
-  // `follow` is intentionally omitted: flipping it true used to yank the
-  // viewport to the end. Re-pinning only arms future content; Jump to latest
-  // and this effect on new rows do the scrolling.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !followRef.current) return;
-    el.scrollTo({ top: el.scrollHeight });
-    previousScrollTop.current = el.scrollTop;
-  }, [bot.id, messages.length, bot.busy, composerDock.pad]);
-
-  // Expanding prepends rows: capture the height first, then after the commit
-  // shift scrollTop by the growth so the message under the cursor stays put
-  // (browser scroll anchoring is disabled on this container).
-  // The captured height belongs to the thread it was taken in: a switch
-  // between the capture and the commit would otherwise shift the new
-  // thread's viewport by the old one's growth.
-  const preExpandHeight = useRef<{ key: string; height: number } | null>(null);
-  const showEarlier = () => {
-    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
-    // expanding means reading scrollback — never let a mid-expand stream
-    // event pin the viewport back to the bottom
-    setBottomFollow(false);
-    const start = expandWindowStart(startIndex);
-    setTranscriptWindow((w) => ({ ...w, start }));
-  };
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    const captured = preExpandHeight.current;
-    if (!captured || !el) return;
-    preExpandHeight.current = null;
-    if (captured.key !== transcriptKey) return;
-    el.scrollTop += el.scrollHeight - captured.height;
-    // keep the resume-follow heuristic from reading the restore as a
-    // downward user scroll
-    previousScrollTop.current = el.scrollTop;
-    // transcriptKey is a dependency so a switch runs this and drops a capture
-    // that belongs to the thread being left.
-  }, [transcriptWindow.start, transcriptKey]);
-
-  const showLater = () => {
-    setBottomFollow(false);
-    const nextEnd = Math.min(messages.length, endIndex + TRANSCRIPT_WINDOW_SIZE);
-    setTranscriptWindow((w) => ({ ...w, end: nextEnd >= messages.length ? null : nextEnd }));
-  };
-
-  // Scrollback across the network: the snapshot holds a bounded page, and
-  // everything before it is still on the server. Asking for it prepends rows
-  // exactly like expanding the local window, so the same height capture keeps
-  // the viewport still — here it is applied when the transcript grows at the
-  // front rather than when the boundary moves.
-  const olderPending = Boolean(state.loadingOlder[bot.threadId]);
-  const loadOlder = () => {
-    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
-    setBottomFollow(false);
-    dispatch({ type: "loadOlderMessages", threadId: bot.threadId });
-  };
-  const oldestId = messages[0]?.id;
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    const captured = preExpandHeight.current;
-    if (!captured || !el) return;
-    preExpandHeight.current = null;
-    if (captured.key !== transcriptKey) return;
-    el.scrollTop += el.scrollHeight - captured.height;
-    previousScrollTop.current = el.scrollTop;
-  }, [oldestId, transcriptKey]);
-
-  // keyboard is a scroll gesture too (upstream lesson): PageUp/Home/ArrowUp
-  // break follow like an upward wheel; the at-end onScroll check re-arms it.
-  // ArrowUp only counts outside inputs — in the composer it edits, not scrolls.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const typing = e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement;
-      if (e.key === "PageUp" || ((e.key === "Home" || e.key === "ArrowUp") && !typing)) {
-        setBottomFollow(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [setBottomFollow]);
-
-  const atEnd = () => {
-    const el = scrollRef.current;
-    return !el || el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_FOLLOW_THRESHOLD;
-  };
-  const jumpToLatest = () => {
-    setBottomFollow(true);
-    setTranscriptWindow({ key: transcriptKey, start: tailWindowStart(messages.length), end: null });
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-    });
-  };
 
   const routineExecution = state.routineRuns.find((run) => run.target === "bot" && run.botId === bot.id && run.threadId === bot.threadId);
   const resultsThreadId = routineExecution?.resultsThreadId ?? routineExecution?.sourceThreadId;
@@ -1434,35 +1289,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       <div
         ref={scrollRef}
         className="glass-scroller h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-5 [overflow-anchor:none]"
-        onPointerDown={(e) => {
-          // grabbing the scrollbar is a scroll gesture too — the lane lives
-          // past the content box (clientWidth excludes it)
-          const el = scrollRef.current;
-          if (el && e.target === el && e.nativeEvent.offsetX >= el.clientWidth) setBottomFollow(false);
-        }}
-        onWheel={(e) => {
-          if (e.deltaY < 0) setBottomFollow(false);
-          else if (atEnd()) setBottomFollow(true);
-        }}
-        onTouchStart={(e) => (touchY.current = e.touches[0]?.clientY ?? 0)}
-        onTouchMove={(e) => {
-          const y = e.touches[0]?.clientY ?? 0;
-          if (y > touchY.current + 4) setBottomFollow(false);
-          else if (atEnd()) setBottomFollow(true);
-        }}
-        onScroll={() => {
-          const el = scrollRef.current;
-          if (!el) return;
-          const scrollTop = el.scrollTop;
-          const resume = shouldResumeBottomFollow({
-            following: followRef.current,
-            previousScrollTop: previousScrollTop.current,
-            scrollTop,
-            distanceFromBottom: el.scrollHeight - scrollTop - el.clientHeight,
-          });
-          previousScrollTop.current = scrollTop;
-          if (resume) setBottomFollow(true);
-        }}
+        {...scrollHandlers}
       >
         <div
           ref={transcriptRef}
@@ -1552,7 +1379,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       <TranscriptAnnouncer threadKey={transcriptKey} snapshot={announcement} />
 
       {/* Reading scrollback — one tap back to the end, streaming or not */}
-      {!follow && (
+      {!following && (
         <button
           onClick={jumpToLatest}
           aria-label={t("chat.jumpToLatestAria")}

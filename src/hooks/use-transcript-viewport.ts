@@ -1,0 +1,252 @@
+// The scrolling transcript of a 1:1 chat or a room: which rows mount, when
+// the pane follows the bottom, and how it holds still while rows are
+// prepended. ChatView and GroupView both use this one copy, so a viewport fix
+// lands once.
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DependencyList,
+  type PointerEvent,
+  type TouchEvent,
+  type WheelEvent,
+} from "react";
+import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow, useBottomFollowResize } from "@/lib/bottom-follow";
+import { useFocusMessage } from "@/lib/focus-message";
+import {
+  TRANSCRIPT_WINDOW_SIZE,
+  expandWindowStart,
+  focusWindowRange,
+  resolveTranscriptWindow,
+  tailWindowStart,
+} from "@/lib/transcript-window";
+import { useStore } from "@/state/store";
+
+export function useTranscriptViewport<T extends { id: string }>({
+  ownerId,
+  threadId,
+  messages,
+  pinOn,
+  transcriptShown = true,
+}: {
+  /** The bot or room; opening another one re-arms bottom-follow. */
+  ownerId: string;
+  threadId: string;
+  /** The full transcript. Only a window of it mounts. */
+  messages: readonly T[];
+  /** Besides a new row, what moves a following reader to the end: busy
+   * flags, the composer's padding. Same length on every render. */
+  pinOn: DependencyList;
+  /** False while something else covers the transcript (a room's set-up form). */
+  transcriptShown?: boolean;
+}) {
+  const { state, dispatch } = useStore();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+
+  // Windowed transcript: only a tail of the thread mounts (screenshots make
+  // full threads DOM-heavy). The boundary is anchored per owner+thread; a
+  // render-phase reset re-tails it on switch so the old thread's boundary
+  // never flashes into the new one. Callers derive everything else (last
+  // reply, working dots) from the FULL list.
+  const transcriptKey = `${ownerId}:${threadId}`;
+  const [transcriptWindow, setTranscriptWindow] = useState<{
+    key: string;
+    start: number;
+    end: number | null;
+  }>(() => ({
+    key: transcriptKey,
+    start: tailWindowStart(messages.length),
+    end: null,
+  }));
+  if (transcriptWindow.key !== transcriptKey) {
+    setTranscriptWindow({ key: transcriptKey, start: tailWindowStart(messages.length), end: null });
+  }
+  const {
+    visible: windowedMessages,
+    hiddenCount,
+    laterCount,
+    startIndex,
+    endIndex,
+  } = useMemo(
+    () => resolveTranscriptWindow(messages, transcriptWindow.start, TRANSCRIPT_WINDOW_SIZE, transcriptWindow.end),
+    [messages, transcriptWindow.start, transcriptWindow.end],
+  );
+
+  // Scroll pinning: follow the bottom while the user hasn't scrolled away.
+  // Follow breaks ONLY on an upward user gesture (wheel/touch/scrollbar/
+  // keys), never on scroll position checks — content growth flickers "at
+  // bottom" false for a frame, and breaking there kills follow permanently
+  // (upstream-verified failure). Scrolling back to the end re-arms it.
+  const [follow, setFollow] = useState(true);
+  const followRef = useRef(true);
+  const previousScrollTop = useRef(0);
+  const touchY = useRef(0);
+
+  const setBottomFollow = useCallback((next: boolean) => {
+    followRef.current = next;
+    setFollow(next);
+  }, []);
+  useBottomFollowResize(scrollRef, transcriptRef, followRef, transcriptShown ? transcriptKey : null);
+
+  useEffect(() => setBottomFollow(true), [ownerId, setBottomFollow]);
+
+  // A search result may be hundreds of rows before the mounted tail. Open a
+  // bounded window around it first; useFocusMessage then scrolls and flashes
+  // the row after React commits that window.
+  const appliedFocus = useRef<number | null>(null);
+  useEffect(() => {
+    const focus = state.focusMessage;
+    if (!focus || focus.consumed || focus.threadId !== threadId || appliedFocus.current === focus.nonce) return;
+    const targetIndex = messages.findIndex((message) => message.id === focus.messageId);
+    if (targetIndex < 0) return;
+    appliedFocus.current = focus.nonce;
+    const range = focusWindowRange(messages.length, targetIndex);
+    setBottomFollow(false);
+    setTranscriptWindow({ key: transcriptKey, start: range.start, end: range.end });
+  }, [threadId, messages, setBottomFollow, state.focusMessage, transcriptKey]);
+  useFocusMessage(threadId, messages.length > 0);
+
+  // deps track the FULL messages.length, so expanding the window (which only
+  // changes windowedMessages) can never re-trigger this bottom scrollTo.
+  // `follow` is intentionally omitted: flipping it true used to yank the
+  // viewport to the end. Re-pinning only arms future content; Jump to latest
+  // and this effect on new rows do the scrolling.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !followRef.current) return;
+    el.scrollTo({ top: el.scrollHeight });
+    previousScrollTop.current = el.scrollTop;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pinOn is the caller's dependency list
+  }, [ownerId, messages.length, ...pinOn]);
+
+  // Expanding prepends rows: capture the height first, then after the commit
+  // shift scrollTop by the growth so the message under the cursor stays put
+  // (browser scroll anchoring is disabled on this container).
+  // The captured height belongs to the thread it was taken in: a switch
+  // between the capture and the commit would otherwise shift the new
+  // thread's viewport by the old one's growth.
+  const preExpandHeight = useRef<{ key: string; height: number } | null>(null);
+  const keepRowInPlace = useCallback(() => {
+    const el = scrollRef.current;
+    const captured = preExpandHeight.current;
+    if (!captured || !el) return;
+    preExpandHeight.current = null;
+    if (captured.key !== transcriptKey) return;
+    el.scrollTop += el.scrollHeight - captured.height;
+    // keep the resume-follow heuristic from reading the restore as a
+    // downward user scroll
+    previousScrollTop.current = el.scrollTop;
+  }, [transcriptKey]);
+  const showEarlier = () => {
+    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
+    // expanding means reading scrollback — never let a mid-expand stream
+    // event pin the viewport back to the bottom
+    setBottomFollow(false);
+    const start = expandWindowStart(startIndex);
+    setTranscriptWindow((w) => ({ ...w, start }));
+  };
+  // keepRowInPlace changes with transcriptKey, so a switch runs this and
+  // drops a capture that belongs to the thread being left.
+  useLayoutEffect(keepRowInPlace, [transcriptWindow.start, keepRowInPlace]);
+
+  const showLater = () => {
+    setBottomFollow(false);
+    const nextEnd = Math.min(messages.length, endIndex + TRANSCRIPT_WINDOW_SIZE);
+    setTranscriptWindow((w) => ({ ...w, end: nextEnd >= messages.length ? null : nextEnd }));
+  };
+
+  // Scrollback across the network: the snapshot holds a bounded page, and
+  // everything before it is still on the server. Asking for it prepends rows
+  // exactly like expanding the local window, so the same height capture keeps
+  // the viewport still — here it is applied when the transcript grows at the
+  // front rather than when the boundary moves.
+  const olderPending = Boolean(state.loadingOlder[threadId]);
+  const loadOlder = () => {
+    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
+    setBottomFollow(false);
+    dispatch({ type: "loadOlderMessages", threadId });
+  };
+  const oldestId = messages[0]?.id;
+  useLayoutEffect(keepRowInPlace, [oldestId, keepRowInPlace]);
+
+  // keyboard is a scroll gesture too (upstream lesson): PageUp/Home/ArrowUp
+  // break follow like an upward wheel; the at-end onScroll check re-arms it.
+  // ArrowUp only counts outside inputs — in the composer it edits, not scrolls.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement;
+      if (e.key === "PageUp" || ((e.key === "Home" || e.key === "ArrowUp") && !typing)) {
+        setBottomFollow(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setBottomFollow]);
+
+  const atEnd = () => {
+    const el = scrollRef.current;
+    return !el || el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_FOLLOW_THRESHOLD;
+  };
+  const jumpToLatest = () => {
+    setBottomFollow(true);
+    setTranscriptWindow({ key: transcriptKey, start: tailWindowStart(messages.length), end: null });
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    });
+  };
+
+  // For the scrolling element, next to ref={scrollRef}.
+  const scrollHandlers = {
+    onPointerDown: (e: PointerEvent<HTMLDivElement>) => {
+      // grabbing the scrollbar is a scroll gesture too — the lane lives
+      // past the content box (clientWidth excludes it)
+      const el = scrollRef.current;
+      if (el && e.target === el && e.nativeEvent.offsetX >= el.clientWidth) setBottomFollow(false);
+    },
+    onWheel: (e: WheelEvent<HTMLDivElement>) => {
+      if (e.deltaY < 0) setBottomFollow(false);
+      else if (atEnd()) setBottomFollow(true);
+    },
+    onTouchStart: (e: TouchEvent<HTMLDivElement>) => {
+      touchY.current = e.touches[0]?.clientY ?? 0;
+    },
+    onTouchMove: (e: TouchEvent<HTMLDivElement>) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      if (y > touchY.current + 4) setBottomFollow(false);
+      else if (atEnd()) setBottomFollow(true);
+    },
+    onScroll: () => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const scrollTop = el.scrollTop;
+      const resume = shouldResumeBottomFollow({
+        following: followRef.current,
+        previousScrollTop: previousScrollTop.current,
+        scrollTop,
+        distanceFromBottom: el.scrollHeight - scrollTop - el.clientHeight,
+      });
+      previousScrollTop.current = scrollTop;
+      if (resume) setBottomFollow(true);
+    },
+  };
+
+  return {
+    scrollRef,
+    transcriptRef,
+    transcriptKey,
+    following: follow,
+    windowedMessages,
+    hiddenCount,
+    laterCount,
+    olderPending,
+    showEarlier,
+    showLater,
+    loadOlder,
+    jumpToLatest,
+    scrollHandlers,
+  };
+}
