@@ -89,8 +89,14 @@ data class OptionCard(
      * question card would read "answer" instead of the reply.
      */
     val answeredText: String? = null,
+    /**
+     * Terminal: the proposal went stale while open. The computer clears its
+     * options and nothing can answer it; a fresh proposal is needed.
+     */
+    val expired: Boolean? = null,
 ) {
-    val isPending: Boolean get() = requestId != null && answered == null && dismissed != true
+    val isPending: Boolean get() =
+        requestId != null && answered == null && dismissed != true && expired != true
     val isPermission: Boolean get() = tool != null
 
     /**

@@ -194,6 +194,21 @@ class DecodingTest {
     }
 
     @Test
+    fun anExpiredProposalIsNotPending() {
+        // The shape the computer leaves when a routine, profile or team setup
+        // proposal goes stale: no answer, no dismissal, no options. Counting it
+        // as pending left a "waiting on you" card with nothing to tap (MOCA-282).
+        val message = CompanionJson.decodeFromString<Message>(
+            """{"id":"m2","role":"bot","kind":"options","at":1786742413762,
+              "card":{"title":"Create routine?","subtitle":"Every morning at 8","options":[],"requestId":"req-2","tool":"create_routine",
+              "expired":true,"held":"This proposal changed after it was made."}}""",
+        )
+        val card = assertNotNull(message.card)
+        assertEquals(true, card.expired)
+        assertFalse(card.isPending, "nothing can answer an expired proposal")
+    }
+
+    @Test
     fun decodesAHashBoundSkillReviewAndLeavesLegacyCardsDenyOnly() {
         val hash = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
         val reviewed = CompanionJson.decodeFromString<Message>(

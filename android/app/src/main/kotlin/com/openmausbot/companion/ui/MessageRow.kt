@@ -1305,7 +1305,8 @@ private fun CardView(chat: Chat, message: Message, haptics: Haptics) {
                 }
             }
         } else {
-            card.answered?.let {
+            val answered = card.answered
+            if (answered != null) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1316,8 +1317,10 @@ private fun CardView(chat: Chat, message: Message, haptics: Haptics) {
                         tint = secondaryTint,
                         modifier = Modifier.size(16.dp),
                     )
-                    Text(it, fontSize = 14.sp, color = secondaryTint)
+                    Text(answered, fontSize = 14.sp, color = secondaryTint)
                 }
+            } else if (card.expired == true) {
+                Text("Expired — ask for a fresh proposal", fontSize = 14.sp, color = secondaryTint)
             }
         }
     }
