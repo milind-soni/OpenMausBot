@@ -27,6 +27,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { friendlyEffort, simpleEffortLevels } from "@/lib/model-friendly";
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
+import { Select } from "./Select";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
 const COMPACT_MODEL_COUNT = 5;
@@ -121,13 +122,12 @@ export function EffortRow({
   if (compact) return (
     <label className={cn("flex items-center justify-between gap-3", className)}>
       {label}
-      <select aria-label="Reasoning effort" value={selection.effort ?? ""}
+      <Select size="sm" aria-label="Reasoning effort" className="max-w-[65%]" value={selection.effort ?? ""}
         onChange={(event) => dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}),
-          selection: { ...selection, effort: levels.find((level) => level === event.target.value) } })}
-        className="min-w-0 max-w-[65%] rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70">
+          selection: { ...selection, effort: levels.find((level) => level === event.target.value) } })}>
         <option value="">Default</option>
         {levels.map((level) => <option key={level} value={level}>{effortLabel(level)}</option>)}
-      </select>
+      </Select>
     </label>
   );
 
@@ -198,15 +198,13 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
     <div className={className}>
       <label className="flex items-center justify-between gap-3">
         {label}
-        <select aria-label="Reasoning variant" disabled={bot.busy}
+        <Select size="sm" aria-label="Reasoning variant" disabled={bot.busy} className={wide ? "flex-1" : "max-w-[65%]"}
           value={selection.variant === undefined ? "unset" : missing ? "missing" : String(options.findIndex((option) => option.id === selection.variant))}
-          onChange={(event) => choose(options[Number(event.target.value)]?.id)}
-          className={cn("min-w-0 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50",
-            wide ? "flex-1" : "max-w-[65%]")}>
+          onChange={(event) => choose(options[Number(event.target.value)]?.id)}>
           <option value="unset">Use session setting</option>
           {missing && <option value="missing" disabled>{selection.variant} ({unavailable ? "unavailable" : "unverified"})</option>}
           {options.map((option, index) => <option key={option.id} value={String(index)}>{variantLabel(option)}</option>)}
-        </select>
+        </Select>
       </label>
       {missing && <p className="mt-1 text-[11px] text-ink-secondary">{unavailable ? "Saved variant is unavailable. Choose another or use the session setting." : "Saved variant has not been checked in this session."}</p>}
     </div>
@@ -442,17 +440,18 @@ export function ClaudeAccountSelect({ accounts, selectedId, onSelect }: {
   return (
     <label className="mt-2 flex min-w-0 items-center gap-2 text-[12px] text-ink-secondary">
       <span>{t("model.account")}:</span>
-      <select
+      <Select
+        size="sm"
+        className="flex-1"
         aria-label={t("model.account")}
         value={selectedId}
         onChange={(event) => {
           const account = accounts.find((instance) => instance.instanceId === event.target.value);
           if (account) onSelect(account);
         }}
-        className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus:border-accent/60 focus:outline-none"
       >
         {accounts.map((account) => <option key={account.instanceId} value={account.instanceId}>{account.displayName}</option>)}
-      </select>
+      </Select>
     </label>
   );
 }

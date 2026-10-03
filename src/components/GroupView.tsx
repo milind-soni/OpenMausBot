@@ -35,6 +35,7 @@ import { botEngine, failedTurnCause } from "@/lib/failed-turn";
 import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
+import { Select } from "./Select";
 import { GroupTaskPicker } from "./TaskPicker";
 import { GroupUsageChip } from "./GroupUsageChip";
 import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
@@ -455,32 +456,28 @@ export function DefaultResponderSelect({ group, members }: { group: Group; membe
   };
 
   return (
-    <div className="relative shrink-0" title={title}>
-      <select
-        aria-label={t("room.responder.aria")}
-        value={value}
-        onChange={(event) => change(event.target.value)}
-        className="h-8 max-w-[190px] appearance-none truncate rounded-full border border-hairline/40 bg-raised/60 py-1 pl-3 pr-7 text-[12.5px] font-medium text-ink outline-none hover:bg-raised focus:border-accent"
-      >
-        <optgroup label={t("room.responder.groupLead")}>
-          {members.map((member) => (
-            <option key={member.id} value={`member:${member.id}`}>
-              {t("room.responder.leadOption", { name: member.name })}
-            </option>
-          ))}
-        </optgroup>
-        <optgroup label={t("room.responder.groupBehavior")}>
-          <option value="auto">{jevOn ? t("room.responder.autoOption") : t("room.responder.autoOptionOff")}</option>
-          <option value="everyone">{t("room.responder.everyoneOption")}</option>
-          <option value="mentions">{t("room.responder.mentionsOption")}</option>
-        </optgroup>
-      </select>
-      <ChevronDown
-        size={13}
-        aria-hidden="true"
-        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-secondary"
-      />
-    </div>
+    <Select
+      variant="pill"
+      size="sm"
+      title={title}
+      aria-label={t("room.responder.aria")}
+      value={value}
+      onChange={(event) => change(event.target.value)}
+      className="shrink-0 max-w-[190px]"
+    >
+      <optgroup label={t("room.responder.groupLead")}>
+        {members.map((member) => (
+          <option key={member.id} value={`member:${member.id}`}>
+            {t("room.responder.leadOption", { name: member.name })}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label={t("room.responder.groupBehavior")}>
+        <option value="auto">{jevOn ? t("room.responder.autoOption") : t("room.responder.autoOptionOff")}</option>
+        <option value="everyone">{t("room.responder.everyoneOption")}</option>
+        <option value="mentions">{t("room.responder.mentionsOption")}</option>
+      </optgroup>
+    </Select>
   );
 }
 

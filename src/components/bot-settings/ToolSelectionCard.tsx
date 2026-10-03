@@ -5,6 +5,7 @@ import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope";
 import { TOOL_SCOPE_SUPPORT } from "../../../shared/tool-scope-support";
 import { useBotEditor } from "./BotEditorContext";
 import { inputCls } from "./field";
+import { Select } from "../Select";
 
 type Draft = { custom: boolean; onlyListed: boolean; allow: string; deny: string };
 const lines = (text: string) => text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
@@ -60,11 +61,11 @@ export function ToolSelectionCard({ bot, engineKind }: { bot: Bot; engineKind?: 
     </p>
     <label className="mt-3 block text-[13px] text-ink-secondary">
       {t("botAccess.tools.mode")}
-      <select aria-label={t("botAccess.tools.title")} disabled={saving || !!bot.busy} value={fields.custom ? "custom" : "all"}
-        className={`${inputCls} mt-1 text-[13px]`} onChange={event => change({ custom: event.target.value === "custom", onlyListed: fields.custom ? fields.onlyListed : true })}>
+      <Select aria-label={t("botAccess.tools.title")} disabled={saving || !!bot.busy} value={fields.custom ? "custom" : "all"}
+        className="mt-1 w-full" onChange={event => change({ custom: event.target.value === "custom", onlyListed: fields.custom ? fields.onlyListed : true })}>
         <option value="all">{t("botAccess.tools.all")}</option>
         <option value="custom">{t("botAccess.tools.custom")}</option>
-      </select>
+      </Select>
     </label>
     {fields.custom && <fieldset disabled={saving || !!bot.busy} className="mt-3 flex flex-col gap-3">
       <label className="flex items-center gap-2 text-[13px] text-ink">

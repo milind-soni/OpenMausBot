@@ -11,6 +11,7 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
+import { Select } from "@/components/Select";
 import type { MausMotion } from "@/lib/mascot";
 import { type BeatId, beatsFor } from "@/lib/onboarding";
 import { SKINS, type SkinId } from "@/lib/skins";
@@ -93,32 +94,29 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
 
-  const control =
-    "rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] text-ink focus:outline-none";
-
   return (
     <div data-skin="midnight" className="min-h-screen bg-app p-6 text-ink">
       <header className="mb-5 flex flex-wrap items-center gap-3">
         <h1 className="mr-2 text-[18px] font-semibold">Welcome flow</h1>
         <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
           Beat
-          <select value={beat} onChange={(e) => setBeat(e.target.value as BeatId)} className={control}>
+          <Select size="sm" value={beat} onChange={(e) => setBeat(e.target.value as BeatId)}>
             {BEATS.map((id) => (
               <option key={id} value={id}>
                 {id}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
           Skin
-          <select value={skin} onChange={(e) => setSkin(e.target.value as SkinId)} className={control} disabled={all}>
+          <Select size="sm" value={skin} onChange={(e) => setSkin(e.target.value as SkinId)} disabled={all}>
             {SKINS.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
           <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> All skins

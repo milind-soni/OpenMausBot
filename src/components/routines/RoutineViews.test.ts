@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Routine, RoutineRun } from "@/lib/routines";
 import { RoutineList } from "./RoutineList";
 import { RoutineLogs } from "./RoutineLogs";
+import { Select } from "../Select";
 import { latestRoutineRun, routineNextLabel } from "@/lib/routine-display";
 
 const routine: Routine = {
@@ -108,7 +109,7 @@ describe("central routine logs", () => {
     function visit(node: ReactNode) {
       Children.forEach(node, (child) => {
         if (!isValidElement<{ onChange?: (event: { target: { value: string } }) => void; children?: ReactNode }>(child)) return;
-        if (child.type === "select") select = child.props;
+        if (child.type === Select) select = child.props;
         visit(child.props.children);
       });
     }

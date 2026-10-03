@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { cn } from "@/lib/cn";
 import { nextCronRuns, type RoutineCronSchedule } from "../../../shared/routine-schedule";
 import type { CronChoice, CronDraft } from "./cron-editor";
+import { Select } from "../Select";
 
 const fieldClass = "min-w-0 rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12.5px] text-ink outline-none focus:border-accent [color-scheme:dark]";
 const MONTHS = Array.from({ length: 12 }, (_, index) => new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2024, index, 1))));
@@ -34,8 +35,8 @@ export function CronScheduleFields({ choice, value, onChange, runs, error }: {
       <input value={value.expression} onChange={(event) => update({ expression: event.target.value })} placeholder="0 9 1 * *" spellCheck={false} autoComplete="off" aria-invalid={Boolean(error)} aria-describedby="routine-cron-help routine-cron-error" className={cn(fieldClass, "w-full font-mono")} />
       <span id="routine-cron-help" className="block text-[11px]">Minute · hour · day of month · month · day of week. For example, 0 9 1 * * runs at 9 am on the first of each month.</span>
     </label> : <div className="flex flex-wrap items-end gap-2">
-      {choice === "yearly" && <label className="space-y-1.5 text-[11.5px] text-ink-secondary"><span className="block">Month</span><select value={value.month} onChange={(event) => update({ month: event.target.value })} className={fieldClass}>{MONTHS.map((month, index) => <option key={month} value={String(index + 1)}>{month}</option>)}</select></label>}
-      <label className="space-y-1.5 text-[11.5px] text-ink-secondary"><span className="block">Day of month</span><select value={value.day} onChange={(event) => update({ day: event.target.value })} className={fieldClass}>{Array.from({ length: 31 }, (_, index) => <option key={index + 1} value={String(index + 1)}>{index + 1}</option>)}<option value="L">Last day</option></select></label>
+      {choice === "yearly" && <label className="space-y-1.5 text-[11.5px] text-ink-secondary"><span className="block">Month</span><Select value={value.month} onChange={(event) => update({ month: event.target.value })}>{MONTHS.map((month, index) => <option key={month} value={String(index + 1)}>{month}</option>)}</Select></label>}
+      <label className="space-y-1.5 text-[11.5px] text-ink-secondary"><span className="block">Day of month</span><Select value={value.day} onChange={(event) => update({ day: event.target.value })}>{Array.from({ length: 31 }, (_, index) => <option key={index + 1} value={String(index + 1)}>{index + 1}</option>)}<option value="L">Last day</option></Select></label>
       <label className="space-y-1.5 text-[11.5px] text-ink-secondary"><span className="block">Time</span><input type="time" step={60} value={value.time} onChange={(event) => update({ time: event.target.value })} className={fieldClass} /></label>
     </div>}
     {choice !== "cron" && Number(value.day) > 28 && <p className="text-[11px] text-ink-secondary">Months without this date are skipped. Choose Last day to always use the end of the month.</p>}

@@ -11,6 +11,7 @@ import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { useStore } from "@/state/store";
 import { Card, Switch } from "./SettingsPrimitives";
 import type { SkillsLibrarySkillWire } from "../../shared/wire";
+import { Select } from "./Select";
 
 /** Pure browse filter: the query matches name, description and source;
  * the tag narrows to rows carrying it. Exported for the component test. */
@@ -284,18 +285,19 @@ export function SkillsSection() {
                   </div>
                   {bots.length > 0 && (
                     <div className="mt-1.5 flex items-center gap-1.5">
-                      <select
+                      <Select
+                        size="sm"
                         aria-label={t("skills.library.assignLabel")}
                         value={assignBot}
                         disabled={Boolean(working || importing)}
                         onChange={(e) => setAssignBot(e.target.value)}
-                        className="max-w-45 truncate rounded-lg border border-hairline/40 bg-inset px-2 py-1 text-[11.5px] text-ink"
+                        className="max-w-45"
                       >
                         <option value="">{t("skills.library.assignPickBot")}</option>
                         {bots.map((bot) => (
                           <option key={bot.id} value={bot.id}>{bot.name}</option>
                         ))}
-                      </select>
+                      </Select>
                       <button
                         type="button"
                         disabled={!assignBot || Boolean(working || importing)}

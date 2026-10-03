@@ -4,6 +4,7 @@ import { Box, ExternalLink, Loader2, Monitor, Plus, RefreshCw, X } from "lucide-
 import { api, useStore } from "@/state/store";
 import type { TeamComputer } from "../../shared/team-computer";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { Select } from "./Select";
 
 const control = "rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40";
 const field = "w-full rounded-lg border border-hairline/60 bg-inset px-3 py-2 text-[12px] text-ink outline-none focus:border-accent";
@@ -234,11 +235,11 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
           </div>
           {computer.problem && <p className="mt-2 text-[11px] text-danger">{computer.problem}</p>}
           <label className="sr-only" htmlFor={`computer-team-${computer.id}`}>Team for {computer.name}</label>
-          <select id={`computer-team-${computer.id}`} className={`${field} mt-3`} disabled={busy !== null} value={computer.section === null ? "unassigned" : `team:${computer.section}`}
+          <Select id={`computer-team-${computer.id}`} className="mt-3 w-full" disabled={busy !== null} value={computer.section === null ? "unassigned" : `team:${computer.section}`}
             onChange={(event) => requestAssignment(computer, event.target.value === "unassigned" ? null : event.target.value.slice(5))}>
             <option value="unassigned">Not assigned</option>
             {sections.filter((section) => computer.section === null || section.key === computer.section).map((section) => <option key={section.key} value={`team:${section.key}`}>{section.name}</option>)}
-          </select>
+          </Select>
           {computer.section !== null && <p className="mt-1.5 text-[10px] text-ink-secondary">Unassign to move to another team.</p>}
           <div className="mt-2 flex flex-wrap gap-1">
             {!ready && !starting && <button className={control} title="Starts this Boat; your provider's usage charges apply" disabled={busy !== null || held} onClick={() => void mutate(computer.id, () => post(computer.id, "provision", { acknowledgeCost: true }))}>Start / retry</button>}

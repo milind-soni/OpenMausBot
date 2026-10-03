@@ -4,6 +4,7 @@ import { api, ApiError, useStore, type Bot, type BotAnnouncement, type BrowserPr
 import { browserProfileDeletionBlockReason, browserProfilesMutation, newBrowserProfileId } from "@/lib/browser-profiles";
 import { isOwnerOrAdmin, readSessionState } from "@/lib/session";
 import { t } from "@/lib/i18n";
+import { Select } from "./Select";
 
 /** Browser-panel and workspace settings share one editor. The server owns
  * session routing and erasure; this UI never handles cookies or partitions. */
@@ -139,19 +140,18 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
       {currentBot && (
         <div className="flex flex-col gap-1.5">
           <label htmlFor={`${fieldId}-profile`} className="text-[12px] font-medium text-ink">{t("settings.profiles.browserSession")}</label>
-          <select
+          <Select
             id={`${fieldId}-profile`}
             value={selected}
             disabled={locked || currentBot.busy}
             onChange={(event) => void select(event.target.value)}
-            className={inputClass}
           >
             <option value="">{t("settings.profiles.own")}</option>
             {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
             <option value="guest">{t("settings.profiles.temporary")}</option>
             {selected && selected !== "guest" && !profiles.some((profile) => profile.id === selected)
               ? <option value={selected} disabled>{t("settings.profiles.removed")}</option> : null}
-          </select>
+          </Select>
           <p className="text-[11px] leading-relaxed text-ink-secondary">
             {currentBot.busy ? t("settings.profiles.stopToSwitch") : selected === "guest" ? t("settings.profiles.temporaryHint") : t("settings.profiles.sharedHint")}
           </p>

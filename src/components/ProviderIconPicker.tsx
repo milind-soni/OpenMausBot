@@ -12,6 +12,7 @@ import {
   type ProviderIcon,
 } from "../../shared/provider-icon";
 import { InstanceProviderMark } from "./ProviderIcons";
+import { Select } from "./Select";
 
 type ImageDimensions = { width: number; height: number };
 
@@ -92,16 +93,16 @@ export function ProviderIconPicker({ instance }: { instance: InstanceInfo }) {
       </span>
       <label className="min-w-40 flex-1 text-[12px] font-medium text-ink">
         {t("engines.icon.label")}
-        <select aria-label={t("engines.icon.selectAria", { name: instance.displayName })} value={value} disabled={saving}
+        <Select aria-label={t("engines.icon.selectAria", { name: instance.displayName })} value={value} disabled={saving}
           onChange={(event) => {
             if (event.target.value === "default") void save(null);
             else if (event.target.value !== "custom") void save({ kind: "preset", preset: event.target.value as typeof PROVIDER_ICON_PRESETS[number] });
           }}
-          className="mt-1 block w-full rounded-lg border border-hairline/40 bg-inset px-2.5 py-2 text-[12px] text-ink focus:border-accent/60 focus:outline-none disabled:opacity-50">
+          className="mt-1 w-full">
           <option value="default">{t("engines.icon.default")}</option>
           {instance.icon?.kind === "custom" && <option value="custom">{t("engines.icon.custom")}</option>}
           {PROVIDER_ICON_PRESETS.map((preset) => <option key={preset} value={preset}>{PROVIDER_ICON_LABELS[preset]}</option>)}
-        </select>
+        </Select>
       </label>
       {saving && <Loader2 size={15} aria-label={t("engines.icon.saving")} className="animate-spin text-ink-secondary" />}
       {instance.icon && <button type="button" disabled={saving} onClick={() => void save(null)}

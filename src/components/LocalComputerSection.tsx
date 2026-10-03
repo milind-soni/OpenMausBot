@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Card, CommandLine } from "./SettingsPrimitives";
 import { MacLocalControl } from "./MacLocalControl";
+import { Select } from "./Select";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/state/store";
 
@@ -1470,15 +1471,15 @@ export function LocalComputerSection() {
               <div className="text-[13px] text-ink">{t("vm.isolation.max")}</div>
               <div className="text-[11.5px] text-ink-secondary">{t("vm.isolation.maxDetail")}</div>
             </div>
-            <select
+            <Select
+              size="sm"
               aria-label={t("vm.isolation.maxAria")}
               value={status?.max_instances ?? 2}
               disabled={!status || policyPending}
               onChange={(event) => void savePolicy(status?.mode ?? "shared", Number(event.target.value))}
-              className="rounded-lg border border-hairline/40 bg-control px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
             >
               {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => <option key={value} value={value}>{value}</option>)}
-            </select>
+            </Select>
           </div>
         )}
         <LocalVmIdleTimeoutSetting

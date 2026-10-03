@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group } from "@/state/store";
+import { Select } from "./Select";
 
 const fixture = vi.hoisted(() => ({ showThreads: true, queued: {} as Record<string, unknown[]>, bots: [] as Bot[], dispatch: vi.fn() }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
@@ -53,7 +54,7 @@ describe("optional bot thread picker", () => {
     fixture.showThreads = false;
     const picker = BotActivityPicker({ bot });
     const select = picker!.props.children[0];
-    expect(select.type).toBe("select");
+    expect(select.type).toBe(Select);
     select.props.onChange({ target: { value: "waiting" } });
     expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: "pepper", threadId: "waiting" });
   });

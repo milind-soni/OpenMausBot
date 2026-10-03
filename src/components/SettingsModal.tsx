@@ -29,6 +29,7 @@ import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudAccountSettings } from "./CloudAccountSettings";
 import { ProSettingsCard } from "./ProIntroduction";
+import { Select } from "./Select";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
@@ -302,12 +303,13 @@ function NewBotEffortRow() {
       subtitle={t("settings.newBotEffort.subtitle")}
       message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
-      <select
+      <Select
+        size="sm"
+        className="w-full max-w-[240px]"
         value={current}
         disabled={saving}
         aria-label={t("settings.newBotEffort.aria")}
         onChange={(event) => void save(event.target.value)}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.newBotEffort.default")}</option>
         {EFFORT_LEVELS.map((level) => (
@@ -315,7 +317,7 @@ function NewBotEffortRow() {
             {effortLabel(level)}
           </option>
         ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -403,11 +405,12 @@ function LanguageRow() {
       title={t("settings.language.title")}
       subtitle={t("settings.language.subtitle")}
     >
-      <select
+      <Select
+        size="sm"
+        className="w-full max-w-[240px]"
         value={current}
         aria-label={t("settings.language.aria")}
         onChange={(event) => setLanguageChoice(event.target.value)}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.language.system")}</option>
         {localeChoices.map(({ code, label }) => (
@@ -415,7 +418,7 @@ function LanguageRow() {
             {label}
           </option>
         ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -437,7 +440,9 @@ function FontRow() {
   const [current, setCurrent] = useState<FontId>(readFont);
   return (
     <SettingRow title={t("settings.font.title")} subtitle={t("settings.font.subtitle")}>
-      <select
+      <Select
+        size="sm"
+        className="w-full max-w-[240px]"
         value={current}
         aria-label={t("settings.font.aria")}
         onChange={(event) => {
@@ -446,12 +451,11 @@ function FontRow() {
           applyFont(id);
           setCurrent(id);
         }}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
       >
         {FONT_IDS.map((id) => (
           <option key={id} value={id}>{t(`settings.font.${id}`)}</option>
         ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -505,16 +509,17 @@ function SidebarDensityRow() {
   const density = useSidebarDensity();
   return (
     <SettingRow title={t("sidebar.density.title")} subtitle={t("settings.sidebarDensity.subtitle")}>
-      <select
+      <Select
+        size="sm"
         value={density}
         aria-label={t("sidebar.density.chooseAria")}
         onChange={(event) => setSidebarDensity(parseSidebarDensity(event.target.value))}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+        className="w-full max-w-[240px]"
       >
         {SIDEBAR_DENSITIES.map((option) => (
           <option key={option} value={option}>{t(SIDEBAR_DENSITY_LABEL_KEYS[option])}</option>
         ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -1148,14 +1153,14 @@ export function SettingsModal() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:px-5">
             {advanced ? (
-              <select
+              <Select
                 aria-label={t("settings.title")}
                 value={section}
                 onChange={(event) => {
                   setQuery("");
                   openSection(event.target.value as AppSettingsSection);
                 }}
-                className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
+              className="sm:hidden"
               >
                 {SETTINGS_GROUPS.map((group) => {
                   const entries = availableSections.filter((entry) => entry.group === group.id);
@@ -1167,9 +1172,9 @@ export function SettingsModal() {
                     </optgroup>
                   );
                 })}
-              </select>
+              </Select>
             ) : (
-              <select
+              <Select
                 aria-label={t("settings.title")}
                 value={currentPage?.id ?? ""}
                 onChange={(event) => {
@@ -1177,12 +1182,12 @@ export function SettingsModal() {
                   const page = simplePages.find((candidate) => candidate.id === event.target.value);
                   if (page) openSection(page.sections[0]!);
                 }}
-                className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
+              className="sm:hidden"
               >
                 {simplePages.map((page) => (
                   <option key={page.id} value={page.id}>{t(page.labelKey)}</option>
                 ))}
-              </select>
+              </Select>
             )}
             <span className="hidden text-[15px] font-semibold text-ink sm:block">
               {sectionLabelKey ? t(sectionLabelKey) : null}
