@@ -461,7 +461,7 @@ function normalizeImageId(id: string | undefined): string | null {
   return id?.trim().replace(/^sha256:/, "") || null;
 }
 
-function inspectedImage(stdout: string): {
+function inspectedImage(stdout: string, runtime: Runtime): {
   labels: Record<string, string> | undefined;
   id: string | null;
 } {
@@ -471,11 +471,22 @@ function inspectedImage(stdout: string): {
     Config?: { Labels?: Record<string, string> };
     config?: { Labels?: Record<string, string>; labels?: Record<string, string> };
     configuration?: { labels?: Record<string, string>; descriptor?: { digest?: string } };
+    variants?: Array<{
+      platform?: { os?: string; architecture?: string };
+      config?: { config?: { Labels?: Record<string, string> } };
+    }>;
   }>;
   const image = parsed[0];
+  // Apple container runs on Apple Silicon and puts image labels inside each
+  // platform variant. Never accept another platform's labels or guess between
+  // multiple matching variants. Docker/Podman keep their existing inspect paths.
+  const variants = runtime === "container" && Array.isArray(image?.variants)
+    ? image.variants.filter(variant => variant?.platform?.os === "linux" && variant.platform.architecture === "arm64")
+    : [];
   return {
-    labels:
-      image?.Config?.Labels ?? image?.config?.Labels ?? image?.config?.labels ?? image?.configuration?.labels,
+    labels: runtime === "container"
+      ? (variants.length === 1 ? variants[0]?.config?.config?.Labels : undefined)
+      : image?.Config?.Labels ?? image?.config?.Labels ?? image?.config?.labels ?? image?.configuration?.labels,
     id: normalizeImageId(image?.Id ?? image?.id ?? image?.configuration?.descriptor?.digest),
   };
 }
@@ -540,7 +551,7 @@ export async function containerComputerStatus(
 
   try {
     const { stdout } = await runner(status.runtime, ["image", "inspect", IMAGE]);
-    const image = inspectedImage(stdout);
+    const image = inspectedImage(stdout, status.runtime);
     status.image = imageLabelsMatch(image.labels);
     status.image_id = image.id;
   } catch {
@@ -992,8 +1003,12 @@ async function ensureVmWorkspace(platform: NodeJS.Platform, target: LocalVmTarge
   if (platform !== "win32") await chmod(target.workspaceDir, 0o700);
 }
 
+function baseImagePullArgs(runtime: Runtime): string[] {
+  return runtime === "container" ? ["image", "pull", BASE_IMAGE] : ["pull", BASE_IMAGE];
+}
+
 async function prepareManagedImage(runtime: Runtime, runner: CommandRunner): Promise<void> {
-  await runner(runtime, ["pull", BASE_IMAGE], 10 * 60_000);
+  await runner(runtime, baseImagePullArgs(runtime), 10 * 60_000);
   const context = await mkdtemp(join(tmpdir(), "openmausbot-cua-image-"));
   try {
     await writeFile(join(context, "Dockerfile"), managedImageDockerfile(), { mode: 0o600 });
@@ -1306,7 +1321,7 @@ export function setupCommands(
     runtimeStart,
     // This is the inspectable base download. The normal Prepare button also
     // builds the checksum-pinned 0.20.0 derivative automatically.
-    pull: command(["pull", BASE_IMAGE]),
+    pull: command(baseImagePullArgs(runtime)),
     run:
       runtime === "container" && target.key !== SHARED_LOCAL_VM_TARGET.key
         ? null

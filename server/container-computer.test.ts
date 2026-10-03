@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -104,6 +104,121 @@ function preparedImageInspect() {
     },
   ]);
 }
+
+function appleImageVariant(labels: Record<string, string> | undefined, architecture = "arm64", os = "linux") {
+  return { platform: { os, architecture }, config: { config: { Labels: labels } } };
+}
+
+function appleImageInspect(variants: unknown[]) {
+  return JSON.stringify([{
+    configuration: { name: IMAGE, descriptor: { digest: "sha256:managed-image-id" } },
+    variants,
+  }]);
+}
+
+const preparedLabels = JSON.parse(preparedImageInspect())[0].Config.Labels as Record<string, string>;
+const appleRuntime = {
+  "/usr/bin/which docker": new Error("missing"),
+  "/usr/bin/which podman": new Error("missing"),
+  "/usr/bin/which container": "container\n",
+  "container system status": "running\n",
+};
+
+describe("Apple container image inspection", () => {
+  it("reads the Linux ARM64 variant, preserving the inspected image digest", async () => {
+    const fake = runner({
+      ...appleRuntime,
+      [`container image inspect ${IMAGE}`]: appleImageInspect([
+        appleImageVariant({}, "amd64"), appleImageVariant(preparedLabels),
+      ]),
+      [`container inspect ${CONTAINER}`]: new Error("missing container"),
+    });
+    const status = await containerComputerStatus(fake.run, "darwin");
+    expect(status.image).toBe(true);
+    expect(status.image_id).toBe("managed-image-id");
+    expect(localVmRecreatableOnDemand(status)).toBe(true);
+  });
+
+  it.each([[], [appleImageVariant(preparedLabels), appleImageVariant(preparedLabels)]])(
+    "does not let root labels override missing or ambiguous ARM64 variants: %j", async (...variants) => {
+      const image = JSON.parse(appleImageInspect(variants));
+      image[0].Config = { Labels: preparedLabels };
+      image[0].configuration.labels = preparedLabels;
+      const fake = runner({
+        ...appleRuntime,
+        [`container image inspect ${IMAGE}`]: JSON.stringify(image),
+        [`container inspect ${CONTAINER}`]: new Error("missing container"),
+      });
+      const status = await containerComputerStatus(fake.run, "darwin");
+      expect(status.image).toBe(false);
+      expect(localVmRecreatableOnDemand(status)).toBe(false);
+    },
+  );
+
+  it.each([
+    ["missing labels", [appleImageVariant(undefined)]],
+    ["unlabelled ARM64 despite valid AMD64", [appleImageVariant(preparedLabels, "amd64"), appleImageVariant({})]],
+    ["wrong OS", [appleImageVariant(preparedLabels, "arm64", "windows")]],
+    ["wrong architecture", [appleImageVariant(preparedLabels, "amd64")]],
+    ["ambiguous ARM64 variants", [appleImageVariant(preparedLabels), appleImageVariant(preparedLabels)]],
+    ["missing variants", []],
+    ["stale driver", [appleImageVariant({ ...preparedLabels, [DRIVER_LABEL]: "stale" })]],
+    ["stale base", [appleImageVariant({ ...preparedLabels, [BASE_IMAGE_LABEL]: "stale" })]],
+    ["stale layer", [appleImageVariant({ ...preparedLabels, [IMAGE_LAYER_LABEL]: "stale" })]],
+    ["foreign image", [appleImageVariant({ ...preparedLabels, [MANAGED_LABEL]: "0" })]],
+    ["malformed variant", [null]],
+  ])("rejects %s without authorizing recreation", async (_name, variants) => {
+    const fake = runner({
+      ...appleRuntime,
+      [`container image inspect ${IMAGE}`]: appleImageInspect(variants as unknown[]),
+      [`container inspect ${CONTAINER}`]: new Error("missing container"),
+    });
+    const status = await containerComputerStatus(fake.run, "darwin");
+    expect(status.image).toBe(false);
+    expect(localVmRecreatableOnDemand(status)).toBe(false);
+  });
+});
+
+describe("managed image preparation", () => {
+  it.each(["container", "docker", "podman"] as const)("uses the supported %s pull command before building", async runtime => {
+    const calls: string[][] = [];
+    let prepared = false;
+    let context: string | undefined;
+    const run: CommandRunner = async (command, args) => {
+      calls.push([command, ...args]);
+      if (command === "/usr/bin/which") {
+        if (args[0] === runtime) return { stdout: runtime };
+        throw new Error("missing executable");
+      }
+      if (command !== runtime) throw new Error("unexpected runtime");
+      if (args[0] === "info" || args.join(" ") === "system status") return { stdout: "running" };
+      if (args.slice(0, 2).join(" ") === "image inspect") {
+        if (!prepared) throw new Error("missing image");
+        return { stdout: runtime === "container" ? appleImageInspect([appleImageVariant(preparedLabels)]) : preparedImageInspect() };
+      }
+      if (args[0] === "inspect") throw new Error("missing container");
+      if (args.join(" ") === (runtime === "container" ? `image pull ${BASE_IMAGE}` : `pull ${BASE_IMAGE}`)) {
+        return { stdout: "pulled" };
+      }
+      if (args.slice(0, 3).join(" ") === `build -t ${IMAGE}`) {
+        context = args[3];
+        expect(readFileSync(join(context, "Dockerfile"), "utf8")).toBe(managedImageDockerfile());
+        prepared = true;
+        return { stdout: "built" };
+      }
+      throw new Error(`unsupported command: ${command} ${args.join(" ")}`);
+    };
+    const status = await containerComputerAction("pull", run, "darwin");
+    expect(status.image).toBe(true);
+    const pullArgs = runtime === "container" ? ["image", "pull", BASE_IMAGE] : ["pull", BASE_IMAGE];
+    const pullIndex = calls.findIndex(call => call.join(" ") === [runtime, ...pullArgs].join(" "));
+    const buildIndex = calls.findIndex(call => call[1] === "build");
+    expect(pullIndex).toBeGreaterThanOrEqual(0);
+    expect(buildIndex).toBeGreaterThan(pullIndex);
+    expect(context).toBeDefined();
+    expect(existsSync(context!)).toBe(false);
+  });
+});
 
 function readyInspect(overrides: Record<string, unknown> = {}) {
   return JSON.stringify([
@@ -392,7 +507,7 @@ describe("containerComputerStatus", () => {
       "/usr/bin/which podman": new Error("missing"),
       "/usr/bin/which container": "container\n",
       "container system status": "running\n",
-      [`container image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`container image inspect ${IMAGE}`]: appleImageInspect([appleImageVariant(preparedLabels)]),
       [`container inspect ${CONTAINER}`]: JSON.stringify([
         {
           configuration: {
@@ -820,7 +935,7 @@ describe("containerComputerAction", () => {
       "/usr/bin/which podman": new Error("missing"),
       "/usr/bin/which container": "container\n",
       "container system status": "running\n",
-      [`container image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`container image inspect ${IMAGE}`]: appleImageInspect([appleImageVariant(preparedLabels)]),
       [`container inspect ${target.containerName}`]: new Error("missing container"),
     });
 
@@ -969,6 +1084,7 @@ describe("setupCommands", () => {
   it("generates Apple container lifecycle commands without Docker-only flags", () => {
     const commands = setupCommands("container", "darwin");
     expect(commands.runtimeStart).toBe("container system start");
+    expect(commands.pull).toBe(`container image pull ${BASE_IMAGE}`);
     expect(commands.remove).toBe(`container rm --force ${CONTAINER}`);
     expect(commands.run).toContain("--memory 4g --cpus 2 --cap-drop ALL");
     expect(commands.run).not.toContain("--memory-swap");
