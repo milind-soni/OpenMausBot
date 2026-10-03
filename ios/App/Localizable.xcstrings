@@ -1801,9 +1801,21 @@
     "and %lld more of this computer’s addresses": {
       "localizations": {
         "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "e mais %lld endereço(s) deste computador"
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "e mais %lld endereço deste computador"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "e mais %lld endereços deste computador"
+                }
+              }
+            }
           }
         },
         "zh-Hans": {

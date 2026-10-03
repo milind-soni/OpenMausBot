@@ -119,16 +119,17 @@ function validSecretPublicKey(value: string | undefined): string | null {
   }
 }
 
-/** The `address` value: `host:port` (IPv6 bracketed) or an http(s) origin,
- * or null when it is neither. */
+/** The `address` value: `host:port` (IPv6 bracketed) or a bare http(s)
+ * origin, or null when it is neither. Both phones refuse an address with
+ * credentials, a path, a query or a fragment, as `qrEndpoints` does. */
 function linkAddress(address: string, port: number | undefined): string | null {
   const value = address.trim();
   if (!value) return null;
   if (/^https?:\/\//i.test(value)) {
     try {
       const parsed = new URL(value);
-      if (parsed.username || parsed.password) return null;
-      return value;
+      if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) return null;
+      return parsed.origin;
     } catch {
       return null;
     }

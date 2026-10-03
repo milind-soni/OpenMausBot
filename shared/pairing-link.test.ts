@@ -161,4 +161,16 @@ describe("phonePairingLink", () => {
     expect(phonePairingLink({ address: "https://user:pass@mini.example", token })).toBeNull();
     expect(phonePairingLink({ address: "mini.example", token })).toBeNull();
   });
+
+  // Both phones refuse an address with a path, query or fragment (Android
+  // Endpoint.kt normalizedUrl, iOS CompanionEndpoint), so the builder does too
+  // rather than print a QR the scanner calls "not a pairing code".
+  it("writes an origin as its bare origin and refuses one with a path, query or fragment", () => {
+    expect(rawField(phonePairingLink({ address: "https://Mini.Example:443/", token })!, "address")).toBe(
+      "https://mini.example",
+    );
+    expect(phonePairingLink({ address: "https://mini.example/omb", token })).toBeNull();
+    expect(phonePairingLink({ address: "https://mini.example/?x=1", token })).toBeNull();
+    expect(phonePairingLink({ address: "https://mini.example/#pair", token })).toBeNull();
+  });
 });
