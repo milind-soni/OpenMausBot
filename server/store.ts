@@ -1600,7 +1600,9 @@ export class Store {
     const full: Message = { id: newId(), at: Date.now(), ...redactBotAuthored(message), parentId: anchorId };
     const children = t.messages.filter((m) => m.parentId === anchorId);
     t.messages.push(full);
-    mdb.appendMessage(threadId, full);
+    // SQLite keeps memory's leaf, or a reload opens on the artifact and
+    // hides the follow-up
+    mdb.appendMessage(threadId, full, t.activeLeafId);
     if (full.kind === "screen") {
       for (const pruned of this.pruneScreenFrames(t)) {
         mdb.updateMessage(threadId, pruned);

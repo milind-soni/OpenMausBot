@@ -785,12 +785,43 @@ describe("Store", () => {
     expect(patches).toContain(followUp.id);
   });
 
+  it("a late artifact behind a follow-up reloads on the branch memory shows", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const turnEnd = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "done" });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "next" });
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "answer to next" });
+    store.insertMessageAfter(bot.threadId, turnEnd.id, { role: "bot", kind: "screen", png: "abc" });
+    const memory = store.activePath(bot.threadId).map((m) => m.id);
+
+    // a restart and the uncached-thread page both start from SQLite's leaf
+    expect(new Store(selection).messagesTail(bot.threadId, 2).activeLeafId).toBe(memory.at(-1));
+    expect(new Store(selection).activePath(bot.threadId).map((m) => m.id)).toEqual(memory);
+  });
+
+  it("a late artifact keeps a thread with no stored leaf on the branch memory shows", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const turnEnd = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "done" });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "next" });
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "answer to next" });
+    // an imported pre-branching transcript carries no leaf; memory falls
+    // back to the newest row
+    mdb.setActiveLeaf(bot.threadId, null);
+    const legacy = new Store(selection);
+    legacy.insertMessageAfter(bot.threadId, turnEnd.id, { role: "bot", kind: "screen", png: "abc" });
+    const memory = legacy.activePath(bot.threadId).map((m) => m.id);
+
+    expect(new Store(selection).activePath(bot.threadId).map((m) => m.id)).toEqual(memory);
+  });
+
   it("insertMessageAfter is a plain append when the anchor is still the leaf, or unknown", () => {
     const store = new Store(selection);
     const bot = store.createBot();
     const turnEnd = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "done" });
     const artifact = store.insertMessageAfter(bot.threadId, turnEnd.id, { role: "bot", kind: "screen", png: "abc" });
     expect(store.activePath(bot.threadId).at(-1)?.id).toBe(artifact.id); // became the leaf
+    expect(new Store(selection).activePath(bot.threadId).at(-1)?.id).toBe(artifact.id); // and stays it after a reload
 
     const orphan = store.insertMessageAfter(bot.threadId, "no-such-message", { role: "bot", kind: "text", text: "x" });
     expect(store.activePath(bot.threadId).at(-1)?.id).toBe(orphan.id);
