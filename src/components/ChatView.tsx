@@ -908,7 +908,7 @@ const MessagesList = memo(function MessagesList({
             case "compaction":
               return <CompactionChip message={m} />;
             case "screen":
-              return m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null;
+              return <ScreenFrame threadId={bot.threadId} message={m} />;
             default:
               return (
                 <Bubble

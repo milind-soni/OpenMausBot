@@ -197,6 +197,14 @@ describe("export-transcript", () => {
     expect(markdown).not.toContain("PRIVATE_");
   });
 
+  it("marks a screen capture that arrived without pixels, as live frames and pages do", () => {
+    const markdown = formatTranscriptMarkdown({
+      title: "Assistant", exportedAt: fixedDate,
+      messages: [{ id: "screen", role: "bot", kind: "screen", hasImage: true, mime: "image/png", at: 1 }],
+    });
+    expect(markdown).toContain("Screen capture");
+  });
+
   it("keeps untrusted metadata literal instead of creating links or remote images", () => {
     const hostile = "` ![tracker](https://tracker.invalid/pixel)\n<img src='https://tracker.invalid/pixel'>";
     const markdown = formatTranscriptMarkdown({

@@ -5331,11 +5331,12 @@ store.onChange((change) => {
     case "sections":
       broadcast({ kind: "sections", sections: store.sections });
       break;
+    // Live frames never carry screenshot pixels; clients load them by URL.
     case "message":
-      broadcast({ kind: "message", threadId: change.threadId, message: change.message });
+      broadcast({ kind: "message", threadId: change.threadId, message: slimMessage(change.message) });
       break;
     case "message.patch":
-      broadcast({ kind: "message.patch", threadId: change.threadId, message: change.message });
+      broadcast({ kind: "message.patch", threadId: change.threadId, message: slimMessage(change.message) });
       break;
     case "thread":
       broadcast({ kind: "thread", threadId: change.threadId, activeLeafId: change.activeLeafId });
@@ -5396,11 +5397,12 @@ function pageSize(raw: string | null): number | null | undefined {
   return Math.min(size, MESSAGE_PAGE_MAX);
 }
 
-/** A screen message without its pixels. The client fetches those from
- * `/api/threads/:threadId/messages/:id/image` when it actually shows one. */
+/** A screen message without its pixels, for live frames and pages alike.
+ * The client fetches those from `/api/threads/:threadId/messages/:id/image`
+ * when it actually shows one; `mime` stays so it can name a download. */
 function slimMessage(message: Message): Message | Record<string, unknown> {
   if (message.kind !== "screen" || !message.png) return message;
-  const { png: _png, mime: _mime, ...rest } = message;
+  const { png: _png, ...rest } = message;
   return { ...rest, hasImage: true };
 }
 

@@ -291,7 +291,7 @@ export const Transcript = memo(function Transcript({
               isStatusActivity(m) ? <StatusActivityRow message={m} /> : <RoomToolChip message={m} roomId={group.id} />
             ) : null
           ) : m.kind === "screen" ? (
-            m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null
+            <ScreenFrame threadId={group.threadId} message={m} />
           ) : m.kind === "compaction" ? (
             <CompactionChip message={m} />
           ) : m.kind === "digest" ? (
