@@ -193,7 +193,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
     }
     // Read by the bar over the list and by nothing inside it, so the rows never
     // recompose for it. `approvals` is handed over rather than walked again.
-    val updates = remember(state, approvals) { state.updates(approvals) }
+    val updates = remember(state, approvals, activityDetail) { state.updates(approvals, activityDetail) }
     // The cross-bot Needs attention section rides above every roster section.
     val attention = remember(state) { state.crossBotAttention() }
 

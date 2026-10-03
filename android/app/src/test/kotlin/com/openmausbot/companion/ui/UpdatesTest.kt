@@ -1,5 +1,6 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.CompanionState
@@ -18,8 +19,9 @@ import kotlin.test.assertTrue
  * DELTA-02: the Updates derivation, pinned against `ios/App/Updates.swift`.
  *
  * Every expectation here is the literal value that file's rules produce — the
- * dedup order, the three kinds, and the two line functions, which are not the
- * roster's preview and must not drift into it.
+ * dedup order, the three kinds, and the two line functions. The review line reads
+ * by the roster's rule and both lines follow the Activity setting, as on iOS
+ * (MOCA-204).
  */
 class UpdatesTest {
     @Test
@@ -28,7 +30,7 @@ class UpdatesTest {
             bots = listOf(bot()),
             messages = mapOf("thread-bot-1" to listOf(text("m1", "all done"))),
         )
-        assertEquals(emptyList(), state.updates)
+        assertEquals(emptyList(), state.updates(ActivityDetail.FULL))
     }
 
     @Test
@@ -37,7 +39,7 @@ class UpdatesTest {
             bots = listOf(bot()),
             messages = mapOf("thread-bot-1" to listOf(options("m1", pendingCard()))),
         )
-        val update = state.updates.single()
+        val update = state.updates(ActivityDetail.FULL).single()
         assertEquals("bot:bot-1:thread-bot-1", update.id)
         assertEquals(UpdateKind.NEEDS_YOU, update.kind)
         assertEquals("ls -la", update.line)
@@ -52,7 +54,7 @@ class UpdatesTest {
                 "thread-bot-1" to listOf(options("m1", pendingCard().copy(subtitle = ""))),
             ),
         )
-        assertEquals("", state.updates.single().line)
+        assertEquals("", state.updates(ActivityDetail.FULL).single().line)
     }
 
     @Test
@@ -66,7 +68,7 @@ class UpdatesTest {
                 ),
             ),
         )
-        val update = state.updates.single()
+        val update = state.updates(ActivityDetail.FULL).single()
         assertEquals(UpdateKind.NEEDS_YOU, update.kind)
         assertEquals("newer ask", update.line)
     }
@@ -77,7 +79,7 @@ class UpdatesTest {
             bots = listOf(bot(busy = true).copy(unread = true)),
             messages = mapOf("thread-bot-1" to listOf(options("m1", pendingCard()))),
         )
-        assertEquals(listOf(UpdateKind.NEEDS_YOU), state.updates.map { it.kind })
+        assertEquals(listOf(UpdateKind.NEEDS_YOU), state.updates(ActivityDetail.FULL).map { it.kind })
     }
 
     @Test
@@ -88,7 +90,7 @@ class UpdatesTest {
                 bot(id = "bot-2").copy(hidden = true, unread = true),
             ),
         )
-        assertEquals(emptyList(), state.updates)
+        assertEquals(emptyList(), state.updates(ActivityDetail.FULL))
     }
 
     @Test
@@ -100,7 +102,7 @@ class UpdatesTest {
             bots = listOf(bot().copy(hidden = true)),
             messages = mapOf("thread-bot-1" to listOf(options("m1", pendingCard()))),
         )
-        assertEquals(listOf(UpdateKind.NEEDS_YOU), state.updates.map { it.kind })
+        assertEquals(listOf(UpdateKind.NEEDS_YOU), state.updates(ActivityDetail.FULL).map { it.kind })
     }
 
     @Test
@@ -119,7 +121,7 @@ class UpdatesTest {
             pendingQueued = mapOf("queued" to listOf(QueuedSend("q1", "Summarize the inbox"))),
         )
 
-        val updates = state.updates
+        val updates = state.updates(ActivityDetail.FULL)
         assertEquals(listOf("thread-bot-1", "icloud", "queued", "done"), updates.map { it.chat.threadId })
         assertEquals(listOf("Gmail", "iCloud", "Outlook", "Calendar"), updates.map { it.chat.threadTitle })
         assertEquals(listOf("Pepper", "Pepper", "Pepper", "Pepper"), updates.map { it.chat.name })
@@ -141,7 +143,7 @@ class UpdatesTest {
         val dead = CompanionState(bots = listOf(bot(name = "Pepper").copy(
             tasks = listOf(BotTask("thread-bot-1", "Gmail", 0.0, activity = "queued")),
         )))
-        assertEquals(emptyList(), dead.updates)
+        assertEquals(emptyList(), dead.updates(ActivityDetail.FULL))
 
         val held = CompanionState(
             bots = listOf(bot(name = "Pepper").copy(
@@ -151,8 +153,8 @@ class UpdatesTest {
                 "thread-bot-1" to listOf(QueuedSend("q1", "first"), QueuedSend("q2", "second")),
             ),
         )
-        assertEquals(listOf(UpdateKind.WORKING), held.updates.map { it.kind })
-        assertEquals("2 messages queued", held.updates.single().line)
+        assertEquals(listOf(UpdateKind.WORKING), held.updates(ActivityDetail.FULL).map { it.kind })
+        assertEquals("2 messages queued", held.updates(ActivityDetail.FULL).single().line)
     }
 
     @Test
@@ -174,7 +176,7 @@ class UpdatesTest {
             ),
         )
 
-        val updates = state.updates
+        val updates = state.updates(ActivityDetail.FULL)
         assertEquals(listOf("thread-bot-1", "icloud", "working"), updates.map { it.chat.threadId })
         assertEquals(listOf("gmail", "icloud", null), updates.map { it.card?.requestId })
         assertEquals(listOf(UpdateKind.NEEDS_YOU, UpdateKind.NEEDS_YOU, UpdateKind.WORKING), updates.map { it.kind })
@@ -194,19 +196,19 @@ class UpdatesTest {
                 ),
             )),
         )
-        assertEquals(listOf("result"), state.updates.map { it.chat.threadId })
+        assertEquals(listOf("result"), state.updates(ActivityDetail.FULL).map { it.chat.threadId })
 
         val needsAnswer = state.copy(messages = mapOf("internal" to listOf(options("ask", pendingCard()))))
-        assertEquals(listOf("internal", "result"), needsAnswer.updates.map { it.chat.threadId })
-        assertEquals("Internal run", needsAnswer.updates.first().chat.threadTitle)
-        assertEquals(UpdateKind.NEEDS_YOU, needsAnswer.updates.first().kind)
-        assertNotNull(needsAnswer.updates.first().card)
+        assertEquals(listOf("internal", "result"), needsAnswer.updates(ActivityDetail.FULL).map { it.chat.threadId })
+        assertEquals("Internal run", needsAnswer.updates(ActivityDetail.FULL).first().chat.threadTitle)
+        assertEquals(UpdateKind.NEEDS_YOU, needsAnswer.updates(ActivityDetail.FULL).first().kind)
+        assertNotNull(needsAnswer.updates(ActivityDetail.FULL).first().card)
     }
 
     @Test
     fun `an explicit empty task catalog does not resurrect the owner's stale activity`() {
         val state = CompanionState(bots = listOf(bot(busy = true).copy(unread = true, tasks = emptyList())))
-        assertEquals(emptyList(), state.updates)
+        assertEquals(emptyList(), state.updates(ActivityDetail.FULL))
     }
 
     @Test
@@ -217,7 +219,7 @@ class UpdatesTest {
                 "thread-bot-1" to listOf(options("m1", pendingCard().copy(answered = "Allow"))),
             ),
         )
-        assertEquals(emptyList(), state.updates)
+        assertEquals(emptyList(), state.updates(ActivityDetail.FULL))
     }
 
     @Test
@@ -228,7 +230,7 @@ class UpdatesTest {
             streaming = mapOf("thread-bot-1" to live),
         )
         // 151 characters in, the last 120 begin 31 'a's from the end of the run.
-        assertEquals("a".repeat(69) + " " + "b".repeat(50), state.updates.single().line)
+        assertEquals("a".repeat(69) + " " + "b".repeat(50), state.updates(ActivityDetail.FULL).single().line)
     }
 
     @Test
@@ -253,7 +255,7 @@ class UpdatesTest {
     private fun workingLine(live: String): String = CompanionState(
         bots = listOf(bot(busy = true)),
         streaming = mapOf("thread-bot-1" to live),
-    ).updates.single().line
+    ).updates(ActivityDetail.FULL).single().line
 
     @Test
     fun `a working bot with no live text names the tool it is running`() {
@@ -261,7 +263,7 @@ class UpdatesTest {
             bots = listOf(bot(busy = true)),
             messages = mapOf("thread-bot-1" to listOf(activity("m1", "Bash"))),
         )
-        assertEquals("Bash", state.updates.single().line)
+        assertEquals("Bash", state.updates(ActivityDetail.FULL).single().line)
     }
 
     @Test
@@ -271,13 +273,13 @@ class UpdatesTest {
             messages = mapOf("thread-bot-1" to listOf(activity("m1", "Bash"))),
             streaming = mapOf("thread-bot-1" to ""),
         )
-        assertEquals("Bash", state.updates.single().line)
+        assertEquals("Bash", state.updates(ActivityDetail.FULL).single().line)
     }
 
     @Test
     fun `a working bot with nothing to say says so`() {
         val quiet = CompanionState(bots = listOf(bot(busy = true)))
-        assertEquals("Working…", quiet.updates.single().line)
+        assertEquals("Working…", quiet.updates(ActivityDetail.FULL).single().line)
 
         // An activity without a tool is not a name, so it is not a line either.
         val toolless = CompanionState(
@@ -288,14 +290,14 @@ class UpdatesTest {
                 ),
             ),
         )
-        assertEquals("Working…", toolless.updates.single().line)
+        assertEquals("Working…", toolless.updates(ActivityDetail.FULL).single().line)
 
         // The last message being text does not make it a working line either.
         val talked = CompanionState(
             bots = listOf(bot(busy = true)),
             messages = mapOf("thread-bot-1" to listOf(text("m1", "hello"))),
         )
-        assertEquals("Working…", talked.updates.single().line)
+        assertEquals("Working…", talked.updates(ActivityDetail.FULL).single().line)
     }
 
     @Test
@@ -313,7 +315,7 @@ class UpdatesTest {
                 bots = listOf(bot().copy(unread = true)),
                 messages = mapOf("thread-bot-1" to listOf(message)),
             )
-            val update = state.updates.single()
+            val update = state.updates(ActivityDetail.FULL).single()
             assertEquals(UpdateKind.TO_REVIEW, update.kind)
             assertEquals(expected, update.line, "kind ${message.kind}")
         }
@@ -322,7 +324,51 @@ class UpdatesTest {
     @Test
     fun `an unread bot with an empty thread has no line`() {
         val state = CompanionState(bots = listOf(bot().copy(unread = true)))
-        assertEquals("", state.updates.single().line)
+        assertEquals("", state.updates(ActivityDetail.FULL).single().line)
+    }
+
+    @Test
+    fun `a webhook reads as its task on the review line, never its envelope`() {
+        val envelope = "[DEFAULT WEBHOOK INSTRUCTIONS]\nTriage the build failure.\n[/DEFAULT WEBHOOK INSTRUCTIONS]\n\n" +
+            "[UNTRUSTED WEBHOOK EVENT DATA]\nReceived: now\nDelivery ID: build-418\nEvent: build.failed\n\n" +
+            "{\"service\":\"checkout\"}\n[/UNTRUSTED WEBHOOK EVENT DATA]"
+        val webhook = Message(id = "m1", role = Message.Role.USER, kind = Message.Kind.TEXT, at = 1.0, text = envelope)
+        val state = CompanionState(
+            bots = listOf(bot().copy(unread = true)),
+            messages = mapOf("thread-bot-1" to listOf(webhook)),
+        )
+        for (detail in ActivityDetail.entries) {
+            assertEquals("Triage the build failure.", state.updates(detail).single().line, "$detail")
+        }
+    }
+
+    @Test
+    fun `hidden activity keeps tool steps off the update lines`() {
+        // A tool's name is often its raw command line; Hidden means hidden on
+        // the pill and the sheet too. A status notice still says what is going on.
+        val command = "/bin/zsh -lc \"kubectl rollout status deploy/web\""
+        val busy = CompanionState(
+            bots = listOf(bot(busy = true)),
+            messages = mapOf("thread-bot-1" to listOf(activity("m1", command))),
+        )
+        assertEquals(command, busy.updates(ActivityDetail.FULL).single().line)
+        assertEquals("Working…", busy.updates(ActivityDetail.HIDDEN).single().line)
+
+        val notice = "notice: Qwen hit a rate limit and is retrying"
+        val noticed = CompanionState(
+            bots = listOf(bot(busy = true)),
+            messages = mapOf("thread-bot-1" to listOf(activity("m1", notice))),
+        )
+        assertEquals(notice, noticed.updates(ActivityDetail.HIDDEN).single().line)
+
+        val review = CompanionState(
+            bots = listOf(bot().copy(unread = true)),
+            messages = mapOf(
+                "thread-bot-1" to listOf(text("m1", "Deployed to staging"), activity("m2", command).copy(at = 2.0)),
+            ),
+        )
+        assertEquals("Deployed to staging", review.updates(ActivityDetail.HIDDEN).single().line)
+        assertEquals(command, review.updates(ActivityDetail.FULL).single().line)
     }
 
     @Test
@@ -335,7 +381,7 @@ class UpdatesTest {
                 ),
             ),
         )
-        assertEquals("Run a command", state.updates.single().line)
+        assertEquals("Run a command", state.updates(ActivityDetail.FULL).single().line)
     }
 
     @Test
@@ -350,7 +396,7 @@ class UpdatesTest {
                 ),
             ),
         )
-        assertEquals("the branch you are reading", state.updates.single().line)
+        assertEquals("the branch you are reading", state.updates(ActivityDetail.FULL).single().line)
     }
 
     @Test
@@ -359,7 +405,7 @@ class UpdatesTest {
             rooms = listOf(room().copy(busyBotId = "bot-2", unread = true)),
             messages = mapOf("thread-room-1" to listOf(activity("m1", "Read"))),
         )
-        val update = state.updates.single()
+        val update = state.updates(ActivityDetail.FULL).single()
         assertEquals("room:room-1:thread-room-1", update.id)
         assertEquals(UpdateKind.WORKING, update.kind)
         assertEquals("Read", update.line)
@@ -371,7 +417,7 @@ class UpdatesTest {
             rooms = listOf(room().copy(unread = true)),
             messages = mapOf("thread-room-1" to listOf(text("m1", "standup notes"))),
         )
-        val update = state.updates.single()
+        val update = state.updates(ActivityDetail.FULL).single()
         assertEquals(UpdateKind.TO_REVIEW, update.kind)
         assertEquals("standup notes", update.line)
     }
@@ -379,7 +425,7 @@ class UpdatesTest {
     @Test
     fun `a busy bot beats its own unread flag`() {
         val state = CompanionState(bots = listOf(bot(busy = true).copy(unread = true)))
-        assertEquals(UpdateKind.WORKING, state.updates.single().kind)
+        assertEquals(UpdateKind.WORKING, state.updates(ActivityDetail.FULL).single().kind)
     }
 
     @Test
@@ -398,7 +444,7 @@ class UpdatesTest {
         )
         assertEquals(
             listOf("bot-4", "bot-2", "room-1", "bot-1", "bot-3"),
-            state.updates.map { it.chat.id },
+            state.updates(ActivityDetail.FULL).map { it.chat.id },
         )
         assertEquals(
             listOf(
@@ -408,7 +454,7 @@ class UpdatesTest {
                 UpdateKind.TO_REVIEW,
                 UpdateKind.TO_REVIEW,
             ),
-            state.updates.map { it.kind },
+            state.updates(ActivityDetail.FULL).map { it.kind },
         )
     }
 
@@ -416,7 +462,7 @@ class UpdatesTest {
     fun `an approval on a thread the fleet does not know is skipped`() {
         val state = CompanionState(bots = listOf(bot()))
         val ghost = PendingApproval("thread-ghost", options("m1", pendingCard()))
-        assertEquals(emptyList(), state.updates(listOf(ghost)))
+        assertEquals(emptyList(), state.updates(listOf(ghost), ActivityDetail.FULL))
     }
 
     @Test
@@ -426,8 +472,8 @@ class UpdatesTest {
             rooms = listOf(room().copy(unread = true)),
             messages = mapOf("thread-bot-1" to listOf(options("m1", pendingCard()))),
         )
-        assertEquals(state.updates, state.updates(state.pendingApprovals))
-        assertTrue(state.updates.isNotEmpty())
+        assertEquals(state.updates(ActivityDetail.FULL), state.updates(state.pendingApprovals, ActivityDetail.FULL))
+        assertTrue(state.updates(ActivityDetail.FULL).isNotEmpty())
     }
 }
 

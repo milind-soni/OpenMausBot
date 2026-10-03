@@ -178,10 +178,12 @@ internal fun MascotStack(colors: List<String>, size: Dp = 28.dp, overlap: Dp = 1
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun UpdatesSheet(onOpen: (Chat) -> Unit, onDismiss: () -> Unit) {
-    val session = LocalCompanion.current.session
+    val environment = LocalCompanion.current
+    val session = environment.session
     val state by session.state.collectAsState()
+    val activityDetail by environment.chatPreferences.activityDetail.collectAsState()
 
-    val updates = remember(state) { state.updates }
+    val updates = remember(state, activityDetail) { state.updates(activityDetail) }
     val sections = remember(updates) {
         UpdateKind.entries.mapNotNull { kind ->
             val items = updates.filter { it.kind == kind }

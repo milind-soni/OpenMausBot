@@ -1,13 +1,15 @@
 package com.openmausbot.companion.ui
 
 import androidx.compose.runtime.Immutable
+import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
-import com.openmausbot.companion.core.routineRunPreview
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.PendingApproval
 import com.openmausbot.companion.core.forTask
+import com.openmausbot.companion.core.isStatusNotice
+import com.openmausbot.companion.core.rosterPreview
 import com.openmausbot.companion.core.takeLastCharacters
 import com.openmausbot.companion.core.visibleTasks
 
@@ -34,15 +36,20 @@ internal data class ChatUpdate(
     val id: String get() = chat.conversationId
 }
 
-internal val CompanionState.updates: List<ChatUpdate>
-    get() = updates(pendingApprovals)
+/**
+ * Every chat worth a line on the pill and the sheet. [detail] is the reader's
+ * Activity setting: the lines fold tool calls and webhooks by the same rule as
+ * the roster, so Hidden means hidden here too (MOCA-204, as on iOS).
+ */
+internal fun CompanionState.updates(detail: ActivityDetail): List<ChatUpdate> =
+    updates(pendingApprovals, detail)
 
 /**
  * The same derivation for a caller that already holds the pending approvals.
  * [CompanionState.pendingApprovals] walks every thread's visible transcript, and
  * the roster reads it for its own rows on the frame it draws the pill.
  */
-internal fun CompanionState.updates(pending: List<PendingApproval>): List<ChatUpdate> {
+internal fun CompanionState.updates(pending: List<PendingApproval>, detail: ActivityDetail): List<ChatUpdate> {
     val out = mutableListOf<ChatUpdate>()
     val seen = mutableSetOf<String>()
 
@@ -77,9 +84,9 @@ internal fun CompanionState.updates(pending: List<PendingApproval>): List<ChatUp
                         if (held == 1) "Queued — waiting for an available slot" else "$held messages queued",
                     )
                 conversation.busy == true ->
-                    out += ChatUpdate(chat, UpdateKind.WORKING, workingLine(chat.threadId))
+                    out += ChatUpdate(chat, UpdateKind.WORKING, workingLine(chat.threadId, detail))
                 conversation.unread ->
-                    out += ChatUpdate(chat, UpdateKind.TO_REVIEW, lastLine(chat.threadId))
+                    out += ChatUpdate(chat, UpdateKind.TO_REVIEW, lastLine(chat.threadId, detail))
             }
         }
     }
@@ -98,11 +105,11 @@ internal fun CompanionState.updates(pending: List<PendingApproval>): List<ChatUp
                 }
                 room.busyBotId != null -> {
                 seen += chat.conversationId
-                out += ChatUpdate(chat, UpdateKind.WORKING, workingLine(room.threadId))
+                out += ChatUpdate(chat, UpdateKind.WORKING, workingLine(room.threadId, detail))
             }
             room.unread -> {
                 seen += chat.conversationId
-                out += ChatUpdate(chat, UpdateKind.TO_REVIEW, lastLine(room.threadId))
+                out += ChatUpdate(chat, UpdateKind.TO_REVIEW, lastLine(room.threadId, detail))
             }
         }
     }
@@ -112,27 +119,21 @@ internal fun CompanionState.updates(pending: List<PendingApproval>): List<ChatUp
     return out.sortedBy(ChatUpdate::kind)
 }
 
-private fun CompanionState.workingLine(threadId: String): String {
+private fun CompanionState.workingLine(threadId: String, detail: ActivityDetail): String {
     val live = streaming[threadId]
     if (!live.isNullOrEmpty()) return live.takeLastCharacters(STREAM_TAIL).replace('\n', ' ')
+    // A tool's name is often its raw command line. Only a reader who wants tool
+    // calls sees it; a status notice is for everyone.
     val last = visibleTranscript(threadId).lastOrNull()
-    if (last?.kind == Message.Kind.ACTIVITY) last.tool?.let { return it.name }
+    if (last?.kind == Message.Kind.ACTIVITY && (detail != ActivityDetail.HIDDEN || isStatusNotice(last))) {
+        last.tool?.let { return it.name }
+    }
     return WORKING_LINE
 }
 
-private fun CompanionState.lastLine(threadId: String): String {
-    // The digest follows every reply and says nothing on its own.
-    val last = visibleTranscript(threadId).lastOrNull { it.kind != Message.Kind.DIGEST } ?: return ""
-    return when (last.kind) {
-        Message.Kind.TEXT, Message.Kind.UNKNOWN -> last.text.orEmpty()
-        Message.Kind.OPTIONS -> last.card?.title.orEmpty()
-        Message.Kind.ACTIVITY -> last.tool?.name.orEmpty()
-        Message.Kind.SCREEN -> "Screenshot"
-        Message.Kind.DIGEST -> ""
-        Message.Kind.COMPACTION -> last.compaction?.chipText ?: last.text.orEmpty()
-        Message.Kind.ROUTINE_RUN -> last.routineRunPreview
-    }
-}
+/** What the chat last said, read by the roster's rule (no digest, webhook as its task). */
+private fun CompanionState.lastLine(threadId: String, detail: ActivityDetail): String =
+    rosterPreview(visibleTranscript(threadId), detail)
 
 /** How much of a streaming turn the working line carries. */
 private const val STREAM_TAIL = 120
