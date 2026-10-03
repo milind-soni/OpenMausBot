@@ -1137,6 +1137,7 @@ export type Action =
       replyToId?: string;
       threadId?: string;
       mode?: "chat" | "goal";
+      steerOnQueue?: boolean;
       onError?: () => void;
     }
   | {
@@ -1164,6 +1165,7 @@ export type Action =
       type: "send";
       botId: string;
       text: string;
+      queueOnly?: boolean;
       sendId?: string;
       replyToId?: string;
       threadId?: string;
@@ -3225,7 +3227,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
             .then(() => api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
-                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
+                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, queueOnly: action.queueOnly }),
               }))
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {
@@ -3530,6 +3532,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   queueId: body.queueId,
                   text: action.text,
                 });
+                if (action.steerOnQueue) {
+                  wrapped({ type: "steerGroupQueued", groupId: action.groupId, threadId: body.threadId, queueId: body.queueId });
+                }
               }
             })
             .catch((error) => {

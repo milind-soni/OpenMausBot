@@ -8848,10 +8848,11 @@ async function acceptDirectSend(
     /** A person is proven present (a paired session, or the desktop's owner
      * capability): steering their words in clears the unattended mark. */
     personPresent: boolean;
+    queueOnly?: boolean;
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, personPresent } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, personPresent, queueOnly } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -8905,6 +8906,7 @@ async function acceptDirectSend(
         const carriesImages = extractTurnImages(text).images.length > 0;
         const steerTarget = handoffs.current(threadId);
         const busyAdmission = admit("direct-busy", {
+          queueOnly,
           carriesImages,
           pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
           engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
@@ -22120,6 +22122,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger,
+          queueOnly: !guarded && body.queueOnly === true,
           // A person steering a webhook turn is present, and auto mode may
           // follow them again. But this route is also reachable from the
           // bot's own shell on a headless server (loopback is the owner

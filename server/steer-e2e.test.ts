@@ -209,6 +209,21 @@ posixOnly("mid-turn steering e2e", () => {
     40_000,
   );
 
+  it("queues a busy direct message when the sender requests the next turn", async () => {
+    rmSync(steerFinishGate, { force: true });
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
+    const queued = await api("POST", `/api/bots/${created.id}/messages`, { text: "next turn", queueOnly: true });
+    expect(queued).toMatchObject({ status: 202, body: { queued: true, threadId: created.threadId } });
+    expect((await getBot(created.id)).messages.some((m: any) => m.text === "next turn")).toBe(false);
+    writeFileSync(steerFinishGate, "finish");
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.text === "next turn"), "the queued turn to start");
+    const bot = await getBot(created.id);
+    expect(bot.messages.find((m: any) => m.text === "next turn").steered).toBeUndefined();
+  });
+
   it("a steer the CLI runs as its next native turn keeps the turn, its busy state and its internal tool pass until that reply lands", async () => {
     rmSync(lateSteerFinishGate, { force: true });
     rmSync(lateSteerContinuationGate, { force: true });
