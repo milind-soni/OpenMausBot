@@ -2456,6 +2456,10 @@ struct CardView: View {
                     Label(answered, systemImage: "checkmark.circle")
                         .font(.system(size: 14))
                         .foregroundStyle(Color.secondary)
+                } else if card.expired == true {
+                    Label("Expired — ask for a fresh proposal", systemImage: "clock.badge.xmark")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.secondary)
                 }
             }
             .padding(14)

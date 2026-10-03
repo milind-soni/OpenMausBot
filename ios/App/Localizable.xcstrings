@@ -5604,6 +5604,16 @@
           }
         }
       }
+    },
+    "Expired — ask for a fresh proposal": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expirou — peça uma nova proposta"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -468,6 +468,26 @@ final class DecodingTests: XCTestCase {
         XCTAssertFalse(dismissed.isPending)
     }
 
+    func testAnExpiredProposalIsNotPending() throws {
+        // The shape the computer leaves when a routine, profile or team
+        // setup proposal goes stale: no answer, no dismissal, no options.
+        // Counting it as pending left a "waiting on you" card with nothing
+        // to tap, stuck in the chat and in Needs you for good (MOCA-282).
+        let json = """
+        {
+          "id": "m2", "role": "bot", "kind": "options", "at": 1786742413762,
+          "card": {
+            "title": "Create routine?", "subtitle": "Every morning at 8",
+            "options": [], "requestId": "req-2", "tool": "create_routine",
+            "expired": true, "held": "This proposal changed after it was made."
+          }
+        }
+        """
+        let card = try XCTUnwrap(try JSONDecoder().decode(Message.self, from: Data(json.utf8)).card)
+        XCTAssertEqual(card.expired, true)
+        XCTAssertFalse(card.isPending, "nothing can answer an expired proposal")
+    }
+
     func testDecodesAReviewedSkillRequest() throws {
         let json = """
         {

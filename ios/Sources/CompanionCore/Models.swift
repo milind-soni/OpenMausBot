@@ -64,11 +64,14 @@ public struct OptionCard: Codable, Hashable, Sendable {
     /// the behavior once the harness settles a live ask, so without this a
     /// settled question card would read "answer" instead of the reply.
     public var answeredText: String? = nil
+    /// Terminal: the proposal went stale while open. The computer clears
+    /// its options and nothing can answer it; a fresh proposal is needed.
+    public var expired: Bool? = nil
 
     /// A card is actionable while it is unanswered and still has a request
     /// behind it. Everything else is transcript.
     public var isPending: Bool {
-        requestId != nil && answered == nil && dismissed != true
+        requestId != nil && answered == nil && dismissed != true && expired != true
     }
 
     /// Permission cards carry a tool; questions do not.
