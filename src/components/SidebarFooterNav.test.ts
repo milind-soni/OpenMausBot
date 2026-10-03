@@ -89,4 +89,45 @@ describe("sidebar footer places", () => {
       expect(html).not.toContain(`>${label}</span>`);
     }
   });
+
+  it("shows a collapse toggle above the rows outside icon density", () => {
+    const { html } = render("comfortable");
+    expect(html).toContain('data-testid="sidebar-footer-tools-toggle"');
+  });
+
+  it("hides the rows but keeps the toggle when collapsed", () => {
+    let tree!: ReturnType<typeof SidebarFooterNav>;
+    function Capture() {
+      tree = SidebarFooterNav({ density: "comfortable", collapsed: true, onToggle: vi.fn() });
+      return tree;
+    }
+    const html = renderToStaticMarkup(createElement(Capture));
+    expect(html).toContain('data-testid="sidebar-footer-tools-toggle"');
+    expect(html).not.toContain('data-sidebar-nav="routines"');
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("toggles from the collapse control", () => {
+    const onToggle = vi.fn();
+    let tree!: ReturnType<typeof SidebarFooterNav>;
+    function Capture() {
+      tree = SidebarFooterNav({ density: "comfortable", collapsed: false, onToggle });
+      return tree;
+    }
+    renderToStaticMarkup(createElement(Capture));
+    const toggle = nodes(tree).find((node) => node.props["data-testid"] === "sidebar-footer-tools-toggle")!;
+    (toggle.props.onClick as () => void)();
+    expect(onToggle).toHaveBeenCalledOnce();
+  });
+
+  it("disables the toggle and ignores collapsed in icon density", () => {
+    let tree!: ReturnType<typeof SidebarFooterNav>;
+    function Capture() {
+      tree = SidebarFooterNav({ density: "icons", collapsed: true, onToggle: vi.fn() });
+      return tree;
+    }
+    const html = renderToStaticMarkup(createElement(Capture));
+    expect(html).not.toContain('data-testid="sidebar-footer-tools-toggle"');
+    expect(html).toContain('data-sidebar-nav="routines"');
+  });
 });
