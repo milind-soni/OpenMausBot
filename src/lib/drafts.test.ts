@@ -502,6 +502,23 @@ describe("saving typed drafts", () => {
     expect(JSON.parse(writes[0])["bot:switch:thread-a"]).toBe("for thread a");
   });
 
+  it("keeps a draft unsaved after a failed write and saves it on the next try", () => {
+    const { store, writes } = countedStorage();
+    const accepting = store.setItem;
+    let full = true;
+    store.setItem = (key, value) => {
+      if (full) throw new DOMException("quota exceeded", "QuotaExceededError");
+      accepting(key, value);
+    };
+    setDraft(store, "bot:quota-retry:thread", "still on screen");
+    leavePage();
+    expect(writes).toHaveLength(0);
+    full = false;
+    page.dispatchEvent(new Event("blur"));
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(writes[0])["bot:quota-retry:thread"]).toBe("still on screen");
+  });
+
   it("keeps drafts another window saved and drops an emptied one", () => {
     const { store, writes } = countedStorage();
     store.setItem("omb-drafts", JSON.stringify({ "bot:other-window:thread": "theirs", "bot:sent:thread": "old" }));

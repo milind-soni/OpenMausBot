@@ -138,11 +138,11 @@ function saveDrafts(): void {
     }
     try {
       store.setItem(KEY, JSON.stringify(drafts));
+      unsavedDrafts.delete(store);
     } catch {
-      /* quota / private mode — the draft just doesn't outlive the page */
+      /* quota / private mode — still unsaved; the next save tries again */
     }
   }
-  unsavedDrafts.clear();
 }
 
 export function getDraftChannelMode(store: Store, id: string): ChannelMode {
