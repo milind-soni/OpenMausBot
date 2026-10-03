@@ -111,6 +111,9 @@ describe("phonePairingLink", () => {
         { url: "http://mac.local:8810/path", kind: "bonjour", priority: 300 },
         { url: "http://mac.local:0", kind: "bonjour", priority: 300 },
         { url: "http://mac.local:65536", kind: "bonjour", priority: 300 },
+        // A bare suffix, no machine name: both phones refuse it
+        // (validTailnetHost), and Android then refuses the whole list.
+        { url: "http://.ts.net:8810", kind: "tailnet", priority: 100 },
         { url: "http://mac.local:8810", kind: "bonjour", priority: 300 },
       ],
     });
