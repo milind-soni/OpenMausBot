@@ -123,6 +123,9 @@ describe("QuestionCard", () => {
       message({ answered: "answer", answeredText: "The user answered your questions.\n\nQ: Which model?\nA: Claude Opus 5" }),
     );
     expect(markup).toContain("A: Claude Opus 5");
+    expect(markup).toContain("Answered");
+    expect(markup).not.toContain("Hazelnut has a question");
+    expect(markup).not.toContain('role="tablist"');
     expect(markup).not.toContain('role="radiogroup"');
   });
 
