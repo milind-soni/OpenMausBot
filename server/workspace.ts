@@ -626,9 +626,8 @@ export function writeMemoryTopic(botId: string, name: string, text: string): voi
   indexWrittenMemoryFile(botId, `memory/${name}`);
 }
 
-/** Read one topic file. The name gate runs here too, not only in the HTTP
- * route — a future caller must not be able to turn this into a read of an
- * arbitrary path. Null for anything invalid or unreadable. */
+/** Read one topic file. The name gate runs here, so no caller can turn this
+ * into a read of an arbitrary path. Null for anything invalid or unreadable. */
 export function readMemoryTopic(botId: string, name: string): string | null {
   if (!isMemoryTopicName(name)) return null;
   try {
