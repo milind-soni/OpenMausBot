@@ -114,6 +114,8 @@ describe("CursorAgentDriver", () => {
   afterEach(async () => {
     delete process.env.FAKE_ACP_DUMP;
     delete process.env.FAKE_ACP_AUTH;
+    delete process.env.FAKE_ACP_AUTH_METHOD;
+    delete process.env.FAKE_ACP_RPC_APPEND_FILE;
     delete process.env.CURSOR_API_KEY;
     delete process.env.CURSOR_AUTH_TOKEN;
     delete process.env.XAI_API_KEY;
@@ -240,6 +242,40 @@ describe("CursorAgentDriver", () => {
       recorder.stop();
       await instance.dispose();
     }
+  });
+
+  it("sends cursor_login only when no Cursor key is in the agent's env", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-auth-"));
+    scratchDirs.push(scratch);
+    process.env.FAKE_ACP_AUTH_METHOD = "cursor_login";
+    const authenticateCalls = async (environment: Record<string, string>) => {
+      const rpcFile = join(scratch, `rpc-${Object.keys(environment).join("-") || "none"}.jsonl`);
+      process.env.FAKE_ACP_RPC_APPEND_FILE = rpcFile;
+      const instance = await CursorAgentDriver.create({
+        instanceId: "cursor-auth",
+        displayName: "Cursor",
+        environment,
+        enabled: true,
+        config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId: "t-cursor-auth", text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+      }
+      return readFileSync(rpcFile, "utf8").trim().split("\n")
+        .map((line) => JSON.parse(line) as { method: string })
+        .filter((entry) => entry.method === "authenticate").length;
+    };
+
+    expect(await authenticateCalls({})).toBe(1);
+    expect(await authenticateCalls({ CURSOR_API_KEY: "key-from-env" })).toBe(0);
+    expect(await authenticateCalls({ CURSOR_AUTH_TOKEN: "token-from-env" })).toBe(0);
   });
 
   it("omits --force when fullAuto is off and still completes a turn", async () => {

@@ -361,8 +361,9 @@ export interface AcpSupport {
     ctx: { model?: string; requestedModel?: string; fullAuto: boolean; botId?: string; cwd: string; toolScope?: SendTurnInput["toolScope"] },
   ): void;
   /** Pick the ACP authenticate methodId from initialize's advertised
-   * authMethods; return null to skip the authenticate step. */
-  pickAuthMethod(authMethods: Array<{ id?: string }>): string | null;
+   * authMethods; return null to skip the authenticate step. `env` is the
+   * environment the agent process was spawned with. */
+  pickAuthMethod(authMethods: Array<{ id?: string }>, env: Record<string, string | undefined>): string | null;
   /** "fail": abort the turn if auth is missing/errors (subscription CLIs).
    *  "continue": proceed anyway (CLIs that work off an ambient login). */
   authFailure: "fail" | "continue";
@@ -1806,7 +1807,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 const methods: Array<{ id?: string }> = Array.isArray(session.initResult?.authMethods)
                   ? session.initResult.authMethods
                   : [];
-                const methodId = support.pickAuthMethod(methods);
+                const methodId = support.pickAuthMethod(methods, spawnEnv);
                 if (methodId) {
                   try {
                     await request("authenticate", { methodId }, INIT_TIMEOUT);
