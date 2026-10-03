@@ -96,7 +96,6 @@ describe("the bot-memory module through the route table", () => {
       ["GET", "/api/bots/missing/memory/upkeep"],
       ["POST", "/api/bots/missing/memory/tidy"],
       ["POST", "/api/bots/missing/memory/open", { target: "folder" }],
-      ["GET", "/api/bots/missing/memory/topics/x.md"],
     ] as Array<[string, string, unknown?]>) {
       const response = await fetch(`${base}${path}`, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
       expect(response.status, `${method} ${path}`).toBe(404);
@@ -180,10 +179,10 @@ describe("the bot-memory module through the route table", () => {
       ["POST", "/api/profile/learned"],
       ["GET", "/api/profile/learned/e1/remove"],
       ["POST", "/api/profile/learned/e1/remove/extra"],
-      ["PUT", "/api/bots/bot-123/memory/topics/x.md"],
       ["GET", "/api/bots/bot-123/memory/file/extra"],
       ["GET", "/api/bots/bot-123/memory/journal/e/revert/extra"],
-      ["GET", "/api/bots/bot-123/memory/topics/x.md/extra"],
+      // No topic route: the panel reads a topic through /memory/file.
+      ["GET", "/api/bots/bot-123/memory/topics/x.md"],
       ["GET", "/api/bots/bot-123/checkpoints"],
     ] as const) {
       const response = await fetch(`${base}${path}`, { method });
@@ -215,7 +214,6 @@ describe("the bot-memory module through the route table", () => {
       ["GET", "/api/profile/learned"],
       ["POST", "/api/profile/learned/e1/remove"],
       ["POST", "/api/bots/b1/memory/open"],
-      ["GET", "/api/bots/b1/memory/topics/x.md"],
     ] as const) {
       expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
     }
@@ -237,7 +235,6 @@ describe("the bot-memory family behind the gate on a real server", () => {
     ["GET", "/api/profile/learned"],
     ["POST", "/api/profile/learned/e1/remove"],
     ["POST", "/api/bots/b1/memory/open", { target: "folder" }],
-    ["GET", "/api/bots/b1/memory/topics/x.md"],
   ];
   const call = async (method: string, path: string, body: unknown, headers: Record<string, string> = {}) => {
     const response = await fetch(`${fixture.info.url}${path}`, {
