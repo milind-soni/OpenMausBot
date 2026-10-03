@@ -42,6 +42,8 @@ import * as procs from "../procs.ts";
 import * as localInject from "./local-inject.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
+/** The process that played the latest turn a FAKE_CLAUDE_DUMP recorded. */
+const dumpedPid = (dump: string): number => JSON.parse(readFileSync(dump, "utf8")).pid;
 
 /** Thread ids for the four ask-id-collision tests. Each must truncate to a
  * unique 8-char tag so no two tests share a broker socket/pipe name. */
@@ -624,7 +626,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     process.env.FAKE_CLAUDE_DUMP = healthyDump;
     const healthy = await instance.adapter.sendTurn({ threadId: "t-update-healthy", text: "keep this session" });
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === healthy.turnId);
-    const healthyBefore = readFileSync(healthyDump, "utf8");
+    const healthyPid = dumpedPid(healthyDump);
 
     process.env.FAKE_CLAUDE_MODE = "api-error";
     const outdatedDump = join(scratch, "outdated-session.json");
@@ -652,7 +654,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const continued = await instance.adapter.sendTurn({ threadId: "t-update-healthy", text: "continue normally" });
     await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === continued.turnId))
       .resolves.toMatchObject({ ok: true });
-    expect(readFileSync(healthyDump, "utf8")).toBe(healthyBefore);
+    expect(dumpedPid(healthyDump)).toBe(healthyPid);
     expect(JSON.parse(readFileSync(retryDump, "utf8")).pid).toBe(replacement.pid);
     expect(recorder.events.some((event) => event.type === "turn.retrying")).toBe(false);
   });
@@ -1935,16 +1937,17 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const dump = join(scratch, "stop-interrupt-dump.json");
     await create("slow", { FAKE_CLAUDE_SLOW_FINISH_GATE: gate, FAKE_CLAUDE_DUMP: dump });
     const threadId = `t-int-${retained}`;
+    let retainedPid: number | undefined;
     if (retained) {
       writeFileSync(gate, "finish");
       const first = await instance.adapter.sendTurn({ threadId, text: "first" });
       await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
       rmSync(gate);
-      rmSync(dump);
+      retainedPid = dumpedPid(dump);
     }
     const running = await instance.adapter.sendTurn({ threadId, text: "go" });
     await recorder.until((e) => e.type === "item.completed" && e.itemType === "tool" && e.turnId === running.turnId);
-    const spawnedItsOwnProcess = existsSync(dump);
+    const spawnedItsOwnProcess = dumpedPid(dump) !== retainedPid;
     expect(spawnedItsOwnProcess).toBe(!retained);
 
     await instance.adapter.interruptTurn(threadId);
@@ -2124,7 +2127,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const first = await instance.adapter.sendTurn({ threadId, text: "first" });
     const firstDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
     expect(firstDone).toMatchObject({ ok: true, cost: 0.01 });
-    const launch = readFileSync(dump, "utf8");
+    const launch = dumpedPid(dump);
     rmSync(finishGate);
 
     const second = await instance.adapter.sendTurn({ threadId, text: "second" });
@@ -2135,7 +2138,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     writeFileSync(finishGate, "finish");
     const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     // the same process ran both logical turns and the continuation
-    expect(readFileSync(dump, "utf8")).toBe(launch);
+    expect(dumpedPid(dump)).toBe(launch);
     expect(recorder.events.filter((e) => e.type === "turn.completed")).toHaveLength(2);
     expect(done).toMatchObject({ ok: true, cost: 0.02, usage: { input: 24, output: 10, cachedInput: 4 } });
   });
@@ -2451,11 +2454,11 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     process.env.FAKE_CLAUDE_DUMP = dump;
     await instance.adapter.sendTurn({ threadId: "t-live", text: "one" });
     await recorder.until((e) => e.type === "turn.completed");
-    const dumpBefore = readFileSync(dump, "utf8");
+    const dumpBefore = dumpedPid(dump);
     const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
     const second = await instance.adapter.sendTurn({ threadId: "t-live", text: "two", ...(withCursor ? { resumeCursor: announced } : {}) });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
-    expect(readFileSync(dump, "utf8")).toBe(dumpBefore);
+    expect(dumpedPid(dump)).toBe(dumpBefore);
     expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(2);
     expect(recorder.events.filter((e) => e.type === "turn.completed")).toHaveLength(2);
   });
@@ -2468,13 +2471,13 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
     const costs: unknown[] = [];
-    let launch: string | undefined;
+    let launch: number | undefined;
     for (const text of ["one", "two", "three"]) {
       const { turnId } = await instance.adapter.sendTurn({ threadId: "t-running-total", text });
       costs.push((await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId) as { cost?: unknown }).cost);
-      launch ??= readFileSync(dump, "utf8");
-      // one process for all three turns: a relaunch would rewrite the dump
-      expect(readFileSync(dump, "utf8")).toBe(launch);
+      launch ??= dumpedPid(dump);
+      // one process for all three turns
+      expect(dumpedPid(dump)).toBe(launch);
     }
     expect(costs).toEqual([0.01, 0.01, 0.01]);
   });
@@ -2516,11 +2519,11 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
     const failed = await instance.adapter.sendTurn({ threadId, text: "two", system: "After.", systemStable: "After.", resumeCursor: announced });
     expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === failed.turnId)).toMatchObject({ ok: false, cost: null });
-    const launch = readFileSync(dump, "utf8");
+    const launch = dumpedPid(dump);
     const third = await instance.adapter.sendTurn({ threadId, text: "three", system: "After.", systemStable: "After.", resumeCursor: announced });
     const thirdDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId);
     // the same resumed process, whose total now reads 0.02
-    expect(readFileSync(dump, "utf8")).toBe(launch);
+    expect(dumpedPid(dump)).toBe(launch);
     expect(JSON.parse(readFileSync(join(costState, `${announced}.json`), "utf8")).total).toBe(0.02);
     expect(thirdDone).toMatchObject({ ok: true, cost: 0.01 });
   });

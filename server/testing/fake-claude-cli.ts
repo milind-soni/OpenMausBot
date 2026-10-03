@@ -17,12 +17,17 @@
 //   FAKE_CLAUDE_API_ERROR text for the api-error frame (default: overloaded).
 //   FAKE_CLAUDE_RELEASE with hang: the turn ends normally once this file exists.
 //   FAKE_CLAUDE_DUMP   path to write {argv, env, cwd, prompt, systemPrompt,
-//                      mcpConfig} as JSON,
-//                      so the test can assert on argv shape and env hygiene.
-//                      mcpConfig is read back from the --mcp-config file the
-//                      way the real CLI reads it — the driver writes it to a
-//                      private temp file and deletes it when the turn settles,
-//                      so a test cannot open it after the fact.
+//                      mcpConfig} as JSON at each turn this process is given
+//                      (the latest turn wins), so the test can assert on argv
+//                      shape and env hygiene. mcpConfig and systemPrompt are
+//                      read once, at the first turn, the way the real CLI
+//                      reads its launch files — the driver writes them to a
+//                      private temp dir and deletes it when that turn
+//                      settles, so a test cannot open them after the fact.
+//                      A process kept warm for later turns still has them.
+//   FAKE_CLAUDE_EXIT_AFTER_TURN 1: the process exits once its turn is
+//                      answered, like a CLI that ended between turns, so
+//                      every later turn launches again (with --resume).
 //   FAKE_CLAUDE_TEXT_FILE path whose contents are the one-shot text mode's
 //                      reply, read fresh each run so a suite sharing one
 //                      server can vary it per test. A missing file, or a body
@@ -359,7 +364,8 @@ const permissionMode =
 const toolsFlag = argAfter("--tools");
 const tools = [...new Set([...(toolsFlag ? toolsFlag.split(",") : ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"]),
   ...(process.env.FAKE_CLAUDE_KEEP_BASH === "1" ? ["Bash"] : [])])];
-let dumped = false;
+/** The launch files, as the first turn read them (FAKE_CLAUDE_DUMP). */
+let launchFiles: Record<string, unknown> | null = null;
 let turnRunning = false;
 let steered: string[] = [];
 /** The folded steers as they were sent, echoed when the reply takes them in. */
@@ -447,6 +453,7 @@ const finishIfDone = () => {
   if (turnRunning) return;
   if (startLateTurn()) return;
   if (stdinEnded) process.exit(0);
+  if (process.env.FAKE_CLAUDE_EXIT_AFTER_TURN === "1") process.stdout.write("", () => process.exit(0));
 };
 
 const finishTurn = () => {
@@ -456,41 +463,46 @@ const finishTurn = () => {
   finishIfDone();
 };
 
+/** The --mcp-config, --append-system-prompt-file and --settings files, read
+ * the way the real CLI reads them: once, at launch. */
+const readLaunchFiles = (): Record<string, unknown> => {
+  const configPath = argAfter("--mcp-config");
+  let mcpConfig: unknown = null;
+  if (configPath) {
+    try {
+      mcpConfig = JSON.parse(readFileSync(configPath, "utf8"));
+    } catch {
+      /* leave null — the test will see it */
+    }
+  }
+  const systemPromptPath = argAfter("--append-system-prompt-file");
+  const settingsPath = argAfter("--settings");
+  const settings = settingsPath ? JSON.parse(readFileSync(settingsPath, "utf8")) : null;
+  const settingsMode = settingsPath ? statSync(settingsPath).mode & 0o777 : null;
+  let systemPrompt: string | null = null;
+  if (systemPromptPath) {
+    try {
+      systemPrompt = readFileSync(systemPromptPath, "utf8");
+    } catch {
+      /* leave null — the test will see it */
+    }
+  }
+  return { systemPrompt, mcpConfig, settings, settingsMode };
+};
+
 const playTurn = (prompt: JsonValue, late = false) => {
   turnRunning = true;
   lateContinuation = late;
   steered = [];
   steeredMessages = [];
-  // Every prompt this process receives, one JSON object per line. FAKE_CLAUDE_DUMP
-  // records only the first, which cannot show what a REUSED session was sent on
-  // its second and later turns.
+  // Every prompt this process receives, one JSON object per line.
+  // FAKE_CLAUDE_DUMP keeps only the latest turn's.
   if (process.env.FAKE_CLAUDE_PROMPTS) appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `${JSON.stringify(prompt)}\n`);
-  if (!dumped && process.env.FAKE_CLAUDE_DUMP) {
-    dumped = true;
-    const configPath = argAfter("--mcp-config");
-    let mcpConfig: unknown = null;
-    if (configPath) {
-      try {
-        mcpConfig = JSON.parse(readFileSync(configPath, "utf8"));
-      } catch {
-        /* leave null — the test will see it */
-      }
-    }
-    const systemPromptPath = argAfter("--append-system-prompt-file");
-    const settingsPath = argAfter("--settings");
-    const settings = settingsPath ? JSON.parse(readFileSync(settingsPath, "utf8")) : null;
-    const settingsMode = settingsPath ? statSync(settingsPath).mode & 0o777 : null;
-    let systemPrompt: string | null = null;
-    if (systemPromptPath) {
-      try {
-        systemPrompt = readFileSync(systemPromptPath, "utf8");
-      } catch {
-        /* leave null — the test will see it */
-      }
-    }
+  if (!late && process.env.FAKE_CLAUDE_DUMP) {
+    launchFiles ??= readLaunchFiles();
     writeFileSync(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, cwd: process.cwd(), prompt, systemPrompt, mcpConfig, settings, settingsMode }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, cwd: process.cwd(), prompt, ...launchFiles }, null, 2),
     );
   }
 

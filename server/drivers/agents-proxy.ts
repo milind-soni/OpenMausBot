@@ -25,7 +25,8 @@ import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 
 const AVAILABLE_TOOLS = availableTools(catalogProfileFromEnv(process.env));
-// One proxy process serves one turn, so its per-turn guards start here.
+// A warm engine keeps this process across its turns; the harness keeps
+// every per-turn limit, so nothing here counts.
 const CONTEXT = toolCallContextFromEnv(process.env);
 
 const send = (msg: Json) => process.stdout.write(JSON.stringify(msg) + "\n");

@@ -348,7 +348,7 @@ describe("start_thread on yourself", () => {
       }
       const sixth = await api("POST", "/api/internal/threads", { title: "Job 5", message: "go" }, token);
       expect(sixth.status).toBe(429);
-      expect(sixth.body.error).toContain("at most 5 threads in one turn");
+      expect(sixth.body.error).toContain("already opened 5 threads this turn");
       expect((await botState(bot.id)).tasks).toHaveLength(6);
       for (const task of (await botState(bot.id)).tasks) release(task.threadId);
       await expect.poll(async () => (await botState(bot.id))?.busy, { timeout: 15_000 }).toBe(false);

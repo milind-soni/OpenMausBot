@@ -1591,9 +1591,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // session, so the model is not a separate axis; fullAuto covers the
         // transformEnv-policy supports (opencode). mcpServers are session
         // establishment inputs — they ride session/new and session/load over
-        // the wire — and the harness mints fresh integration bearer tokens
-        // every turn. Most agents apply changes on live load; those that cache
-        // the old MCP clients must resume on a fresh process (see sessionKey).
+        // the wire — and change when a turn's integrations or their grants do
+        // (a thread keeps its integration credentials across turns). Most
+        // agents apply changes on live load; those that cache the old MCP
+        // clients must resume on a fresh process (see sessionKey).
         // The env the spawned child actually receives is part of the
         // contract too, and arrives hashed as envFingerprint for the same
         // reason.

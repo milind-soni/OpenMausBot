@@ -30,12 +30,6 @@ function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
       api: async () => ({}),
       apiResponse: async () => ({ ok: true, status: 200, body: {} }),
     },
-    turn: {
-      createdThisTurn: 0,
-      roomPostsThisTurn: 0,
-      threadsOpenedThisTurn: 0,
-      delegationTaskIdsThisTurn: new Set(),
-    },
     ...overrides,
   };
 }

@@ -41,6 +41,23 @@ is refused with 401 even when its request body arrives late — is covered by
 thread and rechecks late bodies"); every internal capability, the browser's
 included, passes through that same gate.
 
+A thread keeps its integration credentials from one turn to the next, so its
+engine stays warm instead of relaunching every turn. The same bot on the same
+thread, with the same grants and approval level, holds the same bearer, and
+the harness honours it only while one of that thread's turns runs. Stop, a
+stall, a deleted bot or thread, a changed grant or approval level, or a
+provider reload gives the next turn a new bearer. The computer gets a new
+bearer every turn: its tools bridge into a machine that can stop between
+turns (an idle Local VM, a VPS that Auto starts), and a warm engine would not
+restart a bridge whose machine went away. The per-turn limits (bots
+created, threads opened, room posts, and not checking a delegation in the
+turn that made it) are counted by the harness for each turn, not by the
+proxy, which a warm engine keeps across turns.
+
+```sh
+pnpm exec vitest run server/session-credentials.e2e.test.ts server/post-to-room.test.ts server/vps-routing.test.ts
+```
+
 A message steered into a running Claude turn is folded in only before a
 model call that has not started yet. Words that land during the turn's last
 call are queued and run as the CLI's next native turn, in the same process

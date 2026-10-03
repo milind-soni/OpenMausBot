@@ -54,6 +54,17 @@ const api = async (method: string, path: string, body?: unknown): Promise<ApiRes
   return { status: res.status, body: (parsed ?? {}) as Record<string, unknown> };
 };
 
+/** A new turn for this bot on this thread, and the agents bearer it holds. */
+const startTurn = async (botId: string, threadId: string): Promise<string> => {
+  const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
+    body: JSON.stringify({ botId, threadId, kind: "agents", skillAuthoring: true }),
+  });
+  return (await minted.json() as { token: string }).token;
+};
+
+/** One internal call, made in a new turn of the bot and thread it names. */
 const internal = async (method: string, path: string, body?: unknown): Promise<ApiResult> => {
   const url = new URL(path, BASE);
   const claims = body && typeof body === "object" && !Array.isArray(body)
@@ -61,12 +72,11 @@ const internal = async (method: string, path: string, body?: unknown): Promise<A
     : {};
   const botId = String(claims.fromBotId ?? claims.botId ?? url.searchParams.get("fromBotId") ?? url.searchParams.get("botId") ?? "");
   const threadId = String(claims.fromThreadId ?? claims.threadId ?? url.searchParams.get("fromThreadId") ?? "");
-  const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
-    body: JSON.stringify({ botId, threadId, kind: "agents", skillAuthoring: true }),
-  });
-  const { token } = await minted.json() as { token: string };
+  return asTurn(await startTurn(botId, threadId), method, path, body);
+};
+
+/** One internal call, made with a turn's bearer. */
+const asTurn = async (token: string, method: string, path: string, body?: unknown): Promise<ApiResult> => {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
@@ -887,4 +897,50 @@ describe("provenance on a peer-authored room message", () => {
 
     await api("POST", `/api/groups/${room.id}/interrupt`);
   }, 60_000);
+});
+
+// A warm engine keeps its proxies, and their bearer, from one turn to the
+// next; what a turn may still do is counted on the harness, per turn.
+describe("limits counted per turn on a bearer that outlives the turn", () => {
+  it("stops a turn at its third room post, and the next turn may post again", async () => {
+    const poster = await makeBot("Turn Poster", "Turn posts");
+    const mate = await makeBot("Turn Mate", "Turn posts");
+    const room = await makeRoom("Turn room", [poster.id, mate.id], "Turn posts");
+    const post = (token: string, message: string) => asTurn(token, "POST", "/api/internal/post-to-room", {
+      fromBotId: poster.id, fromThreadId: poster.threadId, groupId: room.id, message,
+    });
+    const token = await startTurn(poster.id, poster.threadId);
+    for (const message of ["one", "two", "three"]) {
+      const posted = await post(token, `post ${message}`);
+      expect(posted.status, JSON.stringify(posted.body)).toBe(201);
+      // the person answers each post, so the room's own ceiling never fires
+      expect(await personSays(room.id, `noted ${message}`)).toBe(202);
+    }
+    const fourth = await post(token, "post four");
+    expect(fourth.status).toBe(429);
+    expect(str(fourth.body.error)).toContain("already posted 3 times this turn");
+
+    expect(await startTurn(poster.id, poster.threadId)).toBe(token);
+    const next = await post(token, "post four");
+    expect(next.status, JSON.stringify(next.body)).toBe(201);
+  }, 40_000);
+
+  it("refuses to check a delegation in the turn that made it, and answers in the next", async () => {
+    const from = await makeBot("Turn Delegator", "Turn delegations");
+    const to = await makeBot("Turn Delegate", "Turn delegations");
+    const token = await startTurn(from.id, from.threadId);
+    const delegated = await asTurn(token, "POST", "/api/internal/delegate-bot", {
+      fromBotId: from.id, fromThreadId: from.threadId, toBotId: to.id, message: "Write the summary.", depth: 0,
+    });
+    expect(delegated.status, JSON.stringify(delegated.body)).toBe(200);
+    const taskId = str(delegated.body.taskId);
+    expect(taskId).not.toBe("");
+    const early = await asTurn(token, "GET", `/api/internal/delegations/${taskId}`);
+    expect(early.status).toBe(409);
+    expect(str(early.body.error)).toContain(`Task ${taskId} was delegated during this turn`);
+
+    expect(await startTurn(from.id, from.threadId)).toBe(token);
+    const later = await asTurn(token, "GET", `/api/internal/delegations/${taskId}`);
+    expect(later.status, JSON.stringify(later.body)).toBe(200);
+  }, 40_000);
 });
