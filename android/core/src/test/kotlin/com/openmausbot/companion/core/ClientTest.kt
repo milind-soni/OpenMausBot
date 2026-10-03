@@ -36,6 +36,23 @@ class ClientTest {
     }
 
     @Test
+    fun stopNamesTheConversationsOwnThread() = runBlocking {
+        // A room's Stop goes to the room, a bot's to the bot; both name the
+        // thread on screen so a sibling thread's turn keeps running (MOCA-148).
+        repeat(2) { server.enqueue(json("{}")) }
+        client.interruptRoom("g1", "gt2")
+        client.interrupt("b1", "t2")
+        server.takeRequest().let { request ->
+            assertEquals("POST /api/groups/g1/interrupt", "${request.method} ${request.path}")
+            assertEquals(mapOf("threadId" to "gt2"), stringBody(request.body.readUtf8()))
+        }
+        server.takeRequest().let { request ->
+            assertEquals("POST /api/bots/b1/interrupt", "${request.method} ${request.path}")
+            assertEquals(mapOf("threadId" to "t2"), stringBody(request.body.readUtf8()))
+        }
+    }
+
+    @Test
     fun pairingUsesTheRightCredentialFieldAndNoAuthorization() = runBlocking {
         server.enqueue(json(fixtureText("pair-response")))
         val older = CompanionClient.pair(connection, "004209", "Ada's phone")

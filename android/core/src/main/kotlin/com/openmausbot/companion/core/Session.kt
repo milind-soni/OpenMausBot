@@ -1568,6 +1568,14 @@ class Session(
         perform { it.interrupt(bot.id, bot.threadId) }
     }
 
+    /** Stop the turn running in this conversation: a bot's thread or a room. */
+    suspend fun interrupt(chat: Chat) {
+        when (chat) {
+            is Chat.BotChat -> interrupt(chat.bot)
+            is Chat.RoomChat -> perform { it.interruptRoom(chat.room.id, chat.room.threadId) }
+        }
+    }
+
     suspend fun cloudDesktop(forBot: Bot): URI {
         val activeClient = client ?: throw APIError.Transport("This computer is offline.")
         val connectionId = _connection.value?.id

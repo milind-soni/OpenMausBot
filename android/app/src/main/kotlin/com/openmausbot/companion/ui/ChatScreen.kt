@@ -1082,6 +1082,10 @@ private fun LoadedChat(
                     fileOpenError = null
                     attachmentError = null
                 },
+                onStop = {
+                    haptics.play(HapticCue.SELECT)
+                    scope.launch { session.interrupt(chat) }
+                },
                 onTogglePlus = {
                     // iOS drops the composer's focus before the sheet rises; a
                     // keyboard under it would leave the sheet nowhere to go.
@@ -1576,6 +1580,7 @@ private fun Composer(
     attachmentError: String?,
     onRemoveAttachment: (PendingMessageAttachment) -> Unit,
     onDismissError: () -> Unit,
+    onStop: () -> Unit,
 ) {
     val canSend = AttachmentImportRules.canSend(draft, attachments.size, preparing, sending)
     val inFlight = preparing || sending
@@ -1807,6 +1812,27 @@ private fun Composer(
                                 sends
                             },
                     )
+                }
+
+                // Stop sits in the bar while the turn runs, as it does on the
+                // desktop and iOS. The Interrupt chat action was the only way
+                // before, and rooms had none at all. The mic stays: a steer
+                // can still be dictated mid-turn.
+                if (busy) {
+                    TouchTarget(onClick = onStop, contentDescription = "Stop the current turn") {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(secondaryTint.copy(alpha = 0.12f), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(11.dp)
+                                    .background(MaterialTheme.colorScheme.onSurface, RoundedCornerShape(2.dp)),
+                            )
+                        }
+                    }
                 }
 
                 TouchTarget(

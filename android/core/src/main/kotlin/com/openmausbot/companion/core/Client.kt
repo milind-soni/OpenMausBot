@@ -767,6 +767,11 @@ class CompanionClient(
         sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/interrupt", body = jsonBody("threadId" to threadId)))
     }
 
+    /** Stop a room's running turn, whichever member is speaking. */
+    suspend fun interruptRoom(groupId: String, threadId: String? = null) {
+        sendUnit(makeRequest("POST", "/api/groups/${segment(groupId)}/interrupt", body = jsonBody("threadId" to threadId)))
+    }
+
     suspend fun cloudDesktop(botId: String): CloudDesktopSession = send(
         makeRequest("POST", "/api/bots/${segment(botId)}/computer/join"),
     )
