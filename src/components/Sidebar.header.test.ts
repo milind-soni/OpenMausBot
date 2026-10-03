@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { initialDesktopCapabilities } from "@/lib/desktop";
 import { setLocale } from "@/lib/i18n";
-import type { SidebarDensity } from "@/lib/sidebar-preferences";
+import { FOOTER_TOOLS_SECTION_ID } from "@/lib/sidebar-layout";
+import { SIDEBAR_COLLAPSED_SECTIONS_KEY, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { StoreProvider } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
@@ -230,4 +231,21 @@ describe("sidebar glass head and foot", () => {
       expect(at("data-glass-frame")).toBeLessThan(head);
     },
   );
+});
+
+describe("sidebar footer tools collapse", () => {
+  it("restores a saved Tools collapse from local storage in the footer", () => {
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => (key === SIDEBAR_COLLAPSED_SECTIONS_KEY
+        ? JSON.stringify([FOOTER_TOOLS_SECTION_ID])
+        : null),
+      setItem: () => {},
+      removeItem: () => {},
+    });
+    const html = render();
+    const toggleAt = html.indexOf('data-testid="sidebar-footer-tools-toggle"');
+    expect(toggleAt).toBeGreaterThan(-1);
+    expect(html.slice(toggleAt, toggleAt + 400)).toContain('aria-expanded="false"');
+    expect(html).not.toContain('data-sidebar-nav="routines"');
+  });
 });

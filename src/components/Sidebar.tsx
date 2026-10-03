@@ -2113,6 +2113,16 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     saveCollapsedSections(next);
   };
 
+  // The Tools footer is exempt from `sectionCollapsed`/`toggleSection` and
+  // their search-aware helpers: the search never matches these rows, so a
+  // typed query must neither force the footer open nor lock its toggle the
+  // way it does for every section the query is filtering.
+  const toggleToolsSection = () => {
+    const next = toggleCollapsedSection(collapsedSections, FOOTER_TOOLS_SECTION_ID);
+    setCollapsedSections(next);
+    saveCollapsedSections(next);
+  };
+
   const commitSectionOrder = (visibleOrder: string[]) => {
     if (!layoutInteractive) return;
     const next = mergeSectionOrder(sectionOrder, visibleOrder);
@@ -2673,8 +2683,8 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       <div className={cn("pb-3 pt-2", density === "icons" ? "px-2" : "px-3")}>
         <SidebarFooterNav
           density={density}
-          collapsed={sectionCollapsed(FOOTER_TOOLS_SECTION_ID)}
-          onToggle={layoutInteractive ? () => toggleSection(FOOTER_TOOLS_SECTION_ID) : undefined}
+          collapsed={collapsedSections.includes(FOOTER_TOOLS_SECTION_ID)}
+          onToggle={toggleToolsSection}
         />
         {density === "icons" && (
           <SidebarPhoneButton
