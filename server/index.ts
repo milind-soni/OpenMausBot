@@ -5796,7 +5796,10 @@ async function answerRequest(
       store.patchMessage(threadId, existing.id, { card: { ...existing.card, answered: "unavailable", dismissed: true } });
     }
     if (messageId) askMessageByRequest.delete(`${threadId}:${requestId}`);
-    if (!persistentQuestion) store.appendMessage(threadId, {
+    // The card's own answered state gates the message too: a replayed respond
+    // for a card that already settled must not read as a failed delivery —
+    // nothing was lost, the earlier answer already ran.
+    if (!persistentQuestion && !existing?.card?.answered) store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
       tool: { name: "Couldn't deliver that answer — the request is no longer open, so the action was not run", ok: false },
