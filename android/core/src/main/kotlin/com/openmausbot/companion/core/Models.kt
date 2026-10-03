@@ -502,6 +502,11 @@ data class Room(
     /** Desktop sidebar section. Missing or blank means the built-in Channels area. */
     val section: String? = null,
     val busyBotId: String? = null,
+    /**
+     * True for the whole orchestrated run — routing, members queued behind a
+     * busy speaker, hand-offs — not just while [busyBotId] names a speaker.
+     */
+    val working: Boolean? = null,
     /** Independent user conversations in this channel. DMs omit this field. */
     val tasks: List<BotTask>? = null,
     val messages: List<Message>? = null,

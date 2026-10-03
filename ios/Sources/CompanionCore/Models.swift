@@ -722,6 +722,9 @@ public struct Room: Codable, Hashable, Identifiable, Sendable {
     /// Desktop sidebar section. Missing or blank means the built-in Channels area.
     public var section: String?
     public var busyBotId: String?
+    /// True for the whole orchestrated run — routing, members queued behind
+    /// a busy speaker, hand-offs — not just while `busyBotId` names a speaker.
+    public var working: Bool? = nil
     /// Independent user conversations in this channel. Bot-to-bot rooms
     /// omit tasks because their transcript is the canonical private chat.
     public var tasks: [BotTask]?

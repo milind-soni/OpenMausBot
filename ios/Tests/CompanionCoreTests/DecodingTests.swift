@@ -430,6 +430,29 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(message.secret?.resumed, true)
     }
 
+    func testARoomWorkingWithoutASpeakerCanStillBeStopped() throws {
+        // `busyBotId` names only the member holding the turn. While the run
+        // routes, or waits on a member busy elsewhere, the room is `working`
+        // with no speaker; the desktop's Stop shows then, and so must the
+        // phone's (MOCA-148). `busy` keeps its old meaning.
+        let json = """
+        {"id":"r","threadId":"rt","name":"Team","memberIds":["b1"],
+         "defaultResponder":{"kind":"mentions"},"bulletin":"","unread":false,"createdAt":1,
+         "busyBotId":null,"working":true}
+        """
+        let room = try JSONDecoder().decode(Room.self, from: Data(json.utf8))
+        XCTAssertEqual(room.working, true)
+        XCTAssertFalse(Chat.room(room).busy)
+        XCTAssertTrue(Chat.room(room).canStop)
+
+        var idle = room
+        idle.working = false
+        XCTAssertFalse(Chat.room(idle).canStop)
+        var speaking = idle
+        speaking.busyBotId = "b1"
+        XCTAssertTrue(Chat.room(speaking).canStop)
+    }
+
     func testAPendingApprovalIsActionableAndAnAnsweredOneIsNot() throws {
         // The shape a live permission request takes, which the fixture rig
         // cannot produce without a real provider attached.

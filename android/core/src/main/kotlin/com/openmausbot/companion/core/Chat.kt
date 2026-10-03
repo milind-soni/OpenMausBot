@@ -10,6 +10,17 @@ sealed class Chat {
     abstract val busy: Boolean
     abstract val color: String
 
+    /**
+     * A turn the composer's Stop can end. A room runs before and between
+     * speakers too (routing, a member busy elsewhere), so it also counts
+     * `working`, as the desktop composer does (`group.working || busyBotId`).
+     */
+    val canStop: Boolean
+        get() = when (this) {
+            is BotChat -> busy
+            is RoomChat -> room.busyBotId != null || room.working == true
+        }
+
     /** Owner IDs stay available for profile APIs; navigation identifies the conversation. */
     val conversationId: String
         get() = when (this) {
@@ -77,7 +88,7 @@ fun CompanionState.chat(target: ChatTarget): Chat? = when (target) {
         when {
             room.threadId == target.threadId -> Chat.RoomChat(room)
             room.tasks.orEmpty().any { it.threadId == target.threadId } -> Chat.RoomChat(
-                room.copy(threadId = target.threadId, busyBotId = null, unread = false, messages = null, hasMore = null),
+                room.copy(threadId = target.threadId, busyBotId = null, working = null, unread = false, messages = null, hasMore = null),
             )
             else -> null
         }

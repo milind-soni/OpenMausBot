@@ -116,6 +116,16 @@ public enum Chat: Identifiable, Hashable, Codable, Sendable {
         }
     }
 
+    /// A turn the composer's Stop can end. A room runs before and between
+    /// speakers too (routing, a member busy elsewhere), so it also counts
+    /// `working`, as the desktop composer does (`group.working || busyBotId`).
+    public var canStop: Bool {
+        switch self {
+        case .bot: return busy
+        case let .room(room): return room.busyBotId != nil || room.working == true
+        }
+    }
+
     public var color: String {
         switch self {
         case let .bot(bot): return bot.color

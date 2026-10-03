@@ -1446,7 +1446,7 @@ struct ChatView: View {
                         // Stop sits in the bar while the turn runs, as it does
                         // on the desktop. The Interrupt action under + was the
                         // only way before, and rooms had none at all.
-                        if current.busy {
+                        if current.canStop {
                             Button {
                                 Haptics.selection()
                                 Task { await session.interrupt(current) }
