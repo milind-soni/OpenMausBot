@@ -3,7 +3,14 @@
 // hide behind a hover "Tools" menu; three rows cost little and each is one
 // click instead of a hover and a click. Team map is an Advanced-mode place:
 // a fourth row there, no menu.
-import { CalendarDays, Network, Puzzle, Zap } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronDown,
+  ChevronRight,
+  Network,
+  Puzzle,
+  Zap,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
@@ -12,7 +19,6 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { isRoutineProblemRun } from "@/lib/routines";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
-
 
 function NavRow({
   id,
@@ -44,71 +50,124 @@ function NavRow({
       aria-current={active ? "page" : undefined}
       className={cn(
         "relative flex w-full items-center rounded-xl text-left transition-colors",
-        iconsOnly ? "min-h-10 justify-center px-2 py-2" : "min-h-9 gap-3 px-3 py-1.5",
+        iconsOnly
+          ? "min-h-10 justify-center px-2 py-2"
+          : "min-h-9 gap-3 px-3 py-1.5",
         active ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
       )}
     >
       {icon(active)}
-      {!iconsOnly && <span className="flex-1 truncate text-[14px]">{label}</span>}
+      {!iconsOnly && (
+        <span className="flex-1 truncate text-[14px]">{label}</span>
+      )}
       {attention && (
         <span
           data-testid="routines-attention"
-          className={cn("size-2 shrink-0 rounded-full bg-danger", iconsOnly && "absolute right-2 top-2")}
+          className={cn(
+            "size-2 shrink-0 rounded-full bg-danger",
+            iconsOnly && "absolute right-2 top-2",
+          )}
         />
       )}
     </button>
   );
 }
 
-export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
+export function SidebarFooterNav({
+  density,
+  collapsed = false,
+  onToggle,
+}: {
+  density: SidebarDensity;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}) {
   const { state, dispatch } = useStore();
   const advanced = useAdvancedMode();
   const iconsOnly = density === "icons";
   const iconSize = iconsOnly ? 20 : 18;
-  const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
-  const routinesNeedYou = state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt);
+  const tone = (active: boolean) =>
+    active ? "text-accent" : "text-ink-secondary";
+  const routinesNeedYou = state.routineRuns.some(
+    (run) => isRoutineProblemRun(run) && !run.seenAt,
+  );
+  // Icons density is already minimal; the collapse control only earns its
+  // keep once the rows carry labels worth folding away.
+  const showToggle = !iconsOnly;
+  const rowsExpanded = iconsOnly || !collapsed;
+  const Chevron = collapsed ? ChevronRight : ChevronDown;
 
   return (
-    // `tools` is the guided tour's anchor for "the places down here".
-    <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">
-      <NavRow
-        id="routines"
-        label={t("sidebar.nav.routines")}
-        tourId="nav-automations"
-        iconsOnly={iconsOnly}
-        active={state.activeView === "routines"}
-        attention={routinesNeedYou}
-        icon={(active) => <CalendarDays size={iconSize} className={tone(active)} />}
-        onClick={() => dispatch({ type: "showRoutines" })}
-      />
-      <NavRow
-        id="triggers"
-        label={t("sidebar.nav.triggers")}
-        iconsOnly={iconsOnly}
-        active={state.triggersOpen}
-        icon={(active) => <Zap size={iconSize} className={tone(active)} />}
-        onClick={() => dispatch({ type: "toggleTriggers", open: true })}
-      />
-      <NavRow
-        id="apps"
-        label={t("sidebar.nav.apps")}
-        tourId="nav-apps"
-        iconsOnly={iconsOnly}
-        active={state.pluginsOpen}
-        icon={(active) => <Puzzle size={iconSize} className={tone(active)} />}
-        onClick={() => dispatch({ type: "togglePlugins", open: true })}
-      />
-      {advanced && (
-        <NavRow
-          id="team-map"
-          label={t("sidebar.nav.teamMap")}
-          tourId="team-tools"
-          iconsOnly={iconsOnly}
-          active={state.activeView === "team-map"}
-          icon={(active) => <Network size={iconSize} className={tone(active)} />}
-          onClick={() => dispatch({ type: "showTeamMap" })}
-        />
+    <>
+      {showToggle && (
+        <button
+          type="button"
+          data-testid="sidebar-footer-tools-toggle"
+          onClick={onToggle}
+          disabled={!onToggle}
+          aria-expanded={rowsExpanded}
+          aria-label={t(
+            collapsed ? "sidebar.section.expand" : "sidebar.section.collapse",
+            { name: t("sidebar.tools") },
+          )}
+          className="mb-0.5 flex size-5 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <Chevron size={11} aria-hidden="true" />
+        </button>
       )}
-    </nav>
+      {rowsExpanded && (
+        // `tools` is the guided tour's anchor for "the places down here".
+        <nav
+          data-tour="tools"
+          aria-label={t("sidebar.tools")}
+          className="flex flex-col gap-0.5"
+        >
+          <NavRow
+            id="routines"
+            label={t("sidebar.nav.routines")}
+            tourId="nav-automations"
+            iconsOnly={iconsOnly}
+            active={state.activeView === "routines"}
+            attention={routinesNeedYou}
+            icon={(active) => (
+              <CalendarDays size={iconSize} className={tone(active)} />
+            )}
+            onClick={() => dispatch({ type: "showRoutines" })}
+          />
+          <NavRow
+            id="triggers"
+            label={t("sidebar.nav.triggers")}
+            iconsOnly={iconsOnly}
+            active={state.triggersOpen}
+            icon={(active) => <Zap size={iconSize} className={tone(active)} />}
+            onClick={() => dispatch({ type: "toggleTriggers", open: true })}
+          />
+          <NavRow
+            id="apps"
+            label={t("sidebar.nav.apps")}
+            tourId="nav-apps"
+            iconsOnly={iconsOnly}
+            active={state.pluginsOpen}
+            icon={(active) => (
+              <Puzzle size={iconSize} className={tone(active)} />
+            )}
+            onClick={() => dispatch({ type: "togglePlugins", open: true })}
+          />
+          {advanced && (
+            <NavRow
+              id="team-map"
+              label={t("sidebar.nav.teamMap")}
+              tourId="team-tools"
+              iconsOnly={iconsOnly}
+              active={state.activeView === "team-map"}
+              icon={(active) => (
+                <Network size={iconSize} className={tone(active)} />
+              )}
+              onClick={() => dispatch({ type: "showTeamMap" })}
+            />
+          )}
+        </nav>
+      )}
+    </>
   );
 }

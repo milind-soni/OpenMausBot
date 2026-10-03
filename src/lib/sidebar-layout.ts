@@ -6,6 +6,7 @@ export const BOT_CHATS_SECTION_ID = "builtin:bot-chats";
 export const BOTS_SECTION_ID = "builtin:bots";
 export const ATTENTION_SECTION_ID = "builtin:attention";
 export const PINNED_THREADS_SECTION_ID = "builtin:pinned-threads";
+export const FOOTER_TOOLS_SECTION_ID = "builtin:footer-tools";
 
 const USER_SECTION_PREFIX = "section:";
 

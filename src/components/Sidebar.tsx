@@ -82,6 +82,7 @@ import {
   BOT_CHATS_SECTION_ID,
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
+  FOOTER_TOOLS_SECTION_ID,
   PINNED_SECTION_ID,
   PINNED_THREADS_SECTION_ID,
   mergeSectionOrder,
@@ -2592,7 +2593,11 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
 
       {/* Footer */}
       <div className={cn("pb-3 pt-2", density === "icons" ? "px-2" : "px-3")}>
-        <SidebarFooterNav density={density} />
+        <SidebarFooterNav
+          density={density}
+          collapsed={sectionCollapsed(FOOTER_TOOLS_SECTION_ID)}
+          onToggle={layoutInteractive ? () => toggleSection(FOOTER_TOOLS_SECTION_ID) : undefined}
+        />
         {density === "icons" && (
           <SidebarPhoneButton
             density={density}
