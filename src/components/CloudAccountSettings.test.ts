@@ -70,7 +70,7 @@ it("a late initial snapshot cannot replace a newer revoked state", async () => {
 
 const all = (html: string, texts: string[]) => texts.forEach(text => expect(html).toContain(text));
 const none = (html: string, texts: string[]) => texts.forEach(text => expect(html).not.toContain(text));
-const BUY = ["Choose a Cloud plan", "Get Pro", "Free account"];
+const BUY = ["Choose a Cloud plan", "Get your 24/7 working team", "Free account"];
 const ALARM = ["cannot currently be verified", "unavailable until", "expired or was revoked"];
 const button = (label: string) => render().nodes.find(node => node.type === "button" && node.props.children === label);
 
