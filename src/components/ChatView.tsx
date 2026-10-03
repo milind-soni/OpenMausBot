@@ -1,4 +1,4 @@
-import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import {
   AlertTriangle,
@@ -34,11 +34,12 @@ import {
   currentTaskBot,
   useStore,
   formatTime,
-  messageVersions,
   openNotificationTarget,
   openThread,
   visibleMessages,
+  type Action,
   type Bot,
+  type ConfigStatus,
   type InstanceInfo,
   type Message,
   type AppState,
@@ -110,6 +111,7 @@ import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
 import { appendComposerDraft, appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
+import { dayLabel, localDay, transcriptLookups, type TranscriptLookups } from "@/lib/transcript-derivations";
 import { citationPreviewText, splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { useCanWriteIn } from "@/lib/cloud-guest";
@@ -121,23 +123,60 @@ import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
  * bury the conversation; bots get full markdown. */
 const USER_COLLAPSE_CHARS = 600;
 const USER_COLLAPSE_LINES = 8;
-const noop = () => {};
 
-/** "Today" / "Yesterday" / "Mon, Aug 11" — real dates, not a hardcoded label. */
-function dayLabel(at: number): string {
-  const d = new Date(at);
-  const now = new Date();
-  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86_400_000);
-  if (diffDays === 0) return t("chat.day.today");
-  if (diffDays === 1) return t("chat.day.yesterday");
-  return d.toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" });
+/** What every row of the open chat reads besides its own message. The value
+ * changes only when one of these does, so the memoized rows skip store
+ * events that are not theirs: another bot's frame, a tool chip elsewhere in
+ * the thread. The rosters keep their identity until a field a row draws
+ * changes, the way ThreadRefsProvider keeps the thread list. */
+interface ChatRows {
+  botId: string;
+  threadId: string;
+  botName: string;
+  voiceId?: string;
+  /** Speech settings, for the read-aloud button. */
+  tts: ConfigStatus["tts"];
+  /** Editing, regenerating and switching versions wait for the turn. */
+  busy: boolean;
+  /** Every bot, for who wrote a relayed line or sits across a bot⇄bot chip. */
+  bots: readonly Bot[];
+  /** Every other bot, for @mentions. */
+  mentionPeers: readonly Bot[];
+  /** A search hit or jump target in this thread. */
+  focus: AppState["focusMessage"];
+  showToolCalls: boolean;
+  /** Rows show catalog strings, so a language change re-renders them. */
+  locale: string;
+  dispatch: Dispatch<Action>;
+  /** Whether a message is on the branch shown now (citation links). */
+  onBranch: (messageId: string) => boolean;
 }
 
-function DaySeparator({ at }: { at: number }) {
+const ChatRowsContext = createContext<ChatRows | null>(null);
+
+function useChatRows(): ChatRows {
+  const rows = useContext(ChatRowsContext);
+  if (!rows) throw new Error("a chat row outside ChatView");
+  return rows;
+}
+
+/** The fields of a bot that rows draw: its name and colour for @mentions,
+ * its avatar for relayed lines and bot⇄bot chips. */
+const drawnBot = (bot: Bot) =>
+  [bot.id, bot.name, bot.hidden, bot.color, bot.mascotBody, bot.mascotExpression, bot.avatarUrl, bot.avatarCrop, bot.avatarZoom, bot.avatarFocusX, bot.avatarFocusY].join("\u0001");
+
+/** `bots`, holding the same array until a drawn field of one of them changes. */
+function useDrawnBots(bots: readonly Bot[]): readonly Bot[] {
+  const signature = bots.map(drawnBot).join("\u0002");
+  const cache = useRef({ signature, bots });
+  if (cache.current.signature !== signature) cache.current = { signature, bots };
+  return cache.current.bots;
+}
+
+function DaySeparator({ at, today }: { at: number; today: number }) {
   return (
     <div className="py-3 text-center text-[13px] text-ink-secondary">
-      {dayLabel(at)} {formatTime(at)}
+      {dayLabel(at, today)} {formatTime(at)}
     </div>
   );
 }
@@ -343,13 +382,18 @@ function BubbleEditor({
   );
 }
 
-function Bubble({
-  bot,
+/** One message. Memoized: it renders when its own props change (the
+ * message, whether it is pinned or being edited) or the chat's ChatRows do,
+ * never for the rest of the store. The callbacks take the message they act
+ * on, so every row shares the same ones. */
+const Bubble = memo(function Bubble({
   message,
   emerging = false,
   eagerAttachments = false,
   editing,
   isLastBotText,
+  pinned,
+  versions,
   onStartEdit,
   onCancelEdit,
   onSubmitEdit,
@@ -357,20 +401,22 @@ function Bubble({
   replyTarget,
   onReply,
 }: {
-  bot: Bot;
   message: Message;
   emerging?: boolean;
   eagerAttachments?: boolean;
   editing: boolean;
   isLastBotText: boolean;
-  onStartEdit: () => void;
+  pinned: boolean;
+  /** Every version of an edited question, oldest first; absent when it was never edited. */
+  versions?: readonly Message[];
+  onStartEdit: (messageId: string) => void;
   onCancelEdit: () => void;
-  onSubmitEdit: (text: string) => void;
+  onSubmitEdit: (messageId: string, text: string) => void;
   onRegenerate?: () => void;
   replyTarget?: Message;
-  onReply: () => void;
+  onReply: (message: Message) => void;
 }) {
-  const { state, dispatch } = useStore();
+  const { botId, threadId, botName, voiceId, tts, busy, mentionPeers, focus, dispatch, onBranch } = useChatRows();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // A user-role line another bot delivered (ask_bot, delegate_bot,
   // start_thread) is that bot speaking, not the person: it takes the
@@ -378,9 +424,8 @@ function Bubble({
   // provenance note stripped from what the reader sees.
   const peer = peerLine(message);
   const user = message.role === "user" && !peer;
-  const mentionPeers = useMemo(() => state.bots.filter((peer) => peer.id !== bot.id), [state.bots, bot.id]);
   const [expanded, setExpanded] = useState(false);
-  const focusedSearch = state.focusMessage?.threadId === bot.threadId && state.focusMessage.messageId === message.id && Boolean(state.focusMessage.matchText);
+  const focusedSearch = focus?.messageId === message.id && Boolean(focus.matchText);
   const [viewRaw, setViewRaw] = useState(false);
   const speech = useSpeech();
   const speaking = speech.messageId === message.id && speech.status !== "idle";
@@ -407,23 +452,25 @@ function Bubble({
     user && !webhookView && !expanded && (visibleText.length > USER_COLLAPSE_CHARS || visibleText.split("\n").length > USER_COLLAPSE_LINES);
   useEffect(() => {
     if (focusedSearch && collapsible) setExpanded(true);
-  }, [focusedSearch, collapsible, state.focusMessage?.nonce]);
+  }, [focusedSearch, collapsible, focus?.nonce]);
 
   if (user && editing && !webhookView && !hasAttachments) {
     return (
       <div className="flex w-full justify-end">
-        <BubbleEditor initial={text} onCancel={onCancelEdit} onSubmit={onSubmitEdit} />
+        <BubbleEditor initial={text} onCancel={onCancelEdit} onSubmit={(edited) => onSubmitEdit(message.id, edited)} />
       </div>
     );
   }
 
   // "‹ 2/3 ›" under an edited message — every fork it belongs to
-  const versions = user ? messageVersions(bot, message) : [message];
-  const versionIndex = versions.findIndex((v) => v.id === message.id);
+  const forks = user && versions ? versions : [message];
+  const versionIndex = forks.findIndex((v) => v.id === message.id);
   const switchTo = (v: Message | undefined) => {
     // an edit still waiting for its server fork has no branch to switch to yet
-    if (v && !bot.busy && !v.id.startsWith("optimistic-")) dispatch({ type: "switchBranch", botId: bot.id, threadId: bot.threadId, messageId: v.id });
+    if (v && !busy && !v.id.startsWith("optimistic-")) dispatch({ type: "switchBranch", botId, threadId, messageId: v.id });
   };
+  const togglePin = () =>
+    dispatch({ type: "updateTask", botId, threadId, patch: { pinnedMessageId: pinned ? "" : message.id } });
 
   return (
     <div className={cn("group flex w-full flex-col", user ? "animate-msg-in items-end" : "items-start")}>
@@ -433,9 +480,9 @@ function Bubble({
           <MessageActions side="user">
             {/* editing rewinds the thread, so it waits for the turn to end —
                 same rule as the version switcher below */}
-            {message.kind === "text" && !webhookView && !hasAttachments && !bot.busy && !message.id.startsWith("optimistic-") && (
+            {message.kind === "text" && !webhookView && !hasAttachments && !busy && !message.id.startsWith("optimistic-") && (
               <button
-                onClick={onStartEdit}
+                onClick={() => onStartEdit(message.id)}
                 aria-label={t("chat.editMessage")}
                 title={t("chat.editMessage")}
                 className={messageActionClass}
@@ -446,7 +493,7 @@ function Bubble({
             {Boolean(visibleText.trim()) && <CopyButton text={visibleText} className="opacity-100" />}
             <button
               type="button"
-              onClick={onReply}
+              onClick={() => onReply(message)}
               aria-label={t("chat.replyToMessage")}
               title={t("chat.reply")}
               className={messageActionClass}
@@ -454,19 +501,12 @@ function Bubble({
               <MessageSquareReply size={14} />
             </button>
             <button
-              onClick={() =>
-                dispatch({
-                  type: "updateTask",
-                  botId: bot.id,
-                  threadId: bot.threadId,
-                  patch: { pinnedMessageId: bot.pinnedMessageId === message.id ? "" : message.id },
-                })
-              }
-              aria-label={bot.pinnedMessageId === message.id ? t("chat.unpinMessage") : t("chat.pinMessage")}
-              title={bot.pinnedMessageId === message.id ? t("chat.unpinHint") : t("chat.pinHint")}
+              onClick={togglePin}
+              aria-label={pinned ? t("chat.unpinMessage") : t("chat.pinMessage")}
+              title={pinned ? t("chat.unpinHint") : t("chat.pinHint")}
               className={cn(messageActionClass, remoteClient && "hidden")}
             >
-              {bot.pinnedMessageId === message.id ? <PinOff size={14} /> : <Pin size={14} />}
+              {pinned ? <PinOff size={14} /> : <Pin size={14} />}
             </button>
           </MessageActions>
         )}
@@ -489,10 +529,10 @@ function Bubble({
             <div className="mb-2">
               <ReplyQuote
                 message={replyTarget}
-                fallbackName={bot.name}
+                fallbackName={botName}
                 compact
                 onJump={() =>
-                  dispatch({ type: "focusMessage", threadId: bot.threadId, messageId: replyTarget.id })
+                  dispatch({ type: "focusMessage", threadId, messageId: replyTarget.id })
                 }
               />
             </div>
@@ -513,14 +553,14 @@ function Bubble({
             </div>
           ) : user ? (
             <>
-              {attachments && <AttachmentGallery images={attachments.images} files={attachments.files} message={{ threadId: bot.threadId, messageId: message.id }} eager={eagerAttachments} className={!visibleText ? "mb-0" : undefined} />}
+              {attachments && <AttachmentGallery images={attachments.images} files={attachments.files} message={{ threadId, messageId: message.id }} eager={eagerAttachments} className={!visibleText ? "mb-0" : undefined} />}
               {visibleText && (
                 <div
                   className={cn("chat-text", collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
                   data-citation-source={message.id}
                   data-citation-owner-type="bot"
-                  data-citation-owner={bot.id}
-                  data-citation-thread={bot.threadId}
+                  data-citation-owner={botId}
+                  data-citation-thread={threadId}
                 >
                   <ThreadRefText text={visibleText} peers={mentionPeers} />
                 </div>
@@ -528,8 +568,8 @@ function Bubble({
               {cited && <SentCitations
                 citations={cited.citations}
                 onNavigate={async (citation: CitationAttachment) => {
-                  if (citation.source.ownerType !== "bot" || !visibleMessages(bot).some((candidate) => candidate.id === citation.source.messageId)) return false;
-                  dispatch({ type: "focusMessage", threadId: bot.threadId, messageId: citation.source.messageId });
+                  if (citation.source.ownerType !== "bot" || !onBranch(citation.source.messageId)) return false;
+                  dispatch({ type: "focusMessage", threadId, messageId: citation.source.messageId });
                   return highlightCitationSource(citation);
                 }}
               />}
@@ -563,11 +603,11 @@ function Bubble({
                   ))}
                 </div>
               )}
-              <AttachmentGallery images={generatedPaths} files={linkedFiles} message={{ threadId: bot.threadId, messageId: message.id }} className={text ? undefined : "mb-0"} eager={eagerAttachments} />
+              <AttachmentGallery images={generatedPaths} files={linkedFiles} message={{ threadId, messageId: message.id }} className={text ? undefined : "mb-0"} eager={eagerAttachments} />
               {viewRaw && text ? (
-                <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={bot.id} data-citation-thread={bot.threadId}><RawMarkdownView text={text} /></div>
+                <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={botId} data-citation-thread={threadId}><RawMarkdownView text={text} /></div>
               ) : text ? (
-                <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={bot.id} data-citation-thread={bot.threadId}><ChatMarkdown text={text} mentionPeers={mentionPeers} message={{ threadId: bot.threadId, messageId: message.id }} /></div>
+                <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={botId} data-citation-thread={threadId}><ChatMarkdown text={text} mentionPeers={mentionPeers} message={{ threadId, messageId: message.id }} /></div>
               ) : null}
             </MessageBoundary>
           )}
@@ -577,9 +617,9 @@ function Bubble({
             {text && <CopyButton text={text} className="opacity-100" />}
             {text && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((r) => !r)} className="opacity-100" />}
             {message.kind === "text" && text && !peer && (
-              <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} className="opacity-100" />
+              <SpeakButton text={text} botId={botId} messageId={message.id} voiceId={voiceId} tts={tts} className="opacity-100" />
             )}
-            {isLastBotText && !bot.busy && onRegenerate && (
+            {isLastBotText && !busy && onRegenerate && (
               <button
                 onClick={onRegenerate}
                 aria-label={t("chat.regenerate")}
@@ -591,7 +631,7 @@ function Bubble({
             )}
             <button
               type="button"
-              onClick={onReply}
+              onClick={() => onReply(message)}
               aria-label={t("chat.replyToMessage")}
               title={t("chat.reply")}
               className={messageActionClass}
@@ -599,19 +639,12 @@ function Bubble({
               <MessageSquareReply size={14} />
             </button>
             <button
-              onClick={() =>
-                dispatch({
-                  type: "updateTask",
-                  botId: bot.id,
-                  threadId: bot.threadId,
-                  patch: { pinnedMessageId: bot.pinnedMessageId === message.id ? "" : message.id },
-                })
-              }
-              aria-label={bot.pinnedMessageId === message.id ? t("chat.unpinMessage") : t("chat.pinMessage")}
-              title={bot.pinnedMessageId === message.id ? t("chat.unpinHint") : t("chat.pinHint")}
+              onClick={togglePin}
+              aria-label={pinned ? t("chat.unpinMessage") : t("chat.pinMessage")}
+              title={pinned ? t("chat.unpinHint") : t("chat.pinHint")}
               className={cn(messageActionClass, remoteClient && "hidden")}
             >
-              {bot.pinnedMessageId === message.id ? <PinOff size={14} /> : <Pin size={14} />}
+              {pinned ? <PinOff size={14} /> : <Pin size={14} />}
             </button>
           </MessageActions>
         )}
@@ -624,22 +657,22 @@ function Bubble({
           {formatTime(message.at)}
         </span>
       </div>
-      {versions.length > 1 && (
+      {forks.length > 1 && (
         <div className="mt-1 flex items-center gap-0.5 pr-1 text-[12px] text-ink-secondary">
           <button
-            onClick={() => switchTo(versions[versionIndex - 1])}
-            disabled={versionIndex <= 0 || bot.busy}
+            onClick={() => switchTo(forks[versionIndex - 1])}
+            disabled={versionIndex <= 0 || busy}
             className="rounded p-0.5 hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
             title={t("chat.previousVersion")}
           >
             <ChevronLeft size={14} />
           </button>
           <span className="tabular-nums">
-            {versionIndex + 1}/{versions.length}
+            {versionIndex + 1}/{forks.length}
           </span>
           <button
-            onClick={() => switchTo(versions[versionIndex + 1])}
-            disabled={versionIndex >= versions.length - 1 || bot.busy}
+            onClick={() => switchTo(forks[versionIndex + 1])}
+            disabled={versionIndex >= forks.length - 1 || busy}
             className="rounded p-0.5 hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
             title={t("chat.nextVersion")}
           >
@@ -649,16 +682,16 @@ function Bubble({
       )}
     </div>
   );
-}
+});
 
 /** Who wrote a relayed line and how it arrived, above the bubble — the
  * same shape as a room's cluster label. Looked up by id, then by name for
  * rows that predate Message.peerAsk; a peer since renamed or deleted still
- * shows the name the line carries. */
+ * shows the name the line carries. Renders with its bubble. */
 function PeerLabel({ peer }: { peer: PeerLine }) {
-  const { state } = useStore();
+  const { bots } = useChatRows();
   const author =
-    state.bots.find((b) => b.id === peer.botId) ?? state.bots.find((b) => b.name === peer.name);
+    bots.find((b) => b.id === peer.botId) ?? bots.find((b) => b.name === peer.name);
   const how =
     peer.delivery === "delegate_bot"
       ? t("chat.peer.delegated")
@@ -682,15 +715,15 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
 }
 
 /** A tool run: spinner while live, check/cross once settled. */
-function ActivityChip({ message, place = "auto" }: { message: Message; place?: EffectivePlace }) {
-  const { state, dispatch } = useStore();
+const ActivityChip = memo(function ActivityChip({ message, place = "auto" }: { message: Message; place?: EffectivePlace }) {
+  const { bots, dispatch } = useChatRows();
   const tool = message.tool;
   if (!tool) return null;
   if (message.threadRef) return <ThreadChip message={message} />;
   // bot⇄bot comm chip: opens the channel where the exchange lives
   const comm = message.comm;
   if (comm) {
-    const withBot = state.bots.find((b) => b.id === comm.withBotId);
+    const withBot = bots.find((b) => b.id === comm.withBotId);
     return (
       <div className="flex justify-start">
         <button
@@ -706,17 +739,64 @@ function ActivityChip({ message, place = "auto" }: { message: Message; place?: E
     );
   }
   return <ToolActivity tool={tool} place={toolPlace(tool.name, place)} />;
+});
+
+/** A routine run's receipt. It opens the run's own thread, so it follows
+ * the whole store to know whether that thread is still there. */
+function RoutineRunRow({ message, botId }: { message: Message; botId: string }) {
+  const { state, dispatch } = useStore();
+  const executionThreadId = message.routineRun?.executionThreadId;
+  const canOpen = executionThreadId && state.bots.some((candidate) =>
+    candidate.threadId === executionThreadId || hasRoutineExecutionTask(candidate.tasks, executionThreadId)
+  );
+  return (
+    <RoutineRunCard
+      message={message}
+      onOpen={canOpen && executionThreadId
+        ? () => openNotificationTarget(dispatch, { botId, threadId: executionThreadId }, state)
+        : undefined}
+    />
+  );
 }
 
-/** The settled transcript, memoized as one unit: when ChatView re-renders
- * for something outside the transcript, all of these props keep their
- * identity (bot/messages only change on real message events), so the whole
- * list — every markdown tree, every code block — bails out of React work. */
+/** A conversation with nothing in it yet: who it is with, and a prompt. */
+function EmptyChat({ bot }: { bot: Bot }) {
+  const { dispatch } = useStore();
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
+      <BotAvatar bot={bot} state="idle" size={64} motion="none" motionKey={0} />
+      <RenameTitle
+        value={bot.name}
+        onCommit={(name) => {
+          if (window.ogb?.remoteClient?.active) {
+            void api(`/api/bots/${bot.id}/profile`, { method: "PATCH", body: JSON.stringify({ name }) })
+              .then(({ bot: updated }) => dispatch({ type: "botPatched", bot: updated }))
+              .catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
+          } else {
+            dispatch({ type: "updateBot", botId: bot.id, patch: { name } });
+          }
+        }}
+        className="text-[17px] font-semibold text-ink"
+        inputClassName="rounded bg-inset px-1.5 py-0.5 text-center text-[17px] font-semibold"
+      />
+      <div className="max-w-[360px] text-[14px] text-ink-secondary">
+        {bot.description || t("chat.emptyPrompt")}
+      </div>
+    </div>
+  );
+}
+
+/** The settled transcript, memoized as one unit: it renders when the
+ * mounted messages or the chat's ChatRows change, and each row inside is
+ * memoized again on its own message, so a patched tool chip renders that
+ * chip and nothing else. */
 const MessagesList = memo(function MessagesList({
-  bot,
   messages,
-  locale,
   transcript,
+  lookups,
+  place,
+  pinnedMessageId,
+  today,
   editingId,
   lastBotTextId,
   emergingId,
@@ -728,13 +808,15 @@ const MessagesList = memo(function MessagesList({
   onRegenerate,
   onReply,
 }: {
-  bot: Bot;
   messages: Message[];
-  /** Refresh the memoized transcript and its derived turn labels when the
-   * language changes, even when the messages themselves stay unchanged. */
-  locale: string;
   /** Active-branch messages, including ones outside the mounted window. */
   transcript: Message[];
+  lookups: TranscriptLookups;
+  /** Where this conversation works, for the place icon on screen and page tools. */
+  place: EffectivePlace;
+  pinnedMessageId?: string;
+  /** localDay of now: Today and Yesterday move on at midnight. */
+  today: number;
   editingId: string | null;
   lastBotTextId: string | undefined;
   emergingId?: string | null;
@@ -747,57 +829,30 @@ const MessagesList = memo(function MessagesList({
   onRegenerate: () => void;
   onReply: (message: Message) => void;
 }) {
-  const { state, dispatch } = useStore();
-  const showToolCalls = showToolCallsEnabled(state.config);
+  const { botId, threadId, botName, focus, showToolCalls, locale } = useChatRows();
   // Finished tool chips become compact runs; settled assistant narration
   // becomes one reversible turn row while the terminal answer stays visible.
+  // The locale refreshes the turn labels when the language changes.
   const items = useMemo(() => groupTranscript(messages), [messages, locale]);
-  // Where this conversation works, for the place icon on screen and page tools.
-  const place = effectivePlace(bot, bot.tasks?.find((task) => task.threadId === bot.threadId));
   const newestMessageId = messages.at(-1)?.id;
-  // Settlement can append bookkeeping after the failure. Retry still belongs
-  // to that final conversational row, including after a Claude update.
-  const retryableMessageId = [...transcript].reverse().find((message) =>
-    message.kind !== "digest" && message.kind !== "compaction"
-  )?.id;
-  const newestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id;
+  let newestUserMessageId: string | undefined;
+  for (let i = messages.length - 1; i >= 0 && !newestUserMessageId; i--) {
+    if (messages[i]!.role === "user") newestUserMessageId = messages[i]!.id;
+  }
   // A search hit inside a folded run has to open it: the fold keeps the
   // row out of the DOM, and there is nothing for the scroll to land on.
-  const focus = state.focusMessage;
-  const focusedId = focus && !focus.consumed && focus.threadId === bot.threadId ? focus.messageId : null;
+  const focusedId = focus && !focus.consumed ? focus.messageId : null;
   return (
     <>
-      {messages.length === 0 && !bot.busy && (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
-          <BotAvatar bot={bot} state="idle" size={64} motion="none" motionKey={0} />
-          <RenameTitle
-            value={bot.name}
-            onCommit={(name) => {
-              if (window.ogb?.remoteClient?.active) {
-                void api(`/api/bots/${bot.id}/profile`, { method: "PATCH", body: JSON.stringify({ name }) })
-                  .then(({ bot: updated }) => dispatch({ type: "botPatched", bot: updated }))
-                  .catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
-              } else {
-                dispatch({ type: "updateBot", botId: bot.id, patch: { name } });
-              }
-            }}
-            className="text-[17px] font-semibold text-ink"
-            inputClassName="rounded bg-inset px-1.5 py-0.5 text-center text-[17px] font-semibold"
-          />
-          <div className="max-w-[360px] text-[14px] text-ink-secondary">
-            {bot.description || t("chat.emptyPrompt")}
-          </div>
-        </div>
-      )}
       {items.map((item, i) => {
         const previous = items[i - 1];
         const prev = previous && (previous.kind === "message" ? previous.message : previous.messages.at(-1));
         const first = item.kind === "message" ? item.message : item.messages[0];
-        const newDay = !prev || new Date(prev.at).toDateString() !== new Date(first.at).toDateString();
+        const newDay = !prev || localDay(prev.at) !== localDay(first.at);
         if (item.kind === "turn") {
           return (
             <div key={item.id} className="contents">
-              {newDay && <DaySeparator at={first.at} />}
+              {newDay && <DaySeparator at={first.at} today={today} />}
               <TurnNarrationRun
                 label={item.label}
                 forceOpen={item.messages.some((message) => message.id === focusedId)}
@@ -805,17 +860,15 @@ const MessagesList = memo(function MessagesList({
                 {item.messages.map((message) => (
                   <div key={message.id} className="contents" data-mid={message.id}>
                     <Bubble
-                      bot={bot}
                       message={message}
                       editing={false}
                       isLastBotText={false}
-                      onStartEdit={noop}
-                      onCancelEdit={noop}
-                      onSubmitEdit={noop}
-                      replyTarget={message.replyToId
-                        ? bot.messages.find((candidate) => candidate.id === message.replyToId)
-                        : undefined}
-                      onReply={() => onReply(message)}
+                      pinned={message.id === pinnedMessageId}
+                      onStartEdit={onStartEdit}
+                      onCancelEdit={onCancelEdit}
+                      onSubmitEdit={onSubmitEdit}
+                      replyTarget={lookups.replyTarget(message)}
+                      onReply={onReply}
                     />
                   </div>
                 ))}
@@ -827,7 +880,7 @@ const MessagesList = memo(function MessagesList({
           if (!showToolCalls) return null;
           return (
             <div key={item.id} className="contents">
-              {newDay && <DaySeparator at={first.at} />}
+              {newDay && <DaySeparator at={first.at} today={today} />}
               <ActivityRun messages={item.messages} forceOpen={item.messages.some((step) => step.id === focusedId)}>
                 {item.messages.map((step) => (
                   <div key={step.id} className="contents" data-mid={step.id}>
@@ -842,9 +895,9 @@ const MessagesList = memo(function MessagesList({
         const row = (() => {
           switch (m.kind) {
             case "secret":
-              return m.secret ? <SecretRequestCard botId={bot.id} threadId={bot.threadId} message={m} /> : null;
+              return m.secret ? <SecretRequestCard botId={botId} threadId={threadId} message={m} /> : null;
             case "connector":
-              return m.connector ? <ConnectorCard botId={bot.id} threadId={bot.threadId} message={m} /> : null;
+              return m.connector ? <ConnectorCard botId={botId} threadId={threadId} message={m} /> : null;
             case "options": {
               // a live permission ask gets the approval box; a structured
               // ask gets the question box; anything else keeps the list
@@ -853,11 +906,11 @@ const MessagesList = memo(function MessagesList({
               // draw must fall back to its text on every open, not take the
               // whole page down every time this chat is selected.
               const card = m.card?.requestId && m.card.questionRequest ? (
-                <QuestionCard threadId={bot.threadId} bot={bot} message={m} />
+                <QuestionCard threadId={threadId} bot={{ name: botName }} message={m} />
               ) : m.card?.requestId && m.card.tool ? (
-                <ApprovalCard bot={bot} message={m} />
+                <ApprovalCard bot={{ name: botName }} message={m} />
               ) : shouldHideOnboardingCard(m, transcript) ? null : (
-                <OptionCard botId={bot.id} threadId={bot.threadId} message={m} />
+                <OptionCard botId={botId} threadId={threadId} message={m} />
               );
               if (!card) return null;
               return (
@@ -866,24 +919,8 @@ const MessagesList = memo(function MessagesList({
                 </MessageBoundary>
               );
             }
-            case "routine.run": {
-              const executionThreadId = m.routineRun?.executionThreadId;
-              const canOpen = executionThreadId && state.bots.some((candidate) =>
-                candidate.threadId === executionThreadId || hasRoutineExecutionTask(candidate.tasks, executionThreadId)
-              );
-              return (
-                <RoutineRunCard
-                  message={m}
-                  onOpen={canOpen && executionThreadId
-                    ? () => openNotificationTarget(
-                        dispatch,
-                        { botId: bot.id, threadId: executionThreadId },
-                        state,
-                      )
-                    : undefined}
-                />
-              );
-            }
+            case "routine.run":
+              return <RoutineRunRow message={m} botId={botId} />;
             case "activity": {
               if (isStatusActivity(m)) return <StatusActivityRow message={m} />;
               // a failed turn is an error, not a tool run — render it as one.
@@ -895,7 +932,7 @@ const MessagesList = memo(function MessagesList({
                   <FailedTurnRow
                     tool={m.tool}
                     engine={engine}
-                    onRetry={m.id === retryableMessageId && canRetryLast ? onRegenerate : undefined}
+                    onRetry={m.id === lookups.retryableId && canRetryLast ? onRegenerate : undefined}
                   />
                 );
               }
@@ -912,18 +949,21 @@ const MessagesList = memo(function MessagesList({
             default:
               return (
                 <Bubble
-                  bot={bot}
                   message={m}
                   emerging={m.id === emergingId}
                   eagerAttachments={m.id === newestMessageId || m.id === newestUserMessageId}
                   editing={editingId === m.id}
                   isLastBotText={m.id === lastBotTextId}
-                  onStartEdit={() => onStartEdit(m.id)}
+                  pinned={m.id === pinnedMessageId}
+                  versions={lookups.editVersions(m)}
+                  onStartEdit={onStartEdit}
                   onCancelEdit={onCancelEdit}
-                  onSubmitEdit={(text) => onSubmitEdit(m.id, text)}
-                  onRegenerate={onRegenerate}
-                  replyTarget={m.replyToId ? bot.messages.find((candidate) => candidate.id === m.replyToId) : undefined}
-                  onReply={() => onReply(m)}
+                  onSubmitEdit={onSubmitEdit}
+                  // only the last answer offers Regenerate; the others keep
+                  // their props when this callback changes
+                  onRegenerate={m.id === lastBotTextId ? onRegenerate : undefined}
+                  replyTarget={lookups.replyTarget(m)}
+                  onReply={onReply}
                 />
               );
           }
@@ -931,7 +971,7 @@ const MessagesList = memo(function MessagesList({
         if (!row) return null;
         return (
           <div key={m.id} className="contents" data-mid={m.id}>
-            {newDay && <DaySeparator at={m.at} />}
+            {newDay && <DaySeparator at={m.at} today={today} />}
             {row}
           </div>
         );
@@ -1022,8 +1062,13 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     return () => window.removeEventListener("keydown", onFind);
   }, []);
 
-  // only the active branch is rendered; forks stay reachable via ‹ › nav
-  const messages = useMemo(() => visibleMessages(bot), [bot]);
+  // only the active branch is rendered; forks stay reachable via ‹ › nav.
+  // Keyed on the transcript alone: a bot frame that leaves it untouched
+  // keeps this array, and the rows memoized on it.
+  const { messages: allMessages, activeLeafId } = bot;
+  const messages = useMemo(() => visibleMessages({ messages: allMessages, activeLeafId }), [allMessages, activeLeafId]);
+  // edit versions, reply targets, the Retry row: once per list, not per row
+  const lookups = useMemo(() => transcriptLookups(allMessages, messages), [allMessages, messages]);
   // The bot's run in the current ask — every command it ran, the control-CLI
   // ones verified — for the run card. Saving mirrors the /learn gate: the
   // flag, an engine with the agents tools, and a bot that can take a message
@@ -1069,6 +1114,25 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     () => [...messages].reverse().find((m) => m.role === "bot" && m.kind === "text")?.id,
     [messages],
   );
+
+  // What the rows read besides their own message (see ChatRows).
+  const bots = useDrawnBots(state.bots);
+  const mentionPeers = useMemo(() => bots.filter((peer) => peer.id !== bot.id), [bots, bot.id]);
+  const focus = state.focusMessage?.threadId === bot.threadId ? state.focusMessage : null;
+  const showToolCalls = showToolCallsEnabled(state.config);
+  const tts = state.config?.tts;
+  const locale = activeLocale();
+  const busy = Boolean(bot.busy);
+  // read when a citation is clicked, so the rows need not change per message
+  const branch = useRef(messages);
+  branch.current = messages;
+  const onBranch = useCallback((messageId: string) => branch.current.some((m) => m.id === messageId), []);
+  const rows = useMemo<ChatRows>(
+    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch }),
+    [bot.id, bot.threadId, bot.name, bot.voice, tts, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch],
+  );
+  // Where this conversation works, for the place icon on screen and page tools.
+  const place = effectivePlace(bot, bot.tasks?.find((task) => task.threadId === bot.threadId));
 
   // one message at a time may be in edit mode
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1349,22 +1413,27 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               </button>
             </div>
           ) : null}
-          <MessagesList
-            bot={bot}
-            locale={activeLocale()}
-            messages={windowedMessages}
-            transcript={messages}
-            editingId={editingId}
-            lastBotTextId={lastBotTextId}
-            emergingId={popping}
-            canRetryLast={!bot.busy && Boolean(lastUserMessage)}
-            engine={state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)}
-            onStartEdit={startEdit}
-            onCancelEdit={cancelEdit}
-            onSubmitEdit={submitEdit}
-            onRegenerate={regenerate}
-            onReply={selectReply}
-          />
+          {windowedMessages.length === 0 && !bot.busy && <EmptyChat bot={bot} />}
+          <ChatRowsContext.Provider value={rows}>
+            <MessagesList
+              messages={windowedMessages}
+              transcript={messages}
+              lookups={lookups}
+              place={place}
+              pinnedMessageId={bot.pinnedMessageId}
+              today={localDay(Date.now())}
+              editingId={editingId}
+              lastBotTextId={lastBotTextId}
+              emergingId={popping}
+              canRetryLast={!bot.busy && Boolean(lastUserMessage)}
+              engine={state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)}
+              onStartEdit={startEdit}
+              onCancelEdit={cancelEdit}
+              onSubmitEdit={submitEdit}
+              onRegenerate={regenerate}
+              onReply={selectReply}
+            />
+          </ChatRowsContext.Provider>
           {laterCount > 0 && (
             <div className="flex justify-center">
               <button

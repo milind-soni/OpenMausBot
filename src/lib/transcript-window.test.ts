@@ -120,6 +120,23 @@ describe("resolveTranscriptWindow", () => {
     expect(result.visible.at(-1)).toBe(99);
     expect(result.laterCount).toBe(0);
   });
+
+  // The rows are memoized on this array: a new array holding the same
+  // messages would re-render the whole list for nothing.
+  it("hands back the previous window when it holds the same messages", () => {
+    const rows = Array.from({ length: 300 }, (_, i) => ({ id: `m${i}` }));
+    const first = resolveTranscriptWindow(rows, 180);
+    // a message before the window changed: a new list, the same window
+    const patched = rows.map((row, i) => (i === 5 ? { id: "m5" } : row));
+    expect(resolveTranscriptWindow(patched, 180, TRANSCRIPT_WINDOW_SIZE, null, first.visible).visible).toBe(first.visible);
+    // one inside it changed, or one was appended: a new window
+    const edited = rows.map((row, i) => (i === 250 ? { id: "m250" } : row));
+    const changed = resolveTranscriptWindow(edited, 180, TRANSCRIPT_WINDOW_SIZE, null, first.visible).visible;
+    expect(changed).not.toBe(first.visible);
+    expect(changed[70]).toBe(edited[250]);
+    const grown = resolveTranscriptWindow([...rows, { id: "m300" }], 180, TRANSCRIPT_WINDOW_SIZE, null, first.visible).visible;
+    expect(grown).toHaveLength(121);
+  });
 });
 
 describe("focusWindowRange", () => {

@@ -9,7 +9,6 @@ import {
   initialState,
   liveCallFromFrame,
   loadSnapshotBoundary,
-  messageVersions,
   openNotificationTarget,
   openThread,
   persistBotUpdate,
@@ -28,6 +27,7 @@ import {
   type Message,
   type Action,
 } from "./store";
+import { transcriptLookups } from "@/lib/transcript-derivations";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
 import type { ConnectorToolGrant } from "../../shared/wire";
@@ -1145,7 +1145,7 @@ describe("optimistic sent messages", () => {
       const visible = visibleMessages(edited.bots[0]!);
       expect(visible.map((message) => message.text)).toEqual(["Ready", "second try"]);
       expect(edited.bots[0]?.activeLeafId).toBe("optimistic-edit-1");
-      expect(messageVersions(edited.bots[0]!, question).map((message) => message.id)).toEqual([question.id, "optimistic-edit-1"]);
+      expect(transcriptLookups(edited.bots[0]!.messages, visible).editVersions(question)?.map((message) => message.id)).toEqual([question.id, "optimistic-edit-1"]);
     });
 
     it("hands the swap to the server fork and keeps its reply visible", () => {

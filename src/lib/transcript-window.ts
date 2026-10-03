@@ -51,12 +51,15 @@ export function focusWindowRange(
  * reader is looking at never drop out from under them. Anchoring means a
  * thread that shrinks (branch switch, edit rewinding the tail) can leave the
  * boundary at or past the new end; that stale boundary falls back to a fresh
- * tail window rather than blanking the transcript. */
+ * tail window rather than blanking the transcript. When the window holds
+ * exactly the messages of `previous`, that array comes back as it was, so
+ * the rows memoized on it skip a change outside the window. */
 export function resolveTranscriptWindow<T>(
   messages: readonly T[],
   startIndex: number,
   size: number = TRANSCRIPT_WINDOW_SIZE,
   endIndex: number | null = null,
+  previous?: T[],
 ): TranscriptWindow<T> {
   const requestedEnd = endIndex === null ? messages.length : Math.max(0, Math.min(messages.length, endIndex));
   const invalidFiniteWindow = endIndex !== null && startIndex >= requestedEnd;
@@ -65,8 +68,9 @@ export function resolveTranscriptWindow<T>(
       ? tailWindowStart(messages.length, size)
       : Math.max(0, startIndex);
   const end = invalidFiniteWindow ? messages.length : Math.max(start, requestedEnd);
+  const unchanged = previous?.length === end - start && previous.every((message, i) => message === messages[start + i]);
   return {
-    visible: messages.slice(start, end),
+    visible: unchanged ? previous : messages.slice(start, end),
     hiddenCount: start,
     laterCount: messages.length - end,
     startIndex: start,
