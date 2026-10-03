@@ -123,14 +123,21 @@ export function useTranscriptViewport<T extends { id: string }>({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pinOn is the caller's dependency list
   }, [ownerId, messages.length, ...pinOn]);
 
-  // Expanding prepends rows: capture the height first, then after the commit
-  // shift scrollTop by the growth so the message under the cursor stays put
-  // (browser scroll anchoring is disabled on this container).
-  // The captured height belongs to the thread it was taken in: a switch
-  // between the capture and the commit would otherwise shift the new
-  // thread's viewport by the old one's growth.
+  // Rows prepended at the front — Show earlier widening the local window, or
+  // an older page arriving from the server — would push the row under the
+  // reader down. Capture the height first, then after the commit shift
+  // scrollTop by the growth so that row stays put (browser scroll anchoring
+  // is disabled on this container). The capture belongs to the thread it was
+  // taken in, and transcriptKey is a dependency so a switch drops a capture
+  // from the thread being left instead of shifting the new one.
   const preExpandHeight = useRef<{ key: string; height: number } | null>(null);
-  const keepRowInPlace = useCallback(() => {
+  const holdRowForPrepend = () => {
+    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
+    // reading scrollback: a mid-expand stream event must not pin the bottom
+    setBottomFollow(false);
+  };
+  const oldestId = messages[0]?.id;
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     const captured = preExpandHeight.current;
     if (!captured || !el) return;
@@ -140,38 +147,25 @@ export function useTranscriptViewport<T extends { id: string }>({
     // keep the resume-follow heuristic from reading the restore as a
     // downward user scroll
     previousScrollTop.current = el.scrollTop;
-  }, [transcriptKey]);
+  }, [transcriptWindow.start, oldestId, transcriptKey]);
+
   const showEarlier = () => {
-    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
-    // expanding means reading scrollback — never let a mid-expand stream
-    // event pin the viewport back to the bottom
-    setBottomFollow(false);
+    holdRowForPrepend();
     const start = expandWindowStart(startIndex);
     setTranscriptWindow((w) => ({ ...w, start }));
   };
-  // keepRowInPlace changes with transcriptKey, so a switch runs this and
-  // drops a capture that belongs to the thread being left.
-  useLayoutEffect(keepRowInPlace, [transcriptWindow.start, keepRowInPlace]);
-
   const showLater = () => {
     setBottomFollow(false);
     const nextEnd = Math.min(messages.length, endIndex + TRANSCRIPT_WINDOW_SIZE);
     setTranscriptWindow((w) => ({ ...w, end: nextEnd >= messages.length ? null : nextEnd }));
   };
-
   // Scrollback across the network: the snapshot holds a bounded page, and
-  // everything before it is still on the server. Asking for it prepends rows
-  // exactly like expanding the local window, so the same height capture keeps
-  // the viewport still — here it is applied when the transcript grows at the
-  // front rather than when the boundary moves.
+  // everything before it is still on the server.
   const olderPending = Boolean(state.loadingOlder[threadId]);
   const loadOlder = () => {
-    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
-    setBottomFollow(false);
+    holdRowForPrepend();
     dispatch({ type: "loadOlderMessages", threadId });
   };
-  const oldestId = messages[0]?.id;
-  useLayoutEffect(keepRowInPlace, [oldestId, keepRowInPlace]);
 
   // keyboard is a scroll gesture too (upstream lesson): PageUp/Home/ArrowUp
   // break follow like an upward wheel; the at-end onScroll check re-arms it.

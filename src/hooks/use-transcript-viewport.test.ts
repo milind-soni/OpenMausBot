@@ -285,6 +285,16 @@ describe("transcript viewport", () => {
     expect(scroller.scrollTop).toBe(300);
   });
 
+  it("drops the capture on a switch even when the next thread opens on the same first row", () => {
+    const view = mount({ messages: rows(50, 100) });
+    scroller.scrollTop = 300;
+    view.act(() => view.current.loadOlder());
+    // same window start and first row, so only the thread change runs the hold
+    view.rerender({ threadId: "other" });
+    view.rerender({ threadId: "thread", messages: [...rows(50, 50), ...rows(50, 100)] });
+    expect(scroller.scrollTop).toBe(300);
+  });
+
   it("opens a bounded window around a search result and pages forward from it", () => {
     store.state.focusMessage = { threadId: "thread", messageId: "m10", nonce: 1, consumed: false };
     const view = mount({ messages: rows(300) });
