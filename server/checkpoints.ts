@@ -170,7 +170,7 @@ export function refusalReason(cwd: string): string | null {
   // the refusal while git still follows the symlink into the protected tree.
   // The native realpath also settles Windows' spellings of one folder —
   // c:\users\me, C:\Users\me\DOCUME~1 — and names compare case-insensitively
-  // there, as turn-resources.ts does for workspace claims.
+  // there.
   const same = (a: string, b: string) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
   if (dir === parse(dir).root) return "checkpoints are not taken at the filesystem root";
   const requestedHome = resolve(homedir());
@@ -268,6 +268,28 @@ function serialize<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// A ref per running turn. Every snapshot parents only the empty base and the
+// cleanup after it prunes whatever HEAD no longer reaches — so when a bot's
+// threads work side by side in one folder, a sibling's snapshot would discard
+// the pre-turn commit a still-running turn diffs against at its end (and the
+// point a user could restore it to). A pin keeps that commit reachable until
+// release(). The pin's name is hashed so any token is a legal ref name.
+const LIVE_REFS = "refs/omb-live/";
+function liveRef(pin: string): string {
+  return LIVE_REFS + createHash("sha256").update(pin).digest("hex").slice(0, 16);
+}
+
+// Pins outlive the process that wrote them (a crash mid-turn), so the first
+// use of each shadow in this process drops every pin left behind: no turn of
+// ours can be live in a shadow this process has not touched yet.
+const sweptShadows = new Set<string>();
+async function sweepLiveRefs(cwd: string, env: NodeJS.ProcessEnv, shadow: string, signal?: AbortSignal): Promise<void> {
+  if (sweptShadows.has(shadow)) return;
+  const stale = (await runGit(["for-each-ref", "--format=%(refname)", LIVE_REFS], cwd, env, signal)).split("\n").filter(Boolean);
+  for (const ref of stale) await runGit(["update-ref", "-d", ref], cwd, env, signal);
+  sweptShadows.add(shadow);
+}
+
 /** Create the shadow repo on first use; self-heal its config files on every
  * use (they are tiny, and rewriting them lets exclude-list updates reach
  * shadows that already exist). The base commit is an EMPTY marker so HEAD
@@ -309,6 +331,7 @@ async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string,
     // brand-new repo (or a crash between init and first commit)
     await runGit(["commit", "--no-verify", "--allow-empty", "-m", "checkpoint base"], cwd, env, signal);
   }
+  await sweepLiveRefs(cwd, env, shadow, signal);
 }
 
 type CommitResult = { hash: string; complete: boolean };
@@ -339,8 +362,9 @@ async function commitAll(cwd: string, env: NodeJS.ProcessEnv, label: string, sig
 }
 
 async function collectObsolete(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
-  // No caller may still need the previous tree. In particular, restore runs
-  // this only AFTER using its source; the safety checkpoint stays reachable.
+  // No caller may still need an unpinned previous tree. In particular, restore
+  // runs this only AFTER using its source; the safety checkpoint stays
+  // reachable, and so does every commit a live turn still pins.
   try {
     await runGit(["reflog", "expire", "--expire=now", "--all"], cwd, env);
     await runGit(["gc", "--prune=now", "--quiet"], cwd, env);
@@ -352,8 +376,10 @@ async function collectObsolete(cwd: string, env: NodeJS.ProcessEnv): Promise<voi
 
 /** Snapshot the folder. Returns the checkpoint hash, or null when the
  * feature is off for this bot, git is missing, or the folder is refused.
- * Never throws — this is called fire-and-forget on the turn path. */
-export async function snapshot(botId: string, cwd: string, label: string, signal?: AbortSignal): Promise<string | null> {
+ * With `pin`, the returned commit stays reachable through later snapshots of
+ * the same folder until release(pin) — for a turn that will diff against it
+ * when it ends. Never throws — this is called fire-and-forget on the turn path. */
+export async function snapshot(botId: string, cwd: string, label: string, signal?: AbortSignal, opts?: { pin?: string }): Promise<string | null> {
   if (signal?.aborted) return null;
   if (disabledBots.has(botId)) return null;
   if (!(await gitAvailable())) return null;
@@ -366,12 +392,31 @@ export async function snapshot(botId: string, cwd: string, label: string, signal
       await ensureShadow(worktree, env, shadow, signal);
       const result = await commitAll(worktree, env, label, signal);
       if (!result.complete) return null;
+      if (opts?.pin) await runGit(["update-ref", liveRef(opts.pin), result.hash], worktree, env, signal);
       await collectObsolete(worktree, env);
       return result.hash;
     });
   } catch (e) {
     if (!signal?.aborted) disable(botId, e instanceof Error ? e.message : String(e));
     return null;
+  }
+}
+
+/** Let go of a pinned pre-turn commit: the next snapshot's cleanup may
+ * reclaim it. Queued behind the shadow's pending operations, so a digest's
+ * diff already in that queue still finds its commit. Best-effort like the
+ * rest of this module — a pin that cannot be dropped costs one log line and
+ * is swept on the next start. */
+export async function release(botId: string, cwd: string, pin: string): Promise<void> {
+  if (!(await gitAvailable())) return;
+  try {
+    const worktree = realpathSync(resolve(cwd));
+    const shadow = shadowDir(botId, worktree);
+    if (!existsSync(join(shadow, ".git", "HEAD"))) return;
+    const env = gitEnv(shadow, worktree);
+    await serialize(shadow, () => runGit(["update-ref", "-d", liveRef(pin)], worktree, env));
+  } catch (e) {
+    console.warn(`checkpoint pin not released for bot ${botId}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 

@@ -9,21 +9,14 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
+// Shadow repos live under DATA_DIR, which server/testing/setup.ts points at a
+// disposable test home before any test module imports config.ts.
+import { CHECKPOINTS_DIR, checkpointsEnabled, diffWorkingTree, listCheckpoints, refusalReason, release, restore, snapshot } from "./checkpoints.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
-// The module stores shadow repos under DATA_DIR, which config.ts reads from
-// OMB_DATA_DIR at import time — so the env var must be set before the import
-// is evaluated (same pattern as attachments.test.ts).
-const DATA_ROOT = mkdtempSync(join(tmpdir(), "omb-checkpoints-"));
-process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
-
-const { CHECKPOINTS_DIR, checkpointsEnabled, listCheckpoints, refusalReason, restore, snapshot } = await import(
-  "./checkpoints.ts"
-);
-
-const scratchDirs: string[] = [DATA_ROOT];
+const scratchDirs: string[] = [];
 afterAll(async () => {
   for (const dir of scratchDirs) await removeTempDir(dir);
 });
@@ -34,6 +27,9 @@ function workspace() {
   scratchDirs.push(cwd);
   seq += 1;
   return { bot: `ckpt-test-bot-${seq}`, cwd };
+}
+function shadowOf(bot: string, cwd: string): string {
+  return join(CHECKPOINTS_DIR, bot, createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
 }
 
 /** The user's own git, as the user would run it — no shadow env involved. */
@@ -91,8 +87,7 @@ describe("snapshot", () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "obsolete payload");
     const first = await snapshot(bot, cwd, "old turn");
-    const shadow = join(CHECKPOINTS_DIR, bot,
-      createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
+    const shadow = shadowOf(bot, cwd);
     const oldBlob = userGit(shadow, "rev-parse", `${first}:a.txt`).trim();
     writeFileSync(join(cwd, "a.txt"), "latest payload");
     const latest = await snapshot(bot, cwd, "latest turn");
@@ -105,6 +100,54 @@ describe("snapshot", () => {
     const [undo] = await listCheckpoints(bot, cwd);
     expect(await restore(bot, cwd, undo!.hash)).toEqual({ ok: true });
     expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("uncommitted edit");
+  });
+
+  // Two threads of one bot work in one folder at the same time: thread B's
+  // snapshot lands while thread A's turn is still running, and A's digest
+  // diffs against A's own pre-turn commit when A ends.
+  it("keeps a pinned pre-turn commit through a sibling turn's snapshot until it is released", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "before A");
+    const hashA = await snapshot(bot, cwd, "turn A", undefined, { pin: "dispatch-A" });
+    writeFileSync(join(cwd, "a.txt"), "A edited");
+    const hashB = await snapshot(bot, cwd, "turn B", undefined, { pin: "dispatch-B" });
+    expect(hashB).not.toBe(hashA);
+    // only the newest is listed, as always — but A's commit is still there
+    expect((await listCheckpoints(bot, cwd)).map(c => c.hash)).toEqual([hashB]);
+    expect(await diffWorkingTree(bot, cwd, hashA!)).toEqual({ changed: ["a.txt"], added: [], deleted: [] });
+    expect(await restore(bot, cwd, hashA!)).toEqual({ ok: true });
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("before A");
+    // the restore's safety point ("A edited") and both pins are intact
+    expect(() => userGit(shadow, "cat-file", "-e", `${hashA}^{commit}`)).not.toThrow();
+    expect(() => userGit(shadow, "cat-file", "-e", `${hashB}^{commit}`)).not.toThrow();
+    // both turns end → the next snapshot's cleanup reclaims A's commit
+    await release(bot, cwd, "dispatch-A");
+    await release(bot, cwd, "dispatch-B");
+    writeFileSync(join(cwd, "a.txt"), "turn C");
+    await snapshot(bot, cwd, "turn C");
+    expect(() => userGit(shadow, "cat-file", "-e", `${hashA}^{commit}`)).toThrow();
+    expect(() => userGit(shadow, "cat-file", "-e", `${hashB}^{commit}`)).toThrow();
+    // releasing twice, or a pin never taken, is harmless
+    await release(bot, cwd, "dispatch-A");
+    await release(bot, cwd, "never-pinned");
+  });
+
+  it("sweeps pins a previous process left behind, on first use of the shadow", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "crashed mid-turn");
+    const leaked = await snapshot(bot, cwd, "turn X", undefined, { pin: "dispatch-X" });
+    expect(userGit(shadow, "for-each-ref", "refs/omb-live/").trim()).toContain(leaked);
+    // a new process: fresh module state (nothing swept yet), same test home
+    vi.resetModules();
+    const fresh = await import("./checkpoints.ts");
+    expect(fresh.CHECKPOINTS_DIR).toBe(CHECKPOINTS_DIR);
+    writeFileSync(join(cwd, "a.txt"), "next start");
+    const next = await fresh.snapshot(bot, cwd, "turn Y");
+    expect(next).not.toBe(leaked);
+    expect(userGit(shadow, "for-each-ref", "refs/omb-live/").trim()).toBe("");
+    expect(() => userGit(shadow, "cat-file", "-e", `${leaked}^{commit}`)).toThrow();
   });
 
   it("excludes tagged cache directories while preserving their live files", async () => {
@@ -369,14 +412,12 @@ describe("refusals", () => {
   it("lists nothing (and creates nothing) for a folder never snapshotted", async () => {
     const { bot, cwd } = workspace();
     expect(await listCheckpoints(bot, cwd)).toEqual([]);
-    const shadow = join(process.env.OMB_DATA_DIR!, "checkpoints", bot);
-    expect(existsSync(shadow)).toBe(false);
+    expect(existsSync(join(CHECKPOINTS_DIR, bot))).toBe(false);
   });
 });
 
 describe("diffWorkingTree", () => {
   it("names settled changes without replacing the pre-turn restore point", async () => {
-    const { diffWorkingTree } = await import("./checkpoints.ts");
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "keep.txt"), "same");
     writeFileSync(join(cwd, "edit.txt"), "before");
@@ -399,7 +440,6 @@ describe("diffWorkingTree", () => {
   });
 
   it("reports no changes and refuses protected folders", async () => {
-    const { diffWorkingTree } = await import("./checkpoints.ts");
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "one");
     const hash = await snapshot(bot, cwd, "turn bbbbbbbb");

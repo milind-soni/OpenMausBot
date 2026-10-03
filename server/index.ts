@@ -6239,17 +6239,28 @@ bus.subscribe((event: RuntimeEvent) => {
 });
 // Per-thread state the digest needs from before the turn: when it started,
 // and the checkpoint taken at dispatch (hash + folder) so settle can diff.
+// `pin` is the dispatch that pinned that commit in the shadow repo, so a
+// sibling thread's snapshot in the same folder cannot reclaim it mid-turn.
 const turnStartedAt = new Map<string, number>();
-const turnCheckpoints = new Map<string, { cwd: string; hash: string }>();
+const turnCheckpoints = new Map<string, { botId: string; cwd: string; hash: string; pin: string }>();
 // The turn a thread is in, from the last event that named one. Not every
 // driver stamps every item with a turnId (ACP fakes, some ACP agents), and
 // a digest can only count activity it can attribute — so an unstamped tool
 // row is attributed to the thread's live turn instead of to nothing.
 const liveTurnByThread = new Map<string, string>();
 
+/** Forget a thread's pre-turn checkpoint and drop its pin, so the shadow
+ * repo's next cleanup may reclaim that commit. */
+function forgetTurnCheckpoint(threadId: string): void {
+  const checkpoint = turnCheckpoints.get(threadId);
+  if (!checkpoint) return;
+  turnCheckpoints.delete(threadId);
+  void checkpoints.release(checkpoint.botId, checkpoint.cwd, checkpoint.pin);
+}
+
 function clearTurnDigestState(threadId: string): void {
   turnStartedAt.delete(threadId);
-  turnCheckpoints.delete(threadId);
+  forgetTurnCheckpoint(threadId);
   liveTurnByThread.delete(threadId);
   memoryRowsByThread.delete(threadId);
 }
@@ -6314,9 +6325,8 @@ function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: 
   return { ok: true };
 }
 
-/** Persist observed tools and memory immediately. Keep a direct turn's
- * workspace claimed while its bounded file snapshot settles, then enrich
- * that same row only if its task and active branch still exist. */
+/** Persist observed tools and memory immediately, then enrich that same
+ * row only if its task and active branch still exist. */
 async function scheduleTurnDigest(input: {
   botId: string;
   botName: string;
@@ -6371,6 +6381,8 @@ async function scheduleTurnDigest(input: {
         recordHanded(handed, store.activePath(input.threadId).filter(isContextMessage).map(row => row.id), [message.id]));
     }
     if (!checkpoint) return;
+    // A folder-level diff: when a sibling thread of this bot works in the
+    // same folder, its edits since this turn's snapshot are listed here too.
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const capture = async () => {
@@ -6390,6 +6402,10 @@ async function scheduleTurnDigest(input: {
     store.patchMessage(input.threadId, message.id, { digest: withFiles, text: renderDigest(withFiles) }, { kind: "digest.files", key: `${input.threadId}:${input.turnId}` });
   } catch (error) {
     console.error(`digest: could not record turn ${input.turnId} on ${input.threadId}:`, error instanceof Error ? error.message : error);
+  } finally {
+    // The pre-turn commit has had its last reader (the diff above is queued
+    // ahead of this in the shadow repo); the next snapshot may reclaim it.
+    if (checkpoint) void checkpoints.release(checkpoint.botId, checkpoint.cwd, checkpoint.pin);
   }
 }
 
@@ -7944,8 +7960,8 @@ bus.subscribe((event: RuntimeEvent) => {
           // still be in flight).
           //
           // Keep the thread busy until its bounded final capture releases
-          // the screen AND workspace. Otherwise an accepted follow-up races
-          // these claims and fails as though another thread owned its folder.
+          // the screen: an accepted follow-up must not take the desktop
+          // before the END-state frame is captured.
           const settleLeafId = store.activePath(event.threadId).at(-1)?.id;
           let timeout: ReturnType<typeof setTimeout>;
           const screenSettled = Promise.race([
@@ -10394,12 +10410,15 @@ async function startTurn(
       // snapshot() absorbs failures, so checkpointing may delay but never fail
       // a turn.
       if (checkpointCwd) {
-        const before = await checkpoints.snapshot(bot.id, checkpointCwd, `turn ${threadId.slice(0, 8)}`);
+        // Pinned by this dispatch: a sibling thread's snapshot in the same
+        // folder must not reclaim this turn's "before" state while it runs.
+        const before = await checkpoints.snapshot(bot.id, checkpointCwd, `turn ${threadId.slice(0, 8)}`, undefined, { pin: dispatchClaimId });
         if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
+          if (before) void checkpoints.release(bot.id, checkpointCwd, dispatchClaimId);
           throw new DirectTurnSetupCancelled("turn stopped during checkpoint");
         }
-        if (before) turnCheckpoints.set(threadId, { cwd: checkpointCwd, hash: before });
-        else turnCheckpoints.delete(threadId);
+        forgetTurnCheckpoint(threadId);
+        if (before) turnCheckpoints.set(threadId, { botId: bot.id, cwd: checkpointCwd, hash: before, pin: dispatchClaimId });
       }
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
         throw new DirectTurnSetupCancelled("turn stopped before dispatch");

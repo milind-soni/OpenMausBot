@@ -239,16 +239,9 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     projectDirs.push(project);
     // Both threads below pin to this one folder (startTurn's cwd resolution
     // for a bot with an explicit project folder), so the fake CLI's gate/dump
-    // naming (basename of its cwd) collapses to one shared path: the dump is
+    // naming (basename of its cwd) collapses to one shared key: the dump is
     // whichever engine started last, and one gate write finishes both.
-    const projectGate = join(fixture.info.dataDir, `${basename(project)}.gate`);
-    const projectDump = () => {
-      try {
-        return JSON.parse(readFileSync(join(fixture.info.dataDir, `${basename(project)}.json`), "utf8"));
-      } catch {
-        return {}; // not written yet, or mid-write in the CLI's process
-      }
-    };
+    const key = basename(project);
     let botId: string | undefined;
     let routineId: string | undefined;
     try {
@@ -257,7 +250,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       expect((await api("PATCH", `/api/bots/${botId}`, { cwd: project })).status).toBe(200);
       expect((await send(botId, threadId, "HOLD_THE_FOLDER")).body.queued).toBeUndefined();
       await expect.poll(() => busyThreads(botId!)).toEqual([threadId]);
-      await expect.poll(() => JSON.stringify(projectDump().prompt), { timeout: 15_000 }).toContain("HOLD_THE_FOLDER");
+      await expect.poll(async () => JSON.stringify((await dump(key)).prompt), { timeout: 15_000 }).toContain("HOLD_THE_FOLDER");
 
       const created = await api("POST", "/api/routines", {
         name: "Workspace collision probe",
@@ -283,15 +276,15 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       expect(dispatched.error).toBeUndefined();
       expect(dispatched.threadId).not.toBe(threadId);
       // …in that same folder, while the first thread is still working there.
-      await expect.poll(() => JSON.stringify(projectDump().prompt), { timeout: 15_000 }).toContain("scheduled digest");
-      expect(projectDump().cwd).toBe(realpathSync(project));
+      await expect.poll(async () => JSON.stringify((await dump(key)).prompt), { timeout: 15_000 }).toContain("scheduled digest");
+      expect((await dump(key)).cwd).toBe(realpathSync(project));
       expect((await busyThreads(botId)).sort()).toEqual([threadId, dispatched.threadId].sort());
 
-      writeFileSync(projectGate, "finish this isolated turn");
+      finish(key);
       await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("completed");
     } finally {
       if (botId) {
-        writeFileSync(projectGate, "finish this isolated turn");
+        finish(key);
         await expect.poll(async () => (await busyThreads(botId!)).length, { timeout: 15_000 }).toBe(0);
       }
       if (routineId) await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);
