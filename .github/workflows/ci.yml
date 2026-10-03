@@ -23,8 +23,10 @@ concurrency:
   # other in October 2026). The running one always finishes. A release runs
   # CI on its own commit in a release-ci/v<version> lane when main's run for
   # it was replaced (scripts/release-ci.mjs). Merge-queue runs stay on their
-  # own refs.
-  group: ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.ref }}
+  # own refs. A PR's group is named by its number, never by github.ref: a
+  # merged PR's closed event reports the base branch as github.ref, so a
+  # ref-named group let every merge cancel main's run (ci-stop-closed.yml).
+  group: ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

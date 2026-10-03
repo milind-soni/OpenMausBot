@@ -38,16 +38,24 @@ describe("CI concurrency", () => {
     // One group for every main push: GitHub keeps the running run and only
     // the newest waiting one, so a burst of merges cannot pile up full runs.
     expect(workflow.concurrency.group).toBe(
-      "ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.ref }}",
+      "ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}",
     );
   });
 
   it("stops a closed PR's run by joining ci.yml's PR group", () => {
     const stop = parse(readFileSync(new URL("../.github/workflows/ci-stop-closed.yml", import.meta.url), "utf8"));
     expect(stop.on).toEqual({ pull_request: { types: ["closed"] } });
-    expect(stop.concurrency).toEqual({ group: "ci-${{ github.ref }}", "cancel-in-progress": true });
-    // For pull_request events ci.yml's group expression reduces to github.ref.
-    expect(workflow.concurrency.group.endsWith("|| github.ref }}")).toBe(true);
+    expect(stop.concurrency).toEqual({ group: "ci-pr-${{ github.event.pull_request.number }}", "cancel-in-progress": true });
+    // For pull_request events ci.yml's group expression reduces to pr-<number>.
+    expect(workflow.concurrency.group).toContain("github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)");
+  });
+
+  it("never lets a merged PR's stop run join main's group", () => {
+    // A merged PR's closed event reports the base branch as github.ref, so any
+    // ref-named group here cancelled main's CI on every merge (Oct 3 2026).
+    const stop = parse(readFileSync(new URL("../.github/workflows/ci-stop-closed.yml", import.meta.url), "utf8"));
+    expect(stop.concurrency.group).not.toContain("github.ref");
+    expect(stop.concurrency.group).toContain("github.event.pull_request.number");
     expect(stop.permissions).toEqual({});
   });
 

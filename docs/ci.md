@@ -41,7 +41,7 @@ half hours. Now:
   Electron smokes.
 - The iPhone/iPad simulator UI suite is `ios-thread-ui.yml`: nightly, on main
   pushes that touch `ios/`, and by hand.
-- `ci-stop-closed.yml` cancels a PR's CI run when the PR is merged or closed.
+- `ci-stop-closed.yml` cancels a PR's CI run when the PR is merged or closed. PR runs share a group named by the PR number (`ci-pr-<n>`), never by `github.ref`: a merged PR's closed event reports the base branch as `github.ref`, which made every merge cancel main's CI (fixed Oct 3 2026).
 
 ## Main and releases
 

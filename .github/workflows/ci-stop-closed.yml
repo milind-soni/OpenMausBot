@@ -11,8 +11,10 @@ on:
 permissions: {}
 
 concurrency:
-  # Must match ci.yml's group for pull_request events.
-  group: ci-${{ github.ref }}
+  # Must match ci.yml's group for pull_request events. Named by the PR's
+  # number: for a merged PR github.ref is the base branch, and a ref-named
+  # group cancelled main's own CI run on every merge.
+  group: ci-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
