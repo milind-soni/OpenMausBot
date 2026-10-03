@@ -1744,6 +1744,14 @@ final class Session: ObservableObject {
         await perform { try await $0.interrupt(botId: bot.id, threadId: bot.threadId) }
     }
 
+    /// Stop the turn running in this conversation — a bot's thread or a room.
+    func interrupt(_ chat: Chat) async {
+        switch chat {
+        case let .bot(bot): await interrupt(bot: bot)
+        case let .room(room): await perform { try await $0.interrupt(groupId: room.id, threadId: room.threadId) }
+        }
+    }
+
     /// Ask for one fresh cloud viewer URL. Unlike ordinary actions this
     /// returns the value to a browser sheet and never writes it to app state.
     func cloudDesktop(for bot: Bot) async throws -> URL {

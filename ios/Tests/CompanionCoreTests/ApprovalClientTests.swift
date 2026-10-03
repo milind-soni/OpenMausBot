@@ -129,6 +129,9 @@ final class ApprovalClientTests: XCTestCase {
         try assertTarget("/api/bots/bot-1/messages")
         try await client.interrupt(botId: "bot-1", threadId: "thread-a")
         try assertTarget("/api/bots/bot-1/interrupt")
+        // A room's Stop names its own thread too (MOCA-148).
+        try await client.interrupt(groupId: "room-1", threadId: "thread-a")
+        try assertTarget("/api/groups/room-1/interrupt")
         try await client.markRead(botId: "bot-1", threadId: "thread-a")
         try assertTarget("/api/bots/bot-1/read")
         try await client.alwaysAllow(botId: "bot-1", key: "Bash:ls", threadId: "thread-a")

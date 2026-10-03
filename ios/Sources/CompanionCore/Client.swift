@@ -1799,6 +1799,11 @@ public struct CompanionClient: Sendable {
         try await send(try makeRequest("POST", "/api/bots/\(botId)/interrupt", body: threadId.map { ["threadId": $0] }))
     }
 
+    /// Stop a room's running turn, whichever member is speaking.
+    public func interrupt(groupId: String, threadId: String? = nil) async throws {
+        try await send(try makeRequest("POST", "/api/groups/\(groupId)/interrupt", body: threadId.map { ["threadId": $0] }))
+    }
+
     public func provideCredential(
         botId: String,
         messageId: String,

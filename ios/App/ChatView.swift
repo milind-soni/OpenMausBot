@@ -1443,6 +1443,27 @@ struct ChatView: View {
                             // keyboard, so this cannot turn its Return into a send.
                             .onHardwareReturn { submit() }
 
+                        // Stop sits in the bar while the turn runs, as it does
+                        // on the desktop. The Interrupt action under + was the
+                        // only way before, and rooms had none at all.
+                        if current.busy {
+                            Button {
+                                Haptics.selection()
+                                Task { await session.interrupt(current) }
+                            } label: {
+                                Image(systemName: "stop.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(Color.primary)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(Color.secondary.opacity(0.12)))
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.bottom, 6)
+                            .accessibilityLabel("Stop the current turn")
+                            .accessibilityIdentifier("composer-stop")
+                            .transition(.scale.combined(with: .opacity))
+                        }
+
                         Button {
                             composerFocused = false
                             dictation.toggle(capturing: draft)
