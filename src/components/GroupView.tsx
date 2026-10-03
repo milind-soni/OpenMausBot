@@ -69,16 +69,7 @@ import { highlightCitationSource } from "@/lib/citations-dom";
 import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
-
-function dayLabel(at: number): string {
-  const d = new Date(at);
-  const now = new Date();
-  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86_400_000);
-  if (diffDays === 0) return t("chat.day.today");
-  if (diffDays === 1) return t("chat.day.yesterday");
-  return d.toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" });
-}
+import { dayLabel, localDay } from "@/lib/transcript-derivations";
 
 /** One finished tool step in a room. Same pill the 1:1 chat uses, minus the
  * status glyph — a room reads as a conversation, not a build log. A chip
@@ -213,7 +204,7 @@ export const Transcript = memo(function Transcript({
         const previous = items[i - 1];
         const prev = previous && (previous.kind === "run" ? previous.messages.at(-1) : previous.message);
         const first = item.kind === "run" ? item.messages[0] : item.message;
-        const newDay = !prev || new Date(prev.at).toDateString() !== new Date(first.at).toDateString();
+        const newDay = !prev || localDay(prev.at) !== localDay(first.at);
         if (item.kind === "run") {
           if (!showToolCalls) return null;
           const cluster = !prev || prev.role !== first.role || prev.from?.botId !== first.from?.botId || newDay;

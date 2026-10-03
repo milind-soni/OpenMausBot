@@ -586,7 +586,7 @@ function rewindThreadUpdatedAt(state: AppState, threadId: string, messages: { at
 
 /** The visible conversation: walk parentId links from the active leaf back
  * to the root. Falls back to the flat list for pre-branching payloads. */
-export function visibleMessages(bot: Bot): Message[] {
+export function visibleMessages(bot: Pick<Bot, "messages" | "activeLeafId">): Message[] {
   const leafId = bot.activeLeafId;
   if (!leafId) return bot.messages;
   const byId = new Map(bot.messages.map((m) => [m.id, m]));
@@ -598,17 +598,6 @@ export function visibleMessages(bot: Bot): Message[] {
     cur = cur.parentId ? byId.get(cur.parentId) : undefined;
   }
   return path.reverse();
-}
-
-/** All versions of a user message (itself + the forks that replaced it),
- * oldest first. Length 1 = never edited. */
-export function messageVersions(bot: Bot, message: Message): Message[] {
-  if (message.role !== "user" || message.kind !== "text") return [message];
-  return bot.messages
-    .filter(
-      (m) => m.role === "user" && m.kind === "text" && (m.parentId ?? null) === (message.parentId ?? null),
-    )
-    .sort((a, b) => a.at - b.at);
 }
 
 /** GET /api/config — configured flags only; secrets are never echoed. */
@@ -4052,9 +4041,13 @@ export function BotEditorStore({ value, children }: { value: ReturnType<typeof u
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
+// Building a formatter costs far more than formatting with one, and every
+// row shows a time: build it once. No locale given, as before: times follow
+// the system's clock style, not the app language.
+const TIME_FORMAT = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
 export function formatTime(at: number) {
-  return new Date(at).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const date = new Date(at);
+  // what toLocaleTimeString says, where a formatter would throw
+  return Number.isNaN(date.getTime()) ? "Invalid Date" : TIME_FORMAT.format(date);
 }
