@@ -878,7 +878,7 @@ function handle(msg: any) {
       if (mode === "unkeyed-tool") {
         // An agent that violates the ACP spec by omitting toolCallId: the
         // turn's lifecycle pair must still carry one stable id so consumers
-        // can pair the start with its completion (#1653 computer-call fence).
+        // can pair the start with its completion.
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", title: "run", rawInput: { command: "echo done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
