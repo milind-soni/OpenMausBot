@@ -1,29 +1,6 @@
-interface CompanionPairingLinkOptions {
-  address: string;
-  port: number;
-  code: string;
-  token: string;
-  name?: string;
-  /** Every host the phone could dial later, best first. Carried alongside
-   * `address` so the app can fall back when the paired host stops resolving
-   * — a tailnet name is unreachable the moment the phone leaves the tailnet,
-   * while the LAN address keeps working. Older mobile builds ignore it. */
-  hosts?: string[];
-  /** Complete base URLs for current mobile builds. Encoded separately from
-   * the legacy address/hosts fields so HTTPS and port 443 stay unambiguous. */
-  endpoints?: CompanionEndpoint[];
-  /** P-256 HPKE recipient key pinned by the camera scan. Its private half
-   * remains in the desktop's OS-encrypted credential store. */
-  secretPublicKey?: string;
-}
+import { qrEndpoints, type CompanionEndpoint } from "../../shared/pairing-link";
 
-export type CompanionEndpointKind = "hosted" | "tailnet" | "lan" | "bonjour";
-
-export interface CompanionEndpoint {
-  url: string;
-  kind: CompanionEndpointKind;
-  priority: number;
-}
+export type { CompanionEndpoint, CompanionEndpointKind } from "../../shared/pairing-link";
 
 export type CompanionPairingRouteMode = "automatic" | "local" | "tailscale";
 
@@ -68,59 +45,6 @@ export interface CompanionPairingRoutePin {
   /** The exact protected transport selected when the QR was created. A
    * local-only route has no protected transport to retain. */
   protectedEndpoint: CompanionEndpoint | null;
-}
-
-/** How many fallback hosts a link will carry. The list is tiny in practice
- * (tailnet name, a LAN address or two, the mDNS name); the cap only keeps a
- * pathological interface list from bloating the QR code. */
-const MAX_HOSTS = 8;
-const ENDPOINT_KINDS = new Set<CompanionEndpointKind>(["hosted", "tailnet", "lan", "bonjour"]);
-
-/** Keep the QR contract strict even though its input came from our own
- * sidecar. A public URL with credentials or a path is not a companion base
- * URL, and filtering it is safer than teaching the phone to reinterpret it. */
-function qrEndpoints(endpoints: CompanionEndpoint[] | undefined): CompanionEndpoint[] {
-  const seen = new Set<string>();
-  const valid: CompanionEndpoint[] = [];
-
-  for (const endpoint of endpoints ?? []) {
-    if (
-      !endpoint ||
-      !ENDPOINT_KINDS.has(endpoint.kind) ||
-      !Number.isInteger(endpoint.priority) ||
-      endpoint.priority < 0 ||
-      endpoint.priority > 1_000_000
-    ) {
-      continue;
-    }
-
-    try {
-      const parsed = new URL(endpoint.url);
-      const expectedProtocol = endpoint.kind === "hosted" ? "https:" : "http:";
-      const explicitPort = parsed.port ? Number(parsed.port) : null;
-      const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
-      if (
-        parsed.protocol !== expectedProtocol ||
-        (endpoint.kind === "tailnet" && !hostname.endsWith(".ts.net")) ||
-        (explicitPort !== null && (!Number.isInteger(explicitPort) || explicitPort < 1 || explicitPort > 65_535)) ||
-        parsed.username ||
-        parsed.password ||
-        parsed.pathname !== "/" ||
-        parsed.search ||
-        parsed.hash ||
-        seen.has(parsed.origin)
-      ) {
-        continue;
-      }
-      seen.add(parsed.origin);
-      valid.push({ url: parsed.origin, kind: endpoint.kind, priority: endpoint.priority });
-    } catch {
-      // One malformed advisory route must not invalidate an otherwise usable
-      // pairing QR. It is simply omitted from the route walk.
-    }
-  }
-
-  return valid.sort((left, right) => left.priority - right.priority).slice(0, MAX_HOSTS);
 }
 
 const deduplicatedHosts = (hosts: string[]): string[] => {
@@ -295,79 +219,4 @@ export function companionPairingRoutePinAvailable(
     (endpoint) => endpoint.kind === pin.protectedEndpoint?.kind
       && endpoint.url === pin.protectedEndpoint.url,
   );
-}
-
-/** URL-safe, unpadded base64 keeps the structured JSON smaller than query
- * escaping every quote and slash while remaining straightforward to decode
- * with Foundation on iOS. */
-function encodeEndpoints(endpoints: CompanionEndpoint[]): string {
-  const bytes = new TextEncoder().encode(JSON.stringify(endpoints));
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-}
-
-function validSecretPublicKey(value: string | undefined): string | null {
-  if (!value || !/^[A-Za-z0-9_-]{87}$/.test(value)) return null;
-  try {
-    const base64 = value.replaceAll("-", "+").replaceAll("_", "/") + "=";
-    const decoded = atob(base64);
-    if (decoded.length !== 65 || decoded.charCodeAt(0) !== 4) return null;
-    let binary = "";
-    for (let index = 0; index < decoded.length; index += 1) binary += decoded[index];
-    return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "") === value
-      ? value
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * A short-lived handoff from the trusted desktop pairing panel to the mobile
- * app. The code still has to be redeemed with the companion; putting it in
- * the link does not create or expose the long-lived device token.
- */
-export function companionPairingLink({
-  address,
-  port,
-  code,
-  token,
-  name,
-  hosts,
-  endpoints,
-  secretPublicKey,
-}: CompanionPairingLinkOptions): string | null {
-  const host = address.trim();
-  if (
-    !host ||
-    !/^\d{6}$/.test(code) ||
-    !/^omb_pair_[A-Za-z0-9_-]{43}$/.test(token) ||
-    !Number.isInteger(port) ||
-    port < 1 ||
-    port > 65_535
-  )
-    return null;
-  const dialableHost = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
-
-  const url = new URL("openmausbot://pair");
-  url.searchParams.set("address", `${dialableHost}:${port}`);
-  // The scanner uses the high-entropy token. The code remains in the link so
-  // an older mobile build can still pair during a staggered desktop rollout.
-  url.searchParams.set("token", token);
-  url.searchParams.set("code", code);
-  if (name?.trim()) url.searchParams.set("name", name.trim());
-  // Comma-joined, which no hostname or IP literal can contain. Filtered
-  // rather than refused: a bad candidate costs the phone one failed dial,
-  // and dropping the whole link over it would break pairing entirely.
-  const candidates = (hosts ?? [])
-    .map((candidate) => candidate.trim())
-    .filter((candidate) => candidate && !/[\s/?#,[\]]/.test(candidate))
-    .slice(0, MAX_HOSTS);
-  if (candidates.length) url.searchParams.set("hosts", candidates.join(","));
-  const routes = qrEndpoints(endpoints);
-  if (routes.length) url.searchParams.set("endpoints", encodeEndpoints(routes));
-  const secretKey = validSecretPublicKey(secretPublicKey);
-  if (secretKey) url.searchParams.set("secretKey", secretKey);
-  return url.toString();
 }

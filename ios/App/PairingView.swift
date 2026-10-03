@@ -285,6 +285,14 @@ struct PairingView: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                if connection.otherPairingAddressCount > 0 {
+                    // A desktop QR consents to every local address it carries
+                    // (`establishRoutePolicyFromInvite(everyLocalRoute:)`), so
+                    // the confirmation says so rather than showing only the first.
+                    Text("and \(connection.otherPairingAddressCount) more of this computer’s addresses")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 Text("Make sure this is the computer you expect before connecting.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

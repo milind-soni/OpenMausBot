@@ -310,6 +310,7 @@
     <string name="mobile_pairing_no_address">這部電腦沒有回傳位址。請改為輸入其「手機」設定中顯示的位址。</string>
     <string name="mobile_pairing_invalid_address">請輸入安全的 https:// 位址、192.168.1.42:8810，或 macbook.tail1234.ts.net 這類名稱。</string>
     <string name="mobile_pairing_invalid_qr">這不是 OpenMausBot 配對 QR Code。</string>
+    <string name="mobile_pairing_other_addresses">以及這部電腦的另外 %1$d 個位址</string>
     <string name="mobile_camera_permission_description">允許使用相機掃描 OpenMausBot 顯示的配對 QR Code。</string>
     <string name="mobile_camera_permission_denied">允許使用相機掃描 OpenMausBot 顯示的配對 QR Code，或返回手動輸入位址與代碼。</string>
 

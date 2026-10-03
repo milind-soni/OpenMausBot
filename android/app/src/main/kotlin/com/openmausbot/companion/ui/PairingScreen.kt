@@ -597,6 +597,13 @@ private fun CodeSection(
             Spacer(Modifier.weight(1f))
             Text(confirmation.address, fontSize = 15.sp, fontFamily = FontFamily.Monospace)
         }
+        if (confirmation.otherAddresses > 0) {
+            Text(
+                stringResource(R.string.mobile_pairing_other_addresses, confirmation.otherAddresses),
+                color = secondaryTint,
+                fontSize = 13.sp,
+            )
+        }
         Text(localizedMobileCopy(confirmation.notice), fontSize = 13.sp, color = secondaryTint)
 
         when (val step = confirmation.step) {

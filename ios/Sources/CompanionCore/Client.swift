@@ -245,10 +245,18 @@ public struct PairingInvite: Equatable, Sendable {
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         else { return nil }
 
+        // Decoded by hand rather than through `queryItems`, which keeps "+".
+        // Desktops before Oct 2026 wrote the link with URLSearchParams, which
+        // encodes a space as "+" ("Miguel's+computer"); every builder writes a
+        // real "+" as %2B, and no credential, address or route contains one.
         var values: [String: String] = [:]
-        for item in components.queryItems ?? [] {
-            guard values[item.name] == nil, let value = item.value else { return nil }
-            values[item.name] = value
+        for item in components.percentEncodedQueryItems ?? [] {
+            guard let name = Self.decodeQueryComponent(item.name),
+                  let raw = item.value,
+                  let value = Self.decodeQueryComponent(raw),
+                  values[name] == nil
+            else { return nil }
+            values[name] = value
         }
         guard let address = values["address"],
               let credential = Self.credential(from: values),
@@ -283,8 +291,12 @@ public struct PairingInvite: Equatable, Sendable {
             guard let normalized = PhoneSecretCrypto.normalizedPublicKey(secretKey) else { return nil }
             connection.secretPublicKey = normalized
         }
-        connection.establishRoutePolicyFromInvite()
+        connection.establishRoutePolicyFromInvite(everyLocalRoute: true)
         return PairingInvite(connection: connection, credential: credential)
+    }
+
+    private static func decodeQueryComponent(_ raw: String) -> String? {
+        raw.replacingOccurrences(of: "+", with: " ").removingPercentEncoding
     }
 
     /// Unpadded base64url JSON keeps the typed array in one unambiguous query
@@ -407,16 +419,39 @@ public struct PairingOutcome: Sendable {
 /// None of the addresses advertised for a computer answered the companion
 /// health check. Kept distinct from a pairing rejection: this invite is still
 /// valid and the UI can offer Retry without making someone scan it again.
+///
+/// The message names the one next step that fits the routes tried — same
+/// Wi-Fi or Remote access when only local addresses were tried, the tailnet
+/// when only Tailscale was, a sleeping computer when even HTTPS failed — and
+/// lists the routes on a line of their own. Mirrors Android's
+/// `PairingRouteError`.
 public struct PairingRouteError: Error, LocalizedError, Equatable, Sendable {
     public let attemptedHosts: [String]
+    public let computerName: String?
 
-    public init(attemptedHosts: [String]) {
+    public init(attemptedHosts: [String], computerName: String? = nil) {
         self.attemptedHosts = attemptedHosts
+        self.computerName = computerName
     }
 
     public var errorDescription: String? {
-        let routes = attemptedHosts.joined(separator: ", ")
-        return "Couldn’t reach this computer through any available route (\(routes)). Keep Phone access turned on in OpenMausBot, then try again."
+        let name = computerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let computer = name.isEmpty ? "this computer" : name
+        let hosts = attemptedHosts.map { URLComponents(string: $0)?.host?.lowercased() ?? "" }
+        let advice: String
+        if attemptedHosts.contains(where: { $0.lowercased().hasPrefix("https://") }) {
+            advice = "Couldn’t reach \(computer). Make sure the computer is awake with OpenMausBot open, then try again."
+        } else if !hosts.isEmpty, hosts.allSatisfy({ $0.hasSuffix(".ts.net") || $0.hasSuffix(".ts.net.") }) {
+            advice = "Your phone couldn’t reach \(computer) over Tailscale. Turn on Tailscale on this phone, " +
+                "signed in to the same tailnet as the computer, then try again."
+        } else {
+            advice = "Your phone couldn’t reach \(computer) on this network. Put the phone on the same Wi-Fi " +
+                "as the computer, or open Settings → Remote access on the computer and sign in " +
+                "so the phone can connect from anywhere."
+        }
+        return attemptedHosts.isEmpty
+            ? advice
+            : advice + "\nTried: " + attemptedHosts.joined(separator: ", ")
     }
 }
 
@@ -764,15 +799,16 @@ public struct CompanionClient: Sendable {
 
     /// Resolve the multi-address invite before consuming its credential.
     ///
-    /// Health probes are non-mutating and run together, so a dead protected
-    /// route cannot sit in front of another protected route for twenty
-    /// seconds. Cleartext LAN/Bonjour routes are deliberately excluded unless
-    /// that exact route is the user's preferred, explicit choice; neither a
-    /// pairing credential nor the later bearer token is sprayed onto the
-    /// current wifi merely because a private address was once advertised.
-    /// Only the first response that identifies itself as OpenMausBot receives
-    /// the one-time pairing POST. The request id makes that redemption safely
-    /// replayable by newer desktop builds if its response is lost in transit.
+    /// Health probes are non-mutating and run together, so a dead route
+    /// cannot sit in front of another for twenty seconds. Only routes the
+    /// invite consented to are tried (`Connection.pairingEndpoints`): a
+    /// desktop QR that leads with a local address consents to each local
+    /// address of that computer, since the desktop cannot know which one the
+    /// phone can reach; a typed address is exactly one; a protected route is
+    /// never followed by cleartext. Only the first response that identifies
+    /// itself as OpenMausBot receives the one-time pairing POST. The request
+    /// id makes that redemption safely replayable by newer desktop builds if
+    /// its response is lost in transit.
     public static func pairFirstReachable(
         connection: Connection,
         credential: String,
@@ -780,13 +816,16 @@ public struct CompanionClient: Sendable {
         pairRequestId: String = UUID().uuidString,
         session: URLSession = .shared
     ) async throws -> PairingOutcome {
-        let automaticEndpoints = connection.automaticEndpoints
-        let candidates = automaticEndpoints.map(connection.dialing)
-        let attemptedRoutes = automaticEndpoints.map(\.url)
+        let pairingEndpoints = connection.pairingEndpoints
+        let candidates = pairingEndpoints.map(connection.dialing)
+        let unreachable = PairingRouteError(
+            attemptedHosts: pairingEndpoints.map(\.url),
+            computerName: connection.name
+        )
         var remaining = candidates
         while !remaining.isEmpty {
             guard let winner = await firstHealthy(in: remaining, session: session) else {
-                throw PairingRouteError(attemptedHosts: attemptedRoutes)
+                throw unreachable
             }
             remaining.remove(at: winner.offset)
             do {
@@ -813,7 +852,7 @@ public struct CompanionClient: Sendable {
                 continue
             }
         }
-        throw PairingRouteError(attemptedHosts: attemptedRoutes)
+        throw unreachable
     }
 
     /// Probe every candidate together, but respect the advertised security

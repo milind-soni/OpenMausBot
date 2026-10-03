@@ -521,18 +521,22 @@ final class Session: ObservableObject {
             pairRequestId: pairRequestId
         )
         let paired = outcome.response
-        // prefer the name the computer calls itself over the Bonjour label
-        var stored = outcome.connection
-        if !paired.serverName.isEmpty { stored.name = paired.serverName }
-        stored.companionDeviceId = paired.device.id
-        // The computer knows every address it answers on, but redemption may
-        // not widen the explicit route consent carried by the invite.
-        stored.applyPairingAdvertisement(hosts: paired.hosts, endpoints: paired.endpoints)
         let winner = outcome.connection.activeEndpoint ?? CompanionEndpoint.direct(
             host: outcome.connection.host,
             port: outcome.connection.port,
             priority: 10_000
         )
+        // prefer the name the computer calls itself over the Bonjour label
+        var stored = outcome.connection
+        // A desktop QR may have consented to every local address of the
+        // computer for this one walk; the device token is bound to the one
+        // that answered.
+        stored.pinRouteConsent(afterPairingThrough: winner, invite: invited)
+        if !paired.serverName.isEmpty { stored.name = paired.serverName }
+        stored.companionDeviceId = paired.device.id
+        // The computer knows every address it answers on, but redemption may
+        // not widen the explicit route consent carried by the invite.
+        stored.applyPairingAdvertisement(hosts: paired.hosts, endpoints: paired.endpoints)
         if let winner { stored.promote(winner) }
         if stored.endpoints?.isEmpty != false {
             stored.hosts = Array(stored.orderedHosts.prefix(8))

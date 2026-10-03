@@ -162,17 +162,109 @@ final class ConnectionTests: XCTestCase {
         XCTAssertNil(PairingInvite.parse(invalidBase64))
     }
 
-    func testSanitizesFallbackHostsAndKeepsOnlyTheConfirmedLocalOrigin() throws {
+    func testSanitizesFallbackHostsAndKeepsTheQRsLocalOrigins() throws {
         // Fallbacks are advisory: a bad one costs a single failed dial when
-        // its turn comes, so it is filtered rather than fatal.
+        // its turn comes, so it is filtered rather than fatal. A desktop QR
+        // consents to every local address it carries.
         let url = try XCTUnwrap(URL(string:
             "openmausbot://pair?address=mac.local&code=004209&hosts=%20mac.local%20,other.local,,bad%2Fslash,has%20space"))
         let invite = try XCTUnwrap(PairingInvite.parse(url))
-        XCTAssertEqual(invite.connection.hosts, ["mac.local"])
+        XCTAssertEqual(invite.connection.hosts, ["mac.local", "other.local"])
 
         // and an invite with no usable candidate keeps the single address
         let empty = try XCTUnwrap(URL(string: "openmausbot://pair?address=mac.local&code=004209&hosts=bad%2Fslash"))
         XCTAssertNil(PairingInvite.parse(empty)?.connection.hosts)
+    }
+
+    // Oct 3: a Windows PC's QR led with WSL's 172.19.96.1. The phone, allowed only that one
+    // address, never tried the Wi-Fi address the same QR carried. The desktop cannot know
+    // which of its addresses a phone can reach, so its own QR consents to all of them for
+    // the one-time pairing walk.
+    func testADesktopQRLeadingWithALocalAddressConsentsToEveryLocalAddressItCarries() throws {
+        let connection = try Self.windowsQR().connection
+
+        XCTAssertEqual(connection.allowedLocalRouteURLs, [Self.wsl, Self.wifi, Self.bonjour])
+        XCTAssertEqual(connection.allowedRouteKinds, [.lan, .bonjour, .hosted])
+        XCTAssertEqual(connection.pairingEndpoints.map(\.url), [Self.wsl, Self.wifi, Self.bonjour])
+        XCTAssertEqual(connection.hosts, ["172.19.96.1", "192.168.1.34", "miguel.local"])
+        XCTAssertEqual(connection.otherPairingAddressCount, 2)
+        // Reconnecting is not pairing: a saved connection still never walks sideways.
+        XCTAssertEqual(connection.automaticEndpoints.map(\.url), [Self.wsl])
+    }
+
+    func testATypedOrDiscoveredAddressStillConsentsToExactlyOne() {
+        var discovered = Connection(name: "Mac", host: "192.168.1.34", port: 8810, hosts: ["192.168.1.34", "172.19.96.1"])
+        discovered.establishRoutePolicyFromInvite()
+
+        XCTAssertEqual(discovered.allowedLocalRouteURLs, [Self.wifi])
+        XCTAssertEqual(discovered.pairingEndpoints.map(\.url), [Self.wifi])
+        XCTAssertEqual(discovered.otherPairingAddressCount, 0)
+    }
+
+    func testAProtectedQRNeverWalksTheLocalAddressesItCarries() throws {
+        let routes = [
+            ["url": "https://mac.companion.example", "kind": "hosted", "priority": 0] as [String: Any],
+            ["url": Self.wsl, "kind": "lan", "priority": 100] as [String: Any],
+            ["url": Self.wifi, "kind": "lan", "priority": 200] as [String: Any],
+        ]
+        let encoded = try Self.base64URL(JSONSerialization.data(withJSONObject: routes))
+        let token = "omb_pair_" + String(repeating: "a", count: 43)
+        let invite = try XCTUnwrap(PairingInvite.parse(XCTUnwrap(URL(string:
+            "openmausbot://pair?address=mac.companion.example%3A443&token=\(token)&endpoints=\(encoded)"))))
+
+        XCTAssertEqual(invite.connection.allowedLocalRouteURLs, [])
+        XCTAssertEqual(invite.connection.pairingEndpoints.map(\.url), ["https://mac.companion.example"])
+    }
+
+    func testPairingPinsConsentToTheLocalAddressThatAnswered() throws {
+        let wifi = try XCTUnwrap(CompanionEndpoint(url: Self.wifi, kind: .lan, priority: 100))
+        let invite = try Self.windowsQR().connection
+        var paired = invite.dialing(wifi)
+        paired.pinRouteConsent(afterPairingThrough: wifi, invite: invite)
+
+        XCTAssertEqual(paired.allowedLocalRouteURLs, [Self.wifi])
+        XCTAssertEqual(paired.allowedRouteKinds, [.lan, .hosted])
+        XCTAssertEqual(paired.endpoints?.map(\.url), [Self.wifi], "persisted, not only filtered")
+        XCTAssertEqual(paired.hosts, ["192.168.1.34"])
+        XCTAssertEqual(paired.automaticEndpoints.map(\.url), [Self.wifi])
+    }
+
+    // Only a local winner narrows consent. When hosted HTTPS redeems a
+    // Tailscale QR, the tailnet the person chose stays a fallback, exactly as
+    // a single-route invite always kept it.
+    func testAProtectedWinnerKeepsTheRouteTheInviteSelected() throws {
+        let routes = [
+            ["url": "http://mac.tail1234.ts.net:8810", "kind": "tailnet", "priority": 0] as [String: Any],
+            ["url": "https://mac.companion.example", "kind": "hosted", "priority": 100] as [String: Any],
+        ]
+        let encoded = try Self.base64URL(JSONSerialization.data(withJSONObject: routes))
+        let token = "omb_pair_" + String(repeating: "a", count: 43)
+        let invite = try XCTUnwrap(PairingInvite.parse(XCTUnwrap(URL(string:
+            "openmausbot://pair?address=mac.tail1234.ts.net%3A8810&token=\(token)&endpoints=\(encoded)")))).connection
+        let hosted = try XCTUnwrap(CompanionEndpoint(url: "https://mac.companion.example", kind: .hosted, priority: 100))
+        var paired = invite.dialing(hosted)
+        paired.pinRouteConsent(afterPairingThrough: hosted, invite: invite)
+
+        XCTAssertEqual(paired.allowedRouteKinds, [.tailnet, .hosted])
+        XCTAssertEqual(paired.endpoints?.map(\.url), ["http://mac.tail1234.ts.net:8810", "https://mac.companion.example"])
+    }
+
+    private static let wsl = "http://172.19.96.1:8810"
+    private static let wifi = "http://192.168.1.34:8810"
+    private static let bonjour = "http://miguel.local:8810"
+
+    /// The Oct 3 QR: "Pair on this Wi-Fi" on a Windows PC whose WSL adapter enumerated first.
+    private static func windowsQR() throws -> PairingInvite {
+        let routes = [
+            ["url": wsl, "kind": "lan", "priority": 0] as [String: Any],
+            ["url": wifi, "kind": "lan", "priority": 100] as [String: Any],
+            ["url": bonjour, "kind": "bonjour", "priority": 200] as [String: Any],
+        ]
+        let encoded = try base64URL(JSONSerialization.data(withJSONObject: routes))
+        let token = "omb_pair_" + String(repeating: "a", count: 43)
+        return try XCTUnwrap(PairingInvite.parse(XCTUnwrap(URL(string:
+            "openmausbot://pair?address=172.19.96.1%3A8810&token=\(token)&name=Miguel%27s+computer" +
+            "&hosts=172.19.96.1,192.168.1.34,miguel.local,miguel.tail1234.ts.net&endpoints=\(encoded)"))))
     }
 
     func testASavedConnectionWithoutFallbacksStillDecodes() throws {

@@ -333,14 +333,13 @@ class Session(
         }
         val outcome = pairFn(invited, credential, deviceName, requestId)
         val paired = outcome.response
-        var stored = outcome.connection.copy(
-            allowedRouteKinds = invited.allowedRouteKinds,
-            allowedLocalRouteURLs = invited.allowedLocalRouteURLs,
-        )
-        if (paired.serverName.isNotEmpty()) stored = stored.copy(name = paired.serverName)
-        stored = stored.applyingPairingAdvertisement(paired.hosts, paired.endpoints)
         val winner = outcome.connection.activeEndpoint
             ?: CompanionEndpoint.direct(outcome.connection.host, outcome.connection.port, priority = 10_000)
+        // A desktop QR may have consented to every local address of the computer for this one
+        // walk; the device token is bound to the one that answered.
+        var stored = outcome.connection.pinningRouteConsent(winner, invited)
+        if (paired.serverName.isNotEmpty()) stored = stored.copy(name = paired.serverName)
+        stored = stored.applyingPairingAdvertisement(paired.hosts, paired.endpoints)
         stored = winner?.let(stored::promoting) ?: stored.promoting(stored.host)
         return stored to paired.token
     }

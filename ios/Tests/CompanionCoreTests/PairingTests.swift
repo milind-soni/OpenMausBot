@@ -136,6 +136,68 @@ final class PairingTests: XCTestCase {
         XCTAssertTrue(requests.allSatisfy { $0.url?.path == "/api/health" })
     }
 
+    // Oct 3: a Windows PC's QR led with WSL's and Hyper-V's addresses; the phone tried only
+    // the first. Every local address the QR carries is tried; the credential still goes only
+    // to the first that identifies itself as OpenMausBot.
+    func testADesktopQRPairsThroughWhicheverOfItsLocalAddressesAnswers() async throws {
+        PairingRequestStub.reset { request in
+            guard request.url?.host == "192.168.1.34" else { return .failure(.timedOut) }
+            return request.url?.path == "/api/health" ? .response(200, Self.health) : .response(201, Self.paired)
+        }
+        let invite = try XCTUnwrap(PairingInvite.parse(Self.windowsQR))
+
+        let outcome = try await CompanionClient.pairFirstReachable(
+            connection: invite.connection,
+            credential: invite.credential,
+            deviceName: "iPhone",
+            session: session
+        )
+
+        XCTAssertEqual(outcome.connection.activeEndpoint?.url ?? outcome.connection.pairingConsentOrigin, "http://192.168.1.34:8810")
+        let requests = PairingRequestStub.captured()
+        XCTAssertEqual(
+            Set(requests.filter { $0.url?.path == "/api/health" }.compactMap(\.url?.host)),
+            ["172.19.96.1", "172.27.208.1", "192.168.1.34"]
+        )
+        XCTAssertEqual(requests.filter { $0.url?.path == "/api/pair" }.map(\.url?.host), ["192.168.1.34"])
+    }
+
+    func testWhenNoLocalAddressAnswersTheErrorSaysSameWiFiOrRemoteAccess() async throws {
+        PairingRequestStub.reset { _ in .failure(.timedOut) }
+        let invite = try XCTUnwrap(PairingInvite.parse(Self.windowsQR))
+
+        await XCTAssertThrowsErrorAsync(
+            try await CompanionClient.pairFirstReachable(
+                connection: invite.connection,
+                credential: invite.credential,
+                deviceName: "iPhone",
+                session: session
+            )
+        ) { error in
+            XCTAssertEqual(
+                error.localizedDescription,
+                "Your phone couldn’t reach Miguel's computer on this network. Put the phone on the same " +
+                    "Wi-Fi as the computer, or open Settings → Remote access on the computer and sign in " +
+                    "so the phone can connect from anywhere.\nTried: http://172.19.96.1:8810, " +
+                    "http://172.27.208.1:8810, http://192.168.1.34:8810"
+            )
+        }
+    }
+
+    func testRouteFailureNamesTheNextStepForTheRoutesTried() {
+        XCTAssertEqual(
+            PairingRouteError(attemptedHosts: ["https://mac.companion.example"], computerName: "Mac").errorDescription,
+            "Couldn’t reach Mac. Make sure the computer is awake with OpenMausBot open, then try again.\n" +
+                "Tried: https://mac.companion.example"
+        )
+        XCTAssertEqual(
+            PairingRouteError(attemptedHosts: ["http://mac.tail1234.ts.net:8810"]).errorDescription,
+            "Your phone couldn’t reach this computer over Tailscale. Turn on Tailscale on this phone, " +
+                "signed in to the same tailnet as the computer, then try again.\n" +
+                "Tried: http://mac.tail1234.ts.net:8810"
+        )
+    }
+
     func testAQuickLANResponseDoesNotOutrankThePreferredTailnetRoute() async throws {
         PairingRequestStub.reset { request in
             if request.url?.path == "/api/health" {
@@ -441,6 +503,11 @@ final class PairingTests: XCTestCase {
     }
 
     private static let credential = "omb_pair_" + String(repeating: "a", count: 43)
+    /// "Pair on this Wi-Fi" on a Windows PC whose WSL and Hyper-V adapters enumerated first,
+    /// written the way desktops before Oct 2026 wrote it ("+" for a space).
+    private static let windowsQR = URL(string:
+        "openmausbot://pair?address=172.19.96.1%3A8810&token=\(credential)&name=Miguel%27s+computer" +
+        "&hosts=172.19.96.1,172.27.208.1,192.168.1.34")!
     private static let health = Data(#"{"app":"openmausbot","pid":42,"static":true}"#.utf8)
     private static let paired = Data(
         #"{"token":"omb_device","device":{"id":"d","name":"iPhone","createdAt":1,"lastSeenAt":1},"serverName":"Mac","hosts":["192.168.1.42"]}"#.utf8

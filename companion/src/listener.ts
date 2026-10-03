@@ -13,19 +13,35 @@ import { execFile } from "node:child_process";
 import { homedir, networkInterfaces } from "node:os";
 import { delimiter, join } from "node:path";
 
-/** Interfaces that exist to tunnel, bridge or mesh traffic — utun (Tailscale
- * and every other VPN), vmnet/bridge (VMs, containers, internet sharing),
- * awdl/llw (AirDrop's side channels), feth/tap/tun. Their addresses stay in
- * the list, because the tailnet one is exactly what a phone off-network
- * dials — but a phone on the same wifi can reach none of them, so none of
- * them may come first. */
-const VIRTUAL_INTERFACES = /^(utun|tun|tap|bridge|vmnet|awdl|llw|feth)/;
+/** Interfaces that exist to tunnel, bridge, virtualize or mesh traffic.
+ * Their addresses stay in the list — the tailnet one is exactly what a phone
+ * off-network dials, and a Hyper-V external switch moves the PC's real address
+ * onto a "vEthernet (…)" adapter — but a phone on the same Wi-Fi can reach
+ * none of the usual ones, so none of them may come first.
+ *
+ * Matched by name, case-insensitively, because that is all Node reports:
+ * - macOS: utun (every VPN, Tailscale), bridge/vmnet (VMs, internet
+ *   sharing), awdl/llw (AirDrop), feth, anpi.
+ * - Linux: docker0, br-<id> (Docker networks), veth, virbr (libvirt),
+ *   vboxnet, cni/flannel/lxc/lxd, tun/tap, wg, zt (ZeroTier), tailscale0.
+ * - Windows names adapters rather than numbering them: "vEthernet (WSL)",
+ *   "vEthernet (Default Switch)", "VirtualBox Host-Only Network", "VMware
+ *   Network Adapter VMnet8", "Tailscale", "ZeroTier One", anything with VPN
+ *   or Bluetooth in its name. */
+const VIRTUAL_INTERFACE =
+  /^(utun|tun|tap|bridge|br-|vmnet|vboxnet|virbr|veth|docker|cni|flannel|lxc|lxd|zt|wg|tailscale|awdl|llw|feth|anpi)|vethernet|virtual|vmware|hyper-v|wsl|zerotier|vpn|loopback|bluetooth/i;
 
-/** Lower sorts earlier. `en0`, `en1`, … are macOS's built-in wifi and
- * ethernet — the networks a phone is actually standing on. */
+/** The networks a phone is actually standing on: macOS en0/en1, Linux
+ * eth0/enp3s0/eno1/wlan0/wlp2s0, Windows "Wi-Fi", "Ethernet 2", and the
+ * German/Chinese "WLAN". */
+const PHYSICAL_INTERFACE = /^(en|eth|wl)[a-z0-9]*$|^(wi-?fi|wlan|ethernet)\b/i;
+
+/** Lower sorts earlier: physical, then anything unrecognized (a localized
+ * Windows name, a hotspot), then virtual. Virtual is checked first so
+ * "vEthernet" is never mistaken for "Ethernet". */
 const interfaceRank = (name: string): number => {
-  if (/^en\d+$/.test(name)) return 0;
-  if (VIRTUAL_INTERFACES.test(name)) return 2;
+  if (VIRTUAL_INTERFACE.test(name)) return 2;
+  if (PHYSICAL_INTERFACE.test(name)) return 0;
   return 1;
 };
 
@@ -34,10 +50,11 @@ const interfaceRank = (name: string): number => {
  * will reach us.
  *
  * Ranked, not merely collected: `networkInterfaces()` promises nothing about
- * order, callers put the first non-tailnet entry into the pairing QR, and on
- * a Mac with a VPN or a VM running the first entry can be a utun or bridge100
- * address the phone cannot route to. Real interfaces lead, tunnels and
- * bridges trail; the sort is stable, so enumeration order still breaks ties.
+ * order, callers put the first non-tailnet entry into the pairing QR, and the
+ * first entry can be an address the phone cannot route to — a utun or
+ * bridge100 on a Mac, WSL's vEthernet on Windows, docker0 on Linux. Real
+ * interfaces lead, virtual ones trail; the sort is stable, so enumeration
+ * order still breaks ties.
  * The parameter exists for tests — the interface table is the machine's. */
 export function lanAddresses(interfaces = networkInterfaces()): string[] {
   const found: Array<{ rank: number; address: string }> = [];

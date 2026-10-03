@@ -322,6 +322,12 @@ internal data class PairingConfirmation(
     val address: String,
     val usesHttps: Boolean,
     val step: Step,
+    /**
+     * More of this computer's addresses the pairing will also try. A desktop QR consents to
+     * every local address it carries (`Connection.establishingRoutePolicyFromInvite`), so what
+     * the person approves has to say so, not only show the first.
+     */
+    val otherAddresses: Int = 0,
 ) {
     sealed interface Step {
         /** A scan whose one-time credential is still in this process: one tap pairs. */
@@ -356,6 +362,7 @@ internal data class PairingConfirmation(
                 name = connection.name.ifBlank { address },
                 address = address,
                 usesHttps = connection.activeEndpoint?.isSecure == true,
+                otherAddresses = connection.otherPairingAddressCount,
                 step = when {
                     pending.needsRescan(secrets) -> Step.Rescan
                     else -> pending.credential(secrets)?.let(Step::Confirm) ?: Step.EnterCode

@@ -31,6 +31,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 
+import { phonePairingLink } from "../shared/pairing-link.ts";
 import { parseAllowList } from "./account-signin.ts";
 import { appendAdminAction, flushAdminActivity, sharedSignIn } from "./admin-activity.ts";
 import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts";
@@ -528,9 +529,9 @@ async function mintPairing(port: number, options: { label?: string; client?: boo
   const address = options.publicUrl ?? (typeof body.url === "string" ? originOf(body.url) : null);
   // A server too old to mint a credential simply has no invite: the web link
   // still works, so an upgrade is never required to pair a browser.
-  const invite = typeof body.credential === "string" && address
-    ? `openmausbot://pair?address=${encodeURIComponent(address)}&token=${encodeURIComponent(body.credential)}${typeof body.serverName === "string" ? `&name=${encodeURIComponent(body.serverName)}` : ""}`
-    : typeof body.inviteUrl === "string" ? body.inviteUrl : null;
+  const invite = (typeof body.credential === "string" && address
+    ? phonePairingLink({ address, token: body.credential, name: typeof body.serverName === "string" ? body.serverName : undefined })
+    : null) ?? (typeof body.inviteUrl === "string" ? body.inviteUrl : null);
   return pairingBlock({ code: body.code, url, inviteUrl: invite, expiresAt: body.expiresAt, hint: typeof body.hint === "string" ? body.hint : null, phone: options.phone });
 }
 

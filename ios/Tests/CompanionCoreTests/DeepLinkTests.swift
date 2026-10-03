@@ -17,6 +17,21 @@ final class DeepLinkTests: XCTestCase {
         XCTAssertEqual(invite.credential, token)
     }
 
+    // Oct 3: an Android phone showed "Miguel's+computer", and iOS read the same link the
+    // same way. Desktops before Oct 2026 wrote it with URLSearchParams, which encodes a space
+    // as "+"; every builder writes a real "+" as %2B.
+    func testAPlusInAPairingInviteIsASpaceAndAnEncodedPlusIsAPlus() throws {
+        let token = "omb_pair_" + String(repeating: "a", count: 43)
+        let url = try XCTUnwrap(URL(string: "openmausbot://pair?address=192.168.1.34%3A8810&token=\(token)&name=Miguel%27s+computer"))
+        guard case let .pairing(invite) = CompanionDeepLink.parse(url) else {
+            return XCTFail("expected a pairing link")
+        }
+        XCTAssertEqual(invite.connection.name, "Miguel's computer")
+
+        let plus = try XCTUnwrap(URL(string: "openmausbot://pair?address=mac.local&code=004209&name=C%2B%2B+box"))
+        XCTAssertEqual(PairingInvite.parse(plus)?.connection.name, "C++ box")
+    }
+
     func testParsesAServerPairLink() throws {
         let url = try XCTUnwrap(URL(string: "https://bot.example/pair#code=ABCD-EFGH-JKLM"))
         guard case let .pairing(invite) = CompanionDeepLink.parse(url) else {

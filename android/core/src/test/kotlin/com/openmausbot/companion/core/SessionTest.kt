@@ -211,6 +211,93 @@ class SessionTest {
         assertEquals(listOf(selected.host), stored.hosts)
     }
 
+    // The QR consents to every local address of the computer for the one-time walk; the
+    // long-lived token must then be bound to the one that answered, so a later reconnect on
+    // another network never presents it to the WSL or Hyper-V address it never reached.
+    @Test
+    fun aQrPairingKeepsConsentOnlyForTheLocalAddressThatAnswered() = runTest {
+        val connections = FakeConnectionStore()
+        val wsl = assertNotNull(
+            CompanionEndpoint.create("http://172.19.96.1:8810", CompanionEndpointKind.LAN, 0),
+        )
+        val wifi = assertNotNull(
+            CompanionEndpoint.create("http://192.168.1.34:8810", CompanionEndpointKind.LAN, 100),
+        )
+        val routes = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(CompanionJson.encodeToString(listOf(wsl, wifi)).toByteArray())
+        val invite = assertNotNull(PairingInvite.parse(
+            "openmausbot://pair?address=172.19.96.1%3A8810&token=omb_pair_${"a".repeat(43)}" +
+                "&name=Miguel%27s+computer&hosts=172.19.96.1,192.168.1.34&endpoints=$routes",
+        ))
+        val session = session(
+            connectionStore = connections,
+            pairOutcomeFn = { invited, _, _, _ ->
+                assertEquals(setOf(wsl.url, wifi.url), invited.allowedLocalRouteURLs)
+                PairingOutcome(
+                    response = PairResponse(
+                        token = "device-token",
+                        device = PairedDevice("d1", "Pixel", 1.0, 1.0),
+                        serverName = "Miguel's computer",
+                        hosts = listOf(wsl.host, wifi.host),
+                        endpoints = listOf(wsl, wifi),
+                    ),
+                    connection = invited.dialing(wifi),
+                )
+            },
+        )
+        session.awaitRestored()
+
+        session.pair(invite)
+        advanceUntilIdle()
+
+        val stored = assertNotNull(connections.saved)
+        assertEquals(setOf(wifi.url), stored.allowedLocalRouteURLs)
+        assertEquals(listOf(wifi.url), stored.endpoints.orEmpty().map { it.url })
+        assertEquals(listOf(wifi.host), stored.hosts)
+        assertEquals(wifi.url, stored.activeEndpoint?.url)
+        assertEquals("Miguel's computer", stored.name)
+    }
+
+    // Only a local winner narrows consent. When hosted HTTPS redeems a Tailscale QR, the
+    // tailnet the person chose stays a fallback, exactly as a single-route invite always kept it.
+    @Test
+    fun aProtectedWinnerKeepsTheRouteTheInviteSelected() = runTest {
+        val connections = FakeConnectionStore()
+        val tailnet = assertNotNull(
+            CompanionEndpoint.create("http://mac.tail1234.ts.net:8810", CompanionEndpointKind.TAILNET, 0),
+        )
+        val hosted = assertNotNull(
+            CompanionEndpoint.create("https://mac.example", CompanionEndpointKind.HOSTED, 100),
+        )
+        val routes = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(CompanionJson.encodeToString(listOf(tailnet, hosted)).toByteArray())
+        val invite = assertNotNull(PairingInvite.parse(
+            "openmausbot://pair?address=mac.tail1234.ts.net%3A8810&token=omb_pair_${"a".repeat(43)}&endpoints=$routes",
+        ))
+        val session = session(
+            connectionStore = connections,
+            pairOutcomeFn = { invited, _, _, _ ->
+                PairingOutcome(
+                    response = PairResponse(
+                        token = "device-token",
+                        device = PairedDevice("d1", "Pixel", 1.0, 1.0),
+                        serverName = "Mac",
+                        endpoints = listOf(tailnet, hosted),
+                    ),
+                    connection = invited.dialing(hosted),
+                )
+            },
+        )
+        session.awaitRestored()
+
+        session.pair(invite)
+        advanceUntilIdle()
+
+        val stored = assertNotNull(connections.saved)
+        assertEquals(setOf(CompanionEndpointKind.TAILNET, CompanionEndpointKind.HOSTED), stored.allowedRouteKinds)
+        assertEquals(listOf(tailnet.url, hosted.url), stored.endpoints.orEmpty().map { it.url })
+    }
+
     @Test
     fun pairPersistsTypedEndpointMetadataAndKeepsTheRedeemingHttpsRouteActive() = runTest {
         val connections = FakeConnectionStore()

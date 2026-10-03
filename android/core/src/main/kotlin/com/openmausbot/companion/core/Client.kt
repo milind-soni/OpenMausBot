@@ -47,7 +47,14 @@ data class PairingOutcome(
     val connection: Connection,
 )
 
-/** No automatically permitted route identified itself and completed the logical pairing. */
+/**
+ * No permitted route identified itself and completed the logical pairing. The message names the
+ * one thing the person can change: a cause a route reported (the local-network permission,
+ * Tailscale or Private DNS) when there is one; otherwise the next step that fits the routes
+ * tried — same Wi-Fi or Remote access when only local addresses were tried, the tailnet when only
+ * Tailscale was, a sleeping computer when even HTTPS failed. The routes go on a line of their own.
+ * Mirrors iOS `PairingRouteError`.
+ */
 class PairingRouteError(
     val attemptedRoutes: List<String>,
     /**
@@ -56,17 +63,32 @@ class PairingRouteError(
      * local-network permission — instead of a list of addresses that all look equally dead.
      */
     val routeFailures: Map<String, Throwable> = emptyMap(),
-) : IOException(pairingRouteMessage(attemptedRoutes, routeFailures))
+    computerName: String? = null,
+) : IOException(pairingRouteMessage(attemptedRoutes, routeFailures, computerName))
 
-private fun pairingRouteMessage(routes: List<String>, failures: Map<String, Throwable>): String {
-    val advice = routes.mapNotNull { route ->
-        val failure = failures[route] ?: return@mapNotNull null
-        val host = runCatching { URI(route).host }.getOrNull().orEmpty()
-        ConnectionAdvice.pairingAdvice(failure, host)
+private fun pairingRouteMessage(
+    routes: List<String>,
+    failures: Map<String, Throwable>,
+    computerName: String?,
+): String {
+    val computer = computerName?.trim()?.takeIf { it.isNotEmpty() } ?: "this computer"
+    val hosts = routes.map { route -> runCatching { URI(route).host.orEmpty() }.getOrDefault("") }
+    val causes = routes.zip(hosts).mapNotNull { (route, host) ->
+        failures[route]?.let { ConnectionAdvice.pairingAdvice(it, host) }
     }.distinct()
-    val summary = "Couldn't reach this computer through any available route " +
-        "(${routes.joinToString()}). Keep Phone access turned on in OpenMausBot, then try again."
-    return (listOf(summary) + advice).joinToString(" ")
+    val advice = when {
+        causes.isNotEmpty() -> "Couldn't reach $computer. ${causes.joinToString(" ")}"
+        routes.any { it.startsWith("https://", ignoreCase = true) } ->
+            "Couldn't reach $computer. Make sure the computer is awake with OpenMausBot open, then try again."
+        hosts.isNotEmpty() && hosts.all { it.lowercase().trimEnd('.').endsWith(".ts.net") } ->
+            "Your phone couldn't reach $computer over Tailscale. Turn on Tailscale on this phone, " +
+                "signed in to the same tailnet as the computer, then try again."
+        else ->
+            "Your phone couldn't reach $computer on this network. Put the phone on the same Wi-Fi " +
+                "as the computer, or open Settings → Remote access on the computer and sign in " +
+                "so the phone can connect from anywhere."
+    }
+    return if (routes.isEmpty()) advice else "$advice\nTried: ${routes.joinToString()}"
 }
 
 /** Keep the same code and request id after an uncertain redemption or rate-limit refusal. */
@@ -1280,8 +1302,10 @@ class CompanionClient(
         )
 
         /**
-         * Identify every automatically permitted route before presenting the one-time credential.
-         * Probes run together, but the advertised order wins rather than response speed.
+         * Identify every route the invite permits ([Connection.pairingEndpoints]) before
+         * presenting the one-time credential. Probes run together, but the advertised order wins
+         * rather than response speed, and only the first route that identifies itself as
+         * OpenMausBot receives the credential.
          */
         suspend fun pairFirstReachable(
             connection: Connection,
@@ -1290,15 +1314,16 @@ class CompanionClient(
             pairRequestId: String = UUID.randomUUID().toString(),
             client: OkHttpClient = OkHttpClient(),
         ): PairingOutcome {
-            val endpoints = connection.automaticEndpoints
+            val endpoints = connection.pairingEndpoints
             val attemptedRoutes = endpoints.map(CompanionEndpoint::url)
             // Route URL → the last reason it failed, for the message the person reads.
             val failures = linkedMapOf<String, Throwable>()
             val remaining = endpoints.map { it.url to connection.dialing(it) }.toMutableList()
+            val unreachable = { PairingRouteError(attemptedRoutes, failures, connection.name) }
 
             while (remaining.isNotEmpty()) {
                 val winnerIndex = firstHealthy(remaining, client, failures)
-                    ?: throw PairingRouteError(attemptedRoutes, failures)
+                    ?: throw unreachable()
                 val (route, winner) = remaining.removeAt(winnerIndex)
                 try {
                     val response = pair(
@@ -1322,7 +1347,7 @@ class CompanionClient(
                     continue
                 }
             }
-            throw PairingRouteError(attemptedRoutes, failures)
+            throw unreachable()
         }
 
         /** The first candidate, in advertised order, that identified itself; why the others did not. */

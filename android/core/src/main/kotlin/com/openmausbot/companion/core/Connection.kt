@@ -74,31 +74,53 @@ data class Connection(
     fun endpointsAllowedByRoutePolicy(candidates: List<CompanionEndpoint>): List<CompanionEndpoint> =
         candidates.filter(::allowsEndpoint)
 
-    /** Bind a new pairing to its selected route before any probe or credential redemption. */
-    fun establishingRoutePolicyFromInvite(): Connection {
+    /**
+     * Bind a new pairing to its selected route before any probe or credential redemption.
+     *
+     * [everyLocalRoute] is for the desktop's own pairing QR. When that leads with a local
+     * address, the person is confirming this computer on this network, and the desktop cannot
+     * know which of its addresses the phone can reach: a Windows PC lists WSL's and Hyper-V's
+     * virtual adapters beside its Wi-Fi. Every local address the QR carries is then consented
+     * for the one-time pairing walk ([pairingEndpoints]), and [pinningRouteConsent] narrows it
+     * to the one that answered before the device token is stored. A typed or discovered
+     * address stays exactly one.
+     */
+    fun establishingRoutePolicyFromInvite(everyLocalRoute: Boolean = false): Connection {
         val selected = activeEndpoint
             ?: CompanionEndpoint.direct(host, port, priority = 0)
+        val invited = if (everyLocalRoute) {
+            endpoints.orEmpty() + hosts.orEmpty().mapNotNull { CompanionEndpoint.direct(it, port, priority = 0) }
+        } else {
+            emptyList()
+        }
+        return consenting(selected, invited)
+    }
+
+    /**
+     * After a pairing walk, bind consent to one route again: the local address that redeemed
+     * the credential ([winner]), or — when a protected route redeemed it — the [invite]'s
+     * selected route, exactly as a single-route invite always was. The device token then never
+     * reaches a local address this phone did not pair through.
+     */
+    fun pinningRouteConsent(winner: CompanionEndpoint?, invite: Connection): Connection = consenting(
+        winner?.takeUnless { it.protectsCredentials }
+            ?: invite.activeEndpoint
+            ?: CompanionEndpoint.direct(invite.host, invite.port, priority = 0),
+        emptyList(),
+    )
+
+    /** Consent to [selected] and hosted HTTPS; when [selected] is local, also to [others]' local routes. */
+    private fun consenting(selected: CompanionEndpoint?, others: List<CompanionEndpoint>): Connection {
+        val local = if (selected?.securityClass == CompanionEndpointSecurityClass.EXPLICIT_LOCAL) {
+            (listOf(selected) + others).filter { it.securityClass == CompanionEndpointSecurityClass.EXPLICIT_LOCAL }
+        } else {
+            emptyList()
+        }
         val kinds = when (selected?.kind) {
             CompanionEndpointKind.HOSTED, null -> setOf(CompanionEndpointKind.HOSTED)
-            CompanionEndpointKind.TAILNET -> setOf(
-                CompanionEndpointKind.TAILNET,
-                CompanionEndpointKind.HOSTED,
-            )
-            CompanionEndpointKind.LAN -> setOf(
-                CompanionEndpointKind.LAN,
-                CompanionEndpointKind.HOSTED,
-            )
-            CompanionEndpointKind.BONJOUR -> setOf(
-                CompanionEndpointKind.BONJOUR,
-                CompanionEndpointKind.HOSTED,
-            )
+            else -> setOf(selected.kind, CompanionEndpointKind.HOSTED) + local.map { it.kind }
         }
-        val localURLs = if (selected?.securityClass == CompanionEndpointSecurityClass.EXPLICIT_LOCAL) {
-            setOf(selected.url)
-        } else {
-            emptySet()
-        }
-        val policy = copy(allowedRouteKinds = kinds, allowedLocalRouteURLs = localURLs)
+        val policy = copy(allowedRouteKinds = kinds, allowedLocalRouteURLs = local.map { it.url }.toSet())
         return policy.copy(
             endpoints = endpoints?.let(policy::endpointsAllowedByRoutePolicy)?.take(MAX_ENDPOINTS),
             hosts = hosts?.let(policy::advertisedHostsAllowedByRoutePolicy)?.take(MAX_ENDPOINTS),
@@ -184,6 +206,23 @@ data class Connection(
 
     val automaticEndpoints: List<CompanionEndpoint>
         get() = CompanionEndpoint.automaticCandidates(orderedEndpoints)
+
+    /**
+     * The routes the one-time pairing walk may try, in the desktop's order. Unlike
+     * [automaticEndpoints], every consented local address is tried, not only the first:
+     * consent is already exact here (see [establishingRoutePolicyFromInvite]). When a
+     * protected route leads, cleartext still never follows it.
+     */
+    val pairingEndpoints: List<CompanionEndpoint>
+        get() {
+            val routes = orderedEndpoints
+            val leadsLocal = routes.firstOrNull()?.protectsCredentials == false
+            return if (allowedRouteKinds != null && leadsLocal) routes else automaticEndpoints
+        }
+
+    /** How many more of this computer's addresses a pairing will try beyond the one shown. */
+    val otherPairingAddressCount: Int
+        get() = allowedLocalRouteURLs.orEmpty().count { it != pairingConsentOrigin }
 
     /**
      * Apply an authenticated endpoint snapshot, which is a replacement rather than a hint.
@@ -405,7 +444,7 @@ data class PairingInvite(val connection: Connection, val credential: String) {
                 connection = connection.copy(endpoints = endpoints).dialing(endpoints.first())
             }
 
-            return PairingInvite(connection.establishingRoutePolicyFromInvite(), credential)
+            return PairingInvite(connection.establishingRoutePolicyFromInvite(everyLocalRoute = true), credential)
         }
 
         fun parse(url: String): PairingInvite? = runCatching { URI(url) }.getOrNull()?.let(::parse)
@@ -487,12 +526,19 @@ data class PairingInvite(val connection: Connection, val credential: String) {
                 .takeIf { it.isNotEmpty() }
         }
 
-        /** Percent-decode a URI query component without form-url-decoding '+'. */
+        /**
+         * Percent-decode a query component, reading '+' as a space. Desktops before Oct 2026
+         * wrote the link with URLSearchParams, which encodes a space as '+' ("Miguel's+computer");
+         * every builder writes a real '+' as %2B, and no credential, address or route contains one.
+         */
         private fun decodeQuery(value: String): String? = runCatching {
             val bytes = ByteArrayOutputStream(value.length)
             var index = 0
             while (index < value.length) {
-                if (value[index] == '%') {
+                if (value[index] == '+') {
+                    bytes.write(' '.code)
+                    index += 1
+                } else if (value[index] == '%') {
                     if (index + 2 >= value.length) return null
                     val high = value[index + 1].digitToIntOrNull(16) ?: return null
                     val low = value[index + 2].digitToIntOrNull(16) ?: return null

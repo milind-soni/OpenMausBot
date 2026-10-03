@@ -20,9 +20,9 @@ import {
   Wifi,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { phonePairingLink } from "../../shared/pairing-link";
 import {
   companionPairingAddressText,
-  companionPairingLink,
   companionPairingRoute,
   companionPairingRoutePin,
   companionPairingRoutePinAvailable,
@@ -794,7 +794,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
   );
   const pairingLink = useMemo(() => {
     if (!state?.pairing || !pairingRoute) return null;
-    return companionPairingLink({
+    return phonePairingLink({
       ...pairingRoute,
       code: state.pairing.code,
       token: state.pairing.token,

@@ -19,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okio.Buffer
@@ -50,17 +51,78 @@ class PairingClientTest {
         }
 
         assertEquals(listOf("http://mac.tail1234.ts.net:8810"), error.attemptedRoutes)
-        // This is the whole of what a stalled pairing tells the person, so the
-        // switch it names has to be the one the desktop actually has: Phone
-        // access, not a Companion toggle (`ios/Sources/CompanionCore/Client.swift:317`).
         assertEquals(
-            "Couldn't reach this computer through any available route " +
-                "(http://mac.tail1234.ts.net:8810). Keep Phone access turned on in " +
-                "OpenMausBot, then try again.",
+            "Your phone couldn't reach Mac over Tailscale. Turn on Tailscale on this phone, " +
+                "signed in to the same tailnet as the computer, then try again.\n" +
+                "Tried: http://mac.tail1234.ts.net:8810",
             error.message,
         )
         assertEquals(listOf("mac.tail1234.ts.net"), stub.requests.map { it.url.host })
         assertTrue(stub.requests.all { it.url.encodedPath == "/api/health" })
+    }
+
+    // Oct 3: a Windows PC's QR led with WSL's 172.19.96.1 and Hyper-V's 172.27.208.1; the
+    // phone tried only the first and failed. Every local address the QR carries is tried, the
+    // credential still goes only to the first that identifies itself as OpenMausBot.
+    @Test
+    fun aDesktopQrPairsThroughWhicheverOfItsLocalAddressesAnswers() = runBlocking {
+        val wsl = endpoint("http://172.19.96.1:8810", CompanionEndpointKind.LAN, 0)
+        val hyperV = endpoint("http://172.27.208.1:8810", CompanionEndpointKind.LAN, 100)
+        val wifi = endpoint("http://192.168.1.34:8810", CompanionEndpointKind.LAN, 200)
+        val stub = PairingStub { request ->
+            when {
+                request.url.host != wifi.host -> StubAction.Failure(IOException("timed out"))
+                request.url.encodedPath == "/api/health" -> StubAction.reply(200, HEALTH)
+                else -> StubAction.reply(201, PAIRED)
+            }
+        }
+        val invite = assertNotNull(PairingInvite.parse(qrLink(wsl, hyperV, wifi)))
+
+        val outcome = CompanionClient.pairFirstReachable(
+            invite.connection,
+            invite.credential,
+            "Pixel",
+            client = stub.client,
+        )
+
+        assertEquals(wifi, outcome.connection.activeEndpoint)
+        assertEquals(setOf(wsl.host, hyperV.host, wifi.host), stub.healthRequests.map { it.url.host }.toSet())
+        assertEquals(listOf(wifi.host), stub.pairRequests.map { it.url.host })
+    }
+
+    @Test
+    fun whenNoLocalAddressAnswersTheErrorSaysSameWifiOrRemoteAccess() = runBlocking {
+        val wsl = endpoint("http://172.19.96.1:8810", CompanionEndpointKind.LAN, 0)
+        val wifi = endpoint("http://192.168.1.34:8810", CompanionEndpointKind.LAN, 100)
+        val stub = PairingStub { StubAction.Failure(IOException("timed out")) }
+        val invite = assertNotNull(PairingInvite.parse(qrLink(wsl, wifi)))
+
+        val error = assertFailsWith<PairingRouteError> {
+            CompanionClient.pairFirstReachable(invite.connection, invite.credential, "Pixel", client = stub.client)
+        }
+
+        assertEquals(listOf(wsl.url, wifi.url), error.attemptedRoutes)
+        assertEquals(
+            "Your phone couldn't reach Miguel's computer on this network. Put the phone on the " +
+                "same Wi-Fi as the computer, or open Settings → Remote access on the computer and " +
+                "sign in so the phone can connect from anywhere.\n" +
+                "Tried: http://172.19.96.1:8810, http://192.168.1.34:8810",
+            error.message,
+        )
+    }
+
+    @Test
+    fun whenAnHttpsRouteWasTriedTooTheErrorSaysWakeTheComputer() {
+        assertEquals(
+            "Couldn't reach Mac. Make sure the computer is awake with OpenMausBot open, then try again.\n" +
+                "Tried: https://mac.companion.example, http://192.168.1.42:8810",
+            PairingRouteError(listOf("https://mac.companion.example", "http://192.168.1.42:8810"), computerName = "Mac").message,
+        )
+        assertEquals(
+            "Couldn't reach this computer. Make sure the computer is awake with OpenMausBot open, " +
+                "then try again.\nTried: https://mac.companion.example",
+            PairingRouteError(listOf("https://mac.companion.example"), computerName = " ").message,
+        )
     }
 
     @Test
@@ -242,11 +304,12 @@ class PairingClientTest {
             generateSequence(error.routeFailures.getValue(route)) { it.cause }.any { it is UnknownHostException },
             "the route's own failure is kept, not folded into unreachable",
         )
+        // The route's own cause is the next step; the generic Tailscale line would only repeat it.
         assertEquals(
-            "Couldn't reach this computer through any available route ($route). Keep Phone access " +
-                "turned on in OpenMausBot, then try again. “mac.tail1234.ts.net” didn't resolve. Make " +
+            "Couldn't reach Mac. “mac.tail1234.ts.net” didn't resolve. Make " +
                 "sure Tailscale is connected on this phone, and set Private DNS (Settings → Network & " +
-                "internet) to Off or Automatic — a named Private DNS provider can't resolve Tailscale names.",
+                "internet) to Off or Automatic — a named Private DNS provider can't resolve Tailscale names.\n" +
+                "Tried: $route",
             error.message,
         )
         assertTrue(stub.pairRequests.isEmpty())
@@ -271,6 +334,7 @@ class PairingClientTest {
         val message = assertNotNull(error.message)
         assertTrue("Allow local network access" in message, message)
         assertFalse("Tailscale" in message, "a LAN address has nothing to do with Tailscale")
+        assertFalse("same Wi-Fi" in message, "one next step: the permission, not the network")
         assertTrue(stub.pairRequests.isEmpty())
     }
 
@@ -450,6 +514,15 @@ class PairingClientTest {
 
     private fun endpoint(url: String, kind: CompanionEndpointKind, priority: Int): CompanionEndpoint =
         assertNotNull(CompanionEndpoint.create(url, kind, priority))
+
+    /** A desktop "Pair on this Wi-Fi" QR, as the Oct 2026 desktop wrote it: '+' for a space. */
+    private fun qrLink(vararg endpoints: CompanionEndpoint): String {
+        val routes = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(CompanionJson.encodeToString(endpoints.toList()).toByteArray())
+        val first = endpoints.first()
+        return "openmausbot://pair?address=${first.host}%3A${first.port}&token=$CREDENTIAL" +
+            "&name=Miguel%27s+computer&hosts=${endpoints.joinToString(",") { it.host }}&endpoints=$routes"
+    }
 
     private fun typedConnection(vararg endpoints: CompanionEndpoint): Connection {
         val active = endpoints.first()

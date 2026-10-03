@@ -26,6 +26,26 @@ class RouteConsentTest {
     private val otherLocal = requireNotNull(
         CompanionEndpoint.create("http://192.168.1.99:8810", CompanionEndpointKind.LAN, 50),
     )
+    private val wsl = requireNotNull(
+        CompanionEndpoint.create("http://172.19.96.1:8810", CompanionEndpointKind.LAN, 0),
+    )
+    private val wifi = requireNotNull(
+        CompanionEndpoint.create("http://192.168.1.34:8810", CompanionEndpointKind.LAN, 100),
+    )
+    private val bonjour = requireNotNull(
+        CompanionEndpoint.create("http://miguel.local:8810", CompanionEndpointKind.BONJOUR, 200),
+    )
+
+    /** The Oct 3 QR: "Pair on this Wi-Fi" on a Windows PC whose WSL adapter enumerated first. */
+    private fun windowsQr(): PairingInvite = requireNotNull(PairingInvite.parse(URI(
+        "openmausbot://pair?address=172.19.96.1%3A8810&token=$TOKEN&name=Miguel%27s+computer" +
+            "&hosts=172.19.96.1,192.168.1.34,miguel.local,miguel.tail1234.ts.net" +
+            "&endpoints=${encoded(listOf(wsl, wifi, bonjour))}",
+    )))
+
+    private fun encoded(routes: List<CompanionEndpoint>): String =
+        java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(CompanionJson.encodeToString(routes).toByteArray())
 
     @Test
     fun hostedInviteAndAdvertisementsRemainHostedOnly() {
@@ -240,6 +260,61 @@ class RouteConsentTest {
         assertEquals(setOf(local.url), localInvite.connection.allowedLocalRouteURLs)
     }
 
+    // Oct 3: a Windows PC's QR led with WSL's 172.19.96.1. The phone, allowed only that one
+    // address, never tried the Wi-Fi address the same QR carried. The desktop cannot know
+    // which of its addresses a phone can reach, so its own QR consents to all of them for
+    // the one-time pairing walk.
+    @Test
+    fun aDesktopQrLeadingWithALocalAddressConsentsToEveryLocalAddressItCarries() {
+        val connection = windowsQr().connection
+
+        assertEquals(setOf(wsl.url, wifi.url, bonjour.url), connection.allowedLocalRouteURLs)
+        assertEquals(
+            setOf(CompanionEndpointKind.LAN, CompanionEndpointKind.BONJOUR, CompanionEndpointKind.HOSTED),
+            connection.allowedRouteKinds,
+        )
+        assertEquals(listOf(wsl.url, wifi.url, bonjour.url), connection.pairingEndpoints.map { it.url })
+        assertEquals(listOf(wsl.host, wifi.host, bonjour.host), connection.hosts, "the tailnet name is not local")
+        // Reconnecting is not pairing: a saved connection still never walks sideways.
+        assertEquals(listOf(wsl.url), connection.automaticEndpoints.map { it.url })
+    }
+
+    @Test
+    fun aTypedOrDiscoveredAddressStillConsentsToExactlyOne() {
+        val discovered = Connection(
+            name = "Mac",
+            host = wifi.host,
+            port = wifi.port,
+            hosts = listOf(wifi.host, wsl.host),
+        ).establishingRoutePolicyFromInvite()
+
+        assertEquals(setOf(wifi.url), discovered.allowedLocalRouteURLs)
+        assertEquals(listOf(wifi.url), discovered.pairingEndpoints.map { it.url })
+    }
+
+    @Test
+    fun aProtectedQrNeverWalksTheLocalAddressesItCarries() {
+        val routes = listOf(hosted, wsl, wifi)
+        val connection = requireNotNull(PairingInvite.parse(URI(
+            "openmausbot://pair?address=mac.companion.example%3A443&token=$TOKEN&endpoints=${encoded(routes)}",
+        ))).connection
+
+        assertEquals(emptySet(), connection.allowedLocalRouteURLs)
+        assertEquals(listOf(hosted.url), connection.pairingEndpoints.map { it.url })
+    }
+
+    @Test
+    fun pairingPinsConsentToTheLocalAddressThatAnswered() {
+        val invite = windowsQr().connection
+        val paired = invite.dialing(wifi).pinningRouteConsent(wifi, invite)
+
+        assertEquals(setOf(wifi.url), paired.allowedLocalRouteURLs)
+        assertEquals(setOf(CompanionEndpointKind.LAN, CompanionEndpointKind.HOSTED), paired.allowedRouteKinds)
+        assertEquals(listOf(wifi.url), paired.endpoints.orEmpty().map { it.url }, "persisted, not only filtered")
+        assertEquals(listOf(wifi.host), paired.hosts)
+        assertEquals(listOf(wifi.url), paired.automaticEndpoints.map { it.url })
+    }
+
     @Test
     fun nonNullRoutePolicyRoundTripsWithThePersistedConnection() {
         val connection = Connection(
@@ -356,4 +431,8 @@ class RouteConsentTest {
         hosts = listOf(otherLocal.host, local.host, tailnet.host),
         endpoints = listOf(otherLocal, tailnet, local, hosted),
     )
+
+    private companion object {
+        const val TOKEN = "omb_pair_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
 }

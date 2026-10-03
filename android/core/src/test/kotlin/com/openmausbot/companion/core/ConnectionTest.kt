@@ -223,12 +223,19 @@ class ConnectionTest {
         assertEquals(token, invite.credential)
     }
 
+    // Oct 3: an Android phone showed "Miguel's+computer". Desktops before Oct 2026 wrote
+    // the link with URLSearchParams, which encodes a space as '+'; every builder writes a
+    // real '+' as %2B, and no other field can contain one.
     @Test
-    fun literalPlusInPairingInviteNameIsPreserved() {
+    fun aPlusInAPairingInviteIsASpaceAndAnEncodedPlusIsAPlus() {
         val invite = PairingInvite.parse(
-            URI("openmausbot://pair?address=mac.local&code=004209&name=Ada%27s+Mac"),
+            URI("openmausbot://pair?address=mac.local&code=004209&name=Miguel%27s+computer"),
         )
-        assertEquals("Ada's+Mac", invite?.connection?.name)
+        assertEquals("Miguel's computer", invite?.connection?.name)
+        val plus = PairingInvite.parse(
+            URI("openmausbot://pair?address=mac.local&code=004209&name=C%2B%2B+box"),
+        )
+        assertEquals("C++ box", plus?.connection?.name)
     }
 
     @Test
@@ -309,7 +316,8 @@ class ConnectionTest {
         val invite = PairingInvite.parse(URI(
             "openmausbot://pair?address=mac.local&code=004209&hosts=%20192.168.1.42%20,,bad%2Fslash,has%20space",
         ))!!
-        assertEquals(emptyList(), invite.connection.hosts)
+        // The usable one is trimmed and kept: a desktop QR consents to every local address it carries.
+        assertEquals(listOf("192.168.1.42"), invite.connection.hosts)
         val empty = PairingInvite.parse(
             URI("openmausbot://pair?address=mac.local&code=004209&hosts=bad%2Fslash"),
         )
