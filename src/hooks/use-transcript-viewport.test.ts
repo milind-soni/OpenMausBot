@@ -330,9 +330,29 @@ describe("transcript viewport", () => {
     expect(view.current.windowedMessages).toHaveLength(120);
 
     view.act(() => press("PageUp"));
-    view.rerender({ messages: rows(100) });
+    view.rerender({ messages: rows(20) });
     expect(view.current.hiddenCount).toBe(0);
-    expect(view.current.windowedMessages).toHaveLength(100);
+    expect(view.current.windowedMessages).toHaveLength(20);
+  });
+
+  it("re-tails a following window when the thread shrinks but still reaches past its start", () => {
+    // a branch switch can shorten the thread without dropping below the
+    // window's start; the person's newest message may now sit before it
+    const view = mount({ messages: rows(300) });
+    view.rerender({ messages: rows(620) });
+    expect(view.current.hiddenCount).toBe(500);
+
+    const branch: Row[] = [...rows(450), { id: "ask", role: "user" }, ...rows(109, 2_000)];
+    view.rerender({ messages: branch });
+    expect(view.current.hiddenCount).toBe(440);
+    expect(view.current.windowedMessages).toHaveLength(120);
+    expect(view.current.windowedMessages.map((row) => row.id)).toContain("ask");
+    expect(scroller.scrollTop).toBe(scroller.bottom);
+
+    // a reader who has scrolled away keeps the rows they are reading
+    view.act(() => press("PageUp"));
+    view.rerender({ messages: rows(500) });
+    expect(view.current.hiddenCount).toBe(440);
   });
 
   it("shows earlier rows without moving the row under the reader", () => {
