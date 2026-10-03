@@ -44,7 +44,11 @@ public struct ChatUpdate: Identifiable, Hashable, Codable {
 }
 
 extension CompanionState {
-    public var updates: [ChatUpdate] {
+    /// Every chat worth a line on the pill, the sheet, the island, Live
+    /// Activities, the widget and Walkie. `detail` is the reader's Activity
+    /// setting: these lines fold tool calls and webhooks by the same rule as
+    /// the roster, so Hidden means hidden on every surface (MOCA-204).
+    public func updates(detail: ActivityDetail) -> [ChatUpdate] {
         var out: [ChatUpdate] = []
         var seen = Set<String>()
 
@@ -66,9 +70,9 @@ extension CompanionState {
                 } else if let held = pendingQueued[task.threadId], !held.isEmpty {
                     out.append(ChatUpdate(chat: chat, kind: .working, line: queuedLine(for: held), card: nil))
                 } else if projected.busy == true {
-                    out.append(ChatUpdate(chat: chat, kind: .working, line: workingLine(threadId: task.threadId), card: nil))
+                    out.append(ChatUpdate(chat: chat, kind: .working, line: workingLine(threadId: task.threadId, detail: detail), card: nil))
                 } else if projected.unread {
-                    out.append(ChatUpdate(chat: chat, kind: .toReview, line: lastLine(threadId: task.threadId), card: nil))
+                    out.append(ChatUpdate(chat: chat, kind: .toReview, line: lastLine(threadId: task.threadId, detail: detail), card: nil))
                 }
             }
         }
@@ -80,10 +84,10 @@ extension CompanionState {
                 out.append(ChatUpdate(chat: chat, kind: .working, line: queuedLine(for: held), card: nil))
             } else if room.busyBotId != nil {
                 seen.insert(chat.conversationID)
-                out.append(ChatUpdate(chat: chat, kind: .working, line: workingLine(threadId: room.threadId), card: nil))
+                out.append(ChatUpdate(chat: chat, kind: .working, line: workingLine(threadId: room.threadId, detail: detail), card: nil))
             } else if room.unread {
                 seen.insert(chat.conversationID)
-                out.append(ChatUpdate(chat: chat, kind: .toReview, line: lastLine(threadId: room.threadId), card: nil))
+                out.append(ChatUpdate(chat: chat, kind: .toReview, line: lastLine(threadId: room.threadId, detail: detail), card: nil))
             }
         }
         return out.sorted { $0.kind < $1.kind }
@@ -107,27 +111,21 @@ extension CompanionState {
         return "\(held.count) messages queued"
     }
 
-    private func workingLine(threadId: String) -> String {
+    private func workingLine(threadId: String, detail: ActivityDetail) -> String {
         if let live = streaming[threadId], !live.isEmpty {
             return String(live.suffix(120)).replacingOccurrences(of: "\n", with: " ")
         }
-        if let last = visibleTranscript(forThread: threadId).last, last.kind == .activity, let tool = last.tool {
+        // A tool's name is often its raw command line. Only a reader who
+        // wants tool calls sees it; a status notice is for everyone.
+        if let last = visibleTranscript(forThread: threadId).last, last.kind == .activity, let tool = last.tool,
+           detail != .hidden || isStatusNotice(last) {
             return tool.name
         }
         return "Working…"
     }
 
-    private func lastLine(threadId: String) -> String {
-        guard let last = visibleTranscript(forThread: threadId).last(where: { $0.kind != .digest }) else { return "" }
-        switch last.kind {
-        case .text, .unknown: return last.text ?? ""
-        case .options: return last.card?.title ?? ""
-        case .secret: return last.secret?.label ?? last.text ?? "Credential required"
-        case .activity: return last.tool?.name ?? ""
-        case .screen: return "Screenshot"
-        case .digest: return ""
-        case .compaction: return last.compaction?.chipText ?? last.text ?? ""
-        case .routineRun: return last.routineRun?.previewLine ?? last.text ?? ""
-        }
+    /// What the chat last said, read by the roster's rule.
+    private func lastLine(threadId: String, detail: ActivityDetail) -> String {
+        rosterPreview(visibleTranscript(forThread: threadId), detail: detail)
     }
 }

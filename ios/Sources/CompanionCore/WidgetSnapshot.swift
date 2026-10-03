@@ -44,6 +44,10 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     /// another's.
     public let connectionID: String
     public let rows: [Row]
+    /// The reader's Activity setting the rows were folded under. The widget
+    /// extension cannot read the app's settings, so its own refresh reuses
+    /// this; nil in a snapshot written before the field existed.
+    public var detail: ActivityDetail? = nil
 }
 
 extension WidgetSnapshot {
@@ -117,7 +121,8 @@ extension WidgetSnapshot {
         WidgetSnapshot(
             writtenAt: writtenAt,
             connectionID: connectionID,
-            rows: rows.filter { $0.chat.threadId != threadId }
+            rows: rows.filter { $0.chat.threadId != threadId },
+            detail: detail
         )
     }
 }
@@ -129,6 +134,7 @@ extension CompanionState {
     /// widget only ever sees the resulting string.
     public func widgetSnapshot(
         connectionID: String,
+        detail: ActivityDetail,
         now: Date = Date(),
         face: (Chat) -> String,
         since: (ChatUpdate) -> Date? = { _ in nil }
@@ -136,7 +142,7 @@ extension CompanionState {
         WidgetSnapshot(
             writtenAt: now,
             connectionID: connectionID,
-            rows: updates.map { update in
+            rows: updates(detail: detail).map { update in
                 // Widgets render identity, status and the offered card, not
                 // the conversation or the rest of its thread tree.
                 let chat: Chat
@@ -162,7 +168,8 @@ extension CompanionState {
                     face: face(update.chat),
                     since: since(update)
                 )
-            }
+            },
+            detail: detail
         )
     }
 }

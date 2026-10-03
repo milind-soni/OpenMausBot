@@ -87,7 +87,7 @@ final class WidgetSyncBridge {
             sinceClock = WidgetSinceClock()
             clockConnectionID = connectionID
         }
-        let snapshot = state.widgetSnapshot(connectionID: connectionID) { chat in
+        let snapshot = state.widgetSnapshot(connectionID: connectionID, detail: .stored) { chat in
             MausState.forChat(chat, in: state).rawValue
         } since: { update in
             sinceClock.stamp(for: update.chat, kind: update.kind)

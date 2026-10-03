@@ -63,16 +63,16 @@ final class LiveActivityUpdatesTests: XCTestCase {
             state.messages[threadId] = [ask]
         }
 
-        XCTAssertEqual(state.updates.filter { $0.chat.id == "bot-busy" }.count, 3)
-        let selected = state.liveActivityUpdates
+        XCTAssertEqual(state.updates(detail: .full).filter { $0.chat.id == "bot-busy" }.count, 3)
+        let selected = state.liveActivityUpdates(detail: .full)
         XCTAssertEqual(selected.count, 3)
         XCTAssertEqual(Set(selected.map(\.chat.id)).count, selected.count)
         XCTAssertTrue(selected.allSatisfy { $0.chat.isBot && $0.kind != .toReview })
         XCTAssertEqual(selected.first { $0.chat.id == "bot-busy" }?.chat.threadId, "newest-ask")
         XCTAssertEqual(selected.first { $0.chat.id == "bot-busy" }?.card?.requestId, "newest-ask")
-        XCTAssertEqual(state.liveActivityUpdates, selected)
+        XCTAssertEqual(state.liveActivityUpdates(detail: .full), selected)
 
         state.messages["newest-ask"]?[0].card?.answered = "Ship it"
-        XCTAssertEqual(state.liveActivityUpdates.first { $0.chat.id == "bot-busy" }?.chat.threadId, "older-ask")
+        XCTAssertEqual(state.liveActivityUpdates(detail: .full).first { $0.chat.id == "bot-busy" }?.chat.threadId, "older-ask")
     }
 }

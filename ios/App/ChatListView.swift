@@ -122,7 +122,7 @@ struct ChatListView: View {
             .overlay(alignment: .top) {
                 if CompanionLayout.supportsIslandPresentation {
                     NeedsYouIsland(
-                        update: session.state.updates.first { $0.kind == .needsYou }
+                        update: session.state.updates(detail: activity).first { $0.kind == .needsYou }
                     ) { chat in path.append(chat) }
                 }
             }
@@ -645,7 +645,7 @@ struct ChatListView: View {
     }
 
     private var updatesButton: some View {
-        UpdatesPill(updates: session.state.updates) {
+        UpdatesPill(updates: session.state.updates(detail: activity)) {
             Haptics.selection()
             showingUpdates = true
         }

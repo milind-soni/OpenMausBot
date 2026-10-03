@@ -48,7 +48,7 @@ final class LiveActivityCoordinator {
 
     private func sync(_ state: CompanionState) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        let wanted = state.liveActivityUpdates
+        let wanted = state.liveActivityUpdates(detail: .stored)
         var wantedIds = Set<String>()
 
         for update in wanted {

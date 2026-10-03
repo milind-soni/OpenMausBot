@@ -32,7 +32,7 @@ final class UpdatesTests: XCTestCase {
     // MARK: - Ordering
 
     func testKindsAppearInCareOrderAndQuietOrHiddenChatsNeverDo() throws {
-        let updates = try hydrated.updates
+        let updates = try hydrated.updates(detail: .full)
         XCTAssertEqual(updates.map(\.chat.threadId), [
             "t-ask-new", "t-ask-old", // needs you, newest ask first
             "t-busy", "r-busy", // working, bots before rooms
@@ -44,7 +44,7 @@ final class UpdatesTests: XCTestCase {
     }
 
     func testNewestApprovalHeadsTheListAndEachChatKeepsOneRow() throws {
-        let needsYou = try hydrated.updates.filter { $0.kind == .needsYou }
+        let needsYou = try hydrated.updates(detail: .full).filter { $0.kind == .needsYou }
         XCTAssertEqual(needsYou.map(\.chat.name), ["Pesto", "Sage"])
         // The subtitle is the question line; the title is only its fallback.
         XCTAssertEqual(needsYou[0].line, "All gates are green on the fork")
@@ -57,19 +57,19 @@ final class UpdatesTests: XCTestCase {
     // MARK: - Working
 
     func testWorkingLineFallsBackToTheLastToolNameThenWorkingDots() throws {
-        let updates = try hydrated.updates
+        let updates = try hydrated.updates(detail: .full)
         XCTAssertEqual(updates.first { $0.chat.threadId == "t-busy" }?.line, "Read")
         XCTAssertEqual(updates.first { $0.chat.threadId == "r-busy" }?.line, "Bash")
 
         var state = try hydrated
         state.messages["t-busy"] = [Message(id: "busy-plain", role: .bot, kind: .text, at: 7)]
-        XCTAssertEqual(state.updates.first { $0.chat.threadId == "t-busy" }?.line, "Working…")
+        XCTAssertEqual(state.updates(detail: .full).first { $0.chat.threadId == "t-busy" }?.line, "Working…")
     }
 
     func testStreamingTailWinsOverToolNamesAndClampsToAFolded120Characters() throws {
         var state = try hydrated
         state.streaming["t-busy"] = String(repeating: "a", count: 100) + "\n" + String(repeating: "b", count: 50)
-        let line = state.updates.first { $0.chat.threadId == "t-busy" }?.line
+        let line = state.updates(detail: .full).first { $0.chat.threadId == "t-busy" }?.line
         // The tail is kept, clamped to its last 120 characters, and folded to one line.
         XCTAssertEqual(line, String(repeating: "a", count: 69) + " " + String(repeating: "b", count: 50))
     }
@@ -78,20 +78,20 @@ final class UpdatesTests: XCTestCase {
         // A capacity hold names the wait it is actually in.
         var state = try hydrated
         state.pendingQueued["t-idle"] = [QueuedSend(queueId: "q-cap", text: "run the tests", reason: "capacity")]
-        let capacity = try XCTUnwrap(state.updates.first { $0.chat.threadId == "t-idle" })
+        let capacity = try XCTUnwrap(state.updates(detail: .full).first { $0.chat.threadId == "t-idle" })
         XCTAssertEqual(capacity.kind, .working)
         XCTAssertEqual(capacity.line, "Queued — waiting for an available slot")
 
         // A hold behind the running turn is simply queued.
         state.pendingQueued["t-idle"] = [QueuedSend(queueId: "q-turn", text: "run the tests", reason: "behind-turn")]
-        XCTAssertEqual(state.updates.first { $0.chat.threadId == "t-idle" }?.line, "Queued")
+        XCTAssertEqual(state.updates(detail: .full).first { $0.chat.threadId == "t-idle" }?.line, "Queued")
 
         // Two or more count themselves.
         state.pendingQueued["t-idle"] = [
             QueuedSend(queueId: "q-1", text: "first", reason: "capacity"),
             QueuedSend(queueId: "q-2", text: "second", reason: "capacity"),
         ]
-        XCTAssertEqual(state.updates.first { $0.chat.threadId == "t-idle" }?.line, "2 messages queued")
+        XCTAssertEqual(state.updates(detail: .full).first { $0.chat.threadId == "t-idle" }?.line, "2 messages queued")
     }
 
     // MARK: - Needs you without a card
@@ -100,7 +100,7 @@ final class UpdatesTests: XCTestCase {
         var state = try hydrated
         let index = try XCTUnwrap(state.bots.firstIndex { $0.id == "bot-idle" })
         state.bots[index].tasks?[0].activity = "waiting-on-you"
-        let row = try XCTUnwrap(state.updates.first { $0.chat.threadId == "t-idle" })
+        let row = try XCTUnwrap(state.updates(detail: .full).first { $0.chat.threadId == "t-idle" })
         XCTAssertEqual(row.kind, .needsYou)
         XCTAssertEqual(row.line, "Waiting on you")
         XCTAssertNil(row.card)
@@ -115,7 +115,7 @@ final class UpdatesTests: XCTestCase {
 
         func reviewLine(endingWith message: Message) throws -> String {
             state.messages["t-idle"] = [Message(id: "review-root", role: .bot, kind: .text, at: 0), message]
-            let row = try XCTUnwrap(state.updates.first { $0.chat.threadId == "t-idle" })
+            let row = try XCTUnwrap(state.updates(detail: .full).first { $0.chat.threadId == "t-idle" })
             XCTAssertEqual(row.kind, .toReview)
             return row.line
         }
@@ -156,8 +156,56 @@ final class UpdatesTests: XCTestCase {
         var digest = Message(id: "review-digest", role: .bot, kind: .digest, at: 9)
         digest.text = "[digest] · tools: 3 · reply: done"
         state.messages["t-idle"] = [visible, digest]
-        let row = try XCTUnwrap(state.updates.first { $0.chat.threadId == "t-idle" })
+        let row = try XCTUnwrap(state.updates(detail: .full).first { $0.chat.threadId == "t-idle" })
         XCTAssertEqual(row.line, "Visible before the digest")
     }
-}
 
+    // MARK: - Activity and webhooks (MOCA-204)
+
+    /// The line under a chat in Updates, the island, Live Activities, the
+    /// widget and Walkie reads like the roster: a webhook is its task, never
+    /// its envelope of delivery ids and headers.
+    func testToReviewLineShowsAWebhookAsItsTaskNotItsEnvelope() throws {
+        var state = try hydrated
+        let index = try XCTUnwrap(state.bots.firstIndex { $0.id == "bot-idle" })
+        state.bots[index].tasks?[0].unread = true
+        var webhook = Message(id: "review-webhook", role: .user, kind: .text, at: 1)
+        webhook.text = "[DEFAULT WEBHOOK INSTRUCTIONS]\nTriage the build failure.\n[/DEFAULT WEBHOOK INSTRUCTIONS]\n\n[UNTRUSTED WEBHOOK EVENT DATA]\nReceived: now\nDelivery ID: build-418\nEvent: build.failed\n\n{\"service\":\"checkout\"}\n[/UNTRUSTED WEBHOOK EVENT DATA]"
+        state.messages["t-idle"] = [webhook]
+        for detail in [ActivityDetail.full, .reduced, .hidden] {
+            let row = try XCTUnwrap(state.updates(detail: detail).first { $0.chat.threadId == "t-idle" })
+            XCTAssertEqual(row.line, "Triage the build failure.", "\(detail)")
+        }
+    }
+
+    /// A reader who turned activity off has said no tool calls, and a tool
+    /// call's name is often a raw shell command. Hidden means hidden on these
+    /// surfaces too; a status notice still says what the bot is doing.
+    func testHiddenActivityKeepsToolStepsOffTheUpdateLines() throws {
+        var state = try hydrated
+        XCTAssertEqual(state.updates(detail: .full).first { $0.chat.threadId == "t-busy" }?.line, "Read")
+        XCTAssertEqual(state.updates(detail: .hidden).first { $0.chat.threadId == "t-busy" }?.line, "Working…")
+        XCTAssertEqual(state.updates(detail: .hidden).first { $0.chat.threadId == "r-busy" }?.line, "Working…")
+
+        var notice = Message(id: "busy-notice", role: .bot, kind: .activity, at: 9)
+        notice.tool = ToolActivity(name: "notice: Qwen hit a rate limit and is retrying")
+        state.messages["t-busy"] = [notice]
+        XCTAssertEqual(
+            state.updates(detail: .hidden).first { $0.chat.threadId == "t-busy" }?.line,
+            "notice: Qwen hit a rate limit and is retrying"
+        )
+
+        let index = try XCTUnwrap(state.bots.firstIndex { $0.id == "bot-idle" })
+        state.bots[index].tasks?[0].unread = true
+        var answer = Message(id: "review-answer", role: .bot, kind: .text, at: 1)
+        answer.text = "Deployed to staging"
+        var command = Message(id: "review-command", role: .bot, kind: .activity, at: 2)
+        command.tool = ToolActivity(name: "/bin/zsh -lc \"kubectl rollout status deploy/web\"", ok: true)
+        state.messages["t-idle"] = [answer, command]
+        XCTAssertEqual(state.updates(detail: .hidden).first { $0.chat.threadId == "t-idle" }?.line, "Deployed to staging")
+        XCTAssertEqual(
+            state.updates(detail: .full).first { $0.chat.threadId == "t-idle" }?.line,
+            "/bin/zsh -lc \"kubectl rollout status deploy/web\""
+        )
+    }
+}

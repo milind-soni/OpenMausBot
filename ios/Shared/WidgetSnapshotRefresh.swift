@@ -97,8 +97,11 @@ enum WidgetSnapshotRefresh {
         state.hydrate(pulled.fleet, waitingThreads: pulled.waitingThreads)
         // Seed the elapsed clock from the snapshot being replaced, so a
         // refresh never resets a working bot's timer to now.
-        var sinceClock = WidgetSinceClock(seed: store.read())
-        let snapshot = state.widgetSnapshot(connectionID: connection.id) { chat in
+        let previous = store.read()
+        var sinceClock = WidgetSinceClock(seed: previous)
+        // The extension cannot see the app's Activity setting; the snapshot
+        // the app last wrote carries it, so a refresh folds the same way.
+        let snapshot = state.widgetSnapshot(connectionID: connection.id, detail: previous?.detail ?? .full) { chat in
             MausState.forChat(chat, in: state).rawValue
         } since: { update in
             sinceClock.stamp(for: update.chat, kind: update.kind)

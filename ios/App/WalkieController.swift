@@ -42,7 +42,7 @@ extension CompanionState {
     /// disagree about who needs you.
     var walkieRoster: [WalkieAgent] {
         var byBot: [String: ChatUpdate] = [:]
-        for update in updates {
+        for update in updates(detail: .stored) {
             if case let .bot(bot) = update.chat, byBot[bot.id] == nil { byBot[bot.id] = update }
         }
         let rows = bots.filter { $0.hidden != true }.map { bot -> WalkieAgent in
