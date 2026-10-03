@@ -106,26 +106,22 @@ export function setDraft(store: Store, id: string, text: string): void {
 const SAVE_DELAY_MS = 500;
 const unsavedDrafts = new Map<NonNullable<Store>, Set<string>>();
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
-let savingOnPageExit = false;
+// Node (the server tests) has no window, and some tests fake one without
+// events; there the timer alone saves.
+const page = (globalThis as { window?: Partial<EventTarget> }).window;
+page?.addEventListener?.("blur", saveDrafts);
+page?.addEventListener?.("pagehide", saveDrafts);
 
 function saveDraftLater(store: NonNullable<Store>, id: string): void {
   const ids = unsavedDrafts.get(store) ?? new Set<string>();
   ids.add(id);
   unsavedDrafts.set(store, ids);
-  // Node (the server tests) has no window; there the timer alone saves.
-  const page = (globalThis as { window?: EventTarget }).window;
-  if (!savingOnPageExit && page) {
-    savingOnPageExit = true;
-    page.addEventListener("blur", saveDrafts);
-    page.addEventListener("pagehide", saveDrafts);
-  }
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveDrafts, SAVE_DELAY_MS);
 }
 
 function saveDrafts(): void {
   clearTimeout(saveTimer);
-  saveTimer = undefined;
   for (const [store, ids] of unsavedDrafts) {
     const memory = memoryFor(store, textDraftsByStore, fallbackTextDrafts);
     // Re-read so drafts another window saved stay; write only what changed here.

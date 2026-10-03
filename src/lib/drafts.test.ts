@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement, type EffectCallback } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -47,9 +47,12 @@ function memoryStorage(): Storage {
 }
 
 // Drafts are also saved when this page loses focus or closes.
-const page = new EventTarget();
+const page = vi.hoisted(() => {
+  const page = new EventTarget();
+  vi.stubGlobal("window", page);
+  return page;
+});
 const leavePage = () => page.dispatchEvent(new Event("pagehide"));
-beforeAll(() => { vi.stubGlobal("window", page); });
 afterAll(() => { vi.unstubAllGlobals(); });
 
 afterEach(() => {
