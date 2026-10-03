@@ -71,9 +71,10 @@ export function qrEndpoints(endpoints: CompanionEndpoint[] | undefined): Compani
       const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
       if (
         parsed.protocol !== expectedProtocol ||
-        // A machine name before the suffix, as both phones require: one
-        // endpoint they refuse makes them refuse the whole QR.
-        (endpoint.kind === "tailnet" && !(hostname.length > ".ts.net".length && hostname.endsWith(".ts.net"))) ||
+        // No empty DNS label (".ts.net", "mac..local"): the phones refuse
+        // one, and one endpoint they refuse makes them refuse the whole QR.
+        hostname.split(".").includes("") ||
+        (endpoint.kind === "tailnet" && !hostname.endsWith(".ts.net")) ||
         (explicitPort !== null && (!Number.isInteger(explicitPort) || explicitPort < 1 || explicitPort > 65_535)) ||
         parsed.username ||
         parsed.password ||
