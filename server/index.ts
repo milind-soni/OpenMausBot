@@ -493,7 +493,8 @@ import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./
 import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
-import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { SERVER_ROOT, SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { createUpdateChecker, installKind } from "./update-check.ts";
 import {
   installLibrarySkill,
   listLibrarySkills,
@@ -762,6 +763,11 @@ const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
 const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
 let workspaceAccess: WorkspaceAccess | null = null;
 const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
+// Self-hosted "Check for updates" (MOCA-276); the packaged app has its own updater.
+const checkForServerUpdate = createUpdateChecker({
+  current: serverVersion(),
+  install: installKind({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE), serverRoot: SERVER_ROOT }),
+});
 const SHARED_WORKSPACE_FULL_ACCESS = sharedWorkspaceFullAccessConfigured();
 const sharedWorkspaceFullAccessEnabled = () => SHARED_WORKSPACE_FULL_ACCESS && Boolean(workspaceAccess) && entitled("admin");
 // Who a loopback request without a session is (server/request-auth.ts
@@ -24145,6 +24151,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // ── app config (API keys — never echoed back, booleans only) ──
+    if (method === "GET" && path === "/api/updates/check") {
+      try {
+        return json(res, 200, await checkForServerUpdate());
+      } catch (error) {
+        return json(res, 502, { error: `Could not check for updates: ${error instanceof Error ? error.message : String(error)}` });
+      }
+    }
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configForAccess(configStatus(), auth.scopes.includes("admin")));
     }
