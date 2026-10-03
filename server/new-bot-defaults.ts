@@ -27,7 +27,7 @@ export const botDefaultsProfileSchema = profilePatchSchema.extend({
   mascotExpression: z.string().max(60).nullable().optional(),
   modelSelection: botDefaultModelSchema.optional(),
   computer: z.enum(["cloud", "vm", "local", "browser", "off"]).nullable().optional(),
-  cloudBackend: z.enum(["box", "vps"]).optional(),
+  cloudBackend: z.enum(["box", "vps", "orgo"]).optional(),
   autoStartVps: z.boolean().optional(),
   cwd: z.string().max(4096).nullable().optional(),
   approvalMode: z.enum(["ask", "auto", "full", "custom"]).optional(),

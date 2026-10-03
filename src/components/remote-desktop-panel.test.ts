@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { cloudRunner, isActiveTurnRefusal, isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remote-desktop";
-import type { InstanceInfo } from "@/state/store";
+import { cloudComputerConfigured, cloudRunner, isActiveTurnRefusal, isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remote-desktop";
+import type { ConfigStatus, InstanceInfo } from "@/state/store";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../../shared/computer-contention";
 
 describe("remote VPS preview", () => {
+  it("never falls back to Boat for Orgo and requires an explicitly selected workspace", () => {
+    const claude = { instanceId: "claude", driverKind: "claude", capabilities: { computerMcp: true } } as InstanceInfo;
+    const boat = { instanceId: "boat", driverKind: "boxAgent", capabilities: { computerMcp: true } } as InstanceInfo;
+    const plain = { instanceId: "plain", driverKind: "codex" } as InstanceInfo;
+    expect(cloudRunner([claude, boat, plain], "claude", "orgo")).toBe(claude);
+    expect(cloudRunner([claude, boat, plain], "plain", "orgo")).toBeUndefined();
+    expect(cloudRunner([claude, boat, plain], "boat", "orgo")).toBeUndefined();
+    expect(cloudComputerConfigured({ orgo: { configured: true } } as ConfigStatus, "orgo")).toBe(false);
+    expect(cloudComputerConfigured({ orgo: { configured: true, workspaceId: "w" } } as ConfigStatus, "orgo")).toBe(true);
+    expect(cloudComputerConfigured({ box: { configured: true } } as ConfigStatus, "orgo")).toBe(false);
+  });
   it("uses the selected bot's bridge or the actual Boat fallback, never an unrelated bridge", () => {
     const plain = { instanceId: "plain", driverKind: "claude", snapshot: { state: "available" } } as InstanceInfo;
     const bridge = { ...plain, instanceId: "bridge", driverKind: "openai-compat", capabilities: { cloudComputerMcp: true } } as InstanceInfo;

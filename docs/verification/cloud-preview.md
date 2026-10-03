@@ -64,6 +64,14 @@ frame retention, and join-pause checks against the same fixture:
 OMB_UI_E2E=1 node node_modules/vitest/vitest.mjs run scripts/testing/cloud-preview.e2e.test.ts
 ```
 
+It also selects Orgo and proves its missing-key card never asks for a Boat
+key, saving a write-only key does not choose a workspace or provision a
+computer, and an explicit workspace selection connects the screen. Sleep
+and Start use the same Orgo computer. The fixture prints a temporary evidence
+directory with Boat-before, Orgo-setup, Orgo-ready and provider-picker screenshots. Orgo
+credentials, workspace catalog and lifecycle responses are synthetic; this
+does not contact an Orgo account or prove production provisioning.
+
 It reuses the standard isolated UI harness and prints the temporary data path
 and persistent server log. To reuse already installed test binaries, set
 `OMB_AGENT_BROWSER_PATH` and `AGENT_BROWSER_EXECUTABLE_PATH` explicitly.

@@ -1,17 +1,21 @@
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request, type IncomingHttpHeaders, type Server } from "node:http";
+import type { RequestOptions } from "node:https";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SessionRegistry } from "../sessions.ts";
 import { resolveRequestAuth, type RequestAuth } from "../request-auth.ts";
 import { json, readBody } from "../harness/http.ts";
 import { SHARED_LOCAL_VM_TARGET, perBotLocalVmTarget, poolLocalVmTarget, type ContainerComputerStatus } from "../container-computer.ts";
 import { createDesktopViewer, desktopViewerUrl, type DesktopTarget } from "./desktop-viewer.ts";
 import { localDesktopTarget, localVmViewerStatus, viewerTargetId } from "../desktop-viewer-targets.ts";
+
+const { httpsRequestMock } = vi.hoisted(() => ({ httpsRequestMock: vi.fn() }));
+vi.mock("node:https", () => ({ request: httpsRequestMock }));
 
 let dir: string;
 let sessions: SessionRegistry;
@@ -23,6 +27,7 @@ let desktopPort: number;
 let admin: ReturnType<SessionRegistry["issue"]>;
 let member: ReturnType<SessionRegistry["issue"]>;
 let vpsTarget: DesktopTarget | undefined;
+let orgoTarget: DesktopTarget | undefined;
 let inspected: string[];
 let seenHeaders: IncomingHttpHeaders;
 let seenPath: string | undefined;
@@ -82,7 +87,7 @@ beforeEach(async () => {
   admin = sessions.issue({ label: "Mac", scopes: ["admin", "client"] });
   member = sessions.issue({ label: "Member", scopes: ["client"] });
   inspected = []; touched = []; statusOverrides = {}; inspection = undefined; seenPath = undefined;
-  vpsTarget = undefined;
+  vpsTarget = undefined; orgoTarget = undefined;
   targetLookups = 0; handled = () => {};
   leases = new Set();
   targets = [SHARED_LOCAL_VM_TARGET, perBotLocalVmTarget("test-bot"), poolLocalVmTarget(1)];
@@ -97,10 +102,13 @@ beforeEach(async () => {
     socket.on("error", () => {});
   });
   desktopPort = await listen(desktop);
+  // No provider network calls: exercise the real proxy with the owned desktop.
+  httpsRequestMock.mockReset().mockImplementation((options: RequestOptions) => request({ ...options, hostname: "127.0.0.1", port: desktopPort }));
   viewer = createDesktopViewer({
     target: id => {
       targetLookups++;
       if (id === "vps/test-bot") return vpsTarget;
+      if (id === "orgo/test-bot") return orgoTarget;
       const target = targets.find(target => viewerTargetId(target) === id);
       return target && localDesktopTarget(target, {
         status: async target => {
@@ -330,6 +338,96 @@ it("uses the same authenticated proxy for VPS and releases only its own connecti
   sessions.revoke(admin.session.id);
   await closed;
   expect(holds).toBe(0);
+});
+
+it("keeps Orgo sockets on the app origin and forwards only each computer's fresh token", async () => {
+  let password = "computer-password&/+#?= secret";
+  orgoTarget = { key: "orgo/test-bot/computer-1", resolve: async () => ({
+    password, orgo: { flyInstanceId: "e784630de969d8", vncPassword: password },
+  }) };
+  const path = "/api/desktop-viewer/orgo/test-bot";
+  const url = desktopViewerUrl("orgo/test-bot");
+  expect(url).toBe("/desktop-viewer#target=orgo%2Ftest-bot");
+  expect(url).not.toContain(password);
+  const config = await get(path);
+  expect(config.body).toEqual({ password });
+  expect(config.headers["cache-control"]).toContain("no-store");
+  expect(httpsRequestMock).not.toHaveBeenCalled();
+  const answer = await open(`${path}/websockify?host=evil.example&token=sk_browser-key&password=wrong`, {
+    authorization: `Bearer ${admin.token}`, "sec-websocket-protocol": "binary", "x-api-key": "sk_browser-key",
+  });
+  expect(answer.status).toBe(101);
+  const socket = answer.socket!;
+  const echo = new Promise<Buffer>(resolve => socket.once("data", resolve));
+  const bytes = Buffer.from([0, 255, 12, 13, 127]);
+  socket.write(bytes);
+  expect(await echo).toEqual(bytes);
+  const options = httpsRequestMock.mock.calls[0][0] as RequestOptions;
+  expect(options.hostname).toBe("www.orgo.ai");
+  expect(options.port).toBe(443);
+  const upstream = new URL(seenPath!, "https://www.orgo.ai");
+  expect(upstream.pathname).toBe("/desktops/e784630de969d8/ws/websockify");
+  expect([...upstream.searchParams]).toEqual([["token", password]]);
+  expect(Object.keys(seenHeaders).sort()).toEqual(["connection", "host", "sec-websocket-key", "sec-websocket-version", "upgrade"]);
+  expect(JSON.stringify(options)).not.toContain("sk_browser-key");
+  expect(JSON.stringify(options)).not.toContain(admin.token);
+  password = "rotated-computer-password";
+  expect((await get(path)).body).toEqual({ password });
+  expect((await open(`${path}/websockify`)).status).toBe(101);
+  expect(new URL(httpsRequestMock.mock.calls[1][0].path, "https://www.orgo.ai").searchParams.get("token")).toBe(password);
+  const closed = once(socket, "close");
+  sessions.revoke(admin.session.id);
+  await closed;
+  expect((await open(`${path}/websockify`)).status).toBe(401);
+});
+
+it("keeps Orgo password reads and upgrades behind session, scope and origin checks", async () => {
+  const resolve = vi.fn(async () => ({ password: "secret", orgo: { flyInstanceId: "e784630de969d8", vncPassword: "secret" } }));
+  orgoTarget = { key: "orgo/test-bot", resolve };
+  const path = "/api/desktop-viewer/orgo/test-bot";
+  for (const [extra, expected] of [
+    [{ cookie: "" }, 403], [{ cookie: `test_session=${member.token}` }, 403],
+    [{ origin: "https://evil.example" }, 403], [{ cookie: "test_session=revoked" }, 401],
+  ] as const) {
+    expect((await get(path, extra)).status).toBe(expected);
+    expect((await open(`${path}/websockify`, extra)).status).toBe(expected);
+  }
+  expect(resolve).not.toHaveBeenCalled();
+  expect(httpsRequestMock).not.toHaveBeenCalled();
+});
+
+it("does not reveal provider keys or connection tokens when Orgo inspection fails", async () => {
+  orgoTarget = { key: "orgo/test-bot", resolve: async () => { throw new Error("https://www.orgo.ai/?token=computer-secret sk_account-key"); } };
+  for (const response of [await get("/api/desktop-viewer/orgo/test-bot"), await open("/api/desktop-viewer/orgo/test-bot/websockify")]) {
+    expect(response.status).toBe(502);
+    expect(JSON.stringify(response.body)).not.toMatch(/sk_account-key|computer-secret|orgo\.ai/);
+  }
+  expect(httpsRequestMock).not.toHaveBeenCalled();
+});
+
+it.each([
+  { flyInstanceId: "../other" }, { flyInstanceId: "https://evil.example" }, { flyInstanceId: "abc?token=other" },
+  { flyInstanceId: undefined }, { flyInstanceId: "a".repeat(129) },
+  { vncPassword: "sk_account-api-key" }, { vncPassword: "" }, { vncPassword: "bad\r\npassword" },
+])("refuses untrusted Orgo connection fields before revealing credentials or making a request: %j", async override => {
+  const orgo = { flyInstanceId: "e784630de969d8", vncPassword: "secret", ...override };
+  orgoTarget = { key: "orgo/test-bot", resolve: async () => ({ password: orgo.vncPassword, orgo }) } as DesktopTarget;
+  const path = "/api/desktop-viewer/orgo/test-bot";
+  expect((await get(path)).status).toBe(409);
+  expect((await open(`${path}/websockify`)).status).toBe(409);
+  expect(httpsRequestMock).not.toHaveBeenCalled();
+});
+
+it("does not substitute loopback desktops or account credentials for an Orgo target", async () => {
+  const path = "/api/desktop-viewer/orgo/test-bot";
+  orgoTarget = { key: "orgo/test-bot", resolve: async () => ({ port: desktopPort, password: "secret" }) };
+  expect((await get(path)).status).toBe(409);
+  orgoTarget.resolve = async () => ({ password: "sk_account-key", orgo: { flyInstanceId: "e784630de969d8", vncPassword: "secret" } });
+  expect((await get(path)).status).toBe(409);
+  for (const target of ["orgo/../../evil", "orgo/https:%2F%2Fevil.example", "orgo/test-bot/other"]) {
+    expect((await open(`/api/desktop-viewer/${target}/websockify`)).status).toBe(404);
+  }
+  expect(httpsRequestMock).not.toHaveBeenCalled();
 });
 
 // A phone paired with the server directly drives the Local VM through this

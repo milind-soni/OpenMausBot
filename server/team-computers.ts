@@ -58,7 +58,7 @@ export class TeamComputers {
   }
   forBot(bot: { computer?: string; cloudBackend?: string; section?: string }): TeamComputerRecord | undefined {
     // Explicit destinations are permissions, not suggestions. Only Auto inherits.
-    return bot.computer === undefined && bot.cloudBackend !== "vps" ? this.forSection(bot.section) : undefined;
+    return bot.computer === undefined && (!bot.cloudBackend || bot.cloudBackend === "box") ? this.forSection(bot.section) : undefined;
   }
   create(name: string, id: string = randomUUID()): TeamComputerRecord {
     const entries = this.list();

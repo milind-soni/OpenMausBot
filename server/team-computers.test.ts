@@ -82,6 +82,7 @@ describe("named team computer ownership", () => {
       expect(registry.forBot({ section: "Design", computer: mode })).toBeUndefined();
     }
     expect(registry.forBot({ section: "Design", cloudBackend: "vps" })).toBeUndefined();
+    expect(registry.forBot({ section: "Design", cloudBackend: "orgo" })).toBeUndefined();
     expect(registry.forBot({ section: "Other" })).toBeUndefined();
   });
 

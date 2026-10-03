@@ -97,6 +97,7 @@ describe("organisation desktop policy overlay", () => {
     expect(computerKindForResource("computer:vm:shared")).toBe("localVm");
     expect(computerKindForResource("computer:box:abc")).toBe("box");
     expect(computerKindForResource("computer:box-bot:bot-1")).toBe("box");
+    expect(computerKindForResource("computer:orgo:bot-1")).toBe("box");
     expect(computerKindForResource("computer:vps:alias:bot-1")).toBe("vps");
     expect(computerKindForResource("computer:phone")).toBeUndefined();
     const { managed } = overlay(policy({ computers: { thisComputer: false, localVm: true, box: false, vps: true } }));
@@ -156,6 +157,8 @@ describe("claim-time computer refusal in bindTurnComputer", () => {
     await expect(bindTurnComputer({}, "computer:host")).rejects.toThrow("Fixture Agency does not allow bots to use this computer.");
     await expect(bindTurnComputer({}, "computer:vps:alias:bot")).rejects.toThrow("VPS computers");
     await expect(bindTurnComputer({}, "computer:vm:shared")).resolves.toBe("claimed");
+    managed.apply(policy({ computers: { thisComputer: true, localVm: true, box: false, vps: true } }));
+    await expect(bindTurnComputer({}, "computer:orgo:bot")).rejects.toThrow("cloud computers");
     managed.apply(null);
     await expect(bindTurnComputer({}, "computer:host")).resolves.toBe("claimed");
   });

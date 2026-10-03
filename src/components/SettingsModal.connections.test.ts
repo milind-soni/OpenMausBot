@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe("Settings → Connections", () => {
-  it.each(["router", "OpenRouter", "base URL", "API key", "OpenAI", "Anthropic", "Groq"])("is found by searching for %s", async (typed) => {
+  it.each(["router", "OpenRouter", "base URL", "API key", "OpenAI", "Anthropic", "Groq", "Orgo"])("is found by searching for %s", async (typed) => {
     const { SECTIONS, sectionMatches } = await import("./SettingsModal");
     const connections = SECTIONS.find((entry) => entry.id === "connections")!;
     // the modal lowercases and trims what was typed before matching

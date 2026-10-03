@@ -8,8 +8,9 @@ import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
+import { OrgoLogo } from "./OrgoLogo";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras";
+export type ConfigSection = "composio" | "box" | "orgo" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras";
 /** Sections whose key can be tried against the provider from the server. */
 export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras";
 
@@ -33,6 +34,7 @@ const SECTIONS: Record<
     flag: (c) => c.box.configured && c.box.included !== true,
     included: (c) => c.box.included === true,
   },
+  orgo: { body: (v) => ({ orgo: { apiKey: v } }), flag: (c) => c.orgo?.configured ?? false },
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
   // A key first saved here runs only "Claude (API key)"; signed-in Claude
   // bots stay on their plan unless the person turns that on below the row.
@@ -50,9 +52,10 @@ const SECTIONS: Record<
 
 // Provider keys have no desktop-shell slot yet and go through the server's
 // own 0600 config, the same place they live on a hosted server.
-const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey">> = {
+const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "orgoApiKey" | "opencodeGoApiKey">> = {
   composio: "composioApiKey",
   box: "boxToken",
+  orgo: "orgoApiKey",
   opencodeGo: "opencodeGoApiKey",
 };
 
@@ -90,6 +93,15 @@ const CREDENTIALS: Record<
     linkLabelKey: "keys.boat.link",
     optional: true,
     warningKey: "keys.boat.warning",
+  },
+  orgo: {
+    labelKey: "keys.orgo.label",
+    placeholderKey: "keys.orgo.placeholder",
+    descriptionKey: "keys.orgo.desc",
+    href: "https://www.orgo.ai/dashboard",
+    linkLabelKey: "keys.orgo.link",
+    optional: true,
+    warningKey: "keys.orgo.warning",
   },
   opencodeGo: {
     labelKey: "keys.opencode.label",
@@ -337,6 +349,7 @@ export function ApiKeyRow({
     <div data-api-key-row={section}>
       <div className="mb-1.5 flex items-center gap-2 text-[13px] text-ink-secondary">
         <span className={cn("size-1.5 rounded-full", configured || included ? "bg-success" : "bg-raised-hover")} />
+        {section === "orgo" && <OrgoLogo className="size-3.5 shrink-0" />}
         <span>{credential.label}</span>
         {credential.optional && (
           <span className="rounded bg-control px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
@@ -397,6 +410,70 @@ export function ApiKeyRow({
       {credential.note && <p className="mt-1.5 text-[11.5px] leading-[1.4] text-ink-secondary">{credential.note}</p>}
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
       {verdict && <div role="status" className="mt-1 text-[12px] text-ink-secondary">{verdict}</div>}
+    </div>
+  );
+}
+
+/** A key and an explicit workspace choice; neither creates a computer. */
+export function OrgoConnection() {
+  const { state, dispatch } = useStore();
+  const configured = state.config?.orgo?.configured === true;
+  const workspaceId = state.config?.orgo?.workspaceId ?? "";
+  const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string }>>([]);
+  const [refresh, setRefresh] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setWorkspaces([]);
+    setError(null);
+    if (!configured) return;
+    setLoading(true);
+    api("/api/orgo/workspaces")
+      .then((result) => {
+        if (alive) setWorkspaces(Array.isArray(result.workspaces)
+          ? result.workspaces.filter((workspace: { id?: unknown; name?: unknown }) => typeof workspace.id === "string" && typeof workspace.name === "string") : []);
+      })
+      .catch((cause) => { if (alive) setError(cause instanceof Error ? cause.message : String(cause)); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [configured, refresh]);
+
+  const chooseWorkspace = async (id: string) => {
+    if (saving || id === workspaceId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const status: ConfigStatus = await api("/api/config", { method: "PUT", body: JSON.stringify({ orgo: { workspaceId: id } }) });
+      dispatch({ type: "configStatus", config: status });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <ApiKeyRow section="orgo" onSaved={() => setRefresh((value) => value + 1)} />
+      {configured && (
+        <label className="text-[12px] text-ink-secondary">
+          Orgo workspace
+          <select
+            aria-label="Orgo workspace"
+            value={workspaceId}
+            disabled={loading || saving}
+            onChange={(event) => void chooseWorkspace(event.target.value)}
+            className="mt-1.5 block w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:outline-none"
+          >
+            <option value="">{loading ? "Loading workspaces…" : "Choose an Orgo workspace"}</option>
+            {workspaceId && !workspaces.some((workspace) => workspace.id === workspaceId) && <option value={workspaceId}>{workspaceId}</option>}
+            {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+          </select>
+        </label>
+      )}
+      {configured && !loading && !error && workspaces.length === 0 && <p className="text-[12px] text-ink-secondary">Create a workspace in your Orgo dashboard, then reload this page.</p>}
+      {error && <p role="alert" className="text-[12px] text-danger">{error} <button type="button" onClick={() => setRefresh((value) => value + 1)} className="text-accent hover:underline">Retry</button></p>}
     </div>
   );
 }

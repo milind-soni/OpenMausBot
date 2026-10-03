@@ -51,11 +51,11 @@ export function DesktopViewer() {
     setConnection("connecting");
     const connect = async () => {
       try {
-        if (!target || !/^(local\/(shared|bot-[a-f0-9]{64}|pool-\d+)|vps\/[\w-]+)$/.test(target)) return setConnection("invalid");
+        if (!target || !/^(local\/(shared|bot-[a-f0-9]{64}|pool-\d+)|(?:vps|orgo)\/[\w-]+)$/.test(target)) return setConnection("invalid");
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
-        if (target.startsWith("vps/")) {
+        if (target.startsWith("vps/") || target.startsWith("orgo/")) {
           const query = threadId ? `?${new URLSearchParams({ threadId })}` : "";
-          const joined = await fetch(`/api/bots/${target.slice(4)}/computer/join${query}`, {
+          const joined = await fetch(`/api/bots/${target.slice(target.indexOf("/") + 1)}/computer/join${query}`, {
             method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal,
           });
           if (!joined.ok) throw new Error("join failed");

@@ -3,22 +3,25 @@
 // origin would give a bot access to the person's authenticated workspace.
 import { createHash } from "node:crypto";
 import { request, ServerResponse, type IncomingMessage, type Server } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import { isSameOrigin, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-const ROUTE = /^\/api\/desktop-viewer\/(local\/(?:shared|bot-[a-f0-9]{64}|pool-\d+)|vps\/[\w-]+)(\/websockify)?$/;
+const ROUTE = /^\/api\/desktop-viewer\/(local\/(?:shared|bot-[a-f0-9]{64}|pool-\d+)|(?:vps|orgo)\/[\w-]+)(\/websockify)?$/;
 const HANDSHAKE_MS = 10_000;
 const RECHECK_MS = 5_000;
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const BOT_ID = /^[\w-]+$/;
 const CONTROL_LEASE = /^[A-Za-z0-9_-]{16,120}$/;
 
-/** Providers resolve a managed loopback endpoint, never a browser-supplied URL. */
+/** Providers resolve a managed endpoint, never a browser-supplied URL. */
 export interface DesktopConnection {
-  port: number;
+  port?: number;
   password: string | null;
+  /** The proxy alone constructs Orgo's fixed HTTPS endpoint and token. */
+  orgo?: { flyInstanceId: string; vncPassword: string };
   live?: () => boolean;
   touch?: () => void;
   /** Acquired only by WebSockets; release must not close other viewers. */
@@ -133,7 +136,13 @@ export function createDesktopViewer(deps: {
     const live = () => deps.live(auth) && deps.target(match[1])?.key === target.key && (connection.live?.() ?? true);
     if (!live()) return json(res, 401, { error: "Viewer access expired" });
     if (!holds()) return json(res, 409, { error: "Take control of this computer first" });
-    if (!Number.isInteger(connection.port) || connection.port < 1 || connection.port > 65535) {
+    const orgo = connection.orgo;
+    const cloud = match[1].startsWith("orgo/");
+    if (cloud ? !orgo || typeof orgo.flyInstanceId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(orgo.flyInstanceId)
+      || typeof orgo.vncPassword !== "string" || !orgo.vncPassword || orgo.vncPassword.length > 1024
+      || orgo.vncPassword.startsWith("sk_") || /\p{Cc}/u.test(orgo.vncPassword)
+      || connection.password !== orgo.vncPassword
+      : orgo || !Number.isInteger(connection.port) || connection.port! < 1 || connection.port! > 65535) {
       return json(res, 409, { error: "The desktop viewer is not available." });
     }
     if (!match[2]) return json(res, 200, { password: connection.password });
@@ -143,12 +152,13 @@ export function createDesktopViewer(deps: {
       || typeof key !== "string" || !/^[A-Za-z0-9+/]{22}==$/.test(key)) {
       return json(res, 400, { error: "Invalid WebSocket handshake" });
     }
-    // Fixed host and path, port from an inspected managed container. Never
-    // forward cookies, bearer tokens, query parameters or forwarded headers.
-    const upstream = request({
-      hostname: "127.0.0.1", port: connection.port, path: "/websockify",
-      headers: { Upgrade: "websocket", Connection: "Upgrade", "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13" },
-    });
+    // Fixed provider host/path; only the inspected computer's token is sent.
+    // Workspace cookies, bearer tokens and browser query/headers stay here.
+    const headers = { Upgrade: "websocket", Connection: "Upgrade", "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13" };
+    const upstream = cloud ? httpsRequest({
+      hostname: "www.orgo.ai", port: 443,
+      path: `/desktops/${orgo!.flyInstanceId}/ws/websockify?${new URLSearchParams({ token: orgo!.vncPassword })}`, headers,
+    }) : request({ hostname: "127.0.0.1", port: connection.port, path: "/websockify", headers });
     const { socket } = upgrade;
     let peer: Duplex | undefined;
     let recheck: ReturnType<typeof setInterval> | undefined;

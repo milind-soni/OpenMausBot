@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StoreProvider } from "@/state/store";
 import * as store from "@/state/store";
-import { AnthropicEveryClaudeBot, ApiKeyRow, looksLikeKey, OpenAiCompatUrl } from "./ApiKeys";
+import { AnthropicEveryClaudeBot, ApiKeyRow, looksLikeKey, OpenAiCompatUrl, OrgoConnection } from "./ApiKeys";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -13,6 +13,24 @@ const render = (element: React.ReactElement) => {
 };
 
 describe("provider key rows", () => {
+  it("offers an Orgo workspace choice only after a write-only key is configured", () => {
+    vi.spyOn(store, "useStore").mockReturnValue({
+      state: { ...store.initialState, config: { ...store.initialState.config, orgo: { configured: true } } as store.ConfigStatus },
+      dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+    });
+    const html = render(createElement(OrgoConnection));
+    expect(html).toContain("Orgo API key");
+    expect(html).toContain('type="password"');
+    expect(html).toContain('value=""');
+    expect(html).toContain("Choose an Orgo workspace");
+    expect(html).toContain("Saving a key does not create a computer");
+    expect(html).not.toContain("Boat API key");
+    vi.mocked(store.useStore).mockReturnValue({
+      state: { ...store.initialState, config: { ...store.initialState.config, orgo: { configured: false } } as store.ConfigStatus },
+      dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+    });
+    expect(render(createElement(OrgoConnection))).not.toContain("Choose an Orgo workspace");
+  });
   it("describes a stored key as configured without claiming an authenticated connection", () => {
     vi.spyOn(store, "useStore").mockReturnValue({
       state: { ...store.initialState, config: {

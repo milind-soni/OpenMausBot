@@ -1,8 +1,9 @@
 // The real panels, image decoder and fetch cancellation in a disposable
 // browser/server. Only the cloud provider transport is simulated.
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
@@ -203,7 +204,41 @@ describe("cloud preview recovery in the real renderer", () => {
       await click("Release desktop join");
       await expect.poll(() => stat("joining")).toBe(false);
     }
-    process.stdout.write(`${JSON.stringify({ fixture: info!, previewUrl: preview.previewUrl, transport: "simulated; panels and browser real" })}\n`);
+
+    // Orgo reuses the same panel but cannot silently select a workspace or
+    // fall back to Boat. Key/config and provider transport remain synthetic.
+    const evidence = mkdtempSync(join(tmpdir(), "omb-orgo-ui-"));
+    await select("Panel", "computer");
+    await expect.poll(frameVisible, { timeout: 6000 }).toBe(true);
+    await ui("screenshot", "--out", join(evidence, "before-boat.png"));
+    if ((await snapshot()).includes("Busy: true")) await click("Busy: true");
+    await select("Conversation surface", "orgo");
+    await expect.poll(snapshot, { timeout: 6000 }).toContain("Orgo API key");
+    expect(await snapshot()).not.toContain("Boat API key");
+    expect(await stat("orgoProvisions")).toBe(0);
+    await ui("type", "--name", "Orgo API key", "--text", "fixture-orgo-key");
+    await ui("press", "--keys", "Tab");
+    await expect.poll(() => stat("orgoKeySaved"), { timeout: 6000 }).toBe(true);
+    await expect.poll(snapshot, { timeout: 6000 }).toContain("Choose an Orgo workspace");
+    expect(await stat("orgoWorkspace")).toBe("");
+    expect(await stat("orgoProvisions")).toBe(0);
+    expect(await evaluate("document.querySelector('input[aria-label=\"Orgo API key\"]').value")).toBe("");
+    await ui("screenshot", "--out", join(evidence, "after-orgo-setup.png"));
+    await select("Orgo workspace", "fixture-workspace");
+    await expect.poll(frameVisible, { timeout: 6000 }).toBe(true);
+    expect(await stat("orgoProvisions")).toBe(1);
+    expect(await snapshot()).not.toContain("Boat API key");
+    await ui("screenshot", "--out", join(evidence, "after-orgo-ready.png"));
+    await evaluate("document.querySelector('[data-cloud-provider=orgo]').scrollIntoView({ block: 'center' }); true");
+    expect(await evaluate("document.querySelector('[data-cloud-provider=orgo]').getAttribute('aria-pressed')")).toBe("true");
+    await ui("screenshot", "--out", join(evidence, "after-orgo-picker.png"));
+    await click("Sleep");
+    await expect.poll(snapshot, { timeout: 6000 }).toContain("Start Orgo computer");
+    expect(await stat("orgoReady")).toBe(false);
+    await click("Start Orgo computer");
+    await expect.poll(frameVisible, { timeout: 6000 }).toBe(true);
+    expect(await stat("orgoProvisions")).toBe(2);
+    process.stdout.write(`${JSON.stringify({ fixture: info!, previewUrl: preview.previewUrl, evidence, transport: "simulated; panels and browser real" })}\n`);
     await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
     expect(child.exitCode).toBe(0);
     expect(existsSync(info!.dataDir)).toBe(false);

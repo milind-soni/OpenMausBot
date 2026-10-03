@@ -49,6 +49,7 @@ describe("resolveComputerPromptKind", () => {
     // vps and local never depended on more than the plan
     [{ kind: "vps", driverKind: "claude", cloudComputerMcp: undefined, vmPrivate: false }, "vps"],
     [{ kind: "vps", driverKind: "claude", cloudComputerMcp: false, vmPrivate: false }, "vps"],
+    [{ kind: "orgo", driverKind: "codex", cloudComputerMcp: false, vmPrivate: false }, "orgo"],
     [{ kind: "local", driverKind: "claude", cloudComputerMcp: undefined, vmPrivate: false }, "local"],
     [{ kind: "local", driverKind: "boxAgent", cloudComputerMcp: false, vmPrivate: false }, "local"],
     // and no plan earns no paragraph
@@ -70,6 +71,7 @@ describe("computerPrompt", () => {
       box: "You have your own cloud computer",
       "box-chat": "You control the assigned cloud computer",
       vps: "This is a VPS, not Boat",
+      orgo: "Orgo cloud Linux computer, not Boat",
       local: "act on the user's computer",
     };
     for (const [kind, distinct] of Object.entries(paragraphs)) {

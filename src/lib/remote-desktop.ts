@@ -1,5 +1,6 @@
-import type { InstanceInfo } from "@/state/store";
+import type { ConfigStatus, InstanceInfo } from "@/state/store";
 import { isCloudComputerBusyMessage } from "../../shared/computer-contention";
+import type { CloudBackend } from "../../shared/wire";
 
 /** Older hosts return only a message/status pair. Do not hide unrelated
  * 409s such as missing configuration or an incompatible desktop image. */
@@ -9,6 +10,7 @@ export function isRemoteScreenshotContention(error: { status: number; message: s
     "the VPS is being prepared — try again shortly",
     "VPS connection settings are being updated — wait for them to finish",
     "Boat account settings are being updated — wait for them to finish",
+    "Orgo connection settings are being updated — wait for them to finish",
   ].includes(error.message);
 }
 
@@ -32,8 +34,14 @@ export function remoteScreenshotSource(raw: unknown): string | null {
 }
 
 /** Match the server: selected bridge-capable engine, otherwise the Boat runner. */
-export function cloudRunner(instances: readonly InstanceInfo[], selectedId?: string): InstanceInfo | undefined {
+export function cloudRunner(instances: readonly InstanceInfo[], selectedId?: string, backend: CloudBackend = "box"): InstanceInfo | undefined {
   if (!selectedId) return undefined;
   const selected = instances.find(instance => instance.instanceId === selectedId);
+  if (backend !== "box") return selected?.capabilities?.computerMcp && selected.driverKind !== "boxAgent" ? selected : undefined;
   return selected?.capabilities?.cloudComputerMcp ? selected : instances.find(instance => instance.driverKind === "boxAgent");
+}
+
+export function cloudComputerConfigured(config: Pick<ConfigStatus, "box" | "vps" | "orgo"> | null, backend: CloudBackend = "box"): boolean {
+  return Boolean(backend === "orgo" ? config?.orgo?.configured && config.orgo.workspaceId
+    : backend === "vps" ? config?.vps?.configured : config?.box.configured);
 }

@@ -1,4 +1,4 @@
-import { cloudRunner } from "@/lib/remote-desktop";
+import { cloudComputerConfigured, cloudRunner } from "@/lib/remote-desktop";
 import {
   useCallback,
   useEffect,
@@ -410,7 +410,10 @@ export function EventEditor({
   const [attachmentPendingCount, setAttachmentPendingCount] = useState(0);
   const attachmentPending = attachmentPendingCount > 0;
   const fileInput = useRef<HTMLInputElement>(null);
-  const cloudReady = Boolean(state.config?.box.configured && botIds.length > 0 && botIds.every(id => cloudRunner(state.instances, bots.find(bot => bot.id === id)?.modelSelection.instanceId)?.snapshot.state === "available"));
+  const cloudReady = botIds.length > 0 && botIds.every((id) => {
+    const bot = bots.find((candidate) => candidate.id === id);
+    return cloudComputerConfigured(state.config, bot?.cloudBackend) && cloudRunner(state.instances, bot?.modelSelection.instanceId, bot?.cloudBackend)?.snapshot.state === "available";
+  });
   const rooms = state.groups.filter(roomCanRunGoal);
   const selectedRoom = rooms.find((group) => group.id === groupId);
   const roomMembers = activeRoomMembers(selectedRoom, state.bots);

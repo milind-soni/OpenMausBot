@@ -46,6 +46,17 @@ import { customMcpServers,
 } from "./config.ts";
 
 describe("configuration boundaries", () => {
+  it("keeps Orgo BYOK separate and requires a workspace UUID", () => {
+    const orgo = { apiKey: "sk_live_fixture", workspaceId: "550e8400-e29b-41d4-a716-446655440000" };
+    expect(parseConfigPatch({ orgo })).toEqual({ orgo });
+    expect(parseStoredConfig({ orgo }).orgo).toEqual(orgo);
+    expect(providerReloadKeys({ orgo })).toEqual([]);
+    expect(() => parseConfigPatch({ orgo: { workspaceId: "../../other-computer" } })).toThrow();
+    expect(parseConfigPatch({ orgo: { apiKey: "", workspaceId: "" } }).orgo).toEqual({ apiKey: "", workspaceId: "" });
+    const env = { ORGO_API_KEY: orgo.apiKey, PATH: "/usr/bin" };
+    stripWorkspaceCredentialEnv(env);
+    expect(env).toEqual({ PATH: "/usr/bin" });
+  });
   it("requires an explicit backup to opt into automatic recovery without reloading engines", () => {
     expect(parseStoredConfig({}).automaticRecovery).toBeUndefined();
     expect(parseConfigPatch({ automaticRecovery: { enabled: false } })).toEqual({ automaticRecovery: { enabled: false } });
@@ -617,6 +628,19 @@ describe("configuration boundaries", () => {
 });
 
 describe("saving the newer sections", () => {
+  it("persists Orgo workspace selection and key clearing without reviving old credentials", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    const workspaceId = "550e8400-e29b-41d4-a716-446655440000";
+    try {
+      saveConfig({ orgo: { apiKey: "sk_fixture", workspaceId } });
+      saveConfig({ orgo: { apiKey: "" } });
+      expect(parseStoredConfig(JSON.parse(readFileSync(path, "utf8"))).orgo).toEqual({ apiKey: "", workspaceId });
+      saveConfig({ orgo: { workspaceId: "" } });
+      expect(parseStoredConfig(JSON.parse(readFileSync(path, "utf8"))).orgo).toEqual({ apiKey: "", workspaceId: "" });
+    } finally { rmSync(path, { force: true }); }
+  });
+
   it("persists the Anthropic key, the spend limit and the price list, section by section", () => {
     const path = join(DATA_DIR, "config.json");
     mkdirSync(DATA_DIR, { recursive: true });

@@ -1,4 +1,4 @@
-import { cloudRunner } from "@/lib/remote-desktop";
+import { cloudComputerConfigured, cloudRunner } from "@/lib/remote-desktop";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -93,7 +93,8 @@ export function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhoo
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  const cloudReady = Boolean(state.config?.box.configured && cloudRunner(state.instances, bots.find(bot => bot.id === botId)?.modelSelection.instanceId)?.snapshot.state === "available");
+  const selectedBot = bots.find(bot => bot.id === botId);
+  const cloudReady = Boolean(cloudComputerConfigured(state.config, selectedBot?.cloudBackend) && cloudRunner(state.instances, selectedBot?.modelSelection.instanceId, selectedBot?.cloudBackend)?.snapshot.state === "available");
 
   useEffect(() => {
     const dialog = dialogRef.current;

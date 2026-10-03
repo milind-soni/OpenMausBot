@@ -16,6 +16,12 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "Paste your Boat API key",
     helpUrl: "https://docs.boat.dev/api-keys",
   },
+  orgoApiKey: {
+    label: "Orgo API key",
+    description: "Gives bots an isolated cloud computer in your selected Orgo workspace.",
+    placeholder: "Paste your Orgo API key",
+    helpUrl: "https://www.orgo.ai/dashboard",
+  },
   opencodeGoApiKey: {
     label: "OpenCode API key",
     description: "Used for OpenCode Go and other key-backed OpenCode providers.",
@@ -47,6 +53,7 @@ export type CredentialConfig = {
   xai?: { key?: string };
   // The persisted config section keeps its historical name: cfg.box.
   box?: { token?: string };
+  orgo?: { apiKey?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; fishKey?: string };
   imageGen?: { key?: string };
@@ -62,6 +69,8 @@ export function credentialConfigPatch(id: CredentialTargetId, value: string): Cr
       return { xai: { key: value } };
     case "boxToken":
       return { box: { token: value } };
+    case "orgoApiKey":
+      return { orgo: { apiKey: value } };
     case "opencodeGoApiKey":
       return { opencodeGo: { apiKey: value } };
     case "ttsKey":
@@ -79,6 +88,8 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.xai?.key);
     case "boxToken":
       return Boolean(config.box?.token);
+    case "orgoApiKey":
+      return Boolean(config.orgo?.apiKey);
     case "opencodeGoApiKey":
       return Boolean(config.opencodeGo?.apiKey);
     case "ttsKey":

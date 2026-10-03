@@ -468,6 +468,7 @@ const appConfigSchema = z.object({
   /** Historical config section name "box" (the persisted config.json key); the
    * provider is Boat now and the key is kept for compatibility. */
   box: z.object({ token: optionalText }).optional(),
+  orgo: z.object({ apiKey: optionalText, workspaceId: z.union([z.literal(""), z.string().uuid()]).optional() }).optional(),
   vps: vpsConfigSchema.optional(),
   /** Optional OpenCode key; persisted write-only and passed only to its child. */
   opencodeGo: z.object({ apiKey: optionalText }).optional(),
@@ -621,6 +622,7 @@ export interface AppConfig {
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   /** Persisted under the historical config key "box" (ascii.dev renamed Box to Boat). */
   box?: { token?: string };
+  orgo?: { apiKey?: string; workspaceId?: string };
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
@@ -971,6 +973,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "imageGen",
   "live",
   "vps",
+  "orgo",
   "rooms",
   "threads",
   "automaticRecovery",
@@ -1096,6 +1099,8 @@ export function loadConfig(): AppConfig {
   // BOX_TOKEN keeps its historical name; the provider is Boat.
   cfg.box = { ...cfg.box };
   if (process.env.BOX_TOKEN !== undefined) cfg.box.token = process.env.BOX_TOKEN;
+  cfg.orgo = { ...cfg.orgo };
+  if (process.env.ORGO_API_KEY !== undefined) cfg.orgo.apiKey = process.env.ORGO_API_KEY;
   cfg.opencodeGo = { ...cfg.opencodeGo };
   if (process.env.OPENCODE_API_KEY !== undefined) cfg.opencodeGo.apiKey = process.env.OPENCODE_API_KEY;
   cfg.tts = { ...cfg.tts };
@@ -1141,6 +1146,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.openrouter?.key, "OMB_OPENROUTER_API_KEY"],
     [patch.composio?.apiKey, "COMPOSIO_API_KEY"],
     [patch.box?.token, "BOX_TOKEN"],
+    [patch.orgo?.apiKey, "ORGO_API_KEY"],
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
@@ -1187,6 +1193,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_OPENAI_API_KEY",
   "OMB_OPENROUTER_API_KEY",
   "BOX_TOKEN",
+  "ORGO_API_KEY",
   "OPENCODE_API_KEY",
   "OMB_TTS_KEY",
   "OMB_FISH_AUDIO_API_KEY",
@@ -1292,7 +1299,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "threads", "context", "memory", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "openai", "openrouter", "openaiCompat", "composio", "box", "orgo", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "threads", "context", "memory", "localVm", "features", "cloudOverflow", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

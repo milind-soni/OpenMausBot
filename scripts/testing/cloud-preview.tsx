@@ -47,6 +47,7 @@ const transport = {
   releaseCapture: () => {}, releaseJoin: () => {},
   screenshot: `data:image/png;base64,${screenshot}`,
   vmScreenshot, paths: [] as string[], vmRequests: 0, vmPending: false, releaseVm: () => {},
+  orgoKeySaved: false, orgoWorkspace: "", orgoReady: false, orgoProvisions: 0, orgoWorkspaceReads: 0,
 };
 Object.assign(window, { cloudPreviewFixture: transport });
 const viewerListeners = new Set<(state: { open: boolean; contextId: string }) => void>();
@@ -70,6 +71,24 @@ window.fetch = async (input, init) => {
   if (path.includes("/computer") || path.includes("/local-computer")) transport.paths.push(requested);
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
     status, headers: { "content-type": "application/json" },
+  });
+  if (path === "/api/orgo/workspaces") {
+    transport.orgoWorkspaceReads++;
+    return json({ workspaces: [{ id: "fixture-workspace", name: "Fixture workspace" }] });
+  }
+  if (path === "/api/config" && init?.method === "PUT") {
+    const body = JSON.parse(String(init.body));
+    if (body.orgo) {
+      // Save only a configured flag in this synthetic transport, never the key.
+      if (body.orgo.apiKey !== undefined) transport.orgoKeySaved = Boolean(body.orgo.apiKey);
+      if (body.orgo.workspaceId !== undefined) transport.orgoWorkspace = body.orgo.workspaceId;
+      const status = await (await originalFetch("/api/config")).json();
+      return json({ ...status, orgo: { configured: transport.orgoKeySaved, workspaceId: transport.orgoWorkspace } });
+    }
+  }
+  if (/^\/api\/bots\/[\w-]+\/computer$/.test(path) && surfaceScenario === "orgo") return json({
+    surface: "cloud", backend: "orgo", configured: transport.orgoKeySaved && Boolean(transport.orgoWorkspace),
+    ready: transport.orgoReady, container: transport.orgoReady ? "running" : "stopped", managed: true,
   });
   if (/^\/api\/bots\/[\w-]+\/computer$/.test(path)) return json({ surface: surfaceScenario === "auto-vm" ? "vm" : "cloud", configured: true, box: { state: "idle" } });
   if (path.endsWith("/local-computer/start")) {
@@ -97,6 +116,12 @@ window.fetch = async (input, init) => {
   // The real server refuses provision/sleep while a turn owns the boat.
   if (path.endsWith("/computer/provision")) {
     if (turnActive) return json({ error: CLOUD_COMPUTER_BUSY_ERROR }, 409);
+    if (surfaceScenario === "orgo") {
+      transport.orgoProvisions++;
+      if (!transport.orgoKeySaved || !transport.orgoWorkspace) return json({ error: "Choose an Orgo workspace first" }, 409);
+      transport.orgoReady = true;
+      return json({ ready: true, container: "running" });
+    }
     return json({ state: "idle" });
   }
   if (path.endsWith("/computer/screenshot")) {
@@ -152,6 +177,10 @@ window.fetch = async (input, init) => {
   }
   // Never allow the fixture's lifecycle actions to reach a real provider.
   if (path.endsWith("/computer/sleep")) {
+    if (surfaceScenario === "orgo") {
+      transport.orgoReady = false;
+      return json({ ready: false, container: "stopped" });
+    }
     return json({ error: "This fixture tests previews only" }, 409);
   }
   return originalFetch(input, init);
@@ -186,7 +215,7 @@ function Fixture() {
         { ...base, instanceId: "fixture-box", driverKind: "boxAgent" }] });
     }
   }, [state.instances, dispatch]);
-  const fixtureBot: Bot | undefined = bot && (scenario === "default"
+  const fixtureBot: Bot | undefined = bot && (scenario === "default" || scenario === "orgo"
     ? { ...bot, busy, tasks: bot.tasks?.map((task) => ({ ...task, busy })) }
     : { ...bot, busy: false, browser: true,
       computer: scenario === "vm-stopped" ? "vm" : scenario === "auto-vm" ? undefined : scenario === "cloud-pin" ? "local" : scenario === "off" ? "off" : "cloud",
@@ -209,9 +238,12 @@ function Fixture() {
         if (bot && (surfaceScenario === "vm-stopped" || previousScenario === "vm-stopped")) {
           dispatch({ type: "updateBot", botId: bot.id, patch: { computer: surfaceScenario === "vm-stopped" ? "vm" : "cloud" } });
         }
+        if (bot && (surfaceScenario === "orgo" || previousScenario === "orgo")) {
+          dispatch({ type: "updateBot", botId: bot.id, patch: { computer: "cloud", cloudBackend: surfaceScenario === "orgo" ? "orgo" : "box" } });
+        }
         setScenario(surfaceScenario);
       }}>
-        {["default", "vm-stopped", "vm-pin", "auto-vm", "cloud-pin", "browser-pin", "off"].map((value) => <option key={value}>{value}</option>)}
+        {["default", "vm-stopped", "vm-pin", "auto-vm", "cloud-pin", "browser-pin", "off", "orgo"].map((value) => <option key={value}>{value}</option>)}
       </select></label>
       <button onClick={() => setGeneration((n) => n + 1)}>Reconnect panel</button>
       <button onClick={() => { turnActive = !busy; setBusy(!busy); }}>Busy: {String(busy)}</button>

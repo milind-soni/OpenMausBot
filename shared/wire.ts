@@ -52,9 +52,9 @@ export interface ModelSelection {
 }
 
 /** Which cloud computer backs computer: "cloud"; absent means Boat. */
-export type CloudBackend = "box" | "vps";
+export type CloudBackend = "box" | "vps" | "orgo";
 
-/** A place a bot can act. cloud covers both cloud backends — from the
+/** A place a bot can act. cloud covers all cloud backends — from the
  * person's seat they are the same "cloud computer" panel. */
 export type Surface = "cloud" | "vm" | "local" | "browser";
 

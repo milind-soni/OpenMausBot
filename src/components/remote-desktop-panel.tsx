@@ -1,4 +1,4 @@
-import { cloudRunner } from "@/lib/remote-desktop";
+import { cloudComputerConfigured, cloudRunner } from "@/lib/remote-desktop";
 import { useEffect, useRef, useState } from "react";
 import { CalendarClock, CalendarDays, ImageOff, Loader2, Monitor, Plus, X } from "lucide-react";
 
@@ -78,8 +78,8 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
     (run) => run.botId === bot.id && ["queued", "running", "waiting"].includes(run.status),
   );
   const cloudRoutineReady = Boolean(
-    state.config?.box.configured &&
-      cloudRunner(state.instances, bot.modelSelection.instanceId)?.snapshot.state === "available",
+    cloudComputerConfigured(state.config, bot.cloudBackend) &&
+      cloudRunner(state.instances, bot.modelSelection.instanceId, bot.cloudBackend)?.snapshot.state === "available",
   );
 
   useEffect(() => {
@@ -200,7 +200,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         <div>
           <div className="text-[14px] font-medium text-ink">{bot.name}&apos;s computer</div>
           <div className="mt-0.5 text-[11px] text-ink-secondary">
-            {bot.cloudBackend === "vps" ? "Self-hosted VPS" : "Cloud desktop"}
+            {bot.cloudBackend === "vps" ? "Self-hosted VPS" : bot.cloudBackend === "orgo" ? "Orgo" : "Cloud desktop"}
           </div>
         </div>
         <button

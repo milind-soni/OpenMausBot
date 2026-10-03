@@ -410,6 +410,8 @@ export async function launchVerificationServer(
   extraProviders: Array<"codex"> = [],
   /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
   boatFixtureApi?: string,
+  /** Programmatic tests only: Orgo's fixed API redirected inside this child. */
+  orgoFixtureApi?: string,
 ): Promise<VerificationServer> {
   if (boatFixtureApi) {
     if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boatFixtureApi)) {
@@ -417,6 +419,13 @@ export async function launchVerificationServer(
     }
     try { new URL(boatFixtureApi); }
     catch { throw new ControlOmbError("Boat verification requires a valid loopback port"); }
+  }
+  if (orgoFixtureApi) {
+    if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(orgoFixtureApi)) {
+      throw new ControlOmbError("Orgo verification requires an explicit loopback HTTP provider");
+    }
+    try { new URL(orgoFixtureApi); }
+    catch { throw new ControlOmbError("Orgo verification requires a valid loopback port"); }
   }
   if (localVm) {
     const endpoint = new URL(localVm.host);
@@ -438,6 +447,7 @@ export async function launchVerificationServer(
   const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     ...(boatFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
+    ...(orgoFixtureApi ? { orgo: { apiKey: "sk_live_verification_fixture", workspaceId: "550e8400-e29b-41d4-a716-446655440000" } } : {}),
     instances: {
       // The synthetic map omits the default computer engine. Register it
       // only when an owned Boat provider backs this fixture's cloud panel.
@@ -471,6 +481,10 @@ export async function launchVerificationServer(
   });
   if (boatFixtureApi) childEnv.OMB_BOX_API = boatFixtureApi;
   const serverArgs = ["--experimental-strip-types"];
+  if (orgoFixtureApi) {
+    childEnv.OMB_TEST_ORGO_API = orgoFixtureApi;
+    serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "orgo-hooks.mjs")).href);
+  }
   if (childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE === "1") {
     serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "fail-audio-append-once.mjs")).href);
   }

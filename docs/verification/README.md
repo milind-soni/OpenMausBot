@@ -142,6 +142,10 @@ The [remote desktop viewer fixture](desktop-viewer.md) checks the bundled
 noVNC page, authenticated WebSocket proxy, desktop input, reconnect and logout
 against an isolated server, synthetic desktop and VPS SSH forward.
 
+The [Orgo cloud computer fixture](orgo.md) checks optional BYOK settings,
+selected-model routing, computer scopes, lifecycle consent and cleanup against
+a disposable server and synthetic loopback provider.
+
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
 

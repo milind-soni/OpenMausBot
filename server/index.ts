@@ -103,6 +103,7 @@ import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import * as boat from "./boat.ts";
+import * as orgo from "./orgo.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import { isEffortLevel, type BotVisibility, type CardAnswerer, type ResolvedSender, type SteerQueueReason, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import { isPersistentQuestionCard, QUESTION_DISMISS_MESSAGE, shouldSettleRequestCard } from "../shared/ask-question.ts";
@@ -3769,7 +3770,7 @@ function previewSystemPrompt(bot: BotRecord) {
   const previewComputer = teamComputer ? "cloud" : bot.computer;
   const computerPromptKind = resolveComputerPromptKind({
     kind: previewComputer === "vm" ? "vm" : previewComputer === "cloud"
-      ? bot.cloudBackend === "vps" ? "vps" : "box" : previewComputer === "local" ? "local" : null,
+      ? bot.cloudBackend ?? "box" : previewComputer === "local" ? "local" : null,
     driverKind: instance?.driverKind,
     cloudComputerMcp: caps?.cloudComputerMcp,
     vmPrivate: localVmMode(cfg) === "per-bot",
@@ -5515,6 +5516,20 @@ function audienceChanged(): void {
 // viewer manager before installing any revocation callbacks.
 const desktopViewer = createDesktopViewer({
   target: (id) => {
+    if (id.startsWith("orgo/")) {
+      const botId = id.slice(5);
+      if (store.bot(botId)?.cloudBackend !== "orgo") return;
+      return { key: `${id}:${cfg.orgo?.workspaceId ?? ""}`, resolve: async () => {
+        const computer = await orgo.computer(cfg, botId);
+        if (!computer?.fly_instance_id || !computer.vnc_password) {
+          throw Object.assign(new Error("The Orgo desktop is not running"), { status: 409 });
+        }
+        return { password: computer.vnc_password,
+          orgo: { flyInstanceId: computer.fly_instance_id, vncPassword: computer.vnc_password },
+          live: () => store.bot(botId)?.cloudBackend === "orgo" && !computerProviderConfigTransitions.has("orgo"),
+        };
+      } };
+    }
     if (id.startsWith("vps/")) {
       const botId = id.slice(4);
       if (store.bot(botId)?.cloudBackend !== "vps") return;
@@ -6511,7 +6526,7 @@ const vpsPreviewRequests = new Map<string, ReturnType<typeof vps.vpsComputerScre
 const vpsJoinRequests = new Map<string, Promise<void>>();
 const orphanBoatLifecycleBusyIds = new Set<string>();
 const boatInventoryRequestsBusyIds = new Set<string>();
-type RemoteComputerProvider = "box" | "vps";
+type RemoteComputerProvider = "box" | "vps" | "orgo";
 const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
 // A restore mutates and cleans a project work tree. Claim the bot across the
 // entire async Git operation so a turn cannot start in that folder midway.
@@ -6742,6 +6757,36 @@ async function mountBotVps(
   };
 }
 
+/** Orgo uses the same scoped stdio computer tools as a VPS, never Boat's
+ * native agent. Auto only attaches a ready computer. */
+async function attachBotOrgo(bot: BotRecord, owner: TurnOwner, explicitCloud: boolean, canMount: boolean) {
+  if (!canMount) {
+    if (explicitCloud) throw new Error("This model cannot use Orgo computer tools — choose a model that supports computer MCP");
+    return null;
+  }
+  if (!orgo.isConfigured(cfg)) {
+    if (explicitCloud) throw new Error("Connect your Orgo API key and choose a workspace in Settings → Connections");
+    return null;
+  }
+  const status = await orgo.state(cfg, bot.id);
+  if (!status.ready && !explicitCloud) return null;
+  const resource = `computer:orgo:${bot.id}`;
+  // ponytail: one seat per bot, as Boat; lazy claims can replace this if
+  // Orgo turns that never use the desktop need to run concurrently.
+  await bindTurnComputer(owner, resource, true);
+  if (explicitCloud && !status.ready) {
+    if (status.box) await orgo.wake(cfg, bot.id);
+    else await orgo.provision(cfg, bot.id);
+  }
+  if (turnResourceOwners.get(owner.threadId)?.generation !== owner.generation) {
+    throw new Error("This Orgo turn stopped while its computer was starting");
+  }
+  const mounted = await orgo.mcp(cfg, bot.id);
+  const control = controlIntegration(bot.id, owner.threadId, owner.generation);
+  return { integration: { ...mounted, env: { ...mounted.env, OMB_CONTROL_URL: control.url, OMB_CONTROL_TOKEN: control.token } },
+    capture: () => orgo.screenshot(cfg, bot.id) };
+}
+
 /** The bot's own Boat. Explicit Cloud is the consent boundary: it may create a
  * missing machine and wake an archived one (~8s, and it un-pauses billing);
  * Auto only attaches a machine that is already running. */
@@ -6820,6 +6865,7 @@ function botHasActiveTurn(botId: string): boolean {
 }
 
 function providerTransitionMessage(provider: RemoteComputerProvider): string {
+  if (provider === "orgo") return "Orgo connection settings are being updated — wait for them to finish";
   return provider === "box"
     ? "Boat account settings are being updated — wait for them to finish"
     : "VPS connection settings are being updated — wait for them to finish";
@@ -6829,11 +6875,12 @@ function providerTransitionMessage(provider: RemoteComputerProvider): string {
  * control lease or detached routine can still refer to a durable computer
  * after the bot record's current destination changes. */
 function providerOperationConflict(provider: RemoteComputerProvider): string | null {
+  if (provider === "orgo" && orgo.orgoLifecycleBusy()) return "Wait for Orgo computer actions to finish before changing its connection";
   if (provider === "vps" && activeVpsThreads.size > 0) {
     return "stop the active VPS turn before changing the SSH config alias";
   }
   if (managedBoatOwners().some((owner) => owner.inUse)) {
-    return `stop active bot work and computer control before changing ${provider === "box" ? "the Boat account" : "the VPS connection"}`;
+    return `stop active bot work and computer control before changing ${provider === "box" ? "the Boat account" : provider === "orgo" ? "the Orgo account" : "the VPS connection"}`;
   }
   if (boatLifecycleBusyBots.size > 0 || vpsPreviewRequests.size > 0) {
     return "wait for cloud computer actions to finish before changing provider settings";
@@ -6856,18 +6903,20 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
 
 function turnSurfacePlan(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string) {
   const instance = registry.get(bot.modelSelection.instanceId);
-  const forcedBoat = runOn === "cloud" || Boolean(inheritedTeamComputer(bot));
+  const forcedCloud = runOn === "cloud" || Boolean(inheritedTeamComputer(bot));
   return resolveSurface({
-    destination: forcedBoat ? "cloud" : bot.computer,
-    pinnedSurface: forcedBoat || !threadId ? null : store.taskByThread(bot.id, threadId)?.surface,
+    destination: forcedCloud ? "cloud" : bot.computer,
+    pinnedSurface: forcedCloud || !threadId ? null : store.taskByThread(bot.id, threadId)?.surface,
     browserOn: builtInBrowserEnabled(cfg) && bot.browser !== false && instance?.adapter.capabilities.browserMcp === true,
   });
 }
 
 function turnProvider(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string): RemoteComputerProvider | null {
-  if (runOn === "cloud" || inheritedTeamComputer(bot)) return "box";
+  if (inheritedTeamComputer(bot)) return "box";
+  if (runOn === "cloud") return bot.cloudBackend === "orgo" ? "orgo" : "box";
   const wants = turnSurfacePlan(bot, runOn, threadId).computer;
   if (wants !== undefined && wants !== "cloud") return null;
+  if (bot.cloudBackend === "orgo") return "orgo";
   if (registry.get(bot.modelSelection.instanceId)?.adapter.capabilities.remoteAgent === true) return "box";
   return bot.cloudBackend === "vps" ? "vps" : wants === "cloud" ? "box" : null;
 }
@@ -6898,6 +6947,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
   if (plan.computer !== undefined) return plan.computer === "off" && plan.browser ? "browser" : plan.computer;
   const instance = registry.get(bot.modelSelection.instanceId);
   if (instance?.adapter.capabilities.remoteAgent === true) return "cloud";
+  if (bot.cloudBackend === "orgo") return "cloud";
   if (bot.cloudBackend === "vps") {
     const remote = await vps.vpsComputerStatus(cfg, bot.id);
     if (remote.ready) return "cloud";
@@ -6935,7 +6985,14 @@ async function selectableComputers(bot: BotRecord) {
     try {
       if (off) reason = "Computer access is Off in this bot's settings.";
       else if (surface === "cloud") {
-        if (bot.cloudBackend === "vps") {
+        if (bot.cloudBackend === "orgo") {
+          const status = localEngine && caps?.computerMcp ? await orgo.state(cfg, bot.id) : null;
+          ready = status?.ready === true;
+          canStart = Boolean(status?.configured && status.box && !ready);
+          canCreate = Boolean(status?.configured && !status.box);
+          reason = status?.configured ? "The Orgo computer is not running. Open its Computer panel to start it."
+            : "Connect Orgo and select a workspace in Settings → Connections.";
+        } else if (bot.cloudBackend === "vps") {
           const status = localEngine && caps?.computerMcp ? await vps.vpsComputerStatus(cfg, bot.id) : null;
           ready = status?.ready === true;
           canStart = Boolean(status?.daemonUp && status.managed && status.container === "stopped" &&
@@ -9464,7 +9521,7 @@ async function startTurn(
     throw Object.assign(new Error("this provider account is being updated — try again shortly"), { status: 409 });
   }
   const switchedEngine = instance.instanceId !== bot.modelSelection.instanceId;
-  const useInstanceDefaults = switchedEngine || (opts?.runOn === "cloud" && !instance.adapter.capabilities.cloudComputerMcp);
+  const useInstanceDefaults = switchedEngine || (opts?.runOn === "cloud" && turnProvider(bot, opts.runOn, threadId) === "box" && !instance.adapter.capabilities.cloudComputerMcp);
   const model = useInstanceDefaults ? instance.models.default : bot.modelSelection.model;
   // A native cloud runner borrows its instance defaults; a Boat bridge keeps
   // the bot's selected model, effort and variant.
@@ -9824,10 +9881,10 @@ async function startTurn(
       // tools that would fail on every call or spawn an unnecessary proxy.
       const dwebUrl = process.env.DWEB_URL?.trim();
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
-      // Cloud routines always use Boat/BoatAgent. The per-bot backend applies
-      // only to ordinary turns that mount a computer into the local agent.
+      // Preserve legacy Boat cloud routines. An explicit Orgo backend keeps
+      // its selected model and computer for scheduled turns as well.
       const teamComputer = inheritedTeamComputer(bot);
-      const cloudBackend = teamComputer || opts?.runOn === "cloud" || bot.cloudBackend !== "vps" ? "box" : "vps";
+      const cloudBackend = teamComputer || (opts?.runOn === "cloud" && bot.cloudBackend !== "orgo") ? "box" : bot.cloudBackend ?? "box";
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;
       // Where this turn's hands may land. The bot's "Works on" choice is
@@ -9853,7 +9910,7 @@ async function startTurn(
       if (placeRefusal) throw Object.assign(new Error(placeRefusal.message), { status: 409, code: placeRefusal.code });
       let previewCapture: (() => Promise<{ png: string; format: string }>) | null = null;
       let browserCapture: (() => Promise<{ png: string; format: string }>) | null = null;
-      let computerKind: "box" | "vps" | "vm" | "local" | null = null;
+      let computerKind: "box" | "vps" | "orgo" | "vm" | "local" | null = null;
       let autoVpsProblem: string | null = null;
       /** The Local VM frame capture for the poller and the settled transcript
        * screenshot. The shared desktop outlives the turn: once another thread
@@ -10162,6 +10219,18 @@ async function startTurn(
         }
       }
 
+      if (cloudBackend === "orgo" && (wants === "cloud" || (wants === undefined && managedPolicy.computerAllowed("box")))) {
+        const attached = await attachBotOrgo(bot, resourceOwner, wants === "cloud",
+          mountsComputerMcp && instance.adapter.capabilities.remoteAgent !== true);
+        if (attached) {
+          integrations.localComputer = attached.integration;
+          previewCapture = attached.capture;
+          computerKind = "orgo";
+        } else if (wants === undefined && opts?.automationSource) {
+          throw new Error("The Orgo computer is not running. Choose Cloud to create or start it; Auto never provisions Orgo computers.");
+        }
+      }
+
       // Cloud is strict when selected. Native Boat and drivers with a Boat
       // bridge may also reuse an already-ready Boat on Auto.
       if (teamComputer) {
@@ -10198,10 +10267,10 @@ async function startTurn(
       // host's own desktop: on a headless server that VM is the only desktop
       // there is, and a person who prepared one meant it to be used.
       if (wants === undefined && !integrations.computer && !integrations.localComputer && !computerPlaceRefusal("localVm") && await attachLocalVm(false)) computerKind = "vm";
-      // An unattended run on a bot with a VPS configured never lands on the
+      // An unattended run on a bot with a remote provider never lands on the
       // host's own desktop instead: a scheduled job clicking on someone's
       // laptop is worse than a scheduled job that fails and says why.
-      const unattendedVps = cloudBackend === "vps" && Boolean(opts?.automationSource);
+      const unattendedVps = cloudBackend !== "box" && Boolean(opts?.automationSource);
       if (
         !integrations.computer &&
         !integrations.localComputer &&
@@ -11180,7 +11249,9 @@ if (recoveryOwners.length > 0) {
 async function cloudRoutineReadiness(botId: string, threadId?: string): Promise<{ ready: boolean; reason?: string }> {
   const bot = threadId ? store.projectBotForTask(botId, threadId) : store.bot(botId);
   if (!bot || bot.hidden) return { ready: false, reason: "The routine's target bot no longer exists." };
-  if (!boat.boatConfigured(cfg)) {
+  const onOrgo = turnProvider(bot, "cloud", threadId) === "orgo";
+  if (onOrgo && !orgo.isConfigured(cfg)) return { ready: false, reason: "Connect your Orgo API key and select a workspace in Settings → Connections." };
+  if (!onOrgo && !boat.boatConfigured(cfg)) {
     return {
       ready: false,
       reason: 'The Boat cloud computer needs a working Boat API key. For the bot’s configured computer, including a self-hosted VPS, set run_on="maus" instead.',
@@ -11189,8 +11260,16 @@ async function cloudRoutineReadiness(botId: string, threadId?: string): Promise<
   const instance = turnInstance(bot, "cloud", threadId);
   if (!instance) return { ready: false, reason: "The Cloud VM runner is unavailable. Restart OpenMausBot and try again." };
   try {
+    if (onOrgo && (!instance.adapter.capabilities.computerMcp || instance.adapter.capabilities.remoteAgent)) {
+      return { ready: false, reason: "The target bot's model cannot use Orgo computer tools." };
+    }
     if ((await instance.snapshot()).state !== "available") {
-      return { ready: false, reason: "The target bot's model is not ready to use the Boat cloud computer." };
+      return { ready: false, reason: `The target bot's model is not ready to use the ${onOrgo ? "Orgo" : "Boat"} cloud computer.` };
+    }
+    if (onOrgo) {
+      // Read-only identity check. Explicit Cloud can create or wake it at dispatch.
+      await orgo.computer(cfg, bot.id);
+      return { ready: true };
     }
     const teamComputer = inheritedTeamComputer(bot);
     const ownerId = teamComputer ? teamComputerOwner(teamComputer.id) : bot.id;
@@ -11255,7 +11334,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
       // A direct turn that has already claimed the bot can provision a Boat in
       // its background setup. Do not let deletion race that work while a Boat
       // account is configured; the person can stop the turn and retry.
-      if ((boat.boatConfigured(cfg) || vpsSshAlias(cfg)) && (bot.busy || hasDirectDispatch(bot.id))) {
+      if ((boat.boatConfigured(cfg) || vpsSshAlias(cfg) || orgo.isConfigured(cfg)) && (bot.busy || hasDirectDispatch(bot.id))) {
         return deletionResponse( 409, { error: "stop this bot's work before checking and deleting its cloud computer" });
       }
       const botBoatRecovery = boatCreateRecoverySnapshot().filter((entry) => entry.botId === bot.id);
@@ -11332,6 +11411,9 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           });
         }
         const ownedBoatComputers = cloudInventory.instances.filter((instance) => instance.ownerBotId === bot.id);
+        // Probe before any provider deletion so unavailable Orgo credentials
+        // cannot leave a billable computer without its bot owner.
+        const ownedOrgoComputer = orgo.isConfigured(cfg) ? await orgo.computer(cfg, bot.id) : null;
 
         // Revalidate a reviewed Chief-of-Staff request and establish the
         // browser cleanup intent before the first irreversible provider
@@ -11357,6 +11439,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           for (const instance of ownedVpsComputers) {
             await vps.removeManagedVpsComputer(cfg, managedBoatOwners(), instance.name, instance.name);
           }
+          if (ownedOrgoComputer) await orgo.remove(cfg, bot.id);
           if (localVmCleanup) {
             if (localVmCleanup.removeContainer) {
               await containerComputerAction("remove", undefined, undefined, localVmCleanup.target);
@@ -12257,7 +12340,7 @@ async function runGroupMemberTurn(
   let setupStalled = false;
   let unregisterSetupStall = () => {};
   // The speaker's own This computer / Cloud mount, and what it must give back.
-  let roomComputerKind: "local" | "vps" | "box" | null = null;
+  let roomComputerKind: "local" | "vps" | "orgo" | "box" | null = null;
   let roomVpsBotId: string | null = null;
   let roomScreenBotId: string | null = null;
   const releaseRoomVmLease = () => {
@@ -12583,6 +12666,15 @@ async function runGroupMemberTurn(
       if (!("integration" in mounted)) throw new Error(mounted.problem ?? "the VPS computer could not be created or reached");
       integrations.localComputer = mounted.integration;
       roomComputerKind = "vps";
+    } else if (turnProvider(readyBot) === "orgo") {
+      const attached = await attachBotOrgo(readyBot, resourceOwner, true,
+        instance.adapter.capabilities.computerMcp === true && instance.adapter.capabilities.remoteAgent !== true);
+      if (!roomSetupIsCurrent()) return false;
+      if (!attached) throw new Error("The Orgo computer is not ready");
+      integrations.localComputer = attached.integration;
+      roomComputerKind = "orgo";
+      roomScreenBotId = readyBot.id;
+      startScreenPoller(readyBot.id, threadId, { computer: attached.capture });
     } else {
       if (!boat.boatConfigured(cfg)) throw new Error(BOAT_NOT_CONFIGURED);
       const remoteAgent = instance.adapter.capabilities.remoteAgent === true;
@@ -15052,6 +15144,7 @@ function configStatus() {
     // configured = cloud computers work here; included = through Cloud Pro,
     // not a saved key
     box: boat.describeBoatAccount(cfg),
+    orgo: { configured: Boolean(cfg.orgo?.apiKey?.trim()), workspaceId: cfg.orgo?.workspaceId ?? "" },
     vps: { configured: Boolean(vpsSshAlias(cfg)), sshAlias: vpsSshAlias(cfg) ?? "" },
     opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
     // the chosen voice is a setting, not a secret; the key is reported the
@@ -21103,8 +21196,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           patch.browserProfile = requestedProfile;
         } else return json(res, 400, { error: "browserProfile must name an existing browser profile" });
       }
-      if (body.cloudBackend !== undefined && !["box", "vps"].includes(String(body.cloudBackend))) {
-        return json(res, 400, { error: "cloudBackend must be box or vps" });
+      if (body.cloudBackend !== undefined && !["box", "vps", "orgo"].includes(String(body.cloudBackend))) {
+        return json(res, 400, { error: "cloudBackend must be box, vps or orgo" });
       }
       if (body.autoStartVps !== undefined) {
         if (typeof body.autoStartVps !== "boolean") return json(res, 400, { error: "autoStartVps must be true or false" });
@@ -24095,6 +24188,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const currentBoatToken = cfg.box?.token?.trim() ?? "";
       const nextBoatToken = patch.box?.token === undefined ? currentBoatToken : patch.box.token;
       const changingBoatToken = patch.box?.token !== undefined && nextBoatToken !== currentBoatToken;
+      if (patch.orgo?.apiKey !== undefined) patch.orgo.apiKey = patch.orgo.apiKey.trim();
+      const nextOrgoConfig = { ...cfg, orgo: { ...cfg.orgo, ...patch.orgo } };
+      const changingOrgo = Boolean(patch.orgo &&
+        (nextOrgoConfig.orgo.apiKey !== cfg.orgo?.apiKey || nextOrgoConfig.orgo.workspaceId !== cfg.orgo?.workspaceId));
       const currentVpsAlias = vpsSshAlias(cfg);
       const nextVpsAlias = patch.vps === undefined
         ? currentVpsAlias
@@ -24102,6 +24199,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const changingVpsAlias = patch.vps !== undefined && nextVpsAlias !== currentVpsAlias;
       const transitioningProviders: RemoteComputerProvider[] = [
         ...(changingBoatToken ? ["box" as const] : []),
+        ...(changingOrgo ? ["orgo" as const] : []),
         ...(changingVpsAlias ? ["vps" as const] : []),
       ];
       providerConfigBusy = true;
@@ -24113,6 +24211,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (conflict) return json(res, 409, { error: conflict });
         }
         for (const provider of transitioningProviders) computerProviderConfigTransitions.add(provider);
+        if (changingOrgo && cfg.orgo?.apiKey) await orgo.validateReplacement(cfg, nextOrgoConfig);
 
         if (changingVpsAlias && currentVpsAlias) {
           const inventory = await vps.listManagedVpsComputers(
@@ -24397,6 +24496,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (persisted.xai?.key !== undefined) persisted.xai.key = "";
           if (persisted.composio?.apiKey !== undefined) persisted.composio.apiKey = "";
           if (persisted.box?.token !== undefined) persisted.box.token = "";
+          if (persisted.orgo?.apiKey !== undefined) persisted.orgo.apiKey = "";
           if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
           if (persisted.tts?.key !== undefined) persisted.tts.key = "";
           if (persisted.tts?.fishKey !== undefined) persisted.tts.fishKey = "";
@@ -24778,15 +24878,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 405, { error: "method not allowed" });
     }
 
-    // ── the bot's cloud computer (Boat) ──
+    if (path === "/api/orgo/workspaces" && method === "GET") {
+      res.setHeader("cache-control", "private, no-store");
+      return json(res, 200, { workspaces: await orgo.listWorkspaces(cfg) });
+    }
+
+    // ── the bot's cloud computer ──
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer$/);
     if (m && method === "GET") {
       const bot = computerPreviewBot(m[1], url);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const surface = url.searchParams.has("threadId") ? await computerPreviewSurface(bot, bot.threadId) : "cloud";
-      if (surface !== "cloud") return json(res, 200, { surface, configured: false, backend: bot.cloudBackend === "vps" ? "vps" : "box" });
+      if (surface !== "cloud") return json(res, 200, { surface, configured: false, backend: bot.cloudBackend ?? "box" });
       const teamComputer = inheritedTeamComputer(bot);
       if (teamComputer) return json(res, 200, { surface, backend: "box", teamComputer: { id: teamComputer.id, name: teamComputer.name }, ...(await boat.boatStatus(cfg, teamComputerOwner(teamComputer.id))) });
+      if (bot.cloudBackend === "orgo") return json(res, 200, { surface, backend: "orgo", ...(await orgo.state(cfg, bot.id)) });
       return bot.cloudBackend === "vps"
         ? json(res, 200, { surface, backend: "vps", ...(await vps.vpsComputerStatus(cfg, bot.id)) })
         : json(res, 200, { surface, backend: "box", ...(await boat.boatStatus(cfg, bot.id)) });
@@ -24883,12 +24989,34 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (m[2] === "join" && bot.cloudBackend === "vps") {
         for (let pending; (pending = vpsJoinRequests.get(botId));) await pending;
       }
-      const remoteProvider: RemoteComputerProvider = bot.cloudBackend === "vps" ? "vps" : "box";
+      const remoteProvider: RemoteComputerProvider = bot.cloudBackend ?? "box";
       if (computerProviderConfigTransitions.has(remoteProvider)) {
         return json(res, 409, { error: providerTransitionMessage(remoteProvider) });
       }
       if (boatLifecycleBusyBots.has(botId)) {
         return json(res, 409, { error: "this bot's cloud computer is being changed — wait for it to finish" });
+      }
+      if (remoteProvider === "orgo") {
+        if (m[2] === "exec") return json(res, 409, { error: "Use the bot's scoped Orgo computer tools for shell commands" });
+        const changesComputer = ["provision", "sleep", "remove"].includes(m[2]);
+        if (changesComputer && botHasActiveTurn(botId)) return json(res, 409, { error: CLOUD_COMPUTER_BUSY_ERROR });
+        if (m[2] === "provision" && bot.computer !== "cloud") {
+          return json(res, 409, { error: "Choose Cloud to create or start the Orgo computer. Auto only attaches an existing running computer." });
+        }
+        const release = claimBotComputerLifecycle(botId, previewOnly);
+        try {
+          res.setHeader("cache-control", "private, no-store");
+          if (m[2] === "screenshot") return json(res, 200, await orgo.screenshot(cfg, botId));
+          if (m[2] === "join") {
+            const computer = await orgo.computer(cfg, botId);
+            if (!computer?.fly_instance_id || !computer.vnc_password) return json(res, 409, { error: "Start the Orgo computer before opening its desktop" });
+            return json(res, 200, { joinUrl: desktopViewerUrl(`orgo/${botId}`, bot.threadId) });
+          }
+          if (m[2] === "remove") return json(res, 200, await orgo.remove(cfg, botId));
+          if (m[2] === "sleep") return json(res, 200, await orgo.sleep(cfg, botId));
+          const status = await orgo.state(cfg, botId);
+          return json(res, 200, status.box ? await orgo.wake(cfg, botId) : await orgo.provision(cfg, botId));
+        } finally { release(); }
       }
       const teamComputer = inheritedTeamComputer(bot);
       if (teamComputer) {

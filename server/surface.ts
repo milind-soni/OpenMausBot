@@ -45,8 +45,8 @@ export function parseSurface(value: unknown): Surface | undefined {
 }
 
 /** The per-turn computer kinds the dispatch tracks, folded to a surface. */
-export function surfaceOfComputerKind(kind: "box" | "vps" | "vm" | "local" | null): Surface | null {
-  if (kind === "box" || kind === "vps") return "cloud";
+export function surfaceOfComputerKind(kind: "box" | "vps" | "orgo" | "vm" | "local" | null): Surface | null {
+  if (kind === "box" || kind === "vps" || kind === "orgo") return "cloud";
   return kind;
 }
 

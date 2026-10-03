@@ -52,7 +52,7 @@ export function buildSystemPrompt(
 
 // The "box*" prompt kinds are Boat's historical kind literals; events and
 // persisted surfaces carry them, so only prose was renamed.
-export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent" | "box-chat" | "vps" | "local";
+export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent" | "box-chat" | "vps" | "orgo" | "local";
 
 /** One ladder for the computer paragraph, so the settings preview, a direct
  * turn, and a room turn cannot disagree about which paragraph a computer plan
@@ -62,7 +62,7 @@ export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent
  * which computer, which driver — and pass the result in; `vmPrivate` keeps
  * this module pure (it is localVmMode(cfg) === "per-bot" at the call site). */
 export type ComputerPromptKindInput = {
-  kind: "vm" | "box" | "vps" | "local" | null;
+  kind: "vm" | "box" | "vps" | "orgo" | "local" | null;
   driverKind: string | undefined;
   cloudComputerMcp: boolean | undefined;
   vmPrivate: boolean;
@@ -72,6 +72,7 @@ export function resolveComputerPromptKind(input: ComputerPromptKindInput): Compu
   if (input.kind === "vm") return input.vmPrivate ? "vm-private" : "vm-shared";
   if (input.kind === "box") return input.driverKind === "boxAgent" ? "box-agent" : input.cloudComputerMcp ? "box-chat" : "box";
   if (input.kind === "vps") return "vps";
+  if (input.kind === "orgo") return "orgo";
   if (input.kind === "local") return "local";
   return null;
 }
@@ -92,6 +93,8 @@ const COMPUTER_PARAGRAPH: Record<ComputerPromptKind, string> = {
   "box-chat": " You control the assigned cloud computer. Inspect it with screenshots; click coordinates refer to the full image. Use the advertised computer tools for desktop actions and shell commands.",
   vps:
     " You have your own self-hosted remote Linux computer through the official Cua tools. This is a VPS, not Boat; using it does not require a Boat API key. Its filesystem is disposable: everything on it is wiped whenever its container is recreated, so keep long-lived work somewhere durable — push it to a remote, or hand the results back in chat — instead of leaving it only on that computer. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully.",
+  orgo:
+    " You have an Orgo cloud Linux computer, not Boat or the user's host. Use the advertised computer tools for screenshots, desktop actions and shell commands. Its disk persists across stop/start until the computer is deleted. Host file and shell tools do not reach it. Save work on the Orgo computer and push important results to a remote or export them through Orgo. Inspect a screenshot before coordinate actions. The Orgo API key is already configured server-side; do not request a Boat key or read credentials.",
   local:
     " You can act on the user's computer through the computer tools. Discover the target app/window and inspect its state first. Prefer window-targeted accessibility actions with background delivery so the user can keep working in another app; do not bring OpenMausBot or another app to the front just to inspect it. Use the dedicated browser tools for browser work when available, keeping the user's intended browser profile/account, and OpenMausBot's configuration/proposal tools for supported bot setup rather than clicking through this app. Full-desktop input, app activation, and foreground delivery can move the real cursor, change focus, or switch desktops: use them only when the user asked for foreground control or agrees after background control reports it cannot perform the action. Do not silently retry a background refusal as foreground input, including through shell scripts, AppleScript/System Events, or another automation tool. If a background action unexpectedly changes focus, report it and stop that route rather than continuing to interrupt the user. Never promise that arbitrary desktop actions can run in the background.",
 };

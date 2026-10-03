@@ -20,6 +20,8 @@ describe("new-bot templates", () => {
   });
 
   it("accepts bounded settings and rejects coercion and invalid model combinations", () => {
+    expect(parseConfigPatch({ newBotDefaults: { profile: { computer: "cloud", cloudBackend: "orgo" } } }).newBotDefaults?.profile)
+      .toEqual({ computer: "cloud", cloudBackend: "orgo" });
     expect(parseConfigPatch({ newBotDefaults: { profile: { notifications: false, computer: "off", mcpServers: [] } } })
       .newBotDefaults?.profile).toEqual({ notifications: false, computer: "off", mcpServers: [] });
     for (const profile of [

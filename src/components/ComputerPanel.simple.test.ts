@@ -24,7 +24,7 @@ const fixture = vi.hoisted(() => {
     index: 0,
     own: 0,
     seed: {} as Record<string, unknown>,
-    config: {} as FeatureFlagConfig & { cloudHome?: boolean; box?: { configured: boolean } },
+    config: {} as FeatureFlagConfig & { cloudHome?: boolean; box?: { configured: boolean }; orgo?: { configured: boolean; workspaceId?: string } },
     instances: [] as InstanceInfo[],
     android: false,
     dispatch: (() => {}) as (...args: unknown[]) => void,
@@ -412,6 +412,31 @@ describe("A chat pinned to a place", () => {
 
 describe("Technical controls", () => {
   const cloud = () => makeBot({ computer: "cloud" });
+
+  it("requests only the Orgo key and workspace for an unconfigured Orgo computer", () => {
+    fixture.seed = { phase: "unconfigured" };
+    fixture.config.orgo = { configured: false };
+    const rendered = render(makeBot({ computer: "cloud", cloudBackend: "orgo" }));
+    expect(rendered.html).toContain("Orgo API key");
+    expect(rendered.html).not.toContain("Boat API key");
+    expect(fixture.api).not.toHaveBeenCalled();
+  });
+
+  it("uses the normal screenshot controls for a ready Orgo computer", () => {
+    fixture.seed = { phase: "ready", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "orgo" } };
+    const rendered = render(makeBot({ computer: "cloud", cloudBackend: "orgo" }));
+    const row = rendered.nodes.find((node) => node.props["data-testid"] === "computer-actions")!;
+    expect(nodes(row.props.children).filter((node) => node.type === "button").map((node) => text(node.props.children)))
+      .toEqual(["Take control", "Full screen", "Sleep"]);
+  });
+
+  it("starts a stopped Orgo computer through the selected bot's own provision route", async () => {
+    fixture.seed = { phase: "orgo-stopped", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "orgo" } };
+    const rendered = render(makeBot({ computer: "cloud", cloudBackend: "orgo" }));
+    (rendered.button("Start Orgo computer")!.props.onClick as () => void)();
+    expect(fixture.api).toHaveBeenCalledWith("/api/bots/scout/computer/provision", { method: "POST" });
+    expect(rendered.html).not.toContain("Start VPS");
+  });
 
   it("hides the gear, backend picker and Routines card in Simple and keeps them in Advanced", () => {
     const simple = render(cloud());

@@ -1,4 +1,4 @@
-import { cloudRunner } from "@/lib/remote-desktop";
+import { cloudComputerConfigured, cloudRunner } from "@/lib/remote-desktop";
 // The bot's computer, in the right-side slot. Where it runs decides the
 // whole flow: explicit cloud → provision the boat on open (idempotent) and preview
 // via SSE frames or a ~4s screenshot poll. macOS local mode keeps the legacy
@@ -37,7 +37,7 @@ import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { ComputerFilesPane } from "./ComputerFilesPane";
 import { effectivePlace, isComputerPlace, placeLabelKey, placeOffered } from "@/lib/place";
 import type { CloudBackend } from "../../shared/wire";
-import { ApiKeyRow } from "./ApiKeys";
+import { ApiKeyRow, OrgoConnection } from "./ApiKeys";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
@@ -111,6 +111,7 @@ type Phase =
   | "vps-unconfigured"
   | "vps-incompatible"
   | "vps-stopped"
+  | "orgo-stopped"
   | "local"
   | "local-unavailable"
   | "auto-unavailable"
@@ -477,15 +478,13 @@ export function ComputerPanel({
   );
   const computerToolSupported = selectedInstance?.capabilities?.computerMcp === true;
   const vpsSupported = Boolean(computerToolSupported && selectedInstance?.driverKind !== "boxAgent");
-  const cloudSupported = cloudBackend === "vps"
-    ? vpsSupported
-    : Boolean(cloudRunner(state.instances, bot.modelSelection.instanceId));
+  const cloudSupported = Boolean(cloudRunner(state.instances, bot.modelSelection.instanceId, cloudBackend));
   const botRoutines = state.routines
     .filter((routine) => routine.botId === bot.id)
     .sort((a, b) => Number(b.enabled) - Number(a.enabled) || (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity));
   const cloudRoutineReady = Boolean(
-    state.config?.box.configured &&
-      cloudRunner(state.instances, bot.modelSelection.instanceId)?.snapshot.state === "available",
+    cloudComputerConfigured(state.config, cloudBackend) &&
+      cloudRunner(state.instances, bot.modelSelection.instanceId, cloudBackend)?.snapshot.state === "available",
   );
   const activeRoutineRun = state.routineRuns.find(
     (run) => run.botId === bot.id && ["queued", "running", "waiting"].includes(run.status),
@@ -599,6 +598,38 @@ export function ComputerPanel({
       return;
     }
     if (bot.computer !== "cloud" && !capabilitiesReady) return;
+    if (cloudBackend === "orgo") {
+      api(threadPath("computer"))
+        .then(async (status) => {
+          if (!alive) return;
+          setResolvedComputerSelection({ botId: bot.id, threadId: bot.threadId, computer: bot.computer, cloudBackend });
+          setBoatState(status.container ?? null);
+          if (!status.configured) {
+            setPhase("unconfigured");
+            return;
+          }
+          if (status.ready) {
+            setPhase("ready");
+            return;
+          }
+          if (!canManageCloud) {
+            setPhase("orgo-stopped");
+            return;
+          }
+          setPhase("starting");
+          const result = await api(`/api/bots/${bot.id}/computer/provision`, { method: "POST" });
+          if (!alive) return;
+          setBoatState(result.container ?? null);
+          setError(result.ready ? null : result.problem ?? "The Orgo computer is not ready. Retry to check it again.");
+          setPhase(result.ready ? "ready" : "error");
+        })
+        .catch((cause) => {
+          if (!alive) return;
+          setError(isActiveTurnRefusal(cause) ? null : cause.message);
+          setPhase(isActiveTurnRefusal(cause) ? "busy-boat" : "error");
+        });
+      return () => { alive = false; };
+    }
     if (cloudBackend === "vps") {
       if (!vpsSupported) {
         setError(new LocalizedPanelError("computer.err.vpsEngine"));
@@ -775,6 +806,8 @@ export function ComputerPanel({
     cloudSupported,
     vpsSupported,
     state.config?.vps?.sshAlias,
+    state.config?.orgo?.configured,
+    state.config?.orgo?.workspaceId,
     panelView,
     computerSelectionPersisted,
     surfaceReady,
@@ -797,7 +830,7 @@ export function ComputerPanel({
         .then((status) => {
           if (!alive) return;
           const state = typeof status.box?.state === "string" ? status.box.state : null;
-          if (isReadyBoatState(state)) {
+          if (cloudBackend === "orgo" ? status.ready === true : isReadyBoatState(state)) {
             setBoatState(state);
             setPhase("ready");
           }
@@ -809,7 +842,7 @@ export function ComputerPanel({
       alive = false;
       window.clearInterval(timer);
     };
-  }, [phase, threadPath, profileBot.busy, canManageCloud]);
+  }, [phase, threadPath, profileBot.busy, canManageCloud, cloudBackend]);
 
   // Only frames received during this connection may replace its preview.
   // A cached SSE frame must never mask every subsequent screenshot poll.
@@ -1096,7 +1129,7 @@ export function ComputerPanel({
       // Release the bot before waiting on best-effort tunnel cleanup. A sick
       // SSH process must never leave the agent paused indefinitely.
       if (tookControl) await transitionControl("release").catch(() => {});
-      if (cloudPreviewReady && cloudBackend === "vps") {
+      if (cloudPreviewReady && cloudBackend !== "box") {
         await api(threadPath("computer/viewer-close"), { method: "POST", body: "{}" }).catch(() => {});
       }
       if (ownsConnection()) setError(e instanceof Error ? e : String(e));
@@ -1123,14 +1156,15 @@ export function ComputerPanel({
             setPhase("ready");
           }
           else {
-            setError(result.problem ?? new LocalizedPanelError("computer.err.vpsNotReady"));
+            setError(result.problem ?? (cloudBackend === "orgo" ? "The Orgo computer is not ready. Retry to check it again." : new LocalizedPanelError("computer.err.vpsNotReady")));
             setPhase("error");
           }
         }
         if (kind === "sleep") {
           setResolvedComputerSelection(null);
-          setBoatState(cloudBackend === "vps" ? "stopped" : "archived");
-          if (cloudBackend === "vps") setPhase("vps-stopped");
+          setBoatState(cloudBackend !== "box" ? "stopped" : "archived");
+          if (cloudBackend === "orgo") setPhase("orgo-stopped");
+          else if (cloudBackend === "vps") setPhase("vps-stopped");
           // The deciders map an archived boat to the sleeping observation
           // phase; re-resolving would see "ensure-boat" and wake it again.
           else setPhase("show-sleeping-boat");
@@ -1337,7 +1371,7 @@ export function ComputerPanel({
     checking: t("computer.phase.checking"),
     starting: t("computer.phase.starting"),
     "busy-boat": t("computer.phase.busyBoat"),
-    unconfigured: t("computer.phase.unconfigured"),
+    unconfigured: cloudBackend === "orgo" ? "Connect your Orgo key and choose a workspace below." : t("computer.phase.unconfigured"),
     "auto-unavailable": t("computer.phase.autoUnavailable"),
     "team-boat": "This bot uses a shared team computer. Open Team map to view or manage it.",
     "show-ready-boat": t("computer.phase.showReadyBoat"),
@@ -1346,6 +1380,7 @@ export function ComputerPanel({
     "vps-unconfigured": t("computer.phase.vpsUnconfigured"),
     "vps-incompatible": t("computer.phase.vpsIncompatible"),
     "vps-stopped": t("computer.phase.vpsStopped"),
+    "orgo-stopped": "The Orgo computer is stopped. Its saved files remain in Orgo.",
     "local-unavailable": localDisabledReason ?? t("computer.phase.localUnavailable"),
     "vm-unavailable": t("computer.phase.vmUnavailable"),
     browser: t("computer.phase.browser"),
@@ -1510,6 +1545,7 @@ export function ComputerPanel({
               <span className="text-[11px]">{t("computer.badge.autoBoat")}</span>
             )}
             {computerStatusCurrent && bot.computer === "cloud" && cloudBackend === "vps" && (phase === "ready" || phase === "starting") && <span className="text-[11px]">{t("computer.badge.vps")}</span>}
+            {computerStatusCurrent && bot.computer === "cloud" && cloudBackend === "orgo" && (phase === "ready" || phase === "starting") && <span className="text-[11px]">Orgo</span>}
         </div>
         <div className="relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-card">
           {cloudPreviewReady || (bot.computer === "cloud" && phase === "starting") ? (
@@ -1625,6 +1661,13 @@ export function ComputerPanel({
               {vmResumable && pending !== "vm-start" && (
                 <p className="text-[12px]">{t(vmStatus?.stop_reason === "idle" ? "vm.stopped.idle" : "vm.stopped.detail")}</p>
               )}
+              {phase === "orgo-stopped" && (
+                <button type="button" onClick={() => canManageCloud ? run("provision") : updateComputerSelection({ computer: "cloud" })}
+                  disabled={pending === "provision"}
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50">
+                  {pending === "provision" ? "Starting…" : "Start Orgo computer"}
+                </button>
+              )}
               {phase === "vm-unavailable" && (
                 canManageVm && vmResumable && vmStatus.mode !== "pool" ? (
                   <button
@@ -1712,12 +1755,12 @@ export function ComputerPanel({
         {phase === "unconfigured" && (
           <div className="mt-3 rounded-xl bg-card p-4">
             <div className="mb-3 text-[13px] text-ink-secondary">
-              {t("computer.addBoatKey")}
+              {cloudBackend === "orgo" ? "Use your own Orgo account for this bot's cloud computer." : t("computer.addBoatKey")}
             </div>
-            <ApiKeyRow
+            {cloudBackend === "orgo" ? <OrgoConnection /> : <ApiKeyRow
               section="box"
               onSaved={(configured) => configured && setRetry((n) => n + 1)}
-            />
+            />}
           </div>
         )}
         {advanced && phase === "vps-unconfigured" && (
@@ -1857,7 +1900,7 @@ export function ComputerPanel({
               <Maximize2 size={14} />
               {t("computer.fullScreen")}
             </button>
-            {cloudPreviewReady && canManageCloud && (cloudBackend === "vps" || boatState !== "archived") && (
+            {cloudPreviewReady && canManageCloud && (cloudBackend !== "box" || boatState !== "archived") && (
               <button
                 type="button"
                 onClick={() => run("sleep")}
@@ -1898,7 +1941,7 @@ export function ComputerPanel({
                 {t("computer.openLiveDesktop")}
               </button>
             )}
-            {canManageCloud && (cloudBackend === "vps" || boatState !== "archived") && (
+            {canManageCloud && (cloudBackend !== "box" || boatState !== "archived") && (
               <button
                 onClick={() => run("sleep")}
                 // the server refuses sleep while a turn owns the boat (409)

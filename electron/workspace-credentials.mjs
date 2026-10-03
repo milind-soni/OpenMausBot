@@ -10,6 +10,7 @@
 export const WORKSPACE_CREDENTIALS = [
   { section: "xai", field: "key", name: "xaiApiKey", env: "XAI_API_KEY" },
   { section: "box", field: "token", name: "boxToken", env: "BOX_TOKEN" },
+  { section: "orgo", field: "apiKey", name: "orgoApiKey", env: "ORGO_API_KEY" },
   { section: "tts", field: "key", name: "ttsKey", env: "OMB_TTS_KEY" },
   { section: "tts", field: "fishKey", name: "fishAudioKey", env: "OMB_FISH_AUDIO_API_KEY" },
   { section: "decider", field: "key", name: "jevApiKey", env: "OMB_JEV_API_KEY" },

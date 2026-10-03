@@ -63,6 +63,9 @@ export function computerKindForResource(resource: string): ComputerKind | undefi
   if (resource.startsWith("computer:vm:")) return "localVm";
   // computer:box: and computer:box-bot: are Boat's historical resource prefixes.
   if (resource.startsWith("computer:box:") || resource.startsWith("computer:box-bot:")) return "box";
+  // Orgo is another hosted computer; the existing organisation allowance
+  // must cover it rather than letting an unknown resource bypass policy.
+  if (resource.startsWith("computer:orgo:")) return "box";
   if (resource.startsWith("computer:vps:")) return "vps";
 }
 

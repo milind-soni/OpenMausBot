@@ -7,6 +7,12 @@ import {
 } from "./workspace-credentials.mjs";
 
 describe("workspace credential migration", () => {
+  it("encrypts the Orgo key without moving its workspace selection into the secret store", () => {
+    const result = migrateWorkspaceCredentials({ orgo: { apiKey: "orgo-secret", workspaceId: "work-1" } }, {});
+    expect(result.credentials).toEqual({ orgoApiKey: "orgo-secret" });
+    expect(result.config).toEqual({ orgo: { workspaceId: "work-1" } });
+    expect(workspaceCredentialEnv(result.credentials)).toEqual({ ORGO_API_KEY: "orgo-secret" });
+  });
   it("stores the router key separately while keeping provider settings", () => {
     const result = migrateWorkspaceCredentials({ imageGen: {
       provider: "custom", key: "openai-only", customApiKey: "router-only",
