@@ -61,13 +61,14 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   // Windowed transcript: only a tail of the thread mounts (screenshots make
   // full threads DOM-heavy). The boundary is per owner+thread; a render-phase
   // reset re-tails it on switch so the old thread's boundary never flashes
-  // into the new one. While the reader follows the bottom, the boundary stays
-  // between the person's newest message and the tail: new rows slide it up so
-  // the window stays one window long, but never past that message, so the
-  // question and the turn answering it stay mounted however many hidden tool
-  // steps that turn adds; a thread that shrinks (a branch switch) re-tails it.
-  // The boundary holds still once they have scrolled away, so the rows they
-  // are reading stay put.
+  // into the new one. While the reader follows the bottom, new rows slide the
+  // boundary up so the window stays one window long, except that it stops at
+  // the person's newest message while that message is mounted and at most one
+  // more window back: the question stays on screen while a turn of hidden tool
+  // steps answers it, and the window never passes two windows. A thread that
+  // shrinks (a branch switch) re-tails it (followWindowStart). The boundary
+  // holds still once they have scrolled away, so the rows they are reading
+  // stay put.
   // Callers derive everything else (last reply, working dots) from the FULL
   // list.
   const transcriptKey = `${ownerId}:${threadId}`;
@@ -85,7 +86,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const nextStart = switched
     ? tailStart
     : follow && transcriptWindow.end === null
-      ? Math.min(Math.max(transcriptWindow.start, followWindowStart(messages)), tailStart)
+      ? followWindowStart(messages, transcriptWindow.start)
       : transcriptWindow.start;
   if (switched || nextStart !== transcriptWindow.start) {
     setTranscriptWindow({ key: transcriptKey, start: nextStart, end: null });

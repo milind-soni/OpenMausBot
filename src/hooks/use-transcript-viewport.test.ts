@@ -297,6 +297,39 @@ describe("transcript viewport", () => {
     expect(scroller.scrollTop).toBe(scroller.bottom);
   });
 
+  it("keeps the window to two windows while one long stretch follows a single message", () => {
+    // a long computer-use turn, or bots answering each other in a room: the
+    // person wrote once and every row since then draws
+    let thread: Row[] = [{ id: "ask", role: "user" }];
+    const view = mount({ messages: thread });
+    for (let step = 0; step < 600; step++) {
+      thread = [...thread, { id: `step${step}`, role: "bot" }];
+      view.rerender({ messages: thread });
+      expect(view.current.windowedMessages.length).toBeLessThanOrEqual(2 * 120);
+      expect(view.current.following).toBe(true);
+      expect(scroller.scrollTop).toBe(scroller.bottom);
+      // the question stays while the turn fits in one more window
+      if (thread.length <= 2 * 120) expect(view.current.windowedMessages[0]?.id).toBe("ask");
+    }
+    expect(view.current.windowedMessages).toHaveLength(120);
+    expect(view.current.windowedMessages.at(-1)?.id).toBe("step599");
+  });
+
+  it("does not hold for a message that is already above the window", () => {
+    // opened (or Jump to latest) in the middle of a long turn: the question
+    // is behind Show earlier, so there is nothing on screen to hold
+    let thread: Row[] = [...rows(30), { id: "ask", role: "user" }, ...rows(200, 1_000)];
+    const view = mount({ messages: thread });
+    expect(view.current.hiddenCount).toBe(111);
+    for (let step = 0; step < 300; step++) {
+      thread = [...thread, { id: `step${step}`, role: "bot" }];
+      view.rerender({ messages: thread });
+      expect(view.current.windowedMessages.length).toBeLessThanOrEqual(120);
+      expect(scroller.scrollTop).toBe(scroller.bottom);
+    }
+    expect(view.current.windowedMessages.at(-1)?.id).toBe("step299");
+  });
+
   it("holds the reader's rows and grows the window once they have scrolled away", () => {
     const view = mount({ messages: rows(300) });
     view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
