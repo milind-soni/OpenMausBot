@@ -11,17 +11,13 @@
 import type {
   BackendRequest, BackendResult, ChoiceAnswer, DeciderAnswer, DeciderBackend, DeciderQuestion, ScoreAnswer, YesNoAnswer,
 } from "./types.ts";
+import { isLoopback } from "../provider-key-check.ts";
 
 export const JEV_DEFAULT_BASE_URL = "https://api.typesafe.ai";
 export const JEV_MODEL = "jev-latest";
 export const JEV_MAX_OPTIONS = 255;
 export const JEV_MIN_LEVELS = 2;
 export const JEV_MAX_LEVELS = 10;
-
-function isLoopback(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, "");
-  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.startsWith("127.");
-}
 
 /** The endpoint for a base URL, or null when the key must not be sent there:
  * https anywhere, plain http only to this machine (a local Jev-compatible

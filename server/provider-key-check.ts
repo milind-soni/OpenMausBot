@@ -25,7 +25,8 @@ const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
 
 const MAX_MODELS = 5;
 
-function isLoopback(hostname: string): boolean {
+/** A URL hostname on this machine: the only place a key may go over plain http. */
+export function isLoopback(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "");
   return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.startsWith("127.");
 }

@@ -631,7 +631,10 @@ function loadSchedule(value: unknown, after: number): RoutineSchedule | null {
   }
 }
 
-function intervalHasRestrictions(schedule: RoutineIntervalSchedule): boolean {
+/** Whether an interval only runs on some weekdays, in a window or until an end. */
+export function intervalHasRestrictions(
+  schedule: Pick<RoutineIntervalSchedule, "weekdays" | "window" | "endsAt">,
+): boolean {
   return schedule.weekdays !== undefined || schedule.window !== undefined || schedule.endsAt !== undefined;
 }
 

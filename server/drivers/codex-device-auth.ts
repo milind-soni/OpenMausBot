@@ -13,7 +13,9 @@ const MAX_OUTPUT = 16_384;
 // operation is exclusive: normal turns are not blocked by this lock.
 const authenticatingHomes = new Set<string>();
 
-function canonicalPath(path: string): string {
+/** The real path of a credential home, so two spellings of one home share
+ * one sign-in lock. A missing tail keeps its name under its real parent. */
+export function canonicalPath(path: string): string {
   try { return realpathSync(path); } catch {
     const parent = dirname(path);
     return parent === path ? path : join(canonicalPath(parent), basename(path));

@@ -195,7 +195,7 @@ const oneLine = (value: string): string => {
   return flattened.replace(/\s+/g, " ").trim();
 };
 
-const clip = (value: string, max: number): string => {
+export const clip = (value: string, max: number): string => {
   const flat = oneLine(value);
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };

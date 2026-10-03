@@ -227,10 +227,10 @@ export function messageReferencesFile(text: string, requested: string): boolean 
   return false;
 }
 
-/** Decode exactly the entity spellings emitted by the composer. A single
- * pass is intentional: double-encoded input must not turn into a path only
- * while it is being authorised. */
-function decodeAttachmentAttribute(value: string): string {
+/** Decode exactly the entity spellings the composer writes into an
+ * attachment tag. A single pass is intentional: double-encoded input stays
+ * encoded and must not turn into a path only while it is being authorised. */
+export function decodeAttachmentAttribute(value: string): string {
   return value.replace(
     /&(quot|lt|gt|amp);|&#(9|10|13);/g,
     (entity, named: string | undefined, numeric: string | undefined) => {

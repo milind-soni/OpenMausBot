@@ -34,7 +34,7 @@ import { basename, join } from "node:path";
 
 import type { AutoVerdictSource } from "./auto-approve.ts";
 import { redactSecrets } from "./redact.ts";
-import { csvCell } from "./usage-ledger.ts";
+import { csvCell, monthKey } from "./usage-ledger.ts";
 
 /** A verdict's outcome. auto-* rows came from a policy — connector grants,
  * auto-approve rules — with no card in front of a person; user-* rows
@@ -146,10 +146,6 @@ const actorScope = new AsyncLocalStorage<{ actor: DecisionActor; via?: "call" }>
  * without each resolver having to thread it through. */
 export function withDecisionActor<T>(actor: DecisionActor, work: () => T, via?: "call"): T {
   return actorScope.run(via ? { actor, via } : { actor }, work);
-}
-
-function monthKey(at: Date): string {
-  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 export function decisionFileFor(dataDir: string, at: Date): string {

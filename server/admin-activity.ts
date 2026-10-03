@@ -21,7 +21,7 @@ import { basename, join } from "node:path";
 
 import { actorLabel, boundRetentionDays, pruneMonthFiles, type DecisionActor, type DecisionRow } from "./decision-log.ts";
 import { redactSecrets } from "./redact.ts";
-import { csvCell } from "./usage-ledger.ts";
+import { csvCell, monthKey } from "./usage-ledger.ts";
 
 export const ADMIN_ACTIVITY_CATEGORIES = ["config", "people", "session", "webhook", "mcp", "engine", "bot", "budget", "visibility"] as const;
 export type AdminActivityCategory = typeof ADMIN_ACTIVITY_CATEGORIES[number];
@@ -49,10 +49,6 @@ const MONTH_FILE = /^(\d{4})-(\d{2})\.ndjson$/;
 const PRUNE_EVERY_MS = 60 * 60_000;
 const writeQueues = new Map<string, Promise<void>>();
 const lastPrune = new Map<string, number>();
-
-function monthKey(at: Date): string {
-  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
-}
 
 export function adminActivityFileFor(dataDir: string, at: Date): string {
   return join(dataDir, DIR, `${monthKey(at)}.ndjson`);

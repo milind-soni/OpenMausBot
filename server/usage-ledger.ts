@@ -93,7 +93,9 @@ const promptBytesOf = (value: unknown): { stable: number; volatile: number } | n
     : null;
 };
 
-function monthKey(at: Date): string {
+/** The UTC month a row belongs to, `YYYY-MM`: the name of its month file.
+ * The decision, admin-activity and decider logs use the same layout. */
+export function monthKey(at: Date): string {
   return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
