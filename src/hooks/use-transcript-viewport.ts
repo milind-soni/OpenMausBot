@@ -65,9 +65,6 @@ export function useTranscriptViewport<T extends { id: string }>({
   if (transcriptWindow.key !== transcriptKey) {
     setTranscriptWindow({ key: transcriptKey, start: tailWindowStart(messages.length), end: null });
   }
-  // The rows are memoized on the window: a change outside it (an older
-  // message patched) keeps the same array, so none of them re-render.
-  const shown = useRef<T[]>([]);
   const {
     visible: windowedMessages,
     hiddenCount,
@@ -75,10 +72,9 @@ export function useTranscriptViewport<T extends { id: string }>({
     startIndex,
     endIndex,
   } = useMemo(
-    () => resolveTranscriptWindow(messages, transcriptWindow.start, TRANSCRIPT_WINDOW_SIZE, transcriptWindow.end, shown.current),
+    () => resolveTranscriptWindow(messages, transcriptWindow.start, TRANSCRIPT_WINDOW_SIZE, transcriptWindow.end),
     [messages, transcriptWindow.start, transcriptWindow.end],
   );
-  shown.current = windowedMessages;
 
   // Scroll pinning: follow the bottom while the user hasn't scrolled away.
   // Follow breaks ONLY on an upward user gesture (wheel/touch/scrollbar/

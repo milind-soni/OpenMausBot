@@ -1,7 +1,6 @@
 import { Loader2, Square, Volume2 } from "lucide-react";
 
 import { speaker } from "@/lib/tts";
-import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import type { ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -13,14 +12,15 @@ import { t } from "@/lib/i18n";
  *
  * Without a key it stays visible but disabled, saying what it needs: a
  * hidden button is a feature nobody discovers. It sits in every answer, so
- * it takes the speech settings from its row instead of following the whole
- * store. */
+ * it takes the speech settings and this device's voice choice from its row
+ * instead of following the whole store. */
 export function SpeakButton({
   text,
   botId,
   messageId,
   voiceId,
   tts,
+  localVoice,
   className,
 }: {
   text: string;
@@ -29,10 +29,11 @@ export function SpeakButton({
   voiceId?: string;
   /** The server's speech settings (`config.tts`). */
   tts: ConfigStatus["tts"];
+  /** A paired Mac reads aloud with its own voices ("This Mac"). */
+  localVoice: boolean;
   className?: string;
 }) {
   const speech = useSpeech();
-  const localVoice = localSystemVoiceActive();
   const configured = localVoice || Boolean(tts?.configured);
   const ready = localVoice || (configured && Boolean(voiceId || tts?.voice));
   const mine = speech.messageId === messageId && speech.status !== "idle";

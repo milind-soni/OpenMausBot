@@ -53,6 +53,8 @@ vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 
 const { ChatView } = await import("./ChatView");
 const { BotEditorStore, initialState, reducer } = await import("@/state/store");
+const { setRemoteVoiceProvider } = await import("@/lib/local-voice");
+const { t } = await import("@/lib/i18n");
 
 const message = (id: string, parentId: string | undefined, fields: Partial<Message>): Message =>
   ({ id, parentId, role: "bot", kind: "text", at: new Date(2026, 9, 3, 9, Number(id.slice(1))).getTime(), ...fields });
@@ -152,5 +154,50 @@ describe("chat transcript rows", () => {
     await rowRendersAfter((current) => reducer(current, { type: "botPatched", bot: { ...scout, unread: true } }));
     expect(document.body.textContent).toContain("Yesterday");
     expect(document.body.textContent).not.toContain("Today");
+  });
+
+  it("offers Regenerate on the last answer only, and not during a turn", async () => {
+    const regenerate = () => [...document.querySelectorAll(`button[aria-label="${t("chat.regenerate")}"]`)]
+      .map((button) => button.closest("[data-mid]")?.getAttribute("data-mid"));
+    expect(regenerate()).toEqual(["m5"]);
+    const busy = (value: boolean) => (current: AppState) => {
+      const { messages: _transcript, ...frame } = current.bots.find((bot) => bot.id === "pepper")!;
+      const tasks = frame.tasks?.map((task) => ({ ...task, busy: value, activity: value ? "working" as const : "idle" as const }));
+      return reducer(current, { type: "botPatched", bot: { ...frame, busy: value, tasks } });
+    };
+    await rowRendersAfter(busy(true));
+    expect(regenerate()).toEqual([]);
+    await rowRendersAfter(busy(false));
+    expect(regenerate()).toEqual(["m5"]);
+  });
+
+  // A paired Mac keeps its voice choice ("This Mac" or "Host voice") on the
+  // device, outside the store. The read-aloud buttons pick up a switch at the
+  // next store event, here the settings beside the chat closing.
+  it("follows this device's voice choice at the next store event", async () => {
+    const bridge = window.ogb;
+    window.ogb = { ...bridge, platform: "darwin", remoteClient: { active: true } } as typeof window.ogb;
+    const kept = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => kept.set(key, value) });
+    vi.stubGlobal("speechSynthesis", { getVoices: () => [] });
+    vi.stubGlobal("SpeechSynthesisUtterance", class {});
+    const speak = () => [...document.querySelectorAll<HTMLButtonElement>("button[aria-label]")]
+      .filter((button) => button.getAttribute("aria-label") === t("chat.speak.read") || button.getAttribute("aria-label") === t("chat.speak.needsKey"))
+      .map((button) => `${button.getAttribute("aria-label")}${button.disabled ? " (off)" : ""}`);
+    const switchTo = async (provider: "host" | "system") => {
+      await rowRendersAfter((current) => reducer(current, { type: "toggleSettings", open: true }));
+      setRemoteVoiceProvider(provider);
+      await rowRendersAfter((current) => reducer(current, { type: "toggleSettings", open: false }));
+    };
+    try {
+      await switchTo("system");
+      expect(speak()).toEqual([t("chat.speak.read"), t("chat.speak.read")]);
+      // no speech key on the host, so Host voice cannot read aloud
+      await switchTo("host");
+      expect(speak()).toEqual([`${t("chat.speak.needsKey")} (off)`, `${t("chat.speak.needsKey")} (off)`]);
+    } finally {
+      // the stubbed globals go in afterAll
+      window.ogb = bridge;
+    }
   });
 });

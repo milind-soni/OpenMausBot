@@ -27,6 +27,7 @@ import {
 import { WorkingDots } from "@/components/WorkingIndicator";
 import { MessageActions, messageActionClass } from "@/components/MessageActions";
 import { useSpeech } from "@/lib/tts/useSpeech";
+import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useCaptionChrome, useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { contextChip, contextDetail, contextShare, costCaption, formatUsd, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "@/lib/usage";
 import {
@@ -136,6 +137,9 @@ interface ChatRows {
   voiceId?: string;
   /** Speech settings, for the read-aloud button. */
   tts: ConfigStatus["tts"];
+  /** A paired Mac reads aloud with its own voices. That choice lives on the
+   * device, not in the store, so it is read here once per store event. */
+  localVoice: boolean;
   /** Editing, regenerating and switching versions wait for the turn. */
   busy: boolean;
   /** Every bot, for who wrote a relayed line or sits across a bot⇄bot chip. */
@@ -391,7 +395,6 @@ const Bubble = memo(function Bubble({
   emerging = false,
   eagerAttachments = false,
   editing,
-  isLastBotText,
   pinned,
   versions,
   onStartEdit,
@@ -405,18 +408,18 @@ const Bubble = memo(function Bubble({
   emerging?: boolean;
   eagerAttachments?: boolean;
   editing: boolean;
-  isLastBotText: boolean;
   pinned: boolean;
   /** Every version of an edited question, oldest first; absent when it was never edited. */
   versions?: readonly Message[];
   onStartEdit: (messageId: string) => void;
   onCancelEdit: () => void;
   onSubmitEdit: (messageId: string, text: string) => void;
+  /** Given to the last answer only. */
   onRegenerate?: () => void;
   replyTarget?: Message;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, voiceId, tts, busy, mentionPeers, focus, dispatch, onBranch } = useChatRows();
+  const { botId, threadId, botName, voiceId, tts, localVoice, busy, mentionPeers, focus, dispatch, onBranch } = useChatRows();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // A user-role line another bot delivered (ask_bot, delegate_bot,
   // start_thread) is that bot speaking, not the person: it takes the
@@ -617,9 +620,9 @@ const Bubble = memo(function Bubble({
             {text && <CopyButton text={text} className="opacity-100" />}
             {text && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((r) => !r)} className="opacity-100" />}
             {message.kind === "text" && text && !peer && (
-              <SpeakButton text={text} botId={botId} messageId={message.id} voiceId={voiceId} tts={tts} className="opacity-100" />
+              <SpeakButton text={text} botId={botId} messageId={message.id} voiceId={voiceId} tts={tts} localVoice={localVoice} className="opacity-100" />
             )}
-            {isLastBotText && !busy && onRegenerate && (
+            {!busy && onRegenerate && (
               <button
                 onClick={onRegenerate}
                 aria-label={t("chat.regenerate")}
@@ -786,10 +789,10 @@ function EmptyChat({ bot }: { bot: Bot }) {
   );
 }
 
-/** The settled transcript, memoized as one unit: it renders when the
- * mounted messages or the chat's ChatRows change, and each row inside is
- * memoized again on its own message, so a patched tool chip renders that
- * chip and nothing else. */
+/** The settled transcript, memoized as one unit: it renders when any
+ * message on the branch or the chat's ChatRows change. Each row inside is
+ * memoized on its own message, so a patched tool chip renders that chip and
+ * nothing else. */
 const MessagesList = memo(function MessagesList({
   messages,
   transcript,
@@ -862,7 +865,6 @@ const MessagesList = memo(function MessagesList({
                     <Bubble
                       message={message}
                       editing={false}
-                      isLastBotText={false}
                       pinned={message.id === pinnedMessageId}
                       onStartEdit={onStartEdit}
                       onCancelEdit={onCancelEdit}
@@ -953,7 +955,6 @@ const MessagesList = memo(function MessagesList({
                   emerging={m.id === emergingId}
                   eagerAttachments={m.id === newestMessageId || m.id === newestUserMessageId}
                   editing={editingId === m.id}
-                  isLastBotText={m.id === lastBotTextId}
                   pinned={m.id === pinnedMessageId}
                   versions={lookups.editVersions(m)}
                   onStartEdit={onStartEdit}
@@ -1121,6 +1122,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const focus = state.focusMessage?.threadId === bot.threadId ? state.focusMessage : null;
   const showToolCalls = showToolCallsEnabled(state.config);
   const tts = state.config?.tts;
+  const localVoice = localSystemVoiceActive();
   const locale = activeLocale();
   const busy = Boolean(bot.busy);
   // read when a citation is clicked, so the rows need not change per message
@@ -1128,8 +1130,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   branch.current = messages;
   const onBranch = useCallback((messageId: string) => branch.current.some((m) => m.id === messageId), []);
   const rows = useMemo<ChatRows>(
-    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch }),
-    [bot.id, bot.threadId, bot.name, bot.voice, tts, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch],
+    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch }),
+    [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch],
   );
   // Where this conversation works, for the place icon on screen and page tools.
   const place = effectivePlace(bot, bot.tasks?.find((task) => task.threadId === bot.threadId));
