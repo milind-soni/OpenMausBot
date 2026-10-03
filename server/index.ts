@@ -351,7 +351,7 @@ import { Handoffs, handedStateUsable, recordHanded, renderUnseen, sessionStart, 
 import { extractTurnImages } from "./turn-images.ts";
 import { threadTitlePrompt, titleConversationExcerpt, type ThreadTitleSource } from "./thread-title.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
-import { TurnResources, workspaceResource, type TurnOwner } from "./turn-resources.ts";
+import { TurnResources, type TurnOwner } from "./turn-resources.ts";
 import { IdleReleasePolicy } from "./claim-idle.ts";
 import {
   ensureWorkspace,
@@ -2894,15 +2894,9 @@ function canAdmitDirectTurn(botId: string, threadId: string): boolean {
 /** Routine and webhook dispatch shares startTurn's admission preconditions
  * instead of waiting for whole-bot idleness: a free thread slot and no
  * active group turn. A group turn blocks scheduled starts the same way it
- * blocks every other turn kind; it does not consume a capacity slot.
- *
- * A fresh dispatch also pins to the bot's own project folder, exactly like
- * startTurn's cwd resolution: a free thread slot alone can miss a second
- * task of this bot landing in that one folder (#F-collide). Predicting that
- * collision here lets it defer through the same busy-target machinery as
- * capacity and group-turn contention, instead of reaching startTurn's own
- * workspace claim — which throws deep inside a detached dispatch that no
- * caller here awaits, so the run would otherwise fail permanently. */
+ * blocks every other turn kind; it does not consume a capacity slot. The
+ * bot's project folder is not a slot: a fresh run works there beside the
+ * bot's other threads (see startTurn's cwd resolution). */
 function unattendedDispatchState(botId: string): "ready" | "busy" | "missing" {
   const bot = store.bot(botId);
   const decision = admit("unattended", {}, {
@@ -2911,14 +2905,6 @@ function unattendedDispatchState(botId: string): "ready" | "busy" | "missing" {
     groupTurn: Boolean(bot) && Boolean(activeGroupTurnForBot(botId)),
   });
   if (decision.action === "refuse") return decision.code === "missing" ? "missing" : "busy";
-  if (bot?.cwd) {
-    try {
-      if (turnResources.blocker(workspaceResource(bot.cwd), { threadId: "", generation: "" })) return "busy";
-    } catch {
-      // An unresolvable folder is startTurn's own admission check to
-      // report; this prediction only ever adds a defer, never a refusal.
-    }
-  }
   return "ready";
 }
 
@@ -9884,10 +9870,12 @@ async function startTurn(
         privateWorkspace
           ? store.pinTaskCwd(bot.id, threadId, privateWorkspace, { privateOnly: cloudGuestOpened(threadId) })
           : null;
+      // A bot's threads run side by side in one project folder, like several
+      // Claude Code or Codex sessions open in one repo: the folder is never a
+      // turn-long claim. What truly needs one writer queues on its own — the
+      // per-turn snapshot per folder (server/checkpoints.ts), memory through
+      // memory_update — and the engines key their sessions by id, not folder.
       const cwd = pinnedCwd ?? undefined;
-      if (cwd && !claimTurnResource(resourceOwner, workspaceResource(cwd))) {
-        throw Object.assign(new Error("another thread is working in this project folder — wait for it to finish or choose a separate folder"), { status: 409, code: "workspace_busy" });
-      }
       // Checkpoint explicit project folders, where a bot can overwrite the
       // user's work. Its private OpenMaus workspace is app-owned and changes
       // on nearly every ordinary chat; snapshotting it would add hidden disk

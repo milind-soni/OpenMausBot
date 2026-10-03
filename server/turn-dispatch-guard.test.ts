@@ -20,7 +20,7 @@ describe("retryable turn admission", () => {
   it("does not retry other failures just because they mention working", () => {
     for (const error of [
       new Error("already working but the provider is unavailable"),
-      Object.assign(new Error("already working"), { status: 409, code: "workspace_busy" }),
+      Object.assign(new Error("already working"), { status: 409, code: "guarded_busy" }),
       { status: 409 }, { code: "provider_unavailable" }, null, undefined, "thread_limit",
     ]) {
       expect(isTurnAdmissionBlocked(error)).toBe(false);
