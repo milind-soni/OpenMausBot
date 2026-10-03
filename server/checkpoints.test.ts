@@ -6,10 +6,21 @@
 // (home) are refused outright.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "./testing/cleanup.ts";
 
@@ -53,6 +64,13 @@ function userGit(cwd: string, ...args: string[]): string {
   });
 }
 
+/** The shadow repo the module keeps for `cwd`: keyed by the folder's
+ * canonical spelling, which on Windows can differ from plain realpathSync's
+ * (a temp folder under an 8.3 alias such as RUNNER~1, for one). */
+function shadowOf(bot: string, cwd: string): string {
+  return join(CHECKPOINTS_DIR, bot, createHash("sha256").update(realpathSync.native(cwd)).digest("hex").slice(0, 16));
+}
+
 describe("snapshot", () => {
   it("cancels optional digest capture without disabling later checkpoints", async () => {
     const { bot, cwd } = workspace();
@@ -91,8 +109,7 @@ describe("snapshot", () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "obsolete payload");
     const first = await snapshot(bot, cwd, "old turn");
-    const shadow = join(CHECKPOINTS_DIR, bot,
-      createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
+    const shadow = shadowOf(bot, cwd);
     const oldBlob = userGit(shadow, "rev-parse", `${first}:a.txt`).trim();
     writeFileSync(join(cwd, "a.txt"), "latest payload");
     const latest = await snapshot(bot, cwd, "latest turn");
@@ -116,8 +133,7 @@ describe("snapshot", () => {
     await snapshot(bot, cwd, "before cache tag");
     writeFileSync(join(cache, "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n");
     const latest = await snapshot(bot, cwd, "tagged cache");
-    const shadow = join(CHECKPOINTS_DIR, bot,
-      createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
+    const shadow = shadowOf(bot, cwd);
     expect(userGit(shadow, "ls-tree", "-r", "--name-only", latest!).trim()).toBe("a.txt");
     writeFileSync(join(cache, "artifact"), "new build");
     writeFileSync(join(cwd, "a.txt"), "edited source");
@@ -130,8 +146,7 @@ describe("snapshot", () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "old");
     await snapshot(bot, cwd, "original");
-    const shadow = join(CHECKPOINTS_DIR, bot,
-      createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
+    const shadow = shadowOf(bot, cwd);
     for (const text of ["middle", "latest"]) {
       writeFileSync(join(cwd, "a.txt"), text);
       userGit(shadow, "--work-tree", cwd, "add", "-A");
@@ -179,6 +194,158 @@ describe("snapshot", () => {
     for (const hash of hashes) expect(hash).toMatch(/^[0-9a-f]{40}$/);
     // all three saw the same unchanged tree → all landed on one commit
     expect(new Set(hashes).size).toBe(1);
+  });
+
+  // One folder, many spellings: Windows accepts a lowercase drive letter, any
+  // case, and an 8.3 alias for the same directory. The shadow repo is keyed by
+  // the folder's path, so every spelling has to reach the same history.
+  it.runIf(process.platform === "win32")("keeps one history however Windows spells the folder", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    const first = await snapshot(bot, cwd, "turn 11111111");
+    expect(first).toMatch(/^[0-9a-f]{40}$/);
+
+    const shouted = cwd.toUpperCase();
+    expect(await listCheckpoints(bot, shouted)).toEqual(await listCheckpoints(bot, cwd));
+    // an unchanged folder must not open a second history under the new spelling
+    expect(await snapshot(bot, shouted, "turn 22222222")).toBe(first);
+
+    writeFileSync(join(cwd, "a.txt"), "two");
+    expect(await restore(bot, shouted, first!)).toMatchObject({ ok: true });
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("one");
+  });
+});
+
+describe("upgrade from the previous key", () => {
+  // Before canonicalWorktree, the shadow repo was keyed by plain realpathSync,
+  // i.e. by whatever spelling the caller typed. These tests stand in for a
+  // Windows folder whose stored spelling differs from the typed one by giving
+  // realpathSync.native a different, real path for the same folder: a symlink
+  // to it. Git can work through it, and it hashes to another key.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const nativeReal = realpathSync.native;
+  /** How the volume spells `cwd`: `spelling`, or the plain realpath when
+   * null (the previous resolver's answer). Every other path is untouched, so
+   * the home and protected-folder checks keep their real answers. */
+  function withSpelling(cwd: string, spelling: string | null) {
+    const real = realpathSync(cwd);
+    vi.spyOn(realpathSync, "native").mockImplementation(((p: string) => {
+      const resolved = nativeReal(p);
+      return resolved === real || realpathSync(p) === real ? (spelling ?? real) : resolved;
+    }) as never);
+  }
+
+  function aliasOf(cwd: string): string {
+    const alias = join(mkdtempSync(join(tmpdir(), "omb-ckpt-alias-")), "spelled");
+    symlinkSync(cwd, alias, process.platform === "win32" ? "junction" : "dir");
+    scratchDirs.push(join(alias, ".."));
+    return alias;
+  }
+
+  it("still finds history keyed by the previous resolver", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    // history written by the previous code: keyed by the typed spelling
+    withSpelling(cwd, null);
+    const first = await snapshot(bot, cwd, "turn 11111111");
+    expect(first).toMatch(/^[0-9a-f]{40}$/);
+
+    // the volume's spelling of the same folder differs from the typed one
+    withSpelling(cwd, aliasOf(cwd));
+    const listed = await listCheckpoints(bot, cwd);
+    expect(listed.map((c) => c.hash)).toEqual([first]);
+
+    writeFileSync(join(cwd, "a.txt"), "two");
+    expect(await restore(bot, cwd, first!)).toMatchObject({ ok: true });
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("one");
+
+    // a new checkpoint lands in the adopted repo rather than starting a
+    // second one: the legacy key no longer holds a repo
+    writeFileSync(join(cwd, "a.txt"), "three");
+    const second = await snapshot(bot, cwd, "turn 22222222");
+    expect((await listCheckpoints(bot, cwd)).map((c) => c.hash)[0]).toBe(second);
+    const legacyKey = createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16);
+    expect(existsSync(join(CHECKPOINTS_DIR, bot, legacyKey))).toBe(false);
+  });
+
+  it("adopts the legacy history past a canonical folder a stopped run left without a repository", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    withSpelling(cwd, null);
+    const first = await snapshot(bot, cwd, "turn 11111111");
+    expect(first).toMatch(/^[0-9a-f]{40}$/);
+
+    // ensureShadow writes its config files before `git init`
+    const alias = aliasOf(cwd);
+    const canonical = join(CHECKPOINTS_DIR, bot, createHash("sha256").update(alias).digest("hex").slice(0, 16));
+    mkdirSync(canonical, { recursive: true });
+    writeFileSync(join(canonical, "gitconfig"), "");
+
+    withSpelling(cwd, alias);
+    expect((await listCheckpoints(bot, cwd)).map((c) => c.hash)).toEqual([first]);
+    expect(await checkpointsEnabled(bot, cwd)).toBe(true);
+  });
+
+  it("adopts the legacy history past a canonical repo that has no commit yet", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    withSpelling(cwd, null);
+    const first = await snapshot(bot, cwd, "turn 11111111");
+    expect(first).toMatch(/^[0-9a-f]{40}$/);
+
+    // a run stopped after `git init`, before ensureShadow's base commit
+    const alias = aliasOf(cwd);
+    const canonical = join(CHECKPOINTS_DIR, bot, createHash("sha256").update(alias).digest("hex").slice(0, 16));
+    mkdirSync(canonical, { recursive: true });
+    execFileSync("git", ["init", "-q", "--template=", canonical]);
+
+    withSpelling(cwd, alias);
+    expect((await listCheckpoints(bot, cwd)).map((c) => c.hash)).toEqual([first]);
+    expect(await checkpointsEnabled(bot, cwd)).toBe(true);
+  });
+
+  // Two spellings of one folder share the canonical repo but name different
+  // legacy keys. Whichever call takes the repo first decides its history; the
+  // other must not move the canonical folder aside while it is initialized.
+  it.runIf(process.platform === "win32")("never moves a canonical repo aside while another spelling initializes it", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    withSpelling(cwd, null);
+    const first = await snapshot(bot, cwd, "turn 11111111");
+    expect(first).toMatch(/^[0-9a-f]{40}$/);
+
+    withSpelling(cwd, aliasOf(cwd));
+    const [second, listed] = await Promise.all([
+      snapshot(bot, cwd.toUpperCase(), "turn 22222222"),
+      listCheckpoints(bot, cwd),
+    ]);
+    expect(second).toMatch(/^[0-9a-f]{40}$/);
+    expect(listed).toHaveLength(1);
+    expect(readdirSync(join(CHECKPOINTS_DIR, bot)).filter((name) => name.includes(".incomplete-"))).toEqual([]);
+    expect(await checkpointsEnabled(bot, cwd)).toBe(true);
+  });
+
+  it("never replaces a canonical history with a legacy one", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "canonical");
+    const alias = aliasOf(cwd);
+    withSpelling(cwd, alias);
+    const canonical = await snapshot(bot, cwd, "turn 11111111");
+
+    // a legacy repo for the same folder appears later, under the typed spelling
+    withSpelling(cwd, null);
+    writeFileSync(join(cwd, "a.txt"), "legacy");
+    const legacy = await snapshot(bot, cwd, "turn 22222222");
+    expect(legacy).not.toBe(canonical);
+
+    withSpelling(cwd, alias);
+    expect((await listCheckpoints(bot, cwd)).map((c) => c.hash)).toEqual([canonical]);
+    // and the legacy history is left where it was
+    withSpelling(cwd, null);
+    expect((await listCheckpoints(bot, cwd)).map((c) => c.hash)).toEqual([legacy]);
   });
 });
 

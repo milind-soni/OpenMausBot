@@ -25,9 +25,9 @@
 // service, and the snapshot-before-every-turn cadence follows Cline.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, parse, resolve } from "node:path";
+import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 
 import { DATA_DIR } from "./config.ts";
 
@@ -189,6 +189,47 @@ export function refusalReason(cwd: string): string | null {
 function shadowDir(botId: string, cwd: string): string {
   const key = createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 16);
   return join(CHECKPOINTS_DIR, botId, key);
+}
+
+/** The single spelling of a folder that keys its shadow repo. Plain
+ * `realpathSync` follows symlinks but hands back whatever case — or 8.3 alias
+ * — the caller typed, so on Windows one folder would collect a separate
+ * checkpoint history per spelling. The native resolver answers with the name
+ * the volume actually stores, as refusalReason() above already relies on. */
+function canonicalWorktree(cwd: string): string {
+  return realpathSync.native(resolve(cwd));
+}
+
+/** A folder's shadow repo, the worktree it is keyed by, and the repo the
+ * previous key names. History written before canonicalWorktree was keyed by
+ * plain `realpathSync`, so on Windows a folder the caller spelled in another
+ * case or as an 8.3 alias has its checkpoints under that spelling's key. */
+function shadowFor(botId: string, cwd: string): { shadow: string; worktree: string; legacy: string } {
+  const worktree = canonicalWorktree(cwd);
+  return { shadow: shadowDir(botId, worktree), worktree, legacy: shadowDir(botId, realpathSync(resolve(cwd))) };
+}
+
+/** When the canonical key has no history yet, move the legacy repo into
+ * place so list and restore keep finding it. A canonical repo with a commit is
+ * never overwritten: the legacy one is left where it is. A canonical folder
+ * without one, which a run that stopped inside ensureShadow leaves behind
+ * (config files only, or `git init` done but no base commit), would block the
+ * move, so it is set aside under another name rather than deleted. Runs inside
+ * serialize(shadow): two spellings of one folder share the canonical repo, and
+ * neither may see it half-moved. */
+async function adoptLegacyShadow(shadow: string, legacy: string, worktree: string): Promise<void> {
+  if (legacy === shadow || !existsSync(join(legacy, ".git", "HEAD"))) return;
+  if (existsSync(join(shadow, ".git", "HEAD"))) {
+    try {
+      await runGit(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], worktree, gitEnv(shadow, worktree));
+      return;
+    } catch {
+      // unborn: `git init` ran, the base commit did not
+    }
+  }
+  mkdirSync(dirname(shadow), { recursive: true });
+  if (existsSync(shadow)) renameSync(shadow, `${shadow}.incomplete-${Date.now()}`);
+  renameSync(legacy, shadow);
 }
 
 function gitEnv(shadow: string, cwd: string): NodeJS.ProcessEnv {
@@ -359,9 +400,9 @@ export async function snapshot(botId: string, cwd: string, label: string, signal
   if (!(await gitAvailable())) return null;
   if (refusalReason(cwd) !== null) return null;
   try {
-    const worktree = realpathSync(resolve(cwd));
-    const shadow = shadowDir(botId, worktree);
+    const { shadow, worktree, legacy } = shadowFor(botId, cwd);
     return await serialize(shadow, async () => {
+      await adoptLegacyShadow(shadow, legacy, worktree);
       const env = gitEnv(shadow, worktree);
       await ensureShadow(worktree, env, shadow, signal);
       const result = await commitAll(worktree, env, label, signal);
@@ -387,10 +428,10 @@ export async function diffWorkingTree(botId: string, cwd: string, fromHash: stri
   if (signal?.aborted || !COMMIT_HASH.test(fromHash)) return null;
   if (disabledBots.has(botId) || !(await gitAvailable()) || refusalReason(cwd) !== null) return null;
   try {
-    const worktree = realpathSync(resolve(cwd));
-    const shadow = shadowDir(botId, worktree);
+    const { shadow, worktree, legacy } = shadowFor(botId, cwd);
     const env = gitEnv(shadow, worktree);
     return await serialize(shadow, async () => {
+      await adoptLegacyShadow(shadow, legacy, worktree);
       await ensureShadow(worktree, env, shadow, signal);
       await runGit(["read-tree", "--empty"], worktree, env, signal);
       await runGit(["add", "-A", "--ignore-errors", "."], worktree, env, signal);
@@ -419,10 +460,10 @@ export async function listCheckpoints(botId: string, cwd: string): Promise<Check
   if (!(await gitAvailable())) return [];
   if (refusalReason(cwd) !== null) return [];
   try {
-    const worktree = realpathSync(resolve(cwd));
-    const shadow = shadowDir(botId, worktree);
-    if (!existsSync(join(shadow, ".git", "HEAD"))) return [];
+    const { shadow, worktree, legacy } = shadowFor(botId, cwd);
     return await serialize(shadow, async () => {
+      await adoptLegacyShadow(shadow, legacy, worktree);
+      if (!existsSync(join(shadow, ".git", "HEAD"))) return [];
       const env = gitEnv(shadow, worktree);
       const out = await runGit(["log", "--format=%H%x09%ct%x09%s"], worktree, env);
       const lines = out.split("\n").filter((line) => line.trim() !== "");
@@ -457,12 +498,12 @@ export async function restore(botId: string, cwd: string, hash: string): Promise
   if (reason !== null) return { ok: false, error: reason };
   if (!COMMIT_HASH.test(hash)) return { ok: false, error: "hash must be a full 40-character checkpoint hash" };
   try {
-    const worktree = realpathSync(resolve(cwd));
-    const shadow = shadowDir(botId, worktree);
-    if (!existsSync(join(shadow, ".git", "HEAD"))) {
-      return { ok: false, error: "no checkpoints exist for this folder" };
-    }
+    const { shadow, worktree, legacy } = shadowFor(botId, cwd);
     return await serialize(shadow, async (): Promise<RestoreResult> => {
+      await adoptLegacyShadow(shadow, legacy, worktree);
+      if (!existsSync(join(shadow, ".git", "HEAD"))) {
+        return { ok: false, error: "no checkpoints exist for this folder" };
+      }
       const env = gitEnv(shadow, worktree);
       try {
         await runGit(["cat-file", "-e", `${hash}^{commit}`], worktree, env);
