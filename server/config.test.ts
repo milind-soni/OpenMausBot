@@ -168,6 +168,16 @@ describe("configuration boundaries", () => {
     });
   });
 
+  it("loads a config that still has the removed cloud-overflow and idle-release keys, and drops them", () => {
+    const stored = {
+      language: "en",
+      features: { browser: true, computerClaimIdleRelease: true, cloudOverflow: true },
+      cloudOverflow: { perSecondCostUsd: 0.0004, idleStopMs: 300_000, allowlistedThreads: ["t1"] },
+    };
+    expect(parseStoredConfig(stored)).toEqual({ language: "en", features: { browser: true } });
+    expect(parseConfigPatch(stored)).toEqual({ language: "en", features: { browser: true } });
+  });
+
   it("rejects malformed stored instances and API patches", () => {
     expect(() => parseStoredConfig({ instances: { claude: { driver: 42 } } })).toThrow("instances.claude.driver");
     expect(() => parseStoredConfig({ browserProfiles: [{ id: "../evil", name: "Unsafe" }] })).toThrow(

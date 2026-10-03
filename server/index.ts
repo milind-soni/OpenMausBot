@@ -171,11 +171,6 @@ import {
   sharedComputersEnabled,
   builtInBrowserEnabled,
   llmThreadTitlesEnabled,
-  computerClaimIdleReleaseEnabled,
-  cloudOverflowAllowlistedThreads,
-  cloudOverflowEnabled,
-  cloudOverflowIdleStopMs,
-  cloudOverflowPerSecondCostUsd,
   browserProfileReplacementConflict,
   browserProfilePartitionTarget,
   syncCredentialEnv,
@@ -352,7 +347,6 @@ import { extractTurnImages } from "./turn-images.ts";
 import { threadTitlePrompt, titleConversationExcerpt, type ThreadTitleSource } from "./thread-title.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import { TurnResources, workspaceResource, type TurnOwner } from "./turn-resources.ts";
-import { IdleReleasePolicy } from "./claim-idle.ts";
 import {
   ensureWorkspace,
   ensureTaskWorkspace,
@@ -524,7 +518,6 @@ import { shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { startAutoVmClaim, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 import { computerFreeAfterText, computerParkedText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
-import { CloudOverflowConsent, CloudSeatLease, cloudOverflowAction, cloudOverflowConsentText, cloudOverflowOfferText, cloudSeatStartedText, cloudSeatStoppedText, type CloudOverflowSituation } from "./cloud-overflow.ts";
 import { modelContextWindow } from "./model-context-window.ts";
 import { cloudPlaceDriverError, parseSurface, PlaceUnavailableError, placeUnavailable, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt, type PlaceSource, type Surface } from "./surface.ts";
 import {
@@ -2515,169 +2508,13 @@ const turnResources = new TurnResources();
 const sharedComputerControl = new SharedComputerControl(turnResources, () => store.bots.some(bot => botComputerControlSnapshot(bot.id).held));
 const turnResourceOwners = new Map<string, TurnOwner>();
 const turnComputerResources = new Map<string, { owner: TurnOwner; resource: string }>();
-/** Screen-touching computer calls that started before their turn's computer
- * claim was bound (#1653 over the lazy attach of #1361): the start event
- * finds no claim to fence, so it waits here and bindTurnComputer carries it
- * into the fresh claim, keeping the quiet window from releasing a seat
- * under a call the desktop is already executing. */
-const pendingComputerCallStarts = new Map<string, { generation: string; count: number }>();
 const teamComputerTurns = new Map<string, { owner: TurnOwner; computerId: string; botId: string; remoteAgent: boolean }>();
 const settlingResourceOwners = new Map<string, string>();
 
-/** Idle release for computer claims (#1653), disabled until the feature
- * flag is on: a seat that stays screen-quiet for the policy's window is
- * released to waiting turns while its holder's turn still lives, and the
- * previous holder re-claims directly inside the reclaim window — it
- * yields once another turn holds the seat. The durable VM profile keeps
- * its login state, so that re-claim is cheap. Read per claim: a flag
- * change applies to new claims, never to a seat held under the old
- * setting. computer:phone is excluded: it is the #1663 exclusivity lock,
- * claimed once per turn with no activity signal to renew it. */
-const COMPUTER_CLAIM_IDLE_POLICY = new IdleReleasePolicy();
-
-function computerClaimIdlePolicy(resource: string): IdleReleasePolicy | undefined {
-  return resource.startsWith("computer:") && resource !== "computer:phone" && computerClaimIdleReleaseEnabled(cfg) ? COMPUTER_CLAIM_IDLE_POLICY : undefined;
-}
-
-/** #1655: the consent ledger for local-wait cloud overflow, and the live
- * cloud seats it has started. One seat per bot — it is the bot's own Box,
- * shared by that bot's threads the way every other computer is. */
-const cloudOverflowConsent = new CloudOverflowConsent();
-const cloudSeatLeases = new Map<string, CloudSeatLease>();
-let cloudSeatSweepTimer: ReturnType<typeof setInterval> | undefined;
-/** One stop attempt per seat at a time (#1655): the sweep ticks faster
- * than a Box sleeps, and a second stop call would race the first. */
-const cloudSeatStopsInFlight = new Set<string>();
-
-/** The waits that may overflow: a turn queued for a local desktop, never
- * one already bound for a cloud or VPS seat. */
-function localComputerWait(resource: string): boolean {
-  return resource === "computer:host" || resource.startsWith("computer:vm:");
-}
-
-function cloudOverflowSituation(owner: TurnOwner, resource: string, started: boolean): CloudOverflowSituation | null {
-  if (!localComputerWait(resource)) return null;
-  if (!store.botByThread(owner.threadId)) return null;
-  const perSecondCostUsd = cloudOverflowPerSecondCostUsd(cfg);
-  return {
-    featureEnabled: cloudOverflowEnabled(cfg),
-    // An organisation that refuses the Box kind has nothing to offer, and
-    // the decision must fail closed before any card is written.
-    cloudConfigured: boat.boatConfigured(cfg) && managedPolicy.computerRefusal("box") === undefined,
-    perSecondCostUsd,
-    // Consent answers the priced card (#1655): a grant counts only at the
-    // rate its card showed, so a config change re-offers instead of
-    // starting at a price nobody approved.
-    consented: cloudOverflowConsent.consented(owner.threadId, cloudOverflowAllowlistedThreads(cfg), perSecondCostUsd ?? undefined),
-    offered: cloudOverflowConsent.offered(owner.threadId, perSecondCostUsd ?? undefined),
-    started,
-  };
-}
-
 function claimTurnResource(owner: TurnOwner, resource: string): boolean {
-  const idle = computerClaimIdlePolicy(resource);
-  if (!turnResources.claim(resource, owner, idle ? { idle } : {})) return false;
+  if (!turnResources.claim(resource, owner)) return false;
   turnResourceOwners.set(owner.threadId, owner);
   return true;
-}
-
-/** Start the waiting bot's cloud seat (#1655). True once handled — started
- * or terminally failed — so the wait never retries every poll; false when
- * another turn of this bot owns the Box lifecycle and a later poll may
- * still land. */
-async function startCloudSeat(owner: TurnOwner): Promise<boolean> {
-  const bot = store.botByThread(owner.threadId);
-  if (!bot) return true;
-  const perSecondCostUsd = cloudOverflowPerSecondCostUsd(cfg);
-  if (!perSecondCostUsd) return true;
-  const boxBotResource = "computer:box-bot:" + bot.id;
-  if (!claimTurnResource(owner, boxBotResource)) return false;
-  try {
-    broadcast({ kind: "computer", botId: bot.id, state: "waking" });
-    const machine = await boat.readyBoat(cfg, bot.id);
-    if (!machine) throw new Error("the cloud computer did not wake");
-    // Consent can be revoked while the Box wakes (#1655): a seat nobody
-    // consented to must not bill. It is released and put straight back to
-    // sleep — and if even that fails, leased as already idle so the sweep
-    // keeps retrying with backoff.
-    if (!cloudOverflowConsent.consented(owner.threadId, cloudOverflowAllowlistedThreads(cfg), perSecondCostUsd)) {
-      turnResources.releaseOne(boxBotResource, owner);
-      const idleStopMs = cloudOverflowIdleStopMs(cfg);
-      void boat.sleepBoat(cfg, bot.id).catch(() => {
-        cloudSeatLeases.set(bot.id, new CloudSeatLease({ botId: bot.id, threadId: owner.threadId, generation: owner.generation, now: Date.now() - idleStopMs - 1, idleStopMs }));
-        ensureCloudSeatSweep();
-      });
-      store.appendMessage(owner.threadId, {
-        role: "bot", kind: "activity",
-        tool: { name: "Cloud overflow consent was revoked while the cloud computer woke; it stops unbilled and the local wait continues.", ok: true },
-      });
-      return true;
-    }
-    cloudSeatLeases.set(bot.id, new CloudSeatLease({ botId: bot.id, threadId: owner.threadId, generation: owner.generation, idleStopMs: cloudOverflowIdleStopMs(cfg) }));
-    ensureCloudSeatSweep();
-    store.appendMessage(owner.threadId, {
-      role: "bot", kind: "activity",
-      tool: { name: cloudSeatStartedText({ perSecondCostUsd, idleStopMs: cloudOverflowIdleStopMs(cfg) }), ok: true },
-    });
-    return true;
-  } catch (error) {
-    turnResources.releaseOne(boxBotResource, owner);
-    store.appendMessage(owner.threadId, {
-      role: "bot", kind: "activity",
-      tool: { name: "Cloud computer could not start (" + (error instanceof Error ? error.message : String(error)) + "); the local wait continues.", ok: false },
-    });
-    return true;
-  }
-}
-
-/** A per-second-billed seat must stop on idleness even when nothing else
- * touches the server, so this slice carries the one timer — unref'd, it
- * can never hold the process open, and it dies with the last lease. */
-function ensureCloudSeatSweep(): void {
-  if (cloudSeatSweepTimer) return;
-  cloudSeatSweepTimer = setInterval(() => {
-    sweepIdleCloudSeats();
-    if (!cloudSeatLeases.size && cloudSeatSweepTimer) {
-      clearInterval(cloudSeatSweepTimer);
-      cloudSeatSweepTimer = undefined;
-    }
-  }, 15_000);
-  cloudSeatSweepTimer.unref?.();
-}
-
-/** Stop every cloud seat idle past its window (#1655): the machine is
- * archived, billing pauses, and the transcript says which wait's seat it
- * was. Only real computer tool completions refresh a lease — the poller's
- * preview frames never reach the touch call. */
-/** Stop one running cloud seat (#1655): the Box sleeps, and only a
- * successful stop clears the lease and its Box claim — a failed stop
- * stays leased and retryable with backoff, because the seat still bills
- * until it sleeps. The claim releases for the lease's own generation,
- * never a newer turn's. */
-function stopCloudSeat(botId: string, lease: CloudSeatLease, stoppedName: string, now = Date.now()): void {
-  if (cloudSeatStopsInFlight.has(botId)) return;
-  if (cloudSeatLeases.get(botId) !== lease) return;
-  cloudSeatStopsInFlight.add(botId);
-  void boat.sleepBoat(cfg, botId)
-    .then(() => {
-      if (cloudSeatLeases.get(botId) === lease) cloudSeatLeases.delete(botId);
-      // The stopped seat's Box claim goes with it, so a still-waiting
-      // turn may start a fresh seat for the same bot.
-      turnResources.releaseOne(`computer:box-bot:${botId}`, { threadId: lease.threadId, generation: lease.generation });
-      store.appendMessage(lease.threadId, { role: "bot", kind: "activity", tool: { name: stoppedName, ok: true } });
-    })
-    .catch(() => {
-      lease.deferSleep(now);
-      store.appendMessage(lease.threadId, { role: "bot", kind: "activity", tool: { name: "Cloud computer could not stop — the sweep retries with backoff; stop it from Settings if it stays awake. Billing continues until it sleeps.", ok: false } });
-    })
-    .finally(() => cloudSeatStopsInFlight.delete(botId));
-}
-
-function sweepIdleCloudSeats(now = Date.now()): void {
-  for (const [botId, lease] of cloudSeatLeases) {
-    if (!lease.idleElapsed(now) || !lease.sleepDue(now)) continue;
-    stopCloudSeat(botId, lease, cloudSeatStoppedText(lease.idleFor(now)), now);
-  }
 }
 
 function releaseTurnResources(owner: TurnOwner | undefined): void {
@@ -2687,7 +2524,6 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
   turnResources.release(owner);
   if (turnResourceOwners.get(owner.threadId)?.generation === owner.generation) turnResourceOwners.delete(owner.threadId);
   if (turnComputerResources.get(owner.threadId)?.owner.generation === owner.generation) turnComputerResources.delete(owner.threadId);
-  if (pendingComputerCallStarts.get(owner.threadId)?.generation === owner.generation) pendingComputerCallStarts.delete(owner.threadId);
   const teamTurn = teamComputerTurns.get(owner.threadId);
   if (teamTurn?.owner.generation === owner.generation) {
     stopScreenPoller(teamTurn.botId, owner.threadId);
@@ -2716,10 +2552,6 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
   // turn.wait_* events carry the same facts for the inspector log.
   let waitedSince: number | undefined;
   let waitEnded = false;
-  // #1655: whether this wait already started (or terminally failed to
-  // start) a cloud seat; the decision is re-evaluated every poll because
-  // consent can arrive mid-wait.
-  let overflowHandled = false;
   const waitEventBase = () => {
     const selection = store.botByThread(owner.threadId)?.modelSelection;
     const instance = selection ? registry.get(selection.instanceId) : null;
@@ -2789,31 +2621,7 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
           position,
           ...(holder ? { holder } : {}),
         });
-        // #1655: the wait is where an overflow choice gets made. The card
-        // names the per-second cost before anything can start, and only a
-        // turn genuinely waiting on a local desktop gets one. Fail closed:
-        // feature off, cloud unusable, or no operator-set rate means no
-        // card at all — Auto never offers, never starts.
-        const overflow = cloudOverflowSituation(owner, resource, overflowHandled);
-        const perSecondCostUsd = overflow?.perSecondCostUsd ?? null;
-        if (overflow && perSecondCostUsd !== null && cloudOverflowAction(overflow).kind === "offer") {
-          store.appendMessage(owner.threadId, {
-            role: "bot", kind: "activity",
-            tool: { name: cloudOverflowOfferText({ perSecondCostUsd, idleStopMs: cloudOverflowIdleStopMs(cfg) }), ok: true },
-          });
-          cloudOverflowConsent.markOffered(owner.threadId, perSecondCostUsd);
-        }
       }
-      // #1655: consent can arrive mid-wait — the card's answer, or a
-      // thread the operator allowlisted — and only then may the cloud
-      // seat start, its cost chip landing beside the waiting one. The
-      // local wait itself is untouched: it still ends by acquisition,
-      // stop, or the ceiling (parking, once that stack lands).
-      if (!overflowHandled) {
-        const situation = cloudOverflowSituation(owner, resource, overflowHandled);
-        if (situation && cloudOverflowAction(situation).kind === "start") overflowHandled = await startCloudSeat(owner);
-      }
-      sweepIdleCloudSeats();
       if (Date.now() >= deadline) {
         // ADR-2 (#1651): the ceiling parks the turn — settled, with a
         // registered resume — instead of failing it. The owner mark lets the
@@ -2834,14 +2642,6 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
   }
   turnResourceOwners.set(owner.threadId, owner);
   turnComputerResources.set(owner.threadId, { owner, resource });
-  // A screen call that started before this bind (#1653) fenced nothing
-  // because no claim existed yet: carry its pending start into the fresh
-  // claim so the idle window still defers to the running call.
-  const pendingStarts = pendingComputerCallStarts.get(owner.threadId);
-  if (pendingStarts?.generation === owner.generation && pendingStarts.count > 0) {
-    pendingComputerCallStarts.delete(owner.threadId);
-    for (let i = 0; i < pendingStarts.count; i += 1) turnResources.beginComputerCall(resource, owner);
-  }
 }
 
 function botForThread(botId: string, threadId: string): BotRecord | null {
@@ -6610,10 +6410,6 @@ async function computerCallGate(internalCapability: InternalCapability) {
     };
   }
   const computer = turnComputerResources.get(internalCapability.threadId);
-  // The screen call arriving here re-claims an idle-released seat directly
-  // (#1653): inside the reclaim window the previous holder picks its seat
-  // back up without re-entering the wait, and the successful claim
-  // restarts the quiet window. A seat another turn holds still refuses.
   if (!snapshot.held && computer && computer.owner.generation === internalCapability.generation &&
       !claimTurnResource(computer.owner, computer.resource)) {
     return {
@@ -7434,34 +7230,6 @@ bus.subscribe((event: RuntimeEvent) => {
           if (touches || /computer|screenshot|click|type_text|press_key|scroll|open_url|wait_for|browser_/i.test(toolName)) {
             pokeScreenPoller(event.threadId, touches, surface);
           }
-          // A completed screen-touching computer tool is real screen
-          // activity (#1653): it restarts the idle clock on that turn's
-          // computer claim. The poller's own frames never arrive here, so
-          // they cannot keep a quiet seat held.
-          if (touches && surface === "computer") {
-            const computer = turnComputerResources.get(event.threadId);
-            if (computer) {
-              // A quiet window cannot expire while this call executes.
-              turnResources.endComputerCall(computer.resource, computer.owner);
-              turnResources.activity(computer.resource, computer.owner);
-            } else {
-              // The call never forwarded onto a bound desktop, or the lazy
-              // bind never landed: drop its pending start so it cannot
-              // fence a claim taken later (#1653).
-              const pending = pendingComputerCallStarts.get(event.threadId);
-              if (pending) {
-                if (pending.count > 1) pendingComputerCallStarts.set(event.threadId, { ...pending, count: pending.count - 1 });
-                else pendingComputerCallStarts.delete(event.threadId);
-              }
-            }
-            // Real cloud-screen work refreshes the #1655 idle stop for
-            // that seat; the poller's own frames never arrive here, so
-            // preview traffic cannot keep a paid machine awake.
-            if (computer?.resource.startsWith("computer:box:")) {
-              const seatBot = store.botByThread(event.threadId);
-              if (seatBot) cloudSeatLeases.get(seatBot.id)?.touch();
-            }
-          }
         }
       }
       break;
@@ -7482,26 +7250,6 @@ bus.subscribe((event: RuntimeEvent) => {
           turnId: liveTurnId,
         });
         if (event.itemId) toolMessageByItem.set(`${event.threadId}:${event.itemId}`, message.id);
-        // A screen-touching computer tool opening is an in-flight call on
-        // that turn's claim (#1653): the seat cannot be idle-released out
-        // from under I/O the desktop is still executing. Its completion —
-        // or the turn settling — drops the fence.
-        if (screenTouchingTool(name) && screenSurfaceForTool(name) === "computer") {
-          const computer = turnComputerResources.get(event.threadId);
-          if (computer) {
-            turnResources.beginComputerCall(computer.resource, computer.owner);
-          } else {
-            // A lazy attach (#1361) may not have seated the claim yet: the
-            // gate finishes the bind before the call forwards, so hold the
-            // start here and let bindTurnComputer fence the fresh claim.
-            const generation = activeInternalGenerationByThread.get(event.threadId);
-            if (generation) {
-              const pending = pendingComputerCallStarts.get(event.threadId);
-              pendingComputerCallStarts.set(event.threadId,
-                pending?.generation === generation ? { generation, count: pending.count + 1 } : { generation, count: 1 });
-            }
-          }
-        }
       }
       break;
     case "request.opened": {
@@ -19231,42 +18979,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // scrollback: the page before a message the client already holds
-    // #1655: the consent card's answer, per conversation. Explicit and
-    // revocable; a thread allowlisted in config carries the same standing
-    // consent without ever seeing a card.
-    m = path.match(/^\/api\/threads\/([\w-]+)\/cloud-overflow$/);
-    if (m && method === "POST") {
-      const threadId = m[1]!;
-      if (!store.botByThread(threadId)) return json(res, 404, { error: "no such conversation" });
-      const body = await readBody(req);
-      if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
-      if (typeof body.consent !== "boolean") return json(res, 400, { error: "consent must be a boolean" });
-      if (body.consent) {
-        // Consent answers the priced card, never a guess: without a prior
-        // offer the rate was never shown, so a seat must not start yet.
-        // The grant binds to the rate the card showed (#1655): a config
-        // change re-offers instead of starting at a new price silently.
-        const offeredRate = cloudOverflowConsent.offeredRate(threadId);
-        if (offeredRate === null) return json(res, 409, { error: "no cloud overflow offer" });
-        cloudOverflowConsent.grant(threadId, offeredRate);
-      } else {
-        cloudOverflowConsent.revoke(threadId);
-        // Revocation must reach the machine (#1655): the ledger alone
-        // would leave this conversation's seat billing to its idle
-        // timeout. A start still waking is caught by its own revoke
-        // check once readyBox resolves.
-        const seatBot = store.botByThread(threadId);
-        const lease = seatBot ? cloudSeatLeases.get(seatBot.id) : undefined;
-        if (seatBot && lease && lease.threadId === threadId) {
-          stopCloudSeat(seatBot.id, lease, "Cloud computer stopped because overflow consent was revoked — billing pauses while it sleeps.");
-        }
-      }
-      store.appendMessage(threadId, {
-        role: "bot", kind: "activity",
-        tool: { name: cloudOverflowConsentText(body.consent, cloudOverflowIdleStopMs(cfg)), ok: true },
-      });
-      return json(res, 200, { consented: body.consent });
-    }
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
     if (m && method === "GET") {
       const threadId = m[1];
