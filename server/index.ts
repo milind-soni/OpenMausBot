@@ -25411,6 +25411,8 @@ const gracefulShutdown = createGracefulShutdown({
   // the shutdown deadline), immediately before the process exits, so no new
   // server can overlap with a still-mutating old one.
   exit: (code) => {
+    // Streamed text the bus is still merging reaches the log and clients.
+    bus.flush();
     try { sessions.close(); }
     catch {
       // An uncleared marker makes saved account sessions require sign-in on
