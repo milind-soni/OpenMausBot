@@ -73,7 +73,10 @@ const toolkitPageSchema = z.object({
   items: z.array(toolkitItemSchema).optional(),
   next_cursor: z.string().nullable().optional(),
 });
-const linkResponseSchema = z.object({ redirect_url: z.string().optional() });
+const linkResponseSchema = z.object({
+  redirect_url: z.string().optional(),
+  connected_account_id: z.string().optional(),
+});
 const aliasRequestSchema = z.object({ alias: z.string().nullable().optional() });
 const upstreamErrorSchema = z.object({
   message: z.string().optional(),
@@ -96,6 +99,14 @@ const MULTI_ACCOUNT_CONFIG = {
 // accounts per page nobody real is near the ceiling.
 const MAX_CONNECTED_ACCOUNT_PAGES = 20;
 const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+/** An auth link was minted and never completed: nothing is connected yet. */
+const UNFINISHED_ACCOUNT = /^(initiated|initializing|pending)$/i;
+/** An attempt that ended without connecting. Composio keeps the record and
+ * its alias on show, but no longer reserves that alias. */
+const LAPSED_ACCOUNT = /^(expired|failed)$/i;
+/** Short enough to survive the connection card's 180-character error. */
+const SIGN_IN_IN_PROGRESS = (alias: string, toolkit: string) =>
+  `Sign-in for "${alias}" on ${toolkit} is still in progress. Finish it, or retry once it expires (about 10 minutes).`;
 /** Composio's catalog cursor is base64 of the page and limit. */
 const CATALOG_CURSOR = /^[A-Za-z0-9+/_=-]{1,256}$/;
 const printableAliasSchema = z.string().min(1).max(64).refine((value) => {
@@ -485,15 +496,34 @@ async function authorize(
   // work, with the alias guardrails degrading to first-account behavior.
   const accounts = await listConnectedAccounts(env, installation.composio_user_id, [slug]).catch(() => []);
   const serviceAccounts = accounts.filter((account) => account.toolkit?.slug?.toLowerCase() === slug);
-  const usableAccounts = serviceAccounts.filter((account) => /^(active|initiated|initializing|pending)$/i.test(account.status ?? ""));
+  // Only a connected account owns its alias. Composio creates the account,
+  // alias included, when the auth link is minted, and stops reserving the
+  // alias when that link expires; a lapsed attempt no longer blocks it. An
+  // attempt the user never finished is this same connection, retried. The
+  // app hands such a retry the link it already issued, so an unfinished
+  // attempt reaching this point is one whose link it no longer knows (minted
+  // before a restart, say). It is left alone rather than replaced: Composio
+  // has no conditional delete, so removing it could race a sign-in finishing
+  // in its tab, or remove an attempt renamed since the list was read. Its
+  // alias frees itself when the attempt lapses.
+  const sameAlias = alias
+    ? serviceAccounts.filter((account) => account.alias?.trim().toLowerCase() === alias.toLowerCase())
+    : [];
+  const holders = sameAlias.filter((account) => !LAPSED_ACCOUNT.test(account.status ?? ""));
+  if (holders.some((account) => !UNFINISHED_ACCOUNT.test(account.status ?? ""))) {
+    return json({ error: `Account alias "${alias}" is already in use for ${slug}` }, 409);
+  }
+  if (holders.length) {
+    return json({ error: SIGN_IN_IN_PROGRESS(alias!, slug) }, 409);
+  }
+  const usableAccounts = serviceAccounts.filter((account) =>
+    /^(active|initiated|initializing|pending)$/i.test(account.status ?? "")
+  );
   if (usableAccounts.length >= MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit) {
     return json({ error: `${slug} already has the maximum of ${MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit} accounts` }, 409);
   }
   if (usableAccounts.length > 0 && !alias) {
     return json({ error: "Add an account alias so the existing connection is not replaced" }, 400);
-  }
-  if (alias && serviceAccounts.some((account) => account.alias?.trim().toLowerCase() === alias.toLowerCase())) {
-    return json({ error: `Account alias "${alias}" is already in use for ${slug}` }, 409);
   }
   const linkRequest: AccountLinkRequest = { toolkit: slug };
   if (alias) linkRequest.alias = alias;
@@ -508,7 +538,12 @@ async function authorize(
   if (redirect.protocol !== "https:" || (redirect.hostname !== "composio.dev" && !redirect.hostname.endsWith(".composio.dev"))) {
     return json({ error: "Composio returned an untrusted authorization link" }, 502);
   }
-  return json({ url: redirect.toString() });
+  // The attempt the link belongs to, so the app can hand a retry this same
+  // link while the attempt is still open.
+  const accountId = body.connected_account_id && ACCOUNT_ID.test(body.connected_account_id)
+    ? body.connected_account_id
+    : undefined;
+  return json(accountId ? { url: redirect.toString(), accountId } : { url: redirect.toString() });
 }
 
 async function disconnect(slug: string, installation: InstallationRow, env: Env, ctx: ExecutionContext) {

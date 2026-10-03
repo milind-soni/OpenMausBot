@@ -112,8 +112,11 @@ const connectorServiceSchema = z.object({
 });
 const connectorServicesResponseSchema = z.object({ services: z.record(z.string(), connectorServiceSchema).optional() });
 const removalResponseSchema = z.object({ removed: z.number() });
-const authUrlResponseSchema = z.object({ url: z.string().optional() });
-const linkResponseSchema = z.object({ redirect_url: z.string().optional() });
+const authUrlResponseSchema = z.object({ url: z.string().optional(), accountId: z.string().optional() });
+const linkResponseSchema = z.object({
+  redirect_url: z.string().optional(),
+  connected_account_id: z.string().optional(),
+});
 
 const MULTI_ACCOUNT_CONFIG = {
   enable: true,
@@ -132,6 +135,14 @@ interface SessionCreateRequest {
 }
 const MAX_CONNECTED_ACCOUNT_PAGES = 100;
 const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+/** An auth link was minted and never completed: nothing is connected yet. */
+const UNFINISHED_ACCOUNT = /^(initiated|initializing|pending)$/i;
+/** An attempt that ended without connecting. Composio keeps the record and
+ * its alias on show, but no longer reserves that alias. */
+const LAPSED_ACCOUNT = /^(expired|failed)$/i;
+/** Short enough to survive the connection card's 180-character error. */
+const SIGN_IN_IN_PROGRESS = (alias: string, toolkit: string) =>
+  `Sign-in for "${alias}" on ${toolkit} is still in progress. Finish it, or retry once it expires (about 10 minutes).`;
 const printableAliasSchema = z.string().min(1).max(64).refine((value) => {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
@@ -1250,6 +1261,34 @@ export async function removeAccount(cfg: AppConfig, slug: string, accountId: str
   return { removed: 1 };
 }
 
+/** Auth links being minted right now, by backend, Composio user and Session,
+ * toolkit and alias. Two requests that overlap share one link: the second
+ * would otherwise find the attempt the first has just created, before its
+ * link is remembered, and be refused as a sign-in already in progress. */
+const authorizationsInFlight = new Map<string, Promise<{ url: string }>>();
+
+/** The link last handed out for each aliased connection, by the same key, and
+ * the attempt it belongs to. Composio keeps one link usable for the whole
+ * attempt, before and after the user reaches the provider's sign-in, but never
+ * shows it again. A retry gets it back; without it, the open attempt holds
+ * the alias and the retry is refused until the attempt lapses. */
+const issuedAuthLinks = new Map<string, { url: string; accountId: string; issuedAt: number }>();
+/** Composio lets an unfinished attempt lapse after about ten minutes; a link
+ * kept past this is never handed out again, so it is dropped. */
+const ISSUED_AUTH_LINK_TTL_MS = 15 * 60_000;
+
+function authLinkKey(cfg: AppConfig, toolkit: string, alias: string | undefined) {
+  // A settings change can swap the Session while a request is in flight; a
+  // link minted for the old one is not the new one's to hand out.
+  return JSON.stringify([
+    connectorToolsIdentity(cfg),
+    cfg.composio?.userId ?? "",
+    cfg.composio?.sessionId ?? "",
+    toolkit,
+    alias?.toLowerCase() ?? "",
+  ]);
+}
+
 /** Mint a browser auth link for one service. Returns { url } or throws. */
 export async function authorizeService(cfg: AppConfig, slug: string, requestedAlias?: string | null) {
   const alias = normalizeAccountAlias(requestedAlias);
@@ -1257,6 +1296,73 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
   const mode = connectionMode(cfg);
   const unavailable = managedConnectorUnavailableReason(mode, toolkit);
   if (unavailable) throw inputError(unavailable, 409);
+  const key = authLinkKey(cfg, toolkit, alias);
+  const inFlight = authorizationsInFlight.get(key);
+  if (inFlight) return inFlight;
+  const minted = issueAuthLink(cfg, toolkit, alias, key).finally(() => {
+    if (authorizationsInFlight.get(key) === minted) authorizationsInFlight.delete(key);
+  });
+  authorizationsInFlight.set(key, minted);
+  return minted;
+}
+
+async function issueAuthLink(
+  cfg: AppConfig,
+  toolkit: string,
+  alias: string | undefined,
+  key: string,
+): Promise<{ url: string }> {
+  const now = Date.now();
+  for (const [issuedKey, link] of issuedAuthLinks) {
+    if (now - link.issuedAt > ISSUED_AUTH_LINK_TTL_MS) issuedAuthLinks.delete(issuedKey);
+  }
+  const issued = issuedAuthLinks.get(key);
+  if (issued) {
+    if (alias && await attemptStillOpen(cfg, toolkit, alias, issued.accountId)) return { url: issued.url };
+    issuedAuthLinks.delete(key);
+  }
+  const link = await mintAuthLink(cfg, toolkit, alias);
+  // Minting can create or recreate the Session, so file the link under the
+  // identity it was minted for.
+  if (alias && link.accountId) {
+    issuedAuthLinks.set(authLinkKey(cfg, toolkit, alias), { url: link.url, accountId: link.accountId, issuedAt: Date.now() });
+  }
+  return { url: link.url };
+}
+
+/** Whether an attempt is still waiting for its sign-in under this alias. Any
+ * doubt answers no, which leaves the decision to the mint path's own checks. */
+async function attemptStillOpen(cfg: AppConfig, toolkit: string, alias: string, accountId: string) {
+  try {
+    const apiKey = projectApiKey(cfg);
+    let account: { alias?: string | null; status?: string; toolkit?: string } | undefined;
+    if (apiKey) {
+      const res = await fetch(`${apiBase()}/connected_accounts/${encodeURIComponent(accountId)}`, {
+        headers: projectHeaders(apiKey),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) return false;
+      const body = connectedAccountResponseSchema.parse(await res.json());
+      account = { alias: body.alias, status: body.status, toolkit: body.toolkit?.slug };
+    } else {
+      const services = await connectionStatus(cfg, [toolkit]);
+      const listed = services[toolkit]?.accounts?.find((item) => item.id === accountId);
+      account = listed && { alias: listed.alias, status: listed.status, toolkit };
+    }
+    return Boolean(account)
+      && (account!.toolkit === undefined || canonicalToolkitSlug(account!.toolkit) === toolkit)
+      && account!.alias?.trim().toLowerCase() === alias.toLowerCase()
+      && UNFINISHED_ACCOUNT.test(account!.status ?? "");
+  } catch {
+    return false;
+  }
+}
+
+async function mintAuthLink(
+  cfg: AppConfig,
+  toolkit: string,
+  alias: string | undefined,
+): Promise<{ url: string; accountId?: string }> {
   const apiKey = projectApiKey(cfg);
   if (!apiKey) {
     const request: RequestInit = { method: "POST" };
@@ -1264,7 +1370,8 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
     const response = await brokerRequest(`/v1/connectors/${encodeURIComponent(toolkit)}/authorize`, request);
     if (!response.ok) await throwBrokerError(response, `Connected apps: HTTP ${response.status}`);
     const body = authUrlResponseSchema.parse(await response.json());
-    return { url: trustedAuthUrl(body.url, toolkit) };
+    const url = trustedAuthUrl(body.url, toolkit);
+    return validAccountId(body.accountId) ? { url, accountId: body.accountId } : { url };
   }
   const session = await ensureProjectSession(cfg);
   const userId = session.config?.user_id ?? cfg.composio?.userId;
@@ -1276,15 +1383,34 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
   const serviceAccounts = accounts.filter((account) =>
     account.toolkit?.slug !== undefined && canonicalToolkitSlug(account.toolkit.slug) === toolkit
   );
-  const usableAccounts = serviceAccounts.filter((account) => /^(active|initiated|initializing|pending)$/i.test(account.status ?? ""));
+  // Only a connected account owns its alias. Composio creates the account,
+  // alias included, when the auth link is minted, and stops reserving the
+  // alias when that link expires; a lapsed attempt no longer blocks it. An
+  // attempt the user never finished is this same connection, retried. The
+  // app hands such a retry the link it already issued, so an unfinished
+  // attempt reaching this point is one whose link it no longer knows (minted
+  // before a restart, say). It is left alone rather than replaced: Composio
+  // has no conditional delete, so removing it could race a sign-in finishing
+  // in its tab, or remove an attempt renamed since the list was read. Its
+  // alias frees itself when the attempt lapses.
+  const sameAlias = alias
+    ? serviceAccounts.filter((account) => account.alias?.trim().toLowerCase() === alias.toLowerCase())
+    : [];
+  const holders = sameAlias.filter((account) => !LAPSED_ACCOUNT.test(account.status ?? ""));
+  if (holders.some((account) => !UNFINISHED_ACCOUNT.test(account.status ?? ""))) {
+    throw inputError(`Account alias "${alias}" is already in use for ${toolkit}`, 409);
+  }
+  if (holders.length) {
+    throw inputError(SIGN_IN_IN_PROGRESS(alias!, toolkit), 409);
+  }
+  const usableAccounts = serviceAccounts.filter((account) =>
+    /^(active|initiated|initializing|pending)$/i.test(account.status ?? "")
+  );
   if (usableAccounts.length >= MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit) {
     throw inputError(`${toolkit} already has the maximum of ${MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit} accounts`, 409);
   }
   if (usableAccounts.length > 0 && !alias) {
     throw inputError("Add an account alias so the existing connection is not replaced");
-  }
-  if (alias && serviceAccounts.some((account) => account.alias?.trim().toLowerCase() === alias.toLowerCase())) {
-    throw inputError(`Account alias "${alias}" is already in use for ${toolkit}`, 409);
   }
   const linkRequest: AccountLinkRequest = { toolkit };
   if (alias) linkRequest.alias = alias;
@@ -1317,7 +1443,8 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
     if (!res.ok) throw new Error(await responseError(res, `Composio authorization: HTTP ${res.status}`));
   }
   const body = linkResponseSchema.parse(await res.json());
-  return { url: trustedAuthUrl(body.redirect_url, toolkit) };
+  const url = trustedAuthUrl(body.redirect_url, toolkit);
+  return validAccountId(body.connected_account_id) ? { url, accountId: body.connected_account_id } : { url };
 }
 
 // ── marketplace catalog ────────────────────────────────────────────────
