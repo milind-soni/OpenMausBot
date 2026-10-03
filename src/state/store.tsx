@@ -186,7 +186,11 @@ export interface Message {
   turnId?: string;
   /** Last assistant text item from a settled provider turn. */
   turnTerminal?: boolean;
-  /** screen messages: a frame of the bot's computer (base64) */
+  /** screen messages: the server holds a frame of the bot's computer,
+   * served by `/api/threads/:threadId/messages/:id/image`. */
+  hasImage?: boolean;
+  /** screen messages in the full (unpaged) shape: the same frame, inline as
+   * base64. Shown through the image route all the same. */
   png?: string;
   mime?: string;
   at: number;
@@ -1859,19 +1863,7 @@ export function reducer(state: AppState, action: Action): AppState {
         // turn artifact (settle-time screenshot) — the leaf must stay put,
         // or the follow-up send it raced would fall off the active branch.
         const adoptsLeaf = (action.message.parentId ?? null) === (b.activeLeafId ?? null);
-        let messages = [...b.messages, action.message];
-        // base64 screen frames are big; a long computer-use session would
-        // grow memory without bound. Keep the newest few frames' pixels and
-        // strip the rest (the message row survives as a placeholder).
-        if (action.message.kind === "screen") {
-          const withPng = messages.filter((m) => m.kind === "screen" && m.png);
-          const excess = withPng.length - MAX_KEPT_SCREEN_FRAMES;
-          if (excess > 0) {
-            const dropIds = new Set(withPng.slice(0, excess).map((m) => m.id));
-            messages = messages.map((m) => (dropIds.has(m.id) ? { ...m, png: undefined } : m));
-          }
-        }
-        return { ...b, messages, activeLeafId: adoptsLeaf ? action.message.id : b.activeLeafId };
+        return { ...b, messages: [...b.messages, action.message], activeLeafId: adoptsLeaf ? action.message.id : b.activeLeafId };
       });
       const motion =
         action.message.role === "user" && action.message.kind === "text" && Boolean(action.message.queueId)
@@ -2425,9 +2417,6 @@ export function reducer(state: AppState, action: Action): AppState {
     }
   }
 }
-
-/** Newest screen frames whose pixels stay in memory per thread. */
-const MAX_KEPT_SCREEN_FRAMES = 8;
 
 export const initialState: AppState = {
   modelVariantSessions: {},
