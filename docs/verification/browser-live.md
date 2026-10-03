@@ -65,7 +65,7 @@ Focused automated coverage:
 
 ```sh
 pnpm exec vitest run server/browser-engine.test.ts server/browser-runtime.test.ts \
-  server/browser-proxy.test.ts server/browser-live.test.ts \
+  server/harness-mcp-proxy.test.ts server/browser-live.test.ts \
   server/browser-live-routes.test.ts server/browser-codex-path.integration.test.ts \
   src/lib/browser-input-queue.test.ts src/lib/browser-control.test.ts src/lib/browser-profiles.test.ts \
   src/components/BrowserProfilesManager.test.ts src/components/BrowserViewport.test.ts \
@@ -191,6 +191,6 @@ Ctrl-C closes the exact fixture and removes the copied sign-in and browser
 data. VM/cloud transport and turn-bound switching are separately covered by
 `server/group-local-vm.e2e.test.ts`, `server/vps-routing.test.ts` and
 `server/index.test.ts` with
-isolated providers. These are not evidence of real cloud provisioning. Native
-Boat currently does not expose the agents selector tool, so switching away
-from an active native Boat destination still requires the composer selector.
+isolated providers. These are not evidence of real cloud provisioning. The
+Computer engine (Boat's native runner) does not expose the agents selector
+tool, so switching it away from Cloud still requires the composer selector.

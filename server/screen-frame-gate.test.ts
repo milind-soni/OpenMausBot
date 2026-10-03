@@ -89,7 +89,7 @@ describe("screenTouchingTool", () => {
   });
 
   const acting = [
-    "screenshot", "click", "type_text", "press_key", "scroll", "computer_batch", "open_url", "browser_click", "browser_fill",
+    "screenshot", "click", "type_text", "press_key", "key_press", "scroll", "computer_batch", "open_url", "browser_click", "browser_fill",
     "browser_navigate", "browser_type", "browser_press", "browser_scroll", "browser_hover", "browser_drag",
     "browser_select_option", "browser_back", "browser_forward", "browser_screenshot",
     "double_click", "right_click", "drag", "hotkey", "move_cursor", "launch_app", "bring_to_front", "zoom",

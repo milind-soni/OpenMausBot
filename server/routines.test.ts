@@ -2988,7 +2988,7 @@ describe("routine runs × turn-held BoatAgent asks", () => {
         h.manager.handleRuntimeEvent(event);
       });
       h.options.startTurn = async (_botId, threadId) => {
-        await instance.adapter.sendTurn({ threadId, text: "sweep", integrations: { computer: { boxId: "boat-1", token: "boat-test-token" } } });
+        await instance.adapter.sendTurn({ threadId, text: "sweep", integrations: { computer: { boxId: "boat-1" } } });
       };
       const routine = h.manager.create({
         name: "Boat sweep",

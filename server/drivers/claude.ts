@@ -6,8 +6,9 @@
 //
 // Integrations become MCP servers on the CLI:
 //   - Composio Sessions (connected apps → tools) over streamable HTTP
-//   - the bot's cloud computer (boat.dev) via server/computer-proxy.ts
-//     — screenshot/exec/open_url, the CUA-on-the-boat bridge
+//   - every computer (this Mac, a Local VM, a VPS, or a Boat cloud
+//     computer through server/harness-mcp-proxy.ts computer) as the one
+//     stdio `computer` server in turn.integrations.localComputer
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
@@ -2582,6 +2583,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           agentsMcp: true,
         customMcp: true,
           computerMcp: true,
+          // The cloud computer mounts as one more stdio computer server.
+          usesCloudComputer: true,
           composioMcp: true,
           phoneMcp: true,
           browserMcp: true,

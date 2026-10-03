@@ -2422,7 +2422,7 @@
   "computer.err.browserEngine": "This model cannot use the built-in browser",
   "computer.err.localEngine": "This model cannot control this computer. Choose Claude or an ACP model provider.",
   "computer.err.vmEngine": "This model cannot use the Local VM. Choose Claude or an ACP model provider.",
-  "computer.err.cloudEngine": "This model cannot use cloud computer tools. Choose Claude, an ACP model provider, or the Computer provider.",
+  "computer.err.cloudEngine": "This model can't use a computer. Choose another model, or set Works on to Auto.",
   "computer.err.vpsEngine": "This model cannot use a self-hosted VPS. Choose Claude or an ACP model provider, or switch the cloud backend to Boat.",
   "computer.err.vmNotReady": "The Local VM is not ready",
   "computer.err.vmOpenSettings": "{problem}. Open Settings → Local VM.",

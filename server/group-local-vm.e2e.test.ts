@@ -446,8 +446,10 @@ describe("Group Local VM ownership on the real isolated server", () => {
     }
   });
 
-  it("holds a cloud turn for a marked output question and resumes after the person's reply", async () => {
-    const { bot } = await api("POST", "/api/bots", { name: "Cloud question fixture" });
+  it("holds a Computer engine turn for a marked output question and resumes after the person's reply", async () => {
+    // The Computer engine runs its whole turn on the Boat; every other engine
+    // keeps its own model there, so this protocol is the Computer engine's.
+    const { bot } = await api("POST", "/api/bots", { name: "Cloud question fixture", modelSelection: { instanceId: "computer", model: "claude-fable-5" } });
     try {
       await api("PUT", "/api/config", { box: { token: "box_fixture" } });
       await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" });
@@ -498,8 +500,10 @@ describe("Group Local VM ownership on the real isolated server", () => {
       holdBoatPrompt = true;
       allowBoatCreation = true;
       await api("PUT", "/api/config", { box: { token: "box_fixture" } });
+      // The Computer engine holds the shared Boat for as long as its Boat
+      // prompt runs, which is the gated provider this check needs.
       for (const name of ["Computer holder", "Computer waiter"]) {
-        const { bot } = await api("POST", "/api/bots", { name, section });
+        const { bot } = await api("POST", "/api/bots", { name, section, modelSelection: { instanceId: "computer", model: "claude-fable-5" } });
         bots.push(bot);
       }
       const requestId = randomUUID();
@@ -567,16 +571,23 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect((await fetch(base + "/api/internal/computer/select", { headers: { authorization: `Bearer ${token}` } })).status).toBe(200);
       expect(boatCalls.every(call => call.method === "GET")).toBe(true);
       if (state === "removed") boatRow = null;
+      // The continuation keeps the bot's own engine and model; the selected
+      // Boat arrives as its computer tools. Boat's runner is never asked.
+      const harnessComputer = (sent: any) => computer(sent)?.args?.at(-1) === "computer" && /harness-mcp-proxy/.test(computer(sent).args[0]);
+      rmSync(dumpFile, { force: true });
       writeFileSync(finishFile, "finish");
-      await until(() => api("GET", "/api/bots?messages=30"), result => {
-        const saved = result.bots.find((b: any) => b.id === bot.id);
-        return !saved.busy && boatPrompts.length === 1;
-      });
+      const continued: any = await dump();
+      expect(harnessComputer(continued)).toBe(true);
+      expect(continued.argv[continued.argv.indexOf("--model") + 1]).toBe(before.argv[before.argv.indexOf("--model") + 1]);
+      await idle(bot.id);
+      expect(boatPrompts).toHaveLength(0);
       expect(boatCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(state === "wake" ? 0 : 1);
       expect(boatCalls.some(call => call.path.endsWith("/resume"))).toBe(state === "wake");
-      expect(boatPrompts[0]).toMatchObject({ model: "claude-fable-5" });
+      rmSync(dumpFile, { force: true });
       await api("POST", `/api/bots/${bot.id}/messages`, { text: "Inspect the current page on the same cloud VM" });
-      await until(async () => boatPrompts.length === 2 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bot.id).busy, Boolean);
+      expect(harnessComputer(await dump())).toBe(true);
+      await idle(bot.id);
+      expect(boatPrompts).toHaveLength(0);
       expect(boatCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(state === "wake" ? 0 : 1);
     } finally {
       writeFileSync(finishFile, "finish");
@@ -834,7 +845,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     }
   });
 
-  it("runs a channel speaker's own Cloud destination on its Boat, waking it first", async () => {
+  it("runs a channel speaker's own Cloud destination on its own engine with its Boat, waking it first", async () => {
     const { bots, group } = await room();
     try {
       await api("PUT", "/api/config", { box: { token: "box_fixture" } });
@@ -845,14 +856,22 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const suffix = createHash("sha256").update(bots[0].id).digest("hex").slice(0, 6);
       boatRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "archived" };
       boatCalls.length = 0; boatPrompts.length = 0;
+      // The speaker keeps its own engine; its Boat is woken and mounted as
+      // its computer tools, and Boat's runner is never asked.
+      const onBoat = (sent: any) => computer(sent)?.args?.at(-1) === "computer" && /harness-mcp-proxy/.test(computer(sent).args[0]);
+      writeFileSync(finishFile, "finish");
       await send(group.id);
-      await until(async () => boatPrompts.length === 1 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bots[0].id).busy, Boolean);
+      expect(onBoat(await dump())).toBe(true);
+      await idle(bots[0].id);
       expect(boatCalls.some(call => call.path.endsWith("/resume"))).toBe(true);
       expect(boatCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(0);
       expect(JSON.stringify(await api("GET", "/api/bots?messages=30"))).not.toContain("not available in channels yet");
       // The Boat is given back: the same speaker can take the room again.
+      rmSync(dumpFile, { force: true });
       await send(group.id);
-      await until(async () => boatPrompts.length === 2 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bots[0].id).busy, Boolean);
+      expect(onBoat(await dump())).toBe(true);
+      await idle(bots[0].id);
+      expect(boatPrompts).toHaveLength(0);
     } finally {
       boatRow = null;
       await stop(group.id);

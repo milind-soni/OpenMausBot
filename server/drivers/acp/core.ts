@@ -2268,6 +2268,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             agentsMcp: true,
         customMcp: true,
             computerMcp: true,
+            // The cloud computer mounts as one more stdio computer server.
+            usesCloudComputer: true,
             composioMcp: true,
             browserMcp: true,
             images: support.images !== false,

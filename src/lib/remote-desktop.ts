@@ -31,9 +31,12 @@ export function remoteScreenshotSource(raw: unknown): string | null {
   return `data:${frame.format === "jpeg" ? "image/jpeg" : "image/png"};base64,${frame.png}`;
 }
 
-/** Match the server: selected bridge-capable engine, otherwise the Boat runner. */
+/** The engine that runs a bot's cloud-computer turns: always its own, when
+ * it has computer tools or is the Computer engine (the server's
+ * cloudPlaceDriverError, and the place chip). Nothing else can use the cloud
+ * computer, so a bot without such an engine has no cloud runner at all. */
 export function cloudRunner(instances: readonly InstanceInfo[], selectedId?: string): InstanceInfo | undefined {
   if (!selectedId) return undefined;
   const selected = instances.find(instance => instance.instanceId === selectedId);
-  return selected?.capabilities?.cloudComputerMcp ? selected : instances.find(instance => instance.driverKind === "boxAgent");
+  return selected?.capabilities?.computerMcp === true || selected?.driverKind === "boxAgent" ? selected : undefined;
 }

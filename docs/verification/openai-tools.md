@@ -63,10 +63,11 @@ and service-specific limits remain separate from the implemented protocol.
 
 The OpenAI-compatible driver opts into structured image input and mounts the
 harness-provided `localComputer` and `browser` stdio descriptors. It does not
-discover or grant a desktop itself. Host, VM, VPS and room routing continue to
-use the harness's existing ownership and permission gates. The driver's Boat
-bridge consumes the separately leased cloud descriptor and keeps the selected
-API model; other engines retain their native Boat runner.
+discover or grant a desktop itself. Host, VM, VPS, Boat and room routing
+continue to use the harness's existing ownership and permission gates. A Boat
+cloud computer arrives in the same `localComputer` slot as every other
+computer (`harness-mcp-proxy computer`), so the selected API model is kept, as
+it is for every engine with computer tools.
 
 MCP images become bounded inline image parts. Tool results retain their call IDs;
 only after the full tool-result batch is appended does a separate image message
@@ -92,19 +93,23 @@ approval denial with no side effect, malformed images and a screenshot larger
 than the ordinary text frame limit. They do not use real desktop access or paid
 inference, and do not establish vision/tool support for every provider model.
 
-### Boat bridge
+### Boat cloud computer
 
-`pnpm exec vitest run server/drivers/chat-boat-tools.test.ts server/openai-boat.e2e.test.ts`
+`pnpm exec vitest run server/cloud-computer-tools.test.ts server/harness-mcp-proxy.test.ts server/openai-boat.e2e.test.ts server/hosted-desktop.e2e.test.ts`
 tests an owned loopback Boat/API fixture. It covers direct chats, group member
 turns and cloud routines retaining the selected model, screenshots arriving as
-image parts, and human control blocking an approved action. Bridge tests cover
-each advertised action, invalid arguments, expired control capabilities,
-changed ownership and in-flight cancellation without replay.
+image parts, and human control blocking an approved action. The tool tests
+cover each advertised action, invalid arguments (checked against the
+advertised schema before anything reaches the Boat), expired turn
+capabilities and in-flight cancellation without replay. The hosted-desktop
+fixture runs the same tools for a Claude bot and proves Boat's own runner is
+never asked.
 
 Model screenshots use native resolution and a separate file from panel frames.
 Every action rechecks the harness control gate. Commands run with an isolated
-environment; Boat and control credentials do not enter model messages. Tests
-use synthetic image bytes, not a paid Boat account or real desktop input.
+environment; the Boat credential stays in the harness, and the agent process
+holds only a turn-scoped capability that ends with the turn. Tests use
+synthetic image bytes, not a paid Boat account or real desktop input.
 
 ## Text-only model connections
 

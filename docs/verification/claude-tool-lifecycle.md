@@ -32,7 +32,7 @@ Sources:
 Regression checks:
 
 ```sh
-pnpm exec vitest run server/drivers/claude.test.ts server/drivers/agents-proxy.test.ts server/browser-proxy.test.ts
+pnpm exec vitest run server/drivers/claude.test.ts server/drivers/agents-proxy.test.ts server/harness-mcp-proxy.test.ts
 ```
 
 The turn boundary itself — a capability whose owning turn has been replaced

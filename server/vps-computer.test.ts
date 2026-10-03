@@ -43,7 +43,6 @@ import {
   vpsContainerName,
   vpsContainerRunArgs,
   vpsDockerArgs,
-  vpsDriverError,
   vpsLifecycleBusy,
   vpsSshTunnelArgs,
   vpsStartsForTurn,
@@ -941,12 +940,6 @@ describe("VPS computer", () => {
       await Promise.allSettled([provision, stale]);
       spawnMock.mockReset();
     }
-  });
-
-  it("fails clearly for BoatAgent and engines without computer MCP", () => {
-    expect(vpsDriverError("boxAgent", true)).toMatch(/cannot use a self-hosted VPS/);
-    expect(vpsDriverError("codex", false)).toMatch(/cannot mount/);
-    expect(vpsDriverError("claudeAgent", true)).toBeNull();
   });
 
   it("fails cleanly when no VPS alias is configured", async () => {

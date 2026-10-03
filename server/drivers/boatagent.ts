@@ -75,6 +75,24 @@ const providerFor = (model: string): { provider: string; model: string } => {
   return { provider: model.startsWith("gpt") ? "codex" : "claude-code", model };
 };
 
+/** Boat answers a prompt it cannot run with 409 provider_not_configured: the
+ * Boat has no AI sign-in for the harness the model needs. Say that, and the
+ * one thing the person can do about it here. */
+export const PROVIDER_NOT_CONFIGURED_MESSAGE =
+  "The Computer engine has no AI sign-in on its cloud computer. Choose another engine in this bot's settings.";
+/** An OMB Cloud's included Boat account has no agent sign-ins and never
+ * will: the operator's account must not run (or pay for) customers' models. */
+export const COMPUTER_ENGINE_CLOUD_UNAVAILABLE = "The Computer engine isn't available on OpenMaus Cloud — choose another engine.";
+
+/** The words of a Boat error envelope ({code, message, error:{code,
+ * message}}), never a bare code when Boat sent a sentence. */
+export function boatErrorMessage(body: any, status: number): string {
+  const code = body?.code ?? body?.error?.code;
+  if (code === "provider_not_configured") return PROVIDER_NOT_CONFIGURED_MESSAGE;
+  const message = body?.message ?? body?.error?.message ?? (typeof body?.error === "string" ? body.error : undefined) ?? code;
+  return typeof message === "string" && message.trim() ? message : `box HTTP ${status}`;
+}
+
 export interface BoatAgentConfig {
   pollMs: number;
   /** How long a held omb-ask waits for the person before resolving as a
@@ -137,9 +155,7 @@ export const BoatAgentDriver: ProviderDriver<BoatAgentConfig> = {
         signal: (opts as any).signal ?? AbortSignal.timeout(30_000),
       });
       const body: any = await res.json().catch(() => null);
-      if (!res.ok || body?.ok === false) {
-        throw new Error(body?.code ?? body?.error ?? `box HTTP ${res.status}`);
-      }
+      if (!res.ok || body?.ok === false) throw new Error(boatErrorMessage(body, res.status));
       return body;
     };
 
@@ -149,6 +165,7 @@ export const BoatAgentDriver: ProviderDriver<BoatAgentConfig> = {
       const computer = turn.integrations?.computer;
       const boxId = computer && (!computer.kind || computer.kind === "box") ? computer.boxId : undefined;
       if (!account()) throw new Error('box not configured — add {"box":{"token":"…"}} to ~/.openmausbot/config.json');
+      if (account()?.included) throw new Error(COMPUTER_ENGINE_CLOUD_UNAVAILABLE);
       if (!boxId) {
         throw new Error("this bot has no computer yet — open the Computer panel and provision one");
       }
@@ -409,6 +426,7 @@ export const BoatAgentDriver: ProviderDriver<BoatAgentConfig> = {
       if (!account()) {
         return { state: "unavailable", reason: 'no Boat token — add {"box":{"token":"…"}} to ~/.openmausbot/config.json' };
       }
+      if (account()?.included) return { state: "unavailable", reason: COMPUTER_ENGINE_CLOUD_UNAVAILABLE };
       try {
         await api("/me");
         return { state: "available", authenticated: true, version: null };

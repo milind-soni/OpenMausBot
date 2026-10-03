@@ -10,11 +10,13 @@ Add a Boat API key in App Settings to provision an isolated hosted Linux desktop
 
 Boat is a third-party paid service after its trial. OpenMausBot stores the configured credential locally and does not expose it to the renderer.
 
-OpenAI-compatible connections, including OpenRouter, can use the Boat desktop
-with the bot's selected model in direct chats, groups and cloud routines. Choose
-a model that supports both images and tools. Screenshots reach that model at
-native resolution; tool approvals and **Take control** still apply. Other engines
-continue to use the native Boat runner for cloud turns.
+Every engine with computer tools (Claude, Codex, ACP, Pi, and OpenAI-compatible
+connections such as OpenRouter) uses the Boat desktop with the bot's own model
+and sign-in in direct chats, groups and cloud routines. For an API connection,
+choose a model that supports both images and tools. Screenshots reach that model
+at native resolution; tool approvals and **Take control** still apply. A model
+without computer tools can't use the cloud computer: choose another model, or set
+**Works on** to Auto.
 
 ## Bring your own VPS
 

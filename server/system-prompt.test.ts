@@ -36,23 +36,20 @@ describe("resolveComputerPromptKind", () => {
   // agreement matrix artifact.
   it.each([
     // a VM plan is decided by the configured mode alone
-    [{ kind: "vm", driverKind: "claude", cloudComputerMcp: undefined, vmPrivate: false }, "vm-shared"],
-    [{ kind: "vm", driverKind: "claude", cloudComputerMcp: true, vmPrivate: true }, "vm-private"],
-    [{ kind: "vm", driverKind: "boxAgent", cloudComputerMcp: false, vmPrivate: false }, "vm-shared"],
-    // a boat plan: the agent earns its own kind, a driver that keeps its
-    // identity and speaks the computer MCP gets the chat paragraph, and the
-    // bare boat branch stays reachable for drivers the swap cannot replace
-    [{ kind: "box", driverKind: "boxAgent", cloudComputerMcp: false, vmPrivate: false }, "box-agent"],
-    [{ kind: "box", driverKind: "codex", cloudComputerMcp: true, vmPrivate: false }, "box-chat"],
-    [{ kind: "box", driverKind: "codex", cloudComputerMcp: false, vmPrivate: false }, "box"],
-    [{ kind: "box", driverKind: "claude", cloudComputerMcp: false, vmPrivate: false }, "box"],
+    [{ kind: "vm", driverKind: "claude", vmPrivate: false }, "vm-shared"],
+    [{ kind: "vm", driverKind: "claude", vmPrivate: true }, "vm-private"],
+    [{ kind: "vm", driverKind: "boxAgent", vmPrivate: false }, "vm-shared"],
+    // a boat plan: the Computer engine earns its own kind; every other
+    // engine drives the boat through the same computer tools
+    [{ kind: "box", driverKind: "boxAgent", vmPrivate: false }, "box-agent"],
+    [{ kind: "box", driverKind: "codex", vmPrivate: false }, "box"],
+    [{ kind: "box", driverKind: "claude", vmPrivate: false }, "box"],
     // vps and local never depended on more than the plan
-    [{ kind: "vps", driverKind: "claude", cloudComputerMcp: undefined, vmPrivate: false }, "vps"],
-    [{ kind: "vps", driverKind: "claude", cloudComputerMcp: false, vmPrivate: false }, "vps"],
-    [{ kind: "local", driverKind: "claude", cloudComputerMcp: undefined, vmPrivate: false }, "local"],
-    [{ kind: "local", driverKind: "boxAgent", cloudComputerMcp: false, vmPrivate: false }, "local"],
+    [{ kind: "vps", driverKind: "claude", vmPrivate: false }, "vps"],
+    [{ kind: "local", driverKind: "claude", vmPrivate: false }, "local"],
+    [{ kind: "local", driverKind: "boxAgent", vmPrivate: false }, "local"],
     // and no plan earns no paragraph
-    [{ kind: null, driverKind: "claude", cloudComputerMcp: true, vmPrivate: true }, null],
+    [{ kind: null, driverKind: "claude", vmPrivate: true }, null],
   ] as const)("resolves %j to %s", (input, expected) => {
     expect(resolveComputerPromptKind(input)).toBe(expected);
   });
@@ -67,8 +64,7 @@ describe("computerPrompt", () => {
     const paragraphs: Record<string, string> = {
       "vm-private": "your own isolated Cua sandbox",
       "vm-shared": "shared, isolated Cua sandbox",
-      box: "You have your own cloud computer",
-      "box-chat": "You control the assigned cloud computer",
+      box: "You control the assigned cloud computer",
       vps: "This is a VPS, not Boat",
       local: "act on the user's computer",
     };
@@ -181,7 +177,7 @@ describe("computerPrompt", () => {
   it("shares the authorized sign-in policy across every computer and browser surface", () => {
     expect(computerPrompt("vm-private")).toContain("your own isolated Cua sandbox");
     expect(computerPrompt("vm-shared")).toContain("a shared, isolated Cua sandbox");
-    expect(computerPrompt("box")).toContain("your own cloud computer");
+    expect(computerPrompt("box")).toContain("You control the assigned cloud computer");
     expect(computerPrompt("vps")).toContain("self-hosted remote Linux computer");
     expect(computerPrompt("local")).toContain("act on the user's computer");
     for (const kind of ["vm-private", "vm-shared", "box", "vps", "local"] as const) {

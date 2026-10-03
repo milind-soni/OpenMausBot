@@ -1749,7 +1749,7 @@
   "computer.err.browserEngine": "這個模型無法使用內建瀏覽器",
   "computer.err.localEngine": "這個模型無法控制這台電腦。請選擇 Claude 或 ACP 模型供應商。",
   "computer.err.vmEngine": "這個模型無法使用本機 VM。請選擇 Claude 或 ACP 模型供應商。",
-  "computer.err.cloudEngine": "這個模型無法使用雲端電腦工具。請選擇 Claude、ACP 模型供應商或 Computer 供應商。",
+  "computer.err.cloudEngine": "這個模型無法使用電腦。請選擇其他模型，或將「運作位置」設為自動。",
   "computer.err.vpsEngine": "這個模型無法使用自行架設的 VPS。請選擇 Claude 或 ACP 模型供應商，或將雲端後端切換為 Boat。",
   "computer.err.vmNotReady": "本機 VM 尚未就緒",
   "computer.err.vmOpenSettings": "{problem}。請開啟「設定 → 本機 VM」。",

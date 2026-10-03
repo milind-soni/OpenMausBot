@@ -1163,10 +1163,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       integrations: {
         browser: {
           command: process.execPath,
-          args: ["/tmp/browser-proxy.js"],
+          args: ["/tmp/harness-mcp-proxy.js"],
           env: {
             OMB_HARNESS_URL: "http://127.0.0.1:8799",
-            OMB_BROWSER_TOKEN: "browser-capability-secret",
+            OMB_MCP_TOKEN: "browser-capability-secret",
           },
         },
       },
@@ -1181,9 +1181,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(seen.argv.some((arg: string) => arg.startsWith("web_search="))).toBe(false);
     expect(seen.argv).toContain('plugins={ "browser@openai-bundled" = { enabled = false }, "computer-use@openai-bundled" = { enabled = false }, "unified-computer-use@openai-bundled" = { enabled = false } }');
     expect(seen.argv).toContain('mcp_servers.browser.default_tools_approval_mode="auto"');
-    expect(seen.argv.join(" ")).toContain("/tmp/browser-proxy.js");
+    expect(seen.argv.join(" ")).toContain("/tmp/harness-mcp-proxy.js");
     expect(seen.argv.join(" ")).not.toContain("browser-capability-secret");
-    expect(seen.env.OMB_BROWSER_TOKEN).toBe("browser-capability-secret");
+    expect(seen.env.OMB_MCP_TOKEN).toBe("browser-capability-secret");
     for (const method of ["thread/start", "turn/start"]) {
       expect(seen.calls.find((call: { method: string }) => call.method === method)?.params).toMatchObject({
         approvalPolicy: "on-request",

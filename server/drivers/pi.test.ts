@@ -696,7 +696,7 @@ describe("PiDriver turns (fake CLI)", () => {
       text: "hi",
       integrations: {
         composio: { command: "node", args: ["connector-proxy.js"], env: { COMPOSIO_KEY: "ck" } },
-        computer: { kind: "box", boxId: "b1", token: "bt", control: { url: "http://c", token: "ct" } },
+        computer: { kind: "box", boxId: "b1" },
       },
     });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);

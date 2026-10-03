@@ -151,6 +151,9 @@ let managedBoatDeleteRemovesRow = true;
 let home: string;
 let staticDir: string;
 let fakeClaudeDump: string;
+/** Every prompt a fake Claude process receives, one JSON line each: the
+ * signal that a turn was granted its computer and its engine started. */
+let fakeClaudePrompts: string;
 let oneShotTextFile: string;
 let oneShotTextDump: string;
 let fakeDockerFixture: string;
@@ -319,6 +322,10 @@ const delayedJsonBody = async (
   };
 };
 
+/** The prompts fake Claude engines have received so far, in order. */
+const claudePrompts = (file = fakeClaudePrompts): string[] =>
+  existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
+
 const readJsonFileWhenReady = async <T = unknown>(file: string, timeout = 5_000): Promise<T> => {
   let parsed: unknown;
   await expect.poll(() => {
@@ -372,6 +379,7 @@ beforeAll(async () => {
   writeFileSync(join(home, "fake-agent-browser"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   staticDir = join(home, "static");
   fakeClaudeDump = join(home, "fake-claude-dump.json");
+  fakeClaudePrompts = join(home, "fake-claude-prompts.jsonl");
   oneShotTextFile = join(home, "fake-claude-one-shot.txt");
   oneShotTextDump = join(home, "fake-claude-one-shot-dump.json");
   const fakeDockerDir = join(home, "fake-docker-bin");
@@ -1163,6 +1171,7 @@ beforeAll(async () => {
       OMB_SSE_HEARTBEAT_MS: "50",
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
+      FAKE_CLAUDE_PROMPTS: fakeClaudePrompts,
       // the one-shot text helper fails by default (its reply file is
       // missing), so first-message generated titles stay off until a test
       // writes that file — and its dump never overwrites a turn's dump
@@ -3143,7 +3152,7 @@ describe("harness HTTP API", () => {
       roomId = room.id;
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work in the virtual machine" })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body),
-        { timeout: 5_000 }).toMatch(/this model cannot use the Local VM/);
+        { timeout: 5_000 }).toMatch(/this model cannot use the Local VM.*Set Works on to Auto in this bot's settings to continue/);
     } finally {
       if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
       if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
@@ -3291,13 +3300,15 @@ describe("harness HTTP API", () => {
         throw new Error(`${(error as Error).message}\nbox calls: ${JSON.stringify(boatRouteCalls.slice(-6))}\nthread: ${JSON.stringify(bot?.messages ?? null).slice(0, 1500)}`);
       }
     };
-    type ComputerDump = { mcpConfig: { mcpServers: { computer?: unknown } } };
-    // A turn on the team computer runs ON that box: the harness server posts
-    // the prompt to the boat instead of spawning a local engine.
+    type ComputerDump = { mcpConfig: { mcpServers: { computer?: { args?: string[] } } } };
+    // A turn on the team computer keeps the bot's own engine; the team's Boat
+    // is its computer tools. Boat's own runner is never asked to run it.
     const promptsOnBoat = () => boatRouteCalls.filter(call => call.method === "POST" && call.path === `/boxes/${managedBoatCreateId}/prompt`).length;
-    const promptedOnBoat = async (count: number, botId: string) => {
+    let promptBaseline = 0;
+    const promptedOnTeamComputer = async (count: number, botId: string) => {
       try {
-        await expect.poll(promptsOnBoat, { timeout: 5_000 }).toBe(count);
+        await expect.poll(() => claudePrompts().length - promptBaseline, { timeout: 5_000 }).toBe(count);
+        expect(promptsOnBoat()).toBe(0);
       } catch (error) {
         const bot = (await api("GET", "/api/bots?messages=5")).body.bots.find((candidate: { id: string }) => candidate.id === botId);
         const kinds = (await api("GET", "/api/instances")).body.instances
@@ -3331,6 +3342,7 @@ describe("harness HTTP API", () => {
       expect((await readJsonFileWhenReady<ComputerDump>(fakeClaudeDump)).mcpConfig.mcpServers.computer).toBeUndefined();
       expect((await api("POST", `/api/bots/${botIds[2]}/interrupt`, {})).status).toBe(200);
       await idle(botIds[2]);
+      promptBaseline = claudePrompts().length;
 
       expect((await api("POST", `/api/bots/${botIds[0]}/computer/control`, { action: "take" })).status).toBe(200);
       expect((await api("GET", `/api/bots/${botIds[1]}/computer/control`)).body.held).toBe(true);
@@ -3340,8 +3352,9 @@ describe("harness HTTP API", () => {
 
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "hold the shared desktop" })).status).toBe(202);
-      await promptedOnBoat(1, botIds[0]);
-      expect(existsSync(fakeClaudeDump)).toBe(false);
+      await promptedOnTeamComputer(1, botIds[0]);
+      expect((await readJsonFileWhenReady<ComputerDump>(fakeClaudeDump)).mcpConfig.mcpServers.computer?.args)
+        .toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js)$/), "computer"]);
       // A sibling thread can wait, and Stop must cancel that pending claim
       // without interrupting the thread which already owns the desktop.
       const firstThread = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { id: string }) => b.id === botIds[0]).threadId;
@@ -3370,7 +3383,7 @@ describe("harness HTTP API", () => {
         outcome: "stopped",
       });
       expect(siblingEvents.find((event) => event.type === "turn.wait_ended").waitedMs).toBeGreaterThanOrEqual(0);
-      expect(promptsOnBoat()).toBe(1);
+      expect(claudePrompts().length - promptBaseline).toBe(1);
       expect((await api("POST", `/api/bots/${botIds[0]}/tasks/${firstThread}`, {})).status).toBe(200);
       for (const action of ["sleep", "provision"]) {
         expect((await api("POST", `/api/team-computers/${requestId}/${action}`, { acknowledgeCost: true })).status).toBe(409);
@@ -3383,12 +3396,12 @@ describe("harness HTTP API", () => {
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.groups.find(
         (group: { id: string }) => group.id === roomId,
       )), { timeout: 5_000 }).toMatch(/Waiting for its turn on this computer/);
-      expect(promptsOnBoat()).toBe(1);
+      expect(claudePrompts().length - promptBaseline).toBe(1);
       expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, {})).status).toBe(200);
       await idle(botIds[0]);
 
       // No Retry or second user message: releasing the owner wakes the turn.
-      await promptedOnBoat(2, botIds[1]);
+      await promptedOnTeamComputer(2, botIds[1]);
       // The room's wait resolved as acquired: the waiting chip stays, the
       // resolution names how long it waited, and the wait events carry both
       // ends of the history.
@@ -3407,7 +3420,7 @@ describe("harness HTTP API", () => {
       expect(roomEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
         outcome: "acquired",
       });
-      expect(existsSync(fakeClaudeDump)).toBe(false);
+      expect(promptsOnBoat()).toBe(0);
       expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(409);
       expect((await api("POST", `/api/groups/${roomId}/interrupt`, {})).status).toBe(200);
       await idle(botIds[1]);
@@ -3465,7 +3478,9 @@ describe("harness HTTP API", () => {
       managedBoatCreateName = "";
       expect((await api("POST", "/api/team-computers", { requestId, name: "Queue desktop", acknowledgeCost: true })).status).toBe(201);
       expect((await api("PATCH", `/api/team-computers/${requestId}`, { section, acknowledgeSharedAccess: true })).status).toBe(200);
-      const promptsOnBox = () => boatRouteCalls.filter(call => call.method === "POST" && call.path === `/boxes/${managedBoatCreateId}/prompt`).length;
+      // Each grant starts the bot's own engine on the shared desktop.
+      const queueBaseline = claudePrompts().length;
+      const promptsOnBox = () => claudePrompts().length - queueBaseline;
       const threadMessages = async (threadId: string) =>
         ((await api("GET", `/api/threads/${threadId}/messages`)).body.messages as Array<{ tool?: { name?: string } }>);
       const threadEvents = async (threadId: string) =>
@@ -3475,7 +3490,6 @@ describe("harness HTTP API", () => {
       // The holder keeps the desktop until it is interrupted.
       expect((await api("POST", `/api/bots/${botId}/messages`, { text: "hold the queue desktop" })).status).toBe(202);
       await expect.poll(promptsOnBox, { timeout: 5_000 }).toBe(1);
-      const promptBaseline = boatPromptBodies.length;
 
       // Three sibling tasks arrive one after another. Each chip names its
       // stable position in arrival order, and no estimate exists yet.
@@ -3493,7 +3507,7 @@ describe("harness HTTP API", () => {
       // one new provider prompt, carrying the first waiter's arrival text.
       expect((await api("POST", `/api/bots/${botId}/interrupt`, { threadId: holderThread })).status).toBe(200);
       await expect.poll(promptsOnBox, { timeout: 10_000 }).toBe(2);
-      expect(String(boatPromptBodies.slice(promptBaseline).at(-1)?.prompt)).toContain("arrival 1 of the queue");
+      expect(claudePrompts().at(-1)).toContain("arrival 1 of the queue");
       await expect.poll(async () => JSON.stringify(await threadMessages(waiterThreads[0]!)), { timeout: 5_000 })
         .toMatch(/Computer free — continuing after waiting /);
       // Positions 2 and 3 keep waiting: nobody jumped the released seat.
@@ -3516,7 +3530,7 @@ describe("harness HTTP API", () => {
       // next, again by its own arrival text.
       expect((await api("POST", `/api/bots/${botId}/interrupt`, { threadId: waiterThreads[0] })).status).toBe(200);
       await expect.poll(promptsOnBox, { timeout: 10_000 }).toBe(3);
-      expect(String(boatPromptBodies.slice(promptBaseline).at(-1)?.prompt)).toContain("arrival 2 of the queue");
+      expect(claudePrompts().at(-1)).toContain("arrival 2 of the queue");
     } finally {
       if (holderThread) await api("POST", `/api/bots/${botId}/interrupt`, { threadId: holderThread }).catch(() => undefined);
       for (const threadId of waiterThreads) await api("POST", `/api/bots/${botId}/interrupt`, { threadId }).catch(() => undefined);
@@ -3569,6 +3583,7 @@ describe("harness HTTP API", () => {
         OMB_STATIC_DIR: isolatedStatic,
         OMB_BOX_API: `http://127.0.0.1:${boatStubPort}`,
         FAKE_CLAUDE_MODE: "hang",
+        FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl"),
         // seconds, not minutes: the point of this file is the cap firing,
         // on the computer cap itself — not the goal cap it used to share
         OMB_COMPUTER_WAIT_MAX_MS: "2000",
@@ -3584,7 +3599,12 @@ describe("harness HTTP API", () => {
       });
       return { status: response.status, body: await response.json() };
     };
-    const promptsOnParkBox = () => boatRouteCalls.filter((call) => call.method === "POST" && call.path === "/boxes/bx_parkdskt/prompt").length;
+    // Each turn granted the shared desktop starts its own engine there once
+    // (the fake engine hangs, holding the seat); Boat's runner is never asked.
+    const promptsOnParkBox = () => {
+      expect(boatRouteCalls.filter((call) => call.method === "POST" && call.path === "/boxes/bx_parkdskt/prompt")).toHaveLength(0);
+      return claudePrompts(join(isolatedHome, "desktop-prompts.jsonl")).length;
+    };
     let botId = "";
     let holderThreadId = "";
     let siblingThreadId = "";
@@ -3766,7 +3786,7 @@ describe("harness HTTP API", () => {
         holder: {
           driver: "claudeAgent",
           displayName: "Fixture holder",
-          environment: { FAKE_CLAUDE_MODE: "hang" },
+          environment: { FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl") },
           config: { cli: FAKE_CLAUDE_CLI },
         },
         lead: {
@@ -3783,6 +3803,7 @@ describe("harness HTTP API", () => {
           driver: "claudeAgent",
           displayName: "Fixture worker",
           environment: {
+            FAKE_CLAUDE_PROMPTS: join(isolatedHome, "desktop-prompts.jsonl"),
             FAKE_CLAUDE_MODE: "happy",
             FAKE_CLAUDE_REPLIES: JSON.stringify(["The parked computer work is complete."]),
             FAKE_CLAUDE_REPLY_STATE: join(isolatedHome, "worker-replies.txt"),
@@ -3817,7 +3838,12 @@ describe("harness HTTP API", () => {
       });
       return { status: response.status, body: await response.json() };
     };
-    const promptsOnGoalBox = () => boatRouteCalls.filter((call) => call.method === "POST" && call.path === "/boxes/bx_parkedsk/prompt").length;
+    // Turns granted the shared desktop: the holder's, then the parked
+    // member's resume. Each starts its own engine; Boat's runner is never asked.
+    const promptsOnGoalBox = () => {
+      expect(boatRouteCalls.filter((call) => call.method === "POST" && call.path === "/boxes/bx_parkedsk/prompt")).toHaveLength(0);
+      return claudePrompts(join(isolatedHome, "desktop-prompts.jsonl")).length;
+    };
     const goalCard = async () => {
       const state = (await isolatedApi("GET", "/api/bots?messages=40")).body;
       const room = state.groups.find((group: any) => group.id === roomId);
@@ -7657,7 +7683,7 @@ describe("harness HTTP API", () => {
     expect(cleared.body.task.surface).toBeUndefined();
   });
 
-  it("dispatches the conversation's pinned computer, never advertises a phantom Auto Boat, and previews that same surface", async () => {
+  it("dispatches the conversation's pinned computer on the bot's own engine, and previews that same surface", async () => {
     const bot = (await api("POST", "/api/bots", {
       name: "Surface routing fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
     })).body.bot;
@@ -7672,8 +7698,12 @@ describe("harness HTTP API", () => {
       boatPromptBodies.length = 0;
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Describe your available computer tools" })).status).toBe(202);
-      const local = await readJsonFileWhenReady<{ mcpConfig: { mcpServers: Record<string, unknown> }; systemPrompt: string }>(fakeClaudeDump);
-      expect(local.mcpConfig.mcpServers.computer).toBeUndefined();
+      // Auto reuses the bot's Boat that is already running, as one more
+      // computer server on its own engine: never created, never Boat's runner.
+      type Dump = { argv: string[]; mcpConfig: { mcpServers: Record<string, { args?: string[] }> }; systemPrompt: string };
+      const local = await readJsonFileWhenReady<Dump>(fakeClaudeDump);
+      expect(local.mcpConfig.mcpServers.computer?.args).toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js)$/), "computer"]);
+      expect(local.systemPrompt).toContain("You control the assigned cloud computer");
       expect(boatPromptBodies).toHaveLength(0);
       expect(boatRouteCalls.some(call => call.method === "POST" && call.path === "/boxes")).toBe(false);
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle();
@@ -7692,15 +7722,18 @@ describe("harness HTTP API", () => {
       expect((await api("GET", `/api/bots/${bot.id}/computer?threadId=${bot.threadId}`)).body.surface).toBe("vm");
       expect((await api("POST", `/api/bots/${bot.id}/computer/join?threadId=${bot.threadId}`, {})).status).toBe(409);
 
-      // The inverse pin dispatches the Boat runner with its own model, not
-      // the local provider's model alias/effort. Preview opens the same Boat.
+      // The inverse pin keeps the bot's own engine and model, with the Boat as
+      // its computer tools; Boat's runner is never asked. Preview opens the
+      // same Boat.
       await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm" });
       await api("PATCH", `/api/bots/${bot.id}/tasks/${bot.threadId}`, { surface: "cloud" });
+      rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Open Chrome on the cloud VM" })).status).toBe(202);
-      await expect.poll(() => boatPromptBodies.length, { timeout: 10_000 }).toBe(1);
-      expect(boatPromptBodies[0]).toMatchObject({ model: "claude-fable-5", provider: "claude-code" });
-      expect(boatPromptBodies[0]!.prompt).toContain("assigned cloud computer");
-      expect(existsSync(fakeClaudeDump)).toBe(false);
+      const pinnedCloud = await readJsonFileWhenReady<Dump>(fakeClaudeDump, 10_000);
+      expect(pinnedCloud.argv[pinnedCloud.argv.indexOf("--model") + 1]).toBe("claude-sonnet-5");
+      expect(pinnedCloud.mcpConfig.mcpServers.computer?.args).toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js)$/), "computer"]);
+      expect(pinnedCloud.systemPrompt).toContain("assigned cloud computer");
+      expect(boatPromptBodies).toHaveLength(0);
       expect((await api("GET", `/api/bots/${bot.id}/computer?threadId=${bot.threadId}`)).body.surface).toBe("cloud");
       const joined = await api("POST", `/api/bots/${bot.id}/computer/join?threadId=${bot.threadId}`, {});
       expect(joined).toMatchObject({ status: 200, body: { joinUrl: "https://desktop.invalid/bx_3456789a" } });
@@ -8837,8 +8870,8 @@ describe("harness HTTP API", () => {
       }).parse(await readJsonFileWhenReady(fakeClaudeDump));
       const browser = dump.mcpConfig.mcpServers.browser;
       expect(browser.command).toBe(process.execPath);
-      expect(browser.args).toEqual([expect.stringMatching(/browser-proxy\.(?:ts|js|mjs)$/)]);
-      expect(browser.env.OMB_BROWSER_TOKEN).toEqual(expect.any(String));
+      expect(browser.args).toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js|mjs)$/), "browser"]);
+      expect(browser.env.OMB_MCP_TOKEN).toEqual(expect.any(String));
       expect(browser.env.OMB_HARNESS_URL).toBe(BASE);
       // Only the server-owned proxy knows native sessions and saved-login keys.
       expect(browser.env.AGENT_BROWSER_SESSION).toBeUndefined();
@@ -8899,7 +8932,7 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "off" })).status).toBe(200);
       expect(await computerSection(bot.id)).toBeUndefined();
       const off = await turnPrompt(messagesPath);
-      for (const paragraph of ["isolated Cua sandbox", "your own cloud computer", "This is a VPS", "user's computer"]) {
+      for (const paragraph of ["isolated Cua sandbox", "assigned cloud computer", "This is a VPS", "user's computer"]) {
         expect(off).not.toContain(paragraph);
       }
       await api("POST", `/api/bots/${bot.id}/interrupt`, {});
@@ -8916,12 +8949,10 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } })).status).toBe(200);
       expect((await computerSection(bot.id)).text).toBe(computerPrompt("vm-shared"));
 
-      // Cloud on the Boat backend swaps the engine to the boat agent, so the
-      // paragraph is agent-shaped: the preview carries only the sign-in
-      // policy, and the dispatched runner prompt carries that same policy
-      // and no desktop paragraph. Direct only: the room leg mounts through
-      // the identical attachBotBoat seam, and a second full boat-runner turn
-      // would only re-prove the driver, not the resolver.
+      // Cloud on the Boat backend keeps the bot's own engine, with the Boat
+      // as its computer tools, so preview and dispatch carry the same cloud
+      // computer paragraph, and Boat's own runner is never asked. Direct
+      // only: the room leg mounts through the identical attachBotBoat seam.
       if (target === "direct") {
         expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
         boatBot = (await api("POST", "/api/bots", { name: "Beacon" })).body.bot;
@@ -8931,15 +8962,13 @@ describe("harness HTTP API", () => {
         })).status).toBe(200);
         managedBoatRows = [{ id: "bx_8765432a", name: managedBoatNameForFixture(boatBot.id), state: "idle" }];
         boatPromptBodies.length = 0;
-        expect((await computerSection(boatBot.id)).text).toBe(computerPrompt("box-agent"));
-        expect((await computerSection(boatBot.id)).text).toBe(SIGN_IN_PROMPT);
-        expect((await api("POST", `/api/bots/${boatBot.id}/messages`, { text: "describe your computer tools" })).status).toBe(202);
-        await expect.poll(() => boatPromptBodies.length, { timeout: 10_000 }).toBe(1);
-        const runnerPrompt = String(boatPromptBodies[0]!.prompt);
-        expect(runnerPrompt).toContain(SIGN_IN_PROMPT);
-        for (const paragraph of ["isolated Cua sandbox", "your own cloud computer", "This is a VPS", "user's computer"]) {
-          expect(runnerPrompt).not.toContain(paragraph);
+        expect((await computerSection(boatBot.id)).text).toBe(computerPrompt("box"));
+        const boatTurn = await turnPrompt(`/api/bots/${boatBot.id}/messages`);
+        expect(boatTurn).toContain(computerPrompt("box"));
+        for (const paragraph of ["isolated Cua sandbox", "This is a VPS", "user's computer"]) {
+          expect(boatTurn).not.toContain(paragraph);
         }
+        expect(boatPromptBodies).toHaveLength(0);
         await api("POST", `/api/bots/${boatBot.id}/interrupt`, {});
         await idle(boatBot.id);
       }

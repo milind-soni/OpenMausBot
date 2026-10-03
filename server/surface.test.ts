@@ -4,7 +4,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CLOUD_PLACE_DRIVER_ERROR,
+  cloudPlaceDriverError,
   parseSurface,
+  placeFailureMessage,
+  placeUnavailable,
   resolveSurface,
   surfaceForTool,
   surfaceOfComputerKind,
@@ -229,4 +233,40 @@ describe("surface parsing", () => {
 it("does not instruct use of a selected browser when no surface is mounted", () => {
   expect(surfacePrompt({ computer: null, browser: false }, { canSelect: true })).not.toContain("For online research");
   expect(surfacePrompt({ computer: null, browser: true })).toContain("For online research");
+});
+
+describe("cloudPlaceDriverError", () => {
+  it("lets every engine with computer tools use either cloud backend, and the Computer engine only Boat", () => {
+    expect(cloudPlaceDriverError({ usesCloudComputer: true }, "box")).toBeNull();
+    expect(cloudPlaceDriverError({ usesCloudComputer: true }, "vps")).toBeNull();
+    expect(cloudPlaceDriverError({ usesCloudComputer: true, remoteAgent: true }, "box")).toBeNull();
+    expect(cloudPlaceDriverError({ usesCloudComputer: true, remoteAgent: true }, "vps")).toMatch(/can't use a self-hosted VPS/);
+  });
+
+  it("refuses an engine without computer tools with one message and the control that changes it", () => {
+    expect(CLOUD_PLACE_DRIVER_ERROR).toBe("This model can't use a computer. Choose another model, or set Works on to Auto.");
+    expect(cloudPlaceDriverError({}, "box")).toBe(CLOUD_PLACE_DRIVER_ERROR);
+    expect(cloudPlaceDriverError({ usesCloudComputer: false }, "vps", "pin")).toBe("This model can't use a computer. Choose another model, or clear this conversation's place in the composer.");
+    expect(cloudPlaceDriverError({}, "box", "routine")).toMatch(/change where this routine runs\.$/);
+  });
+});
+
+describe("placeUnavailable", () => {
+  it("names the control that changes the failed place, by where the choice came from", () => {
+    expect(placeUnavailable("cloud", "pin", "the cloud computer could not be created or reached").message)
+      .toBe("the cloud computer could not be created or reached. Clear this conversation's place in the composer to continue.");
+    expect(placeUnavailable("cloud", "works-on", "boom.").message).toBe("boom. Set Works on to Auto in this bot's settings to continue.");
+    expect(placeUnavailable("vm", "routine", "boom").message).toBe("boom. Change where this routine runs.");
+    expect(placeUnavailable("cloud", "auto-pin", "boom").message).toContain("back on Auto");
+    expect(placeUnavailable("vm", "pin", "x")).toMatchObject({ name: "PlaceUnavailableError", place: "vm", source: "pin" });
+  });
+
+  it("shortens the cause, never the action, to fit the transcript row", () => {
+    const message = placeFailureMessage("x".repeat(400), "works-on");
+    expect(message.length).toBeLessThanOrEqual(160);
+    expect(message.endsWith("Set Works on to Auto in this bot's settings to continue.")).toBe(true);
+    expect(message).toContain("…");
+    // A room row has no such cut: the whole cause stays.
+    expect(placeUnavailable("vm", "works-on", "x".repeat(400), Infinity).message).toBe(`${"x".repeat(400)}. Set Works on to Auto in this bot's settings to continue.`);
+  });
 });

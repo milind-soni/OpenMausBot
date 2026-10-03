@@ -128,7 +128,7 @@ const engine = (): InstanceInfo => ({
   instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", access: "subscription",
   snapshot: { state: "available", version: "1", authenticated: true },
   models: { default: "m", options: [{ id: "m", label: "M" }] },
-  capabilities: { computerMcp: true, browserMcp: true, cloudComputerMcp: true },
+  capabilities: { computerMcp: true, browserMcp: true },
 } as InstanceInfo);
 
 function makeBot(patch: Partial<Bot> = {}): Bot {

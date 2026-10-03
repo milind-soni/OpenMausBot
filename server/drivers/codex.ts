@@ -1910,6 +1910,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         guestTurns: "confined",
         queueing: true,
         computerMcp: true,
+        // The cloud computer mounts as one more stdio computer server.
+        usesCloudComputer: true,
         localComputerMcp: true,
         composioMcp: true,
         agentsMcp: true,

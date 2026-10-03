@@ -1,8 +1,8 @@
 // Capability-field contract tests: remoteAgent and usesCloudComputer are the
-// typed replacements for the boxAgent composite reads in dispatch and rooms.
-// The fleet invariant at the bottom is the zero-behavior-change proof for
-// every swapped site: usesCloudComputer must equal the union it replaces, and
-// remoteAgent must be declared by exactly the boat-native driver.
+// typed reads dispatch and rooms use for the cloud computer. The fleet
+// invariant at the bottom is the one rule for Hosted desktop: an engine can
+// use the cloud computer exactly when it runs there (remoteAgent) or has
+// computer tools (computerMcp), and remoteAgent is the boat-native driver only.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ensureDirs } from "../config.ts";
@@ -30,55 +30,55 @@ describe("typed capability fields (remoteAgent / usesCloudComputer)", () => {
     for (const instance of created.splice(0)) await instance.dispose();
   });
 
-  it("declares the box-native engine remote and cloud-bound without a bridge mount", async () => {
+  it("declares the box-native engine remote and cloud-bound without computer tools", async () => {
     const boat = await keep(BoatAgentDriver.create({
       instanceId: "caps-box", displayName: "Caps Boat",
       environment: { BOX_TOKEN: "boat-test-token" }, enabled: true, config: { pollMs: 0 },
     }));
     expect(boat.adapter.capabilities.remoteAgent).toBe(true);
     expect(boat.adapter.capabilities.usesCloudComputer).toBe(true);
-    // The agent switches to Boat's model — it never consumes the descriptor,
-    // so cloudComputerMcp stays absent (its own contract excludes it).
-    expect(boat.adapter.capabilities.cloudComputerMcp).toBeUndefined();
+    expect(boat.adapter.capabilities.computerMcp).toBeUndefined();
   });
 
-  it("keeps usesCloudComputer locked to cloudComputerMcp on the chat runtime", async () => {
+  it("keeps usesCloudComputer locked to computerMcp on the chat runtime", async () => {
     const mounted = await keep(OpenAICompatDriver.create({
       instanceId: "caps-compat", displayName: "Caps Compat", environment: {}, enabled: true,
       config: OpenAICompatDriver.defaultConfig(),
     }));
-    expect(mounted.adapter.capabilities.cloudComputerMcp).toBe(true);
+    expect(mounted.adapter.capabilities.computerMcp).toBe(true);
     expect(mounted.adapter.capabilities.usesCloudComputer).toBe(true);
     expect(mounted.adapter.capabilities.remoteAgent).toBeUndefined();
-    // Tools off means the runtime cannot mount the leased descriptor either,
-    // so both gates must fall together.
+    // Tools off means the runtime has no computer tools to mount the cloud
+    // computer into, so both gates must fall together.
     const bare = await keep(OpenAICompatDriver.create({
       instanceId: "caps-compat-bare", displayName: "Caps Compat Bare", environment: {}, enabled: true,
       config: { ...OpenAICompatDriver.defaultConfig(), tools: false },
     }));
-    expect(bare.adapter.capabilities.cloudComputerMcp).toBe(false);
+    expect(bare.adapter.capabilities.computerMcp).toBe(false);
     expect(bare.adapter.capabilities.usesCloudComputer).toBe(false);
   });
 
-  it("leaves host-harness drivers without either field", async () => {
+  it("lets host-harness drivers with computer tools use the cloud computer on their own engine", async () => {
+    // These ran on a swapped-in Computer engine before, which could not sign
+    // in on an OMB Cloud (provider_not_configured).
     const claude = await keep(ClaudeDriver.create({
       instanceId: "caps-claude", displayName: "Caps Claude", environment: {}, enabled: true,
       config: ClaudeDriver.defaultConfig(),
     }));
     expect(claude.adapter.capabilities.remoteAgent).toBeUndefined();
-    expect(claude.adapter.capabilities.usesCloudComputer).toBeUndefined();
+    expect(claude.adapter.capabilities.usesCloudComputer).toBe(true);
     const codex = await keep(CodexDriver.create({
       instanceId: "caps-codex", displayName: "Caps Codex", environment: {}, enabled: true,
       config: CodexDriver.defaultConfig(),
     }));
     expect(codex.adapter.capabilities.remoteAgent).toBeUndefined();
-    expect(codex.adapter.capabilities.usesCloudComputer).toBeUndefined();
+    expect(codex.adapter.capabilities.usesCloudComputer).toBe(true);
     const pi = await keep(PiDriver.create({
       instanceId: "caps-pi", displayName: "Caps Pi", environment: {}, enabled: true,
       config: PiDriver.defaultConfig(),
     }));
     expect(pi.adapter.capabilities.remoteAgent).toBeUndefined();
-    expect(pi.adapter.capabilities.usesCloudComputer).toBeUndefined();
+    expect(pi.adapter.capabilities.usesCloudComputer).toBe(true);
   });
 
   it("holds the fleet invariant the swapped reads rely on", async () => {
@@ -92,10 +92,10 @@ describe("typed capability fields (remoteAgent / usesCloudComputer)", () => {
       // what lets every former driverKind === "boxAgent" capability read
       // become caps.remoteAgent === true without changing an outcome.
       expect(caps.remoteAgent === true, driver.driverKind).toBe(driver.driverKind === "boxAgent");
-      // usesCloudComputer is exactly the union it replaces at the attach and
-      // readiness sites (remoteAgent || cloudComputerMcp).
+      // usesCloudComputer is exactly "runs there, or has computer tools":
+      // the one rule every cloud attach and readiness site applies.
       expect(caps.usesCloudComputer === true, driver.driverKind)
-        .toBe(caps.remoteAgent === true || caps.cloudComputerMcp === true);
+        .toBe(caps.remoteAgent === true || caps.computerMcp === true);
     }
   });
 });

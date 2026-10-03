@@ -1208,6 +1208,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           // pi-mcp-extension (pi core has no MCP client of its own).
           agentsMcp: true,
           computerMcp: true,
+          // The cloud computer mounts as one more stdio computer server.
+          usesCloudComputer: true,
           composioMcp: true,
           phoneMcp: true,
           customMcp: true,

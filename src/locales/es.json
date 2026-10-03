@@ -1110,7 +1110,7 @@
   "computer.err.browserEngine": "Este modelo no puede usar el navegador integrado",
   "computer.err.localEngine": "Este modelo no puede controlar este equipo. Elige Claude o un proveedor de modelos ACP.",
   "computer.err.vmEngine": "Este modelo no puede usar la VM local. Elige Claude o un proveedor de modelos ACP.",
-  "computer.err.cloudEngine": "Este modelo no puede usar las herramientas de equipo en la nube. Elige Claude, un proveedor de modelos ACP o el proveedor Computer.",
+  "computer.err.cloudEngine": "Este modelo no puede usar un equipo. Elige otro modelo o pon «Trabaja en» en Automático.",
   "computer.err.vpsEngine": "Este modelo no puede usar un VPS propio. Elige Claude o un proveedor de modelos ACP, o cambia el backend de nube a Boat.",
   "computer.err.vmNotReady": "La VM local no está lista",
   "computer.err.vmOpenSettings": "{problem}. Abre Ajustes → VM local.",

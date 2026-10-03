@@ -596,7 +596,7 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       expect(threadPreview.body).toMatchObject({ surface: "cloud", backend: "vps", ready: true });
 
       // Scheduling on the bot's setup must retain its ACP model + VPS tools,
-      // without requiring credentials for the unrelated Boat-hosted runner.
+      // without requiring credentials for the unrelated Boat cloud computer.
       const created = await api("POST", "/api/routines", {
         botId: bot.id, name: "VPS scheduled check", prompt: "Check the existing VPS.", enabled: false,
         schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },

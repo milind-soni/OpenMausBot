@@ -8,7 +8,6 @@ import type { SendTurnInput } from "../contracts.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { chatImage, type ChatImagePart } from "./chat-images.ts";
-import { ChatBoatClient } from "./chat-boat-tools.ts";
 import { mcpStdioServer } from "../mcp-gate-config.ts";
 import { allowsTool, canUseMcpServer, parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
 
@@ -28,7 +27,6 @@ export interface ChatToolSession {
 }
 
 type Server = { command: string; args: string[]; env: Record<string, string> };
-type BoatDescriptor = NonNullable<NonNullable<SendTurnInput["integrations"]>["computer"]>;
 const STARTUP_MS = 8_000;
 const CALL_MS = 10 * 60_000;
 const FRAME_BYTES = 2 * 1024 * 1024;
@@ -214,7 +212,7 @@ const validatorOptions = {
   // or describe an open tuple. Ajv still enforces every constraint.
   strictRequired: false, strictTypes: false, strictTuples: false,
 };
-function compileSchema(schema: Record<string, unknown>): ValidateFunction {
+export function compileToolSchema(schema: Record<string, unknown>): ValidateFunction {
   const dialect = schema.$schema;
   if (dialect !== undefined && dialect !== "http://json-schema.org/draft-07/schema#" && dialect !== "https://json-schema.org/draft/2020-12/schema") {
     throw new Error("MCP tool schema uses an unsupported dialect; use JSON Schema draft-07 or 2020-12");
@@ -260,9 +258,8 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const parsed = parseToolScope(toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
-  const servers: Array<[string, Server | BoatDescriptor]> = [];
+  const servers: Array<[string, Server]> = [];
   const eligible = (server: string) => scope === undefined || canUseMcpServer(scope, server);
-  if (computerUse && integrations?.computer && eligible("computer")) servers.push(["computer", integrations.computer]);
   if (computerUse && integrations?.localComputer && eligible("computer")) servers.push(["computer", integrations.localComputer]);
   if (computerUse && integrations?.browser && eligible("browser")) servers.push(["browser", integrations.browser]);
   if (integrations?.agents && eligible("agents")) servers.push(["agents", integrations.agents]);
@@ -274,7 +271,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     servers.push([name, { command: stdio.command, args: stdio.args ?? [], env: stdio.env ?? {} }]);
   }
   if (servers.length > 32) throw new Error("MCP server count exceeds the 32-server limit");
-  const clients: Array<ChatMcpClient | ChatBoatClient> = [];
+  const clients: ChatMcpClient[] = [];
   let closed = false;
   let closing: Promise<void> | undefined;
   const close = (): Promise<void> => {
@@ -289,7 +286,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const cancel = () => { void close().catch(() => {}); };
   signal.addEventListener("abort", cancel, { once: true });
   const definitions: ChatToolDefinition[] = [];
-  const registered = new Map<string, { client: ChatMcpClient | ChatBoatClient; server: string; builtInBrowser: boolean; name: string; schema: ValidateFunction }>();
+  const registered = new Map<string, { client: ChatMcpClient; server: string; builtInBrowser: boolean; name: string; schema: ValidateFunction }>();
   try {
     if (signal.aborted) throw aborted();
     // Start independent servers concurrently; consume results in config order
@@ -298,10 +295,10 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       if (signal.aborted || closed) throw aborted();
       // Every mounted MCP server can return images when the caller enables
       // image delivery, including custom servers. Text stays bounded below.
-      const client = "boxId" in descriptor ? new ChatBoatClient(descriptor) : new ChatMcpClient(descriptor, computerUse);
+      const client = new ChatMcpClient(descriptor, computerUse);
       clients.push(client);
       const include = (tool: unknown) => scope === undefined || (object(tool) && typeof tool.name === "string" && allowsTool(scope, { kind: "mcp", server: name, name: tool.name }));
-      const tools = client instanceof ChatMcpClient ? await client.tools(signal, include) : (await client.tools()).filter(include);
+      const tools = await client.tools(signal, include);
       return { name, client, builtInBrowser: descriptor === integrations?.browser, tools };
     }));
     for (const mount of mounts) {
@@ -314,7 +311,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         if (definitions.length >= TOOL_COUNT) throw new Error("MCP tool count exceeds the 128-tool limit");
         if (!object(tool.inputSchema) || tool.inputSchema.type !== "object") throw new Error("MCP tools require an object input schema");
         if (Buffer.byteLength(JSON.stringify(tool.inputSchema)) > SCHEMA_BYTES) throw new Error("MCP tool schema exceeds the 64KB limit");
-        const schema = compileSchema(tool.inputSchema);
+        const schema = compileToolSchema(tool.inputSchema);
         const parameters = { ...tool.inputSchema };
         const constraints: Record<string, unknown> = {};
         if (computerUse) {

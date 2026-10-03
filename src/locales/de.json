@@ -1117,7 +1117,7 @@
   "computer.err.browserEngine": "Dieses Modell kann den eingebauten Browser nicht nutzen",
   "computer.err.localEngine": "Dieses Modell kann diesen Computer nicht steuern. Wähl Claude oder einen ACP-Modellanbieter.",
   "computer.err.vmEngine": "Dieses Modell kann die lokale VM nicht nutzen. Wähl Claude oder einen ACP-Modellanbieter.",
-  "computer.err.cloudEngine": "Dieses Modell kann keine Cloud-Computer-Tools nutzen. Wähl Claude, einen ACP-Modellanbieter oder den Anbieter Computer.",
+  "computer.err.cloudEngine": "Dieses Modell kann keinen Computer nutzen. Wähl ein anderes Modell oder stell „Arbeitet auf“ auf Auto.",
   "computer.err.vpsEngine": "Dieses Modell kann keinen selbst gehosteten VPS nutzen. Wähl Claude oder einen ACP-Modellanbieter, oder stell das Cloud-Backend auf Boat um.",
   "computer.err.vmNotReady": "Die lokale VM ist nicht bereit",
   "computer.err.vmOpenSettings": "{problem}. Öffne Einstellungen → Lokale VM.",

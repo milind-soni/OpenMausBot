@@ -117,8 +117,8 @@ describe("included Boat computers", () => {
     expect(requests.every((request) => request.auth === `Bearer ${INCLUDED}`)).toBe(true);
   });
 
-  it("a leased descriptor carrying the included token still reaches only the relay", async () => {
-    // What chat-boat-tools.ts builds from integrations.computer.
+  it("a cloud computer tool call with the included token still reaches only the relay", async () => {
+    // What cloud-computer-tools.ts runs for /api/internal/computer/mcp.
     await boat.runCommand({ box: { token: boat.boatAccount({})!.token } }, boxId, "true");
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ path: `/relay/api/box/v1/boxes/${boxId}/commands`, auth: `Bearer ${INCLUDED}` });

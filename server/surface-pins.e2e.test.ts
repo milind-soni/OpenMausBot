@@ -29,6 +29,7 @@ describe("surface pin provenance against the real server", () => {
   let base = "";
   let boatServer: Server;
   let boatApi = "";
+  let boatDown = false;
 
   const vmState = (state: Record<string, unknown> = {}) => writeFileSync(stateFile, JSON.stringify(state));
   const resetTurn = () => { vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true }); };
@@ -122,7 +123,9 @@ describe("surface pin provenance against the real server", () => {
     writeFileSync(join(ui, "assets", "test.css"), "body{}");
     boatServer = createServer(async (req, res) => {
       res.setHeader("content-type", "application/json");
-      if (new URL(req.url ?? "/", "http://box.fixture").pathname === "/boxes") return res.end(JSON.stringify({ boxes: [] }));
+      const path = new URL(req.url ?? "/", "http://box.fixture").pathname;
+      if (boatDown && path.startsWith("/boxes")) { res.statusCode = 503; return res.end(JSON.stringify({ error: "Fixture Boat unavailable" })); }
+      if (path === "/boxes") return res.end(JSON.stringify({ boxes: [] }));
       return res.end("{}");
     });
     await new Promise<void>(resolve => boatServer.listen(0, "127.0.0.1", resolve));
@@ -137,7 +140,7 @@ describe("surface pin provenance against the real server", () => {
     if (boatServer) await new Promise<void>(resolve => boatServer.close(() => resolve()));
     if (home) await removeTempDir(home);
   });
-  afterEach(async () => { await stop(); resetTurn(); });
+  afterEach(async () => { await stop(); resetTurn(); boatDown = false; });
 
   it("marks a person's thread pin as theirs and clears provenance with the pin", async () => {
     await start();
@@ -340,6 +343,56 @@ describe("surface pin provenance against the real server", () => {
     } finally {
       rmSync(cuaDescriptor, { force: true });
     }
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+    await stop();
+  });
+
+  // A place that fails never sticks (the Hosted desktop incident): the
+  // machine's own pin to it is cleared so the next message runs on Auto,
+  // while a person's pin stays and the failure names the composer control.
+  it("clears a select_computer pin to a cloud computer that fails, and keeps a person's pin", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Failed place bot" });
+    const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    await apiOk("PUT", "/api/config", { box: { token: "box_fixture" } });
+    const lastRow = async () => {
+      const { messages } = await apiOk("GET", `/api/threads/${task.threadId}/messages?limit=30`);
+      return String(messages.at(-1)?.tool?.name ?? "");
+    };
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Open Chrome on the cloud computer.", threadId: task.threadId });
+    const sent = await dump();
+    const token = sent.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const selected = await fetch(base + "/api/internal/computer/select", { method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ surface: "cloud" }) });
+    expect(await selected.json()).toMatchObject({ status: "pending", surface: "cloud" });
+    // The Boat goes down before the continuation can attach it.
+    boatDown = true;
+    writeFileSync(finishFile, "finish");
+    await until(() => lastRow(), row => row.startsWith("error:"));
+    await idle(bot.id, task.threadId);
+    expect(await lastRow()).toMatch(/^error: .*This conversation is back on Auto; send your message again\.$/);
+    const cleared = savedTask(bot.id, task.threadId)!;
+    expect(cleared.surface).toBeUndefined();
+    expect(cleared.surfaceSource).toBeUndefined();
+    // The next message runs on Auto, with the Boat still down.
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Carry on where you can.", threadId: task.threadId });
+    const next = await dump();
+    expect(mountedComputer(next)?.args ?? []).not.toContain("computer");
+    writeFileSync(finishFile, "finish");
+    await idle(bot.id, task.threadId);
+    expect(await lastRow()).not.toMatch(/^error:/);
+
+    // A person's pin to the same failing place stays, and says how to clear it.
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "cloud" });
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Use the cloud computer.", threadId: task.threadId });
+    await until(() => lastRow(), row => row.startsWith("error:"));
+    await idle(bot.id, task.threadId);
+    expect(await lastRow()).toMatch(/^error: .*Clear this conversation's place in the composer to continue\.$/);
+    expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "cloud", surfaceSource: "user" });
+    boatDown = false;
     await apiOk("DELETE", `/api/bots/${bot.id}`);
     await stop();
   });

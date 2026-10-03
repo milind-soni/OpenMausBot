@@ -1112,7 +1112,7 @@
   "computer.err.browserEngine": "このモデルは内蔵ブラウザーを使えません",
   "computer.err.localEngine": "このモデルはこのコンピューターを操作できません。Claude か ACP のモデルプロバイダーを選んでください。",
   "computer.err.vmEngine": "このモデルはローカル VM を使えません。Claude か ACP のモデルプロバイダーを選んでください。",
-  "computer.err.cloudEngine": "このモデルはクラウドコンピューターのツールを使えません。Claude、ACP のモデルプロバイダー、または Computer プロバイダーを選んでください。",
+  "computer.err.cloudEngine": "このモデルはコンピューターを使えません。別のモデルを選ぶか、「作業先」を自動にしてください。",
   "computer.err.vpsEngine": "このモデルはセルフホストの VPS を使えません。Claude か ACP のモデルプロバイダーを選ぶか、クラウドバックエンドを Boat に切り替えてください。",
   "computer.err.vmNotReady": "ローカル VM は準備できていません",
   "computer.err.vmOpenSettings": "{problem}。「設定 → ローカル VM」を開いてください。",

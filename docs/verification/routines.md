@@ -165,7 +165,8 @@ rollback on a failed save. The MCP fixture verifies reviewed policy changes
 and the listing through the actual tool and API, using no live accounts.
 
 The routine tool defaults to `maus` (the bot's configured model and computer,
-including VPS); `box` explicitly selects the separate Boat agent. Legacy `cloud`
+including VPS); `box` explicitly selects the bot's Boat cloud computer, which the
+bot's own model drives through its computer tools. Legacy `cloud`
 values remain accepted without migrating existing routines. The cron tool
 fixture checks this default and the missing-Boat-account recovery instruction.
 The VPS fixture runs an actual scheduled execution with fake ACP/SSH and checks

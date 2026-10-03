@@ -82,9 +82,10 @@ surface changes have regression coverage. The VPS fixture separately proves
 starting a stopped container and creating a missing one only after selection.
 
 Two limits remain explicit: a stopped Local VM is not destructively rebuilt to
-make selection succeed, and the native Boat runner does not expose the local
-agents MCP. Switching back from an already Cloud-pinned native Boat conversation
-therefore uses the composer destination selector for now.
+make selection succeed, and the Computer engine (Boat's native runner) does not
+expose the local agents MCP. Switching a Computer engine conversation back from
+Cloud therefore uses the composer destination selector for now. Every other
+engine keeps its own model on Cloud, with the Boat as its computer tools.
 
 Run the regression coverage without a container engine:
 
