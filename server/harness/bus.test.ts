@@ -242,7 +242,7 @@ describe("EventBus streamed text", () => {
     expect(seen.find((event) => event.type === "content.delta" && event.delta === "api error")?.synthetic).toBe(true);
   });
 
-  it("publishes waiting text when its instance is detached, on detachAll and on flush", async () => {
+  it("publishes waiting text on detach and on flush", async () => {
     const { instance, emit } = await liveInstance();
     const bus = new EventBus();
     bus.attach([instance]);
@@ -252,9 +252,6 @@ describe("EventBus streamed text", () => {
     emit(delta("from the adapter"));
     bus.publish(delta("other engine", { threadId: "thread-2", providerInstanceId: "inst-2" }));
     bus.detach("inst-1");
-    expect(summary(seen)).toEqual(["thread-1:assistant_text:from the adapter"]);
-
-    bus.detachAll();
     expect(summary(seen)).toEqual(["thread-1:assistant_text:from the adapter", "thread-2:assistant_text:other engine"]);
 
     // the server calls flush() as the process exits

@@ -78,12 +78,9 @@ export class EventBus {
     this.write(event);
   }
 
-  /** Publish every thread's waiting text now. The server calls this as the
-   * process exits; detach and detachAll call it for the engines they drop. */
-  flush(instanceId?: string) {
-    for (const [threadId, pending] of Array.from(this.pendingText)) {
-      if (instanceId === undefined || pending.event.providerInstanceId === instanceId) this.flushThread(threadId);
-    }
+  /** Publish every thread's waiting text now: on detach, and as the server exits. */
+  flush() {
+    for (const threadId of Array.from(this.pendingText.keys())) this.flushThread(threadId);
   }
 
   private flushThread(threadId: string) {
@@ -151,12 +148,11 @@ export class EventBus {
 
   detachAll() {
     for (const id of this.unsubscribes.keys()) this.detach(id);
-    this.flush();
   }
 
   detach(instanceId: string) {
     this.unsubscribes.get(instanceId)?.();
     this.unsubscribes.delete(instanceId);
-    this.flush(instanceId);
+    this.flush();
   }
 }
