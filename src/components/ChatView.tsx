@@ -947,7 +947,7 @@ const MessagesList = memo(function MessagesList({
             case "compaction":
               return <CompactionChip message={m} />;
             case "screen":
-              return <ScreenFrame threadId={bot.threadId} message={m} />;
+              return <ScreenFrame threadId={threadId} message={m} />;
             default:
               return (
                 <Bubble
