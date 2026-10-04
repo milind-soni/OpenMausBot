@@ -1897,6 +1897,22 @@ describe("scrollback pages", () => {
     expect(landed.loadingOlder).toEqual({});
   });
 
+  it("keeps the open transcript's scrollback answer when a bot frame does not switch it", () => {
+    const open = { ...bot, tasks: [{ threadId: "thread-1", title: "Long", createdAt: 1 }] } as never as Bot;
+    // Another client opened thread-2; its frame carries thread-2's page.
+    const opened = reducer({ ...initialState, bots: [open] }, {
+      type: "botPatched",
+      bot: { ...open, threadId: "thread-2", tasks: [{ threadId: "thread-2", title: "New", createdAt: 2 }, ...open.tasks!], messages: [], hasMore: false } as never,
+    });
+    expect(opened.bots[0]).toMatchObject({ threadId: "thread-1", hasMore: true });
+    expect(opened.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    // A reply with this thread's newest page leaves the scrollback already loaded.
+    const loaded = { ...initialState, bots: [{ ...open, hasMore: false }] };
+    const replied = reducer(loaded, { type: "botPatched", bot: { ...open, messages: [message("m4", 4)], hasMore: true } as never });
+    expect(replied.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    expect(replied.bots[0].hasMore).toBe(false);
+  });
+
   it("answers the scrollback question from a payload that carries a transcript", () => {
     const group = {
       id: "room",

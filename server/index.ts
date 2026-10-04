@@ -1603,11 +1603,11 @@ function memberFrameContext(visible: VisibleSet): FrameContext {
     webhookBot: (webhookId) => webhooks.list().find((webhook) => webhook.id === webhookId)?.botId,
     freshBot: (botId) => {
       const bot = store.bot(botId);
-      return bot ? { ...wireBot(bot), tasks: store.tasks(bot.id).map(wireTask), ...messagePage(bot.threadId, DEFAULT_PAGE) } : undefined;
+      return bot ? publicBot(bot) : undefined;
     },
     freshGroup: (groupId) => {
       const group = store.group(groupId);
-      return group ? { ...publicGroupState(group), ...messagePage(group.threadId, DEFAULT_PAGE) } : undefined;
+      return group ? groupWithThread(group) : undefined;
     },
   };
 }
@@ -3389,9 +3389,6 @@ function packageImportDeps(selection: ModelSelection): PackageImportDeps {
         return avatarUrl;
       },
     },
-    broadcast: (event) => event.kind === "bot"
-      ? broadcast({ kind: "bot", bot: publicBot(event.bot) })
-      : broadcast({ kind: "group", group: publicGroupState(event.group) }),
     defaultSelection: () => selection,
     presets: presetStore,
   };
@@ -4224,7 +4221,8 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
 const storedAvatarExists = (avatarUrl: string): boolean =>
   attachmentExists(avatarUrl.slice("/api/attachments/".length));
 
-/** A bot with its open thread's newest page, for HTTP replies. */
+/** A bot with its open thread's newest page, for HTTP replies and a
+ * member stream's first frame of it. */
 const publicBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => ({
   ...wireBot(bot),
   ...messagePage(bot.threadId, DEFAULT_PAGE),
@@ -5097,7 +5095,8 @@ function activeGroupTurnForBot(botId: string): { group: GroupRecord; threadId: s
   return null;
 }
 
-/** A room with its open thread's newest page, for HTTP replies. */
+/** A room with its open thread's newest page, for HTTP replies and a
+ * member stream's first frame of it. */
 const groupWithThread = (group: GroupRecord) => ({
   ...publicGroupState(group),
   ...messagePage(group.threadId, DEFAULT_PAGE),

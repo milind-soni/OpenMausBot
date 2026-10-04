@@ -1785,6 +1785,11 @@ export function reducer(state: AppState, action: Action): AppState {
         // Clear immediately on deletion: old approvals must never be sent
         // to the replacement thread while waiting for its transcript.
         messages: switchedThread ? [] : b.messages,
+        // This branch keeps the transcript it holds, so it keeps that
+        // transcript's scrollback answer too. A frame's hasMore describes
+        // the page it carries (often another thread's); taskSwitched takes
+        // it together with that page.
+        hasMore: switchedThread ? undefined : b.hasMore,
       }));
       return reconcileModelVariantSessions(patched);
     }

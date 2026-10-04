@@ -41,12 +41,15 @@ describe("transcript pages on bot and room frames", () => {
    * order, so once a later frame for another bot shows up, everything the
    * request sent has arrived too. */
   async function framesFor(kind: "bot" | "group", id: string, act: () => Promise<unknown>): Promise<any[]> {
+    return (await framesDuring(act)).filter((frame) => frame.kind === kind && frame[kind]?.id === id).map((frame) => frame[kind]);
+  }
+  async function framesDuring(act: () => Promise<unknown>): Promise<any[]> {
     const start = stream.frames.length;
     await act();
     const name = `Fence ${++fences}`;
     expect((await api("PATCH", `/api/bots/${fenceBot}`, { name })).status).toBe(200);
     await stream.until((frame) => frame.kind === "bot" && frame.bot?.id === fenceBot && frame.bot.name === name);
-    return stream.frames.slice(start).filter((frame) => frame.kind === kind && frame[kind]?.id === id).map((frame) => frame[kind]);
+    return stream.frames.slice(start);
   }
 
   /** A bot whose open thread holds LONG messages, restored from a backup. */
@@ -154,6 +157,45 @@ describe("transcript pages on bot and room frames", () => {
     expect(windowB.bots[0].awaitingThreadSnapshot).toBeFalsy();
     expect(texts(windowB.bots[0].messages)).toEqual(newestPage);
     expect(windowB.bots[0].hasMore).toBe(true);
+  });
+
+  it("leaves another window's scrollback alone when someone else opens a thread", async () => {
+    const desktop = await import(pathToFileURL(join(ROOT, "src", "state", "store.tsx")).href);
+    const bot = await longBot();
+    const hydrated = (await api("GET", "/api/bots?messages=50")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+    let windowB = { ...desktop.initialState, bots: [hydrated], selectedId: bot.id };
+    expect(windowB.bots[0].hasMore).toBe(true);
+
+    // A phone opens a new thread; its frame carries that thread's empty page.
+    const frames = await framesFor("bot", bot.id, () => api("POST", `/api/bots/${bot.id}/tasks`, { title: "From the phone" }));
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toMatchObject({ messages: [], hasMore: false });
+    for (const frame of frames) windowB = desktop.reducer(windowB, { type: "botPatched", bot: frame });
+    // Window B stays on its thread, and "Load earlier" still reaches the rest.
+    expect(windowB.bots[0].threadId).toBe(bot.threadId);
+    expect(texts(windowB.bots[0].messages)).toEqual(newestPage);
+    expect(windowB.bots[0].hasMore).toBe(true);
+  });
+
+  it("sends an imported team's bots and room one page each, from the store alone", async () => {
+    let imported: any;
+    const frames = await framesDuring(async () => {
+      const reply = await api("POST", "/api/teams/import?mode=project", {
+        format: "openmaus.team", version: 2, team: { name: "Imported", members: [
+          { key: "first", name: "Imported One", appearance: { color: "purple" } },
+          { key: "second", name: "Imported Two", appearance: { color: "blue" } },
+        ] },
+      });
+      expect(reply.status, JSON.stringify(reply.body)).toBe(201);
+      imported = reply.body;
+    });
+    const paged = (kind: "bot" | "group", id: string) =>
+      frames.filter((frame) => frame.kind === kind && frame[kind]?.id === id && "messages" in frame[kind]);
+    expect(imported.bots).toHaveLength(2);
+    for (const bot of imported.bots) expect(paged("bot", bot.id)).toHaveLength(1);
+    const roomFrames = frames.filter((frame) => frame.kind === "group" && frame.group?.id === imported.group.id);
+    expect(roomFrames).toHaveLength(1);
+    expect(roomFrames[0].group).toHaveProperty("messages");
   });
 
   it("sends a room's page only when its open thread changes", async () => {
