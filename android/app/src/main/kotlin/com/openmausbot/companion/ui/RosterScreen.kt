@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -71,6 +72,9 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -140,6 +144,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
     var showingNewSection by remember { mutableStateOf(false) }
     var expandedBots by rememberSaveable(stateSaver = StringSetSaver) { mutableStateOf(emptySet<String>()) }
     var collapsedFolders by rememberSaveable(stateSaver = StringSetSaver) { mutableStateOf(emptySet<String>()) }
+    var pinnedCollapsed by rememberSaveable { mutableStateOf(false) }
     var creatingThreads by remember { mutableStateOf(emptySet<String>()) }
     // One createBot at a time: a second tap while the first is in flight
     // would race two bots into existence.
@@ -369,13 +374,17 @@ fun RosterScreen(navigator: CompanionNavigator) {
                         if (pinned.isNotEmpty()) {
                             item(key = "pinned-label") {
                                 // a compact row above it leaves little air of its own
-                                SectionLabel(
-                                    stringResource(R.string.mobile_roster_pinned),
-                                    Modifier.padding(top = if (compact) sectionSpacing else 2.dp, bottom = 4.dp),
+                                CollapsibleSectionLabel(
+                                    text = stringResource(R.string.mobile_roster_pinned),
+                                    collapsed = pinnedCollapsed,
+                                    onToggle = { pinnedCollapsed = !pinnedCollapsed },
+                                    modifier = Modifier.padding(top = if (compact) sectionSpacing else 2.dp, bottom = 4.dp),
                                 )
                             }
-                            itemsIndexed(pinned, key = { _, summary -> "pinned-${summary.id}" }) { index, summary ->
-                                entry(summary, index == pinned.lastIndex)
+                            if (!pinnedCollapsed) {
+                                itemsIndexed(pinned, key = { _, summary -> "pinned-${summary.id}" }) { index, summary ->
+                                    entry(summary, index == pinned.lastIndex)
+                                }
                             }
                         }
                         val startNewGroup = {
@@ -714,6 +723,39 @@ private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
         color = secondaryTint,
         modifier = modifier.padding(horizontal = 20.dp),
     )
+}
+
+/** A [SectionLabel] that doubles as a disclosure toggle (same chevron idiom as
+ * [BotThreadTree]'s folder toggles). */
+@Composable
+private fun CollapsibleSectionLabel(
+    text: String,
+    collapsed: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$text section"
+                stateDescription = if (collapsed) "Collapsed" else "Expanded"
+            }
+            .clickable(role = Role.Button, onClick = onToggle)
+            .heightIn(min = 20.dp)
+            .padding(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DisclosureIcon(!collapsed)
+        Text(
+            text = RosterLayout.sectionLabel(text),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.4.sp,
+            color = secondaryTint,
+        )
+    }
 }
 
 /**

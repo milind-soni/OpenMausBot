@@ -25,6 +25,24 @@ final class RosterDensityUITests: XCTestCase {
     }
 
     @MainActor
+    func testTappingPinnedCollapsesAndReExpandsItsBots() {
+        let app = launchRoster(density: nil)
+        let toggle = app.buttons["section-toggle.pinned"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        XCTAssertEqual(toggle.value as? String, "Expanded")
+        XCTAssertTrue(app.buttons["chat-row.roster-pixel"].exists)
+
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "Collapsed")
+        XCTAssertFalse(app.buttons["chat-row.roster-pixel"].exists)
+        recordScreenshot("Pinned collapsed", in: app)
+
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "Expanded")
+        XCTAssertTrue(app.buttons["chat-row.roster-pixel"].exists)
+    }
+
+    @MainActor
     func testSingleThreadBotHasNoThreadsRowAndStillStartsAThread() {
         let app = launchRoster(density: nil)
         let atlas = app.buttons["chat-row.roster-atlas"]

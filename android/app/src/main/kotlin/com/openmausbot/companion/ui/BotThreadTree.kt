@@ -196,7 +196,7 @@ private fun ThreadLinks(
 }
 
 @Composable
-private fun DisclosureIcon(expanded: Boolean) {
+internal fun DisclosureIcon(expanded: Boolean) {
     Icon(
         if (expanded) Icons.Filled.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
         contentDescription = null,

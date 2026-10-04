@@ -199,6 +199,20 @@ class RosterScreenTest {
     }
 
     @Test
+    fun `tapping Pinned collapses and re-expands its bots`() {
+        mount()
+        compose.onNodeWithTag("chat-row.${RosterFixture.PINNED}").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Pinned section").assert(hasStateDescription("Expanded"))
+
+        compose.onNodeWithContentDescription("Pinned section").performClick()
+        compose.onNodeWithTag("chat-row.${RosterFixture.PINNED}").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Pinned section").assert(hasStateDescription("Collapsed"))
+
+        compose.onNodeWithContentDescription("Pinned section").performClick()
+        compose.onNodeWithTag("chat-row.${RosterFixture.PINNED}").assertIsDisplayed()
+    }
+
+    @Test
     fun `the Chief of Staff row stands apart from Needs attention`() {
         mount()
         val chief = compose.onNodeWithTag("chat-row.${RosterFixture.CHIEF}").getBoundsInRoot()

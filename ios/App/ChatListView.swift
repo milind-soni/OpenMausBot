@@ -29,6 +29,7 @@ struct ChatListView: View {
     @State private var showingNewSection = false
     @State private var expandedBots = Set<String>()
     @State private var collapsedFolders = Set<String>()
+    @State private var pinnedCollapsed = false
     @State private var creatingThreads = Set<String>()
     @State private var managingThreads: Chat?
     @FocusState private var searchFocused: Bool
@@ -329,11 +330,14 @@ struct ChatListView: View {
 
         let pinned = summaries(for: session.state.pinnedBots, from: allSummaries)
         if !pinned.isEmpty {
-            sectionLabel(Text("Pinned"))
+            sectionLabel(Text("Pinned"), collapsed: $pinnedCollapsed)
                 // a compact row above it leaves little air of its own
                 .padding(.top, density == .compact ? sectionSpacing : 2)
                 .padding(.bottom, 4)
-            botRows(pinned, waiting: waiting)
+                .accessibilityIdentifier("section-toggle.pinned")
+            if !pinnedCollapsed {
+                botRows(pinned, waiting: waiting)
+            }
         }
 
         switch density {
@@ -773,8 +777,11 @@ struct ChatListView: View {
         return chats.isEmpty && searchHits.isEmpty && !searching
     }
 
-    private func sectionLabel(_ text: Text) -> some View {
-        text
+    /// `collapsed` makes this a tappable disclosure (chevron, same idiom as
+    /// `BotThreadTree`'s folder toggles); omit it for a plain static heading.
+    @ViewBuilder
+    private func sectionLabel(_ text: Text, collapsed: Binding<Bool>? = nil) -> some View {
+        let styled = text
             .textCase(.uppercase)
             // Compact rows follow Dynamic Type, so their titles do too, but
             // only up to xxxLarge: beyond it these uppercase labels would
@@ -783,7 +790,25 @@ struct ChatListView: View {
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .tracking(0.4)
             .foregroundStyle(Color.secondary)
+        if let collapsed {
+            Button {
+                Haptics.selection()
+                collapsed.wrappedValue.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: collapsed.wrappedValue ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                    styled
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
             .padding(.horizontal, 20)
+            .accessibilityValue(collapsed.wrappedValue ? "Collapsed" : "Expanded")
+        } else {
+            styled.padding(.horizontal, 20)
+        }
     }
 }
 
