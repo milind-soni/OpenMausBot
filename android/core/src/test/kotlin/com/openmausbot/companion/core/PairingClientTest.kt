@@ -91,7 +91,7 @@ class PairingClientTest {
     }
 
     @Test
-    fun whenNoLocalAddressAnswersTheErrorSaysSameWifiOrRemoteAccess() = runBlocking {
+    fun whenNoLocalAddressAnswersTheErrorSaysSameWifiThenFirewallOrRemoteAccess() = runBlocking {
         val wsl = endpoint("http://172.19.96.1:8810", CompanionEndpointKind.LAN, 0)
         val wifi = endpoint("http://192.168.1.34:8810", CompanionEndpointKind.LAN, 100)
         val stub = PairingStub { StubAction.Failure(IOException("timed out")) }
@@ -103,9 +103,13 @@ class PairingClientTest {
 
         assertEquals(listOf(wsl.url, wifi.url), error.attemptedRoutes)
         assertEquals(
+            // A phone already on the same Wi-Fi is most often stopped by Windows Firewall on a
+            // network Windows calls Public, so the message does not stop at "same Wi-Fi".
             "Your phone couldn't reach Miguel's computer on this network. Put the phone on the " +
-                "same Wi-Fi as the computer, or open Settings → Remote access on the computer and " +
-                "sign in so the phone can connect from anywhere.\n" +
+                "same Wi-Fi as the computer. If it already is, the computer's firewall may be " +
+                "blocking OpenMausBot: on a Windows PC, set its network to Private. Or open " +
+                "Settings → Remote access on the computer and sign in so the phone can connect " +
+                "from anywhere.\n" +
                 "Tried: http://172.19.96.1:8810, http://192.168.1.34:8810",
             error.message,
         )

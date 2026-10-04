@@ -466,8 +466,8 @@ internal fun pairingFailureDisposition(
 /**
  * The routes pairing with [connection] may dial: inside the consent boundary
  * the invite carries — or the one `Session.pair` sets for a typed or discovered
- * computer — the ones `pairFirstReachable` probes. A server pairing dials the
- * first of them.
+ * computer — exactly the ones `pairFirstReachable` probes
+ * ([Connection.pairingEndpoints]). A server pairing dials the first of them.
  */
 internal fun pairingRoutes(connection: Connection): List<CompanionEndpoint> {
     val invited = if (connection.allowedRouteKinds == null) {
@@ -475,7 +475,7 @@ internal fun pairingRoutes(connection: Connection): List<CompanionEndpoint> {
     } else {
         connection
     }
-    return invited.automaticEndpoints
+    return invited.pairingEndpoints
 }
 
 @Composable

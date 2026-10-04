@@ -1485,6 +1485,7 @@
   "phone.code.trouble": "遇到問題嗎？",
   "phone.code.manual": "手動驗證碼",
   "phone.code.address": "配對位址",
+  "phone.code.publicNetwork": "Windows 將這台電腦的 {network} 網路設為公用網路，防火牆可能會封鎖你的手機。如果手機無法連線，請開啟 Windows 設定 → 網路和網際網路 → {network}，將網路設定檔類型設為私人網路。",
   "phone.error.directUnavailable": "這台電腦目前無法使用 Wi-Fi 直接配對。請將這台電腦連上 Wi-Fi 後再試一次。",
   "phone.error.protectedUnavailable": "HTTPS 配對路由已無法使用。請檢查安全存取，然後建立新的驗證碼。",
   "phone.error.remoteUpdate": "無法更新遠端存取。請開啟「進階與疑難排解」後再試一次。",

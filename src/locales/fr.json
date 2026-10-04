@@ -876,6 +876,7 @@
   "phone.code.trouble": "Un souci ?",
   "phone.code.manual": "Code manuel",
   "phone.code.address": "Adresse d’appairage",
+  "phone.code.publicNetwork": "Windows a défini le réseau {network} de cet ordinateur sur Public : son pare-feu peut donc bloquer votre téléphone. Si votre téléphone ne parvient pas à se connecter, ouvrez Paramètres Windows → Réseau et Internet → {network} et choisissez le type de profil réseau Privé.",
   "phone.error.directUnavailable": "L’appairage Wi-Fi direct n’est pas disponible sur cet ordinateur pour l’instant. Connectez-le au Wi-Fi, puis réessayez.",
   "phone.error.protectedUnavailable": "La route d’appairage HTTPS est devenue indisponible. Vérifiez l’accès sécurisé, puis créez un nouveau code.",
   "phone.error.remoteUpdate": "L’accès à distance n’a pas pu être mis à jour. Ouvrez Avancé et dépannage, puis réessayez.",

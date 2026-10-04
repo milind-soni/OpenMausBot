@@ -889,6 +889,7 @@
   "phone.code.trouble": "Com dificuldade?",
   "phone.code.manual": "Código manual",
   "phone.code.address": "Endereço de pareamento",
+  "phone.code.publicNetwork": "O Windows definiu a rede {network} deste computador como Pública, então o firewall pode bloquear seu celular. Se o celular não conseguir se conectar, abra Configurações do Windows → Rede e Internet → {network} e defina o tipo de perfil de rede como Privada.",
   "phone.error.directUnavailable": "O pareamento direto por Wi-Fi não está disponível neste computador agora. Conecte-o a uma Wi-Fi e tente de novo.",
   "phone.error.protectedUnavailable": "A rota de pareamento HTTPS ficou indisponível. Verifique o acesso seguro e crie um código novo.",
   "phone.error.remoteUpdate": "Não foi possível atualizar o acesso remoto. Abra Avançado e solução de problemas e tente de novo.",

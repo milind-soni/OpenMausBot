@@ -162,7 +162,7 @@ final class PairingTests: XCTestCase {
         XCTAssertEqual(requests.filter { $0.url?.path == "/api/pair" }.map(\.url?.host), ["192.168.1.34"])
     }
 
-    func testWhenNoLocalAddressAnswersTheErrorSaysSameWiFiOrRemoteAccess() async throws {
+    func testWhenNoLocalAddressAnswersTheErrorSaysSameWiFiThenFirewallOrRemoteAccess() async throws {
         PairingRequestStub.reset { _ in .failure(.timedOut) }
         let invite = try XCTUnwrap(PairingInvite.parse(Self.windowsQR))
 
@@ -177,8 +177,10 @@ final class PairingTests: XCTestCase {
             XCTAssertEqual(
                 error.localizedDescription,
                 "Your phone couldn’t reach Miguel's computer on this network. Put the phone on the same " +
-                    "Wi-Fi as the computer, or open Settings → Remote access on the computer and sign in " +
-                    "so the phone can connect from anywhere.\nTried: http://172.19.96.1:8810, " +
+                    "Wi-Fi as the computer. If it already is, the computer’s firewall may be blocking " +
+                    "OpenMausBot: on a Windows PC, set its network to Private. Or open Settings → " +
+                    "Remote access on the computer and sign in so the phone can connect from " +
+                    "anywhere.\nTried: http://172.19.96.1:8810, " +
                     "http://172.27.208.1:8810, http://192.168.1.34:8810"
             )
         }

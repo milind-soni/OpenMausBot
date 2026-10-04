@@ -878,6 +878,7 @@
   "phone.code.trouble": "うまくいきませんか？",
   "phone.code.manual": "手動コード",
   "phone.code.address": "ペアリング用アドレス",
+  "phone.code.publicNetwork": "Windows はこのコンピューターの {network} ネットワークをパブリックに設定しているため、ファイアウォールがスマートフォンをブロックする可能性があります。スマートフォンが接続できない場合は、Windows の設定 → ネットワークとインターネット → {network} を開き、ネットワーク プロファイルの種類をプライベートに設定してください。",
   "phone.error.directUnavailable": "このコンピューターでは今、Wi-Fi の直接ペアリングを利用できません。Wi-Fi に接続してからもう一度お試しください。",
   "phone.error.protectedUnavailable": "HTTPS のペアリング経路が使えなくなりました。セキュアアクセスを確認し、新しいコードを作ってください。",
   "phone.error.remoteUpdate": "リモートアクセスを更新できませんでした。「詳細設定とトラブルシューティング」を開いて、もう一度お試しください。",

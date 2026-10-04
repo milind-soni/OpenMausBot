@@ -883,6 +883,7 @@
   "phone.code.trouble": "Probleme?",
   "phone.code.manual": "Manueller Code",
   "phone.code.address": "Kopplungsadresse",
+  "phone.code.publicNetwork": "Windows hat das Netzwerk {network} dieses Computers auf „Öffentlich“ gestellt, daher blockiert die Firewall dein Telefon möglicherweise. Wenn dein Telefon keine Verbindung herstellen kann, öffne in Windows Einstellungen → Netzwerk und Internet → {network} und setze den Netzwerkprofiltyp auf „Privat“.",
   "phone.error.directUnavailable": "Direkte WLAN-Kopplung ist auf diesem Rechner gerade nicht verfügbar. Verbinde ihn mit dem WLAN und versuch es erneut.",
   "phone.error.protectedUnavailable": "Die HTTPS-Kopplungsroute ist nicht mehr verfügbar. Prüf den sicheren Zugang und erstell einen neuen Code.",
   "phone.error.remoteUpdate": "Der Fernzugriff konnte nicht aktualisiert werden. Öffne „Erweitert & Fehlersuche“ und versuch es erneut.",

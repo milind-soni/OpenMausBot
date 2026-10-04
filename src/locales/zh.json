@@ -1485,6 +1485,7 @@
   "phone.code.trouble": "遇到问题？",
   "phone.code.manual": "手动验证码",
   "phone.code.address": "配对地址",
+  "phone.code.publicNetwork": "Windows 将这台电脑的 {network} 网络设为公用网络，防火墙可能会阻止你的手机连接。如果手机无法连接，请打开 Windows 设置 → 网络和 Internet → {network}，将网络配置文件类型设为专用网络。",
   "phone.error.directUnavailable": "这台电脑现在无法进行直接 Wi-Fi 配对。请先连上 Wi-Fi 再试。",
   "phone.error.protectedUnavailable": "HTTPS 配对通道已不可用。请检查安全访问后重新生成验证码。",
   "phone.error.remoteUpdate": "无法更新远程访问。请打开“高级与故障排查”后重试。",

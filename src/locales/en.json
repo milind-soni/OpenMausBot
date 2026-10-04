@@ -2157,6 +2157,7 @@
   "phone.code.trouble": "Having trouble?",
   "phone.code.manual": "Manual code",
   "phone.code.address": "Pairing address",
+  "phone.code.publicNetwork": "Windows has this computer's {network} network set to Public, so its firewall may block your phone. If your phone can't connect, open Windows Settings → Network & internet → {network} and set the network profile type to Private.",
   "phone.error.directUnavailable": "Direct Wi-Fi pairing isn’t available on this computer right now. Connect this computer to Wi-Fi, then try again.",
   "phone.error.protectedUnavailable": "The HTTPS pairing route became unavailable. Check secure access, then create a new code.",
   "phone.error.remoteUpdate": "Remote access could not be updated. Open Advanced & troubleshooting and try again.",

@@ -51,8 +51,9 @@ data class PairingOutcome(
  * No permitted route identified itself and completed the logical pairing. The message names the
  * one thing the person can change: a cause a route reported (the local-network permission,
  * Tailscale or Private DNS) when there is one; otherwise the next step that fits the routes
- * tried — same Wi-Fi or Remote access when only local addresses were tried, the tailnet when only
- * Tailscale was, a sleeping computer when even HTTPS failed. The routes go on a line of their own.
+ * tried — same Wi-Fi, the computer's firewall, or Remote access when only local addresses were
+ * tried, the tailnet when only Tailscale was, a sleeping computer when even HTTPS failed. The
+ * routes go on a line of their own.
  * Mirrors iOS `PairingRouteError`.
  */
 class PairingRouteError(
@@ -83,10 +84,14 @@ private fun pairingRouteMessage(
         hosts.isNotEmpty() && hosts.all { it.lowercase().trimEnd('.').endsWith(".ts.net") } ->
             "Your phone couldn't reach $computer over Tailscale. Turn on Tailscale on this phone, " +
                 "signed in to the same tailnet as the computer, then try again."
+        // Same Wi-Fi first; then the firewall, because a phone already on that Wi-Fi is most
+        // often stopped by Windows Firewall on a network Windows calls Public (the desktop's
+        // Wi-Fi pairing panel says so too); then Remote access, which connects outward.
         else ->
             "Your phone couldn't reach $computer on this network. Put the phone on the same Wi-Fi " +
-                "as the computer, or open Settings → Remote access on the computer and sign in " +
-                "so the phone can connect from anywhere."
+                "as the computer. If it already is, the computer's firewall may be blocking " +
+                "OpenMausBot: on a Windows PC, set its network to Private. Or open Settings → " +
+                "Remote access on the computer and sign in so the phone can connect from anywhere."
     }
     return if (routes.isEmpty()) advice else "$advice\nTried: ${routes.joinToString()}"
 }

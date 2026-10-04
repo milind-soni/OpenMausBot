@@ -85,6 +85,11 @@ export interface CompanionState {
   endpoints?: CompanionEndpoint[];
   secretPublicKey?: string;
   discovery?: { advertising: boolean; name: string };
+  /** The Windows adapter the Wi-Fi QR's address is on ("Wi-Fi"), present
+   * while a pairing window is open and Windows has that network down as
+   * Public, where its firewall drops a phone's connection
+   * (companion/src/windows-network.ts). */
+  publicNetwork?: string;
   error?: string;
 }
 
@@ -1241,6 +1246,12 @@ export function PhoneSetupFlowView({
       )}
       {!c.pairingExpired && manualCodeMode === "details" && c.state?.pairing && (
         <p className="mt-3 text-[11.5px] text-ink-secondary">{t("phone.code.expiresIn", { seconds: c.secondsLeft })}</p>
+      )}
+      {/* Only the Wi-Fi QR is dialed on this network; a hosted QR connects outward. */}
+      {!c.pairingExpired && c.localFallback && c.state?.publicNetwork && (
+        <p role="note" className="mt-3 w-full max-w-[390px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-[12px] leading-relaxed text-warning">
+          {t("phone.code.publicNetwork", { network: c.state.publicNetwork })}
+        </p>
       )}
       {c.pairingExpired && (
         <button onClick={c.refreshCode} className="mt-5 rounded-lg bg-accent px-5 py-2.5 text-[14px] font-medium text-white">

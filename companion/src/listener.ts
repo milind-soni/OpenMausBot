@@ -57,15 +57,22 @@ const interfaceRank = (name: string): number => {
  * order still breaks ties.
  * The parameter exists for tests — the interface table is the machine's. */
 export function lanAddresses(interfaces = networkInterfaces()): string[] {
-  const found: Array<{ rank: number; address: string }> = [];
+  return lanInterfaces(interfaces).map((entry) => entry.address);
+}
+
+/** `lanAddresses`, each with the interface it is on, in the same order. The
+ * name is what Windows calls the adapter ("Wi-Fi"), which is how the pairing
+ * panel asks whether Windows has that network down as Public. */
+export function lanInterfaces(interfaces = networkInterfaces()): Array<{ name: string; address: string }> {
+  const found: Array<{ rank: number; name: string; address: string }> = [];
   for (const [name, entries] of Object.entries(interfaces)) {
     for (const entry of entries ?? []) {
       if (entry.family !== "IPv4" || entry.internal) continue;
       if (entry.address.startsWith("169.254.")) continue;
-      found.push({ rank: interfaceRank(name), address: entry.address });
+      found.push({ rank: interfaceRank(name), name, address: entry.address });
     }
   }
-  return found.sort((a, b) => a.rank - b.rank).map((entry) => entry.address);
+  return found.sort((a, b) => a.rank - b.rank).map(({ name, address }) => ({ name, address }));
 }
 
 /** Tailscale hands its nodes an address in 100.64.0.0/10 — the CGNAT range

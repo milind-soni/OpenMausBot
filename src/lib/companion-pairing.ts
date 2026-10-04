@@ -66,9 +66,12 @@ const directHTTPOrigin = (host: string, port: number): string => {
 
 /** Select the route policy encoded into a QR. Automatic setup is deliberately
  * hosted-HTTPS only: Tailscale must be chosen explicitly and never replaces a
- * hosted route that is still provisioning. Explicit local setup promotes one
- * exact LAN/Bonjour endpoint, followed only by hosted upgrades; iOS then
- * refuses to spray the pairing credential onto any other cleartext route. */
+ * hosted route that is still provisioning. Explicit local setup leads with the
+ * first LAN/Bonjour endpoint, then hosted, then this computer's other local
+ * addresses (never a tailnet one). Both phones probe each of them, send the
+ * one-time code only to the first in that order that answers as OpenMausBot,
+ * and bind the device token to that one (ios Failover.swift
+ * `pinRouteConsent`, android Connection.kt `pinningRouteConsent`). */
 export function companionPairingRoute(
   source: CompanionPairingRouteSource,
   mode: CompanionPairingRouteMode,

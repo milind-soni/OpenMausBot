@@ -421,10 +421,10 @@ public struct PairingOutcome: Sendable {
 /// valid and the UI can offer Retry without making someone scan it again.
 ///
 /// The message names the one next step that fits the routes tried — same
-/// Wi-Fi or Remote access when only local addresses were tried, the tailnet
-/// when only Tailscale was, a sleeping computer when even HTTPS failed — and
-/// lists the routes on a line of their own. Mirrors Android's
-/// `PairingRouteError`.
+/// Wi-Fi, the computer's firewall, or Remote access when only local addresses
+/// were tried, the tailnet when only Tailscale was, a sleeping computer when
+/// even HTTPS failed — and lists the routes on a line of their own. Mirrors
+/// Android's `PairingRouteError`.
 public struct PairingRouteError: Error, LocalizedError, Equatable, Sendable {
     public let attemptedHosts: [String]
     public let computerName: String?
@@ -445,9 +445,13 @@ public struct PairingRouteError: Error, LocalizedError, Equatable, Sendable {
             advice = "Your phone couldn’t reach \(computer) over Tailscale. Turn on Tailscale on this phone, " +
                 "signed in to the same tailnet as the computer, then try again."
         } else {
+            // Same Wi-Fi first; then the firewall, because a phone already on that
+            // Wi-Fi is most often stopped by Windows Firewall on a network Windows
+            // calls Public; then Remote access, which connects outward.
             advice = "Your phone couldn’t reach \(computer) on this network. Put the phone on the same Wi-Fi " +
-                "as the computer, or open Settings → Remote access on the computer and sign in " +
-                "so the phone can connect from anywhere."
+                "as the computer. If it already is, the computer’s firewall may be blocking " +
+                "OpenMausBot: on a Windows PC, set its network to Private. Or open Settings → " +
+                "Remote access on the computer and sign in so the phone can connect from anywhere."
         }
         return attemptedHosts.isEmpty
             ? advice
