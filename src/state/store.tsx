@@ -43,7 +43,7 @@ import { roleProfilePatch, type BotRole } from "@/lib/bot-roles";
 import { t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import type { OnboardingStatus } from "@/lib/onboarding";
-import { openLiveEvents } from "@/lib/live-events";
+import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
 
 const MAX_ROUTINE_RUNS = 2_000;
 const ACTIVE_ROUTINE_RUN_STATUSES = new Set<RoutineRun["status"]>(["queued", "running", "waiting"]);
@@ -966,8 +966,6 @@ export interface AppState {
   botSettingsSection: BotSettingsSection;
   /** True only when the open action named a section — accordion expands that row. */
   botSettingsExpandAccordion: boolean;
-  /** latest live frame of a bot's computer, per botId */
-  screens: Record<string, { png: string; mime: string; threadId?: string }>;
   /** bots whose cloud computer is being provisioned */
   provisioning: Record<string, boolean>;
   /** Bot removals waiting for the server to verify that no persistent
@@ -1223,7 +1221,6 @@ export type Action =
   /** `restoreLeafId` puts back the branch an optimistic edit replaced; a
    * plain send falls back to the removed row's parent. */
   | { type: "optimisticMessageRemoved"; threadId: string; sendId: string; restoreLeafId?: string | null }
-  | { type: "screenFrame"; botId: string; threadId?: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
   | { type: "modelVariantRuntime"; event: RuntimeEvent }
@@ -1928,12 +1925,6 @@ export function reducer(state: AppState, action: Action): AppState {
         messages: b.messages.map((m) => (m.id === action.message.id ? action.message : m)),
       }));
     }
-    case "screenFrame":
-      return {
-        ...withMascotMotion(state, action.botId, "success"),
-        screens: { ...state.screens, [action.botId]: { png: action.png, mime: action.mime, threadId: action.threadId } },
-        provisioning: { ...state.provisioning, [action.botId]: false },
-      };
     case "provisioning":
       return {
         ...(action.on ? withMascotMotion(state, action.botId, "launch") : state),
@@ -2447,7 +2438,6 @@ export const initialState: AppState = {
   tourOpen: false,
   botSettingsSection: "overview",
   botSettingsExpandAccordion: false,
-  screens: {},
   provisioning: {},
   deletingBots: {},
   computerControl: {},
@@ -3906,7 +3896,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "screen":
-          rawDispatch({ type: "screenFrame", botId: frame.botId, threadId: frame.threadId, png: frame.png, mime: frame.mime ?? "image/png" });
+          // The picture went to the Computer panel (publishLiveFrame). For
+          // the store, a first frame only means the computer is set up.
+          if (stateRef.current.provisioning[frame.botId]) {
+            rawDispatch({ type: "provisioning", botId: frame.botId, on: false });
+          }
           break;
         case "computer":
           rawDispatch({ type: "provisioning", botId: frame.botId, on: frame.state === "provisioning" });
@@ -3953,12 +3947,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       onError: () => rawDispatch({ type: "connected", value: false }),
       onSnapshotRequired: () => {
         clearTimeout(hydrationFallback);
+        publishMissedFrames();
         // Frames buffered before this non-resumable stream belong to an
         // abandoned generation. Keep the new generation behind hydrate().
         pendingFrames.splice(0);
         return hydrate();
       },
       onFrame: (frame) => {
+        // Open panels read what the store does not keep (live screens, raw
+        // runtime events) from this same stream.
+        publishLiveFrame(frame as ServerFrame);
         if (hydrated) handleFrame(frame as ServerFrame);
         else pendingFrames.push(frame as ServerFrame);
       },
