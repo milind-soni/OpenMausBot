@@ -15,6 +15,24 @@ options:
     iOS: "16.0"
   createIntermediateGroups: true
 
+# Build settings every target inherits.
+settings:
+  configs:
+    Debug:
+      # The type checker warns, at the line, when it spends more than half a
+      # second on one expression or function body. That is the common way a
+      # SwiftUI build turns from minutes into a CI timeout: a `body` that
+      # chains enough views, modifiers, colour ternaries and closures becomes
+      # one constraint problem the solver searches for seconds. (The other
+      # way, a view type IRGen cannot finish, is what the `ViewModifier` rule
+      # in App/BackDeployCompat.swift is for; this flag does not see it.)
+      # CI reads these warnings out of the build log and fails on any
+      # (ci.yml, the step after "Build the simulator app"), so a new slow
+      # body is a file:line in a two-minute build, not a 30-minute timeout.
+      # Keep bodies small: a section or a row is its own property or
+      # function, and a colour chosen by a ternary is a typed `let`.
+      OTHER_SWIFT_FLAGS: "$(inherited) -Xfrontend -warn-long-expression-type-checking=500 -Xfrontend -warn-long-function-bodies=500"
+
 packages:
   CompanionCore:
     path: .
