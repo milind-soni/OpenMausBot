@@ -14,6 +14,8 @@
 // runner, where ChatView's 19 `onValueChange` calls turned a 5-minute build
 // into a 25-minute one (Oct 2026). A modifier wraps the view once and branches
 // over a fixed placeholder, so the type grows linearly however long the chain.
+// CI holds the rule: scripts/check-ios-view-shims.sh fails on an `#available`
+// inside any `extension View`.
 import AVFoundation
 import SwiftUI
 

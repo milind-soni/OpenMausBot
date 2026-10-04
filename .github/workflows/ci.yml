@@ -512,10 +512,18 @@ jobs:
     runs-on: macos-latest
     # About five minutes end to end: package tests ~1.5, xcodegen ~1, the
     # simulator build ~2. The cap is a hang guard, not room for the build
-    # to grow into: the type-check step below names a slow body instead.
+    # to grow into: the two guard steps below name the slow code instead.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: No #available branch in a View extension
+        # The way the Oct 2026 build went from 5 to 25+ minutes: a
+        # `@ViewBuilder` View extension branching on `#available` doubles the
+        # caller's view type at every call, and IRGen on the batch holding
+        # both never finishes. The type-check flag below cannot see it and a
+        # build killed at the cap prints nothing, so the shape is refused at
+        # the source: such a shim is a ViewModifier (ios/App/BackDeployCompat.swift).
+        run: bash scripts/check-ios-view-shims.sh
       - name: Swift package tests
         run: swift test --package-path ios
       - name: Generate the Xcode project
@@ -528,10 +536,7 @@ jobs:
         # x86_64 (ONLY_ACTIVE_ARCH is a no-op there), and nothing runs the
         # x86_64 one: the runner, the UI-test simulators and every current
         # Mac are arm64. Two slices doubled the compile and ran six
-        # swift-frontends side by side on a 3-core, 7 GB runner. The timing
-        # summary puts per-task totals at the end of the log, so a slow
-        # batch is read there rather than inferred from a 27-minute gap
-        # (the iOS 16 shims in BackDeployCompat.swift, Oct 2026). The log is
+        # swift-frontends side by side on a 3-core, 7 GB runner. The log is
         # kept for the type-check step that follows.
         run: |
           set -o pipefail
@@ -541,7 +546,6 @@ jobs:
             -scheme OpenMausCompanion \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
-            -showBuildTimingSummary \
             ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO \
             build | tee "$RUNNER_TEMP/xcodebuild.log"

@@ -25,7 +25,8 @@ settings:
       # chains enough views, modifiers, colour ternaries and closures becomes
       # one constraint problem the solver searches for seconds. (The other
       # way, a view type IRGen cannot finish, is what the `ViewModifier` rule
-      # in App/BackDeployCompat.swift is for; this flag does not see it.)
+      # in App/BackDeployCompat.swift is for; this flag does not see it, so
+      # CI checks that rule at the source: scripts/check-ios-view-shims.sh.)
       # CI reads these warnings out of the build log and fails on any
       # (ci.yml, the step after "Build the simulator app"), so a new slow
       # body is a file:line in a two-minute build, not a 30-minute timeout.

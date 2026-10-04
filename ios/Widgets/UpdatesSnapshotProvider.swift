@@ -146,29 +146,34 @@ enum WidgetChatLink {
     )
 }
 
-/// The background every home-screen widget in this extension draws. iOS
-/// 17 requires a widget to opt in to its container background or render
-/// with none at all; below 17 the system draws it for us.
-extension View {
-    @ViewBuilder
-    func widgetContainerBackground() -> some View {
+/// iOS 17 requires a widget to opt in to its container background or render
+/// with none at all; below 17 the system draws it for us. A ViewModifier, not
+/// a `@ViewBuilder` extension, for the reason given in
+/// App/BackDeployCompat.swift: the builder form doubles the view type at
+/// every call, and scripts/check-ios-view-shims.sh fails CI on that shape.
+private struct WidgetContainerBackground: ViewModifier {
+    let color: Color
+
+    func body(content: Content) -> some View {
         if #available(iOS 17.0, *) {
-            containerBackground(for: .widget) { Color(uiColor: .systemBackground) }
+            content.containerBackground(for: .widget) { color }
         } else {
-            self
+            content
         }
+    }
+}
+
+extension View {
+    /// The background every home-screen widget in this extension draws.
+    func widgetContainerBackground() -> some View {
+        modifier(WidgetContainerBackground(color: Color(uiColor: .systemBackground)))
     }
 
     /// The background a lock-screen accessory draws: nothing of its own, so
     /// the system's accessory material shows through. Accessories opt in
     /// explicitly on iOS 17 for the same reason home-screen widgets do —
     /// below it the system already draws one.
-    @ViewBuilder
     func widgetAccessoryBackground() -> some View {
-        if #available(iOS 17.0, *) {
-            containerBackground(for: .widget) { Color.clear }
-        } else {
-            self
-        }
+        modifier(WidgetContainerBackground(color: .clear))
     }
 }
