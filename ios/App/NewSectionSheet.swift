@@ -272,55 +272,7 @@ struct NewSectionSheet: View {
                 warningFeedback += 1
             }
         } label: {
-            VStack(spacing: 9) {
-                ZStack(alignment: .topTrailing) {
-                    BotAvatarView(bot: bot, size: 52, animated: false)
-                    if let order {
-                        Text("\(order)")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.white)
-                            .frame(minWidth: 21, minHeight: 21)
-                            .background(tint, in: Circle())
-                            .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2))
-                            .offset(x: 5, y: -5)
-                    }
-                }
-
-                VStack(spacing: 3) {
-                    Text(bot.name)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(1)
-                    Text(botContext(bot))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 116)
-            .background(
-                selected ? tint.opacity(0.13) : Color.secondary.opacity(0.07),
-                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(
-                        candidate ? tint : (selected ? tint.opacity(0.75) : Color.secondary.opacity(0.12)),
-                        lineWidth: candidate ? 3 : 1
-                    )
-            }
-            .overlay(alignment: .bottom) {
-                if candidate {
-                    Capsule()
-                        .fill(tint)
-                        .frame(height: 4)
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 7)
-                        .transition(.opacity)
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            botTile(bot, selected: selected, candidate: candidate, order: order, tint: tint)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(bot.name), \(botContext(bot))")
@@ -329,6 +281,64 @@ struct NewSectionSheet: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: selected)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: candidate)
+    }
+
+    /// The tile: face with its order badge, name and context, the selection
+    /// ring, and the underline on the tile the trail is about to add.
+    private func botTile(_ bot: Bot, selected: Bool, candidate: Bool, order: Int?, tint: Color) -> some View {
+        VStack(spacing: 9) {
+            ZStack(alignment: .topTrailing) {
+                BotAvatarView(bot: bot, size: 52, animated: false)
+                if let order {
+                    orderBadge(order, tint: tint)
+                }
+            }
+
+            VStack(spacing: 3) {
+                Text(bot.name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                Text(botContext(bot))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 116)
+        .background(
+            selected ? tint.opacity(0.13) : Color.secondary.opacity(0.07),
+            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(
+                    candidate ? tint : (selected ? tint.opacity(0.75) : Color.secondary.opacity(0.12)),
+                    lineWidth: candidate ? 3 : 1
+                )
+        }
+        .overlay(alignment: .bottom) {
+            if candidate {
+                Capsule()
+                    .fill(tint)
+                    .frame(height: 4)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 7)
+                    .transition(.opacity)
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func orderBadge(_ order: Int, tint: Color) -> some View {
+        Text("\(order)")
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundStyle(Color.white)
+            .frame(minWidth: 21, minHeight: 21)
+            .background(tint, in: Circle())
+            .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2))
+            .offset(x: 5, y: -5)
     }
 
     private var trail: some View {

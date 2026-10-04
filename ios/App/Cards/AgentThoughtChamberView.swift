@@ -103,38 +103,45 @@ public struct AgentThoughtChamberView: View, Equatable {
         .buttonStyle(.plain)
     }
     
-    @ViewBuilder
     private func expandedContent(isDark: Bool, steps: [ReasoningWindow.Step]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let fill: Color = isDark ? Color.black.opacity(0.35) : Color.white.opacity(0.85)
+        let rim: Color = isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.06)
+        return VStack(alignment: .leading, spacing: 6) {
             ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(steps) { step in
-                            stepRow(number: step.number, step: step.text, isDark: isDark)
-                        }
-                    }
-                }
-                .frame(maxHeight: 160)
-                // While the bot thinks, the newest step is the news: start at
-                // the bottom and keep following as steps arrive, the way the
-                // reply bubble follows its own text.
-                .scrollAnchorCompat(.bottom)
-                .onValueChange(of: reasoning) { _ in
-                    guard isStreaming, let newest = steps.last else { return }
-                    withAnimation { proxy.scrollTo(newest.number, anchor: .bottom) }
-                }
+                stepList(proxy: proxy, isDark: isDark, steps: steps)
             }
         }
         .padding(10)
-        .background(isDark ? Color.black.opacity(0.35) : Color.white.opacity(0.85))
+        .background(fill)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.06), lineWidth: 0.5)
+                .stroke(rim, lineWidth: 0.5)
         )
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
-    
+
+    private func stepList(proxy: ScrollViewProxy, isDark: Bool, steps: [ReasoningWindow.Step]) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(steps) { step in
+                    stepRow(number: step.number, step: step.text, isDark: isDark)
+                }
+            }
+        }
+        .frame(maxHeight: 160)
+        // While the bot thinks, the newest step is the news: start at
+        // the bottom and keep following as steps arrive, the way the
+        // reply bubble follows its own text.
+        .scrollAnchorCompat(.bottom)
+        .onValueChange(of: reasoning) { _ in followNewestStep(proxy, steps: steps) }
+    }
+
+    private func followNewestStep(_ proxy: ScrollViewProxy, steps: [ReasoningWindow.Step]) {
+        guard isStreaming, let newest = steps.last else { return }
+        withAnimation { proxy.scrollTo(newest.number, anchor: .bottom) }
+    }
+
     @ViewBuilder
     private func stepRow(number: Int, step: String, isDark: Bool) -> some View {
         HStack(alignment: .top, spacing: 6) {

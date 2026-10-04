@@ -123,259 +123,14 @@ struct AgentProfileView: View {
                 // Changing the model and generating avatars need the admin scope
                 // on a server; a chat-only phone is not shown either.
                 if session.canAdminister {
-                    Section {
-                        if !modelsLoaded {
-                            HStack {
-                                Text("Loading models")
-                                Spacer()
-                                ProgressView()
-                            }
-                        } else if instanceChoices.isEmpty {
-                            Label("No model providers are available", systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Picker("Provider", selection: $selectedInstanceID) {
-                                if !instances.contains(where: { $0.instanceId == selectedInstanceID }) {
-                                    Text("Current provider (unavailable)")
-                                        .tag(selectedInstanceID)
-                                        .disabled(true)
-                                }
-                                ForEach(instanceChoices) { instance in
-                                    Text(instanceLabel(instance))
-                                        .tag(instance.instanceId)
-                                        .disabled(!instance.snapshot.isAvailable)
-                                }
-                            }
-                            .onValueChange(of: selectedInstanceID) { instanceID in
-                                selectDefaults(for: instanceID)
-                            }
-
-                            Picker("Model", selection: $selectedModelID) {
-                                ForEach(selectedModelChoices) { option in
-                                    Text(option.label).tag(option.id)
-                                }
-                            }
-                            .disabled(selectedInstance?.snapshot.isAvailable != true)
-
-                            if !effortLevels.isEmpty {
-                                Picker("Reasoning effort", selection: $selectedEffort) {
-                                    Text("Default").tag(String?.none)
-                                    ForEach(effortLevels, id: \.self) { level in
-                                        Text(effortLabel(level)).tag(Optional(level))
-                                    }
-                                }
-                            }
-
-                            if current.busy == true {
-                                Label("Stop this bot before changing its model.", systemImage: "hourglass")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            } else if selectedInstance?.snapshot.isAvailable != true {
-                                Label("Choose an available provider to change this bot's model.", systemImage: "info.circle")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Button("Apply model", systemImage: "checkmark") {
-                                Task { await saveModel() }
-                            }
-                            .disabled(busy || !canApplyModel)
-                        }
-                    } header: {
-                        Text("Model")
-                    } footer: {
-                        Text("Provider accounts and API keys stay on your computer. Default sends no reasoning level and lets the provider decide.")
-                    }
+                    modelSection
                 }
-
-                Section {
-                    HStack {
-                        Spacer()
-                        BotAvatarView(bot: current, size: 112, state: .happy, animated: true)
-                        Spacer()
-                    }
-                    .listRowBackground(Color.clear)
-
-                    Picker("Shape", selection: $crop) {
-                        ForEach(AvatarCrop.allCases, id: \.self) { shape in
-                            Text(shape.label).tag(shape)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    PhotosPicker(selection: $photo, matching: .images) {
-                        Label("Upload image", systemImage: "photo.badge.plus")
-                    }
-                    .disabled(busy)
-
-                    if current.avatarUrl != nil {
-                        Button("Use mascot", systemImage: "trash", role: .destructive) {
-                            Task { await clearImage() }
-                        }
-                        .disabled(busy)
-                    }
-                } header: {
-                    Text("Avatar")
-                } footer: {
-                    Text("PNG, JPEG, GIF, or WebP, up to 10 MB. Images are stored on your paired computer and loaded with this device's pairing token.")
-                }
-
+                avatarSection
                 if session.canAdminister {
-                    Section {
-                        TextField("Art direction", text: $prompt, axis: .vertical)
-                            .lineLimit(2...5)
-                        Button("Generate on computer", systemImage: "sparkles") {
-                            Task { await generateImage() }
-                        }
-                        .disabled(busy || !imageGenerationReady || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    } header: {
-                        Text("Generate an avatar")
-                    } footer: {
-                        Text(imageGenerationReady
-                             ? "Generation uses the shared image provider configured on your computer. No provider key is sent to or stored on this device."
-                             : "To generate images, configure the shared image provider in OpenMausBot on your computer. Provider keys cannot be added from this device.")
-                    }
+                    generateSection
                 }
-
-                Section("Identity") {
-                    NavigationLink {
-                        BotOverviewView(bot: current)
-                    } label: {
-                        Label("What this bot does", systemImage: "list.bullet.rectangle")
-                    }
-                    NavigationLink {
-                        BotActivityView(bot: current)
-                    } label: {
-                        Label("Activity", systemImage: "checklist")
-                    }
-                    NavigationLink {
-                        TeamMemoryView(section: current.section ?? "")
-                    } label: {
-                        Label("Team memory", systemImage: "brain")
-                    }
-                    TextField("Name", text: $name)
-                        .textInputAutocapitalization(.words)
-                    TextField("Title", text: $title)
-                    TextField("What this agent does", text: $description, axis: .vertical)
-                        .lineLimit(3...8)
-                    Toggle("Agent notifications", isOn: $notifications)
-                }
-
-                Section {
-                    Picker("Voice engine", selection: $engine) {
-                        Text("ElevenLabs").tag(VoiceProvider.elevenlabs)
-                        Text("Fish Audio").tag(VoiceProvider.fish)
-                        Text("Built-in Mac voices")
-                            .tag(VoiceProvider.system)
-                            .disabled(!hostIsMac)
-                        Text("Chatterbox (local)").tag(VoiceProvider.chatterbox)
-                    }
-                    .disabled(switchingEngine)
-
-                    if usesChatterbox {
-                        TextField(
-                            "Chatterbox server address",
-                            text: $chatterboxURL,
-                            prompt: Text("http://127.0.0.1:4123")
-                        )
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        TextField(
-                            "Chatterbox model",
-                            text: $chatterboxModel,
-                            prompt: Text("chatterbox-turbo")
-                        )
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        Button {
-                            Task { await saveChatterboxServer() }
-                        } label: {
-                            HStack {
-                                Text("Save server")
-                                if savingServer { Spacer(); ProgressView() }
-                            }
-                        }
-                        .disabled(savingServer || chatterboxURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        if let serverProblem {
-                            Label(serverProblem, systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(Color.orange)
-                        }
-                    }
-
-                    if voiceConfigured {
-                        Picker("Voice", selection: $voice) {
-                            if hasWorkspaceDefaultVoice {
-                                Text("Workspace default").tag("")
-                            } else {
-                                Text("Choose an agent voice").tag("").disabled(true)
-                            }
-                            if !voice.isEmpty, !voices.contains(where: { $0.id == voice }) {
-                                Text("Current agent voice").tag(voice)
-                            }
-                            ForEach(voices) { option in
-                                VStack(alignment: .leading) {
-                                    Text(option.label)
-                                    if let detail = option.description { Text(detail) }
-                                }
-                                .tag(option.id)
-                            }
-                        }
-                        Toggle("Speak replies", isOn: $speakReplies)
-                            .disabled(!selectedVoiceCanSpeak)
-                        Button("Preview voice", systemImage: "speaker.wave.2") {
-                            previewTask = Task { await previewVoice() }
-                        }
-                        .disabled(busy || !selectedVoiceCanSpeak)
-
-                        if !hasWorkspaceDefaultVoice, voice.isEmpty {
-                            Label("Pick a voice for this agent before enabling speech.", systemImage: "info.circle")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else if usesSystemVoices {
-                        Label("Built-in Mac voices are unavailable", systemImage: "speaker.slash")
-                            .foregroundStyle(.secondary)
-                    } else if !usesChatterbox {
-                        Label(
-                            usesFishAudio ? "Fish Audio is not configured" : "ElevenLabs is not configured",
-                            systemImage: "speaker.slash"
-                        )
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Voice")
-                } footer: {
-                    if !voiceConfigured {
-                        // Under the built-in engine "not configured" is not a
-                        // missing credential — there is none — so the remedy
-                        // cannot be a key. `providerConfigured` in
-                        // `server/tts/index.ts` is reporting that this
-                        // computer has no built-in voices to speak with.
-                        if usesSystemVoices {
-                            Text("Built-in Mac voices need no key, and this computer has none available. Switch the voice engine above to ElevenLabs to keep using voice.")
-                        } else if usesChatterbox {
-                            Text("Any OpenAI-compatible server running Chatterbox works, no key needed. Save its address and model id above.")
-                        } else if usesFishAudio {
-                            Text("Add the shared Fish Audio key in OpenMausBot on your computer. The key is never returned to iOS.")
-                        } else {
-                            Text("Add the shared ElevenLabs key in this agent's profile on the computer. The key is never returned to iOS.")
-                        }
-                    } else if !hasWorkspaceDefaultVoice {
-                        if usesSystemVoices {
-                            Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the built-in Mac voices on your computer.")
-                        } else if usesChatterbox {
-                            Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the Chatterbox server on your computer.")
-                        } else if usesFishAudio {
-                            Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the shared Fish Audio key on your computer.")
-                        } else {
-                            Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the shared ElevenLabs key on your computer.")
-                        }
-                    } else {
-                        Text("The voice choice belongs to this agent. Workspace default uses the shared voice selected on your computer.")
-                    }
-                }
-
+                identitySection
+                voiceSection
                 Section {
                     Button("Save profile changes") { Task { await save() } }
                         .disabled(busy || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -387,24 +142,7 @@ struct AgentProfileView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
             }
             .overlay { if busy { ProgressView().controlSize(.large) } }
-            .task {
-                async let status = session.configStatus()
-                async let options = session.voiceOptions()
-                async let catalog = loadModelCatalog()
-                async let environment = session.serverEnvironment()
-                let (loadedConfig, loadedVoices, loadedInstances) = await (status, options, catalog)
-                config = loadedConfig
-                engine = loadedConfig?.voiceProvider ?? .elevenlabs
-                chatterboxURL = loadedConfig?.tts?.baseUrl ?? ""
-                chatterboxModel = loadedConfig?.tts?.model ?? ""
-                hostIsMac = (await environment)?.platform == "darwin"
-                voices = loadedVoices
-                instances = loadedInstances
-                modelsLoaded = true
-                if let loadedConfig, !loadedConfig.canSpeak(agentVoice: voice) {
-                    speakReplies = false
-                }
-            }
+            .task { await loadProfile() }
             .onValueChange(of: photo) { item in
                 guard let item else { return }
                 Task { await upload(item) }
@@ -420,6 +158,301 @@ struct AgentProfileView: View {
                 player.pause()
                 VoiceNoteCenter.shared.release(player)
             }
+        }
+    }
+
+    private var modelSection: some View {
+        Section {
+            if !modelsLoaded {
+                HStack {
+                    Text("Loading models")
+                    Spacer()
+                    ProgressView()
+                }
+            } else if instanceChoices.isEmpty {
+                Label("No model providers are available", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.secondary)
+            } else {
+                modelPickers
+            }
+        } header: {
+            Text("Model")
+        } footer: {
+            Text("Provider accounts and API keys stay on your computer. Default sends no reasoning level and lets the provider decide.")
+        }
+    }
+
+    @ViewBuilder private var modelPickers: some View {
+        Picker("Provider", selection: $selectedInstanceID) {
+            if !instances.contains(where: { $0.instanceId == selectedInstanceID }) {
+                Text("Current provider (unavailable)")
+                    .tag(selectedInstanceID)
+                    .disabled(true)
+            }
+            ForEach(instanceChoices) { instance in
+                Text(instanceLabel(instance))
+                    .tag(instance.instanceId)
+                    .disabled(!instance.snapshot.isAvailable)
+            }
+        }
+        .onValueChange(of: selectedInstanceID) { instanceID in
+            selectDefaults(for: instanceID)
+        }
+
+        Picker("Model", selection: $selectedModelID) {
+            ForEach(selectedModelChoices) { option in
+                Text(option.label).tag(option.id)
+            }
+        }
+        .disabled(selectedInstance?.snapshot.isAvailable != true)
+
+        if !effortLevels.isEmpty {
+            Picker("Reasoning effort", selection: $selectedEffort) {
+                Text("Default").tag(String?.none)
+                ForEach(effortLevels, id: \.self) { level in
+                    Text(effortLabel(level)).tag(Optional(level))
+                }
+            }
+        }
+
+        if current.busy == true {
+            Label("Stop this bot before changing its model.", systemImage: "hourglass")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } else if selectedInstance?.snapshot.isAvailable != true {
+            Label("Choose an available provider to change this bot's model.", systemImage: "info.circle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+
+        Button("Apply model", systemImage: "checkmark") {
+            Task { await saveModel() }
+        }
+        .disabled(busy || !canApplyModel)
+    }
+
+    private var avatarSection: some View {
+        Section {
+            HStack {
+                Spacer()
+                BotAvatarView(bot: current, size: 112, state: .happy, animated: true)
+                Spacer()
+            }
+            .listRowBackground(Color.clear)
+
+            Picker("Shape", selection: $crop) {
+                ForEach(AvatarCrop.allCases, id: \.self) { shape in
+                    Text(shape.label).tag(shape)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            PhotosPicker(selection: $photo, matching: .images) {
+                Label("Upload image", systemImage: "photo.badge.plus")
+            }
+            .disabled(busy)
+
+            if current.avatarUrl != nil {
+                Button("Use mascot", systemImage: "trash", role: .destructive) {
+                    Task { await clearImage() }
+                }
+                .disabled(busy)
+            }
+        } header: {
+            Text("Avatar")
+        } footer: {
+            Text("PNG, JPEG, GIF, or WebP, up to 10 MB. Images are stored on your paired computer and loaded with this device's pairing token.")
+        }
+    }
+
+    private var generateSection: some View {
+        Section {
+            TextField("Art direction", text: $prompt, axis: .vertical)
+                .lineLimit(2...5)
+            Button("Generate on computer", systemImage: "sparkles") {
+                Task { await generateImage() }
+            }
+            .disabled(busy || !imageGenerationReady || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } header: {
+            Text("Generate an avatar")
+        } footer: {
+            Text(imageGenerationReady
+                 ? "Generation uses the shared image provider configured on your computer. No provider key is sent to or stored on this device."
+                 : "To generate images, configure the shared image provider in OpenMausBot on your computer. Provider keys cannot be added from this device.")
+        }
+    }
+
+    private var identitySection: some View {
+        Section("Identity") {
+            NavigationLink {
+                BotOverviewView(bot: current)
+            } label: {
+                Label("What this bot does", systemImage: "list.bullet.rectangle")
+            }
+            NavigationLink {
+                BotActivityView(bot: current)
+            } label: {
+                Label("Activity", systemImage: "checklist")
+            }
+            NavigationLink {
+                TeamMemoryView(section: current.section ?? "")
+            } label: {
+                Label("Team memory", systemImage: "brain")
+            }
+            TextField("Name", text: $name)
+                .textInputAutocapitalization(.words)
+            TextField("Title", text: $title)
+            TextField("What this agent does", text: $description, axis: .vertical)
+                .lineLimit(3...8)
+            Toggle("Agent notifications", isOn: $notifications)
+        }
+    }
+
+    private var voiceSection: some View {
+        Section {
+            Picker("Voice engine", selection: $engine) {
+                Text("ElevenLabs").tag(VoiceProvider.elevenlabs)
+                Text("Fish Audio").tag(VoiceProvider.fish)
+                Text("Built-in Mac voices")
+                    .tag(VoiceProvider.system)
+                    .disabled(!hostIsMac)
+                Text("Chatterbox (local)").tag(VoiceProvider.chatterbox)
+            }
+            .disabled(switchingEngine)
+
+            if usesChatterbox {
+                chatterboxFields
+            }
+
+            if voiceConfigured {
+                voiceControls
+            } else if usesSystemVoices {
+                Label("Built-in Mac voices are unavailable", systemImage: "speaker.slash")
+                    .foregroundStyle(.secondary)
+            } else if !usesChatterbox {
+                Label(
+                    usesFishAudio ? "Fish Audio is not configured" : "ElevenLabs is not configured",
+                    systemImage: "speaker.slash"
+                )
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Voice")
+        } footer: {
+            voiceFooter
+        }
+    }
+
+    @ViewBuilder private var chatterboxFields: some View {
+        TextField(
+            "Chatterbox server address",
+            text: $chatterboxURL,
+            prompt: Text("http://127.0.0.1:4123")
+        )
+        .keyboardType(.URL)
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        TextField(
+            "Chatterbox model",
+            text: $chatterboxModel,
+            prompt: Text("chatterbox-turbo")
+        )
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        Button {
+            Task { await saveChatterboxServer() }
+        } label: {
+            HStack {
+                Text("Save server")
+                if savingServer { Spacer(); ProgressView() }
+            }
+        }
+        .disabled(savingServer || chatterboxURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        if let serverProblem {
+            Label(serverProblem, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(Color.orange)
+        }
+    }
+
+    @ViewBuilder private var voiceControls: some View {
+        Picker("Voice", selection: $voice) {
+            if hasWorkspaceDefaultVoice {
+                Text("Workspace default").tag("")
+            } else {
+                Text("Choose an agent voice").tag("").disabled(true)
+            }
+            if !voice.isEmpty, !voices.contains(where: { $0.id == voice }) {
+                Text("Current agent voice").tag(voice)
+            }
+            ForEach(voices) { option in
+                VStack(alignment: .leading) {
+                    Text(option.label)
+                    if let detail = option.description { Text(detail) }
+                }
+                .tag(option.id)
+            }
+        }
+        Toggle("Speak replies", isOn: $speakReplies)
+            .disabled(!selectedVoiceCanSpeak)
+        Button("Preview voice", systemImage: "speaker.wave.2") {
+            previewTask = Task { await previewVoice() }
+        }
+        .disabled(busy || !selectedVoiceCanSpeak)
+
+        if !hasWorkspaceDefaultVoice, voice.isEmpty {
+            Label("Pick a voice for this agent before enabling speech.", systemImage: "info.circle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var voiceFooter: some View {
+        if !voiceConfigured {
+            // Under the built-in engine "not configured" is not a
+            // missing credential — there is none — so the remedy
+            // cannot be a key. `providerConfigured` in
+            // `server/tts/index.ts` is reporting that this
+            // computer has no built-in voices to speak with.
+            if usesSystemVoices {
+                Text("Built-in Mac voices need no key, and this computer has none available. Switch the voice engine above to ElevenLabs to keep using voice.")
+            } else if usesChatterbox {
+                Text("Any OpenAI-compatible server running Chatterbox works, no key needed. Save its address and model id above.")
+            } else if usesFishAudio {
+                Text("Add the shared Fish Audio key in OpenMausBot on your computer. The key is never returned to iOS.")
+            } else {
+                Text("Add the shared ElevenLabs key in this agent's profile on the computer. The key is never returned to iOS.")
+            }
+        } else if !hasWorkspaceDefaultVoice {
+            if usesSystemVoices {
+                Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the built-in Mac voices on your computer.")
+            } else if usesChatterbox {
+                Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the Chatterbox server on your computer.")
+            } else if usesFishAudio {
+                Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the shared Fish Audio key on your computer.")
+            } else {
+                Text("No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the shared ElevenLabs key on your computer.")
+            }
+        } else {
+            Text("The voice choice belongs to this agent. Workspace default uses the shared voice selected on your computer.")
+        }
+    }
+
+    private func loadProfile() async {
+        async let status = session.configStatus()
+        async let options = session.voiceOptions()
+        async let catalog = loadModelCatalog()
+        async let environment = session.serverEnvironment()
+        let (loadedConfig, loadedVoices, loadedInstances) = await (status, options, catalog)
+        config = loadedConfig
+        engine = loadedConfig?.voiceProvider ?? .elevenlabs
+        chatterboxURL = loadedConfig?.tts?.baseUrl ?? ""
+        chatterboxModel = loadedConfig?.tts?.model ?? ""
+        hostIsMac = (await environment)?.platform == "darwin"
+        voices = loadedVoices
+        instances = loadedInstances
+        modelsLoaded = true
+        if let loadedConfig, !loadedConfig.canSpeak(agentVoice: voice) {
+            speakReplies = false
         }
     }
 

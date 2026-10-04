@@ -183,257 +183,7 @@ struct ChatView: View {
         // explicitly told to take everything the composer does not.
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
-                ScrollView {
-                    // VStack, not LazyVStack. A lazy stack does not know how
-                    // tall it is until its rows have been built, so
-                    // `.defaultScrollAnchor(.bottom)` anchors against an
-                    // estimate and the chat opens somewhere in the middle of
-                    // the conversation. Building all of it up front makes the
-                    // height exact and the anchor land on the newest message.
-                    // A thread holds 50 messages until you ask for more, so
-                    // there is nothing here worth being lazy about.
-                    VStack(alignment: .leading, spacing: 6) {
-                        // room for the floating face when scrolled to the top
-                        Color.clear.frame(height: 72)
-
-                        if session.state.hasMore[threadId] == true {
-                            Button("Load earlier messages") {
-                                // keep the reader where they were: after older
-                                // messages are prepended, sit back on the one
-                                // that used to be at the top
-                                let anchor = transcript.first?.id
-                                Task {
-                                    await session.loadOlder(threadId: threadId)
-                                    if let anchor { proxy.scrollTo(anchor, anchor: .top) }
-                                }
-                            }
-                            .font(.footnote)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                        }
-
-                        ForEach(Array(transcript.enumerated()), id: \.element.id) { index, row in
-                            VStack(alignment: .leading, spacing: 6) {
-                                // a gap in time is worth marking; a timestamp
-                                // on every message is just noise
-                                if startsANewStretch(at: index, in: transcript) {
-                                    Text(RelativeStamp.separator(row.head.date))
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(Color.secondary.opacity(0.7))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.top, 10)
-                                        .padding(.bottom, 4)
-                                }
-                                switch row {
-                                case let .message(message):
-                                    MessageRow(
-                                        chat: current,
-                                        message: message,
-                                        versions: message.role == .user && message.kind == .text
-                                            ? versions[message.parentId] ?? [] : [],
-                                        endsRun: endsRun(at: index, in: transcript),
-                                        openLink: openLink,
-                                        openThread: openThread
-                                    )
-                                case let .activityRun(items):
-                                    ActivityRunChip(items: items, openThread: openThread)
-                                case let .assistantTurn(turn):
-                                    AssistantTurnChip(
-                                        turn: turn, chat: current, openLink: openLink, openThread: openThread,
-                                        revealedMessageId: revealedMessageId,
-                                        scrollToMessage: { proxy.scrollTo($0, anchor: .center) }
-                                    )
-                                }
-                            }
-                            .id(row.id)
-                        }
-
-                        // The reply as it is typed. It sits after the last
-                        // settled message and disappears the moment the real
-                        // one arrives — the store clears it on the same frame
-                        // that appends the message, so there is never a beat
-                        // where both are on screen.
-                        // At Hidden the words go to the status line above the
-                        // composer; the transcript keeps the typing dots.
-                        if current.busy, detail != .hidden, let live = session.state.streaming[threadId], !live.isEmpty {
-                            StreamingBubble(text: live, reasoning: nil, color: current.color)
-                                .id(Self.liveBubbleId)
-                        } else if current.busy, activityDetail != ActivityDetail.hidden.rawValue,
-                                  let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
-                            // Only while there is no answer yet. Once tokens
-                            // of the reply exist, the reasoning is behind us
-                            // and showing both is just noise.
-                            StreamingBubble(text: nil, reasoning: thinking, color: current.color)
-                                .id(Self.liveBubbleId)
-                        } else if current.busy {
-                            TypingIndicatorView(tintColor: MausPalette.color(current.color))
-                                .id(Self.liveBubbleId)
-                                .accessibilityLabel("\(current.name) is working")
-                        }
-
-                        Color.clear
-                            .frame(height: 1)
-                            .id(Self.transcriptEndId)
-                            // Only a change of answer touches state: this
-                            // fires on every scrolled frame.
-                            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { end in
-                                let reading = end - viewportBottom > Self.jumpToLatestThreshold
-                                if reading != showsJumpToLatest {
-                                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { showsJumpToLatest = reading }
-                                }
-                            }
-                            .accessibilityHidden(true)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: CompanionLayout.chatWidth, alignment: .leading)
-                    .frame(maxWidth: .infinity)
-                }
-                // The header lives in the scroll view's top safe area: the
-                // transcript starts below it and scrolls under it — that is
-                // what the glass is for. An inset rather than a content
-                // margin, because `.defaultScrollAnchor(.bottom)` anchored
-                // unreliably against a margin and opened chats mid-way.
-                // The blur is only the top strip — back, computer — the way
-                // a system bar is; the transcript starts on that line and
-                // scrolls under the face and name, which float over it.
-                .safeAreaInset(edge: .top, spacing: 0) { headerBar }
-                .overlay(alignment: .top) { headerFace }
-                .overlay(alignment: .top) {
-                    // One face, in one layer, measured from the screen's top
-                    // edge: it sits in the island while that is open and
-                    // glides into its header slot when the island lets go.
-                    let topInset = IslandGeometry.topInset
-                    let islandSide: CGFloat = 220
-                    // centred in the part of the square the hardware island does not cover
-                    let islandFaceCentre = IslandGeometry.top + IslandGeometry.size.height + (islandSide - IslandGeometry.size.height) / 2
-                    let headerFaceCentre = topInset + 26
-                    let faceSize = 60 + 72 * facePhase
-                    let faceCentre = headerFaceCentre + (islandFaceCentre - headerFaceCentre) * facePhase
-                    ZStack(alignment: .top) {
-                        if islandVisible {
-                            IslandShell(expanded: islandExpanded, expandedSize: CGSize(width: islandSide, height: islandSide)) {
-                                Color.clear
-                            }
-                        }
-                        ChatAvatarView(chat: current, size: faceSize, state: MausState.forChat(current, in: session.state), animated: MausState.forChat(current, in: session.state).showsActivity || islandExpanded, comets: islandExpanded)
-                            .offset(y: faceCentre - faceSize / 2)
-                            .allowsHitTesting(false)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .top)
-                    .ignoresSafeArea(edges: .top)
-                    .allowsHitTesting(false)
-                }
-                // Reading scrollback — one tap back to the end, streaming or
-                // not, the same pill the desktop chat offers.
-                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom in
-                    viewportBottom = bottom
-                }
-                .overlay(alignment: .bottom) {
-                    if showsJumpToLatest {
-                        Button {
-                            withAnimation { proxy.scrollTo(Self.transcriptEndId, anchor: .bottom) }
-                        } label: {
-                            Label("Jump to latest", systemImage: "arrow.down")
-                                .font(.footnote.weight(.medium))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(.regularMaterial, in: Capsule())
-                                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
-                                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Jump to latest messages")
-                        .padding(.bottom, 10)
-                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                    }
-                }
-                .task {
-                    // grow, hold a beat, shrink — the face rides along
-                    guard CompanionLayout.supportsIslandPresentation, !reduceMotion else { return }
-                    // The intro is a greeting, and a greeting repeated every
-                    // time you open a chat stops being one.
-                    let intro = IslandIntro(rawValue: islandIntro) ?? .oncePerBot
-                    switch intro {
-                    case .never:
-                        return
-                    case .oncePerBot:
-                        guard !IslandSeen.contains(islandIntroID, in: islandSeen) else { return }
-                        islandSeen = IslandSeen.adding(islandIntroID, to: islandSeen)
-                    case .always:
-                        break
-                    }
-                    islandVisible = true
-                    try? await Task.sleep(for: .milliseconds(40))
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { islandExpanded = true; facePhase = 1 }
-                    try? await Task.sleep(for: .milliseconds(1000))
-                    withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) { islandExpanded = false; facePhase = 0 }
-                    try? await Task.sleep(for: .milliseconds(600))
-                    islandVisible = false
-                }
-                // A conversation grows from the bottom: a transcript shorter
-                // than the screen rests at the bottom, and opening a chat
-                // starts on the newest message rather than the oldest.
-                .scrollAnchorCompat(.bottom)
-                // Tapping the transcript puts the keyboard away. The composer
-                // is a sibling of this scroll view rather than inside it, so
-                // nothing else here drops its focus — until this, the only way
-                // back to the whole conversation was to leave the chat.
-                // Simultaneous, not `.onTapGesture`: a tap that lands on a
-                // link, a card button or a selected word still reaches the row
-                // that owns it, and only also closes the keyboard.
-                .simultaneousGesture(TapGesture().onEnded {
-                    if composerFocused { composerFocused = false }
-                })
-                // And a drag down over the transcript pushes it away, the way
-                // it does in Mail and Messages.
-                .scrollDismissesKeyboard(.interactively)
-                // `initial: true` is what opens the chat on the newest
-                // message where `scrollAnchorCompat` cannot (iOS 16). On 17 the
-                // anchor has already put us there and this is a no-op.
-                .onValueChange(of: transcript.last?.id, initial: true) { _ in
-                    guard let last = transcript.last else { return }
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                }
-                // Neither of the above is enough on its own when the newest
-                // message holds a table or a code block. Their horizontal
-                // scroll views throw off the height the anchor measures on
-                // the first pass, so the chat opened a table's height short
-                // of the end; and the `initial` scroll above runs before
-                // there is anything to scroll. One more scroll once the first
-                // layout has settled lands on the end — again when the page
-                // arrives from the computer, which can be after the push,
-                // unless the reader has already scrolled away to read.
-                .task(id: "\(threadId)|\(session.state.hasLoadedPage(forThread: threadId))") {
-                    try? await Task.sleep(for: .milliseconds(50))
-                    guard !Task.isCancelled, !readerScrolled, let last = rows.last else { return }
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
-                .onUserScrollCompat { readerScrolled = true }
-                // Follow the text as it arrives. Keyed on length rather than
-                // the string so this fires once per delta batch, and without
-                // animation — animating every token turns a smooth stream
-                // into a stutter, because each scroll interrupts the last.
-                .onValueChange(of: session.state.streaming[threadId]?.count ?? 0) { length in
-                    guard length > 0 else { return }
-                    proxy.scrollTo(Self.liveBubbleId, anchor: .bottom)
-                }
-                .task(id: session.focusedMessageId) {
-                    guard let messageId = session.focusedMessageId,
-                          messages.contains(where: { $0.id == messageId })
-                    else { return }
-                    revealedMessageId = messageId
-                    // Materialize the lazy folded row first. Its target bubble
-                    // scrolls itself into view once expansion has laid it out.
-                    let folded = transcript.first { row in
-                        if case let .assistantTurn(turn) = row {
-                            return turn.messages.contains { $0.id == messageId }
-                        }
-                        return false
-                    }
-                    proxy.scrollTo(folded?.id ?? messageId, anchor: .center)
-                    session.consumeFocus(messageId)
-                }
+                transcriptScrollView(proxy: proxy, transcript: transcript, versions: versions)
             }
             .id(threadId)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -443,17 +193,7 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .overlay(alignment: .bottom) { plusSheet }
-        .overlay(alignment: .bottomTrailing) {
-#if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-busy-fleet-preview") {
-                Text("Offline busy-fleet fixture")
-                    .font(.caption2)
-                    .allowsHitTesting(false)
-                    .accessibilityIdentifier("busy-fleet-progress")
-                    .accessibilityValue(session.state.cursor ?? "0")
-            }
-#endif
-        }
+        .overlay(alignment: .bottomTrailing) { busyFleetFixtureBadge }
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         // Hiding the bar above also disarms the system edge-swipe back
@@ -464,52 +204,15 @@ struct ChatView: View {
         .navigationDestination(isPresented: $showingComputer) {
             if case let .bot(bot) = current { ComputerView(bot: bot) }
         }
-        .task(id: threadId) {
-            if selectedThreadWasRemoved { dismiss(); return }
-            let openedChat = current
-            session.threadSelection.rememberThread(openedChat, connectionID: session.connection?.id)
-            await session.loadThreadIfNeeded(openedChat.threadId)
-            // opening a chat is what marks it read, exactly as on the desktop
-            if openedChat.unread { await session.markRead(openedChat) }
-#if DEBUG
-            // `-open-plus`: the + sheet up, for the screenshot harness
-            if ProcessInfo.processInfo.arguments.contains("-open-plus") { showingPlus = true }
-            // Profile parity screenshots without automating a tap through the
-            // animated island/header transition.
-            if ProcessInfo.processInfo.arguments.contains("-open-profile") { showingProfile = true }
-#endif
-        }
+        .task(id: threadId) { await enterThread() }
         .onValueChange(of: selectedThreadWasRemoved) { removed in
             if removed { dismiss() }
         }
         .onValueChange(of: session.state.hasLoadedPage(forThread: threadId)) { loaded in
-            let requestedThread = threadId
-            if !loaded { Task { await session.loadThreadIfNeeded(requestedThread) } }
+            reloadIfPageDropped(loaded)
         }
-        .onValueChange(of: current.unread) { unread in
-            // A message can arrive while this chat is already on screen. The
-            // initial task above will not run again, so clear that new unread
-            // bit here rather than leaving a badge on an open conversation.
-            let readChat = current
-            if unread { Task { await session.markRead(readChat) } }
-        }
-        .onValueChangePair(of: threadId) { previous, next in
-            dictation.stop()
-            threadDrafts[previous] = ComposerSnapshot(text: draft, attachments: attachments, error: attachmentError)
-            let restored = threadDrafts.removeValue(forKey: next) ?? ComposerSnapshot()
-            draft = restored.text
-            attachments = restored.attachments
-            attachmentError = restored.error
-            selectedPhotos = []
-            showCommandHUD = false
-            showingPlus = false
-            readerScrolled = false
-            // The local task picker changed threads. A download
-            // started in the previous task must not open a sheet (or surface
-            // its error) in the new one when the network reply arrives late.
-            resetFilePreview()
-            cancelThreadOpen()
-        }
+        .onValueChange(of: current.unread) { unread in markReadIfNeeded(unread) }
+        .onValueChangePair(of: threadId) { previous, next in switchThread(from: previous, to: next) }
         .onValueChange(of: session.connection?.id) { _ in
             steering = false
             cancelThreadOpen()
@@ -517,11 +220,7 @@ struct ChatView: View {
         .onValueChange(of: heldSends.first?.queueId) { _ in steering = false }
         .onValueChange(of: current.busy) { busy in if !busy { steering = false } }
         .onValueChange(of: threadId) { _ in steering = false }
-        .task(id: steering) {
-            guard steering else { return }
-            try? await Task.sleep(for: .seconds(20))
-            if !Task.isCancelled { steering = false }
-        }
+        .task(id: steering) { await expireSteering() }
         .onDisappear {
             dictation.stop()
             resetFilePreview()
@@ -543,11 +242,7 @@ struct ChatView: View {
             if shown { dictation.stop() }
         }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { note in
-            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey]
-            let value = (raw as? NSNumber)?.uintValue ?? (raw as? UInt)
-            if value == AVAudioSession.InterruptionType.began.rawValue {
-                dictation.stop()
-            }
+            stopDictation(ifInterruptedBy: note)
         }
         .onValueChange(of: dictation.transcript) { spoken in
             // Always join against the text frozen at capture start. A newer
@@ -608,6 +303,385 @@ struct ChatView: View {
                 startLiveCall(bot)
             }
         }
+    }
+
+    // MARK: - Transcript
+
+    /// The transcript: its rows, the live tail, the header and face that
+    /// float over it, and the scrolling that keeps the newest message in view.
+    private func transcriptScrollView(
+        proxy: ScrollViewProxy, transcript: [TranscriptRow], versions: [String?: [Message]]
+    ) -> some View {
+        ScrollView {
+            transcriptColumn(proxy: proxy, transcript: transcript, versions: versions)
+        }
+        // The header lives in the scroll view's top safe area: the
+        // transcript starts below it and scrolls under it — that is
+        // what the glass is for. An inset rather than a content
+        // margin, because `.defaultScrollAnchor(.bottom)` anchored
+        // unreliably against a margin and opened chats mid-way.
+        // The blur is only the top strip — back, computer — the way
+        // a system bar is; the transcript starts on that line and
+        // scrolls under the face and name, which float over it.
+        .safeAreaInset(edge: .top, spacing: 0) { headerBar }
+        .overlay(alignment: .top) { headerFace }
+        .overlay(alignment: .top) { floatingFace }
+        // Reading scrollback — one tap back to the end, streaming or
+        // not, the same pill the desktop chat offers.
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { bottom in
+            viewportBottom = bottom
+        }
+        .overlay(alignment: .bottom) { jumpToLatestPill(proxy) }
+        .task { await playIslandIntro() }
+        // A conversation grows from the bottom: a transcript shorter
+        // than the screen rests at the bottom, and opening a chat
+        // starts on the newest message rather than the oldest.
+        .scrollAnchorCompat(.bottom)
+        // Tapping the transcript puts the keyboard away. The composer
+        // is a sibling of this scroll view rather than inside it, so
+        // nothing else here drops its focus — until this, the only way
+        // back to the whole conversation was to leave the chat.
+        // Simultaneous, not `.onTapGesture`: a tap that lands on a
+        // link, a card button or a selected word still reaches the row
+        // that owns it, and only also closes the keyboard.
+        .simultaneousGesture(TapGesture().onEnded {
+            if composerFocused { composerFocused = false }
+        })
+        // And a drag down over the transcript pushes it away, the way
+        // it does in Mail and Messages.
+        .scrollDismissesKeyboard(.interactively)
+        // `initial: true` is what opens the chat on the newest
+        // message where `scrollAnchorCompat` cannot (iOS 16). On 17 the
+        // anchor has already put us there and this is a no-op.
+        .onValueChange(of: transcript.last?.id, initial: true) { _ in
+            guard let last = transcript.last else { return }
+            withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+        }
+        // Neither of the above is enough on its own when the newest
+        // message holds a table or a code block. Their horizontal
+        // scroll views throw off the height the anchor measures on
+        // the first pass, so the chat opened a table's height short
+        // of the end; and the `initial` scroll above runs before
+        // there is anything to scroll. One more scroll once the first
+        // layout has settled lands on the end — again when the page
+        // arrives from the computer, which can be after the push,
+        // unless the reader has already scrolled away to read.
+        .task(id: "\(threadId)|\(session.state.hasLoadedPage(forThread: threadId))") {
+            await settleOnEnd(proxy)
+        }
+        .onUserScrollCompat { readerScrolled = true }
+        // Follow the text as it arrives. Keyed on length rather than
+        // the string so this fires once per delta batch, and without
+        // animation — animating every token turns a smooth stream
+        // into a stutter, because each scroll interrupts the last.
+        .onValueChange(of: session.state.streaming[threadId]?.count ?? 0) { length in
+            guard length > 0 else { return }
+            proxy.scrollTo(Self.liveBubbleId, anchor: .bottom)
+        }
+        .task(id: session.focusedMessageId) { revealFocusedMessage(proxy, in: transcript) }
+    }
+
+    /// The rows, then whatever is live, then the end marker.
+    private func transcriptColumn(
+        proxy: ScrollViewProxy, transcript: [TranscriptRow], versions: [String?: [Message]]
+    ) -> some View {
+        // VStack, not LazyVStack. A lazy stack does not know how
+        // tall it is until its rows have been built, so
+        // `.defaultScrollAnchor(.bottom)` anchors against an
+        // estimate and the chat opens somewhere in the middle of
+        // the conversation. Building all of it up front makes the
+        // height exact and the anchor land on the newest message.
+        // A thread holds 50 messages until you ask for more, so
+        // there is nothing here worth being lazy about.
+        VStack(alignment: .leading, spacing: 6) {
+            // room for the floating face when scrolled to the top
+            Color.clear.frame(height: 72)
+
+            if session.state.hasMore[threadId] == true {
+                loadEarlierButton(proxy: proxy, transcript: transcript)
+            }
+
+            ForEach(Array(transcript.enumerated()), id: \.element.id) { index, row in
+                transcriptRow(row, at: index, in: transcript, versions: versions, proxy: proxy)
+            }
+
+            liveTail
+            transcriptEnd
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: CompanionLayout.chatWidth, alignment: .leading)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func loadEarlierButton(proxy: ScrollViewProxy, transcript: [TranscriptRow]) -> some View {
+        Button("Load earlier messages") {
+            // keep the reader where they were: after older
+            // messages are prepended, sit back on the one
+            // that used to be at the top
+            let anchor = transcript.first?.id
+            Task {
+                await session.loadOlder(threadId: threadId)
+                if let anchor { proxy.scrollTo(anchor, anchor: .top) }
+            }
+        }
+        .font(.footnote)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+
+    private func transcriptRow(
+        _ row: TranscriptRow, at index: Int, in transcript: [TranscriptRow],
+        versions: [String?: [Message]], proxy: ScrollViewProxy
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // a gap in time is worth marking; a timestamp
+            // on every message is just noise
+            if startsANewStretch(at: index, in: transcript) {
+                Text(RelativeStamp.separator(row.head.date))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.secondary.opacity(0.7))
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 10)
+                    .padding(.bottom, 4)
+            }
+            switch row {
+            case let .message(message):
+                MessageRow(
+                    chat: current,
+                    message: message,
+                    versions: message.role == .user && message.kind == .text
+                        ? versions[message.parentId] ?? [] : [],
+                    endsRun: endsRun(at: index, in: transcript),
+                    openLink: openLink,
+                    openThread: openThread
+                )
+            case let .activityRun(items):
+                ActivityRunChip(items: items, openThread: openThread)
+            case let .assistantTurn(turn):
+                AssistantTurnChip(
+                    turn: turn, chat: current, openLink: openLink, openThread: openThread,
+                    revealedMessageId: revealedMessageId,
+                    scrollToMessage: { proxy.scrollTo($0, anchor: .center) }
+                )
+            }
+        }
+        .id(row.id)
+    }
+
+    /// The reply as it is typed. It sits after the last settled message and
+    /// disappears the moment the real one arrives — the store clears it on
+    /// the same frame that appends the message, so there is never a beat
+    /// where both are on screen.
+    /// At Hidden the words go to the status line above the composer; the
+    /// transcript keeps the typing dots.
+    @ViewBuilder private var liveTail: some View {
+        if current.busy, detail != .hidden, let live = session.state.streaming[threadId], !live.isEmpty {
+            StreamingBubble(text: live, reasoning: nil, color: current.color)
+                .id(Self.liveBubbleId)
+        } else if current.busy, activityDetail != ActivityDetail.hidden.rawValue,
+                  let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
+            // Only while there is no answer yet. Once tokens
+            // of the reply exist, the reasoning is behind us
+            // and showing both is just noise.
+            StreamingBubble(text: nil, reasoning: thinking, color: current.color)
+                .id(Self.liveBubbleId)
+        } else if current.busy {
+            TypingIndicatorView(tintColor: MausPalette.color(current.color))
+                .id(Self.liveBubbleId)
+                .accessibilityLabel("\(current.name) is working")
+        }
+    }
+
+    private var transcriptEnd: some View {
+        Color.clear
+            .frame(height: 1)
+            .id(Self.transcriptEndId)
+            // Only a change of answer touches state: this
+            // fires on every scrolled frame.
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { end in
+                noteTranscriptEnd(end)
+            }
+            .accessibilityHidden(true)
+    }
+
+    private func noteTranscriptEnd(_ end: CGFloat) {
+        let reading = end - viewportBottom > Self.jumpToLatestThreshold
+        if reading != showsJumpToLatest {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { showsJumpToLatest = reading }
+        }
+    }
+
+    /// One face, in one layer, measured from the screen's top
+    /// edge: it sits in the island while that is open and
+    /// glides into its header slot when the island lets go.
+    private var floatingFace: some View {
+        let topInset = IslandGeometry.topInset
+        let islandSide: CGFloat = 220
+        // centred in the part of the square the hardware island does not cover
+        let islandFaceCentre = IslandGeometry.top + IslandGeometry.size.height + (islandSide - IslandGeometry.size.height) / 2
+        let headerFaceCentre = topInset + 26
+        let faceSize = 60 + 72 * facePhase
+        let faceCentre = headerFaceCentre + (islandFaceCentre - headerFaceCentre) * facePhase
+        return ZStack(alignment: .top) {
+            if islandVisible {
+                IslandShell(expanded: islandExpanded, expandedSize: CGSize(width: islandSide, height: islandSide)) {
+                    Color.clear
+                }
+            }
+            ChatAvatarView(chat: current, size: faceSize, state: MausState.forChat(current, in: session.state), animated: MausState.forChat(current, in: session.state).showsActivity || islandExpanded, comets: islandExpanded)
+                .offset(y: faceCentre - faceSize / 2)
+                .allowsHitTesting(false)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder private func jumpToLatestPill(_ proxy: ScrollViewProxy) -> some View {
+        if showsJumpToLatest {
+            Button {
+                withAnimation { proxy.scrollTo(Self.transcriptEndId, anchor: .bottom) }
+            } label: {
+                Label("Jump to latest", systemImage: "arrow.down")
+                    .font(.footnote.weight(.medium))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
+                    .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Jump to latest messages")
+            .padding(.bottom, 10)
+            .transition(.opacity.combined(with: .scale(scale: 0.9)))
+        }
+    }
+
+    /// grow, hold a beat, shrink — the face rides along
+    private func playIslandIntro() async {
+        guard CompanionLayout.supportsIslandPresentation, !reduceMotion else { return }
+        // The intro is a greeting, and a greeting repeated every
+        // time you open a chat stops being one.
+        let intro = IslandIntro(rawValue: islandIntro) ?? .oncePerBot
+        switch intro {
+        case .never:
+            return
+        case .oncePerBot:
+            guard !IslandSeen.contains(islandIntroID, in: islandSeen) else { return }
+            islandSeen = IslandSeen.adding(islandIntroID, to: islandSeen)
+        case .always:
+            break
+        }
+        islandVisible = true
+        try? await Task.sleep(for: .milliseconds(40))
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { islandExpanded = true; facePhase = 1 }
+        try? await Task.sleep(for: .milliseconds(1000))
+        withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) { islandExpanded = false; facePhase = 0 }
+        try? await Task.sleep(for: .milliseconds(600))
+        islandVisible = false
+    }
+
+    /// One more scroll to the end once the first layout has settled, unless
+    /// the reader has already scrolled away.
+    private func settleOnEnd(_ proxy: ScrollViewProxy) async {
+        try? await Task.sleep(for: .milliseconds(50))
+        guard !Task.isCancelled, !readerScrolled, let last = rows.last else { return }
+        proxy.scrollTo(last.id, anchor: .bottom)
+    }
+
+    private func revealFocusedMessage(_ proxy: ScrollViewProxy, in transcript: [TranscriptRow]) {
+        guard let messageId = session.focusedMessageId,
+              messages.contains(where: { $0.id == messageId })
+        else { return }
+        revealedMessageId = messageId
+        // Materialize the lazy folded row first. Its target bubble
+        // scrolls itself into view once expansion has laid it out.
+        let folded = transcript.first { row in
+            if case let .assistantTurn(turn) = row {
+                return turn.messages.contains { $0.id == messageId }
+            }
+            return false
+        }
+        proxy.scrollTo(folded?.id ?? messageId, anchor: .center)
+        session.consumeFocus(messageId)
+    }
+
+    // MARK: - Thread lifecycle
+
+    /// Opening a chat: remember it, load it, and mark it read.
+    private func enterThread() async {
+        if selectedThreadWasRemoved { dismiss(); return }
+        let openedChat = current
+        session.threadSelection.rememberThread(openedChat, connectionID: session.connection?.id)
+        await session.loadThreadIfNeeded(openedChat.threadId)
+        // opening a chat is what marks it read, exactly as on the desktop
+        if openedChat.unread { await session.markRead(openedChat) }
+#if DEBUG
+        // `-open-plus`: the + sheet up, for the screenshot harness
+        if ProcessInfo.processInfo.arguments.contains("-open-plus") { showingPlus = true }
+        // Profile parity screenshots without automating a tap through the
+        // animated island/header transition.
+        if ProcessInfo.processInfo.arguments.contains("-open-profile") { showingProfile = true }
+#endif
+    }
+
+    private func reloadIfPageDropped(_ loaded: Bool) {
+        let requestedThread = threadId
+        if !loaded { Task { await session.loadThreadIfNeeded(requestedThread) } }
+    }
+
+    /// A message can arrive while this chat is already on screen. The
+    /// opening task will not run again, so clear that new unread bit here
+    /// rather than leaving a badge on an open conversation.
+    private func markReadIfNeeded(_ unread: Bool) {
+        let readChat = current
+        if unread { Task { await session.markRead(readChat) } }
+    }
+
+    /// The local task picker changed threads: park this one's draft, bring
+    /// back the next one's, and drop what belonged to the old thread.
+    private func switchThread(from previous: String, to next: String) {
+        dictation.stop()
+        threadDrafts[previous] = ComposerSnapshot(text: draft, attachments: attachments, error: attachmentError)
+        let restored = threadDrafts.removeValue(forKey: next) ?? ComposerSnapshot()
+        draft = restored.text
+        attachments = restored.attachments
+        attachmentError = restored.error
+        selectedPhotos = []
+        showCommandHUD = false
+        showingPlus = false
+        readerScrolled = false
+        // A download started in the previous task must not open a sheet (or
+        // surface its error) in the new one when the network reply arrives late.
+        resetFilePreview()
+        cancelThreadOpen()
+    }
+
+    private func expireSteering() async {
+        guard steering else { return }
+        try? await Task.sleep(for: .seconds(20))
+        if !Task.isCancelled { steering = false }
+    }
+
+    private func stopDictation(ifInterruptedBy note: Notification) {
+        let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey]
+        let value = (raw as? NSNumber)?.uintValue ?? (raw as? UInt)
+        if value == AVAudioSession.InterruptionType.began.rawValue {
+            dictation.stop()
+        }
+    }
+
+    @ViewBuilder private var busyFleetFixtureBadge: some View {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-busy-fleet-preview") {
+            Text("Offline busy-fleet fixture")
+                .font(.caption2)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("busy-fleet-progress")
+                .accessibilityValue(session.state.cursor ?? "0")
+        }
+#endif
     }
 
     // MARK: - Live call
@@ -2163,22 +2237,7 @@ struct CredentialRequestCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 11) {
-                Image(systemName: "key.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 38, height: 38)
-                    .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(label)
-                        .font(.system(size: 16, weight: .semibold))
-                    Text("Requested by \(requester)")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Color.secondary)
-                }
-                Spacer(minLength: 0)
-            }
+            heading
 
             if let description = visible(secret.description) {
                 Text(description)
@@ -2187,129 +2246,7 @@ struct CredentialRequestCardView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if secret.provided == true {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(
-                        secret.resumed == true ? "Saved securely. The task resumed." : "Saved securely on your computer.",
-                        systemImage: "checkmark.shield.fill"
-                    )
-                    .foregroundStyle(.green)
-
-                    if secret.resumed != true, let preparedSubmission {
-                        Button(action: { send(preparedSubmission) }) {
-                            HStack(spacing: 7) {
-                                if submitting { ProgressView() }
-                                Image(systemName: "arrow.clockwise")
-                                Text(submitting ? "Resuming…" : "Try resuming the task")
-                            }
-                            .font(.system(size: 13, weight: .semibold))
-                        }
-                        .disabled(submitting || !hasProtectedTransport)
-                    }
-                }
-            } else if secret.dismissed == true {
-                Label("Not provided", systemImage: "xmark.circle")
-                    .foregroundStyle(Color.secondary)
-            } else if submitted {
-                Label("Encrypted and saved on your computer", systemImage: "checkmark.shield.fill")
-                    .foregroundStyle(.green)
-            } else if canEnterOnPhone {
-                VStack(alignment: .leading, spacing: 5) {
-                    Label("Enter securely on this phone", systemImage: "lock.shield.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(tint)
-
-                    if preparedSubmission == nil {
-                        SecureField(placeholder, text: $value)
-                            .id(fieldID)
-                            .textContentType(.password)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .privacySensitive()
-                            .disabled(submitting)
-                            .submitLabel(.done)
-                            .onSubmit { submit() }
-                            .padding(.horizontal, 12)
-                            .frame(minHeight: 44)
-                            .background(
-                                Color.secondary.opacity(0.1),
-                                in: RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            )
-                            .accessibilityLabel(label)
-                    } else {
-                        Label(
-                            submitting ? "Encrypted and saving…" : "Encrypted and ready to retry",
-                            systemImage: "lock.fill"
-                        )
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .background(
-                            Color.secondary.opacity(0.1),
-                            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        )
-                    }
-
-                    Button(action: submit) {
-                        HStack(spacing: 7) {
-                            if submitting { ProgressView().tint(.white) }
-                            Image(systemName: "lock.fill")
-                            Text(
-                                submitting
-                                    ? "Saving securely…"
-                                    : preparedSubmission == nil ? "Save securely" : "Try again securely"
-                            )
-                        }
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(maxWidth: .infinity, minHeight: 42)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(tint)
-                    .disabled(!canSubmit)
-
-                    if preparedSubmission != nil, !submitting, submissionError != nil {
-                        Button("Enter a different value") {
-                            discardPreparedSubmission()
-                        }
-                        .font(.system(size: 13, weight: .medium))
-                    }
-
-                    Text("Use Apple Passwords, 1Password, Bitwarden, or paste. The value is encrypted for your computer and never added to chat.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(11)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            } else if !hasSecurePairing {
-                VStack(alignment: .leading, spacing: 5) {
-                    Label("Pair again to enter here", systemImage: "qrcode")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(tint)
-                    Text("This pairing predates secure phone entry. Scan a fresh QR from OpenMausBot, or finish this request on your computer.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(11)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            } else {
-                VStack(alignment: .leading, spacing: 5) {
-                    Label("Secure connection required", systemImage: "lock.shield.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(tint)
-                    Text("Switch to Secure phone access (HTTPS) or Tailscale, then try again. You can still finish this request on your computer.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(11)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            }
+            outcome
 
             if let submissionError = visible(submissionError) {
                 Label(submissionError, systemImage: "exclamationmark.triangle.fill")
@@ -2345,21 +2282,9 @@ struct CredentialRequestCardView: View {
         .accessibilityElement(children: canEnterOnPhone ? .contain : .combine)
         .accessibilityLabel("\(label). \(accessibilityStatus)")
         .onAppear {
-            preparedSubmission = session.preparedCredential(
-                chat: chat,
-                message: message,
-                secret: secret
-            )
+            preparedSubmission = session.preparedCredential(chat: chat, message: message, secret: secret)
         }
-        .onValueChange(of: requestIdentity) { _ in
-            resetSensitiveState(clearPrepared: true)
-            preparedSubmission = session.preparedCredential(
-                chat: chat,
-                message: message,
-                secret: secret
-            )
-            submitted = false
-        }
+        .onValueChange(of: requestIdentity) { _ in resetForNewRequest() }
         .onValueChange(of: session.credentialEntryResetGeneration) { _ in
             suspendSensitiveEntry()
         }
@@ -2380,6 +2305,189 @@ struct CredentialRequestCardView: View {
             clearPlaintext()
             submissionError = nil
         }
+    }
+
+    private var heading: some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "key.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 38, height: 38)
+                .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(label)
+                    .font(.system(size: 16, weight: .semibold))
+                Text("Requested by \(requester)")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Color.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Where the request stands: answered, declined, waiting on this phone,
+    /// or waiting on a connection this phone does not have.
+    @ViewBuilder private var outcome: some View {
+        if secret.provided == true {
+            providedStatus
+        } else if secret.dismissed == true {
+            Label("Not provided", systemImage: "xmark.circle")
+                .foregroundStyle(Color.secondary)
+        } else if submitted {
+            Label("Encrypted and saved on your computer", systemImage: "checkmark.shield.fill")
+                .foregroundStyle(.green)
+        } else if canEnterOnPhone {
+            phoneEntry
+        } else if !hasSecurePairing {
+            pairAgainNotice
+        } else {
+            secureConnectionNotice
+        }
+    }
+
+    private var providedStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                secret.resumed == true ? "Saved securely. The task resumed." : "Saved securely on your computer.",
+                systemImage: "checkmark.shield.fill"
+            )
+            .foregroundStyle(.green)
+
+            if secret.resumed != true, let preparedSubmission {
+                Button(action: { send(preparedSubmission) }) {
+                    HStack(spacing: 7) {
+                        if submitting { ProgressView() }
+                        Image(systemName: "arrow.clockwise")
+                        Text(submitting ? "Resuming…" : "Try resuming the task")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                }
+                .disabled(submitting || !hasProtectedTransport)
+            }
+        }
+    }
+
+    private var phoneEntry: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("Enter securely on this phone", systemImage: "lock.shield.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+
+            if preparedSubmission == nil {
+                secureField
+            } else {
+                preparedNotice
+            }
+
+            submitButton
+
+            if preparedSubmission != nil, !submitting, submissionError != nil {
+                Button("Enter a different value") {
+                    discardPreparedSubmission()
+                }
+                .font(.system(size: 13, weight: .medium))
+            }
+
+            Text("Use Apple Passwords, 1Password, Bitwarden, or paste. The value is encrypted for your computer and never added to chat.")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+
+    private var secureField: some View {
+        SecureField(placeholder, text: $value)
+            .id(fieldID)
+            .textContentType(.password)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .privacySensitive()
+            .disabled(submitting)
+            .submitLabel(.done)
+            .onSubmit { submit() }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(
+                Color.secondary.opacity(0.1),
+                in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+            )
+            .accessibilityLabel(label)
+    }
+
+    private var preparedNotice: some View {
+        Label(
+            submitting ? "Encrypted and saving…" : "Encrypted and ready to retry",
+            systemImage: "lock.fill"
+        )
+        .font(.system(size: 13))
+        .foregroundStyle(Color.secondary)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.horizontal, 12)
+        .background(
+            Color.secondary.opacity(0.1),
+            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+        )
+    }
+
+    private var submitButton: some View {
+        Button(action: submit) {
+            HStack(spacing: 7) {
+                if submitting { ProgressView().tint(.white) }
+                Image(systemName: "lock.fill")
+                Text(
+                    submitting
+                        ? "Saving securely…"
+                        : preparedSubmission == nil ? "Save securely" : "Try again securely"
+                )
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .frame(maxWidth: .infinity, minHeight: 42)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(tint)
+        .disabled(!canSubmit)
+    }
+
+    private var pairAgainNotice: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("Pair again to enter here", systemImage: "qrcode")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+            Text("This pairing predates secure phone entry. Scan a fresh QR from OpenMausBot, or finish this request on your computer.")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+
+    private var secureConnectionNotice: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("Secure connection required", systemImage: "lock.shield.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+            Text("Switch to Secure phone access (HTTPS) or Tailscale, then try again. You can still finish this request on your computer.")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
+
+    /// A different request landed in this card: start clean, with whatever
+    /// envelope the session already holds for it.
+    private func resetForNewRequest() {
+        resetSensitiveState(clearPrepared: true)
+        preparedSubmission = session.preparedCredential(chat: chat, message: message, secret: secret)
+        submitted = false
     }
 
     private func submit() {

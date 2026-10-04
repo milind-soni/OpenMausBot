@@ -246,147 +246,10 @@ struct RoutineEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Work") {
-                    TextField("Routine name", text: $name)
-                    Picker("Agent", selection: $botId) {
-                        Text("Choose an agent").tag("")
-                        ForEach(session.state.bots.filter { $0.hidden != true }) { bot in Text(bot.name).tag(bot.id) }
-                    }
-                    TextField("What should the agent do?", text: $prompt, axis: .vertical).lineLimit(4...10)
-                }
-
-                Section {
-                    Picker("Run location", selection: $runOn) {
-                        Label("This computer", systemImage: "laptopcomputer")
-                            .tag(RoutineRunLocation.maus)
-                        Label("Cloud VM", systemImage: "cloud")
-                            .tag(RoutineRunLocation.cloud)
-                            .rowSelectionDisabled(!cloudSelectable)
-                    }
-                    .pickerStyle(.inline)
-
-                    if !availabilityLoaded {
-                        ProgressView("Checking Cloud VM availability…")
-                    } else if runAvailability == nil {
-                        Label("Cloud VM status is unavailable", systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Where does it run?")
-                } footer: {
-                    if runOn == .maus {
-                        Text("Uses this agent's selected model and computer setting on the paired computer.")
-                    } else if runAvailability?.cloudReady == true {
-                        Text("Runs the agent and its tools inside its Boat virtual machine. The VM wakes automatically for each run; keep OpenMausBot running so its scheduler can launch the job.")
-                    } else {
-                        Text("This existing Cloud VM choice is preserved, but it cannot run until the paired computer has a configured Boat API key and an available Boat agent.")
-                    }
-                }
-
-                Section {
-                    Picker("Repeats", selection: $kind) {
-                        if kind == .unknown {
-                            Text("Newer schedule").tag(RoutineSchedule.Kind.unknown)
-                                .rowSelectionDisabled()
-                        }
-                        Text("One time").tag(RoutineSchedule.Kind.once)
-                        Text("Selected days").tag(RoutineSchedule.Kind.daily)
-                        Text("Every X minutes").tag(RoutineSchedule.Kind.interval)
-                    }
-                    if kind == .once {
-                        DatePicker("Run", selection: $onceAt, in: Date()...)
-                    } else if kind == .daily {
-                        DatePicker("Time", selection: $dailyTime, displayedComponents: .hourAndMinute)
-                        HStack {
-                            ForEach(0..<7) { day in
-                                Button(Self.dayLetters[day]) {
-                                    if weekdays.contains(day) { weekdays.remove(day) } else { weekdays.insert(day) }
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(weekdays.contains(day) ? .accentColor : .secondary)
-                                .accessibilityLabel(Self.dayNames[day])
-                            }
-                        }
-                    } else if kind == .interval {
-                        HStack(spacing: 5) {
-                            Text(intervalPreset == 0 ? "Runs on" : "Runs every")
-                            Menu {
-                                ForEach(Self.intervalPresets, id: \.self) { minutes in
-                                    Button("\(minutes) minutes") {
-                                        intervalPreset = minutes
-                                    }
-                                }
-                                Divider()
-                                Button("Custom interval…") {
-                                    intervalPreset = 0
-                                }
-                            } label: {
-                                HStack(spacing: 3) {
-                                    Text(intervalPreset == 0 ? "a custom interval" : "\(intervalPreset)")
-                                        .fontWeight(.semibold)
-                                    Image(systemName: "chevron.up.chevron.down")
-                                        .font(.caption2)
-                                }
-                            }
-                            .accessibilityLabel("How often this routine runs")
-                            .accessibilityValue(intervalFrequencyAccessibilityValue)
-                            if intervalPreset != 0 {
-                                Text("minutes")
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        if intervalPreset == 0 {
-                            HStack {
-                                Text("Set the interval to")
-                                TextField("5–1,440", value: $customIntervalMinutes, format: .number)
-                                    .keyboardType(.numberPad)
-                                    .multilineTextAlignment(.trailing)
-                                    .frame(minWidth: 72)
-                                    .accessibilityLabel("Custom interval in minutes")
-                                Text("minutes")
-                                    .foregroundStyle(.secondary)
-                            }
-                            if selectedIntervalMinutes == nil {
-                                Text("Enter a whole number from 5 to 1,440 minutes.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.red)
-                            }
-                        }
-                        DatePicker("Starting", selection: $intervalAnchor)
-                    } else {
-                        Label(
-                            "This routine uses a schedule added by a newer OpenMausBot. Choose One time, Selected days, or Every X minutes before saving.",
-                            systemImage: "exclamationmark.triangle"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Schedule")
-                } footer: {
-                    if kind == .interval {
-                        Text("Each occurrence starts with fresh context. Results collect in one thread, and full run logs remain available. If the previous run is still active, the next occurrence is skipped instead of queued.")
-                    } else {
-                        Text("Each occurrence starts with fresh context. Results collect in one thread, and full run logs remain available. No cron syntax is used.")
-                    }
-                }
-
-                Section {
-                    DisclosureGroup(isExpanded: $advancedExpanded) {
-                        Picker("Stop if still running after", selection: $timeoutMinutes) {
-                            Text("No limit").tag(nil as Int?)
-                            ForEach(Self.timeoutOptions, id: \.self) { minutes in
-                                Text(Self.durationLabel(minutes)).tag(Optional(minutes))
-                            }
-                        }
-                    } label: {
-                        timeoutMinutes.map { Text("Advanced · \(Self.durationLabel($0)) run limit") } ?? Text("Advanced · no run limit")
-                    }
-                } footer: {
-                    if advancedExpanded {
-                        Text("Optional. The clock starts when work actually begins and does not control how often the routine starts.")
-                    }
-                }
+                workSection
+                runLocationSection
+                scheduleSection
+                advancedSection
             }
             .navigationTitle(routine == nil ? "New routine" : "Edit routine")
             .navigationBarTitleDisplayMode(.inline)
@@ -394,27 +257,204 @@ struct RoutineEditorView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { Task { await save() } }
-                        .disabled(
-                            saving || kind == .unknown
-                                || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                || botId.isEmpty
-                                || (kind == .daily && weekdays.isEmpty)
-                                || (kind == .interval && selectedIntervalMinutes == nil)
-                        )
+                        .disabled(saveDisabled)
                 }
             }
             .onAppear { if botId.isEmpty { botId = session.state.bots.first(where: { $0.hidden != true })?.id ?? "" } }
-            .onValueChange(of: kind) { nextKind in
-                guard nextKind == .interval, !intervalTimeoutDefaultApplied else { return }
-                timeoutMinutes = timeoutMinutes ?? 30
-                intervalTimeoutDefaultApplied = true
+            .onValueChange(of: kind) { nextKind in applyIntervalTimeoutDefault(for: nextKind) }
+            .task { await loadAvailability() }
+        }
+    }
+
+    private var saveDisabled: Bool {
+        saving || kind == .unknown
+            || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || botId.isEmpty
+            || (kind == .daily && weekdays.isEmpty)
+            || (kind == .interval && selectedIntervalMinutes == nil)
+    }
+
+    private var workSection: some View {
+        Section("Work") {
+            TextField("Routine name", text: $name)
+            Picker("Agent", selection: $botId) {
+                Text("Choose an agent").tag("")
+                ForEach(session.state.bots.filter { $0.hidden != true }) { bot in Text(bot.name).tag(bot.id) }
             }
-            .task {
-                runAvailability = await session.loadRoutineRunAvailability()
-                availabilityLoaded = true
+            TextField("What should the agent do?", text: $prompt, axis: .vertical).lineLimit(4...10)
+        }
+    }
+
+    private var runLocationSection: some View {
+        Section {
+            Picker("Run location", selection: $runOn) {
+                Label("This computer", systemImage: "laptopcomputer")
+                    .tag(RoutineRunLocation.maus)
+                Label("Cloud VM", systemImage: "cloud")
+                    .tag(RoutineRunLocation.cloud)
+                    .rowSelectionDisabled(!cloudSelectable)
+            }
+            .pickerStyle(.inline)
+
+            if !availabilityLoaded {
+                ProgressView("Checking Cloud VM availability…")
+            } else if runAvailability == nil {
+                Label("Cloud VM status is unavailable", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Where does it run?")
+        } footer: {
+            if runOn == .maus {
+                Text("Uses this agent's selected model and computer setting on the paired computer.")
+            } else if runAvailability?.cloudReady == true {
+                Text("Runs the agent and its tools inside its Boat virtual machine. The VM wakes automatically for each run; keep OpenMausBot running so its scheduler can launch the job.")
+            } else {
+                Text("This existing Cloud VM choice is preserved, but it cannot run until the paired computer has a configured Boat API key and an available Boat agent.")
             }
         }
+    }
+
+    private var scheduleSection: some View {
+        Section {
+            Picker("Repeats", selection: $kind) {
+                if kind == .unknown {
+                    Text("Newer schedule").tag(RoutineSchedule.Kind.unknown)
+                        .rowSelectionDisabled()
+                }
+                Text("One time").tag(RoutineSchedule.Kind.once)
+                Text("Selected days").tag(RoutineSchedule.Kind.daily)
+                Text("Every X minutes").tag(RoutineSchedule.Kind.interval)
+            }
+            scheduleFields
+        } header: {
+            Text("Schedule")
+        } footer: {
+            if kind == .interval {
+                Text("Each occurrence starts with fresh context. Results collect in one thread, and full run logs remain available. If the previous run is still active, the next occurrence is skipped instead of queued.")
+            } else {
+                Text("Each occurrence starts with fresh context. Results collect in one thread, and full run logs remain available. No cron syntax is used.")
+            }
+        }
+    }
+
+    /// The fields the chosen `kind` needs.
+    @ViewBuilder private var scheduleFields: some View {
+        if kind == .once {
+            DatePicker("Run", selection: $onceAt, in: Date()...)
+        } else if kind == .daily {
+            DatePicker("Time", selection: $dailyTime, displayedComponents: .hourAndMinute)
+            weekdayRow
+        } else if kind == .interval {
+            intervalRow
+            if intervalPreset == 0 {
+                customIntervalFields
+            }
+            DatePicker("Starting", selection: $intervalAnchor)
+        } else {
+            Label(
+                "This routine uses a schedule added by a newer OpenMausBot. Choose One time, Selected days, or Every X minutes before saving.",
+                systemImage: "exclamationmark.triangle"
+            )
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var weekdayRow: some View {
+        HStack {
+            ForEach(0..<7) { day in
+                Button(Self.dayLetters[day]) {
+                    if weekdays.contains(day) { weekdays.remove(day) } else { weekdays.insert(day) }
+                }
+                .buttonStyle(.bordered)
+                .tint(weekdays.contains(day) ? .accentColor : .secondary)
+                .accessibilityLabel(Self.dayNames[day])
+            }
+        }
+    }
+
+    private var intervalRow: some View {
+        HStack(spacing: 5) {
+            Text(intervalPreset == 0 ? "Runs on" : "Runs every")
+            intervalMenu
+            if intervalPreset != 0 {
+                Text("minutes")
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var intervalMenu: some View {
+        Menu {
+            ForEach(Self.intervalPresets, id: \.self) { minutes in
+                Button("\(minutes) minutes") {
+                    intervalPreset = minutes
+                }
+            }
+            Divider()
+            Button("Custom interval…") {
+                intervalPreset = 0
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(intervalPreset == 0 ? "a custom interval" : "\(intervalPreset)")
+                    .fontWeight(.semibold)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+            }
+        }
+        .accessibilityLabel("How often this routine runs")
+        .accessibilityValue(intervalFrequencyAccessibilityValue)
+    }
+
+    @ViewBuilder private var customIntervalFields: some View {
+        HStack {
+            Text("Set the interval to")
+            TextField("5–1,440", value: $customIntervalMinutes, format: .number)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .frame(minWidth: 72)
+                .accessibilityLabel("Custom interval in minutes")
+            Text("minutes")
+                .foregroundStyle(.secondary)
+        }
+        if selectedIntervalMinutes == nil {
+            Text("Enter a whole number from 5 to 1,440 minutes.")
+                .font(.footnote)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private var advancedSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $advancedExpanded) {
+                Picker("Stop if still running after", selection: $timeoutMinutes) {
+                    Text("No limit").tag(nil as Int?)
+                    ForEach(Self.timeoutOptions, id: \.self) { minutes in
+                        Text(Self.durationLabel(minutes)).tag(Optional(minutes))
+                    }
+                }
+            } label: {
+                timeoutMinutes.map { Text("Advanced · \(Self.durationLabel($0)) run limit") } ?? Text("Advanced · no run limit")
+            }
+        } footer: {
+            if advancedExpanded {
+                Text("Optional. The clock starts when work actually begins and does not control how often the routine starts.")
+            }
+        }
+    }
+
+    private func applyIntervalTimeoutDefault(for nextKind: RoutineSchedule.Kind) {
+        guard nextKind == .interval, !intervalTimeoutDefaultApplied else { return }
+        timeoutMinutes = timeoutMinutes ?? 30
+        intervalTimeoutDefaultApplied = true
+    }
+
+    private func loadAvailability() async {
+        runAvailability = await session.loadRoutineRunAvailability()
+        availabilityLoaded = true
     }
 
     private var cloudSelectable: Bool {

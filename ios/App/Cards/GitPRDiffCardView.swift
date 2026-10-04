@@ -34,127 +34,154 @@ public struct GitPRDiffCardView: View {
         }
     }
     
-    public var body: some View {
-        let isDark = colorScheme == .dark
-        
-        VStack(alignment: .leading, spacing: 8) {
-            // Header
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.pull")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(Color(hex: "#22C55E"))
-                
-                Text(filename)
-                    .font(.caption.weight(.bold))
-                    .foregroundColor(isDark ? Color(hex: "#F8FAFC") : Color(hex: "#0F172A"))
-                    .lineLimit(1)
-                
-                Spacer()
-                
-                // Diff Delta (+ / -)
-                HStack(spacing: 4) {
-                    Text("+\(additions)")
-                        .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(hex: "#22C55E"))
-                    Text("-\(deletions)")
-                        .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(hex: "#EF4444"))
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2.5)
-                .background(isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.04))
-                .clipShape(Capsule())
-            }
-            
-            // Diff Content
-            if !diffText.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            showDiff.toggle()
-                        }
-                        Haptics.selection()
-                    } label: {
-                        HStack {
-                            Image(systemName: showDiff ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 9, weight: .bold))
-                            Text(showDiff ? "Hide Diff" : "View Diff")
-                                .font(.caption2.weight(.semibold))
-                            Spacer()
-                        }
-                        .foregroundColor(isDark ? Color(hex: "#94A3B8") : Color(hex: "#64748B"))
-                        .padding(.vertical, 2)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    if showDiff {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, line in
-                                    diffLineView(line, isDark: isDark)
-                                }
-                            }
-                            .padding(6)
-                        }
-                        .background(isDark ? Color.black.opacity(0.55) : Color(hex: "#0F172A"))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+    private var isDark: Bool { colorScheme == .dark }
+    private static let green = Color(hex: "#22C55E")
+    private static let red = Color(hex: "#EF4444")
+    private var titleColor: Color { isDark ? Color(hex: "#F8FAFC") : Color(hex: "#0F172A") }
+    private var mutedColor: Color { isDark ? Color(hex: "#94A3B8") : Color(hex: "#64748B") }
+    private var deltaFill: Color { isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.04) }
+    private var hairline: Color { isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.08) }
+    private var codeFill: Color { isDark ? Color.black.opacity(0.55) : Color(hex: "#0F172A") }
 
-                        if lines.count > 80 {
-                            Button(showAllLines ? "Show first 80 lines" : "Show all \(lines.count) lines") {
-                                withAnimation(.easeInOut(duration: 0.2)) { showAllLines.toggle() }
-                                Haptics.selection()
-                            }
-                            .font(.caption2.weight(.semibold))
-                            .buttonStyle(.plain)
-                            .accessibilityHint("The copied diff always includes every line")
-                        }
-                    }
-                }
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            if !diffText.isEmpty {
+                diffSection
             }
-            
-            Divider().background(isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.08))
-            
-            // Footer Actions
-            HStack(spacing: 8) {
-                Button {
-                    PlatformBridge.copyToPasteboard(diffText)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "doc.on.doc")
-                        Text("Copy Diff")
-                    }
-                    .font(.caption2.weight(.medium))
-                    .foregroundColor(isDark ? Color(hex: "#94A3B8") : Color(hex: "#64748B"))
-                }
-                .buttonStyle(.plain)
-                
-                Spacer()
-            }
+            Divider().background(hairline)
+            footer
         }
         .padding(10)
-        .background(
-            LinearGradient(
-                colors: isDark ? [
-                    Color(hex: "#0D1117").opacity(0.96),
-                    Color(hex: "#161B22").opacity(0.92)
-                ] : [
-                    Color.white.opacity(0.96),
-                    Color(hex: "#F8FAFC").opacity(0.92)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .background(cardGradient)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.08), lineWidth: 0.75)
+                .stroke(hairline, lineWidth: 0.75)
         )
         .shadow(color: Color.black.opacity(isDark ? 0.20 : 0.04), radius: 4, y: 1.5)
     }
-    
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.pull")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(Self.green)
+
+            Text(filename)
+                .font(.caption.weight(.bold))
+                .foregroundColor(titleColor)
+                .lineLimit(1)
+
+            Spacer()
+
+            delta
+        }
+    }
+
+    /// The + / - counts.
+    private var delta: some View {
+        HStack(spacing: 4) {
+            Text("+\(additions)")
+                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                .foregroundColor(Self.green)
+            Text("-\(deletions)")
+                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                .foregroundColor(Self.red)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2.5)
+        .background(deltaFill)
+        .clipShape(Capsule())
+    }
+
+    private var diffSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            diffToggle
+
+            if showDiff {
+                diffLines
+
+                if lines.count > 80 {
+                    Button(showAllLines ? "Show first 80 lines" : "Show all \(lines.count) lines") {
+                        withAnimation(.easeInOut(duration: 0.2)) { showAllLines.toggle() }
+                        Haptics.selection()
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .accessibilityHint("The copied diff always includes every line")
+                }
+            }
+        }
+    }
+
+    private var diffToggle: some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                showDiff.toggle()
+            }
+            Haptics.selection()
+        } label: {
+            HStack {
+                Image(systemName: showDiff ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                Text(showDiff ? "Hide Diff" : "View Diff")
+                    .font(.caption2.weight(.semibold))
+                Spacer()
+            }
+            .foregroundColor(mutedColor)
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var diffLines: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, line in
+                    diffLineView(line, isDark: isDark)
+                }
+            }
+            .padding(6)
+        }
+        .background(codeFill)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private var footer: some View {
+        HStack(spacing: 8) {
+            Button {
+                PlatformBridge.copyToPasteboard(diffText)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "doc.on.doc")
+                    Text("Copy Diff")
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundColor(mutedColor)
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+        }
+    }
+
+    private var cardGradient: LinearGradient {
+        LinearGradient(
+            colors: isDark ? [
+                Color(hex: "#0D1117").opacity(0.96),
+                Color(hex: "#161B22").opacity(0.92)
+            ] : [
+                Color.white.opacity(0.96),
+                Color(hex: "#F8FAFC").opacity(0.92)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
     @ViewBuilder
     private func diffLineView(_ line: String, isDark: Bool) -> some View {
         let isAddition = line.hasPrefix("+") && !line.hasPrefix("+++")
