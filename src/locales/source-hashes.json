@@ -11417,7 +11417,22 @@
       "computer.phase.showSleepingBoat": "dfbd04c1e36d554878a6ec1366e5b381507c69da80f06b172962d79ff3e0d7a5",
       "computer.phase.showPendingBoat": "9d5fdebf99747cd6ac9a160b14440a32d39a5c164fdee27caa95babc669b5605",
       "computer.badge.autoBoat": "ea81d1b8c0f10bbb043fecfd863ba77595403e14d1acb09f23bc229cb42f9b4a",
-      "computer.addBoatKey": "fcf349af3c05d6750fdc7ebdaac778bfcf27f8514faf5084c3882479c084cc36"
+      "computer.addBoatKey": "fcf349af3c05d6750fdc7ebdaac778bfcf27f8514faf5084c3882479c084cc36",
+      "apiInstances.title": "ec06f53c8ab199d23a7b4fd3b8324375c752078315ac6b44a7830f0e151b667f",
+      "apiInstances.subtitle": "0f9a9a00d08341e15500564c5f2a2886f664c6c3dddb30a6e475ac18631b0d9a",
+      "apiInstances.name": "2b7f6a84de917e387539dbe441ca22056e793d738e6c50db30c3f569e4448df3",
+      "apiInstances.url": "70589413a3c9793339fcf764276727ac652fa7dfe2f15fb5671251303a52ca49",
+      "apiInstances.key": "16f0ee47f993d6270c9059450473eea493ca8ae037f8877782ae2bc176f24d18",
+      "apiInstances.add": "ad897090864f2a622971da41fc664317ad8c887f54b23b81b125ac048b1dd643",
+      "apiInstances.adding": "c6de6f45c827f464b161b668ae93192ce4e6585c4029d8dd71795cbd7f922719",
+      "apiInstances.remove": "c3812fc4acb861d5182fc2b8155f327f736fbe5e5eb86a7bd7afcb6dc5497282",
+      "apiInstances.empty": "e2370f7d95f14ae1c598478e25ac9707c4f9b4f78cdfd1f15957c34c685d4b3d",
+      "apiInstances.failed": "15a9f1ef0847ed09b54853610591188340a5c6a95ec6173ae17ebe50932dcdfb",
+      "apiInstances.models": "cf6f0a12e8916b1a59066160acb10284ed07842f43594e634e08afbc6ada51e5",
+      "apiInstances.modelsPlaceholder": "357144f2b7712e18ddb786f816e3490a4fe56322c34ace0125bb6e73cc3a8347",
+      "apiInstances.keyHint": "f323a8068bd62b12afa6e3fe016378897b1425a6b9847bd0655dd1a064843fa7",
+      "apiInstances.keyLooksLikeUrl": "6b6a7eae0cc8d6bd754668e18aeb179afffd25923e8a727f3e1ed52c9c4760d6",
+      "apiInstances.refreshModels": "bf81860b7d4b0e2b835946dd85656edb0bef627be3a26a58797078bbe02370b6"
     },
     "zh-tw": {
       "usage.bot.empty": "a5580dec31af0c3535d045bfcf97c3379665e1ac24f67fe95ef3819c4fd57bc6",

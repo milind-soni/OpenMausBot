@@ -2434,5 +2434,20 @@
   "computer.phase.showSleepingBoat": "自动找到了一台休眠的云电脑。它没有被唤醒或更改。",
   "computer.phase.showPendingBoat": "自动找到了一台尚未就绪的云电脑。它没有被更改。",
   "computer.badge.autoBoat": "云 boat · 自动 · 只读",
-  "computer.addBoatKey": "添加 Boat API 密钥即可为此机器人提供云电脑——它就在这里启动。"
+  "computer.addBoatKey": "添加 Boat API 密钥即可为此机器人提供云电脑——它就在这里启动。",
+  "apiInstances.title": "更多自定义接入",
+  "apiInstances.subtitle": "每个接入都是独立的 OpenAI 兼容端点，有自己的 Base URL 和 API 密钥，所有 bot 都能选用。",
+  "apiInstances.name": "显示名称",
+  "apiInstances.url": "Base URL",
+  "apiInstances.key": "API 密钥",
+  "apiInstances.add": "添加接入",
+  "apiInstances.adding": "添加中…",
+  "apiInstances.remove": "移除",
+  "apiInstances.empty": "还没有额外的接入。",
+  "apiInstances.failed": "接入保存失败，请检查各项后重试。",
+  "apiInstances.models": "模型列表（可选）",
+  "apiInstances.modelsPlaceholder": "glm-5.3、glm-4.6（留空自动探测）",
+  "apiInstances.keyHint": "只粘贴密钥本身，不要填网址。若模型选择器出现示例模型，说明该端点无法自动列出模型，请在上框手动填写或点“重新探测”。",
+  "apiInstances.keyLooksLikeUrl": "这看起来是网址而不是 API 密钥，请粘贴密钥本身",
+  "apiInstances.refreshModels": "重新探测模型"
 }
