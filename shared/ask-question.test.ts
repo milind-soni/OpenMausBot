@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   answerWithoutPreamble,
   askQuestionSummary,
+  asyncQuestionReply,
   ASK_USER_TOOL,
   ASK_USER_TOOL_DEFINITION,
   formatQuestionAnswers,
@@ -11,6 +12,7 @@ import {
   MAX_QUESTION_TEXT,
   MAX_QUESTIONS,
   parseAskQuestions,
+  parseAsyncQuestions,
   parseChoices,
   parseProtocolAskQuestions,
   shouldSettleRequestCard,
@@ -210,6 +212,41 @@ describe("answerWithoutPreamble", () => {
 
   it("leaves anything else alone", () => {
     expect(answerWithoutPreamble("Tea")).toBe("Tea");
+  });
+});
+
+describe("parseAsyncQuestions", () => {
+  it("reads Codex's title and string options into the card shape", () => {
+    expect(parseAsyncQuestions([
+      { title: "Which source?", options: ["Directly", "Executor", "Directly"] },
+      { title: "Anything else?", options: null },
+    ])).toEqual([
+      { question: "Which source?", options: [{ label: "Directly" }, { label: "Executor" }] },
+      { question: "Anything else?", options: [] },
+    ]);
+  });
+
+  it("returns null when nothing offers an option to pick", () => {
+    expect(parseAsyncQuestions(undefined)).toBeNull();
+    expect(parseAsyncQuestions("please")).toBeNull();
+    expect(parseAsyncQuestions([])).toBeNull();
+    expect(parseAsyncQuestions([{ title: "Free text?", options: null }])).toBeNull();
+    expect(parseAsyncQuestions([{ title: "  ", options: ["Orphan"] }, "x"])).toBeNull();
+  });
+});
+
+describe("asyncQuestionReply", () => {
+  const one: AskQuestion[] = [{ question: "Which source?", options: [{ label: "Directly" }, { label: "Executor" }] }];
+  const two: AskQuestion[] = [...one, { question: "When?", options: [{ label: "Now" }] }];
+
+  it("sends a single question's pick as the person would have typed it", () => {
+    expect(asyncQuestionReply(formatQuestionAnswers(one, [["Directly"]]), one)).toBe("Directly");
+    expect(asyncQuestionReply("  my own words ", one)).toBe("my own words");
+  });
+
+  it("keeps the question lines for several questions, without the lead-in", () => {
+    expect(asyncQuestionReply(formatQuestionAnswers(two, [["Executor"], ["Now"]]), two))
+      .toBe("Q: Which source?\nA: Executor\n\nQ: When?\nA: Now");
   });
 });
 

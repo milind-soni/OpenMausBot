@@ -219,7 +219,9 @@ export function isRuntimeEvent(value: unknown): value is RuntimeEvent {
     case "item.updated":
       return (value.itemType === "tool" || value.itemType === "reasoning") && numberOrNullOrMissing(value.tokens);
     case "item.completed":
-      return value.itemType === "assistant_text" ? typeof value.text === "string" : value.itemType === "tool" && typeof value.ok === "boolean";
+      return value.itemType === "assistant_text"
+        ? typeof value.text === "string" && askQuestionsOrMissing(value.questions)
+        : value.itemType === "tool" && typeof value.ok === "boolean";
     case "content.delta":
       return (value.streamKind === "assistant_text" || value.streamKind === "reasoning_text") && typeof value.delta === "string";
     case "request.opened":

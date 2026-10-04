@@ -51,7 +51,7 @@ import { codexAccountEmail, codexHome } from "./codex-identity.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts";
-import { parseProtocolAskQuestions, questionAnswersById, questionChoices } from "../../shared/ask-question.ts";
+import { parseAsyncQuestions, parseProtocolAskQuestions, questionAnswersById, questionChoices } from "../../shared/ask-question.ts";
 import { codexVersionBehind, readLatestCodexRelease } from "./codex-release.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
@@ -1501,7 +1501,18 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                   emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta: item.text });
                 }
                 state.sawStreamDelta = false;
-                emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text: item.text });
+                // request_user_input_async posts its questions on this
+                // message and the turn carries on: no server request will
+                // follow, so the questions ride the text for the card. Only
+                // the completed item counts; item/started repeats them.
+                const questions = item.delivery === "async" ? parseAsyncQuestions(item.questions) : null;
+                emit({
+                  ...base(threadId, turnId),
+                  type: "item.completed",
+                  itemType: "assistant_text",
+                  text: item.text,
+                  ...(questions ? { questions } : {}),
+                });
               }
             } else if (item.type === "imageGeneration" && item.status !== "failed") {
               // Current Codex app-server (the same schema consumed by T3

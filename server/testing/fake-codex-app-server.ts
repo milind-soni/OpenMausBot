@@ -10,7 +10,7 @@
 //                     config-profile-unsupported | config-read-error | image |
 //                     logged-in-stdout | logged-out | unauthorized | late-request |
 //                     retry-then-complete | signin-refused | auth-recovery | mcp-401 | legacy-error |
-//                     key-401 | recovered-403 | recovered-401 | recovering-403
+//                     key-401 | recovered-403 | recovered-401 | recovering-403 | async-question
 //   FAKE_CODEX_LAUNCH_CRASHES  die at turn/start (before ack) with transient stderr,
 //                               exit 1, for the first N launches (launch count kept in
 //                               FAKE_CODEX_STATE)
@@ -28,6 +28,10 @@
 //                              confirms the reasoning delta was parsed
 //   FAKE_CODEX_ASK_HOLD        question modes: record the ask reply and hold the turn open, for
 //                              timeout tests that advance the clock
+//   FAKE_CODEX_ASYNC_QUESTIONS  async-question mode: JSON replacing the agentMessage's
+//                              `questions` (malformed and empty shapes)
+//   FAKE_CODEX_ASYNC_QUESTION_GATE  async-question mode: gate file path; the turn keeps
+//                              running after the question until it appears (default: 300 ms)
 //   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
 //                     (a Codex that did not take them)
@@ -409,7 +413,7 @@ process.stdin.on("data", (chunk) => {
           out({ jsonrpc: "2.0", id: msg.id, error: JSON.parse(process.env.FAKE_CODEX_RESUME_ERROR) });
         } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
-        } else if (mode === "resume" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" ||
+        } else if (mode === "resume" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
             (mode === "resume-then-missing" && !existsSync(process.env.FAKE_CODEX_STATE ?? ""))) {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else {
@@ -808,6 +812,28 @@ process.stdin.on("data", (chunk) => {
                     { id: "q-review", question: "Who reviews?", options: [{ label: "Ada" }, { label: "Lin" }] },
                   ],
             },
+          });
+        } else if (mode === "async-question") {
+          // request_user_input_async, as Codex 0.160 reports it: no server
+          // request, an agentMessage carrying the questions (started, then
+          // completed), and the turn keeps running after the tool returns.
+          const item = {
+            type: "agentMessage",
+            id: "call_async_question",
+            text: "Which source should I use?\n- Directly in OpenMausBot\n- The official server in Executor",
+            phase: "final_answer",
+            memoryCitation: null,
+            delivery: "async",
+            questions: process.env.FAKE_CODEX_ASYNC_QUESTIONS
+              ? JSON.parse(process.env.FAKE_CODEX_ASYNC_QUESTIONS)
+              : [{ title: "Which source should I use?", options: ["Directly in OpenMausBot", "The official server in Executor"] }],
+          };
+          notify("item/started", { item, startedAtMs: Date.now() });
+          notify("item/completed", { item, completedAtMs: Date.now() });
+          const gate = process.env.FAKE_CODEX_ASYNC_QUESTION_GATE;
+          void waitForGate(gate, gate ? 15_000 : 300).then(() => {
+            dump();
+            finishTurn();
           });
         } else if (mode === "approval" || mode === "windows-command") {
           const approvalCommand = mode === "windows-command" ? command : "rm -rf scratch";

@@ -2272,6 +2272,45 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(decision.error.message).toContain("array of questions");
   });
 
+  it("carries async questions on the completed message once, without opening a request", async () => {
+    await create({ mode: "async-question" });
+    await instance.adapter.sendTurn({ threadId: "t-async-question", text: "which source?" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const texts = recorder.events.filter(
+      (e): e is Extract<RuntimeEvent, { type: "item.completed"; itemType: "assistant_text" }> =>
+        e.type === "item.completed" && e.itemType === "assistant_text",
+    );
+    // item/started repeats the questions; only the completed item counts
+    expect(texts).toHaveLength(2);
+    expect(texts[0]).toMatchObject({
+      text: "Which source should I use?\n- Directly in OpenMausBot\n- The official server in Executor",
+      questions: [{
+        question: "Which source should I use?",
+        options: [{ label: "Directly in OpenMausBot" }, { label: "The official server in Executor" }],
+      }],
+    });
+    // the turn kept working and settled with its own reply
+    expect(texts[1]).toMatchObject({ text: "done from fake codex" });
+    expect(texts[1]).not.toHaveProperty("questions");
+    expect(recorder.events.filter((e) => e.type === "content.delta" && e.streamKind === "assistant_text")).toHaveLength(2);
+    expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+  });
+
+  it("keeps an async message as plain text when its questions offer nothing to pick", async () => {
+    for (const questions of ["please", [], [{ title: "   ", options: ["Orphan"] }, { title: "Anything else?", options: null }]]) {
+      await create({ mode: "async-question", environment: { FAKE_CODEX_ASYNC_QUESTIONS: JSON.stringify(questions) } });
+      await instance.adapter.sendTurn({ threadId: "t-async-plain", text: "ask loosely" });
+      await recorder.until((e) => e.type === "turn.completed");
+      const first = recorder.events.find((e) => e.type === "item.completed" && e.itemType === "assistant_text");
+      expect(first).toMatchObject({ text: expect.stringContaining("Which source should I use?") });
+      expect(first).not.toHaveProperty("questions");
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
   it("times out an ask with empty answers and a timeout-sourced resolve", async () => {
     // Hold the ask reply without completing the turn: a completed turn
     // starts the driver's child-reap loop, whose 25ms setTimeout poll would

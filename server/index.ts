@@ -114,7 +114,9 @@ import * as boat from "./boat.ts";
 import { cloudComputerRpc } from "./cloud-computer-tools.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import { isEffortLevel, type BotVisibility, type CardAnswerer, type ResolvedSender, type SteerQueueReason, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
-import { isPersistentQuestionCard, QUESTION_DISMISS_MESSAGE, shouldSettleRequestCard } from "../shared/ask-question.ts";
+import {
+  askQuestionSummary, asyncQuestionReply, isPersistentQuestionCard, QUESTION_DISMISS_MESSAGE, questionChoices, shouldSettleRequestCard,
+} from "../shared/ask-question.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "./boat-create-idempotency.ts";
@@ -5988,6 +5990,11 @@ async function respondToCard(input: {
   await answeringCardAs(auth, threadId, requestId, async () => {
     // peer-approval intercept, as the route: only a card on this thread
     if (card && resolvePeerComms(approvalBus, requestId, behavior)) return;
+    const asyncReply = await respondToAsyncQuestion(auth, threadId, cardMessage, { behavior, message }, "call");
+    if (asyncReply) {
+      if (asyncReply.status !== 200) result = { ok: false, status: asyncReply.status, error: String(asyncReply.body.error) };
+      return;
+    }
     const outcome = await answerRequest(
       threadId, botForThread(bot.id, threadId)?.modelSelection.instanceId ?? "", requestId, behavior, message,
       { id: bot.id, name: bot.name },
@@ -7620,6 +7627,25 @@ bus.subscribe((event: RuntimeEvent) => {
         // kept so "finished" can say what it finished with, rather than
         // just that something ended
         lastReply.set(event.threadId, text);
+        // Questions posted with the text while the turn carries on. No
+        // provider request waits on them, so the card's requestId is the
+        // harness's own: every client answers it through /respond, which
+        // sends the answer as the person's reply (respondToAsyncQuestion).
+        if (event.questions?.length) {
+          pushMessage({
+            role: "bot",
+            kind: "options",
+            card: {
+              title: "Your bot has a question",
+              subtitle: askQuestionSummary(event.questions),
+              options: questionChoices(event.questions) ?? [],
+              requestId: newId(),
+              requestType: "question",
+              questionRequest: { version: 1, questions: event.questions },
+              asyncQuestion: true,
+            },
+          });
+        }
       } else if (event.itemType === "assistant_image") {
         try {
           const decoded = decodeGeneratedImage(event.data);
@@ -9225,6 +9251,86 @@ async function acceptDirectSend(
   );
 }
 
+/** One answer per question card: retries of the same answer resolve to the
+ * message the first one recorded. */
+function questionAnswerSendId(threadId: string, requestId: string): string {
+  return `late-question-${createHash("sha256").update(`${threadId}:${requestId}`).digest("hex").slice(0, 32)}`;
+}
+
+/** Answer a card from Codex's request_user_input_async. The model asked and
+ * kept working, so nothing waits on the card: an answer is the person's
+ * reply, and closing the card sends nothing. Null when the card is not one
+ * of these, so the caller's ordinary path runs. */
+async function respondToAsyncQuestion(
+  auth: RequestAuth,
+  threadId: string,
+  cardMessage: Message | undefined,
+  input: { behavior: "allow" | "deny" | "answer"; message?: unknown; dismiss?: unknown },
+  via?: "call",
+): Promise<{ status: number; body: Record<string, unknown> } | null> {
+  const card = cardMessage?.card;
+  if (!cardMessage || !card?.asyncQuestion || !card.requestId) return null;
+  if (input.behavior !== "answer" || input.dismiss === true || input.message === QUESTION_DISMISS_MESSAGE) {
+    if (!card.dismissed) {
+      store.patchMessage(threadId, cardMessage.id, { card: { ...card, answered: card.answered ?? "deny", dismissed: true } });
+    }
+    return { status: 200, body: { ok: true, dismissed: true } };
+  }
+  const answer = typeof input.message === "string" ? asyncQuestionReply(input.message, card.questionRequest?.questions ?? []) : "";
+  if (!answer) return { status: 400, body: { error: "a question answer is required" } };
+  const owner = cardMessage.from?.botId ? store.bot(cardMessage.from.botId) : store.botByThread(threadId);
+  if (!owner) return { status: 409, body: { error: "the bot that asked this question is no longer available" } };
+  try {
+    const reply = await deliverAsyncQuestionAnswer(auth, threadId, card.requestId, answer, cardMessage, owner, via);
+    return {
+      status: 200,
+      body: { ok: true, outcome: "answered", ...(reply.steered ? { steered: true } : {}), ...(reply.queued ? { queued: true } : {}) },
+    };
+  } catch (error) {
+    return { status: 409, body: { error: error instanceof Error ? error.message : "the answer could not be delivered" } };
+  }
+}
+
+/** An async question's answer goes the way the composer sends a reply: into
+ * the running turn when it can steer, else queued or started. A room's
+ * composer never steers, and the late-answer path already sends a room
+ * reply exactly as that composer would. */
+async function deliverAsyncQuestionAnswer(
+  auth: RequestAuth,
+  threadId: string,
+  requestId: string,
+  answer: string,
+  cardMessage: Message,
+  owner: BotRecord,
+  via?: "call",
+): Promise<{ queued: boolean; steered: boolean }> {
+  if (store.groupByThread(threadId)) {
+    return { ...(await deliverLateQuestionAnswer(auth, threadId, requestId, answer, cardMessage, owner, via)), steered: false };
+  }
+  const current = store.messagesFor(threadId).find((message) => message.id === cardMessage.id)?.card;
+  // A retry of the recorded answer is let through: its sendId resolves to
+  // the message the first attempt wrote.
+  if (!current || current.dismissed || (current.answered && current.answeredText !== answer)) {
+    throw Object.assign(new Error("this question has already been answered"), { status: 409 });
+  }
+  const receipt = await acceptDirectSend({
+    botId: owner.id,
+    threadId,
+    text: answer,
+    sendId: questionAnswerSendId(threadId, requestId),
+    replyTo: cardMessage,
+    sender: messageSender(auth),
+    trigger: usageTriggerFor(auth),
+    via,
+    personPresent: auth.kind === "session" || DESKTOP_MANAGED,
+  });
+  const latest = store.messagesFor(threadId).find((message) => message.id === cardMessage.id)?.card;
+  if (latest && !latest.answered && !latest.dismissed) {
+    store.patchMessage(threadId, cardMessage.id, { card: { ...latest, answered: "answer", answeredText: answer, dismissed: false } });
+  }
+  return { queued: "queued" in receipt, steered: "steered" in receipt && receipt.steered === true };
+}
+
 /** A provider can finish its run before the owner answers. Persist that answer
  * as a normal reply and run/queue it against the original conversation. */
 async function deliverLateQuestionAnswer(
@@ -9250,7 +9356,7 @@ async function deliverLateQuestionAnswer(
   }
 
   const text = group ? `@${owner.name}: ${answer}` : answer;
-  const sendId = `late-question-${createHash("sha256").update(`${threadId}:${requestId}`).digest("hex").slice(0, 32)}`;
+  const sendId = questionAnswerSendId(threadId, requestId);
   const key = group
     ? `group:${group.id}:${threadId}:${sendId}`
     : `bot:${owner.id}:${threadId}:${sendId}`;
@@ -22769,6 +22875,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const requestId = String(body.requestId);
         const pending = store.messagesFor(bot.threadId).find((message) => message.card?.requestId === requestId);
+        const asyncReply = await respondToAsyncQuestion(auth, bot.threadId, pending, { behavior, message: body.message, dismiss: body.dismiss });
+        if (asyncReply) return json(res, asyncReply.status, asyncReply.body);
         if (isPersistentQuestionCard(pending?.card) && (body.dismiss === true || body.message === QUESTION_DISMISS_MESSAGE)) {
           if (!pending?.card) return json(res, 404, { error: "this question is no longer available" });
           if (pending.card.answered !== "answer" || pending.card.dismissed) {
@@ -22896,6 +23004,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // answerRequest closes an unreachable card, and a pending approval owns
         // the composer, so a dead end here locks the room for good.
         const pending = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId);
+        const asyncReply = await respondToAsyncQuestion(auth, threadId, pending, { behavior, message: body.message, dismiss: body.dismiss });
+        if (asyncReply) return json(res, asyncReply.status, asyncReply.body);
         if (isPersistentQuestionCard(pending?.card) && (body.dismiss === true || body.message === QUESTION_DISMISS_MESSAGE)) {
           if (!pending?.card) return json(res, 404, { error: "this question is no longer available" });
           if (pending.card.answered !== "answer" || pending.card.dismissed) {

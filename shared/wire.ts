@@ -568,6 +568,10 @@ export interface OptionCardData {
   skillRequest?: SkillRequestCardData;
   /** A provider's structured question set. */
   questionRequest?: QuestionRequestCardData;
+  /** The questions came with a message and the turn kept working (Codex's
+   * request_user_input_async). No provider request waits on this card: its
+   * answer is sent as the person's reply, and closing it sends nothing. */
+  asyncQuestion?: true;
 }
 
 /** Which app holds the microphone of a Live call: the desktop app (its own
