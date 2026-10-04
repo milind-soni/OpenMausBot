@@ -407,6 +407,9 @@ export interface AcpSupport {
     sessionModels: Array<{ modelId?: string; name?: string }>;
     /** Last model acknowledged by session/new/load, preserved for pooled turns. */
     currentModelId?: string;
+    /** Tell the person the session runs another model than the one picked.
+     * Said once per process for the same message, like the core fallback. */
+    notice: (message: string) => void;
   }): Promise<void>;
 }
 
@@ -2008,6 +2011,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     ? sessionResult.models.availableModels
                     : [],
                   currentModelId: session.sessionConfigResult?.models?.currentModelId,
+                  notice: (message) => {
+                    if (session.fallbackNotice === message) return;
+                    session.fallbackNotice = message;
+                    emit({ ...base(threadId, turnId), type: "runtime.notice", message });
+                  },
                 });
                 approvalUnconfirmed = false;
                 // initialize's currentModelId is the CLI default,
