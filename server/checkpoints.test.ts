@@ -1,9 +1,8 @@
 // checkpoints.ts contract, exercised against REAL git in mkdtemp folders:
 // snapshots are commits in a shadow repo (idempotent when nothing changed),
-// restore retains the pre-restore safety point (so a restore can be
-// undone), excluded/ignored files are neither snapshotted nor deleted, a
-// user's own git repo in the folder is never touched, and dangerous folders
-// (home) are refused outright.
+// excluded/ignored files are never snapshotted, the digest diff names what a
+// turn changed, a user's own git repo in the folder is never touched, and
+// dangerous folders (home) are refused outright.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
@@ -13,7 +12,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 
 // Shadow repos live under DATA_DIR, which server/testing/setup.ts points at a
 // disposable test home before any test module imports config.ts.
-import { CHECKPOINTS_DIR, checkpointsEnabled, diffWorkingTree, listCheckpoints, refusalReason, release, restore, snapshot } from "./checkpoints.ts";
+import { CHECKPOINTS_DIR, diffWorkingTree, refusalReason, release, snapshot } from "./checkpoints.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const scratchDirs: string[] = [];
@@ -30,6 +29,16 @@ function workspace() {
 }
 function shadowOf(bot: string, cwd: string): string {
   return join(CHECKPOINTS_DIR, bot, createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
+}
+
+/** The shadow repo's snapshots, newest first, without the empty base marker. */
+function snapshotsIn(bot: string, cwd: string): { hash: string; label: string }[] {
+  const lines = userGit(shadowOf(bot, cwd), "log", "--format=%H%x09%s").split("\n").filter(Boolean);
+  lines.pop(); // the root of the log is always the empty base marker
+  return lines.map((line) => {
+    const [hash, ...label] = line.split("\t");
+    return { hash: hash!, label: label.join("\t") };
+  });
 }
 
 /** The user's own git, as the user would run it — no shadow env involved. */
@@ -54,33 +63,27 @@ describe("snapshot", () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "one");
     expect(await snapshot(bot, cwd, "cancelled capture", AbortSignal.abort())).toBeNull();
-    expect(await listCheckpoints(bot, cwd)).toEqual([]);
+    expect(existsSync(shadowOf(bot, cwd))).toBe(false);
     expect(await snapshot(bot, cwd, "next turn")).toMatch(/^[0-9a-f]{40}$/);
   });
 
   it("creates a checkpoint commit and is idempotent while nothing changes", async () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "one");
-    const before = Date.now();
     const first = await snapshot(bot, cwd, "turn 11111111");
     expect(first).toMatch(/^[0-9a-f]{40}$/);
 
     // unchanged folder → same hash, no second commit
     const again = await snapshot(bot, cwd, "turn 22222222");
     expect(again).toBe(first);
-    const unchanged = await listCheckpoints(bot, cwd);
-    expect(unchanged).toHaveLength(1);
-    expect(unchanged[0]).toMatchObject({ hash: first, label: "turn 11111111" });
-    expect(unchanged[0]!.at).toBeGreaterThanOrEqual(before - 2000);
-    expect(unchanged[0]!.at).toBeLessThanOrEqual(Date.now() + 2000);
+    expect(snapshotsIn(bot, cwd)).toEqual([{ hash: first, label: "turn 11111111" }]);
 
     // a real change → a new checkpoint, newest first
     writeFileSync(join(cwd, "a.txt"), "two");
     const second = await snapshot(bot, cwd, "turn 33333333");
     expect(second).toMatch(/^[0-9a-f]{40}$/);
     expect(second).not.toBe(first);
-    const list = await listCheckpoints(bot, cwd);
-    expect(list.map((c) => c.label)).toEqual(["turn 33333333"]);
+    expect(snapshotsIn(bot, cwd).map((c) => c.label)).toEqual(["turn 33333333"]);
   });
 
   it("keeps only the newest usable checkpoint and reclaims obsolete content", async () => {
@@ -91,15 +94,9 @@ describe("snapshot", () => {
     const oldBlob = userGit(shadow, "rev-parse", `${first}:a.txt`).trim();
     writeFileSync(join(cwd, "a.txt"), "latest payload");
     const latest = await snapshot(bot, cwd, "latest turn");
-    expect((await listCheckpoints(bot, cwd)).map(c => c.hash)).toEqual([latest]);
+    expect(snapshotsIn(bot, cwd).map(c => c.hash)).toEqual([latest]);
     expect(() => userGit(shadow, "cat-file", "-e", oldBlob)).toThrow();
     expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("latest payload");
-    writeFileSync(join(cwd, "a.txt"), "uncommitted edit");
-    expect(await restore(bot, cwd, latest!)).toEqual({ ok: true });
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("latest payload");
-    const [undo] = await listCheckpoints(bot, cwd);
-    expect(await restore(bot, cwd, undo!.hash)).toEqual({ ok: true });
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("uncommitted edit");
   });
 
   // Two threads of one bot work in one folder at the same time: thread B's
@@ -114,11 +111,9 @@ describe("snapshot", () => {
     const hashB = await snapshot(bot, cwd, "turn B", undefined, { pin: "dispatch-B" });
     expect(hashB).not.toBe(hashA);
     // only the newest is listed, as always — but A's commit is still there
-    expect((await listCheckpoints(bot, cwd)).map(c => c.hash)).toEqual([hashB]);
+    expect(snapshotsIn(bot, cwd).map(c => c.hash)).toEqual([hashB]);
     expect(await diffWorkingTree(bot, cwd, hashA!)).toEqual({ changed: ["a.txt"], added: [], deleted: [] });
-    expect(await restore(bot, cwd, hashA!)).toEqual({ ok: true });
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("before A");
-    // the restore's safety point ("A edited") and both pins are intact
+    // both pinned commits are intact
     expect(() => userGit(shadow, "cat-file", "-e", `${hashA}^{commit}`)).not.toThrow();
     expect(() => userGit(shadow, "cat-file", "-e", `${hashB}^{commit}`)).not.toThrow();
     // both turns end → the next snapshot's cleanup reclaims A's commit
@@ -150,7 +145,7 @@ describe("snapshot", () => {
     expect(() => userGit(shadow, "cat-file", "-e", `${leaked}^{commit}`)).toThrow();
   });
 
-  it("excludes tagged cache directories while preserving their live files", async () => {
+  it("excludes tagged cache directories", async () => {
     const { bot, cwd } = workspace();
     const cache = join(cwd, "custom-target");
     mkdirSync(cache);
@@ -162,11 +157,19 @@ describe("snapshot", () => {
     const shadow = join(CHECKPOINTS_DIR, bot,
       createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
     expect(userGit(shadow, "ls-tree", "-r", "--name-only", latest!).trim()).toBe("a.txt");
-    writeFileSync(join(cache, "artifact"), "new build");
-    writeFileSync(join(cwd, "a.txt"), "edited source");
-    expect(await restore(bot, cwd, latest!)).toEqual({ ok: true });
-    expect(readFileSync(join(cache, "artifact"), "utf8")).toBe("new build");
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("source");
+  });
+
+  it("never snapshots excluded or gitignored files", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    writeFileSync(join(cwd, ".gitignore"), "secret.txt\n");
+    writeFileSync(join(cwd, "secret.txt"), "user-ignored, not checkpointed");
+    mkdirSync(join(cwd, "node_modules"));
+    writeFileSync(join(cwd, "node_modules", "x.txt"), "installed dependency");
+    writeFileSync(join(cwd, ".env"), "API_KEY=hunter2");
+    writeFileSync(join(cwd, "run.log"), "log line");
+    const checkpoint = await snapshot(bot, cwd, "turn 1");
+    expect(userGit(shadowOf(bot, cwd), "ls-tree", "-r", "--name-only", checkpoint!).trim().split("\n")).toEqual([".gitignore", "a.txt"]);
   });
 
   it("compacts legacy history even when the workspace has not changed", async () => {
@@ -180,9 +183,9 @@ describe("snapshot", () => {
       userGit(shadow, "--work-tree", cwd, "add", "-A");
       userGit(shadow, "commit", "-m", text);
     }
-    expect(await listCheckpoints(bot, cwd)).toHaveLength(3);
+    expect(snapshotsIn(bot, cwd)).toHaveLength(3);
     const hash = await snapshot(bot, cwd, "unchanged");
-    expect(await listCheckpoints(bot, cwd)).toEqual([expect.objectContaining({ hash, label: "latest" })]);
+    expect(snapshotsIn(bot, cwd)).toEqual([{ hash, label: "latest" }]);
     expect(userGit(shadow, "rev-list", "--count", "HEAD").trim()).toBe("2");
     expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("latest");
   });
@@ -197,7 +200,7 @@ describe("snapshot", () => {
     chmodSync(locked, 0o000);
     try {
       expect(await snapshot(bot, cwd, "incomplete")).toBeNull();
-      expect((await listCheckpoints(bot, cwd)).map(c => c.hash)).toEqual([first]);
+      expect(snapshotsIn(bot, cwd).map(c => c.hash)).toEqual([first]);
       expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("unfinished");
     } finally {
       chmodSync(locked, 0o600);
@@ -222,94 +225,6 @@ describe("snapshot", () => {
     for (const hash of hashes) expect(hash).toMatch(/^[0-9a-f]{40}$/);
     // all three saw the same unchanged tree → all landed on one commit
     expect(new Set(hashes).size).toBe(1);
-  });
-});
-
-describe("restore", () => {
-  it("rolls modified and newly created files back to the checkpoint, and can undo the rollback", async () => {
-    const { bot, cwd } = workspace();
-    writeFileSync(join(cwd, "a.txt"), "one");
-    const checkpoint = await snapshot(bot, cwd, "turn 1");
-    expect(checkpoint).not.toBeNull();
-
-    // the "turn" edits a file and creates a brand-new untracked one
-    writeFileSync(join(cwd, "a.txt"), "two");
-    writeFileSync(join(cwd, "b.txt"), "made by the turn");
-
-    const result = await restore(bot, cwd, checkpoint!);
-    expect(result).toEqual({ ok: true });
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("one");
-    expect(existsSync(join(cwd, "b.txt"))).toBe(false);
-
-    // the pre-restore state became a checkpoint itself ("before restore"),
-    // because HEAD never moved — so the restore is undoable
-    const list = await listCheckpoints(bot, cwd);
-    const safety = list.find((c) => c.label === "before restore");
-    expect(safety).toBeDefined();
-    expect(list).toHaveLength(1);
-    const undo = await restore(bot, cwd, safety!.hash);
-    expect(undo).toEqual({ ok: true });
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("two");
-    expect(readFileSync(join(cwd, "b.txt"), "utf8")).toBe("made by the turn");
-  });
-
-  it("leaves excluded and gitignored files alone in both directions", async () => {
-    const { bot, cwd } = workspace();
-    writeFileSync(join(cwd, "a.txt"), "one");
-    writeFileSync(join(cwd, ".gitignore"), "secret.txt\n");
-    writeFileSync(join(cwd, "secret.txt"), "user-ignored, not checkpointed");
-    mkdirSync(join(cwd, "node_modules"));
-    writeFileSync(join(cwd, "node_modules", "x.txt"), "installed dependency");
-    writeFileSync(join(cwd, ".env"), "API_KEY=hunter2");
-    writeFileSync(join(cwd, "run.log"), "log line");
-    const checkpoint = await snapshot(bot, cwd, "turn 1");
-
-    writeFileSync(join(cwd, "a.txt"), "two");
-    writeFileSync(join(cwd, "node_modules", "x.txt"), "changed by npm install");
-    const result = await restore(bot, cwd, checkpoint!);
-    expect(result).toEqual({ ok: true });
-
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("one");
-    // excluded files: never snapshotted, so never reverted — and `git clean
-    // -fd` (no -x) never deletes them either
-    expect(readFileSync(join(cwd, "node_modules", "x.txt"), "utf8")).toBe("changed by npm install");
-    expect(readFileSync(join(cwd, ".env"), "utf8")).toBe("API_KEY=hunter2");
-    expect(readFileSync(join(cwd, "secret.txt"), "utf8")).toBe("user-ignored, not checkpointed");
-    expect(existsSync(join(cwd, "run.log"))).toBe(true);
-  });
-
-  it.skipIf(process.platform === "win32")("refuses to restore when the safety checkpoint misses a path", async () => {
-    const { bot, cwd } = workspace();
-    writeFileSync(join(cwd, "a.txt"), "one");
-    const checkpoint = await snapshot(bot, cwd, "turn 1");
-
-    // Git cannot read this file, but `git clean` can still unlink it. The
-    // safety snapshot may retain the ordinary edit; restore must stop before
-    // clean can delete the path it missed.
-    const locked = join(cwd, "locked.txt");
-    writeFileSync(locked, "unreadable");
-    chmodSync(locked, 0o000);
-    writeFileSync(join(cwd, "a.txt"), "two");
-
-    const result = await restore(bot, cwd, checkpoint!);
-    expect(result).toEqual({
-      ok: false,
-      error: "restore stopped because some current files could not be added to the safety checkpoint",
-    });
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("two");
-    expect(existsSync(locked)).toBe(true);
-  });
-
-  it("refuses garbage hashes and the empty base marker", async () => {
-    const { bot, cwd } = workspace();
-    writeFileSync(join(cwd, "a.txt"), "one");
-    await snapshot(bot, cwd, "turn 1");
-    const bogus = await restore(bot, cwd, "0123456789abcdef0123456789abcdef01234567");
-    expect(bogus.ok).toBe(false);
-    const revspec = await restore(bot, cwd, "HEAD~1");
-    expect(revspec.ok).toBe(false);
-    // the folder is intact either way
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("one");
   });
 });
 
@@ -347,14 +262,13 @@ describe("nested and user-owned git repos", () => {
     const checkpoint = await snapshot(bot, cwd, "turn 1");
     expect(checkpoint).toMatch(/^[0-9a-f]{40}$/);
     writeFileSync(join(cwd, "a.txt"), "two");
-    expect((await restore(bot, cwd, checkpoint!)).ok).toBe(true);
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("one");
+    expect(await diffWorkingTree(bot, cwd, checkpoint!)).toEqual({ changed: ["a.txt"], added: [], deleted: [] });
 
-    // the user's repository: HEAD unmoved, log intact, status clean (a.txt
-    // is back at the committed content), reflog free of checkpoint commits
+    // the user's repository: HEAD unmoved, log intact, and the edit still
+    // unstaged in the user's own index (the diff staged only the shadow's)
     expect(userGit(cwd, "rev-parse", "HEAD").trim()).toBe(userHead);
     expect(userGit(cwd, "log", "--format=%s").trim()).toBe("user's own commit");
-    expect(userGit(cwd, "status", "--porcelain").trim()).toBe("");
+    expect(userGit(cwd, "status", "--porcelain")).toBe(" M a.txt\n");
   });
 });
 
@@ -368,13 +282,11 @@ describe("refusals", () => {
     expect(refusalReason("relative/path")).not.toBeNull();
 
     expect(await snapshot(bot, homedir(), "turn 1")).toBeNull();
-    expect(await checkpointsEnabled(bot, homedir())).toBe(false);
-    const result = await restore(bot, homedir(), "0123456789abcdef0123456789abcdef01234567");
-    expect(result.ok).toBe(false);
-    // refusal is a per-folder condition, not a failure: the bot is still
-    // enabled in a legitimate folder afterwards
+    // refusal is a per-folder condition, not a failure: the bot still
+    // snapshots a legitimate folder afterwards
     const { cwd } = workspace();
-    expect(await checkpointsEnabled(bot, cwd)).toBe(true);
+    writeFileSync(join(cwd, "a.txt"), "one");
+    expect(await snapshot(bot, cwd, "turn 2")).toMatch(/^[0-9a-f]{40}$/);
   });
 
   it("refuses a symlink that resolves to the home folder", async () => {
@@ -384,14 +296,12 @@ describe("refusals", () => {
 
     expect(refusalReason(linkedHome)).toBe("checkpoints are not taken in the home folder");
     expect(await snapshot(bot, linkedHome, "turn 1")).toBeNull();
-    expect(await checkpointsEnabled(bot, linkedHome)).toBe(false);
   });
 
   // Windows folder names are case-insensitive: every spelling below is the
   // same folder on disk. Only side-effect-free checks here — on a build that
   // missed the refusal, a snapshot would stage the whole home folder.
-  it.runIf(process.platform === "win32")("refuses the home and protected folders in any Windows spelling", async () => {
-    const { bot } = workspace();
+  it.runIf(process.platform === "win32")("refuses the home and protected folders in any Windows spelling", () => {
     expect(refusalReason(homedir().toLowerCase())).toBe("checkpoints are not taken in the home folder");
     expect(refusalReason(homedir().toUpperCase())).toBe("checkpoints are not taken in the home folder");
     for (const [name, spelling] of [["Desktop", "DESKTOP"], ["Documents", "documents"], ["Downloads", "DownLoads"]]) {
@@ -406,18 +316,11 @@ describe("refusals", () => {
     if (existsSync(shortDocuments) && existsSync(join(homedir(), "Documents"))) {
       expect(refusalReason(shortDocuments)).toBe("checkpoints are not taken in the Documents folder");
     }
-    expect(await checkpointsEnabled(bot, homedir().toUpperCase())).toBe(false);
-  });
-
-  it("lists nothing (and creates nothing) for a folder never snapshotted", async () => {
-    const { bot, cwd } = workspace();
-    expect(await listCheckpoints(bot, cwd)).toEqual([]);
-    expect(existsSync(join(CHECKPOINTS_DIR, bot))).toBe(false);
   });
 });
 
 describe("diffWorkingTree", () => {
-  it("names settled changes without replacing the pre-turn restore point", async () => {
+  it("names settled changes without replacing the pre-turn snapshot", async () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "keep.txt"), "same");
     writeFileSync(join(cwd, "edit.txt"), "before");
@@ -432,11 +335,7 @@ describe("diffWorkingTree", () => {
       added: ["new.txt"],
       deleted: ["gone.txt"],
     });
-    expect((await listCheckpoints(bot, cwd)).map(c => c.hash)).toEqual([before]);
-    expect(await restore(bot, cwd, before!)).toEqual({ ok: true });
-    expect(readFileSync(join(cwd, "edit.txt"), "utf8")).toBe("before");
-    expect(readFileSync(join(cwd, "gone.txt"), "utf8")).toBe("bye");
-    expect(existsSync(join(cwd, "new.txt"))).toBe(false);
+    expect(snapshotsIn(bot, cwd).map(c => c.hash)).toEqual([before]);
   });
 
   it("reports no changes and refuses protected folders", async () => {

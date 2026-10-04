@@ -6422,9 +6422,6 @@ const orphanBoatLifecycleBusyIds = new Set<string>();
 const boatInventoryRequestsBusyIds = new Set<string>();
 type RemoteComputerProvider = "box" | "vps";
 const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
-// A restore mutates and cleans a project work tree. Claim the bot across the
-// entire async Git operation so a turn cannot start in that folder midway.
-const checkpointRestoreLeases = new Set<string>();
 /** The effective idle window, read from config so a Settings change applies
  * to both new and already-armed timers (see the config route). */
 const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
@@ -9271,11 +9268,6 @@ async function startTurn(
   // A workspace at its monthly spend limit starts no turn of any kind: a
   // person's message, a routine, a peer hop or a webhook all stop here.
   assertWithinBudget(cfg, DATA_DIR);
-  if (checkpointRestoreLeases.has(botId)) {
-    throw Object.assign(new Error("this bot's project files are being restored — wait for the restore to finish"), {
-      status: 409,
-    });
-  }
   if (boatLifecycleBusyBots.has(botId)) {
     throw Object.assign(new Error("this bot's cloud computer is being changed — wait for it to finish"), { status: 409 });
   }
@@ -9724,7 +9716,7 @@ async function startTurn(
       // Checkpoint explicit project folders, where a bot can overwrite the
       // user's work. Its private OpenMaus workspace is app-owned and changes
       // on nearly every ordinary chat; snapshotting it would add hidden disk
-      // and process overhead without a user project to restore.
+      // and process overhead without a user project to list changes for.
       const checkpointCwd = cwd && cwd !== privateWorkspace ? cwd : undefined;
       // dweb is opt-in: without an explicit daemon URL, do not advertise
       // tools that would fail on every call or spawn an unnecessary proxy.
@@ -15309,7 +15301,7 @@ const workspaceBackupAccess = {
       !routines?.isTicking && !calendarCalls?.isTicking &&
       !localVmImageBusy && !localVmProvisionBusy && !localVmModeChangeBusy &&
       !localVmLifecycleBusy.size && !boatLifecycleBusyBots.size && !vpsPreviewRequests.size && !orphanBoatLifecycleBusyIds.size &&
-      !computerProviderConfigTransitions.size && !checkpointRestoreLeases.size &&
+      !computerProviderConfigTransitions.size &&
       teamComputers.list().every(computer => !teamComputerInUse(computer)) &&
       store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !botComputerControlSnapshot(bot.id).held) &&
       store.groups.every((group) => !groupIsWorking(group)),
@@ -21722,49 +21714,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const visible = wireBot(updated);
       broadcast({ kind: "bot", bot: visible });
       return json(res, 200, { bot: visible });
-    }
-
-    // ── workspace checkpoints: per-turn shadow-git snapshots ────────────
-    // The list endpoint is the source of truth (turns store nothing), and
-    // `enabled` tells the UI whether snapshots can happen here at all —
-    // false for refused folders (home, Desktop…), a missing git, or a bot
-    // whose checkpoints failed earlier this session.
-    m = path.match(/^\/api\/bots\/([\w-]+)\/checkpoints$/);
-    if (m && method === "GET") {
-      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
-      const cwd = url.searchParams.get("cwd") ?? "";
-      if (!cwd.trim()) return json(res, 400, { error: "cwd query parameter required" });
-      return json(res, 200, {
-        checkpoints: await checkpoints.listCheckpoints(m[1]!, cwd),
-        enabled: await checkpoints.checkpointsEnabled(m[1]!, cwd),
-      });
-    }
-    m = path.match(/^\/api\/bots\/([\w-]+)\/checkpoints\/restore$/);
-    if (m && method === "POST") {
-      const bot = store.bot(m[1]);
-      if (!bot) return json(res, 404, { error: "no such bot" });
-      const parsed = z
-        .object({ cwd: z.string().min(1), hash: z.string().regex(/^[0-9a-f]{40}$/) })
-        .safeParse(await readBody(req));
-      if (!parsed.success) {
-        return json(res, 400, { error: "cwd (absolute path) and hash (full 40-character checkpoint hash) required" });
-      }
-      // Claim synchronously with the busy check. startTurn checks the same
-      // lease before reserving the bot, so no turn can enter during the
-      // awaited Git operation.
-      if (bot.busy) return json(res, 409, { error: "the bot is working — stop the turn before restoring files" });
-      if (checkpointRestoreLeases.has(bot.id)) {
-        return json(res, 409, { error: "this bot's project files are already being restored" });
-      }
-      checkpointRestoreLeases.add(bot.id);
-      let result: checkpoints.RestoreResult;
-      try {
-        result = await checkpoints.restore(bot.id, parsed.data.cwd, parsed.data.hash);
-      } finally {
-        checkpointRestoreLeases.delete(bot.id);
-      }
-      if (!result.ok) return json(res, 400, { error: result.error });
-      return json(res, 200, { ok: true });
     }
 
     // onboarding/ask cards persist their answered/dismissed state

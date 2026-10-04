@@ -2,17 +2,15 @@
 //
 // Before a turn's engine can touch files, the working folder is snapshotted
 // into a shadow repo at DATA_DIR/checkpoints/<botId>/<sha256(cwd)[..16]>/.git.
+// When the turn settles, its digest diffs the folder against that snapshot to
+// list the files the turn changed, added and deleted.
 // The user's own .git (if the folder is a repository) is never read, written,
 // or locked: every git call runs with GIT_DIR pointing at the shadow repo and
 // GIT_WORK_TREE pointing at the folder, so the shadow index is the only index
 // involved — and git always skips directories named .git when walking a work
 // tree, so the user's repository internals are invisible to the snapshot.
 //
-// Restore is redo-friendly on purpose: it commits a safety point, then moves
-// the index and work tree back with `git restore --source` + `git clean -fd`
-// while HEAD keeps the safety point — so the state just replaced is the one
-// retained checkpoint, and "undo the undo" is one more restore. Ignored/excluded files
-// (node_modules, .env, media) are never snapshotted and never removed by one.
+// Ignored/excluded files (node_modules, .env, media) are never snapshotted.
 //
 // Failure policy: checkpointing is best-effort convenience, never load-bearing.
 // Any git failure disables the feature for that bot for the rest of the
@@ -20,9 +18,9 @@
 //
 // Adapted from the checkpoint designs of Cline, Roo-Code, and Gemini CLI
 // (all Apache-2.0): the per-call GIT_DIR/GIT_WORK_TREE/GIT_CONFIG_* env
-// override and restore shape follow Gemini CLI's gitService, the sanitized
-// GIT_* env list and the exclude categories follow Roo-Code's checkpoint
-// service, and the snapshot-before-every-turn cadence follows Cline.
+// override follows Gemini CLI's gitService, the sanitized GIT_* env list and
+// the exclude categories follow Roo-Code's checkpoint service, and the
+// snapshot-before-every-turn cadence follows Cline.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
@@ -33,19 +31,15 @@ import { DATA_DIR } from "./config.ts";
 
 export const CHECKPOINTS_DIR = join(DATA_DIR, "checkpoints");
 
-export type Checkpoint = { hash: string; at: number; label: string };
-export type RestoreResult = { ok: true } | { ok: false; error: string };
-
-/** Full sha1 hex only. The API hands out full hashes; accepting anything
- * looser would let arbitrary revspecs ("HEAD~3", "main@{u}") reach git. */
+/** Full sha1 hex only: accepting anything looser would let arbitrary
+ * revspecs ("HEAD~3", "main@{u}") reach git. */
 const COMMIT_HASH = /^[0-9a-f]{40}$/;
 
-// What a checkpoint deliberately does not carry. Restores must never delete
-// these either: `git clean -fd` (without -x) leaves ignored files alone, so
-// everything listed here survives a rollback untouched. Categories follow
-// Roo-Code's checkpoint excludes: VCS internals, dependency trees, build
-// output, caches, logs, secrets, media, archives, databases, model weights.
-const EXCLUDES = `# OpenMausBot checkpoint excludes — never snapshotted, never removed by restore
+// What a checkpoint deliberately does not carry, so a digest never lists
+// these either. Categories follow Roo-Code's checkpoint excludes: VCS
+// internals, dependency trees, build output, caches, logs, secrets, media,
+// archives, databases, model weights.
+const EXCLUDES = `# OpenMausBot checkpoint excludes — never snapshotted
 .git/
 .svn/
 .hg/
@@ -128,8 +122,8 @@ Thumbs.db
 
 // gpgsign off: the user's global config may demand signing, and a shadow
 // commit must never block on a passphrase prompt. Automatic GC stays off:
-// explicit GC runs inside the same serialization as snapshot/restore, after
-// their source objects are no longer needed.
+// explicit GC runs inside the same serialization as each snapshot, after the
+// previous snapshot's objects are no longer needed.
 const GITCONFIG = "[commit]\n\tgpgsign = false\n[core]\n\tautocrlf = false\n[gc]\n\tauto = 0\n";
 
 /** One failed git call disables checkpoints for that bot until restart —
@@ -152,8 +146,7 @@ function gitAvailable(): Promise<boolean> {
 
 /** Folders a checkpoint must never be taken in: missing paths, the sprawling
  * personal folders (home, Desktop, Documents, Downloads), and the filesystem
- * root — snapshotting those would trawl unbounded personal data into a repo,
- * and a restore's `git clean -fd` there would be an act of vandalism. */
+ * root — snapshotting those would trawl unbounded personal data into a repo. */
 export function refusalReason(cwd: string): string | null {
   if (!isAbsolute(cwd)) return "the working folder must be an absolute path";
   const requested = resolve(cwd);
@@ -212,9 +205,9 @@ function gitEnv(shadow: string, cwd: string): NodeJS.ProcessEnv {
 }
 
 /** Run one git command against the shadow repo. cwd is the WORK TREE — the
- * "." pathspec in add/restore resolves relative to it. A hung git (index
- * lock, dead network filesystem) would otherwise jam the per-repo queue for
- * the whole session, so every call carries a hard timeout. */
+ * "." pathspec in add resolves relative to it. A hung git (index lock, dead
+ * network filesystem) would otherwise jam the per-repo queue for the whole
+ * session, so every call carries a hard timeout. */
 function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<string> {
   return new Promise((resolvePromise, rejectPromise) => {
     signal?.throwIfAborted();
@@ -250,10 +243,10 @@ function hasStagedChanges(cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSig
   });
 }
 
-// One operation at a time per shadow repo: snapshots and restores against the
-// same folder queue behind each other (git's index lock would fail the loser
-// anyway — this turns a crash into a wait). The stored tail never rejects, so
-// one failed operation can't poison the queue.
+// One operation at a time per shadow repo: snapshots, diffs and pin releases
+// against the same folder queue behind each other (git's index lock would
+// fail the loser anyway — this turns a crash into a wait). The stored tail
+// never rejects, so one failed operation can't poison the queue.
 const chains = new Map<string, Promise<void>>();
 function serialize<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const tail = chains.get(key) ?? Promise.resolve();
@@ -271,9 +264,9 @@ function serialize<T>(key: string, fn: () => Promise<T>): Promise<T> {
 // A ref per running turn. Every snapshot parents only the empty base and the
 // cleanup after it prunes whatever HEAD no longer reaches — so when a bot's
 // threads work side by side in one folder, a sibling's snapshot would discard
-// the pre-turn commit a still-running turn diffs against at its end (and the
-// point a user could restore it to). A pin keeps that commit reachable until
-// release(). The pin's name is hashed so any token is a legal ref name.
+// the pre-turn commit a still-running turn diffs against at its end. A pin
+// keeps that commit reachable until release(). The pin's name is hashed so
+// any token is a legal ref name.
 const LIVE_REFS = "refs/omb-live/";
 function liveRef(pin: string): string {
   return LIVE_REFS + createHash("sha256").update(pin).digest("hex").slice(0, 16);
@@ -293,9 +286,7 @@ async function sweepLiveRefs(cwd: string, env: NodeJS.ProcessEnv, shadow: string
 /** Create the shadow repo on first use; self-heal its config files on every
  * use (they are tiny, and rewriting them lets exclude-list updates reach
  * shadows that already exist). The base commit is an EMPTY marker so HEAD
- * always resolves — it is filtered from listings and refused as a restore
- * target, because "restore to empty" on a user's own project folder would
- * delete their files. */
+ * always resolves; every snapshot parents only it. */
 async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
   mkdirSync(shadow, { recursive: true, mode: 0o700 });
@@ -362,15 +353,14 @@ async function commitAll(cwd: string, env: NodeJS.ProcessEnv, label: string, sig
 }
 
 async function collectObsolete(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
-  // No caller may still need an unpinned previous tree. In particular, restore
-  // runs this only AFTER using its source; the safety checkpoint stays
-  // reachable, and so does every commit a live turn still pins.
+  // No caller may still need an unpinned previous tree: HEAD stays reachable,
+  // and so does every commit a live turn still pins.
   try {
     await runGit(["reflog", "expire", "--expire=now", "--all"], cwd, env);
     await runGit(["gc", "--prune=now", "--quiet"], cwd, env);
   } catch {
-    // A busy/full disk must not hide an otherwise usable restore point.
-    console.warn("checkpoint cleanup deferred; the latest restore point is preserved");
+    // A busy/full disk must not hide an otherwise usable snapshot.
+    console.warn("checkpoint cleanup deferred; the latest snapshot is preserved");
   }
 }
 
@@ -426,7 +416,7 @@ export interface CheckpointDiff {
   deleted: string[];
 }
 
-/** Diff the settled workspace without replacing its pre-turn restore point.
+/** Diff the settled workspace without replacing its pre-turn snapshot.
  * Staging is confined to the shadow index; the user's files and Git are untouched. */
 export async function diffWorkingTree(botId: string, cwd: string, fromHash: string, signal?: AbortSignal): Promise<CheckpointDiff | null> {
   if (signal?.aborted || !COMMIT_HASH.test(fromHash)) return null;
@@ -453,97 +443,5 @@ export async function diffWorkingTree(botId: string, cwd: string, fromHash: stri
     });
   } catch {
     return null;
-  }
-}
-
-/** The latest usable checkpoint (plus legacy history until the next snapshot). Empty when nothing
- * was ever snapshotted (listing never creates the shadow repo). The empty
- * base marker is omitted — it is not a state anyone should return to. */
-export async function listCheckpoints(botId: string, cwd: string): Promise<Checkpoint[]> {
-  if (disabledBots.has(botId)) return [];
-  if (!(await gitAvailable())) return [];
-  if (refusalReason(cwd) !== null) return [];
-  try {
-    const worktree = realpathSync(resolve(cwd));
-    const shadow = shadowDir(botId, worktree);
-    if (!existsSync(join(shadow, ".git", "HEAD"))) return [];
-    return await serialize(shadow, async () => {
-      const env = gitEnv(shadow, worktree);
-      const out = await runGit(["log", "--format=%H%x09%ct%x09%s"], worktree, env);
-      const lines = out.split("\n").filter((line) => line.trim() !== "");
-      lines.pop(); // the root of the log is always the empty base marker
-      return lines.flatMap((line) => {
-        const [hash, seconds, ...subject] = line.split("\t");
-        if (!hash || !COMMIT_HASH.test(hash)) return [];
-        return [{ hash, at: Number(seconds) * 1000, label: subject.join("\t") }];
-      });
-    });
-  } catch (e) {
-    disable(botId, e instanceof Error ? e.message : String(e));
-    return [];
-  }
-}
-
-/** Can this bot take/restore checkpoints in this folder right now? */
-export async function checkpointsEnabled(botId: string, cwd: string): Promise<boolean> {
-  return !disabledBots.has(botId) && (await gitAvailable()) && refusalReason(cwd) === null;
-}
-
-/** Move the folder's files back to a checkpoint. The current state is
- * committed first ("before restore"), so the restore itself shows up as a
- * checkpoint and can be undone; HEAD never moves backwards, only forward
- * over the "restored" commit. Excluded and gitignored files are untouched. */
-export async function restore(botId: string, cwd: string, hash: string): Promise<RestoreResult> {
-  if (disabledBots.has(botId)) {
-    return { ok: false, error: "checkpoints are disabled for this bot until the app restarts (an earlier snapshot failed — see the server log)" };
-  }
-  if (!(await gitAvailable())) return { ok: false, error: "git is not installed on this machine" };
-  const reason = refusalReason(cwd);
-  if (reason !== null) return { ok: false, error: reason };
-  if (!COMMIT_HASH.test(hash)) return { ok: false, error: "hash must be a full 40-character checkpoint hash" };
-  try {
-    const worktree = realpathSync(resolve(cwd));
-    const shadow = shadowDir(botId, worktree);
-    if (!existsSync(join(shadow, ".git", "HEAD"))) {
-      return { ok: false, error: "no checkpoints exist for this folder" };
-    }
-    return await serialize(shadow, async (): Promise<RestoreResult> => {
-      const env = gitEnv(shadow, worktree);
-      try {
-        await runGit(["cat-file", "-e", `${hash}^{commit}`], worktree, env);
-      } catch {
-        return { ok: false, error: "no such checkpoint" };
-      }
-      const base = (await runGit(["rev-list", "--max-parents=0", "HEAD"], worktree, env)).trim();
-      if (base === hash) return { ok: false, error: "that is the empty base marker, not a checkpoint" };
-      // safety point: whatever is about to be overwritten becomes restorable
-      await ensureShadow(worktree, env, shadow);
-      const safety = await commitAll(worktree, env, "before restore");
-      if (!safety.complete) {
-        return {
-          ok: false,
-          error: "restore stopped because some current files could not be added to the safety checkpoint",
-        };
-      }
-      // Index AND work tree move to the source; HEAD stays put. --staged
-      // matters: with a work-tree-only restore, a file that exists in the
-      // source but not in the index (deleted in a later checkpoint, now
-      // resurrected) would be untracked the moment restore recreates it —
-      // and the clean below would delete it right back. Restoring the index
-      // too makes clean blind to everything the checkpoint owns; what clean
-      // then sweeps is exactly the strays the safety commit could not stage
-      // (unreadable files, add races) — never ignored/excluded files (no -x).
-      await runGit(["restore", "--source", hash, "--staged", "--worktree", "--", "."], worktree, env);
-      await runGit(["clean", "-fd"], worktree, env);
-      // Retain the pre-restore safety point, not another copy of the state
-      // now on disk. Reset only the shadow index so it cannot pin old blobs.
-      await runGit(["read-tree", "HEAD"], worktree, env);
-      await collectObsolete(worktree, env);
-      return { ok: true };
-    });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    disable(botId, message);
-    return { ok: false, error: `restore failed: ${message}` };
   }
 }

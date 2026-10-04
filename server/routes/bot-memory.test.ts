@@ -183,7 +183,6 @@ describe("the bot-memory module through the route table", () => {
       ["GET", "/api/bots/bot-123/memory/journal/e/revert/extra"],
       // No topic route: the panel reads a topic through /memory/file.
       ["GET", "/api/bots/bot-123/memory/topics/x.md"],
-      ["GET", "/api/bots/bot-123/checkpoints"],
     ] as const) {
       const response = await fetch(`${base}${path}`, { method });
       expect(await response.json(), `${method} ${path}`).toEqual({ from: "inline routes" });
