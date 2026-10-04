@@ -44,7 +44,7 @@ export function IdentitySection({
 
       <div>
         <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <label htmlFor={`bot-name-${bot.id}`} className="text-[13px] text-ink-secondary">Name</label>
+          <label htmlFor={`bot-name-${bot.id}`} className="text-[13px] text-ink-secondary">{t("identitySection.name")}</label>
           {draft && <div className="flex flex-wrap gap-1">
             {(["female", "male"] as const).map(kind => <button
               key={kind}
@@ -64,12 +64,12 @@ export function IdentitySection({
           onChange={(e) => patch({ name: e.target.value })}
         />
       </div>
-      <Field label="Title">
+      <Field label={t("identitySection.title")}>
         <ProposalStatus bot={bot} kind="chief" />
         <input
           className={inputCls}
           maxLength={BOT_PROFILE_LIMITS.title}
-          placeholder="Describe what your agent does"
+          placeholder={t("identitySection.titlePlaceholder")}
           value={bot.title}
           onChange={(e) => patch({ title: e.target.value })}
         />
@@ -77,14 +77,14 @@ export function IdentitySection({
       <div className="block">
         <div className="mb-1.5 flex items-center justify-between gap-3">
           <label htmlFor={`bot-instructions-${bot.id}`} className="text-[13px] text-ink-secondary">
-            Blurb
+            {t("identitySection.blurb")}
           </label>
           <button
             type="button"
             onClick={() => setInstructionsOpen(true)}
             className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-accent-text hover:bg-accent/10"
           >
-            <BookOpen size={12} /> View full
+            <BookOpen size={12} /> {t("identitySection.viewFull")}
           </button>
         </div>
         <ProposalStatus bot={bot} kind="chief" />
@@ -92,13 +92,13 @@ export function IdentitySection({
           id={`bot-instructions-${bot.id}`}
           className={cn(inputCls, "min-h-[72px] resize-y leading-relaxed")}
           maxLength={BOT_PROFILE_LIMITS.description}
-          placeholder="One line on what this bot is for"
-          aria-label="Blurb"
+          placeholder={t("identitySection.blurbPlaceholder")}
+          aria-label={t("identitySection.blurb")}
           value={bot.description}
           onChange={(e) => patch({ description: e.target.value })}
         />
         <div className="mt-1.5 flex items-start justify-between gap-3 text-[11px] text-ink-secondary">
-          <span>Shown in rosters, on the phone, and to other bots. Standing instructions belong in Soul, which has room for a full document.</span>
+          <span>{t("identitySection.blurbHint")}</span>
           {/* The cap only matters when someone is near it; a counter under a
               one-line field otherwise reads as an invitation to fill it. */}
           {bot.description.length > 3_000 && (

@@ -111,8 +111,8 @@ export function BrowserViewport({ frame, width, height, driving, input: sendInpu
     return () => image.removeEventListener("wheel", wheel);
   }, [driving, input, frameWidth, frameHeight, src]);
   return <>
-    <img ref={screen} src={src} alt="Live bot browser" draggable={false} tabIndex={driving ? 0 : -1}
-      title={driving ? "Shift+Escape returns to the browser address bar." : undefined}
+    <img ref={screen} src={src} alt={t("browser.viewport.alt")} draggable={false} tabIndex={driving ? 0 : -1}
+      title={driving ? t("browser.viewport.returnHint") : undefined}
       aria-description={driving ? t("browser.viewport.keysHint") : undefined}
       aria-keyshortcuts={driving ? "Shift+Escape" : undefined}
       className={`block h-full w-full object-contain select-none outline-none focus:ring-2 focus:ring-inset focus:ring-accent ${driving ? "cursor-default touch-none" : "cursor-not-allowed"}`}

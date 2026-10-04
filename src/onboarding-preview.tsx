@@ -14,6 +14,7 @@ import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
 import type { MausMotion } from "@/lib/mascot";
 import { type BeatId, beatsFor } from "@/lib/onboarding";
 import { SKINS, type SkinId } from "@/lib/skins";
+import { t } from "@/lib/i18n";
 import { StoreProvider, type Bot } from "@/state/store";
 import "./styles.css";
 
@@ -99,9 +100,9 @@ function Preview() {
   return (
     <div data-skin="midnight" className="min-h-screen bg-app p-6 text-ink">
       <header className="mb-5 flex flex-wrap items-center gap-3">
-        <h1 className="mr-2 text-[18px] font-semibold">Welcome flow</h1>
+        <h1 className="mr-2 text-[18px] font-semibold">{t("onboardingPreview.title")}</h1>
         <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          Beat
+          {t("onboardingPreview.beat")}
           <select value={beat} onChange={(e) => setBeat(e.target.value as BeatId)} className={control}>
             {BEATS.map((id) => (
               <option key={id} value={id}>
@@ -111,7 +112,7 @@ function Preview() {
           </select>
         </label>
         <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          Skin
+          {t("onboardingPreview.skin")}
           <select value={skin} onChange={(e) => setSkin(e.target.value as SkinId)} className={control} disabled={all}>
             {SKINS.map((s) => (
               <option key={s.id} value={s.id}>
@@ -121,19 +122,19 @@ function Preview() {
           </select>
         </label>
         <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> All skins
+          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> {t("onboardingPreview.allSkins")}
         </label>
         <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-          <input type="checkbox" checked={reduced} onChange={(e) => setReduced(e.target.checked)} /> Reduced motion
+          <input type="checkbox" checked={reduced} onChange={(e) => setReduced(e.target.checked)} /> {t("onboardingPreview.reducedMotion")}
         </label>
         <button
           onClick={() => setRun((r) => r + 1)}
           className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
         >
-          Replay entrance
+          {t("onboardingPreview.replayEntrance")}
         </button>
         <span className="ml-auto text-[12px] text-ink-secondary">
-          Use Back / Continue inside the card to walk the real transitions.
+          {t("onboardingPreview.hint")}
         </span>
       </header>
 

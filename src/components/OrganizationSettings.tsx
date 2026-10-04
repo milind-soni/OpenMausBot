@@ -124,7 +124,7 @@ export function OrganizationSettings() {
         </div>
       </div>}
       {enrolled && <div className="flex flex-col gap-3">
-        <div>{connection.branding?.logo && <img src={connection.branding.logo} alt="Organization logo" className="mb-2 size-12 rounded-lg object-contain" />}<div className="break-words text-[15px] font-medium text-ink">{connection.organization?.name}</div>
+        <div>{connection.branding?.logo && <img src={connection.branding.logo} alt={t("organization.logoAlt")} className="mb-2 size-12 rounded-lg object-contain" />}<div className="break-words text-[15px] font-medium text-ink">{connection.organization?.name}</div>
           <div className="break-all text-[13px] text-ink-secondary">{connection.email}</div></div>
         {connection.status === "reauth-required" ? <p role="alert" className="text-[13px] text-ink-secondary">{t("organization.reauth")}</p> : connection.status === "license-expired" ? <>
           {connection.providers?.some((provider) => provider.configured && provider.models.length > 0) && <ul className="divide-y divide-hairline/40">{connection.providers.filter((provider) => provider.configured && provider.models.length > 0).map((provider) => <li key={provider.id} className="flex flex-wrap justify-between gap-2 py-2 text-[13px]">
