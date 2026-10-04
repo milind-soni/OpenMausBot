@@ -41,43 +41,39 @@ public struct PredictiveActionChipsView: View {
         self.onSelectChip = onSelectChip
     }
     
-    private var isDark: Bool { colorScheme == .dark }
-    private var chipFill: Color { isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.05) }
-    private var chipStroke: Color { isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.06) }
-    private var titleColor: Color { isDark ? Color(hex: "#E2E8F0") : Color(hex: "#334155") }
-
     public var body: some View {
+        let isDark = colorScheme == .dark
+        
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(chips) { chip in
-                    chipButton(chip)
+                    Button {
+                        onSelectChip(chip)
+                        Haptics.selection()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: chip.icon)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(accentColor)
+                            
+                            Text(chip.title)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundColor(isDark ? Color(hex: "#E2E8F0") : Color(hex: "#334155"))
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4.5)
+                        .background(isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.06), lineWidth: 0.5)
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 3)
         }
-    }
-
-    private func chipButton(_ chip: ActionChipItem) -> some View {
-        Button {
-            onSelectChip(chip)
-            Haptics.selection()
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: chip.icon)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(accentColor)
-
-                Text(chip.title)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundColor(titleColor)
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4.5)
-            .background(chipFill)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(chipStroke, lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
     }
 }
