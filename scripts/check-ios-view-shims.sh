@@ -19,6 +19,7 @@ hits=$(find ios -name '*.swift' -not -path '*/.build/*' -print0 | xargs -0 awk '
   FNR == 1 { inside = 0; depth = 0 }
   {
     line = $0
+    gsub(/"([^"\\]|\\.)*"/, "\"\"", line)     # string literals: a brace or // inside one is text
     sub(/(^|[[:space:]])\/\/.*$/, "", line)   # line comments; "https://" survives
     if (!inside && line ~ /^[[:space:]]*((public|internal|fileprivate|private)[[:space:]]+)?extension[[:space:]]+View([[:space:]]|\{|$)/) inside = 1
     if (!inside) next

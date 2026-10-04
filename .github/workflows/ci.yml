@@ -554,16 +554,31 @@ jobs:
         # than 500 ms type-checking one expression or function body, the
         # usual way a SwiftUI build turns from minutes into a timeout. Swift
         # has no diagnostic group for those two warnings, so -Werror cannot
-        # single them out; the log is read instead, and a hit fails here
-        # with its file:line.
+        # single them out; the log is read instead.
+        #
+        # 500 ms is the bar on a developer Mac, where Xcode shows the
+        # warning at its line. It is not a stable verdict on this runner:
+        # the compiler measures wall-clock time, and the shared 3-core
+        # runner swings about 2x from one run to the next (bodies at 216
+        # and 263 ms on an M5 measured 551 and 600 ms here on a loaded run,
+        # under 420 ms on a quiet one). The step therefore lists every
+        # body over the 500 ms warning limit, and fails only on one over
+        # three times that, which no body in the app comes near and which
+        # a type-check problem on its way to a timeout runs past.
         run: |
-          hits=$(grep -E 'took [0-9]+ms to type-check \(limit: ' "$RUNNER_TEMP/xcodebuild.log" | sed -E 's#^.*/ios/##' | sort -u || true)
+          fail_over_ms=1500
+          warnings=$(grep -E 'took [0-9]+ms to type-check \(limit: ' "$RUNNER_TEMP/xcodebuild.log" | sed -E 's#^.*/ios/##' | sort -u || true)
+          if [ -n "$warnings" ]; then
+            echo "Over the 500 ms warning limit on this runner (fails at ${fail_over_ms} ms):"
+            printf '%s\n' "$warnings"
+          fi
+          hits=$(printf '%s\n' "$warnings" | awk -v limit="$fail_over_ms" 'match($0, /took [0-9]+ms/) { ms = substr($0, RSTART + 5, RLENGTH - 7) + 0; if (ms > limit) print }')
           if [ -n "$hits" ]; then
             printf '%s\n' "$hits"
-            echo "::error::The Swift type checker spent over its limit on the expression(s) above. Split that body into smaller views or functions, and give colours chosen by a ternary an explicit Color type."
+            echo "::error::The Swift type checker spent over ${fail_over_ms} ms on the expression(s) above. Split that body into smaller views or functions, and give colours chosen by a ternary an explicit Color type."
             exit 1
           fi
-          echo "No expression or function body took the type checker over 500 ms."
+          echo "No expression or function body took the type checker over ${fail_over_ms} ms."
 
   # Selection includes ios/** as well as android/**: :core's fixtures come
   # from ios/Tests/CompanionCoreTests/Fixtures.
