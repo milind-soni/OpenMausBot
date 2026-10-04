@@ -93,7 +93,6 @@ vi.mock("@/state/store", async (importOriginal) => ({
       config: { box: { configured: true }, ...fixture.config },
       instances: fixture.instances,
       computerControl: {},
-      screens: {},
       routines: [],
       routineRuns: [],
     },

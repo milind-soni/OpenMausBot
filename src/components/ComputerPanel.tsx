@@ -42,6 +42,7 @@ import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
+import { listenLiveFrames } from "@/lib/live-events";
 import { CloudScreenPreview } from "./CloudScreenPreview";
 import { isActiveTurnRefusal, isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
@@ -809,29 +810,26 @@ export function ComputerPanel({
     };
   }, [phase, threadPath, profileBot.busy, canManageCloud]);
 
-  // Only frames received during this connection may replace its preview.
-  // A cached SSE frame must never mask every subsequent screenshot poll.
+  // Live frames of this conversation's screen come straight from the app's
+  // stream, never through the store. Only a frame heard while this preview is
+  // up may replace it, and the poll below waits while they keep coming.
   const pageVisible = usePageVisible();
-  const screen = state.screens[bot.id];
-  const live = screen?.threadId === bot.threadId || (!screen?.threadId && (profileBot.tasks?.length ?? 0) <= 1)
-    ? screen : undefined;
-  const latestLive = useRef({ frame: live, at: 0 });
+  const lastLiveAt = useRef(0);
   const previewBusy = useRef(bot.busy);
   useEffect(() => { previewBusy.current = bot.busy; }, [bot.busy]);
   useEffect(() => {
-    if (!cloudPreviewReady) {
-      latestLive.current = { frame: live, at: 0 };
-      return;
-    }
-    if (latestLive.current.frame === live) return;
-    latestLive.current = { frame: live, at: 0 };
-    if (cloudPreviewReady && live) {
-      latestLive.current.at = Date.now();
-      setPolledFrame(live);
-      setPreviewError(null);
-      setPreviewRefreshing(false);
-    }
-  }, [live, cloudPreviewReady]);
+    lastLiveAt.current = 0;
+    if (!cloudPreviewReady) return;
+    return listenLiveFrames({
+      onFrame: (frame) => {
+        if (frame.kind !== "screen" || frame.botId !== bot.id || frame.threadId !== bot.threadId) return;
+        lastLiveAt.current = Date.now();
+        setPolledFrame({ png: frame.png, mime: frame.mime ?? "image/png" });
+        setPreviewError(null);
+        setPreviewRefreshing(false);
+      },
+    });
+  }, [cloudPreviewReady, bot.id, bot.threadId]);
 
   useEffect(() => {
     if (panelView !== "computer" || !cloudPreviewReady || viewerOpen || !pageVisible || pending || controlPending) return;
@@ -847,7 +845,7 @@ export function ComputerPanel({
       if (Date.now() - lastAttemptAt < (retryDelay ?? (previewBusy.current ? 4000 : 30_000))) return;
       // Resume polling if a busy bot stops publishing frames. A single old
       // SSE event is not evidence of a working stream for the whole turn.
-      if (previewBusy.current && Date.now() - latestLive.current.at < 10_000) return;
+      if (previewBusy.current && Date.now() - lastLiveAt.current < 10_000) return;
       inFlight = true;
       retryDelay = null;
       const startedAt = Date.now();
@@ -856,7 +854,7 @@ export function ComputerPanel({
           method: "POST",
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]),
         });
-        if (!controller.signal.aborted && latestLive.current.at <= startedAt) {
+        if (!controller.signal.aborted && lastLiveAt.current <= startedAt) {
           if (typeof png !== "string" || !png.trim()) throw new LocalizedPanelError("computer.err.emptyFrame");
           setPolledFrame({ png, mime: format === "jpeg" ? "image/jpeg" : "image/png" });
           setPreviewError(null);
@@ -864,7 +862,7 @@ export function ComputerPanel({
           contentionSince = null;
         }
       } catch (e) {
-        if (!controller.signal.aborted && latestLive.current.at <= startedAt) {
+        if (!controller.signal.aborted && lastLiveAt.current <= startedAt) {
           // A canceled client request can leave its capture running on the
           // host. Contention is temporary, not a disconnected computer.
           if (e instanceof ApiError && isRemoteScreenshotContention(e)) {
@@ -1523,7 +1521,7 @@ export function ComputerPanel({
               disabled={controlPending}
               onOpen={() => void openDesktop()}
               onRetry={(discardFrame) => {
-                latestLive.current.at = 0;
+                lastLiveAt.current = 0;
                 if (discardFrame) setPolledFrame(null);
                 setPreviewError(null);
                 setPreviewRefreshing(true);
