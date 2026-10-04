@@ -2,7 +2,7 @@
 // browser development falls back to PUT /api/config. Secrets are write-only
 // either way — GET /api/config returns configured flags, never values.
 import { useEffect, useId, useRef, useState } from "react";
-import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-react";
+import { Check, CircleHelp, ExternalLink, Loader2, Plus, RotateCw, Trash2, TriangleAlert } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
@@ -563,6 +563,183 @@ export function OpenAiCompatUrl() {
         )}
       </div>
       <p className="mt-1 text-[11.5px] leading-relaxed text-ink-secondary">{t("keys.openaiCompat.urlHint")}</p>
+      {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+type OpenAiCompatInstanceRow = {
+  instanceId: string;
+  displayName?: string;
+  url?: string;
+};
+
+/** Extra OpenAI-compatible endpoints: each entry is its own engine instance
+ * with its own key and base URL, selectable by every bot. Add, list and
+ * remove here; the built-in openaiCompat slot above is unchanged. */
+export function OpenAiCompatInstances() {
+  const [rows, setRows] = useState<OpenAiCompatInstanceRow[] | null>(null);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [key, setKey] = useState("");
+  const [models, setModels] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api("/api/instances")
+      .then((data: { instances?: OpenAiCompatInstanceRow[] }) =>
+        setRows(Array.isArray(data?.instances) ? data.instances : []),
+      )
+      .catch(() => setRows([]));
+  }, []);
+
+  const refresh = () =>
+    void api("/api/instances")
+      .then((data: { instances?: OpenAiCompatInstanceRow[] }) =>
+        setRows(Array.isArray(data?.instances) ? data.instances : []),
+      )
+      .catch(() => {});
+
+  const extras = (rows ?? []).filter((row) => {
+    const driver = (row as { driver?: string }).driver;
+    return driver === "openai-compat" && row.instanceId !== "openaiCompat";
+  });
+
+  const add = () => {
+    if (busy || !name.trim() || !url.trim() || !key.trim()) return;
+    if (/^https?:\/\//i.test(key.trim())) {
+      setError(t("apiInstances.keyLooksLikeUrl"));
+      return;
+    }
+    const modelList = models.split(",").map((m) => m.trim()).filter(Boolean);
+    setBusy(true);
+    setError(null);
+    void api("/api/instances/openai-compat", {
+      method: "POST",
+      body: JSON.stringify({ displayName: name.trim(), url: url.trim(), key: key.trim(), ...(modelList.length ? { models: modelList } : {}) }),
+    })
+      .then((data: { instances?: OpenAiCompatInstanceRow[] }) => {
+        if (Array.isArray(data?.instances)) setRows(data.instances);
+        setName("");
+        setUrl("");
+        setKey("");
+        setModels("");
+      })
+      .catch((e: Error) => setError(e.message || t("apiInstances.failed")))
+      .finally(() => setBusy(false));
+  };
+
+  const remove = (instanceId: string) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    void api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "DELETE" })
+      .then(() => refresh())
+      .catch((e: Error) => setError(e.message || t("apiInstances.failed")))
+      .finally(() => setBusy(false));
+  };
+
+  const refreshModels = (instanceId: string) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    void api(`/api/instances/${encodeURIComponent(instanceId)}/refresh-models`, { method: "POST" })
+      .then(() => refresh())
+      .catch((e: Error) => setError(e.message || t("apiInstances.failed")))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div>
+      <div className="mb-1.5 text-[13px] text-ink-secondary">{t("apiInstances.title")}</div>
+      <p className="mb-2 text-[11.5px] leading-relaxed text-ink-secondary">{t("apiInstances.subtitle")}</p>
+      {rows !== null && extras.length === 0 && (
+        <p className="text-[11.5px] text-ink-secondary">{t("apiInstances.empty")}</p>
+      )}
+      {extras.map((row) => (
+        <div
+          key={row.instanceId}
+          className="mb-1.5 flex items-center justify-between gap-2 rounded-lg border border-hairline/40 bg-inset px-3 py-2"
+        >
+          <div className="min-w-0">
+            <div className="truncate text-[12px] text-ink">{row.displayName || row.instanceId}</div>
+            {row.url && <div className="truncate font-mono text-[11px] text-ink-secondary">{row.url}</div>}
+          </div>
+          <button
+            type="button"
+            onClick={() => refreshModels(row.instanceId)}
+            disabled={busy}
+            aria-label={t("apiInstances.refreshModels")}
+            title={t("apiInstances.refreshModels")}
+            className="shrink-0 rounded-md px-2 py-1 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-50"
+          >
+            <RotateCw size={13} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={() => remove(row.instanceId)}
+            disabled={busy}
+            aria-label={t("apiInstances.remove")}
+            title={t("apiInstances.remove")}
+            className="shrink-0 rounded-md px-2 py-1 text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-50"
+          >
+            <Trash2 size={13} aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+      <div className="mt-2 flex flex-col gap-1.5">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t("apiInstances.name")}
+          aria-label={t("apiInstances.name")}
+          spellCheck={false}
+          disabled={busy}
+          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12px] text-ink placeholder:text-ink-secondary focus:outline-none"
+        />
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://api.example.com/v1"
+          aria-label={t("apiInstances.url")}
+          spellCheck={false}
+          disabled={busy}
+          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink placeholder:text-ink-secondary focus:outline-none"
+        />
+        <input
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          placeholder={t("apiInstances.key")}
+          type="password"
+          aria-label={t("apiInstances.key")}
+          disabled={busy}
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink placeholder:text-ink-secondary focus:outline-none"
+        />
+        <input
+          value={models}
+          onChange={(e) => setModels(e.target.value)}
+          placeholder={t("apiInstances.modelsPlaceholder")}
+          aria-label={t("apiInstances.models")}
+          spellCheck={false}
+          disabled={busy}
+          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink placeholder:text-ink-secondary focus:outline-none"
+        />
+        <p className="text-[11px] leading-relaxed text-ink-secondary">{t("apiInstances.keyHint")}</p>
+        <button
+          type="button"
+          onClick={add}
+          disabled={busy || !name.trim() || !url.trim() || !key.trim()}
+          className="inline-flex items-center gap-1.5 self-start rounded-lg border border-hairline/40 px-2.5 py-1.5 text-[12px] text-ink hover:bg-inset disabled:opacity-50"
+        >
+          {busy ? (
+            <Loader2 size={12} aria-hidden="true" className="animate-spin" />
+          ) : (
+            <Plus size={12} aria-hidden="true" />
+          )}
+          {busy ? t("apiInstances.adding") : t("apiInstances.add")}
+        </button>
+      </div>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
     </div>
   );

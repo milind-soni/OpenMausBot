@@ -3489,5 +3489,20 @@
   "botAccess.tools.busy": "Wait until this bot finishes all active tasks before changing its tool selection.",
   "botAccess.tools.saving": "Saving tool selection…",
   "botAccess.tools.save": "Save tool selection",
-  "botAccess.tools.examples": "Examples and engine support"
+  "botAccess.tools.examples": "Examples and engine support",
+  "apiInstances.title": "More custom endpoints",
+  "apiInstances.subtitle": "Each one is a separate OpenAI-compatible endpoint with its own base URL and API key — every bot can pick it.",
+  "apiInstances.name": "Display name",
+  "apiInstances.url": "Base URL",
+  "apiInstances.key": "API key",
+  "apiInstances.add": "Add endpoint",
+  "apiInstances.adding": "Adding…",
+  "apiInstances.remove": "Remove",
+  "apiInstances.empty": "No extra endpoints yet.",
+  "apiInstances.failed": "Couldn't save the endpoint. Check the fields and try again.",
+  "apiInstances.models": "Model list (optional)",
+  "apiInstances.modelsPlaceholder": "glm-5.3, glm-4.6 — auto-detected if empty",
+  "apiInstances.keyHint": "Paste the secret key only — never a URL. If the model picker shows sample models, this endpoint can't list models: fill the list above or press the re-detect button.",
+  "apiInstances.keyLooksLikeUrl": "That looks like a URL, not an API key. Paste the secret key itself.",
+  "apiInstances.refreshModels": "Re-detect models"
 }
