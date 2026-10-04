@@ -26,6 +26,7 @@ import { createServerSupervisor } from "./server-supervisor.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
+import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 import { createStartupScreen } from "./startup-screen.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
@@ -3502,10 +3503,15 @@ app.whenReady().then(async () => {
     if (desktopTray?.show()) return;
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-});
+}).finally(() => allWindowsClosedQuit.settleStartup());
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+// The startup splash is the only window while boot runs; its recovery
+// timers can destroy it mid-boot (issue #2028). An unconditional
+// last-window-closed quit would fire there, killing the app before the
+// server child forks — exactly the exit the recovery was meant to avoid.
+const allWindowsClosedQuit = createAllWindowsClosedQuit({
+  app,
+  allWindows: () => BrowserWindow.getAllWindows(),
 });
 
 // EMBEDDING.md lifecycle rule: defer the first quit until the embedded
