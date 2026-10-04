@@ -53,7 +53,7 @@ export function QuestionCard({
    * same way as one in a 1:1 chat */
   threadId: string;
   /** who is asking, for the "Name has a question" line */
-  bot?: Bot;
+  bot?: Pick<Bot, "name">;
   message: Message;
 }) {
   const { dispatch } = useStore();

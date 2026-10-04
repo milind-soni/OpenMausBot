@@ -131,7 +131,7 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
       messageLines.push(`> ${statusIcon} _Used tool:_ ${inlineCode(toolLabel)}`);
     }
 
-    if (message.kind === "screen" && message.png) {
+    if (message.kind === "screen" && (message.hasImage || message.png)) {
       messageLines.push("📷 _Screen capture (image not included in Markdown export)._");
     }
 
