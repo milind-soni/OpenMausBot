@@ -186,7 +186,11 @@ export interface Message {
   turnId?: string;
   /** Last assistant text item from a settled provider turn. */
   turnTerminal?: boolean;
-  /** screen messages: a frame of the bot's computer (base64) */
+  /** screen messages: the server holds a frame of the bot's computer,
+   * served by `/api/threads/:threadId/messages/:id/image`. */
+  hasImage?: boolean;
+  /** screen messages in the full (unpaged) shape: the same frame, inline as
+   * base64. Shown through the image route all the same. */
   png?: string;
   mime?: string;
   at: number;
@@ -586,7 +590,7 @@ function rewindThreadUpdatedAt(state: AppState, threadId: string, messages: { at
 
 /** The visible conversation: walk parentId links from the active leaf back
  * to the root. Falls back to the flat list for pre-branching payloads. */
-export function visibleMessages(bot: Bot): Message[] {
+export function visibleMessages(bot: Pick<Bot, "messages" | "activeLeafId">): Message[] {
   const leafId = bot.activeLeafId;
   if (!leafId) return bot.messages;
   const byId = new Map(bot.messages.map((m) => [m.id, m]));
@@ -598,17 +602,6 @@ export function visibleMessages(bot: Bot): Message[] {
     cur = cur.parentId ? byId.get(cur.parentId) : undefined;
   }
   return path.reverse();
-}
-
-/** All versions of a user message (itself + the forks that replaced it),
- * oldest first. Length 1 = never edited. */
-export function messageVersions(bot: Bot, message: Message): Message[] {
-  if (message.role !== "user" || message.kind !== "text") return [message];
-  return bot.messages
-    .filter(
-      (m) => m.role === "user" && m.kind === "text" && (m.parentId ?? null) === (message.parentId ?? null),
-    )
-    .sort((a, b) => a.at - b.at);
 }
 
 /** GET /api/config — configured flags only; secrets are never echoed. */
@@ -1859,19 +1852,7 @@ export function reducer(state: AppState, action: Action): AppState {
         // turn artifact (settle-time screenshot) — the leaf must stay put,
         // or the follow-up send it raced would fall off the active branch.
         const adoptsLeaf = (action.message.parentId ?? null) === (b.activeLeafId ?? null);
-        let messages = [...b.messages, action.message];
-        // base64 screen frames are big; a long computer-use session would
-        // grow memory without bound. Keep the newest few frames' pixels and
-        // strip the rest (the message row survives as a placeholder).
-        if (action.message.kind === "screen") {
-          const withPng = messages.filter((m) => m.kind === "screen" && m.png);
-          const excess = withPng.length - MAX_KEPT_SCREEN_FRAMES;
-          if (excess > 0) {
-            const dropIds = new Set(withPng.slice(0, excess).map((m) => m.id));
-            messages = messages.map((m) => (dropIds.has(m.id) ? { ...m, png: undefined } : m));
-          }
-        }
-        return { ...b, messages, activeLeafId: adoptsLeaf ? action.message.id : b.activeLeafId };
+        return { ...b, messages: [...b.messages, action.message], activeLeafId: adoptsLeaf ? action.message.id : b.activeLeafId };
       });
       const motion =
         action.message.role === "user" && action.message.kind === "text" && Boolean(action.message.queueId)
@@ -2425,9 +2406,6 @@ export function reducer(state: AppState, action: Action): AppState {
     }
   }
 }
-
-/** Newest screen frames whose pixels stay in memory per thread. */
-const MAX_KEPT_SCREEN_FRAMES = 8;
 
 export const initialState: AppState = {
   modelVariantSessions: {},
@@ -4052,9 +4030,13 @@ export function BotEditorStore({ value, children }: { value: ReturnType<typeof u
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
+// Building a formatter costs far more than formatting with one, and every
+// row shows a time: build it once. No locale given, as before: times follow
+// the system's clock style, not the app language.
+const TIME_FORMAT = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
 export function formatTime(at: number) {
-  return new Date(at).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const date = new Date(at);
+  // what toLocaleTimeString says, where a formatter would throw
+  return Number.isNaN(date.getTime()) ? "Invalid Date" : TIME_FORMAT.format(date);
 }
