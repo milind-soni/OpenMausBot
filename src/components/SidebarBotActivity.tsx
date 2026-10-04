@@ -1,5 +1,6 @@
 import { BellDot, CircleAlert, Clock3, Loader2, Pin, PinOff, type LucideIcon } from "lucide-react";
-import { useStore, type Bot, type Group, type Task } from "@/state/store";
+import type { Dispatch } from "react";
+import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { orderedSidebarThreads, orderedThreadList, threadRecency, threadUpdatedLabel } from "./SidebarThreadRow";
@@ -214,9 +215,8 @@ export function PinnedThreadRows({ entries, now, onJump, onUnpin }: { entries: A
 
 /** The escape hatch for other ongoing conversations when their tree is hidden.
  * These are selection-only buttons: no create, rename, move, or delete menu. */
-export function SidebarBotActivity({ bot, density }: { bot: Bot; density: SidebarDensity }) {
-  const { state, dispatch } = useStore();
-  const tasks = threadsWhenTreeHidden(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId);
+export function SidebarBotActivity({ bot, density, pendingQueued, dispatch }: { bot: Bot; density: SidebarDensity; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action> }) {
+  const tasks = threadsWhenTreeHidden(bot, pendingQueued).filter((task) => task.threadId !== bot.threadId);
   if (!tasks.length) return null;
   const iconOnly = density === "icons";
   return <div data-sidebar-bot-activity={bot.id} className={cn("mb-1 space-y-0.5", !iconOnly && "ml-6")}>

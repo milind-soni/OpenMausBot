@@ -12,12 +12,8 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
 }));
 import { useRelativeNow } from "./SidebarThreadRow";
-import { BotThreadList } from "./Sidebar";
-import type { Bot } from "@/state/store";
-vi.mock("@/state/store", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/state/store")>(),
-  useStore: () => ({ state: { pendingQueued: {} }, dispatch: vi.fn() }),
-}));
+import { BotThreadList, botRowProps } from "./Sidebar";
+import { initialState, type Bot } from "@/state/store";
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
 type Interval = { delay: number; fire: () => void; cleared: boolean };
@@ -117,7 +113,7 @@ describe("relative clock tick", () => {
       ],
     };
     fixture.index = 0; fixture.effects = [];
-    const markup = renderToStaticMarkup(createElement(BotThreadList, { bot, selected: true }));
+    const markup = renderToStaticMarkup(createElement(BotThreadList, { ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", quiet: false, query: "", onMenu: vi.fn() }), selected: true }));
     expect(markup).toContain("just now");
     expect(markup).toContain("5 min ago");
     runEffects();

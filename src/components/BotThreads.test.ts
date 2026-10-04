@@ -1,8 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { StoreProvider, type Bot, type Group } from "@/state/store";
-import { BotThreadList, GroupThreadList } from "./Sidebar";
+import { initialState, StoreProvider, type Bot, type Group } from "@/state/store";
+import { BotThreadList, botRowProps, GroupThreadList } from "./Sidebar";
 import { formatUpdatedAt } from "./SidebarThreadRow";
 import { GroupTaskPicker, TaskPicker } from "./TaskPicker";
 
@@ -19,9 +19,15 @@ const bot: Bot = {
   ],
 };
 
+// A bot row hands its thread list the row's props (see botRowProps).
+const threadList = (candidate: Bot, query = "") => createElement(BotThreadList, {
+  ...botRowProps(initialState, vi.fn(), candidate, { density: "comfortable", quiet: false, query, onMenu: vi.fn() }),
+  selected: true,
+});
+
 describe("sidebar bot threads", () => {
   it("shows named threads flush with the bot row, with separate presence and no trailing New thread row", () => {
-    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot, selected: true })));
+    const markup = renderToStaticMarkup(threadList(bot));
     expect(markup).toContain('aria-label="Maus threads"');
     expect(markup).toContain('data-sidebar-thread-row="idle" aria-current="page"');
     expect(markup).toContain(`Long research · ${formatUpdatedAt(2)} · Working`);
@@ -45,7 +51,7 @@ describe("sidebar bot threads", () => {
   it("shows fresh threads with a relative stamp while the tooltip keeps the full date", () => {
     const recent = Date.now() - 5 * 60_000;
     const fresh = { ...bot, unread: false, busy: false, activity: "idle" as const, tasks: [{ threadId: "fresh", title: "Fresh question", createdAt: recent, busy: false, activity: "idle" as const }] };
-    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot: fresh, selected: true })));
+    const markup = renderToStaticMarkup(threadList(fresh));
     expect(markup).toContain("5 min ago");
     expect(markup).toContain(`title="Fresh question · ${formatUpdatedAt(recent)}"`);
   });
@@ -53,7 +59,7 @@ describe("sidebar bot threads", () => {
   it("groups folder threads under one bot while keeping loose threads and empty folders reachable", () => {
     const projectBot = { ...bot, projects: [{ id: "research", name: "Research", emoji: "🧪" }, { id: "empty", name: "Ideas" }],
       tasks: bot.tasks!.map((task) => ({ ...task, ...(task.threadId === "working" ? { projectId: "research" } : {}) })) };
-    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot: projectBot, selected: true })));
+    const markup = renderToStaticMarkup(threadList(projectBot));
     expect(markup).toContain('data-sidebar-project="research"');
     expect(markup).toContain('aria-label="Research threads"');
     expect(markup).toContain('aria-label="Actions for Research folder"');
@@ -88,7 +94,7 @@ describe("sidebar bot threads", () => {
       ],
     };
     for (const query of ["", "daily"]) {
-      const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot: routineBot, selected: true, query })));
+      const markup = renderToStaticMarkup(threadList(routineBot, query));
       expect(markup).toContain('data-sidebar-thread-row="routine-result"');
       expect(markup).toContain("Daily digest results");
       expect(markup).not.toContain("routine-execution");
