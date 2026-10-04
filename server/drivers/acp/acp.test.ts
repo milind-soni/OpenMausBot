@@ -305,8 +305,8 @@ describe("ACP turns (fake CLI)", () => {
     const started = recorder.events.find((e) => e.type === "item.started" && e.itemType === "tool");
     const completed = recorder.events.find((e) => e.type === "item.completed" && e.itemType === "tool");
     // The agent sent no toolCallId: without a synthetic id the completion
-    // would be dropped by the itemId guard and the #1653 computer-call
-    // fence would hold the seat until settle.
+    // would be dropped by the itemId guard and the tool chip would never
+    // show its result.
     expect(typeof started?.itemId).toBe("string");
     expect(started?.itemId).toBeTruthy();
     expect(completed?.itemId).toBe(started?.itemId);

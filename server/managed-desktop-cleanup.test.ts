@@ -88,7 +88,6 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
     directRequestOwners: new Map(),
     autoVmClaims,
     turnResources: { release() {} }, settlingResourceOwners: new Map(), turnComputerResources: new Map(), teamComputerTurns: new Map(),
-    pendingComputerCallStarts: new Map(),
     roomHandoffs: { stopAwaitingDirect() {} }, noteTeammatesLeftRunning() {},
     cancelDirectTurnDispatch: (_botId: string, threadId: string) => cancelled.push(threadId),
     cancelGroupTurnOperations: (_groupId: string, threadId: string) => cancelled.push(threadId),

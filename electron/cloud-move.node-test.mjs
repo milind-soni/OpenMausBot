@@ -265,7 +265,7 @@ test("a move is measured against the plan's largest disk when the disk grows, an
 const OVERVIEW_START = "async function cloudMoveOverview(", IPC_START = "// ── Who asks, and where to", IPC_END = "// ── end Copy this computer here ──";
 /** main's cloudMoveOverview, run against fakes of what it asks. */
 async function mainOverview({ dest, peek, local = { bots: 3, rooms: 1, chats: 12, bytes: 3.4 * GB, files: 100 }, state = { phase: "idle" }, running = false, onServerPage = true }) {
-  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf(OVERVIEW_START), end = source.indexOf(IPC_START, start);
   assert.ok(start >= 0 && end > start);
   const context = vm.createContext({ moveFit, moveBlocked, cloudMoveDismissed: () => false, peekCloudMove: async () => peek,
@@ -666,7 +666,7 @@ test("the bridge forwards only a saved server's id, only from this computer's pa
 
 /** main's copy IPC, run against fakes of what it calls. */
 function mainIpc(extra = {}) {
-  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf(IPC_START), end = source.indexOf(IPC_END, start);
   assert.ok(start >= 0 && end > start);
   const handlers = new Map(), calls = [];
@@ -811,7 +811,7 @@ test("production IPC: a finished copy opens the server it went to", async () => 
 });
 
 test("a server's Copy opens this computer's Settings → Servers on that server's copy, in this window or by switching it to this computer", () => {
-  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf("function openWorkspaceSettings("), end = source.indexOf("\n}\n", start) + 3;
   assert.ok(start >= 0 && end > start);
   const calls = [];
@@ -847,7 +847,7 @@ test("the Cloud's setup checklist can open the lending switch here, and nothing 
   assert.deepEqual(Object.keys(page.bridge.cloudLending), ["open"]);
   // Main opens Settings → OMB Cloud for this window's local page or the
   // person's verified Cloud in it, and refuses any other page.
-  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf(IPC_START), end = source.indexOf(IPC_END, start);
   const handlers = new Map(), opened = [];
   const localFrame = { url: `${LOCAL}/` }, localContents = { mainFrame: localFrame };
@@ -889,7 +889,7 @@ test("Settings on the person's own Cloud shows the plan read only, and can only 
   await clicked.bridge.cloudPlan.manage("https://evil.example.test"); await clicked.bridge.cloudPlan.useThisComputer("vps");
   assert.deepEqual(clicked.invoked, [["cloud-plan:manage"], ["cloud-plan:local"]]);
 
-  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf(IPC_START), end = source.indexOf(IPC_END, start);
   const handlers = new Map(), calls = [];
   const cloudFrame = { url: `${ORIGIN}/` }, cloudContents = { mainFrame: cloudFrame };
