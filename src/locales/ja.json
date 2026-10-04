@@ -737,6 +737,8 @@
   "usage.title": "使用状況",
   "usage.subtitle": "確定した各ターンを合算した、ボットごとのトークンとコストです。価格を報告するプロバイダーだけ金額が出ます。",
   "usage.empty": "まだ消費はありません。ボットの最初のターンのあとに数字が出ます。",
+  "usage.bot.empty": "このボットの使用量はまだ記録されていません。",
+  "usage.bot.unpriced": "このプロバイダーは料金を報告しません。トークン数のみ記録されます。",
   "usage.colBot": "ボット",
   "usage.colTurns": "ターン",
   "usage.colTokens": "トークン",

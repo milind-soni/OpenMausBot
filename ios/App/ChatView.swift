@@ -983,6 +983,12 @@ struct ChatView: View {
         messages.contains { $0.card?.isPending == true }
     }
 
+    /// Who the @ being typed can tag, filtered by what follows it. Empty
+    /// while no tag is being typed, which is what keeps the picker closed.
+    private var mentionChoices: [MentionChoice] {
+        ComposerMention.choices(for: draft, pool: ComposerMention.pool(for: current, bots: session.state.bots))
+    }
+
     private var engineCanSteer: Bool {
         guard case let .bot(bot) = current else { return false }
         return attachments.isEmpty && session.steeringInstanceIds.contains(bot.modelSelection.instanceId)
@@ -1318,6 +1324,15 @@ struct ChatView: View {
     /// A round + and a glass pill with dictation and send inside it.
     private var composer: some View {
         VStack(spacing: 6) {
+            let mentions = composerFocused && !showCommandHUD && !dictation.isListening ? mentionChoices : []
+            if !mentions.isEmpty {
+                MentionPicker(choices: mentions, bots: session.state.bots) { choice in
+                    Haptics.selection()
+                    if let completed = ComposerMention.complete(draft, with: choice) { draft = completed }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if let line = liveStatusLine?.trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty {
                 LiveStatusLine(text: line)
                     .transition(.opacity)
@@ -2813,5 +2828,61 @@ private struct QueuedSendList: View {
         .padding(.horizontal, 4)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(sends.count == 1 ? "1 queued message" : "\(sends.count) queued messages")
+    }
+}
+
+/// The names an @ can tag, above the composer while one is being typed.
+/// Tapping writes the exact name, so the harness's routing always matches
+/// and autocorrect never touches it.
+private struct MentionPicker: View {
+    let choices: [MentionChoice]
+    let bots: [Bot]
+    let pick: (MentionChoice) -> Void
+
+    private static let rowHeight: CGFloat = 44
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(choices) { choice in
+                    Button { pick(choice) } label: {
+                        HStack(spacing: 10) {
+                            if let bot = bots.first(where: { $0.id == choice.id }) {
+                                BotAvatarView(bot: bot, size: 26)
+                            } else {
+                                Image(systemName: "person.3.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Color.secondary)
+                                    .frame(width: 26, height: 26)
+                                    .background(Circle().fill(Color.secondary.opacity(0.15)))
+                            }
+                            Text(verbatim: "@" + choice.name)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Color.primary)
+                                .lineLimit(1)
+                            if choice.isEveryone {
+                                Text("Everyone in this room")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Color.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(height: Self.rowHeight)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("mention-\(choice.id)")
+                }
+            }
+        }
+        // Four rows, then it scrolls: a big room stays reachable without
+        // the list climbing over the conversation.
+        .frame(height: Self.rowHeight * CGFloat(min(choices.count, 4)))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Mention someone")
     }
 }

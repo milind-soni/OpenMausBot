@@ -1252,7 +1252,7 @@ export async function removeAccount(cfg: AppConfig, slug: string, accountId: str
 
 /** Mint a browser auth link for one service. Returns { url } or throws. */
 export async function authorizeService(cfg: AppConfig, slug: string, requestedAlias?: string | null) {
-  const alias = normalizeAccountAlias(requestedAlias);
+  let alias = normalizeAccountAlias(requestedAlias);
   const toolkit = canonicalToolkitSlug(slug);
   const mode = connectionMode(cfg);
   const unavailable = managedConnectorUnavailableReason(mode, toolkit);
@@ -1280,8 +1280,14 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
   if (usableAccounts.length >= MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit) {
     throw inputError(`${toolkit} already has the maximum of ${MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit} accounts`, 409);
   }
-  if (usableAccounts.length > 0 && !alias) {
-    throw inputError("Add an account alias so the existing connection is not replaced");
+  if (serviceAccounts.length > 0 && !alias) {
+    if (serviceAccounts.every((account) => /^(initializing|initiated|expired)$/i.test(account.status ?? ""))) {
+      // Retry without replacing a named account or revoking a former grant:
+      // EXPIRED can describe either an abandoned flow or an expired credential.
+      alias = `omb-retry-${randomUUID()}`;
+    } else {
+      throw inputError("Add an account alias so the existing connection is not replaced");
+    }
   }
   if (alias && serviceAccounts.some((account) => account.alias?.trim().toLowerCase() === alias.toLowerCase())) {
     throw inputError(`Account alias "${alias}" is already in use for ${toolkit}`, 409);

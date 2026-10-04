@@ -280,6 +280,49 @@ describe("connected-apps broker boundaries", () => {
     expect(JSON.parse(String(linkCall?.init?.body))).toEqual({ toolkit: "gmail", alias: "second" });
   });
 
+  it("retries only unfinished or expired accounts without replacing grants", async () => {
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const { env, ctx } = testEnv(fetchCalls);
+    const installation = { id: "retry-install", composio_user_id: "retry-user", session_id: "trs_retry", disabled_at: null };
+    let accounts: Array<{ id: string; status?: string; alias?: string; toolkit: { slug: string } }> = [];
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      fetchCalls.push({ url, init });
+      if (url.includes("/connected_accounts")) {
+        expect(new URL(url).searchParams.get("user_ids")).toBe("retry-user");
+        return Response.json({ items: accounts });
+      }
+      if (url.endsWith("/link")) return Response.json({ redirect_url: "https://connect.composio.dev/link/gmail" });
+      return Response.json(session("trs_retry", "retry-user"));
+    });
+    const linkBodies = () => fetchCalls.filter((call) => call.url.endsWith("/link"))
+      .map((call) => JSON.parse(String(call.init?.body)) as { toolkit: string; alias?: string });
+
+    for (const status of ["INITIALIZING", "initiated", "EXPIRED"]) {
+      accounts = [{ id: "old", alias: "original", status, toolkit: { slug: "Gmail" } }];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const response = await authorize("gmail", undefined, installation, env as never, ctx as never);
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toEqual({ url: "https://connect.composio.dev/link/gmail" });
+        expect(linkBodies().at(-1)).toEqual({ toolkit: "gmail", alias: expect.stringMatching(/^omb-retry-[0-9a-f-]{36}$/) });
+      }
+      expect(accounts[0].alias).toBe("original");
+    }
+    expect(new Set(linkBodies().map((body) => body.alias)).size).toBe(6);
+    const successfulLinks = linkBodies().length;
+    for (const status of ["ACTIVE", "PENDING", "FAILED", "INACTIVE", "REVOKED", "unknown", undefined]) {
+      accounts = [{ id: "protected", status, toolkit: { slug: "gmail" } }];
+      const response = await authorize("gmail", undefined, installation, env as never, ctx as never);
+      expect(response.status).toBe(400);
+    }
+    accounts = [{ id: "old", alias: "Original", status: "EXPIRED", toolkit: { slug: "gmail" } }];
+    expect((await authorize("gmail", "original", installation, env as never, ctx as never)).status).toBe(409);
+    accounts = Array.from({ length: 5 }, (_, id) => ({ id: String(id), status: "INITIALIZING", toolkit: { slug: "gmail" } }));
+    expect((await authorize("gmail", undefined, installation, env as never, ctx as never)).status).toBe(409);
+    expect(linkBodies()).toHaveLength(successfulLinks);
+    expect(fetchCalls.filter((call) => /^(DELETE|PATCH)$/.test(call.init?.method ?? ""))).toHaveLength(0);
+  });
+
   it("pages the catalog by forwarding a well-formed cursor only", async () => {
     const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
     const { env } = testEnv(fetchCalls);

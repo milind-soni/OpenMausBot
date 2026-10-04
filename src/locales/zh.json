@@ -1196,6 +1196,8 @@
   "usage.title": "用量",
   "usage.subtitle": "按机器人统计的词元与费用，来自每一个已结算的轮次。只有会报告价格的提供方才显示金额。",
   "usage.empty": "还没有消耗——机器人跑完第一个轮次后就会出现数据。",
+  "usage.bot.empty": "此机器人尚未记录任何用量。",
+  "usage.bot.unpriced": "此提供方不报告价格；仅统计词元。",
   "usage.colBot": "机器人",
   "usage.colTurns": "轮次",
   "usage.colTokens": "词元",

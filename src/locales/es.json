@@ -735,6 +735,8 @@
   "usage.title": "Uso",
   "usage.subtitle": "Tokens y coste por bot, sumados de cada turno completado. Solo muestran precio los proveedores que informan uno.",
   "usage.empty": "Todavía no hay gasto: las cifras aparecen tras el primer turno de un bot.",
+  "usage.bot.empty": "Aún no hay uso registrado para este bot.",
+  "usage.bot.unpriced": "Este proveedor no informa un precio; se cuentan los tokens.",
   "usage.colBot": "Bot",
   "usage.colTurns": "Turnos",
   "usage.colTokens": "Tokens",

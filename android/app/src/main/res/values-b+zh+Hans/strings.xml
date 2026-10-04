@@ -782,4 +782,6 @@
     <string name="mobile_density_compact">紧凑</string>
     <string name="mobile_density_comfortable_caption">头像更大，机器人名称下会显示最新消息。</string>
     <string name="mobile_density_compact_caption">每个机器人占一行。拥有多个活跃对话的机器人会显示对话数量；点按数字即可列出对话。</string>
+    <string name="mobile_mention_someone">提及某人</string>
+    <string name="mobile_mention_everyone">此对话中的所有人</string>
 </resources>

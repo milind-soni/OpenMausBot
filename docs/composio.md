@@ -47,6 +47,23 @@ If a provider or restricted Composio project policy prevents another authorizati
 
 The hosted/managed connected-apps broker exposes the same account-aware response shape and account-specific removal routes as the self-hosted project-key mode; it does not send broker or provider credentials to the renderer.
 
+## Browser authorization recovery
+
+The web UI reserves an authorization tab during your click, before requesting
+the link. If the browser still blocks it, use **Open authorization page** in
+the Apps modal or connector card. **Continue** / **Open again** reuses the
+pending link instead of creating another account. Links stay in UI memory only;
+after ten minutes, retry requests a fresh link, as required by
+[Composio's connection lifecycle](https://docs.composio.dev/kb/guide/platform-connected-accounts).
+
+If all existing accounts for that app are `INITIALIZING`, `INITIATED`, or
+`EXPIRED`, an alias-less retry gets a unique `omb-retry-…` alias. It never deletes
+or replaces an account: `EXPIRED` can also describe a formerly active grant.
+Active or unknown states still require an explicit unique label, and the
+five-usable-account limit remains. At that limit, inspect the account rows and
+disconnect only an account you intend to revoke. Managed installations need
+the updated broker as well as the updated app; this is not a client-side bypass.
+
 ## Renderer-neutral connection inventory
 
 Desktop, web, and mobile clients can load the complete account inventory in one request:

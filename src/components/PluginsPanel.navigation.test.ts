@@ -2,6 +2,7 @@ import { Children, createElement, isValidElement, type DependencyList, type Effe
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
+import { api } from "@/state/store";
 
 // PluginsPanel's own state, seeded by call order: effects never run under
 // server rendering, so the catalog is put in place the way a finished fetch
@@ -25,7 +26,10 @@ vi.mock("react", async (original) => {
       if (!fixture.counting) return react.useState(initial);
       const index = fixture.index++;
       const seeded = fixture.overrides.has(index) ? fixture.overrides.get(index) : typeof initial === "function" ? (initial as () => unknown)() : initial;
-      return [seeded, () => {}];
+      return [seeded, (value: unknown) => {
+        const current = fixture.overrides.has(index) ? fixture.overrides.get(index) : seeded;
+        fixture.overrides.set(index, typeof value === "function" ? (value as (current: unknown) => unknown)(current) : value);
+      }];
     },
   };
 });
@@ -90,6 +94,108 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Apps pop-up", () => {
+  it("keeps a safe explicit authorization link and reopens without creating another account", async () => {
+    const url = "https://auth.example.test/flow";
+    fixture.overrides.set(STATUS, { gmail: { connected: false, pending: true } });
+    fixture.overrides.set(8, { gmail: { url, createdAt: Date.now() } });
+    const page = { opener: {}, closed: false, location: { replace: vi.fn() }, close: vi.fn() };
+    const open = vi.fn(() => page);
+    vi.stubGlobal("window", { open });
+    const { nodes: tree } = render();
+    const link = tree.find((node) => node.type === "a" && node.props.href === url)!;
+    expect(link.props.target).toBe("_blank");
+    expect(link.props.rel).toBe("noopener noreferrer");
+    const tile = tree.find((node) => node.props["data-app-tile"] === "gmail")!;
+    const button = nodes(tile).find((node) => node.type === "button")!;
+    vi.mocked(api).mockClear();
+    button.props.onClick!();
+    expect(open).toHaveBeenCalledWith("", "_blank");
+    expect(page.opener).toBeNull();
+    await Promise.resolve();
+    expect(page.location.replace).toHaveBeenCalledWith(url);
+    expect(api).not.toHaveBeenCalled();
+    expect(page.close).not.toHaveBeenCalled();
+  });
+
+  it("reserves before requesting authorization and closes its blank when the panel closes", async () => {
+    fixture.overrides.set(9, "gmail");
+    fixture.overrides.set(10, "work");
+    let resolve!: (value: unknown) => void;
+    vi.mocked(api).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const page = { opener: {}, closed: false, location: { replace: vi.fn() }, close: vi.fn() };
+    const open = vi.fn(() => page);
+    vi.stubGlobal("window", { open });
+    const { nodes: tree } = render();
+    const form = tree.find((node) => node.type === "form")!;
+    (form.props.onSubmit as (event: { preventDefault(): void }) => void)({ preventDefault() {} });
+    expect(open).toHaveBeenCalledWith("", "_blank");
+    expect(open.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api).mock.invocationCallOrder.at(-1)!);
+    const cleanup = fixture.effects.find(({ deps }) => deps?.length === 0)!.effect();
+    if (typeof cleanup === "function") cleanup();
+    expect(page.close).toHaveBeenCalledOnce();
+    resolve({ url: "https://auth.example.test/late" });
+    await Promise.resolve();
+    expect(page.location.replace).not.toHaveBeenCalled();
+  });
+
+  it("renews an expired retained link without reusing its occupied account alias", async () => {
+    fixture.overrides.set(STATUS, { gmail: { connected: false, pending: true, status: "INITIALIZING", accounts: [{ id: "ca_old", alias: "work", status: "INITIALIZING" }] } });
+    fixture.overrides.set(8, { gmail: { url: "https://auth.example.test/old", createdAt: Date.now() - 600_000 } });
+    vi.mocked(api).mockClear();
+    vi.mocked(api).mockImplementationOnce(async (_path, request) => {
+      if (request?.body) throw new Error("That account alias is already in use");
+      return { url: "https://auth.example.test/new" };
+    });
+    const page = { opener: {}, closed: false, location: { replace: vi.fn() }, close: vi.fn() };
+    vi.stubGlobal("window", { open: () => page });
+    const { nodes: tree } = render();
+    expect(tree.some((node) => node.type === "a" && node.props.href === "https://auth.example.test/old")).toBe(false);
+    const tile = tree.find((node) => node.props["data-app-tile"] === "gmail")!;
+    nodes(tile).find((node) => node.type === "button")!.props.onClick!();
+    expect(api).toHaveBeenCalledWith("/api/connectors/gmail/authorize", { method: "POST" });
+    await Promise.resolve();
+    expect(page.location.replace).toHaveBeenCalledWith("https://auth.example.test/new");
+    const cleanup = fixture.effects.find(({ deps }) => deps?.length === 0)!.effect();
+    if (typeof cleanup === "function") cleanup();
+  });
+
+  it("retries an INITIALIZING account after reload instead of polling without a usable link", async () => {
+    fixture.overrides.set(STATUS, { gmail: { connected: false, pending: true, status: "INITIALIZING", accounts: [{ id: "ca_abandoned", alias: "work", status: "INITIALIZING" }] } });
+    vi.mocked(api).mockClear();
+    vi.mocked(api).mockResolvedValueOnce({ url: "https://auth.example.test/retry" });
+    const page = { opener: {}, closed: false, location: { replace: vi.fn() }, close: vi.fn() };
+    vi.stubGlobal("window", { open: () => page });
+    const { nodes: tree } = render();
+    const tile = tree.find((node) => node.props["data-app-tile"] === "gmail")!;
+    nodes(tile).find((node) => node.type === "button")!.props.onClick!();
+    expect(api).toHaveBeenCalledWith("/api/connectors/gmail/authorize", { method: "POST" });
+    await Promise.resolve();
+    expect(page.location.replace).toHaveBeenCalledWith("https://auth.example.test/retry");
+    const cleanup = fixture.effects.find(({ deps }) => deps?.length === 0)!.effect();
+    if (typeof cleanup === "function") cleanup();
+  });
+
+  it("shows the required alias form for mixed active and unfinished accounts", async () => {
+    fixture.overrides.set(STATUS, { gmail: { connected: true, pending: true, status: "ACTIVE", accounts: [
+      { id: "ca_active", alias: "work", status: "ACTIVE" },
+      { id: "ca_abandoned", status: "INITIALIZING" },
+    ] } });
+    vi.mocked(api).mockClear();
+    vi.mocked(api).mockRejectedValueOnce(new Error("Add an account alias so the existing connection is not replaced"));
+    const page = { opener: {}, closed: false, location: { replace: vi.fn() }, close: vi.fn() };
+    vi.stubGlobal("window", { open: () => page });
+    const initial = render();
+    const tile = initial.nodes.find((node) => node.props["data-app-tile"] === "gmail")!;
+    nodes(tile).find((node) => node.type === "button")!.props.onClick!();
+    await Promise.resolve();
+    const recovered = render();
+    const recoveredTile = recovered.nodes.find((node) => node.props["data-app-tile"] === "gmail")!;
+    expect(nodes(recoveredTile).some((node) => node.type === "form")).toBe(true);
+    expect(recovered.html).toContain('aria-label="Label for another Gmail account"');
+    expect(page.close).toHaveBeenCalledOnce();
+    expect(page.location.replace).not.toHaveBeenCalled();
+  });
+
   it("focuses and wraps through visible controls in a narrow window", () => {
     let active: Control;
     const focusElement = (element: Control) => { active = element; };

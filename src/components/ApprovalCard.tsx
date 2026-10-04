@@ -90,7 +90,7 @@ export function ApprovalCard({
   message,
 }: {
   /** who is asking, for the "Name wants to …" line */
-  bot?: Bot;
+  bot?: Pick<Bot, "name">;
   message: Message;
 }) {
   const card = message.card;

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addDisabledMcpServer,
   listMcpServers,
+  MAX_MCP_SERVERS,
   mcpServerNameError,
   parseMcpServerMutation,
   parseMcpServersImport,
@@ -70,6 +72,78 @@ describe("custom MCP registry", () => {
     });
   });
 
+});
+
+describe("addDisabledMcpServer", () => {
+  const notes = { command: "old", args: ["a"], env: { TOKEN: "kept" }, enabled: true };
+
+  it("stores a stdio server and a remote url server switched off, secrets included", () => {
+    expect(addDisabledMcpServer({}, {
+      name: "notes",
+      command: "npx",
+      args: ["-y", "notes-mcp"],
+      env: { NOTES_TOKEN: "secret-token" },
+      note: "dropped",
+    })).toEqual({
+      ok: true,
+      name: "notes",
+      server: { command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: "secret-token" }, enabled: false },
+      next: { notes: { command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: "secret-token" }, enabled: false } },
+    });
+    const remote = {
+      type: "sse" as const,
+      url: "https://docs.example/mcp",
+      headers: { Authorization: "Bearer real" },
+      oauth: { clientId: "corp-app", clientSecret: "app-secret", scopes: ["mcp.read"] },
+      enabled: false,
+    };
+    expect(addDisabledMcpServer({}, {
+      name: "docs",
+      url: remote.url,
+      type: "sse",
+      headers: remote.headers,
+      oauth: { clientId: "corp-app", clientSecret: "app-secret", scopes: ["mcp.read"] },
+    })).toEqual({ ok: true, name: "docs", server: remote, next: { docs: remote } });
+  });
+
+  it("refuses a body that contains enabled and leaves the map unchanged", () => {
+    const current = { notes: { ...notes } };
+    expect(addDisabledMcpServer(current, { name: "other", command: "npx", enabled: true })).toEqual({
+      ok: false,
+      status: 400,
+      error: "A bot cannot change the on/off switch. The server is saved off, and only the user can turn it on in MCP server settings.",
+    });
+    expect(addDisabledMcpServer(current, { name: "other", command: "npx", enabled: false }).ok).toBe(false);
+    expect(current).toEqual({ notes });
+  });
+
+  it("refuses an existing name and leaves that server unchanged", () => {
+    const current = { notes: { ...notes }, other: { command: "stay", args: [], env: {}, enabled: false } };
+    const before = structuredClone(current);
+    expect(addDisabledMcpServer(current, { name: "notes", command: "new", env: { TOKEN: "nope" }, enabled: false })).toMatchObject({
+      ok: false,
+      status: 400,
+    });
+    expect(addDisabledMcpServer(current, { name: "notes", command: "new", env: { TOKEN: "nope" } })).toEqual({
+      ok: false,
+      status: 409,
+      error: "An MCP server with that name already exists.",
+    });
+    expect(current).toEqual(before);
+  });
+
+  it("refuses a new server once the installation is already full", () => {
+    const current: Record<string, unknown> = {};
+    for (let i = 0; i < MAX_MCP_SERVERS; i++) current[`s${i}`] = { command: "x", args: [], env: {}, enabled: false };
+    const before = structuredClone(current);
+    expect(addDisabledMcpServer(current, { name: "extra", command: "npx" })).toEqual({
+      ok: false,
+      status: 400,
+      error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.`,
+    });
+    expect(addDisabledMcpServer(current, { name: "s0", command: "new" })).toMatchObject({ ok: false, status: 409 });
+    expect(current).toEqual(before);
+  });
 });
 
 describe("parseMcpServersImport", () => {

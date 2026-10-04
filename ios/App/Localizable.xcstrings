@@ -11215,6 +11215,28 @@
         }
       }
     },
+    "Everyone in this room": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Todos nesta sala"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此对话中的所有人"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此對話中的所有人"
+          }
+        }
+      }
+    },
     "简体中文": {
       "shouldTranslate": false
     },
@@ -11227,6 +11249,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Expirou — peça uma nova proposta"
+          }
+        }
+      }
+    },
+    "Mention someone": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mencionar alguém"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提及某人"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提及某人"
           }
         }
       }

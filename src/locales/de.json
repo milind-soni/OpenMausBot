@@ -742,6 +742,8 @@
   "usage.title": "Nutzung",
   "usage.subtitle": "Tokens und Kosten pro Bot, aufsummiert über jeden abgeschlossenen Zug. Einen Preis zeigen nur Anbieter, die einen melden.",
   "usage.empty": "Noch nichts verbraucht — Zahlen erscheinen nach dem ersten Zug eines Bots.",
+  "usage.bot.empty": "Für diesen Bot wurde noch keine Nutzung erfasst.",
+  "usage.bot.unpriced": "Dieser Anbieter meldet keinen Preis; Tokens werden gezählt.",
   "usage.colBot": "Bot",
   "usage.colTurns": "Züge",
   "usage.colTokens": "Tokens",

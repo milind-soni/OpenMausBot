@@ -735,6 +735,8 @@
   "usage.title": "Utilisation",
   "usage.subtitle": "Jetons et coût par bot, additionnés sur chaque tour terminé. Seuls les fournisseurs qui rapportent un prix en affichent un.",
   "usage.empty": "Rien de dépensé pour l’instant — les chiffres apparaissent après le premier tour d’un bot.",
+  "usage.bot.empty": "Aucune utilisation enregistrée pour ce bot pour l’instant.",
+  "usage.bot.unpriced": "Ce fournisseur n’indique pas de prix ; les jetons sont comptés.",
   "usage.colBot": "Bot",
   "usage.colTurns": "Tours",
   "usage.colTokens": "Jetons",

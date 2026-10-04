@@ -6,6 +6,7 @@ import android.view.KeyCharacterMap
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -45,6 +46,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -75,6 +77,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
@@ -108,7 +113,10 @@ import com.openmausbot.companion.R
 import com.openmausbot.companion.audio.MicrophoneAccess
 import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.AttachmentPolicy
+import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.ComposerMention
+import com.openmausbot.companion.core.MentionChoice
 import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.LocalMessageLink
 import com.openmausbot.companion.core.PendingMessageAttachment
@@ -1103,6 +1111,17 @@ private fun LoadedChat(
                     fileOpenError = null
                     attachmentError = null
                 },
+                // Who the @ being typed can tag; empty while none is, which
+                // keeps the picker closed. Not over the command HUD or a dictation.
+                mentions = if (hudOpen || dictationListening) emptyList()
+                    else ComposerMention.choicesFor(draft, ComposerMention.pool(chat, state.bots)),
+                mentionBots = state.bots,
+                onSelectMention = { choice ->
+                    if (dictationLocked) return@Composer
+                    val completed = ComposerMention.complete(draft, choice) ?: return@Composer
+                    composer.onTypedChange(completed)
+                    publishFrom(composer)
+                },
                 stoppable = chat.canStop,
                 liveStatus = liveStatus,
                 onStop = {
@@ -1559,6 +1578,59 @@ private val PLUS_SHEET_RADIUS = 28.dp
 private const val PLUS_TURN_DEGREES = 45f
 
 /**
+ * The names an @ can tag, above the composer while one is being typed — iOS
+ * `MentionPicker`. Tapping writes the exact name, so the harness's routing
+ * always matches and the keyboard's corrections never touch it.
+ */
+@Composable
+private fun MentionPicker(choices: List<MentionChoice>, bots: List<Bot>, onPick: (MentionChoice) -> Unit) {
+    val label = stringResource(R.string.mobile_mention_someone)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            // Four rows, then it scrolls: a big room stays reachable without
+            // the list climbing over the conversation.
+            .heightIn(max = MENTION_ROW_HEIGHT * 4)
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+            .verticalScroll(rememberScrollState())
+            .semantics { contentDescription = label },
+    ) {
+        choices.forEach { choice ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(MENTION_ROW_HEIGHT)
+                    .clickable(role = Role.Button) { onPick(choice) }
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val bot = bots.firstOrNull { it.id == choice.id }
+                if (bot != null) {
+                    BotAvatar(bot = bot, size = 26.dp, animated = false)
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Person,
+                        contentDescription = null,
+                        tint = secondaryTint,
+                        modifier = Modifier
+                            .size(26.dp)
+                            .background(secondaryTint.copy(alpha = 0.15f), CircleShape)
+                            .padding(5.dp),
+                    )
+                }
+                Text(text = "@" + choice.name, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                if (choice.isEveryone) {
+                    Text(text = stringResource(R.string.mobile_mention_everyone), fontSize = 13.sp, color = secondaryTint, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+private val MENTION_ROW_HEIGHT = 44.dp
+
+/**
  * What a working bot is saying, at Hidden: one grey line above the composer,
  * replaced by each new message, instead of a bubble per message. Port of the iOS
  * `LiveStatusLine`.
@@ -1664,11 +1736,21 @@ private fun Composer(
     attachmentError: String?,
     onRemoveAttachment: (PendingMessageAttachment) -> Unit,
     onDismissError: () -> Unit,
+    mentions: List<MentionChoice>,
+    mentionBots: List<Bot>,
+    onSelectMention: (MentionChoice) -> Unit,
     stoppable: Boolean,
     onStop: () -> Unit,
     liveStatus: String? = null,
 ) {
     val canSend = AttachmentImportRules.canSend(draft, attachments.size, preparing, sending)
+    var fieldFocused by remember { mutableStateOf(false) }
+    // The field keeps its own caret. A draft changed from outside it — a
+    // picked @tag, dictation, a queued message handed back — puts the caret
+    // at the end, where those words were written; the string overload would
+    // leave it wherever it was, in the middle of the new name.
+    var field by remember { mutableStateOf(TextFieldValue(draft, TextRange(draft.length))) }
+    val fieldValue = if (field.text == draft) field else TextFieldValue(draft, TextRange(draft.length))
     val inFlight = preparing || sending
     // Held as the state rather than unwrapped with `by`: read inside the layer
     // block, the turn is a new frame, not a new composition of the composer.
@@ -1683,6 +1765,9 @@ private fun Composer(
             .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        if (fieldFocused && mentions.isNotEmpty()) {
+            MentionPicker(choices = mentions, bots = mentionBots, onPick = onSelectMention)
+        }
         liveStatus?.trim()?.takeIf { it.isNotEmpty() }?.let { LiveStatusLine(it) }
         if (dictationError != null) {
             Text(
@@ -1868,8 +1953,11 @@ private fun Composer(
                         )
                     }
                     BasicTextField(
-                        value = draft,
-                        onValueChange = onDraftChange,
+                        value = fieldValue,
+                        onValueChange = { next ->
+                            field = next
+                            if (next.text != draft) onDraftChange(next.text)
+                        },
                         // Partials rebuild from a frozen base; prevent competing
                         // edits without dimming the text.
                         readOnly = dictationLocked,
@@ -1886,6 +1974,7 @@ private fun Composer(
                         // key event too, so the rule also asks where it came from.
                         modifier = Modifier
                             .fillMaxWidth()
+                            .onFocusChanged { fieldFocused = it.isFocused }
                             .onPreviewKeyEvent { event ->
                                 val sends = ComposerReturn.sends(
                                     isReturnKey = event.key == Key.Enter || event.key == Key.NumPadEnter,

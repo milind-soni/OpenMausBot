@@ -10,6 +10,8 @@ import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
+import { reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
+import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
 import { connectorServiceAccess, isConnectorToolGrantShape } from "@/lib/connector-grants";
 import { BotAvatar } from "./Avatar";
@@ -331,7 +333,7 @@ export function PluginsPanel() {
   const [stale, setStale] = useState(
     cachedConnectorStatus !== null && !cachedConnectorStatusAuthoritative,
   );
-  const [pendingUrls, setPendingUrls] = useState<Record<string, string>>({});
+  const [pendingUrls, setPendingUrls] = useState<Record<string, PendingAuthorization>>({});
   const [aliasSlug, setAliasSlug] = useState<string | null>(null);
   const [aliasDraft, setAliasDraft] = useState("");
   const [busySlug, setBusySlug] = useState<string | null>(null);
@@ -347,6 +349,7 @@ export function PluginsPanel() {
   const pollTimers = useRef(new Map<string, ReturnType<typeof setInterval>>());
   const statusGenerations = useRef(new Map<string, number>());
   const latestStatusRequests = useRef(new Map<string, number>());
+  const opening = useRef<ReturnType<typeof reserveConnectionPage> | null>(null);
 
   const refreshStatus = useCallback((slugs: string[]): Promise<Record<string, ConnectorStatus>> => {
     if (!slugs.length) return Promise.resolve({});
@@ -374,7 +377,7 @@ export function PluginsPanel() {
         ));
         for (const [slug, state] of Object.entries(services)) {
           const isCurrent = (statusGenerations.current.get(slug) ?? 0) === (requestGenerations.get(slug) ?? 0);
-          if (isCurrent && state.connected && !state.pending) setPendingUrls((current) => {
+          if (isCurrent && ((state.connected && !state.pending) || /^(expired|failed)$/i.test(state.status ?? ""))) setPendingUrls((current) => {
             if (!current[slug]) return current;
             const next = { ...current };
             delete next[slug];
@@ -401,7 +404,7 @@ export function PluginsPanel() {
         ));
         for (const [slug, state] of Object.entries(services)) {
           const isCurrent = (statusGenerations.current.get(slug) ?? 0) === (requestGenerations.get(slug) ?? 0);
-          if (isCurrent && state.connected && !state.pending) setPendingUrls((current) => {
+          if (isCurrent && ((state.connected && !state.pending) || /^(expired|failed)$/i.test(state.status ?? ""))) setPendingUrls((current) => {
             if (!current[slug]) return current;
             const next = { ...current };
             delete next[slug];
@@ -430,6 +433,8 @@ export function PluginsPanel() {
   }, [refreshConnectedStatus]);
 
   useEffect(() => () => {
+    opening.current?.cancel();
+    opening.current = null;
     for (const timer of pollTimers.current.values()) clearInterval(timer);
     pollTimers.current.clear();
   }, []);
@@ -510,22 +515,17 @@ export function PluginsPanel() {
   }, [dispatch]);
 
   const openConnectUrl = async (url: string) => {
-    if (window.ogb?.openExternal) {
-      await window.ogb.openExternal(url);
-      return;
+    if (opening.current) return;
+    const launch = reserveConnectionPage();
+    opening.current = launch;
+    try {
+      if (!await launch.open(url) && opening.current === launch) {
+        setError({ key: "connectors.popupBlockedContinue" });
+      }
+    } finally {
+      launch.cancel();
+      if (opening.current === launch) opening.current = null;
     }
-    // Browser development fallback. If a popup blocker rejects the first
-    // asynchronous open, the visible Continue button retries from a direct
-    // user gesture using the URL retained in pendingUrls.
-    const opened = window.open("", "_blank");
-    if (!opened) {
-      setError({ key: "connectors.popupBlockedContinue" });
-      return;
-    }
-    // Open a same-origin blank page first so the OAuth origin never receives
-    // an opener reference, while a real null remains a reliable blocked signal.
-    opened.opener = null;
-    opened.location.replace(url);
   };
 
   const startPolling = (slug: string) => {
@@ -545,14 +545,21 @@ export function PluginsPanel() {
   };
 
   const connect = async (slug: string, alias?: string) => {
+    if (busySlug || opening.current) return;
+    const launch = reserveConnectionPage();
+    opening.current = launch;
     statusGenerations.current.set(slug, (statusGenerations.current.get(slug) ?? 0) + 1);
     setBusySlug(slug);
     setError(null);
     try {
+      const createdAt = Date.now();
       const request: RequestInit = { method: "POST" };
       if (alias) request.body = JSON.stringify({ alias });
-      const { url } = await api(`/api/connectors/${slug}/authorize`, request);
-      setPendingUrls((current) => ({ ...current, [slug]: url }));
+      const result = await api(`/api/connectors/${slug}/authorize`, request);
+      if (opening.current !== launch) return;
+      const url = mcpSignInLink(typeof result.url === "string" ? result.url : null);
+      if (!url) throw new Error(t("connectors.invalidAuthorizationUrl"));
+      setPendingUrls((current) => ({ ...current, [slug]: { url, createdAt } }));
       setStatus((current) => ({
         ...current,
         [slug]: {
@@ -565,8 +572,11 @@ export function PluginsPanel() {
       setAliasSlug(null);
       setAliasDraft("");
       startPolling(slug);
-      await openConnectUrl(url);
+      if (!await launch.open(url) && opening.current === launch) {
+        setError({ key: "connectors.popupBlockedContinue" });
+      }
     } catch (e) {
+      if (opening.current !== launch) return;
       const message = e instanceof Error ? e.message : String(e);
       if (requiresAccountAlias(message)) {
         // Recover gracefully if an existing account was discovered after the
@@ -579,7 +589,11 @@ export function PluginsPanel() {
         setError(message);
       }
     } finally {
-      setBusySlug(null);
+      launch.cancel();
+      if (opening.current === launch) {
+        opening.current = null;
+        setBusySlug(null);
+      }
     }
   };
 
@@ -860,8 +874,10 @@ export function PluginsPanel() {
 
   function renderTile(card: ToolkitCard) {
     const serviceStatus = status[card.slug];
-    const pending = serviceStatus?.pending;
     const failed = serviceStatus?.status && /^(expired|failed)$/i.test(serviceStatus.status);
+    const pending = serviceStatus?.pending && !failed;
+    const pendingAuthorization = pending && !failed ? pendingUrls[card.slug] : undefined;
+    const authorizationUrl = reusableConnectionUrl(pendingAuthorization);
     const accounts = serviceStatus?.accounts ?? [];
     // connected with no accounts and nothing in flight = a no-auth
     // toolkit: there is no OAuth to run, so "Connect" would mint a
@@ -869,7 +885,7 @@ export function PluginsPanel() {
     const included = card.noAuth === true
       || (serviceStatus?.connected === true && !accounts.length && !pending && !failed);
     const connected = Boolean(serviceStatus?.connected || accounts.length);
-    const addingAccount = aliasSlug === card.slug && !pending;
+    const addingAccount = aliasSlug === card.slug && !included;
     const busy = busySlug === card.slug;
     const unavailableReason = managedConnectorUnavailableReason(mode, card.slug)
       ? t("connectors.selfHostOnlyReason")
@@ -891,7 +907,7 @@ export function PluginsPanel() {
             >
               {unavailableReason ?? (
                 pending
-                  ? pendingUrls[card.slug]
+                  ? authorizationUrl
                     ? t("connectors.finishSetup")
                     : t("connectors.finishSetupOrDisconnect")
                   : failed && !accounts.length
@@ -935,15 +951,16 @@ export function PluginsPanel() {
               disabled={!configured || inventoryPhase !== "ready" || busy || included || Boolean(unavailableReason)}
               title={unavailableReason ?? undefined}
               onClick={() => {
-                if (pending) {
-                  if (pendingUrls[card.slug]) {
+                if (pending && !failed) {
+                  const url = reusableConnectionUrl(pendingAuthorization);
+                  if (url) {
                     setError(null);
-                    void openConnectUrl(pendingUrls[card.slug]).catch((e) => setError(e.message));
+                    void openConnectUrl(url).catch((e) => setError(e.message));
                   } else {
-                    setAliasSlug(null);
-                    setError(null);
-                    void refreshStatus([card.slug]);
-                    startPolling(card.slug);
+                    // A reload or expired link cannot be resumed. The host
+                    // safely retries unfinished-only accounts; live accounts
+                    // still require an explicit new alias below.
+                    void connect(card.slug);
                   }
                 } else {
                   setAliasSlug((current) => current === card.slug ? null : card.slug);
@@ -960,7 +977,7 @@ export function PluginsPanel() {
                 connectorActionLabel(inventoryPhase, {
                   busy,
                   included,
-                  canContinue: Boolean(pending && pendingUrls[card.slug]),
+                  canContinue: Boolean(pendingAuthorization),
                   pending,
                   hasAccounts: accounts.length > 0,
                   failed: Boolean(failed),
@@ -969,6 +986,16 @@ export function PluginsPanel() {
             </button>
           </div>
         </div>
+        {authorizationUrl && (
+          <a href={authorizationUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => {
+            if (!reusableConnectionUrl(pendingAuthorization)) {
+              event.preventDefault();
+              void connect(card.slug);
+            }
+          }} className="mt-2 text-[12px] text-accent-text underline underline-offset-2">
+            {t("connectors.openAuthorizationPage")}
+          </a>
+        )}
         {accounts.length > 0 && (
           <div className="mt-3 space-y-1.5">
             {accounts.map((account) => {

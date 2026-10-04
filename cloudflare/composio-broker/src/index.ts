@@ -489,8 +489,13 @@ async function authorize(
   if (usableAccounts.length >= MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit) {
     return json({ error: `${slug} already has the maximum of ${MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit} accounts` }, 409);
   }
-  if (usableAccounts.length > 0 && !alias) {
-    return json({ error: "Add an account alias so the existing connection is not replaced" }, 400);
+  if (serviceAccounts.length > 0 && !alias) {
+    if (serviceAccounts.every((account) => /^(initializing|initiated|expired)$/i.test(account.status ?? ""))) {
+      // Keep abandoned flows/grants intact; a unique alias cannot replace them.
+      alias = `omb-retry-${crypto.randomUUID()}`;
+    } else {
+      return json({ error: "Add an account alias so the existing connection is not replaced" }, 400);
+    }
   }
   if (alias && serviceAccounts.some((account) => account.alias?.trim().toLowerCase() === alias.toLowerCase())) {
     return json({ error: `Account alias "${alias}" is already in use for ${slug}` }, 409);

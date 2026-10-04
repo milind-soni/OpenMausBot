@@ -1196,6 +1196,8 @@
   "usage.title": "用量",
   "usage.subtitle": "每個機器人的 token 與費用，由每次結算完成的回合累加而成。只有會回報價格的供應商才會顯示費用。",
   "usage.empty": "尚未有任何花費 — 機器人完成第一次回合後才會顯示資料。",
+  "usage.bot.empty": "此機器人尚未記錄任何用量。",
+  "usage.bot.unpriced": "此供應商未回報價格；僅計算 Token。",
   "usage.colBot": "機器人",
   "usage.colTurns": "回合",
   "usage.colTokens": "Token",

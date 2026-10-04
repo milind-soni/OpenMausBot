@@ -1628,7 +1628,7 @@ export class Store {
   /** Screen frames are ~100-500KB of base64 each; keeping every frame of a
    * long computer session bloats the transcript for nothing the client
    * would ever show. The newest few keep their pixels; older ones stay in
-   * the transcript as placeholders. Mirrors the client's own frame cap.
+   * the transcript as placeholders.
    * Returns the messages whose pixels were dropped so the caller can
    * persist exactly those. */
   private pruneScreenFrames(t: { messages: Message[] }, keep = 4): Message[] {

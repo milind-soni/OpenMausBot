@@ -104,6 +104,41 @@ class AndroidThreadNavigationTest {
     }
 
     @Test
+    fun `a busy chat can complete a mention without losing its draft or Stop control`() {
+        val busy = fixture.copy(busy = true, tasks = fixture.tasks!!.map {
+            if (it.threadId == "first") it.copy(busy = true) else it
+        })
+        val teammate = fixture.copy(id = "juniper", threadId = "juniper-thread", name = "Juniper", tasks = null)
+        val hidden = teammate.copy(id = "ghost", name = "Ghost", hidden = true)
+        val destination = Destination.Chat(Chat.BotChat(busy).target)
+        mount(bot = busy, bots = listOf(busy, teammate, hidden)) {
+            ChatScreen(destination, onResolved = {}, onBack = {}, onOpenComputer = {}, onOpenOverview = {})
+        }
+
+        compose.onNode(hasSetTextAction()).performTextInput("ask @")
+        compose.onNodeWithText("@Juniper").assertIsDisplayed()
+        compose.onNodeWithText("@Ghost").assertDoesNotExist()
+        compose.onNodeWithText("@everyone").assertDoesNotExist()
+        compose.onNodeWithText("@${fixture.name}").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Stop the current turn").assertIsDisplayed()
+
+        compose.onNode(hasSetTextAction()).performTextInput("ju")
+        compose.onNodeWithText("@Juniper").performClick()
+        compose.onNode(hasSetTextAction()).assertTextEquals("ask @Juniper ")
+        compose.onNodeWithText("@Juniper").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).performTextInput("please help")
+        compose.onNode(hasSetTextAction()).assertTextEquals("ask @Juniper please help")
+        assertTrue(requests.none { it.method == "POST" }, "picking a mention must not send it")
+
+        compose.onNodeWithContentDescription("Stop the current turn").performClick()
+        compose.waitUntil(5_000) {
+            requests.any { it.method == "POST" && it.path?.startsWith("/api/bots/${fixture.id}/interrupt") == true }
+        }
+        assertEquals("""{"threadId":"first"}""", requests.single { it.method == "POST" }.body.readUtf8())
+        compose.onNode(hasSetTextAction()).assertTextEquals("ask @Juniper please help")
+    }
+
+    @Test
     fun `the header switches exact threads and restores each typed draft until Back`() {
         val initial = Destination.Chat(Chat.BotChat(fixture).target)
         val navigator = CompanionNavigator(listOf(Destination.Roster, initial))
@@ -367,11 +402,12 @@ class AndroidThreadNavigationTest {
                 awaitCancellation()
             }
         },
+        bots: List<Bot> = listOf(bot),
         content: @Composable () -> Unit,
     ) {
         scene = WiringScene(
             connection = Connection(id = "thread-fixture", name = "Offline fixture", host = "127.0.0.1", port = server.port),
-            fleet = Fleet(listOf(bot), emptyList()),
+            fleet = Fleet(bots, emptyList()),
             events = events,
         )
         compose.setContent {

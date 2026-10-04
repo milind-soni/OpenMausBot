@@ -783,4 +783,6 @@
     <string name="mobile_density_compact">Compact</string>
     <string name="mobile_density_comfortable_caption">Larger faces, with each bot\'s latest message under its name.</string>
     <string name="mobile_density_compact_caption">One line per bot. Bots with more than one active thread show how many; tap the number to list them.</string>
+    <string name="mobile_mention_someone">Mention someone</string>
+    <string name="mobile_mention_everyone">Everyone in this room</string>
 </resources>

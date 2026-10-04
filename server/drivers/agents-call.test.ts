@@ -89,6 +89,55 @@ describe("create_bot", () => {
   });
 });
 
+describe("add_mcp_server", () => {
+  it("posts the arguments and tells the model the server was saved off", async () => {
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const result = await callTool("add_mcp_server", {
+      name: "notes",
+      command: "npx",
+      args: ["-y", "notes-mcp"],
+      env: { NOTES_TOKEN: "super-secret" },
+    }, context({
+      client: {
+        api: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return { name: "notes", enabled: false, transport: "command", target: "npx", envKeys: ["NOTES_TOKEN"], headerKeys: [] };
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(result.text).toContain("Saved MCP server “notes” (command npx) switched off.");
+    expect(result.text).toContain("MCP server settings");
+    expect(result.text).toContain("runs that command on their computer");
+    expect(result.text).toContain("NOTES_TOKEN");
+    expect(result.text).not.toContain("super-secret");
+    expect(calls).toEqual([{
+      path: "/api/internal/mcp-servers",
+      body: { name: "notes", command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: "super-secret" } },
+    }]);
+  });
+
+  it("returns the route's error sentence without echoing a secret", async () => {
+    const result = await callTool("add_mcp_server", {
+      name: "docs",
+      url: "https://docs.example/mcp",
+      headers: { Authorization: "Bearer hidden" },
+      enabled: true,
+    }, context({
+      client: {
+        api: async () => { throw new Error("A bot cannot change the on/off switch. The server is saved off, and only the user can turn it on in MCP server settings."); },
+        apiResponse: async () => ({ ok: false, status: 400, body: {} }),
+      },
+    }));
+    expect(result).toEqual({
+      text: "A bot cannot change the on/off switch. The server is saved off, and only the user can turn it on in MCP server settings.",
+      isError: true,
+    });
+    expect(result.text).not.toContain("hidden");
+  });
+});
+
 describe("propose_profile", () => {
   it("rejects a non-boolean toggle without proposing the valid half", async () => {
     const calls: Array<{ path: string; body: any }> = [];

@@ -286,6 +286,44 @@ export function parseMcpServerMutation(
   return looksRemote(raw) ? parseRemote(raw, true, existing) : parseStdio(raw, true, existing);
 }
 
+/** The fields POST /api/mcp/servers keeps (`mcpServerBody` in server/index.ts),
+ * minus `enabled`. A bot is not allowed to send that switch at all. */
+const BOT_MCP_SERVER_KEYS = ["command", "args", "env", "type", "url", "headers", "oauth"] as const;
+
+function pickMcpServerFields(record: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of BOT_MCP_SERVER_KEYS) if (record[key] !== undefined) out[key] = record[key];
+  return out;
+}
+
+export type DisabledMcpServerAdd =
+  | { ok: true; name: string; server: StoredMcpServer; next: Record<string, unknown> }
+  | { ok: false; status: number; error: string };
+
+const BOT_CANNOT_SWITCH = "A bot cannot change the on/off switch. The server is saved off, and only the user can turn it on in MCP server settings.";
+
+/** File one new MCP server as a disabled row. Does not probe, does not
+ * launch, and does not touch a server that is already stored. The caller
+ * still applies organisation policy before writing the returned map. */
+export function addDisabledMcpServer(current: Record<string, unknown>, body: unknown): DisabledMcpServerAdd {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, status: 400, error: "Expected an MCP server object with a name." };
+  }
+  const record = body as Record<string, unknown>;
+  if (Object.hasOwn(record, "enabled")) return { ok: false, status: 400, error: BOT_CANNOT_SWITCH };
+  const name = typeof record.name === "string" ? record.name : "";
+  if (name && Object.hasOwn(current, name)) {
+    return { ok: false, status: 409, error: "An MCP server with that name already exists." };
+  }
+  if (Object.keys(current).length >= MAX_MCP_SERVERS) {
+    return { ok: false, status: 400, error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` };
+  }
+  const parsed = parseMcpServerMutation(name, pickMcpServerFields(record));
+  if (!parsed.ok) return { ok: false, status: 400, error: parsed.error };
+  if (parsed.server.enabled !== false) return { ok: false, status: 400, error: BOT_CANNOT_SWITCH };
+  return { ok: true, name, server: parsed.server, next: { ...current, [name]: parsed.server } };
+}
+
 export function listMcpServers(raw: Record<string, unknown> | undefined): McpServerListing[] {
   return Object.entries(raw ?? {}).flatMap(([name, value]): McpServerListing[] => {
     const parsed = parseStoredMcpServer(name, value);
