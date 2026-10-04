@@ -65,7 +65,6 @@ export type DecisionSource =
   | "skill"
   | "profile"
   | "model"
-  | "tightening"
   | "user"
   | "connector-scope"
   | "outbound"

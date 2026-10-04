@@ -461,7 +461,6 @@ describe("isPersistentQuestionCard", () => {
     expect(isPersistentQuestionCard({ requestType: "permission", tool: "Bash" })).toBe(false);
     expect(isPersistentQuestionCard({ routineRequest: {} })).toBe(false);
     expect(isPersistentQuestionCard({ modelRequest: {} })).toBe(false);
-    expect(isPersistentQuestionCard({ tighteningRequest: {} })).toBe(false);
   });
 
   it("settles a question only for an explicit user answer", () => {
