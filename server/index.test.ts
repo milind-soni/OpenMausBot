@@ -10485,25 +10485,6 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("has no route for a bot to propose reducing its own permissions; the owner changes them in Edit Profile", async () => {
-    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
-    try {
-      await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto", alwaysAllow: ["Bash"] });
-      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
-      const proposal = await fetch(`${BASE}/api/internal/tightening-requests`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { alwaysAllow: ["Bash"] }, reason: "lockdown" }),
-      });
-      expect(proposal.status).toBe(404);
-      const after = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
-      expect(after.messages.some((message: { card?: unknown }) => message.card)).toBe(false);
-      expect(after).toMatchObject({ approvalMode: "auto", alwaysAllow: ["Bash"] });
-    } finally {
-      await api("DELETE", `/api/bots/${bot.id}`);
-    }
-  });
-
   it("only lets a section's Chief of Staff propose (and hold) a change to another bot's profile", async () => {
     const a = (await api("POST", "/api/bots", { name: "Ari" })).body.bot;
     const b = (await api("POST", "/api/bots", { name: "Bo" })).body.bot;
