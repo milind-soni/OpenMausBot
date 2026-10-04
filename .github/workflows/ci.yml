@@ -521,6 +521,14 @@ jobs:
           cd ios
           xcodegen generate
       - name: Build the simulator app
+        # One slice. The generic simulator destination builds arm64 AND
+        # x86_64 (ONLY_ACTIVE_ARCH is a no-op there), and nothing runs the
+        # x86_64 one: the runner, the UI-test simulators and every current
+        # Mac are arm64. Two slices doubled the compile and ran six
+        # swift-frontends side by side on a 3-core, 7 GB runner. The timing
+        # summary puts per-task totals at the end of the log, so a slow
+        # batch is read there rather than inferred from a 27-minute gap
+        # (the iOS 16 shims in BackDeployCompat.swift, Oct 2026).
         run: |
           cd ios
           xcodebuild \
@@ -528,6 +536,8 @@ jobs:
             -scheme OpenMausCompanion \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
+            -showBuildTimingSummary \
+            ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO \
             build
 
