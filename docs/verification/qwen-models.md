@@ -25,25 +25,24 @@ but unchanged selection must not send a prompt.
 The synthetic CLI also reproduces Qwen's live-session cache: `session/load`
 acknowledges the request while retaining the original MCP credentials. The
 fixture calls the real agents proxy's `list_bots` and `session_search` tools on
-three turns, covering a new conversation and two resumed turns. OMB rotates
-the agents bearer every turn, so Qwen must close the previous child and resume
-the saved conversation in a fresh process before prompting. The pid changes
-each turn; the aggregate RPC log contains three `initialize`, one `session/new`,
-two `session/load`, and three `session/prompt` calls. Each process confirms the
-selected endpoint before its prompt, and every completed turn's credentials
-must return HTTP 401 afterward. The ACP unit checks separately retain process
-reuse when Qwen's MCP configuration is unchanged and same-process reloads for
-engines that support them. JSON includes resulting messages and the
+three turns on one conversation. OMB keeps the agents bearer across turns
+while the grants are unchanged, so Qwen keeps one child and its live session.
+The pid stays the same; the aggregate RPC log contains one `initialize`, one
+`session/new`, no `session/load`, and three `session/prompt` calls. The process
+confirms the selected endpoint before its first prompt, and each turn's
+credential returns HTTP 401 once the turn settles. The ACP unit checks
+separately cover a fresh Qwen process when its MCP configuration changes,
+process reuse when it is unchanged, and same-process reloads for engines that
+support them. JSON includes resulting messages and the
 launcher's persistent log path. The server and temporary home are cleaned up
 on completion. This proves OMB's integration contract, not real provider auth
 or a paid model response.
 
-Last exercised: 2026-09-26, isolated macOS fixture. Before the fix, turn two
-reused the first pid and its real agents proxy returned `unauthorized`. After
-the fix, all three turns settled with six successful roster calls, three
-history searches, three process ids, and six HTTP 401 checks against revoked
-credentials. The alternate-provider, alternate-endpoint, and rejected-switch
-checks also passed. No live provider or user workspace was used.
+Last exercised: 2026-10-04, isolated macOS fixture. All three turns settled
+with six successful roster calls, three history searches, one process id, one
+agents bearer, and three HTTP 401 checks after the turns settled. The
+alternate-provider, alternate-endpoint, and rejected-switch checks also passed.
+No live provider or user workspace was used.
 
 Route identity follows Qwen Code's
 [ACP model utility](https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/utils/acpModelUtils.ts)

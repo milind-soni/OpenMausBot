@@ -2163,7 +2163,7 @@ type InternalCapability = {
 };
 const MAX_ATTACHED_FILES_PER_TURN = 10;
 const MAX_ROOM_POSTS_PER_TURN = 3;
-const MAX_CREATED_BOTS_REFUSAL = "You can create at most 4 bots in one turn. Use the team you have before adding more.";
+const MAX_CREATED_BOTS_PER_TURN = 4;
 // A capability lives for the exact provider-turn generation, including while
 // that turn is parked on a human approval. The long ceiling is only an orphan
 // backstop for an impossible-to-settle adapter; normal terminal paths revoke
@@ -2235,32 +2235,39 @@ function beginInternalCapabilityGeneration(threadId: string, generation = random
 // between turns, and after any revoke, nothing honours it. A changed grant,
 // Stop, a stall, a deleted bot or thread or a provider reload gives the next
 // turn a new bearer, so whatever still holds the old one is never honoured
-// again. The computer is the exception: its tools bridge into a machine the
-// harness stops and starts between turns (an idle Local VM, a VPS that Auto
-// starts), and a warm engine never restarts a server whose machine went
-// away. So its bearer stays per turn, and a turn with a computer mounted
-// starts its engine fresh, as before.
+// again.
 /** threadId → "botId kind" → the bearer and the grants it was minted for. */
 const sessionCredentials = new Map<string, Map<string, { grants: string; token: string }>>();
 
 /** What a bearer stands for: everything its record grants (a turn's counters
  * all start at zero), plus the thread's approval level; not the turn. */
-function sessionGrants({ generation: _turn, localVmTarget, ...grants }: Omit<InternalCapability, "orphanExpiresAt">): string {
+function sessionGrants({ generation: _turn, ...grants }: Omit<InternalCapability, "orphanExpiresAt">): string {
   const thread = botForThread(grants.botId, grants.threadId);
-  return JSON.stringify({ ...grants, localVmTarget: localVmTarget?.key ?? null, approval: thread ? approvalModeFor(thread) : null });
+  return JSON.stringify({ ...grants, approval: thread ? approvalModeFor(thread) : null });
 }
 
-function mintInternalCapability(capability: Omit<InternalCapability, "orphanExpiresAt">): string {
-  if (activeInternalGenerationByThread.get(capability.threadId) !== capability.generation) {
-    throw new Error("cannot mint an integration capability for an inactive turn");
-  }
+/** The thread's bearer for this integration, new only when its grants changed. */
+function sessionBearer(capability: Omit<InternalCapability, "orphanExpiresAt">): string {
   const credentials = sessionCredentials.get(capability.threadId) ?? new Map<string, { grants: string; token: string }>();
   sessionCredentials.set(capability.threadId, credentials);
   const slot = `${capability.botId} ${capability.kind}`;
   const grants = sessionGrants(capability);
   const held = credentials.get(slot);
-  const token = capability.kind !== "computer" && held?.grants === grants ? held.token : randomBytes(24).toString("hex");
+  if (held?.grants === grants) return held.token;
+  const token = randomBytes(24).toString("hex");
   credentials.set(slot, { grants, token });
+  return token;
+}
+
+function mintInternalCapability(capability: Omit<InternalCapability, "orphanExpiresAt">, { perTurn = false } = {}): string {
+  if (activeInternalGenerationByThread.get(capability.threadId) !== capability.generation) {
+    throw new Error("cannot mint an integration capability for an inactive turn");
+  }
+  // perTurn: a bridge into a machine the harness stops and starts between
+  // turns (a Local VM, the VPS, a Boat). A warm engine never restarts a
+  // server whose machine went away, so such a turn gets a new bearer and
+  // starts its engine fresh.
+  const token = perTurn ? randomBytes(24).toString("hex") : sessionBearer(capability);
   // Minted twice in one turn: keep that turn's record and its counters.
   if (internalCapabilities.get(token)?.generation !== capability.generation) {
     internalCapabilities.set(token, {
@@ -3112,8 +3119,17 @@ const routineRequestEnvelopeSchema = z.discriminatedUnion("action", [
 
 /** The loopback endpoint a bot's computer proxy polls before acting. With a
  * Boat id, the same turn-scoped token also serves that Boat's tools at
- * /api/internal/computer/mcp, and is revoked when the turn ends. */
-function controlIntegration(botId: string, threadId: string, generation: string, localVmTarget?: LocalVmTarget, boxId?: string) {
+ * /api/internal/computer/mcp, and is revoked when the turn ends. This
+ * computer runs as long as the app does, so its bridge keeps the thread's
+ * bearer like every other integration; any other machine (a Local VM, the
+ * VPS, a Boat) gets a new bearer each turn. */
+function controlIntegration(
+  botId: string,
+  threadId: string,
+  generation: string,
+  machine: "this computer" | { localVmTarget?: LocalVmTarget; boxId?: string } = {},
+) {
+  const { localVmTarget, boxId } = machine === "this computer" ? {} : machine;
   return {
     url: `http://127.0.0.1:${PORT}/api/internal/computer-control?botId=${encodeURIComponent(botId)}`,
     token: mintInternalCapability({
@@ -3128,7 +3144,7 @@ function controlIntegration(botId: string, threadId: string, generation: string,
       skillAuthoring: false,
       createdBots: 0,
       openedThreads: 0,
-    }),
+    }, { perTurn: machine !== "this computer" }),
   };
 }
 
@@ -6570,7 +6586,7 @@ function cloudEngine(instance: ReturnType<typeof registry.get>): CloudEngine {
  * turn-scoped capability naming this Boat, never a Boat credential. */
 function cloudComputerMount(botId: string, owner: TurnOwner, boxId: string, remoteAgent: boolean): Pick<NonNullable<SendTurnInput["integrations"]>, "computer" | "localComputer"> {
   if (remoteAgent) return { computer: { kind: "box", boxId } };
-  const control = controlIntegration(botId, owner.threadId, owner.generation, undefined, boxId);
+  const control = controlIntegration(botId, owner.threadId, owner.generation, { boxId });
   return {
     localComputer: {
       command: process.execPath,
@@ -6599,7 +6615,7 @@ async function mountHostComputer(owner: TurnOwner, botId: string, providerSuppor
       : "CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
   }
   await bindTurnComputer(owner, "computer:host");
-  return gatedLocalComputer(cua, controlIntegration(botId, owner.threadId, owner.generation));
+  return gatedLocalComputer(cua, controlIntegration(botId, owner.threadId, owner.generation, "this computer"));
 }
 
 /** The bot's own VPS desktop, mounted into the local agent. The desktop lease
@@ -10131,7 +10147,7 @@ async function startTurn(
               pinAutoSurface("local");
             },
           });
-          integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
+          integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId, "this computer"));
           computerKind = "local";
         }
       }
@@ -12564,7 +12580,7 @@ async function runGroupMemberTurn(
       }
       integrations.localComputer = containerComputerMcp(
         vm.runtime,
-        controlIntegration(readyBot.id, threadId, internalGeneration, target),
+        controlIntegration(readyBot.id, threadId, internalGeneration, { localVmTarget: target }),
         target,
       );
     }
@@ -18021,8 +18037,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!chief.chiefOfStaff) {
           return json(res, 403, { error: "only a section's Chief of Staff can create operator bots" });
         }
-        if (internalCapability.createdBots >= 4) {
-          return json(res, 429, { error: MAX_CREATED_BOTS_REFUSAL });
+        if (internalCapability.createdBots >= MAX_CREATED_BOTS_PER_TURN) {
+          return json(res, 429, { error: `You can create at most ${MAX_CREATED_BOTS_PER_TURN} bots in one turn. Use the team you have before adding more.` });
         }
         if (store.bots.length >= MAX_WORKSPACE_BOTS) {
           return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
@@ -18063,7 +18079,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (store.bot(chief.id) !== chief || chief.hidden || !chief.chiefOfStaff || !connectorThread(chief.id, fromThreadId)) {
           return json(res, 403, { error: "only an active Chief of Staff can create operator bots" });
         }
-        if (internalCapability.createdBots >= 4) return json(res, 429, { error: MAX_CREATED_BOTS_REFUSAL });
+        if (internalCapability.createdBots >= MAX_CREATED_BOTS_PER_TURN) {
+          return json(res, 429, { error: `You can create at most ${MAX_CREATED_BOTS_PER_TURN} bots in one turn. Use the team you have before adding more.` });
+        }
         if (store.bots.length >= MAX_WORKSPACE_BOTS) return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
         const duplicate = store.bots.find(
           (candidate) =>
