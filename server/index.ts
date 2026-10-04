@@ -4224,10 +4224,10 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
 const storedAvatarExists = (avatarUrl: string): boolean =>
   attachmentExists(avatarUrl.slice("/api/attachments/".length));
 
+/** A bot with its open thread's newest page, for HTTP replies. */
 const publicBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => ({
   ...wireBot(bot),
-  messages: store.messagesFor(bot.threadId),
-  activeLeafId: store.activeLeaf(bot.threadId),
+  ...messagePage(bot.threadId, DEFAULT_PAGE),
   tasks: store.tasks(bot.id).map(wireTask),
 });
 const publicBotQueuedMessages = () => queuedSteerSnapshot((botId, threadId) => Boolean(store.taskByThread(botId, threadId)));
@@ -5097,19 +5097,31 @@ function activeGroupTurnForBot(botId: string): { group: GroupRecord; threadId: s
   return null;
 }
 
+/** A room with its open thread's newest page, for HTTP replies. */
 const groupWithThread = (group: GroupRecord) => ({
   ...publicGroupState(group),
-  messages: store.messagesFor(group.threadId),
-  activeLeafId: store.activeLeaf(group.threadId),
+  ...messagePage(group.threadId, DEFAULT_PAGE),
   ...(group.dm ? {} : { tasks: store.groupTasks(group.id) }),
 });
 
 // The store tells us what it wrote; this is the ONE place that turns those
 // into SSE frames. No mutation path can persist without emitting — the
 // property holds by construction, not by every call site remembering to
-// broadcast. Bot frames are the slim wire shape (no transcript); the few
-// endpoints whose callers need the transcript (task create/switch, imports)
-// still send their richer payload on top.
+// broadcast.
+//
+// A bot or room frame carries its open thread's newest page only when that
+// thread is not the one it last went out with: a switch, a new open thread,
+// deleting the open one, a new bot or room. Other windows swap transcripts
+// on exactly those frames (one whose open thread was deleted keeps its
+// composer locked until a page arrives). Every other frame stays slim, and
+// clients keep the transcript they hold when a frame carries none.
+const sentThreads = new Map<string, string>();
+for (const record of [...store.bots, ...store.groups]) sentThreads.set(record.id, record.threadId);
+function pageIfThreadChanged(id: string, threadId: string) {
+  if (sentThreads.get(id) === threadId) return {};
+  sentThreads.set(id, threadId);
+  return messagePage(threadId, DEFAULT_PAGE);
+}
 store.onChange((change) => {
   // Who owns which thread, and what each member may see, follow the fleet.
   if (change.type !== "message" && change.type !== "message.patch" && change.type !== "thread" && change.type !== "sections") forgetVisibility();
@@ -5141,23 +5153,25 @@ store.onChange((change) => {
       break;
     case "bot": {
       const bot = store.bot(change.botId);
-      if (bot) broadcast({ kind: "bot", bot: wireBot(bot) });
+      if (bot) broadcast({ kind: "bot", bot: { ...wireBot(bot), ...pageIfThreadChanged(bot.id, bot.threadId) } });
       // A new audience narrows the rooms this bot is in, for good.
       if (bot) for (const group of store.groups.filter((candidate) => candidate.memberIds.includes(bot.id))) settleRoomFloor(group);
       break;
     }
     case "bot.deleted":
+      sentThreads.delete(change.botId);
       try { commandAllowlist.clear(change.botId); }
       catch { console.error("[command-allowlist] Could not remove deleted bot's saved rules."); }
       broadcast({ kind: "bot.deleted", botId: change.botId });
       break;
     case "group": {
       const group = store.group(change.groupId);
-      if (group) broadcast({ kind: "group", group: publicGroupState(group) });
+      if (group) broadcast({ kind: "group", group: { ...publicGroupState(group), ...pageIfThreadChanged(group.id, group.threadId) } });
       if (group) settleRoomFloor(group);
       break;
     }
     case "group.deleted":
+      sentThreads.delete(change.groupId);
       broadcast({ kind: "group.deleted", groupId: change.groupId });
       break;
   }
@@ -10831,21 +10845,10 @@ routines = new RoutineManager({
     // conversation, by whoever wrote the routine: a run of one that is
     // nobody's is confined to a folder of its own, never the bot's project.
     if (task && CLOUD_HOME && routineId) threadStarters.set(task.threadId, routineOpener(routineId));
-    const bot = store.bot(botId);
-    // A run's task that stays in the background changes the bot's task list,
-    // not the conversation on screen, so the frame carries no transcript.
-    // publicBot() here sent the whole active thread on every scheduled run;
-    // past the phone sidecar's 4 MiB event ceiling that ended the stream, and
-    // the resume cursor replayed the same frame on every reconnect: "loses
-    // connection about once an hour" on a phone with an hourly routine
-    // (MOCA-179). Every client keeps its transcript when a bot frame has
-    // none. An activated task is a fresh, short thread the client must show.
-    if (task && bot) {
-      broadcast({
-        kind: "bot",
-        bot: activate ? publicBot(bot) : { ...wireBot(bot), tasks: store.tasks(bot.id).map(wireTask) },
-      });
-    }
+    // The store's frame announces it. A run's task that stays in the
+    // background leaves the open thread alone, so that frame carries no
+    // transcript: a whole thread on every scheduled run once passed the phone
+    // sidecar's 4 MiB event ceiling and ended the stream (MOCA-179).
     return task;
   },
   joinConversation: (run) => {
@@ -18956,12 +18959,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       try { groupUsageReader.refresh(); } catch { /* accounting must not block a snapshot */ }
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
-      // wireBot(), not publicBot(): publicBot() pulls the whole transcript via
-      // messagesFor() just to have it overwritten below by messagePage(),
-      // which — for a bounded request — never needs the full transcript.
-      // tasks stays explicit, because that is the one field publicBot() adds
-      // that messagePage() does not: wireBot() omits the key entirely for a
-      // bot record carrying no tasks, where publicBot() always sent [].
+      // wireBot(), not publicBot(): this snapshot answers with the page it
+      // was asked for, not the default one. tasks stays explicit, as in
+      // publicBot(): wireBot() omits the key entirely for a bot record
+      // carrying no tasks, where clients expect [].
       // A member on a workspace with a restricted bot gets only what they may
       // see (bot-visibility.ts); for everyone else these filters keep all.
       const shownBots = store.bots.filter((bot) => visible.bot(bot.id));
@@ -19699,8 +19700,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (importMode !== "add") return json(res, 400, { error: "Import backups alongside your existing bots; project mode is only for templates" });
         try {
           const imported = importTeamBackup(store, routines!, body, await defaultSelection(), { visibility: importVisibility });
+          // A restore writes its transcripts without store events, after the
+          // store's own frames announced each bot and room, so these frames
+          // are what carries the restored pages to other clients.
           const bots = imported.bots.map((bot) => publicBot(bot));
-          const groups = imported.groups.map((group) => ({ ...publicGroupState(group), ...messagePage(group.threadId, undefined) }));
+          const groups = imported.groups.map((group) => groupWithThread(group));
           for (const bot of bots) broadcast({ kind: "bot", bot });
           for (const group of groups) broadcast({ kind: "group", group });
           return json(res, 201, { ...imported, bots, groups });
@@ -19837,9 +19841,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
-      const fresh = groupWithThread(store.group(group.id)!);
-      broadcast({ kind: "group", group: fresh });
-      return json(res, 201, { group: fresh, task });
+      return json(res, 201, { group: groupWithThread(store.group(group.id)!), task });
     }
 
     m = path.match(/^\/api\/groups\/([\w-]+)\/tasks\/([\w-]+)$/);
@@ -19861,15 +19863,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const switched = store.switchGroupTask(group.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such channel task" });
       const switchedSettings = { ...publicGroupState(switched), tasks: store.groupTasks(switched.id) };
-      // The frame says the channel moved; it is not a transcript delivery.
-      // A long room's whole history over SSE is the payload `?messages=`
-      // exists to avoid, and it would also overwrite a bounded snapshot on
-      // every other client. One default page is enough to render the switch;
-      // anything earlier pages back through /api/threads/:id/messages.
-      broadcast({
-        kind: "group",
-        group: { ...switchedSettings, ...messagePage(switched.threadId, DEFAULT_PAGE) },
-      });
       // "0" predates paging and means settings only — no `messages` key at
       // all, which clients tell apart from an empty page. A positive page is
       // the transcript a client can actually hold; omitting the parameter
@@ -19877,9 +19870,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // materialises it.
       const responseGroup = requestedMessages === "0"
         ? switchedSettings
-        : switchLimit === undefined
-          ? groupWithThread(switched)
-          : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit) };
+        : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit) };
       return json(res, 200, { group: responseGroup });
     }
     if (m && method === "PATCH") {
@@ -19941,9 +19932,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (updated) clearTurnDigestState(m[2]);
       if (!updated) return json(res, 400, { error: "a channel keeps at least one task" });
       rejectDeletedThreadSkillStages(stagedSkillCleanups);
-      const fresh = groupWithThread(updated);
-      broadcast({ kind: "group", group: fresh });
-      return json(res, 200, { group: fresh });
+      return json(res, 200, { group: groupWithThread(updated) });
     }
 
     m = path.match(/^\/api\/groups\/([\w-]+)$/);
@@ -22458,15 +22447,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // ── tasks: a bot's separate contexts ────────────────────────────────
-    // The bot record answers with its messages because switching tasks
-    // changes which transcript is live, and a partial patch would leave
-    // the client showing the previous task's conversation.
-    const botWithThread = (bot: NonNullable<ReturnType<typeof store.bot>>) => ({
-      ...wireBot(bot),
-      messages: store.messagesFor(bot.threadId),
-      activeLeafId: store.activeLeaf(bot.threadId),
-      tasks: store.tasks(bot.id).map(wireTask),
-    });
+    // Replies carry the open thread's newest page: a create or delete can
+    // change which transcript is live. The frames come from store.onChange.
 
     // Folders organize one bot's threads; they never own settings,
     // transcripts or working directories. The project wire names stay stable.
@@ -22482,7 +22464,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const projects = store.reorderProjects(bot.id, body.projectIds);
       if (!projects) return json(res, 400, { error: "projectIds must include each of this bot's folders exactly once" });
-      return json(res, 200, { projects, bot: botWithThread(bot) });
+      return json(res, 200, { projects, bot: publicBot(bot) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/projects(?:\/([\w-]+))?$/);
     if (m && ((method === "POST" && !m[2]) || (method === "PATCH" && m[2]) || (method === "DELETE" && m[2]))) {
@@ -22491,7 +22473,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (m[2] && !store.project(bot.id, m[2])) return json(res, 404, { error: "no such folder" });
       if (method === "DELETE") {
         const updated = store.deleteProject(bot.id, m[2]!);
-        return json(res, 200, { bot: botWithThread(updated!) });
+        return json(res, 200, { bot: publicBot(updated!) });
       }
       const body = await readBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
@@ -22511,7 +22493,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const project = method === "POST"
         ? store.createProject(bot.id, patch.name!, patch.emoji)
         : store.patchProject(bot.id, m[2]!, patch);
-      return json(res, method === "POST" ? 201 : 200, { project, bot: botWithThread(bot) });
+      return json(res, method === "POST" ? 201 : 200, { project, bot: publicBot(bot) });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks$/);
@@ -22542,9 +22524,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
-      const fresh = botWithThread(store.bot(bot.id)!);
-      broadcast({ kind: "bot", bot: fresh });
-      return json(res, 201, { bot: fresh, task: wireTask(task) });
+      return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)$/);
     if (m && method === "POST") {
@@ -22560,18 +22540,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const switched = store.switchTask(bot.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such task" });
       const switchedSettings = { ...wireBot(switched), tasks: store.tasks(switched.id).map(wireTask) };
-      // Bounded for the same reason as the channel switch above.
-      broadcast({
-        kind: "bot",
-        bot: { ...switchedSettings, ...messagePage(switched.threadId, DEFAULT_PAGE) },
-      });
       // "0" is settings only, a positive page is a bounded transcript, and no
       // parameter is the whole thread — the one branch that materialises it.
+      // Search results land through that branch (src/lib/focus-message.ts):
+      // the hit can be older than one page.
       const responseBot = requestedMessages === "0"
         ? switchedSettings
-        : switchLimit === undefined
-          ? botWithThread(switched)
-          : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit) };
+        : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit) };
       return json(res, 200, { bot: responseBot });
     }
     if (m && method === "PATCH") {
@@ -22634,9 +22609,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const task = store.refreshTaskPermissions(profile.id, m[2]);
         if (!task) return json(res, 404, { error: "no such task" });
-        const fresh = botWithThread(store.bot(profile.id)!);
-        broadcast({ kind: "bot", bot: fresh });
-        return json(res, 200, { task: wireTask(task), bot: fresh });
+        return json(res, 200, { task: wireTask(task), bot: publicBot(store.bot(profile.id)!) });
       }
       const patch: Parameters<typeof store.patchTask>[2] = {};
       if (body.projectId !== undefined) {
@@ -22717,9 +22690,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? store.switchTaskModel(m[1], m[2], patch.modelSelection, body.updateBotDefault === true, body.resetApprovalToAsk === true,
           { ...patch, ...hostedModels?.resetTask(current.modelSelection, patch.modelSelection) })!
         : store.patchTask(m[1], m[2], patch)!;
-      const fresh = botWithThread(store.bot(m[1])!);
-      broadcast({ kind: "bot", bot: fresh });
-      return json(res, 200, { task: wireTask(task), bot: fresh });
+      return json(res, 200, { task: wireTask(task), bot: publicBot(store.bot(m[1])!) });
     }
     if (m && method === "DELETE") {
       const bot = store.bot(m[1]);
@@ -22743,9 +22714,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       handoffs.forget(m[2]);
       settleDirectFollowup(directTurnGenerationByThread.get(m[2]));
       rejectDeletedThreadSkillStages(stagedSkillCleanups);
-      const fresh = botWithThread(updated);
-      broadcast({ kind: "bot", bot: fresh });
-      return json(res, 200, { bot: fresh });
+      return json(res, 200, { bot: publicBot(updated) });
     }
     // Regenerate title (#1858): name the thread again from its conversation
     // as it is now. The person asked, so the result replaces any title, but
