@@ -325,11 +325,10 @@ async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string,
   await sweepLiveRefs(cwd, env, shadow, signal);
 }
 
-type CommitResult = { hash: string; complete: boolean };
-
-/** Capture fully before advancing HEAD. A partial add must never replace
- * the last usable checkpoint or authorize removal of its objects. */
-async function commitAll(cwd: string, env: NodeJS.ProcessEnv, label: string, signal?: AbortSignal): Promise<CommitResult> {
+/** Capture fully before advancing HEAD: null when the add was partial, so a
+ * partial capture never replaces the last usable checkpoint or authorizes
+ * removal of its objects. */
+async function commitAll(cwd: string, env: NodeJS.ProcessEnv, label: string, signal?: AbortSignal): Promise<string | null> {
   const previous = (await runGit(["rev-parse", "HEAD"], cwd, env, signal)).trim();
   try {
     // Rebuild only the shadow index so newly ignored/cache-tagged files stop
@@ -337,19 +336,19 @@ async function commitAll(cwd: string, env: NodeJS.ProcessEnv, label: string, sig
     await runGit(["read-tree", "--empty"], cwd, env, signal);
     await runGit(["add", "-A", "--ignore-errors", "."], cwd, env, signal);
   } catch {
-    return { hash: previous, complete: false };
+    return null;
   }
   const changed = await hasStagedChanges(cwd, env, signal);
   const base = (await runGit(["rev-list", "--max-parents=0", "HEAD"], cwd, env, signal)).trim();
   const count = (await runGit(["rev-list", "--count", "HEAD"], cwd, env, signal)).trim();
-  if (!changed && Number(count) <= 2) return { hash: previous, complete: true };
+  if (!changed && Number(count) <= 2) return previous;
   const tree = (await runGit(["write-tree"], cwd, env, signal)).trim();
   const message = changed ? label : (await runGit(["show", "-s", "--format=%B", "HEAD"], cwd, env, signal)).trim();
   // Parent only the empty marker, never the previous snapshot: keeping the
   // previous commit as an ancestor would retain every old tree indefinitely.
   const hash = (await runGit(["commit-tree", tree, "-p", base, "-m", message], cwd, env, signal)).trim();
   await runGit(["update-ref", "HEAD", hash, previous], cwd, env, signal);
-  return { hash, complete: true };
+  return hash;
 }
 
 async function collectObsolete(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
@@ -365,7 +364,8 @@ async function collectObsolete(cwd: string, env: NodeJS.ProcessEnv): Promise<voi
 }
 
 /** Snapshot the folder. Returns the checkpoint hash, or null when the
- * feature is off for this bot, git is missing, or the folder is refused.
+ * feature is off for this bot, git is missing, the folder is refused, or a
+ * file could not be read.
  * With `pin`, the returned commit stays reachable through later snapshots of
  * the same folder until release(pin) — for a turn that will diff against it
  * when it ends. Never throws — this is called fire-and-forget on the turn path. */
@@ -380,11 +380,11 @@ export async function snapshot(botId: string, cwd: string, label: string, signal
     return await serialize(shadow, async () => {
       const env = gitEnv(shadow, worktree);
       await ensureShadow(worktree, env, shadow, signal);
-      const result = await commitAll(worktree, env, label, signal);
-      if (!result.complete) return null;
-      if (opts?.pin) await runGit(["update-ref", liveRef(opts.pin), result.hash], worktree, env, signal);
+      const hash = await commitAll(worktree, env, label, signal);
+      if (!hash) return null;
+      if (opts?.pin) await runGit(["update-ref", liveRef(opts.pin), hash], worktree, env, signal);
       await collectObsolete(worktree, env);
-      return result.hash;
+      return hash;
     });
   } catch (e) {
     if (!signal?.aborted) disable(botId, e instanceof Error ? e.message : String(e));
