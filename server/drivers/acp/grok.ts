@@ -12,8 +12,9 @@ import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome, splitCliString } from "../../env-path.ts";
 import type { DeviceSignIn } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
-import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { createAcpDriver, type AcpQuestionRequest, type AcpSupport } from "./core.ts";
 import { allowsTool, canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
+import { parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById } from "../../../shared/ask-question.ts";
 
 export const STATIC_GROK_MODELS: ModelCatalog = {
   default: "grok-4.7",
@@ -345,8 +346,54 @@ export function grokToolScopeProfile(scope: unknown, init: unknown, inherited?: 
   };
 }
 
+/** Grok's `ask_user_question` tool blocks its turn on this extension request
+ * (xai-org/grok-build: xai-grok-shell/src/session/acp_session_impl/spawn.rs,
+ * xai-grok-tools/.../ask_user_question/types.rs). The tool is on by default
+ * and needs no client capability. ACP's Rust SDK adds the extension prefix
+ * `_` on the wire, as with `_x.ai/mcp/list`; the bare name is accepted too.
+ * Answers are keyed by the question text Grok sent, one label per pick; the
+ * person's own words ride as "Other" with the text in annotations[].notes. */
+export const GROK_ASK_USER_QUESTION: AcpQuestionRequest = {
+  cancelled: { outcome: "cancelled" },
+  parse(params) {
+    const raw = (params as { questions?: unknown } | null)?.questions;
+    if (!Array.isArray(raw)) return null;
+    // The entry index is the protocol id, so each card question maps back
+    // to the exact text Grok keys its answers by. Grok serializes the flag
+    // as `multiSelect`; its model-facing name `multi_select` is read too.
+    const parsed = parseProtocolAskQuestions(raw.map((entry, index) =>
+      entry && typeof entry === "object"
+        ? { ...entry, id: String(index), multiSelect: entry.multiSelect === true || entry.multi_select === true }
+        : entry));
+    if (!parsed) return null;
+    return {
+      questions: parsed.map(({ question }) => question),
+      answered(message) {
+        const byId = questionAnswersById(message, parsed);
+        // Null prototype: a question text such as __proto__ is a real key.
+        const answers: Record<string, string[]> = Object.create(null);
+        const annotations: Record<string, { notes: string }> = Object.create(null);
+        for (const { id, question } of parsed) {
+          const reply = byId[id];
+          if (reply === undefined) continue;
+          const text = (raw[Number(id)] as { question: string }).question;
+          const { labels, other } = pickedOptionLabels(reply, question);
+          answers[text] = other === undefined ? labels : [...labels, "Other"];
+          if (other !== undefined) annotations[text] = { notes: other };
+        }
+        if (!Object.keys(answers).length) return null;
+        return { outcome: "accepted", answers, ...(Object.keys(annotations).length ? { annotations } : {}) };
+      },
+    };
+  },
+};
+
 const support: AcpSupport = {
   driverKind: "grokAgent",
+  questionRequests: {
+    "_x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
+    "x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
+  },
   displayName: "Grok",
   images: true,
   acceptsUnadvertisedImages: grokAcceptsUnadvertisedImages,

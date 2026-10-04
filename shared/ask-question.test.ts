@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   answerWithoutPreamble,
+  capAnswerEcho,
   askQuestionSummary,
   ASK_USER_TOOL,
   ASK_USER_TOOL_DEFINITION,
@@ -13,6 +14,7 @@ import {
   parseAskQuestions,
   parseChoices,
   parseProtocolAskQuestions,
+  pickedOptionLabels,
   shouldSettleRequestCard,
   questionAnswersById,
   questionAnswersByQuestion,
@@ -213,6 +215,17 @@ describe("answerWithoutPreamble", () => {
   });
 });
 
+describe("capAnswerEcho", () => {
+  it("leaves an answer within the limit alone", () => {
+    expect(capAnswerEcho("Q: Which?\nA: Opus", 100)).toBe("Q: Which?\nA: Opus");
+  });
+
+  it("cuts an over-limit answer back to the last whole block and says so", () => {
+    const answer = "Q: One?\nA: First\n\nQ: Two?\nA: " + "x".repeat(50);
+    expect(capAnswerEcho(answer, 40)).toBe("Q: One?\nA: First\n\n[answer truncated]");
+  });
+});
+
 describe("questionAnswersByQuestion", () => {
   const questions = parseAskQuestions({
     questions: [
@@ -347,6 +360,23 @@ describe("questionAnswersById", () => {
   it("files nothing when a bare reply could answer any of several ids", () => {
     expect(questionAnswersById("Yes", questions)).toEqual({});
     expect(questionAnswersById("   ", questions.slice(0, 1))).toEqual({});
+  });
+});
+
+describe("pickedOptionLabels", () => {
+  const single = { question: "Which color?", options: [{ label: "Blue" }, { label: "Green" }] };
+  const multi = { question: "Which sizes?", multiSelect: true, options: [{ label: "Small" }, { label: "Small, fitted" }, { label: "Large" }] };
+
+  it("reads a single-choice answer as one label or the person's own words", () => {
+    expect(pickedOptionLabels(" Green ", single)).toEqual({ labels: ["Green"] });
+    expect(pickedOptionLabels("Blue, Green", single)).toEqual({ labels: [], other: "Blue, Green" });
+  });
+
+  it("splits a multi-select answer into whole labels, longest first, with typed words last", () => {
+    expect(pickedOptionLabels("Small, fitted, Large", multi)).toEqual({ labels: ["Small, fitted", "Large"] });
+    expect(pickedOptionLabels("Large, Small", multi)).toEqual({ labels: ["Large", "Small"] });
+    expect(pickedOptionLabels("Small, and an XXL", multi)).toEqual({ labels: ["Small"], other: "and an XXL" });
+    expect(pickedOptionLabels("Only XXL", multi)).toEqual({ labels: [], other: "Only XXL" });
   });
 });
 

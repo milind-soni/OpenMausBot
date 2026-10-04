@@ -53,7 +53,7 @@ import type {
 } from "../contracts.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { newEventId, newId } from "../contracts.ts";
-import { parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../shared/ask-question.ts";
+import { ASK_USER_TOOL, MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../shared/ask-question.ts";
 import {
   decodeInjectId,
   encodeInjectId,
@@ -62,7 +62,7 @@ import {
   mergeLocalInject,
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
-import { canUseMcpServer, parseToolScope } from "../../shared/tool-scope.ts";
+import { allowsTool, canUseMcpServer, parseToolScope } from "../../shared/tool-scope.ts";
 import { gateServer, mcpStdioServer, resultBudget } from "../mcp-gate-config.ts";
 import { remoteMcpSpec } from "../mcp-http.ts";
 
@@ -729,14 +729,17 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // integrations → stdio MCP servers for the pi-mcp-extension. The config
       // carries credentials (boat token, composio key, comms token), so it goes
       // into a 0600 temp file removed when the turn settles — never on argv.
+      // The same extension registers ask_user: pi ships no ask tool that
+      // works over RPC, so it is the only way a pi model can ask the person.
       const mcpServers = buildMcpServers(turn);
+      const askUser = toolScope === undefined || allowsTool(toolScope, { kind: "native", name: ASK_USER_TOOL });
       let mcpTempDir: string | null = null;
       let scopeReadyPath: string | undefined;
-      if (mcpServers || toolScope !== undefined) {
+      if (mcpServers || toolScope !== undefined || askUser) {
         mcpTempDir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-"));
         if (toolScope !== undefined) scopeReadyPath = join(mcpTempDir, "scope-ready.json");
         try {
-          writeFileSync(join(mcpTempDir, "mcp.json"), JSON.stringify({ mcpServers: mcpServers ?? {}, toolScope, scopeReadyPath, approvalMode: turn.approvalMode }), { mode: 0o600 });
+          writeFileSync(join(mcpTempDir, "mcp.json"), JSON.stringify({ mcpServers: mcpServers ?? {}, toolScope, scopeReadyPath, approvalMode: turn.approvalMode, askUser }), { mode: 0o600 });
         } catch (err) {
           // A failed write must not leave the temp dir behind — a partial file
           // could still hold the boat token / composio key / comms token.
@@ -986,7 +989,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
               const isQuestion = isSelect || evt.method === "input";
               const selectOptions: string[] = isSelect && Array.isArray(evt.options)
                 ? evt.options.filter((option): option is string => typeof option === "string") : [];
-              const summary = String(evt.title ?? (isQuestion ? "pi has a question" : "pi wants confirmation")).slice(0, 200);
+              // A question keeps its whole text (the card collapses a long
+              // one); a confirmation title stays a one-line summary.
+              const summary = String(evt.title ?? (isQuestion ? "pi has a question" : "pi wants confirmation")).slice(0, isQuestion ? MAX_QUESTION_TEXT : 200);
               // A select is a question with named options; the structured
               // card renders from it while the flat choices keep older
               // clients answering. An input has nothing to pick from and

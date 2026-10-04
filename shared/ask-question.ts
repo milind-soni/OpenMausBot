@@ -273,6 +273,23 @@ export function answerWithoutPreamble(answer: string): string {
   return answer.startsWith(`${ANSWER_PREAMBLE}\n\n`) ? answer.slice(ANSWER_PREAMBLE.length + 2) : answer;
 }
 
+/** The longest formatted answer OMB will echo back to an engine in free
+ * text (Cursor's skipped-question reason). formatQuestionAnswers itself does
+ * not truncate, but six answers at the custom-answer cap is the most a
+ * legitimate reply weighs, so that is the ceiling. */
+export const MAX_ANSWER_ECHO = 6 * MAX_CUSTOM_ANSWER;
+
+/** Cap a formatted answer for echoing back. An over-cap echo is cut back to
+ * the last whole block so no partial answer reads as one, and says it was
+ * truncated. */
+export function capAnswerEcho(answer: string, limit = MAX_ANSWER_ECHO): string {
+  if (answer.length <= limit) return answer;
+  const cut = answer.slice(0, limit);
+  const boundary = cut.lastIndexOf("\n\nQ: ");
+  const kept = boundary > 0 ? cut.slice(0, boundary) : cut;
+  return kept + "\n\n[answer truncated]";
+}
+
 /**
  * The answer text, read back as one value per question.
  *
@@ -293,6 +310,34 @@ export function questionAnswersByQuestion(
   questions: readonly AskQuestion[],
 ): Record<string, string> {
   return questionAnswersById(message, questions.map(question => ({ id: question.question, question })));
+}
+
+/**
+ * One question's answer read back as the option labels it picked, plus any
+ * words of the person's own, for a protocol that answers by option rather
+ * than by text (Grok's ask_user_question, Cursor's ask_question).
+ *
+ * The card writes a single-choice answer as one label or the typed reply,
+ * and a multi-select answer as the picked labels joined by ", " with a typed
+ * reply last. A label is matched whole, the longest first, so a label that
+ * contains ", " is still read as one pick. Anything left over is the
+ * person's own words, never a guessed option.
+ */
+export function pickedOptionLabels(answer: string, question: AskQuestion): { labels: string[]; other?: string } {
+  const text = answer.trim();
+  const labels = question.options.map((option) => option.label);
+  if (labels.includes(text)) return { labels: [text] };
+  if (!question.multiSelect) return text ? { labels: [], other: text } : { labels: [] };
+  const picked: string[] = [];
+  let rest = text;
+  const longestFirst = [...labels].sort((a, b) => b.length - a.length);
+  for (;;) {
+    const label = longestFirst.find((candidate) => !picked.includes(candidate) && (rest === candidate || rest.startsWith(`${candidate}, `)));
+    if (!label) break;
+    picked.push(label);
+    rest = rest.slice(label.length + 2);
+  }
+  return rest ? { labels: picked, other: rest } : { labels: picked };
 }
 
 /** Longest protocol id accepted. Ids are harness-internal keys, never shown

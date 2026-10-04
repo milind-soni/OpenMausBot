@@ -112,11 +112,13 @@ card for a person. What differs per engine is only how the ask travels:
 
 | Engine family | How an ask travels | Multiple questions at once |
 | --- | --- | --- |
-| Claude Code | Structured round-trip (its own `AskUserQuestion`) | Yes — capped at 4 by the CLI |
+| Claude Code | Structured round-trip (its own `AskUserQuestion`). In Full access the CLI does not offer that tool, so the model uses the injected `ask_user` tool | Yes — capped at 4 by the CLI, up to 6 with `ask_user` |
 | Codex | Structured round-trip | Yes — up to 6 |
-| Grok Build, Minimax, OpenAI-compatible endpoints | The injected `ask_user` tool | Yes — up to 6 |
-| ACP engines (Cursor, Antigravity, Gemini CLI, Qwen Code, OpenCode, …) | Option-match round-trip on the ACP permission request | One at a time — the request carries one choice set |
-| Pi | Free-text round-trip over `extension_ui_request` | One at a time |
+| Grok Build | Structured round-trip (its own `ask_user_question`, sent as `_x.ai/ask_user_question`) | Yes — up to 6 |
+| Cursor | Structured round-trip (its own `cursor/ask_question`). Cursor accepts only option ids, so an answer in your own words goes back as a skipped question with your words as the reason | Yes — up to 6 |
+| Grok (API), MiniMax, OpenAI-compatible endpoints | The injected `ask_user` tool | Yes — up to 6 |
+| Other ACP engines (Antigravity, Gemini CLI, Qwen Code, OpenCode, …) | Option-match round-trip on the ACP permission request | One at a time — the request carries one choice set |
+| Pi | The injected `ask_user` tool over `extension_ui_request`; each question is its own card | Up to 6 per call, shown one after another. One pick per question, no multi-select |
 
 Older conversations may still hold a question the removed Computer engine
 parsed out of model-authored output rather than a real tool call. Those
