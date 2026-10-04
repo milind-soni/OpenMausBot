@@ -29,29 +29,26 @@ export function formatUpdatedAt(at: number): string {
  * The caller supplies "now" so one clock tick re-renders a whole list
  * instead of each row keeping its own timer. */
 export function threadUpdatedLabel(at: number, now: number): string {
-  if (!Number.isFinite(at) || at <= 0) return "";
-  if (!Number.isFinite(now)) return formatUpdatedAt(at);
+  if (stampClock(at, now) === undefined) return formatUpdatedAt(at);
   const seconds = Math.max(0, Math.round((now - at) / 1000));
   if (seconds < 45) return t("task.updated.justNow");
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return t("task.updated.minutes", { count: minutes });
   const hours = Math.round(minutes / 60);
-  // Tier on unrounded time like the week gate below: 23.5 hours rounds to
-  // a display of "24 h ago" without a day having actually passed.
+  // Tier on unrounded time like the week gate in stampClock: 23.5 hours
+  // rounds to a display of "24 h ago" without a day having actually passed.
   if (seconds < 86_400) return t("task.updated.hours", { count: hours });
   const days = Math.round(hours / 24);
   if (days === 1) return t("task.updated.yesterday");
-  // Gate the fallback on unrounded elapsed time: six and a half days rounds
-  // to "7 d ago" but is still inside the week, so the absolute date waits
-  // for a full seven days.
-  if (seconds < 7 * 86_400) return t("task.updated.days", { count: days });
-  return formatUpdatedAt(at);
+  return t("task.updated.days", { count: days });
 }
 
 /** The clock a row's stamp reads: the list's tick while the stamp is
- * relative, nothing once it is a fixed date (a week or more old, the same
- * gate as threadUpdatedLabel). A row with no clock keeps its date and skips
- * the list's tick. */
+ * relative, nothing once it is a fixed date (a week or more old;
+ * threadUpdatedLabel reads it too). A row with no clock keeps its date and
+ * skips the list's tick. The week is unrounded elapsed time: six and a half
+ * days rounds to "7 d ago" but is still inside the week, so the absolute
+ * date waits for a full seven days. */
 export function stampClock(at: number, now: number): number | undefined {
   if (!Number.isFinite(at) || at <= 0 || !Number.isFinite(now)) return undefined;
   return Math.max(0, Math.round((now - at) / 1000)) < 7 * 86_400 ? now : undefined;
@@ -271,13 +268,10 @@ const sameFields = <T extends object>(a: T, b: T): boolean => {
   return keys.length === Object.keys(b).length && keys.every((key) => Object.is(a[key], b[key]));
 };
 
-/** A row renders again only when its thread or one of its other props
- * changes. */
-const sameThreadRow = (previous: ThreadRowProps, next: ThreadRowProps): boolean => {
-  const keys = Object.keys(next) as (keyof ThreadRowProps)[];
-  return keys.length === Object.keys(previous).length &&
-    keys.every((key) => key === "task" ? sameFields(previous.task, next.task) : Object.is(previous[key], next[key]));
-};
+/** A row renders again only when a field of its thread or one of its other
+ * props changes. */
+const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { task, ...next }: ThreadRowProps): boolean =>
+  sameFields(previousTask, task) && sameFields(previous, next);
 
 /** One quiet row for bot and group histories. Surface denotes selection;
  * working/waiting/unread remain independent signals, never different cards. */

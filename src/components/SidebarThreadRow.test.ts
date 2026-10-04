@@ -2,7 +2,7 @@ import { createElement, type ComponentProps, type MemoExoticComponent, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, SidebarThreadRow, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, SidebarThreadRow, stampClock, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 type ThreadRowProps = ComponentProps<typeof SidebarThreadRow>;
 
@@ -276,6 +276,15 @@ describe("threadUpdatedLabel", () => {
     const morning = Date.UTC(2026, 8, 25, 0, 15, 0);
     const night = Date.UTC(2026, 8, 25, 23, 45, 0);
     expect(threadUpdatedLabel(morning, night)).toBe("24 h ago");
+  });
+
+  it("gives a row the clock exactly while its label reads relative", () => {
+    const halfPastSix = 6 * 86_400_000 + 12 * 3_600_000;
+    expect(stampClock(now - halfPastSix, now)).toBe(now);
+    expect(stampClock(now - 7 * 86_400_000, now)).toBeUndefined();
+    expect(stampClock(0, now)).toBeUndefined();
+    expect(stampClock(now - 60_000, Number.NaN)).toBeUndefined();
+    expect(threadUpdatedLabel(now - 60_000, Number.NaN)).toBe(formatUpdatedAt(now - 60_000));
   });
 
   it("skips a missing stamp and clamps a future clock to just now", () => {
