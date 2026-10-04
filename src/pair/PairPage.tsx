@@ -14,6 +14,7 @@ import {
   type SessionState,
 } from "../lib/session";
 import { pairedDestination } from "../lib/phone-pairing";
+import { t } from "@/lib/i18n";
 
 const input = "mt-1 w-full rounded-md border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink outline-none focus:border-accent-border";
 const button = "mt-5 w-full rounded-md bg-accent px-4 py-2 text-[14px] font-medium text-accent-ink disabled:opacity-50";
@@ -30,9 +31,9 @@ export function pairsAutomatically(initialCode: string | null, desktop = typeof 
 /** What the page says above the form. An OMB Cloud has no server screen to
  * read a code from: it says where its connection starts instead. */
 export function pairIntro({ mode, sent, email, cloudHome }: { mode: "email" | "code" | null; sent: boolean; email: string; cloudHome: boolean }): string {
-  if (mode === "email") return sent ? `We emailed an 8-digit code to ${email}. It works once and expires in ten minutes.` : "Enter your email and we will send you a one-time code.";
-  if (cloudHome) return "To open your Cloud, choose Connect to my Cloud in the OpenMausBot app on your computer (Settings → OMB Cloud), or Use in your browser on your Cloud dashboard. Have a pairing code? Enter it below.";
-  return "Enter the pairing code shown on the server. Codes work once and expire after five minutes.";
+  if (mode === "email") return sent ? t("pair.emailedCode", { email }) : t("pair.enterEmail");
+  if (cloudHome) return t("pair.cloudHomeIntro");
+  return t("pair.enterCode");
 }
 
 /** The page a pairing link opens: /pair#code=XXXX-XXXX-XXXX. Also what the
@@ -126,28 +127,28 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
       <div className="absolute left-3 top-12 max-w-[280px]"><DesktopWorkspaceSwitcher /></div>
       <div className="w-full max-w-[420px]">
         {opening ? (
-          <p role="status" className="text-[20px] font-semibold">{cloudHome ? "Opening your Cloud…" : `Connecting to ${environment?.label ?? "this OpenMausBot"}…`}</p>
+          <p role="status" className="text-[20px] font-semibold">{cloudHome ? t("pair.openingCloud") : t("pair.connectingTo", { name: environment?.label ?? t("pair.thisServer") })}</p>
         ) : <>
-        <h1 className="text-[20px] font-semibold">{cloudHome ? "Your Cloud" : `${mode === "email" ? "Sign in to" : "Connect to"} ${environment?.label ?? "this OpenMausBot"}`}</h1>
+        <h1 className="text-[20px] font-semibold">{cloudHome ? t("pair.yourCloud") : t(mode === "email" ? "pair.signInTo" : "pair.connectTo", { name: environment?.label ?? t("pair.thisServer") })}</h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-secondary">
-          {environment && !cloudHome ? `Version ${environment.version} on ${environment.platform}. ` : ""}
+          {environment && !cloudHome ? t("pair.versionOn", { version: environment.version, platform: environment.platform }) : ""}
           {pairIntro({ mode, sent, email, cloudHome })}
         </p>
         {reasonWorthShowing(reason) && !connected ? <p className="mt-3 text-[13px] text-ink-secondary">{reasonWorthShowing(reason)}</p> : null}
         {/* An expired or used code on a Cloud: the app starts a fresh one. */}
-        {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">This link has expired or was already used. In the OpenMausBot app on your computer, open Settings → OMB Cloud and choose Connect to my Cloud.</p> : null}
+        {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">{t("pair.linkExpired")}</p> : null}
         </>}
         {opening ? null : connected ? (
           <p className="mt-4 text-[13.5px]">
-            This browser is already connected.{" "}
+            {t("pair.alreadyConnected")}{" "}
             <a href="/" className="text-accent underline">
-              Open the app
+              {t("pair.openTheApp")}
             </a>
           </p>
         ) : mode === "email" ? (
           <form onSubmit={submitEmail}>
             <label className={fieldLabel} htmlFor="signin-email">
-              Email
+              {t("pair.emailLabel")}
             </label>
             <input
               id="signin-email"
@@ -166,7 +167,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
             {sent ? (
               <>
                 <label className={fieldLabel} htmlFor="signin-code">
-                  Code from the email
+                  {t("pair.codeFromEmail")}
                 </label>
                 <input
                   id="signin-code"
@@ -179,28 +180,28 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
                   className={`${input} font-mono text-[15px] tracking-[0.12em]`}
                 />
                 <label className={fieldLabel} htmlFor="signin-label">
-                  This device
+                  {t("pair.thisDevice")}
                 </label>
                 <input id="signin-label" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} className={input} />
               </>
             ) : null}
             {error ? <p className="mt-3 text-[13px] text-danger">{error}</p> : null}
             <button type="submit" disabled={busy || !email.includes("@") || (sent && otp.replace(/\D/g, "").length < 8)} className={button}>
-              {busy ? (sent ? "Signing in…" : "Sending…") : sent ? "Sign in" : "Send code"}
+              {busy ? (sent ? t("pair.signingIn") : t("pair.sending")) : sent ? t("pair.signIn") : t("pair.sendCode")}
             </button>
             {sent ? (
               <button type="button" onClick={() => setSent(false)} className="mt-3 w-full text-[13px] text-ink-secondary underline">
-                Send a new code
+                {t("pair.sendNewCode")}
               </button>
             ) : null}
             <button type="button" onClick={() => switchMode("code")} className="mt-3 w-full text-[13px] text-ink-secondary underline">
-              Have a pairing code instead?
+              {t("pair.haveCodeInstead")}
             </button>
           </form>
         ) : (
           <form onSubmit={submitCode}>
             <label className={fieldLabel} htmlFor="pair-code">
-              Pairing code
+              {t("pair.pairingCode")}
             </label>
             <input
               id="pair-code"
@@ -216,16 +217,16 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
               className={`${input} font-mono text-[15px] tracking-[0.12em]`}
             />
             <label className={fieldLabel} htmlFor="pair-label">
-              This device
+              {t("pair.thisDevice")}
             </label>
             <input id="pair-label" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} className={input} />
             {error ? <p className="mt-3 text-[13px] text-danger">{error}</p> : null}
             <button type="submit" disabled={busy || code.replace(/[^a-z0-9]/gi, "").length < 12} className={button}>
-              {busy ? "Connecting…" : "Connect"}
+              {busy ? t("pair.connecting") : t("pair.connect")}
             </button>
             {emailOffered ? (
               <button type="button" onClick={() => switchMode("email")} className="mt-3 w-full text-[13px] text-ink-secondary underline">
-                Sign in with your email instead
+                {t("pair.signInWithEmailInstead")}
               </button>
             ) : null}
           </form>

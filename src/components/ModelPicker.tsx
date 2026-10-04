@@ -125,7 +125,7 @@ export function EffortRow({
         onChange={(event) => dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}),
           selection: { ...selection, effort: levels.find((level) => level === event.target.value) } })}
         className="min-w-0 max-w-[65%] rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70">
-        <option value="">Default</option>
+        <option value="">{t("model.default")}</option>
         {levels.map((level) => <option key={level} value={level}>{effortLabel(level)}</option>)}
       </select>
     </label>
@@ -144,8 +144,8 @@ export function EffortRow({
             aria-pressed={selection.effort === level}
             title={
               level === undefined
-                ? "Send no effort level and let the provider decide"
-                : `Ask for ${effortLabel(level)} reasoning effort`
+                ? t("model.effortDefaultHint")
+                : t("model.effortHint", { level: effortLabel(level) })
             }
             onClick={() => dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } })}
             className={cn(
@@ -155,7 +155,7 @@ export function EffortRow({
                 : "border-hairline/40 text-ink-secondary hover:bg-control/60 hover:text-ink",
             )}
           >
-            {level === undefined ? "Default" : effortLabel(level)}
+            {level === undefined ? t("model.default") : effortLabel(level)}
           </button>
         ))}
       </div>
@@ -164,7 +164,7 @@ export function EffortRow({
 }
 
 function variantLabel(option: ModelVariantOption): string {
-  return option.id === "default" ? "OpenCode default" : option.label;
+  return option.id === "default" ? t("model.opencodeDefault") : option.label;
 }
 
 /** ACP variant ids are opaque; their model/session declares the available choices. */
@@ -203,12 +203,12 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
           onChange={(event) => choose(options[Number(event.target.value)]?.id)}
           className={cn("min-w-0 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50",
             wide ? "flex-1" : "max-w-[65%]")}>
-          <option value="unset">Use session setting</option>
-          {missing && <option value="missing" disabled>{selection.variant} ({unavailable ? "unavailable" : "unverified"})</option>}
+          <option value="unset">{t("model.useSessionSetting")}</option>
+          {missing && <option value="missing" disabled>{t("model.savedVariantMissingOption", { variant: selection.variant ?? "", status: unavailable ? t("model.unavailable") : t("model.unverified") })}</option>}
           {options.map((option, index) => <option key={option.id} value={String(index)}>{variantLabel(option)}</option>)}
         </select>
       </label>
-      {missing && <p className="mt-1 text-[11px] text-ink-secondary">{unavailable ? "Saved variant is unavailable. Choose another or use the session setting." : "Saved variant has not been checked in this session."}</p>}
+      {missing && <p className="mt-1 text-[11px] text-ink-secondary">{unavailable ? t("model.savedVariantUnavailable") : t("model.savedVariantUnverified")}</p>}
     </div>
   );
   return (
@@ -216,16 +216,16 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
       {label}
       {(selection.variant === undefined || missing) && (
         <p className="mt-2 text-[12px] text-ink-secondary">
-          {unavailable ? `Saved variant “${selection.variant}” is unavailable. Choose an available variant.`
-            : missing ? `Saved variant “${selection.variant}” has not been checked in this session.` : "No variant selected."}
-          {current !== undefined && ` Session: ${variantLabel(options.find((option) => option.id === current) ?? { id: current, label: current })}.`}
+          {unavailable ? t("model.variantUnavailableChoose", { variant: selection.variant ?? "" })
+            : missing ? t("model.variantUnchecked", { variant: selection.variant ?? "" }) : t("model.noVariantSelected")}
+          {current !== undefined && ` ${t("model.sessionVariant", { variant: variantLabel(options.find((option) => option.id === current) ?? { id: current, label: current }) })}`}
         </p>
       )}
       {selection.variant !== undefined && (
         <button type="button" disabled={bot.busy} onClick={() => choose()}
-          title="Send no variant selection; OpenCode keeps its session or configured setting"
+          title={t("model.clearVariantHint")}
           className="mt-2 block text-[12px] text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-50">
-          Clear variant selection
+          {t("model.clearVariant")}
         </button>
       )}
       {options.length > 0 && (
@@ -236,7 +236,7 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
               type="button"
               disabled={bot.busy}
               aria-pressed={selection.variant === option.id}
-              title={`Use ${variantLabel(option)} for this model`}
+              title={t("model.useVariantFor", { variant: variantLabel(option) })}
               onClick={() => choose(option.id)}
               className={cn(
                 "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50",
@@ -294,10 +294,10 @@ function ModelRow({
           </span>
         )}
         {option.id === defaultId && (
-          <span className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary">Default</span>
+          <span className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary">{t("model.default")}</span>
         )}
         {option.loaded && (
-          <span className="shrink-0 rounded bg-accent/10 px-1.5 py-px text-[10px] text-accent">Loaded</span>
+          <span className="shrink-0 rounded bg-accent/10 px-1.5 py-px text-[10px] text-accent">{t("model.loadedBadge")}</span>
         )}
       </span>
       {current && <Check size={14} className="shrink-0 text-accent" />}
@@ -808,7 +808,7 @@ export function ModelPicker({
           : active
           ? `${active.displayName} · ${modelLabel(active, selection.model)}${
               modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
-            }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${effortLabel(selection.effort)} effort` : ""}`
+            }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${t("model.effortWith", { level: effortLabel(selection.effort) })}` : ""}`
           : selection.model
       }
     >
@@ -940,12 +940,12 @@ export function ModelPicker({
                   {(["thread", "bot"] as const).map((value) => (
                     <button key={value} type="button" aria-pressed={scope === value} onClick={() => setScope(value)}
                       className={cn("rounded-lg px-2 py-1 text-[12px]", scope === value ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60")}>
-                      {value === "bot" ? "Thread + bot default" : "Only this thread"}
+                      {value === "bot" ? t("model.scopeBot") : t("model.scopeThread")}
                     </button>
                   ))}
                 </div>
                 <p className="mt-1 text-[11px] text-ink-secondary">
-                  {scope === "bot" ? "This thread, groups, and new threads. Other existing threads keep their model." : "Other threads and groups keep their model."}
+                  {scope === "bot" ? t("model.scopeBotHint") : t("model.scopeThreadHint")}
                 </p>
               </div>
             )}
@@ -1147,7 +1147,7 @@ export function ModelPicker({
                     threadId={threadId}
                     updateBotDefault={Boolean(threadId && scope === "bot")}
                     className="shrink-0 border-t border-hairline/40 px-4 py-2"
-                    label={<span className="text-[12.5px] font-medium text-ink">{active?.capabilities?.modelVariants ? "Reasoning" : "Effort"}</span>}
+                    label={<span className="text-[12.5px] font-medium text-ink">{active?.capabilities?.modelVariants ? t("model.reasoningLabel") : t("model.effortLabel")}</span>}
                   />
                 )}
 

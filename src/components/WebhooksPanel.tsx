@@ -29,19 +29,20 @@ import {
   webhookCredentialStore,
 } from "@/lib/webhook-credentials";
 import { WEBHOOK_DEFAULT_MAX_PENDING_RUNS, WEBHOOK_MAX_PENDING_RUNS_LIMIT, webhookActivationDefaults, webhookMaxPendingRunsInput, type WebhookAttempt, type WebhookCredential, type WebhookTrigger, type WebhookTriggerInput } from "@/lib/webhooks";
+import { t } from "@/lib/i18n";
 import { api, useStore, type Bot } from "@/state/store";
 
 export function relativeTime(at?: number) {
-  if (!at) return "Never";
+  if (!at) return t("webhook.never");
   const elapsed = Math.max(0, Date.now() - at);
-  if (elapsed < 60_000) return "Just now";
-  if (elapsed < 60 * 60_000) return `${Math.floor(elapsed / 60_000)}m ago`;
-  if (elapsed < 24 * 60 * 60_000) return `${Math.floor(elapsed / 3_600_000)}h ago`;
+  if (elapsed < 60_000) return t("webhook.justNow");
+  if (elapsed < 60 * 60_000) return t("webhook.minutesAgo", { count: Math.floor(elapsed / 60_000) });
+  if (elapsed < 24 * 60 * 60_000) return t("webhook.hoursAgo", { count: Math.floor(elapsed / 3_600_000) });
   return new Date(at).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function deliverySummary(run: RoutineRun) {
-  const eventName = run.prompt?.match(/^Event: (.+)$/m)?.[1]?.trim() || "Webhook event";
+  const eventName = run.prompt?.match(/^Event: (.+)$/m)?.[1]?.trim() || t("webhook.webhookEvent");
   const eventData = run.prompt?.match(/\[UNTRUSTED WEBHOOK EVENT DATA\]\n([\s\S]*?)\n\[\/UNTRUSTED WEBHOOK EVENT DATA\]/)?.[1] ?? "";
   const payloadStart = eventData.indexOf("\n\n");
   const payload = (payloadStart >= 0 ? eventData.slice(payloadStart + 2) : eventData).replace(/\s+/g, " ").trim();
@@ -50,14 +51,14 @@ function deliverySummary(run: RoutineRun) {
 
 export function suggestedName(prompt: string, bot?: Bot) {
   const first = prompt.trim().split(/[.!?\n]/)[0]?.trim().slice(0, 60);
-  return first || `${bot?.name ?? "MAUS"} webhook`;
+  return first || t("webhook.defaultName", { name: bot?.name ?? "MAUS" });
 }
 
 export function statusFor(webhook: WebhookTrigger) {
-  if (webhook.verificationPending) return { label: "Waiting for test", tone: "text-accent", dot: "bg-accent animate-pulse" };
-  if (webhook.verifiedAt && !webhook.enabled) return { label: "Ready to enable", tone: "text-warning", dot: "bg-warning" };
-  if (webhook.enabled) return { label: "Active", tone: "text-success", dot: "bg-success" };
-  return { label: "Paused", tone: "text-ink-secondary", dot: "bg-ink-secondary/50" };
+  if (webhook.verificationPending) return { label: t("webhook.statusWaiting"), tone: "text-accent", dot: "bg-accent animate-pulse" };
+  if (webhook.verifiedAt && !webhook.enabled) return { label: t("webhook.statusReady"), tone: "text-warning", dot: "bg-warning" };
+  if (webhook.enabled) return { label: t("webhook.statusActive"), tone: "text-success", dot: "bg-success" };
+  return { label: t("webhook.statusPaused"), tone: "text-ink-secondary", dot: "bg-ink-secondary/50" };
 }
 
 export function outcomeTone(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
@@ -68,16 +69,16 @@ export function outcomeTone(outcome: WebhookAttempt["outcome"], run?: RoutineRun
 }
 
 export function outcomeLabel(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
-  if (run) return run.status === "waiting" ? "Needs you" : run.status[0]!.toUpperCase() + run.status.slice(1);
-  if (outcome === "captured") return "Test received";
-  if (outcome === "duplicate") return "Duplicate";
-  if (outcome === "ignored") return "Ignored";
-  if (outcome === "rejected") return "Rejected";
-  return "Accepted";
+  if (run) return run.status === "waiting" ? t("webhook.needsYou") : run.status[0]!.toUpperCase() + run.status.slice(1);
+  if (outcome === "captured") return t("webhook.testReceived");
+  if (outcome === "duplicate") return t("webhook.duplicate");
+  if (outcome === "ignored") return t("webhook.ignored");
+  if (outcome === "rejected") return t("webhook.rejected");
+  return t("webhook.accepted");
 }
 
 export function terminalCommand(credential: WebhookCredential) {
-  return `curl -sS '${credential.url}' --json '{"task":"A customer wrote: This app saved me hours. Write a short thank-you reply."}'`;
+  return `curl -sS '${credential.url}' --json '{"task":"${t("webhook.exampleTask")}"}'`;
 }
 
 export function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: WebhookTrigger; bots: Bot[]; onClose: () => void; onCredential: (credential: WebhookCredential, webhookId: string) => void }) {
@@ -135,7 +136,7 @@ export function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhoo
     const bot = bots.find((candidate) => candidate.id === botId);
     const pendingLimit = webhookMaxPendingRunsInput(maxPendingRuns);
     if (pendingLimit === undefined) {
-      setError(`Unfinished tasks at once must be a whole number from 1 to ${WEBHOOK_MAX_PENDING_RUNS_LIMIT}.`);
+      setError(t("webhook.pendingLimitError", { limit: WEBHOOK_MAX_PENDING_RUNS_LIMIT }));
       return;
     }
     const input: WebhookTriggerInput = { name: name.trim() || suggestedName(prompt, bot), prompt: prompt.trim(), botId, runOn, ...webhookActivationDefaults(webhook), eventTypes: eventTypes.split(",").map((value) => value.trim()).filter(Boolean), maxPendingRuns: pendingLimit };
@@ -156,12 +157,12 @@ export function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhoo
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={webhook ? "Edit webhook" : "New webhook"} tabIndex={-1} className="flex max-h-[90vh] w-full max-w-[590px] flex-col overflow-hidden rounded-2xl border border-hairline/60 bg-panel shadow-2xl">
-        <div className="flex items-start justify-between border-b border-hairline/40 px-5 py-4"><div><div className="text-[17px] font-semibold text-ink">{webhook ? "Edit webhook" : "New webhook"}</div><div className="mt-1 text-[12px] text-ink-secondary">Each request starts a new task in the MAUS chat.</div></div><button onClick={onClose} aria-label="Close webhook editor" className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"><X size={18} /></button></div>
+        <div className="flex items-start justify-between border-b border-hairline/40 px-5 py-4"><div><div className="text-[17px] font-semibold text-ink">{webhook ? t("webhook.editWebhook") : t("webhook.newWebhook")}</div><div className="mt-1 text-[12px] text-ink-secondary">{t("webhook.eachRequestHint")}</div></div><button onClick={onClose} aria-label="Close webhook editor" className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"><X size={18} /></button></div>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
-          <div><div className="mb-2 text-[12px] font-medium text-ink-secondary">Who receives the tasks?</div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{bots.map((bot) => <button key={bot.id} type="button" data-initial-focus={botId === bot.id ? "" : undefined} onClick={() => setBotId(bot.id)} className={cn("flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left", botId === bot.id ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised/60")}><BotAvatar bot={bot} state={botId === bot.id ? "happy" : "idle"} size={38} animated={false} /><span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span></button>)}</div></div>
-          <div className="rounded-xl border border-accent/20 bg-accent/5 px-3.5 py-3 text-[11.5px] leading-relaxed text-ink-secondary">Send the task in the request: <code className="text-ink">{`{"task":"Check the failed build"}`}</code>. The MAUS keeps its model, tools, permissions, and computer setup.</div>
+          <div><div className="mb-2 text-[12px] font-medium text-ink-secondary">{t("webhook.whoReceives")}</div><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{bots.map((bot) => <button key={bot.id} type="button" data-initial-focus={botId === bot.id ? "" : undefined} onClick={() => setBotId(bot.id)} className={cn("flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left", botId === bot.id ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised/60")}><BotAvatar bot={bot} state={botId === bot.id ? "happy" : "idle"} size={38} animated={false} /><span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span></button>)}</div></div>
+          <div className="rounded-xl border border-accent/20 bg-accent/5 px-3.5 py-3 text-[11.5px] leading-relaxed text-ink-secondary">{t("webhook.sendTaskPrefix")} <code className="text-ink">{`{"task":"${t("webhook.exampleTaskCode")}"}`}</code>{t("webhook.sendTaskSuffix")}</div>
           <details className="group rounded-xl border border-hairline/45 bg-inset/45 px-4 py-3" open={Boolean(webhook)}>
-            <summary className="cursor-pointer text-[12.5px] font-medium text-ink">Advanced options</summary>
+            <summary className="cursor-pointer text-[12.5px] font-medium text-ink">{t("webhook.advancedOptions")}</summary>
             <div className="mt-4 space-y-4">
               <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">Name <span className="font-normal">· optional</span></span><input value={name} onChange={(event) => setName(event.target.value)} placeholder={suggestedName(prompt, bots.find((bot) => bot.id === botId))} className="w-full rounded-xl border border-hairline/60 bg-panel px-3.5 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70" /></label>
               <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">Default instructions <span className="font-normal">· optional</span></span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder="For every event, summarize what happened and suggest the next step…" className="w-full resize-y rounded-xl border border-hairline/60 bg-panel px-3.5 py-3 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70" /><span className="mt-1.5 block text-[10.5px] leading-relaxed text-ink-secondary">Use this only when every event needs the same handling rule. Otherwise the request’s task is used.</span></label>
@@ -172,7 +173,7 @@ export function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhoo
           </details>
           {error && <div className="rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-3 text-[12px] text-danger">{error}</div>}
         </div>
-        <div className="flex justify-end gap-2 border-t border-hairline/40 px-5 py-4"><button onClick={onClose} className="rounded-xl px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">Cancel</button><button disabled={saving || !botId} onClick={() => void save()} className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40">{saving && <Loader2 size={14} className="animate-spin" />}{webhook ? "Save changes" : "Create webhook"}</button></div>
+        <div className="flex justify-end gap-2 border-t border-hairline/40 px-5 py-4"><button onClick={onClose} className="rounded-xl px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">{t("webhook.cancel")}</button><button disabled={saving || !botId} onClick={() => void save()} className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40">{saving && <Loader2 size={14} className="animate-spin" />}{webhook ? t("webhook.saveChanges") : t("webhook.createWebhook")}</button></div>
       </div>
     </div>
   );
@@ -239,7 +240,7 @@ export function useWebhookActions() {
         });
       } else {
         const enabling = !webhook.enabled;
-        if (enabling && webhook.verificationPending) throw new Error("Send a request before turning this webhook on");
+        if (enabling && webhook.verificationPending) throw new Error(t("webhook.needRequestError"));
         const response = await api(`/api/webhooks/${webhook.id}`, { method: "PATCH", body: JSON.stringify({ enabled: enabling, verificationPending: false }) });
         dispatch({ type: "webhookPatched", webhook: response.webhook });
       }
@@ -388,7 +389,7 @@ export function WebhooksPanel({
               {tab === "setup" ? (
                 <div className="px-5 py-6 md:px-7">
                   <div className="max-w-[720px]">
-                    <h4 className="text-[14px] font-semibold text-ink">Send a task</h4>
+                    <h4 className="text-[14px] font-semibold text-ink">{t("webhook.sendTask")}</h4>
                     <p className="mt-1 text-[11.5px] leading-relaxed text-ink-secondary">Copy this command into Terminal and press Return. It starts a real task in {selectedBot?.name ?? "this MAUS"}&apos;s chat; edit the task text for whatever you want done.</p>
                     {credential ? (
                       <div className="mt-4 overflow-hidden rounded-xl border border-hairline/45 bg-inset">
@@ -409,7 +410,7 @@ export function WebhooksPanel({
                       <div className="grid gap-4 text-[11.5px] sm:grid-cols-2"><div><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Tasks go to</div><div className="mt-1.5 font-medium text-ink">{selectedBot?.name ?? "Deleted MAUS"}</div></div><div><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Runs on</div><div className="mt-1.5 font-medium text-ink">{selected.runOn === "cloud" ? "Cloud VM" : "This computer"}</div></div></div>
                     </div>
 
-                    <details className="group mt-5 border-t border-hairline/35 pt-4"><summary className="flex cursor-pointer list-none items-center justify-between text-[11.5px] font-medium text-ink"><span>Advanced</span><ChevronDown size={14} className="text-ink-secondary transition-transform group-open:rotate-180" /></summary><div className="mt-4 space-y-3 text-[10.5px] leading-relaxed text-ink-secondary">{selected.prompt ? <p><span className="font-medium text-ink">Default instruction:</span> {selected.prompt}</p> : <p>The task or message sent with each request becomes the MAUS instruction.</p>}{selected.eventTypes?.length ? <p><span className="font-medium text-ink">Accepted events:</span> {selected.eventTypes.join(", ")}</p> : <p>All event types are accepted.</p>}<p><span className="font-medium text-ink">Unfinished tasks at once:</span> {selected.maxPendingRuns ?? WEBHOOK_DEFAULT_MAX_PENDING_RUNS}. More requests get HTTP 429 until one finishes.</p><button onClick={() => setEditor(selected)} className="rounded-lg border border-hairline/50 px-3 py-2 text-[11px] font-medium text-ink hover:bg-raised">Edit settings</button></div></details>
+                    <details className="group mt-5 border-t border-hairline/35 pt-4"><summary className="flex cursor-pointer list-none items-center justify-between text-[11.5px] font-medium text-ink"><span>Advanced</span><ChevronDown size={14} className="text-ink-secondary transition-transform group-open:rotate-180" /></summary><div className="mt-4 space-y-3 text-[10.5px] leading-relaxed text-ink-secondary">{selected.prompt ? <p><span className="font-medium text-ink">{t("webhook.defaultInstruction")}:</span> {selected.prompt}</p> : <p>{t("webhook.taskBecomesInstruction")}</p>}{selected.eventTypes?.length ? <p><span className="font-medium text-ink">Accepted events:</span> {selected.eventTypes.join(", ")}</p> : <p>All event types are accepted.</p>}<p><span className="font-medium text-ink">Unfinished tasks at once:</span> {selected.maxPendingRuns ?? WEBHOOK_DEFAULT_MAX_PENDING_RUNS}. More requests get HTTP 429 until one finishes.</p><button onClick={() => setEditor(selected)} className="rounded-lg border border-hairline/50 px-3 py-2 text-[11px] font-medium text-ink hover:bg-raised">Edit settings</button></div></details>
                   </div>
                 </div>
               ) : (
@@ -419,7 +420,7 @@ export function WebhooksPanel({
                     {activity.length === 0 ? <div className="px-2 py-12 text-center text-[11.5px] text-ink-secondary">No requests yet. Use the command in Setup to send one.</div> : activity.map((item) => (
                       <div key={item.id} className="flex items-center gap-2.5 border-b border-hairline/25 px-1 py-3.5">
                         <span className={cn("size-2 shrink-0 rounded-full", item.outcome === "rejected" || item.run?.status === "failed" ? "bg-danger" : item.run && ["queued", "running", "waiting"].includes(item.run.status) ? "animate-pulse bg-accent" : item.outcome === "ignored" || item.outcome === "duplicate" ? "bg-ink-secondary/50" : "bg-success")} />
-                        <div className="min-w-0 flex-1"><div className="flex items-center gap-1.5 text-[11.5px]"><span className="truncate font-medium text-ink">{item.eventName}</span><span className="shrink-0 text-ink-secondary">· {relativeTime(item.at)}</span></div><div className="mt-0.5 truncate font-mono text-[10px] text-ink-tertiary">{item.reason || item.preview || "Empty payload"}</div></div>
+                        <div className="min-w-0 flex-1"><div className="flex items-center gap-1.5 text-[11.5px]"><span className="truncate font-medium text-ink">{item.eventName}</span><span className="shrink-0 text-ink-secondary">· {relativeTime(item.at)}</span></div><div className="mt-0.5 truncate font-mono text-[10px] text-ink-tertiary">{item.reason || item.preview || t("webhook.emptyPayload")}</div></div>
                         <span className={cn("shrink-0 text-[10px] font-medium", outcomeTone(item.outcome, item.run))}>{outcomeLabel(item.outcome, item.run)}</span>
                         {item.run?.threadId && selectedBot && <button onClick={() => { dispatch({ type: "select", id: selectedBot.id }); dispatch({ type: "switchTask", botId: selectedBot.id, threadId: item.run!.threadId! }); }} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[10.5px] text-ink-secondary hover:bg-raised hover:text-ink" title="Open this execution in the MAUS chat"><ExternalLink size={11} />Open chat</button>}
                       </div>
