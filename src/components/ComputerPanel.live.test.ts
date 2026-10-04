@@ -63,6 +63,10 @@ const engine = {
 } as InstanceInfo;
 
 let root: Root;
+let value: Parameters<typeof BotEditorStore>[0]["value"];
+const render = (shown: Bot) => {
+  flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ComputerPanel, { bot: shown }) })));
+};
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const settle = async () => {
   for (let i = 0; i < 10; i++) {
@@ -84,11 +88,11 @@ beforeAll(async () => {
     instances: [engine],
     config: { box: { configured: true } } as AppState["config"],
   };
-  const value = { state, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  value = { state, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ComputerPanel, { bot }) })));
+  render(bot);
   await settle();
 });
 afterAll(() => {
@@ -126,5 +130,15 @@ describe("Computer panel live frames", () => {
     await settle();
     expect(captured.posts).toBeGreaterThan(1);
     expect(preview()).toBe("data:image/png;base64,POLLED");
+  });
+
+  it("keeps waiting on live frames when the bot opens a second conversation", async () => {
+    const posts = captured.posts;
+    flushSync(() => screen({ png: "AGAIN" }));
+    render({ ...bot, tasks: [...bot.tasks!, { threadId: "sibling", title: "Other", createdAt: 2, approvalMode: "ask" }] } as Bot);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await settle();
+    expect(captured.posts).toBe(posts);
+    expect(preview()).toBe("data:image/png;base64,AGAIN");
   });
 });

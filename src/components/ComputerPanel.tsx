@@ -817,21 +817,19 @@ export function ComputerPanel({
   const lastLiveAt = useRef(0);
   const previewBusy = useRef(bot.busy);
   useEffect(() => { previewBusy.current = bot.busy; }, [bot.busy]);
-  const singleThread = (profileBot.tasks?.length ?? 0) <= 1;
   useEffect(() => {
     lastLiveAt.current = 0;
     if (!cloudPreviewReady) return;
     return listenLiveFrames({
       onFrame: (frame) => {
-        if (frame.kind !== "screen" || frame.botId !== bot.id) return;
-        if (frame.threadId ? frame.threadId !== bot.threadId : !singleThread) return;
+        if (frame.kind !== "screen" || frame.botId !== bot.id || frame.threadId !== bot.threadId) return;
         lastLiveAt.current = Date.now();
         setPolledFrame({ png: frame.png, mime: frame.mime ?? "image/png" });
         setPreviewError(null);
         setPreviewRefreshing(false);
       },
     });
-  }, [cloudPreviewReady, bot.id, bot.threadId, singleThread]);
+  }, [cloudPreviewReady, bot.id, bot.threadId]);
 
   useEffect(() => {
     if (panelView !== "computer" || !cloudPreviewReady || viewerOpen || !pageVisible || pending || controlPending) return;
