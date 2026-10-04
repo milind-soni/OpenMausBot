@@ -773,6 +773,13 @@ export function ModelPicker({
     />
   );
 
+  // The idle tooltip's whole text, and the busy tooltip's first line.
+  const summary = active
+    ? `${active.displayName} · ${modelLabel(active, selection.model)}${
+        modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
+      }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${effortLabel(selection.effort)} effort` : ""}`
+    : selection.model;
+
   const trigger = (
     <button data-tour="model"
       type="button"
@@ -802,15 +809,7 @@ export function ModelPicker({
         // Multiple Claude accounts keep their name even in the compact chip.
         !contained && active && !showActiveAccount && COMPACT_SQUARE,
       )}
-      title={
-        bot.busy
-          ? t(threadId ? "model.threadBusy" : "model.busy")
-          : active
-          ? `${active.displayName} · ${modelLabel(active, selection.model)}${
-              modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
-            }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${effortLabel(selection.effort)} effort` : ""}`
-          : selection.model
-      }
+      title={bot.busy ? `${summary}\n${t(threadId ? "model.threadBusy" : "model.busy")}` : summary}
     >
       {active && <InstanceProviderMark instance={active} size={14} />}
       {!contained && active && showActiveAccount && (
