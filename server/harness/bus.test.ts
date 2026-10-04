@@ -3,7 +3,7 @@
 // neither logging nor a broken listener may take down the stream.
 import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EVENTS_DIR, ensureDirs } from "../config.ts";
 import type { RuntimeEvent } from "../contracts.ts";
@@ -158,5 +158,107 @@ describe("EventBus", () => {
     bus.detachAll();
     emit(testEvent());
     expect(seenAfterDetach).toHaveLength(0);
+  });
+});
+
+// A provider streams a reply as many small text deltas. The bus publishes
+// them merged, at most one per thread every 50 ms, so the log, the listeners
+// and every connected client handle a few frames per second instead of one
+// per token. Nothing else is delayed, and nothing changes order.
+describe("EventBus streamed text", () => {
+  const delta = (text: string, over: Partial<RuntimeEvent> = {}): RuntimeEvent =>
+    testEvent({ type: "content.delta", streamKind: "assistant_text", delta: text, turnId: "turn-1", ...over } as Partial<RuntimeEvent>);
+  const logged = (threadId: string) =>
+    readFileSync(join(EVENTS_DIR, `${threadId}.ndjson`), "utf8").trim().split("\n").map((line) => JSON.parse(line) as RuntimeEvent);
+  const summary = (events: RuntimeEvent[]) =>
+    events.map((event) => (event.type === "content.delta" ? `${event.threadId}:${event.streamKind}:${event.delta}` : `${event.threadId}:${event.type}`));
+
+  beforeEach(() => {
+    rmSync(EVENTS_DIR, { recursive: true, force: true });
+    ensureDirs();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("merges deltas that arrive within 50 ms into one event, logged once", () => {
+    const bus = new EventBus();
+    const seen: RuntimeEvent[] = [];
+    bus.subscribe((event) => seen.push(event));
+
+    bus.publish(delta("Hel", { eventId: "d1" }));
+    bus.publish(delta("lo, ", { eventId: "d2" }));
+    vi.advanceTimersByTime(30);
+    bus.publish(delta("world", { eventId: "d3" }));
+    expect(seen).toHaveLength(0);
+
+    vi.advanceTimersByTime(20);
+    expect(summary(seen)).toEqual(["thread-1:assistant_text:Hello, world"]);
+    expect(seen[0]).toMatchObject({ eventId: "d1", turnId: "turn-1" });
+    expect(summary(logged("thread-1"))).toEqual(["thread-1:assistant_text:Hello, world"]);
+
+    bus.publish(delta("!", { eventId: "d4" }));
+    vi.advanceTimersByTime(50);
+    expect(summary(seen)).toEqual(["thread-1:assistant_text:Hello, world", "thread-1:assistant_text:!"]);
+  });
+
+  it("publishes the waiting text before any other event on that thread", () => {
+    const bus = new EventBus();
+    const seen: RuntimeEvent[] = [];
+    bus.subscribe((event) => seen.push(event));
+
+    bus.publish(delta("Let me check"));
+    bus.publish(testEvent({ eventId: "tool", type: "item.started", itemType: "tool", title: "Read", turnId: "turn-1" }));
+    bus.publish(delta("Done"));
+    bus.publish(testEvent({ eventId: "text", type: "item.completed", itemType: "assistant_text", text: "Let me check Done", turnId: "turn-1" }));
+    bus.publish(delta(" late"));
+    bus.publish(testEvent({ eventId: "end", type: "turn.completed", ok: true, turnId: "turn-1" }));
+
+    const expected = [
+      "thread-1:assistant_text:Let me check", "thread-1:item.started", "thread-1:assistant_text:Done",
+      "thread-1:item.completed", "thread-1:assistant_text: late", "thread-1:turn.completed",
+    ];
+    expect(summary(seen)).toEqual(expected);
+    expect(summary(logged("thread-1"))).toEqual(expected);
+  });
+
+  it("never merges across threads, stream kinds, turns or synthetic text", () => {
+    const bus = new EventBus();
+    const seen: RuntimeEvent[] = [];
+    bus.subscribe((event) => seen.push(event));
+
+    bus.publish(delta("a1"));
+    bus.publish(delta("b1", { threadId: "thread-2" }));
+    bus.publish(delta("thinking", { streamKind: "reasoning_text" }));
+    bus.publish(delta("a2"));
+    bus.publish(delta("next turn", { turnId: "turn-2" }));
+    bus.publish(delta("api error", { turnId: "turn-2", synthetic: true }));
+    bus.publish(delta("b2", { threadId: "thread-2" }));
+    expect(summary(seen)).toEqual(["thread-1:assistant_text:a1", "thread-1:reasoning_text:thinking", "thread-1:assistant_text:a2", "thread-1:assistant_text:next turn"]);
+
+    vi.advanceTimersByTime(50);
+    expect(summary(seen).slice(4).sort()).toEqual(["thread-1:assistant_text:api error", "thread-2:assistant_text:b1b2"]);
+    expect(seen.find((event) => event.type === "content.delta" && event.delta === "api error")?.synthetic).toBe(true);
+  });
+
+  it("publishes waiting text on detach and on flush", async () => {
+    const { instance, emit } = await liveInstance();
+    const bus = new EventBus();
+    bus.attach([instance]);
+    const seen: RuntimeEvent[] = [];
+    bus.subscribe((event) => seen.push(event));
+
+    emit(delta("from the adapter"));
+    bus.publish(delta("other engine", { threadId: "thread-2", providerInstanceId: "inst-2" }));
+    bus.detach("inst-1");
+    expect(summary(seen)).toEqual(["thread-1:assistant_text:from the adapter", "thread-2:assistant_text:other engine"]);
+
+    // the server calls flush() as the process exits
+    bus.publish(delta("last words", { threadId: "thread-3" }));
+    bus.flush();
+    expect(summary(seen).at(-1)).toBe("thread-3:assistant_text:last words");
+    vi.advanceTimersByTime(100);
+    expect(seen).toHaveLength(3);
   });
 });

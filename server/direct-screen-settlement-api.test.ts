@@ -129,6 +129,22 @@ describe.skipIf(process.platform === "win32")("direct final-screen settlement", 
       messages.findIndex((message: any) => message.text === "FOLLOWUP_AFTER_SCREEN"));
   }, 30_000);
 
+  it("sends the settled screenshot to live clients without its pixels; the image route serves them", async () => {
+    await beginCapture();
+    gate("capture.gate");
+    const frame = await events.until((candidate) => candidate.kind === "message" &&
+      candidate.threadId === threadId && candidate.message?.kind === "screen", 15_000);
+    expect(frame.message).toMatchObject({ hasImage: true, mime: "image/png" });
+    expect(frame.message.png).toBeUndefined();
+    expect(JSON.stringify(frame)).not.toContain("iVBORw0KGgo");
+    const image = await fetch(`${session.info.url}/api/threads/${threadId}/messages/${frame.message.id}/image`,
+      { headers: { origin: session.info.url } });
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await image.arrayBuffer()).toString("base64"))
+      .toBe("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==");
+  }, 30_000);
+
   it("bounds capture settlement and discards a late frame after the thread is deleted", async () => {
     const sibling = await api("POST", `/api/bots/${botId}/tasks`, { title: "Keep bot" });
     expect(sibling.status).toBe(201);

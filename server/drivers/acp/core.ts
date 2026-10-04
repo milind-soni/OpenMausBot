@@ -163,8 +163,8 @@ interface AcpTurn {
   runningTools: Set<string>;
   /** Synthetic item ids handed to `tool_call` notifications the agent sent
    * without a `toolCallId`: lifecycle consumers pair a tool's start with
-   * its completion by `itemId` (the #1653 computer-call fence among them),
-   * so an unkeyed call must still carry one stable id across both events. */
+   * its completion by `itemId` (the tool chip's result among them), so an
+   * unkeyed call must still carry one stable id across both events. */
   unkeyedToolIds: string[];
   interruptTimer: ReturnType<typeof setTimeout> | null;
   /** ends the quiet-status watch started with the prompt */
