@@ -185,11 +185,17 @@ describe("systemPrompt", () => {
   });
 
   it("stays under its byte budget, newest first when it has to cut", () => {
-    for (let i = 0; i < 400; i++) {
-      const proposed = memory.propose("", { kind: "term", name: `Term ${i}`, detail: "d".repeat(60) }, { ...source, at: source.at + i });
-      memory.resolve("", proposed.entry.id, "accept");
-    }
-    const prompt = memory.systemPrompt("");
+    // 400 accepted terms, ~75 bytes a line, well past the 6 000-byte budget.
+    // They are written as one saved file, not proposed and accepted one at a
+    // time: that was 800 fsync+rename saves of a growing JSON file (70 MB in
+    // all), 4 s here and past the 20 s test timeout on the Windows runners.
+    // The budget is systemPrompt's to keep, and it reads the loaded file.
+    const entries = Array.from({ length: 400 }, (_, i) => ({
+      id: `term-${i}`, kind: "term", name: `Term ${i}`, detail: "d".repeat(60), aliases: [], status: "accepted",
+      source: { ...source, at: source.at + i }, updatedAt: source.at + i,
+    }));
+    writeFileSync(join(dir, "team-memory.json"), JSON.stringify({ version: 1, sections: { "": entries } }));
+    const prompt = new TeamMemory(join(dir, "team-memory.json")).systemPrompt("");
     expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(TEAM_MEMORY_PROMPT_MAX_BYTES + 400);
     expect(prompt).toContain("Term 399");
     expect(prompt).not.toContain("Term 0:");

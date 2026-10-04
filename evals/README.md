@@ -29,7 +29,7 @@ Each fixture declares a `world`, the `bots` to create with their scripted `turns
 
 ## Current pins
 
-- `dispatch-supersede` — a message sent while coordinated work is outstanding runs immediately, the assignment stays attached, and the steered turn is told which work is outstanding. (Current semantics: steering is not cancelling.)
+- `dispatch-supersede` — a message sent to an idle Chief while its coordinated work is outstanding runs immediately as its own turn (not steered into the dispatching turn, not queued behind the work), the assignment stays attached, and that turn is told which work is outstanding. (Current semantics: a new message is not a cancellation.)
 - `routine-deferral` — a routine due behind a busy target is stamped `deferredAt` while staying queued, then dispatches and completes when the target frees.
 - `lazy-claim-screenless` (issue #1361) — a screen-less Auto turn mounts computer tools without claiming the VM and completes while another thread holds it; no wait activity appears.
 - `lazy-computer-claim` (issue #1361) — the first screen call fires the deferred claim, is honestly refused while another thread holds the VM, shows the existing wait activity, and proceeds on release.
