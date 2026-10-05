@@ -29,9 +29,11 @@
 //                      answered, like a CLI that ended between turns, so
 //                      every later turn launches again (with --resume).
 //   FAKE_CLAUDE_GONE_AFTER_TURN path: once its turn is answered, the process
-//                      stops reading stdin, so a write to it fails, writes
-//                      <path>.closed, and exits once <path> exists — a CLI
-//                      that ended between turns before the driver saw it go.
+//                      stops reading stdin, so a write to it fails (POSIX;
+//                      on Windows Node's stdin holds a duplicate handle, so
+//                      the write can still land), writes <path>.closed, and
+//                      exits once <path> exists — a CLI that ended between
+//                      turns before the driver saw it go.
 //   FAKE_CLAUDE_TEXT_FILE path whose contents are the one-shot text mode's
 //                      reply, read fresh each run so a suite sharing one
 //                      server can vary it per test. A missing file, or a body

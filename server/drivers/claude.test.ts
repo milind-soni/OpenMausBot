@@ -1974,6 +1974,14 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // the warm process no longer reads stdin, and has not exited yet
     await expect.poll(() => existsSync(`${gone}.closed`)).toBe(true);
     const { turnId } = await instance.adapter.sendTurn({ threadId, text: "second", resumeCursor: sessionId });
+    // The failed write itself ends the warm process: it has not exited, and
+    // nothing else would end the turn before a Stop. POSIX only: with fd 0
+    // closed the pipe has no reader. On Windows Node's stdin keeps its own
+    // duplicate of the pipe handle, so the write can land there and only the
+    // exit below ends the process.
+    if (process.platform !== "win32") {
+      expect(readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8")).toContain('"close":"stdin write failed"');
+    }
     writeFileSync(gone, "go");
     expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId)).toMatchObject({ ok: true });
     const seen = JSON.parse(readFileSync(dump, "utf8"));
