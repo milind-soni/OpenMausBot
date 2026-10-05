@@ -34,13 +34,21 @@ const sectionKey = (section?: string): string => section?.trim() || "";
 
 export const PEER_ACCESS_HELP = "Call list_bots for reachable teammates. If the intended Chief is missing, ask the user to check team membership and this bot's allowed peers, or message the Chief directly. A Chief's access to another team does not grant that team's bots access back to the Chief. Do not use computer control to bypass this.";
 
+/** OMB_OPEN_TEAMS=1 runs the workspace as one team: any bot may reach a bot
+ * in any section, so sections only group the sidebar. Off by default. Peer
+ * lists, hidden bots and visibility still apply, and it grants no Chief
+ * authority (coordinatorSupervises). Read per call, so no caller caches it. */
+const openTeams = (): boolean => process.env.OMB_OPEN_TEAMS === "1";
+
 /** Coordination is scoped to the bot's own team unless the owner explicitly
- * allows its Chief to work with additional teams. A title, peer id, imported
- * persona or a room membership is not a grant. Invalid saved grants fail closed. */
+ * allows its Chief to work with additional teams, or opens every team to
+ * every bot (openTeams). A title, peer id, imported persona or a room
+ * membership is not a grant. Invalid saved grants fail closed. */
 export function canAccessTeam(
   from: Pick<RosterMember, "section" | "chiefOfStaff" | "managedSections">,
   section?: string,
 ): boolean {
+  if (openTeams()) return true;
   const target = sectionKey(section);
   return target === sectionKey(from.section) || Boolean(from.chiefOfStaff &&
     Array.isArray(from.managedSections) && from.managedSections.some(value =>

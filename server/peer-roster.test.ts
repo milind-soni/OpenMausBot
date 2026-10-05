@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   canAccessTeam,
@@ -118,6 +118,33 @@ describe("owner-granted cross-team coordination", () => {
     expect(canAccessTeam({ ...chief, managedSections: "Personal" as unknown as string[] }, "Personal")).toBe(false);
     expect(canAccessTeam({ ...chief, managedSections: [null] as unknown as string[] }, "Personal")).toBe(false);
     expect(canAccessTeam({ ...chief, managedSections: [""] }, undefined)).toBe(true);
+  });
+});
+
+describe("open teams (OMB_OPEN_TEAMS=1)", () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it("keeps the team boundary unless the flag is exactly 1", () => {
+    for (const value of [undefined, "", "0", "true"]) {
+      vi.stubEnv("OMB_OPEN_TEAMS", value);
+      expect(canAccessTeam(self, "Personal")).toBe(false);
+      expect(reachablePeers(fleet, self).map(bot => bot.id)).toEqual(["writer", "coder"]);
+    }
+  });
+
+  it("lets any bot reach any team while peer lists, hidden bots and visibility still apply", () => {
+    vi.stubEnv("OMB_OPEN_TEAMS", "1");
+    expect(canAccessTeam(self, "Personal")).toBe(true);
+    expect(canAccessTeam(fleet[4]!, undefined)).toBe(true);
+    expect(canReachPeer(fleet[4]!, self)).toBe(true);
+    expect(reachablePeers(fleet, self).map(bot => bot.id)).toEqual(["writer", "coder", "elsewhere"]);
+    expect(reachablePeers(fleet, { ...self, peers: ["writer"] }).map(bot => bot.id)).toEqual(["writer"]);
+    expect(canReachPeer(self, { ...fleet[4]!, visibility: "admins" })).toBe(false);
+  });
+
+  it("grants no Chief authority over another team", () => {
+    vi.stubEnv("OMB_OPEN_TEAMS", "1");
+    expect(coordinatorSupervises({ chiefOfStaff: true, managedSections: ["Work"] }, { section: "Personal" })).toBe(false);
   });
 });
 
