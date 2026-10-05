@@ -717,8 +717,8 @@ describe("waiting for a Live call's audio to connect", () => {
 // server's page the microphone only on the person's own Cloud, so on any other
 // server no setting there helps.
 describe("a blocked microphone", () => {
-  const blockedIn = (dictation: Partial<DesktopCapabilities["dictation"]>) => configureLiveMedia({
-    getUserMedia: async () => { throw new DOMException("denied", "NotAllowedError"); },
+  const blockedIn = (dictation: Partial<DesktopCapabilities["dictation"]>, reason = "NotAllowedError") => configureLiveMedia({
+    getUserMedia: async () => { throw new DOMException("denied", reason); },
     createPeer: () => peer as unknown as RTCPeerConnection,
     request: request as never,
     iceTimeoutMs: 50,
@@ -745,6 +745,18 @@ describe("a blocked microphone", () => {
     blockedIn({ reasonCode: "desktop-app-required" });
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(liveMedia().notice).toBe("The microphone is blocked. Allow it for this site in your browser, then try again.");
+  });
+
+  // No setting supplies a microphone that isn't there, in any window.
+  it.each([
+    ["another server's page", { reasonCode: "remote-server" }],
+    ["a web browser", { reasonCode: "desktop-app-required" }],
+    ["the Windows app", { reasonCode: "unsupported-platform" }],
+  ] as const)("with no microphone at all, in %s, asks for one", async (_where, dictation) => {
+    blockedIn(dictation, "NotFoundError");
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    expect(liveMedia()).toMatchObject({ phase: "failed", canRetry: false });
+    expect(liveMedia().notice).toBe("No microphone was found. Connect one, then try again.");
   });
 
   it.each([

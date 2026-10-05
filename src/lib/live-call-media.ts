@@ -268,13 +268,17 @@ export async function startLiveCall(target: {
     release();
     if (body?.needsKey) return set({ ...IDLE, needsKey: true, botId: target.botId, threadId: target.threadId });
     if (body?.activeCall) return set({ ...IDLE, phase: "failed", botId: target.botId, threadId: target.threadId, busyWith: body.activeCall, notice: busyText(body.activeCall) });
-    const blocked = error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "NotFoundError");
+    // No microphone at all is not a permission: no setting supplies one.
+    const missing = error instanceof DOMException && error.name === "NotFoundError";
+    const blocked = missing || (error instanceof DOMException && error.name === "NotAllowedError");
     // Trying again cannot help a blocked microphone, a window without
     // WebRTC or a refused sign-in: each needs a person to change something.
     const hopeless = blocked || error instanceof LiveUnsupportedError || (error instanceof ApiError && error.status === 401);
     set({
       ...IDLE, phase: "failed", botId: target.botId, threadId: target.threadId, canRetry: !hopeless,
-      notice: blocked ? micBlockedNotice(deps.capabilities(), target.cloudHome === true) : error instanceof Error ? error.message : String(error),
+      notice: missing ? t("call.live.micMissing")
+        : blocked ? micBlockedNotice(deps.capabilities(), target.cloudHome === true)
+        : error instanceof Error ? error.message : String(error),
     });
   }
 }

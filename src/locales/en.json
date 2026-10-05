@@ -3376,6 +3376,7 @@
   "call.live.busy.android": "Another Live call is running on an Android phone. Hang up there first.",
   "call.live.micBlocked": "The microphone is blocked. Allow microphone access for this app in System Settings, then try again.",
   "call.live.micBlockedBrowser": "The microphone is blocked. Allow it for this site in your browser, then try again.",
+  "call.live.micMissing": "No microphone was found. Connect one, then try again.",
   "call.live.micServerPage": "The desktop app doesn't let a server's page use your microphone. Open this server in your web browser to make a Live call.",
   "call.live.unsupported": "Live calls need microphone and WebRTC support, which this window does not have.",
   "call.live.noOffer": "The call could not start: no connection offer.",
