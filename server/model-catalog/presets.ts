@@ -197,6 +197,14 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     anthropic: { baseUrl: "https://opencode.ai/zen" },
     checkedAt: CHECKED,
   },
+  {
+    id: "wallaby",
+    catalogId: "wallaby",
+    label: "Wallaby",
+    api: "https://api.wallabytoken.com/v1",
+    keyCheck: "/models",
+    checkedAt: "2026-10-05",
+  },
 ];
 
 const BY_ID = new Map(PROVIDER_PRESETS.map((preset) => [preset.id, preset]));
