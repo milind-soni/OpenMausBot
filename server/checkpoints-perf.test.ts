@@ -139,7 +139,11 @@ describe("incremental shadow index", () => {
     hooks.calls = [];
     expect(await diffWorkingTree(bot, cwd, first!)).toEqual({ changed: [], added: [], deleted: [] });
     expect(subcommands()).not.toContain("read-tree");
-  });
+    // The assertions are about which git subcommands run, not how fast.
+    // Writing and first-indexing 3,000 files takes ~2 s on macOS but runs
+    // past vitest's 20 s default on CI's Windows runners, so give the
+    // fixture room rather than shrink the tree it is about.
+  }, 120_000);
 
   it("falls back to a full rebuild when the index cannot be listed", async () => {
     const { bot, cwd } = workspace();
