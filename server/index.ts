@@ -344,6 +344,7 @@ import { createLiveSession, liveAttachUrl, LiveSessionError, type LiveBot, type 
 import { LiveCallController, LiveCallSignedOutError, type LiveSocket } from "./live-call-controller.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { turnStartLogLine } from "./turn-log.ts";
+import { makeCapContinuationSubscriber } from "./turn-continuation.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS, peerMessageText } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
@@ -5965,6 +5966,11 @@ bus.subscribe((event: RuntimeEvent) => {
     }
   } else if (event.type !== "session.exited") watchdog.touch(event.threadId);
 });
+
+// Automatic continuity: a turn that died on its budget or on tool errors gets
+// a `Continue:` task on the same bot, seeded with the persisted handoff — the
+// work moves forward without a person noticing and re-dispatching.
+bus.subscribe(makeCapContinuationSubscriber({ store, startTurn }));
 
 // Memory journal turn boundary (server/memory-journal.ts). A bot's own
 // file-tool writes to MEMORY.md and memory/ have no hook to tap, so the

@@ -71,6 +71,16 @@ export type RuntimeEvent = RuntimeEventBase &
         usage?: { input: number; output: number; cachedInput?: number };
       }
     | {
+        /** A resumable terminal: the turn exhausted its model/tool budget or
+         * died on tool errors, and a structured handoff was persisted. The
+         * harness may start a `Continue:` thread automatically. */
+        type: "cap.exhausted";
+        /** Absolute path to the persisted handoff for the dead turn. */
+        handoffPath: string;
+        /** What stopped the turn without a final answer. */
+        reason: "cap" | "tool_error";
+      }
+    | {
         type: "turn.wait_started";
         /** The computer resource this turn queued behind (e.g. "computer:box:bx_…"). */
         resource: string;
