@@ -636,7 +636,9 @@ export interface ConfigStatus {
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number };
-  opencodeGo?: { configured: boolean };
+  /** `providerKeys`: names of the keys saved for OpenCode's other
+   * providers, never the keys. */
+  opencodeGo?: { configured: boolean; providerKeys?: string[] };
   /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
    * Fish Audio key, or a Chatterbox server address); `ready` = that AND a voice, which is
    * what it takes to actually speak. The key itself is never echoed back;

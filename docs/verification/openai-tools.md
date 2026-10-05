@@ -54,6 +54,12 @@ non-streaming responses, tool errors, and lifecycle edge cases:
 pnpm exec vitest run server/drivers/openai-chat-tools.test.ts server/workspace.test.ts
 ```
 
+One turn stops after 64 model steps, or 200 tool calls in total (each reply
+may carry up to 32). The stop says so in one line with one next action: the
+steps so far already ran, so ask only for what's left (retrying the whole task
+would repeat them). A batch that would pass 200 runs none of its calls. There
+is no per-bot or per-thread setting for either number.
+
 The harness proves the OpenAI-compatible adapter and the shared execution
 path. It does not establish that every third-party model supports tools, or
 that live Grok and MiniMax services accept a particular schema. Model support

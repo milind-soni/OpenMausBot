@@ -8,6 +8,7 @@ import { useSyncExternalStore } from "react";
 import type { LiveCallState, LiveEndReason } from "../../shared/wire";
 import { api, ApiError } from "@/state/store";
 import { endCall, startCall } from "./call";
+import { desktopCapabilitiesNow } from "./desktop";
 import { t } from "./i18n";
 
 export type LiveMediaPhase = "idle" | "starting" | "live" | "ending" | "ended" | "failed";
@@ -51,6 +52,8 @@ export interface LiveMediaDeps {
   playRemote(track: MediaStreamTrack): Promise<void> | void;
   stopRemote(): void;
   iceTimeoutMs: number;
+  /** what this window is: the desktop app's own page, a server's page in it, or a browser */
+  capabilities(): DesktopCapabilities;
 }
 
 const IDLE: LiveMediaState = {
@@ -88,6 +91,7 @@ const defaults: LiveMediaDeps = {
     if (audio) audio.srcObject = null;
   },
   iceTimeoutMs: 10_000,
+  capabilities: desktopCapabilitiesNow,
 };
 let deps: LiveMediaDeps = defaults;
 
@@ -167,7 +171,24 @@ export function endNotice(reason: LiveEndReason | undefined): { text: string; dr
   }
 }
 
-export async function startLiveCall(target: { botId: string; threadId: string }): Promise<void> {
+/** Who can allow a blocked microphone. The desktop app gives a server's page
+ * the microphone only on the person's own Cloud (`cloudHome`); on any other
+ * server no setting helps, and a web browser asks per site. The app's own
+ * window, and the Cloud in it, follow the computer's privacy settings. */
+function micBlockedNotice(capabilities: DesktopCapabilities, cloudHome: boolean): string {
+  switch (capabilities.dictation.reasonCode) {
+    case "remote-server": return t(cloudHome ? "call.live.micBlocked" : "call.live.micServerPage");
+    case "desktop-app-required": return t("call.live.micBlockedBrowser");
+    default: return t("call.live.micBlocked");
+  }
+}
+
+export async function startLiveCall(target: {
+  botId: string;
+  threadId: string;
+  /** this page is the person's own Cloud (config.cloudHome) */
+  cloudHome?: boolean;
+}): Promise<void> {
   if (isLiveCallRunning(state.phase)) return;
   release();
   const mine = ++generation;
@@ -247,13 +268,17 @@ export async function startLiveCall(target: { botId: string; threadId: string })
     release();
     if (body?.needsKey) return set({ ...IDLE, needsKey: true, botId: target.botId, threadId: target.threadId });
     if (body?.activeCall) return set({ ...IDLE, phase: "failed", botId: target.botId, threadId: target.threadId, busyWith: body.activeCall, notice: busyText(body.activeCall) });
-    const blocked = error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "NotFoundError");
+    // No microphone at all is not a permission: no setting supplies one.
+    const missing = error instanceof DOMException && error.name === "NotFoundError";
+    const blocked = missing || (error instanceof DOMException && error.name === "NotAllowedError");
     // Trying again cannot help a blocked microphone, a window without
     // WebRTC or a refused sign-in: each needs a person to change something.
     const hopeless = blocked || error instanceof LiveUnsupportedError || (error instanceof ApiError && error.status === 401);
     set({
       ...IDLE, phase: "failed", botId: target.botId, threadId: target.threadId, canRetry: !hopeless,
-      notice: blocked ? t("call.live.micBlocked") : error instanceof Error ? error.message : String(error),
+      notice: missing ? t("call.live.micMissing")
+        : blocked ? micBlockedNotice(deps.capabilities(), target.cloudHome === true)
+        : error instanceof Error ? error.message : String(error),
     });
   }
 }

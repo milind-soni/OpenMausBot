@@ -4,9 +4,18 @@ export type CallCapabilityHelp = {
   action?: "choose-local-workspace";
 };
 
+/** Only the Mac app listens on-device. Live calls need no on-device
+ * listening, so where they are offered (a browser, a Windows or Linux app)
+ * their button is the way on. */
+const TURNS_NEED_MAC: CallCapabilityHelp = {
+  label: "Calls where you take turns need the Mac app",
+  reason: "They listen with on-device speech recognition, which only the Mac app has.",
+};
+
 /** Explain why this renderer cannot start a call. Keep the remote-workspace
  * case distinct: the installed Mac app is already present, but this page is
- * intentionally denied access to the Mac microphone. */
+ * intentionally denied access to the Mac microphone. Only a Mac is offered
+ * the trip to This computer: anywhere else it cannot take turns either. */
 export function callCapabilityHelp(
   capabilities: DesktopCapabilities,
   speechServiceAvailable: boolean,
@@ -14,6 +23,7 @@ export function callCapabilityHelp(
   if (!capabilities.dictation.available) {
     switch (capabilities.dictation.reasonCode) {
       case "remote-server":
+        if (capabilities.host.platform !== "darwin") return TURNS_NEED_MAC;
         return {
           label: "Calls are available on This computer",
           reason:
@@ -21,15 +31,8 @@ export function callCapabilityHelp(
           action: "choose-local-workspace",
         };
       case "desktop-app-required":
-        return {
-          label: "Calls need the macOS desktop app",
-          reason: "Open it in OpenMausBot for macOS to make calls with on-device speech recognition.",
-        };
       case "unsupported-platform":
-        return {
-          label: "Calls currently need macOS",
-          reason: "Calls are available on macOS for now because speech recognition runs on-device.",
-        };
+        return TURNS_NEED_MAC;
       default:
         return {
           label: "Calls aren't available on this device",

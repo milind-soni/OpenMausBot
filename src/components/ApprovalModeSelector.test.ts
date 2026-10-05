@@ -34,7 +34,7 @@ describe("approval mode selector", () => {
       {
         mode: "auto",
         label: "Approve for me",
-        description: "Uses the provider's automatic review to approve routine actions and ask about others",
+        description: "Uses the provider's automatic review to approve routine actions and ask about others. Web search is allowed without asking.",
       },
       {
         mode: "full",

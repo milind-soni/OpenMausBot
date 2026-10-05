@@ -39,7 +39,8 @@ vi.mock("@/state/store", async (importOriginal) => {
 });
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
-  useDesktopCapabilities: () => ({ capabilities: { dictation: fixture.dictation }, ready: true }),
+  // the Mac app: only a Mac is sent to This computer for a call
+  useDesktopCapabilities: () => ({ capabilities: { host: { platform: "darwin" }, dictation: fixture.dictation }, ready: true }),
 }));
 vi.mock("@/lib/call", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/call")>(),

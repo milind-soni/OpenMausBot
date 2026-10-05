@@ -7,6 +7,7 @@ import { cloudPlanLabel, cloudPlanLine, cloudPlanView, type CloudPlanView } from
 import type { LocaleKey } from "@/locales";
 import { Card } from "./SettingsPrimitives";
 import { CloudLending } from "./CloudLending";
+import { useDesktopCapabilities } from "./DesktopCapabilities";
 
 export { cloudPlanLabel };
 
@@ -93,11 +94,22 @@ export function cloudLinkAction(account: CloudAccountState, link: { arrived: boo
   return null;
 }
 
+/** A saved sign-in that may only be locked is kept and read again by itself.
+ * Where a keychain can be locked, unlocking it is the one step; Windows has
+ * nothing to unlock. Never Sign out: that would delete the sign-in the app is
+ * about to read, with nothing revoked on the Cloud. */
+const RESTORE_RETRY: Partial<Record<DesktopCapabilities["host"]["platform"], LocaleKey>> = {
+  darwin: "cloudAccount.restoreRetryKeychain",
+  linux: "cloudAccount.restoreRetryKeyring",
+};
+
 /** The one message for a state, or none. */
-function accountMessage(account: CloudAccountState | null, view: CloudPlanView): string | null {
+function accountMessage(account: CloudAccountState | null, view: CloudPlanView, platform: DesktopCapabilities["host"]["platform"]): string | null {
   if (!account) return null;
   if (account.message === "signout-local-only") return t("cloudAccount.signoutLocalOnly");
-  if (account.message === "signout-storage-failed" || account.message === "restore-failed") return t("cloudAccount.storageFailed");
+  // Clearing it failed: Sign out again is the retry.
+  if (account.message === "signout-storage-failed") return t("cloudAccount.storageFailed");
+  if (account.message === "restore-failed") return t(RESTORE_RETRY[platform] ?? "cloudAccount.restoreRetry");
   if (view.kind === "reauth") return t(view.reason === "expired" ? "cloudAccount.reauthExpired" : "cloudAccount.reauthEnded");
   if (view.kind === "unverified") return t("cloudAccount.unavailable");
   if (view.kind === "purchase") return view.paidAt ? t("cloudAccount.purchaseNote", { date: day(view.paidAt) }) : t("cloudAccount.purchaseNoteNoDate");
@@ -159,6 +171,7 @@ export function CloudPlanOnCloud({ bridge, onConnectPhone }: { bridge: CloudPlan
  * Cloud itself). */
 export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onConnectPhone }: { linkRequest?: number; cloudHome?: boolean; onConnectPhone?: () => void } = {}) {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
+  const { platform } = useDesktopCapabilities().capabilities.host;
   const [account, setAccount] = useState<CloudAccountState | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState(false), [confirm, setConfirm] = useState(false);
   const [homeFailed, setHomeFailed] = useState(false), [phoneFailed, setPhoneFailed] = useState(false);
@@ -221,7 +234,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, onCon
   const view = cloudPlanView(account);
   const signed = account && ["connected", "unavailable", "reauth-required"].includes(account.status);
   // Status comes only from the server-verified native snapshot; checkout never sets it.
-  const message = accountMessage(account, view);
+  const message = accountMessage(account, view, platform);
   const line = cloudPlanLine(view);
   // A paid plan's Cloud before the Admin lists it is being set up.
   const machine: CloudMachine | undefined = account?.status === "connected" ? account.machine ?? (view.kind === "paid" ? { status: "provisioning" } : undefined) : undefined;

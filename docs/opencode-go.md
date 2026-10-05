@@ -24,6 +24,19 @@ write-only and injected as `OPENCODE_API_KEY` only into the OpenCode child
 process; it is not sent to the renderer, logs, analytics, snapshots, error
 messages, or command arguments.
 
+Keys for OpenCode's other providers go under **Keys for other OpenCode
+providers** in the same place, each under the environment name OpenCode reads
+it from: `VENICE_API_KEY` for Venice, `GROQ_API_KEY` for Groq, and so on. This
+works on the desktop and on an OMB Cloud, where there is no terminal to export
+them in. Each key is write-only (Settings shows its name, never the key), is
+kept in the server's own config, and is passed only to the OpenCode process;
+saving one reloads the engines, so OpenCode lists that provider's models
+straight away. On a Cloud, a hosted team or an organization's desktop,
+OpenCode still never reads provider keys from the server's own environment;
+the keys saved here are the exception. Names OpenMausBot keeps for itself
+(`OPENCODE_*`, `OMB_*`, and the keys it saves for other engines, such as
+`XAI_API_KEY`) are refused, and up to 20 keys can be saved.
+
 OpenMausBot does not copy or rewrite `auth.json`. The OpenCode CLI remains the
 owner of provider authentication, and the same Zen or Go connection used by
 the OpenCode desktop/TUI is used by OpenMausBot.

@@ -136,6 +136,11 @@ Every other routine is nobody's: it runs confined, like a guest's, and
 reports into a conversation that is nobody's. An owner's routine reports
 into a conversation that is the owner's.
 
+A webhook is the owner's: only their own devices can create, edit or rotate
+one, so its runs work at the bot's own level, in its project folder, with its
+shell, as on the desktop. What a webhook brings in still never reaches the
+lent Mac (below).
+
 The routines a revoked session wrote are paused at that start, and the
 conversations it opened lose their working folder: their next turn works in
 a folder of their own, never the owner's project.

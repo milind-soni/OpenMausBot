@@ -5,7 +5,9 @@ export interface ChatToolCall {
   function: { name: string; arguments: string };
 }
 
-export const MAX_CHAT_TOOL_CALLS = 32;
+/** Calls one model reply may carry (its index bound). The turn's own total is
+ * MAX_TURN_TOOL_CALLS in openai-chat.ts. */
+const MAX_REPLY_TOOL_CALLS = 32;
 const MAX_ARGUMENT_CHARS = 256_000;
 
 export class ChatProtocolError extends Error {}
@@ -44,7 +46,7 @@ export class ChatToolCalls {
     for (const [position, raw] of value.entries()) {
       const delta = object(raw);
       const index = streaming ? delta?.index : position;
-      if (!delta || !Number.isInteger(index) || Number(index) < 0 || Number(index) >= MAX_CHAT_TOOL_CALLS) {
+      if (!delta || !Number.isInteger(index) || Number(index) < 0 || Number(index) >= MAX_REPLY_TOOL_CALLS) {
         throw new ChatProtocolError("provider returned an invalid tool-call index");
       }
       const call = this.calls.get(Number(index)) ?? { id: "", type: "function", function: { name: "", arguments: "" } };

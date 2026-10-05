@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { callCapabilityHelp } from "@/lib/call-capability";
 
-function capabilities(dictation: DesktopCapabilities["dictation"]): DesktopCapabilities {
+function capabilities(
+  dictation: DesktopCapabilities["dictation"],
+  platform: DesktopCapabilities["host"]["platform"] = "darwin",
+): DesktopCapabilities {
   return {
     host: {
-      platform: "darwin",
+      platform,
       label: "macOS",
       session: "unknown",
       packaged: true,
@@ -44,25 +47,45 @@ describe("call capability guidance", () => {
     });
   });
 
-  it("tells a browser user to open the installed macOS app", () => {
+  // Only a Mac's own window can take turns. Elsewhere This computer can't
+  // either, so the help names no trip there; the Live button is the way on.
+  it.each(["win32", "linux"] as const)("sends nobody on %s to This computer, which can't take turns either", (platform) => {
+    const help = callCapabilityHelp(capabilities({
+      available: false,
+      engine: "none",
+      onDevice: false,
+      reasonCode: "remote-server",
+    }, platform), false);
+    expect(help).toEqual({
+      label: "Calls where you take turns need the Mac app",
+      reason: "They listen with on-device speech recognition, which only the Mac app has.",
+    });
+  });
+
+  // A browser can make Live calls (the button under this help starts one), so
+  // the help says only what needs the Mac app: taking turns.
+  it("tells a browser user only taking turns needs the Mac app", () => {
     const help = callCapabilityHelp(capabilities({
       available: false,
       engine: "none",
       onDevice: false,
       reasonCode: "desktop-app-required",
-    }), false);
-    expect(help?.label).toBe("Calls need the macOS desktop app");
-    expect(help).not.toHaveProperty("action");
+    }, "other"), false);
+    expect(help).toEqual({
+      label: "Calls where you take turns need the Mac app",
+      reason: "They listen with on-device speech recognition, which only the Mac app has.",
+    });
   });
 
-  it("explains that native calls are not supported on a non-Mac desktop", () => {
+  // Live calls work on Windows and Linux: only taking turns needs the Mac.
+  it("says only taking turns needs the Mac app on a non-Mac desktop", () => {
     const help = callCapabilityHelp(capabilities({
       available: false,
       engine: "none",
       onDevice: false,
       reasonCode: "unsupported-platform",
-    }), false);
-    expect(help?.label).toBe("Calls currently need macOS");
+    }, "win32"), false);
+    expect(help?.label).toBe("Calls where you take turns need the Mac app");
     expect(help).not.toHaveProperty("action");
   });
 

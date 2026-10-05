@@ -191,6 +191,8 @@ import {
   onConfigSaved,
   CLAUDE_API_INSTANCE,
   liveSettingsFor,
+  mergeOpenCodeProviderKeys,
+  openCodeProviderKeys,
 } from "./config.ts";
 import { sweepThreadEventLogs, type ThreadLogRetentionCandidate } from "./thread-retention.ts";
 import { ComputerControl } from "./computer-control.ts";
@@ -248,7 +250,7 @@ import {
 import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
-import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./drivers/acp/opencode-go.ts";
+import { openCodeProviderKeysAllowed, setOpenCodeOwnProviderKeys, setOpenCodeProviderKeyPolicy } from "./drivers/acp/opencode-go.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { readMessageText, recallMessages, recentMessages, searchMessagesAsync, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
@@ -1137,10 +1139,14 @@ function approvalShape(shape: { prompt?: string; botId?: string; runOn?: string;
 /** Who opens a routine's results conversation on a Cloud home: the writer
  * of this request, else the owner for a routine that is theirs (they wrote
  * it as it stands, or they are its writer: cloud-owner.ts), else its last
- * writer, else nobody. */
+ * writer, else nobody. A webhook's run is the owner's: only their own
+ * devices can create, edit or rotate one (admin scope), so it runs at the
+ * bot's own level, in its folder, as on the desktop. Its payload still never
+ * reaches the lent Mac: cloud-lending.ts refuses every webhook run. */
 function routineOpener(routineId: string): string {
   if (routineWriterInFlight) return routineWriterInFlight;
   const routine = routines?.listRoutines().find((candidate) => candidate.id === routineId);
+  if (!routine && CLOUD_OWNER_KEY && webhooks.list().some((hook) => hook.id === routineId)) return CLOUD_OWNER_KEY;
   if (routine && CLOUD_OWNER_KEY && cloudRoutineAuthors?.authored(routineId, routine)) return CLOUD_OWNER_KEY;
   const writer = cloudRoutineAuthors?.writer(routineId);
   if (writer && CLOUD_OWNER_KEY && writer === CLOUD_OWNER_KEY) return CLOUD_OWNER_KEY;
@@ -1882,6 +1888,8 @@ const openCodeKeysAllowed = (): boolean => openCodeProviderKeysAllowed({
   sharedSignIn: sharedSignIn(signInAllowList()),
 });
 setOpenCodeProviderKeyPolicy(openCodeKeysAllowed);
+// Keys the owner saved for OpenCode in Settings reach it on every server.
+setOpenCodeOwnProviderKeys(() => openCodeProviderKeys(cfg));
 let openCodeKeysLastAllowed = openCodeKeysAllowed();
 /** OpenCode lists a provider's models only while it may read that
  * provider's key. When enrollment or the sign-in list changes the answer,
@@ -7341,8 +7349,9 @@ bus.subscribe((event: RuntimeEvent) => {
       // A permission request here is one the provider left for a person: its
       // own mode already ran (Ask, Edits, Auto's reviewer, Custom's config).
       // Only the person's explicit Full access or exact saved command answers.
-      // The app does not guess whether the action is safe. A QUESTION
-      // always reaches the human — even Full access never invents an answer.
+      // Approve for me allows a web search. The app does not guess whether
+      // the action is safe. A QUESTION always reaches the human — even Full
+      // access never invents an answer.
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id, event.threadId) : false;
       // A turn a guest drives on a Cloud home is Ask, room turns included,
@@ -14911,7 +14920,8 @@ function configStatus() {
     // not a saved key
     box: boat.describeBoatAccount(cfg),
     vps: { configured: Boolean(vpsSshAlias(cfg)), sshAlias: vpsSshAlias(cfg) ?? "" },
-    opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
+    // names only: every provider key stays write-only
+    opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey), providerKeys: Object.keys(openCodeProviderKeys(cfg)) },
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
     tts: tts.describeVoice(cfg),
@@ -14993,6 +15003,7 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
     edition: { edition: status.edition.edition, features: status.edition.features },
     signIn: { admins: [], members: [] },
     vps: { configured: status.vps.configured, sshAlias: "" },
+    opencodeGo: { configured: status.opencodeGo.configured, providerKeys: [] },
     profile: { name: status.profile.name, email: "" },
     browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),
   };
@@ -24127,6 +24138,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       for (const provider of transitioningProviders) {
         const conflict = providerOperationConflict(provider);
         if (conflict) return json(res, 409, { error: conflict });
+      }
+      // A change names only the OpenCode provider keys it saves or removes;
+      // the rest stay. Merged with no await before the save below, so it
+      // starts from what is saved at that moment.
+      if (patch.opencodeGo?.providerKeys) {
+        const merged = mergeOpenCodeProviderKeys(cfg, patch.opencodeGo.providerKeys);
+        if (!merged.ok) return json(res, 400, { error: merged.error });
+        patch.opencodeGo = { ...patch.opencodeGo, providerKeys: merged.keys };
       }
       const browserCleanupRequests: BrowserCleanupRequest[] = [];
       if (profileControlConflict()) return json(res, 409, { error: "Release browser control before deleting its profile." });

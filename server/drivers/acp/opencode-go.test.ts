@@ -22,6 +22,7 @@ import {
   parseOpenCodeModelsOutput,
   preferredOpenCodeModel,
   resetOpenCodeModelCache,
+  setOpenCodeOwnProviderKeys,
   setOpenCodeProviderKeyPolicy,
 } from "./opencode-go.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
@@ -346,8 +347,25 @@ describe("OpenCode catalog", () => {
 
   it("points a rejected Zen key at the key OpenMaus saves", () => {
     expect(describeOpenCodeAccountError("invalid_credentials", "opencode/big-pickle")).toContain("Settings → API keys");
+    // one next action, and one a Cloud owner (who has no terminal there) can take
+    for (const model of [undefined, "opencode/big-pickle", "opencode-go/minimax-m3"]) {
+      expect(describeOpenCodeAccountError("invalid_credentials", model)).not.toContain("opencode auth login");
+    }
     expect(describeOpenCodeAccountError("insufficient_funds", "opencode/big-pickle")).toContain("Zen");
     expect(describeOpenCodeAccountError("inactive_subscription", "opencode-go/minimax-m3")).toContain("OpenCode Go subscription");
+  });
+
+  // On a Cloud the owner has no terminal: a key for any other provider is
+  // saved in Settings, under Keys for other OpenCode providers.
+  it("on a Cloud, sends another provider's refused key to Settings, not a terminal", () => {
+    for (const model of ["openrouter/openai/gpt-4o-mini", "venice/llama-3.3-70b", `${"very-long-provider-name".repeat(4)}/model`]) {
+      const cloud = describeOpenCodeAccountError("invalid_credentials", model, { cloudHome: true });
+      expect(cloud).not.toContain("opencode auth login");
+      expect(cloud).toContain("Save it under Keys for other OpenCode providers in Settings → API keys.");
+      expect(cloud.length, model).toBeLessThanOrEqual(160);
+      // on the person's own computer the CLI's sign-in still fixes it
+      expect(describeOpenCodeAccountError("invalid_credentials", model, { cloudHome: false })).toContain("opencode auth login");
+    }
   });
 
   it("passes the person's provider keys through, as the CLI would see them", async () => {
@@ -442,6 +460,54 @@ describe("OpenCode catalog", () => {
       setOpenCodeProviderKeyPolicy(() => !cloudHomeConfigured() && !hostedWorkspaceConfigured());
       await removeTempDir(scratch);
     }
+  });
+
+  // On a Cloud the owner has no shell to export a key in: Settings saves it
+  // for OpenCode (config.ts openCodeProviderKeys), and the server hands it
+  // over in the instance environment. That exact value goes through; the
+  // server's own key under the same name still does not.
+  it("lets the owner's saved provider keys through on a Cloud home, and only those", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-own-keys-"));
+    setOpenCodeProviderKeyPolicy(() => false);
+    setOpenCodeOwnProviderKeys(() => ({ ANTHROPIC_API_KEY: "owner-anthropic", GEMINI_API_KEY: "owner-gemini", VENICE_API_KEY: "owner-venice" }));
+    try {
+      const dump = join(scratch, "env.json");
+      const driver = createOpenCodeDriver(async () => catalog("opencode-go/minimax-m3"));
+      const instance = await driver.create({
+        instanceId: "opencode-own-keys",
+        displayName: "OpenCode",
+        environment: {
+          ANTHROPIC_API_KEY: "owner-anthropic",
+          VENICE_API_KEY: "owner-venice",
+          // Saved, but this instance holds the server's value, not the saved one.
+          GEMINI_API_KEY: "operator-gemini",
+          // Never saved: the server's own.
+          OPENAI_API_KEY: "operator-openai",
+          FAKE_ACP_DUMP: dump,
+        },
+        enabled: true,
+        config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      await instance.snapshot();
+      const child = JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> };
+      expect(child.env.ANTHROPIC_API_KEY).toBe("owner-anthropic");
+      expect(child.env.VENICE_API_KEY).toBe("owner-venice");
+      expect(child.env.GEMINI_API_KEY).toBeUndefined();
+      expect(child.env.OPENAI_API_KEY).toBeUndefined();
+      await instance.dispose();
+    } finally {
+      setOpenCodeProviderKeyPolicy(() => !cloudHomeConfigured() && !hostedWorkspaceConfigured());
+      setOpenCodeOwnProviderKeys(() => ({}));
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("wires the owner's saved keys in index.ts before the first catalog probe", () => {
+    const source = readFileSync(new URL("../../index.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    const wired = source.indexOf("setOpenCodeOwnProviderKeys(() => openCodeProviderKeys(cfg));");
+    expect(wired).toBeGreaterThan(0);
+    expect(source.indexOf("await registry.load(providerConfigs(), decorateHostedProvider);")).toBeGreaterThan(wired);
+    expect(source.match(/setOpenCodeOwnProviderKeys\(/g)).toHaveLength(1);
   });
 });
 

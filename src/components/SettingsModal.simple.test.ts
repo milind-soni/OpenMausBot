@@ -50,6 +50,7 @@ vi.mock("./ApiKeys", () => ({
   ApiKeyRow: marker("apiKey"),
   AnthropicEveryClaudeBot: marker("anthropicEvery"),
   OpenAiCompatUrl: marker("compatUrl"),
+  OpenCodeProviderKeys: marker("opencodeProviderKeys"),
   VpsConnection: marker("vps"),
 }));
 vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: marker("companion") }));

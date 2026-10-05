@@ -401,6 +401,109 @@ export function ApiKeyRow({
   );
 }
 
+/** Keys for OpenCode's other providers (Venice, Groq, DeepSeek…), each under
+ * the name OpenCode reads it from. Write-only like every key: the server sends
+ * back names, never keys, and hands the keys to OpenCode alone. Saved in the
+ * server's own config, on the desktop and on a Cloud alike. */
+export function OpenCodeProviderKeys() {
+  const { state, dispatch } = useStore();
+  const names = state.config?.opencodeGo?.providerKeys ?? [];
+  const [name, setName] = useState("");
+  const [key, setKey] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const busy = adding || removing !== null;
+
+  const put = (target: string, value: string) =>
+    api("/api/config", { method: "PUT", body: JSON.stringify({ opencodeGo: { providerKeys: { [target]: value } } }) })
+      .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }));
+
+  const add = () => {
+    const target = name.trim().toUpperCase();
+    const value = key.trim();
+    if (busy || !target || !value) return;
+    if (!looksLikeKey(value)) {
+      setError(t("keys.notAKey"));
+      return;
+    }
+    setAdding(true);
+    setError(null);
+    put(target, value)
+      .then(() => { setName(""); setKey(""); })
+      .catch((e) => setError(e.message))
+      .finally(() => setAdding(false));
+  };
+
+  const remove = (target: string) => {
+    if (busy) return;
+    setRemoving(target);
+    setError(null);
+    put(target, "")
+      .catch((e) => setError(e.message))
+      .finally(() => setRemoving(null));
+  };
+
+  return (
+    <details data-opencode-provider-keys className="rounded-lg border border-hairline/40 bg-inset px-3 py-2" open={names.length > 0}>
+      <summary className="cursor-pointer text-[13px] text-ink-secondary">{t("keys.opencode.otherProviders.title")}</summary>
+      <div className="mt-3 flex flex-col gap-2">
+        <p className="text-[11.5px] leading-relaxed text-ink-secondary">{t("keys.opencode.otherProviders.hint")}</p>
+        {names.map((saved) => (
+          <div key={saved} data-opencode-provider-key={saved} className="flex items-center gap-2">
+            <span className="size-1.5 shrink-0 rounded-full bg-success" />
+            <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">{saved}</code>
+            <span className="text-[11px] text-ink-secondary">{t("keys.configured")}</span>
+            <button
+              type="button"
+              onClick={() => remove(saved)}
+              disabled={busy}
+              aria-label={t("keys.opencode.otherProviders.removeAria", { name: saved })}
+              className="flex w-[72px] shrink-0 items-center justify-center rounded-lg bg-control py-1.5 text-[13px] text-danger hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {removing === saved ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : t("keys.clear")}
+            </button>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => { setError(null); setName(e.target.value); }}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            disabled={busy}
+            placeholder="VENICE_API_KEY"
+            aria-label={t("keys.opencode.otherProviders.name")}
+            autoComplete="off"
+            spellCheck={false}
+            className="w-[44%] min-w-0 rounded-lg border border-hairline/40 bg-panel px-3 py-2 font-mono text-[12px] uppercase text-ink placeholder:normal-case placeholder:text-ink-secondary focus:outline-none"
+          />
+          <input
+            type="password"
+            value={key}
+            onChange={(e) => { setError(null); setKey(e.target.value); }}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            disabled={busy}
+            placeholder={t("keys.opencode.otherProviders.keyPlaceholder")}
+            aria-label={t("keys.opencode.otherProviders.key")}
+            autoComplete="off"
+            className="w-full min-w-0 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={add}
+            disabled={busy || !name.trim() || !key.trim()}
+            className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {adding ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : <><Check size={13} aria-hidden="true" />{t("common.save")}</>}
+          </button>
+        </div>
+        {error && <div role="alert" className="text-[12px] text-danger">{error}</div>}
+      </div>
+    </details>
+  );
+}
+
 /** Whether the Anthropic key also runs signed-in Claude bots. Off, only
  * "Claude (API key)" bills per token; on, every Claude bot does. */
 export function AnthropicEveryClaudeBot() {
