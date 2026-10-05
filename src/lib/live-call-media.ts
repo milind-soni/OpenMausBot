@@ -171,19 +171,24 @@ export function endNotice(reason: LiveEndReason | undefined): { text: string; dr
   }
 }
 
-/** Who can allow a blocked microphone. The desktop app never gives a
- * server's page (a Cloud included) the microphone, so no setting helps there:
- * a web browser asks per site. The app's own window follows the computer's
- * privacy settings. */
-function micBlockedNotice(capabilities: DesktopCapabilities): string {
+/** Who can allow a blocked microphone. The desktop app gives a server's page
+ * the microphone only on the person's own Cloud (`cloudHome`); on any other
+ * server no setting helps, and a web browser asks per site. The app's own
+ * window, and the Cloud in it, follow the computer's privacy settings. */
+function micBlockedNotice(capabilities: DesktopCapabilities, cloudHome: boolean): string {
   switch (capabilities.dictation.reasonCode) {
-    case "remote-server": return t("call.live.micServerPage");
+    case "remote-server": return t(cloudHome ? "call.live.micBlocked" : "call.live.micServerPage");
     case "desktop-app-required": return t("call.live.micBlockedBrowser");
     default: return t("call.live.micBlocked");
   }
 }
 
-export async function startLiveCall(target: { botId: string; threadId: string }): Promise<void> {
+export async function startLiveCall(target: {
+  botId: string;
+  threadId: string;
+  /** this page is the person's own Cloud (config.cloudHome) */
+  cloudHome?: boolean;
+}): Promise<void> {
   if (isLiveCallRunning(state.phase)) return;
   release();
   const mine = ++generation;
@@ -269,7 +274,7 @@ export async function startLiveCall(target: { botId: string; threadId: string })
     const hopeless = blocked || error instanceof LiveUnsupportedError || (error instanceof ApiError && error.status === 401);
     set({
       ...IDLE, phase: "failed", botId: target.botId, threadId: target.threadId, canRetry: !hopeless,
-      notice: blocked ? micBlockedNotice(deps.capabilities()) : error instanceof Error ? error.message : String(error),
+      notice: blocked ? micBlockedNotice(deps.capabilities(), target.cloudHome === true) : error instanceof Error ? error.message : String(error),
     });
   }
 }

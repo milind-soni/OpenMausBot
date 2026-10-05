@@ -713,8 +713,9 @@ describe("waiting for a Live call's audio to connect", () => {
   });
 });
 
-// A blocked microphone says who can allow it. The desktop app never gives a
-// server's page (a Cloud included) the microphone, so no setting there helps.
+// A blocked microphone says who can allow it. The desktop app gives a
+// server's page the microphone only on the person's own Cloud, so on any other
+// server no setting there helps.
 describe("a blocked microphone", () => {
   const blockedIn = (dictation: Partial<DesktopCapabilities["dictation"]>) => configureLiveMedia({
     getUserMedia: async () => { throw new DOMException("denied", "NotAllowedError"); },
@@ -724,11 +725,20 @@ describe("a blocked microphone", () => {
     capabilities: () => ({ dictation: { available: false, engine: "none", onDevice: false, ...dictation } }) as DesktopCapabilities,
   });
 
-  it("on a server's page in the desktop app, sends the call to the web browser instead of System Settings", async () => {
+  it("on another server's page in the desktop app, sends the call to the web browser instead of System Settings", async () => {
     blockedIn({ reasonCode: "remote-server" });
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(liveMedia()).toMatchObject({ phase: "failed", canRetry: false });
     expect(liveMedia().notice).toBe("The desktop app doesn't let a server's page use your microphone. Open this server in your web browser to make a Live call.");
+  });
+
+  // The desktop app lets the person's own Cloud use the microphone, so a
+  // block there is the computer's, not the app's.
+  it("on the person's own Cloud in the desktop app, points at the computer's settings", async () => {
+    blockedIn({ reasonCode: "remote-server" });
+    await startLiveCall({ botId: "b1", threadId: "t1", cloudHome: true });
+    expect(liveMedia()).toMatchObject({ phase: "failed", canRetry: false });
+    expect(liveMedia().notice).toBe("The microphone is blocked. Allow microphone access for this app in System Settings, then try again.");
   });
 
   it("in a web browser, points at the site's microphone permission", async () => {

@@ -795,8 +795,8 @@ function allowOwnedDirectories(env: Record<string, string | undefined>, botId: s
  * refused: with provider keys and `opencode auth login` a model may be
  * OpenRouter's or Anthropic's, not Zen's. Each stays under the 160
  * characters a chat error row shows. Zen and Go take the key saved in
- * Settings. Another provider's key is OpenCode's own: on a Cloud the owner
- * has no terminal for `opencode auth login`, so another model is the way on. */
+ * Settings. On a Cloud the owner has no terminal for `opencode auth login`:
+ * another provider's key is saved under Keys for other OpenCode providers. */
 export function describeOpenCodeAccountError(
   code: AccountErrorCode,
   model?: string,
@@ -812,7 +812,7 @@ export function describeOpenCodeAccountError(
       return zen || go || !provider
         ? "OpenCode rejected its key, or has none for this model. Add or replace the OpenCode key in Settings → API keys."
         : where.cloudHome
-          ? `OpenCode's ${name} key for this model is missing or was rejected. Choose another model for this bot.`
+          ? `OpenCode's ${name} key for this model is missing or was rejected. Save it under Keys for other OpenCode providers in Settings → API keys.`
           : `OpenCode's ${name} key for this model is missing or was rejected. Fix it with \`opencode auth login\`, or choose another model.`;
     case "insufficient_funds":
       return zen || !provider

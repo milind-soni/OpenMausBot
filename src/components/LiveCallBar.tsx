@@ -147,7 +147,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
             type="button"
             aria-label={t("call.live.tryAgain")}
             className={cn(button, "bg-raised hover:bg-raised-hover")}
-            onClick={() => void startLiveCall({ botId: bot.id, threadId: bot.threadId })}
+            onClick={() => void startLiveCall({ botId: bot.id, threadId: bot.threadId, cloudHome: state.config?.cloudHome === true })}
           >
             <RotateCcw className="size-3.5" /> <span className="hidden sm:inline">{t("call.live.tryAgain")}</span>
           </button>

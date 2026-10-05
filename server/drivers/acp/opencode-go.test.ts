@@ -355,14 +355,14 @@ describe("OpenCode catalog", () => {
     expect(describeOpenCodeAccountError("inactive_subscription", "opencode-go/minimax-m3")).toContain("OpenCode Go subscription");
   });
 
-  // On a Cloud the owner has no terminal, and OpenCode never gets the
-  // provider keys saved in Settings there: choosing another model is the way on.
-  it("on a Cloud, sends another provider's refused key to another model, not a terminal", () => {
-    for (const model of ["openrouter/openai/gpt-4o-mini", "venice/llama-3.3-70b"]) {
+  // On a Cloud the owner has no terminal: a key for any other provider is
+  // saved in Settings, under Keys for other OpenCode providers.
+  it("on a Cloud, sends another provider's refused key to Settings, not a terminal", () => {
+    for (const model of ["openrouter/openai/gpt-4o-mini", "venice/llama-3.3-70b", `${"very-long-provider-name".repeat(4)}/model`]) {
       const cloud = describeOpenCodeAccountError("invalid_credentials", model, { cloudHome: true });
       expect(cloud).not.toContain("opencode auth login");
-      expect(cloud).not.toContain("Settings → API keys");
-      expect(cloud).toContain("Choose another model for this bot.");
+      expect(cloud).toContain("Save it under Keys for other OpenCode providers in Settings → API keys.");
+      expect(cloud.length, model).toBeLessThanOrEqual(160);
       // on the person's own computer the CLI's sign-in still fixes it
       expect(describeOpenCodeAccountError("invalid_credentials", model, { cloudHome: false })).toContain("opencode auth login");
     }
