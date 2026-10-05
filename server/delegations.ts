@@ -47,6 +47,10 @@ export interface DelegationItem {
   targetThreadId?: string;
   /** Cross-bot send: ownership stays with the recipient; never wake source. */
   oneWay?: boolean;
+  /** Queued by a standing external runtime, which reads the outcome with
+   * check/wait_delegation: the receipt is its answer, so completion never
+   * wakes the source bot's own engine. Set from the caller's credential. */
+  completionOwner?: "external";
 }
 
 interface PendingDelegationItem extends DelegationItem {
@@ -280,6 +284,7 @@ export function _loadPending(): void {
           loaded.targetThreadId = item.targetThreadId;
         }
         if (item.oneWay === true) loaded.oneWay = true;
+        if (item.completionOwner === "external") loaded.completionOwner = "external";
         return [loaded];
       });
       if (items.length) pendingDelegations.set(threadId, items);
@@ -429,6 +434,7 @@ export function drainDelegations(
     sourceBotId: string,
     targetThreadId: string | undefined,
     oneWay: boolean,
+    completionOwner?: "external",
   ) => void | Promise<void>,
   /** Terminal failures before dispatch also need to wake the source. A
    * launched peer reports through its provider-turn finalizer instead. */
@@ -500,7 +506,7 @@ export function drainDelegations(
         if (outcome === "settled" && stillQueued) {
           const receipt = findDelegationReceipt(item.id);
           try {
-            if (receipt && !item.oneWay) onSettled?.(receipt);
+            if (receipt && wakesSource(item)) onSettled?.(receipt);
           } catch (error) {
             console.error("delegation settled but its source could not be resumed", error);
           }
@@ -545,6 +551,11 @@ function appendDeliveryMessage(
   if (item.oneWay && threadId === sourceThreadId && !sourceThreadBelongsToBot(bus.store, item.sourceBotId, sourceThreadId)) return;
   bus.store.appendMessage(threadId, message);
 }
+
+/** A settled handoff resumes the bot that queued it, unless its outcome
+ * belongs elsewhere: to a one-way send's recipient, or to an external
+ * runtime that polls for the receipt. */
+const wakesSource = (item: DelegationItem): boolean => !item.oneWay && item.completionOwner !== "external";
 
 const isExpired = (item: PendingDelegationItem, now: number): boolean => now - item.queuedAt >= DELEGATION_TTL_MS;
 
@@ -620,7 +631,7 @@ export function expireStaleDelegations(
   now: number,
   onSettled?: (receipt: DelegationReceipt) => void,
 ): number {
-  const expired: Array<{ receipt: DelegationReceipt; oneWay: boolean }> = [];
+  const expired: Array<{ receipt: DelegationReceipt; wake: boolean }> = [];
   for (const [threadId, items] of pendingDelegations) {
     if (drainingThreads.has(threadId)) continue;
     const due = items.filter((item) => isDueForExpiry(bus, item, now));
@@ -632,14 +643,14 @@ export function expireStaleDelegations(
     for (const item of due) {
       expireDelegation(bus, threadId, item, ownerId ?? item.sourceBotId);
       const receipt = findDelegationReceipt(item.id);
-      if (receipt) expired.push({ receipt, oneWay: item.oneWay === true });
+      if (receipt) expired.push({ receipt, wake: wakesSource(item) });
     }
   }
   if (!expired.length) return 0;
   savePending();
-  for (const { receipt, oneWay } of expired) {
+  for (const { receipt, wake } of expired) {
     try {
-      if (!oneWay) onSettled?.(receipt);
+      if (wake) onSettled?.(receipt);
     } catch (error) {
       console.error("delegation expired but its source could not be resumed", error);
     }
@@ -695,6 +706,7 @@ async function processOne(
     sourceBotId: string,
     targetThreadId: string | undefined,
     oneWay: boolean,
+    completionOwner?: "external",
   ) => void | Promise<void>,
 ): Promise<"settled" | "requeued" | "dispatched"> {
   let sender = from;
@@ -837,7 +849,7 @@ async function processOne(
   const prefixed = item.targetThreadId
     ? item.message
     : `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
-  await runTarget(item.toBotId, prefixed, item.oneWay ? 0 : item.depth + 1, sourceThreadId, channel, item.id, sender.id, item.targetThreadId, item.oneWay === true);
+  await runTarget(item.toBotId, prefixed, item.oneWay ? 0 : item.depth + 1, sourceThreadId, channel, item.id, sender.id, item.targetThreadId, item.oneWay === true, item.completionOwner);
   return "dispatched";
 }
 

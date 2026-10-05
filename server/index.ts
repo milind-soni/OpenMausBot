@@ -2209,6 +2209,11 @@ function externalRuntimeMayCall(method: string, path: string): boolean {
   if (method === "GET") return path === "/api/internal/agents" || /^\/api\/internal\/delegations\/[\w-]+$/.test(path);
   return method === "POST" && (path === "/api/internal/ask-bot" || path === "/api/internal/delegate-bot");
 }
+/** An external runtime polls check/wait_delegation for what it hands off, so
+ * the result must not also wake the bot's own engine on the pinned thread. */
+function externalCompletion(capability: InternalCapability): { completionOwner?: "external" } {
+  return capability.generation === EXTERNAL_RUNTIME_GENERATION ? { completionOwner: "external" } : {};
+}
 function externalRuntimeCapability(header: string | string[] | undefined): InternalCapability | null {
   const grant = authorizeExternalRuntime(EXTERNAL_RUNTIMES_FILE, header, id => store.bot(id));
   if (!grant) return null;
@@ -7899,6 +7904,8 @@ const delegationWatch = new Map<string, {
   startedAtMs?: number;
   /** Cross-bot send: leave the terminal state in the recipient thread. */
   oneWay?: boolean;
+  /** An external runtime's handoff: record the receipt, never wake the source. */
+  completionOwner?: "external";
 }>();
 
 /** The card in this thread that is waiting on the person: an approval, a
@@ -8381,11 +8388,14 @@ function finalizeDelegationWatch(
       // with the reply only visible in the thread (the "delegated and went
       // silent" gap). Failures wake it too — the user must hear the task did
       // not finish. Idle-checked and burst-capped so a busy source or a
-      // re-delegating loop cannot spin up runs.
-      if (ok) {
-        wakeDelegationSource(source, watched.sourceThreadId, targetName, undefined, watched.routineRunId);
-      } else if (!ok) {
-        wakeDelegationSource(source, watched.sourceThreadId, targetName, failureName || "the delegated turn did not finish", watched.routineRunId);
+      // re-delegating loop cannot spin up runs. An external runtime polls
+      // for the receipt instead; waking would answer it a second time.
+      if (watched.completionOwner !== "external") {
+        if (ok) {
+          wakeDelegationSource(source, watched.sourceThreadId, targetName, undefined, watched.routineRunId);
+        } else {
+          wakeDelegationSource(source, watched.sourceThreadId, targetName, failureName || "the delegated turn did not finish", watched.routineRunId);
+        }
       }
     }
   }
@@ -8433,7 +8443,7 @@ bus.subscribe((event: RuntimeEvent) => {
 /** How a drained delegation becomes a real turn on the target. Shared by
  * the settle-time drain and the boot-time drain of what a previous process
  * left queued. */
-const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawText, commsDepth, sourceThreadId, channel, taskId, sourceBotId, openedThreadId, oneWay) => {
+const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawText, commsDepth, sourceThreadId, channel, taskId, sourceBotId, openedThreadId, oneWay, completionOwner) => {
     // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
     // unavailable provider. Unhandled, that rejection is fatal to the
     // harness (Node's default), which in the packaged app kills the server
@@ -8467,6 +8477,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawTe
         routineRunId: activeRoutineRunForThread(sourceThreadId)?.id,
         startedAtMs: Date.now(),
         ...(oneWay ? { oneWay: true } : {}),
+        ...(completionOwner ? { completionOwner } : {}),
       });
     }
     let failureReported = false;
@@ -16995,7 +17006,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const queued = queueDelegation(
             commsBus,
             from,
-            { toBotId, message, reason: "asked while busy", depth, approvalAlreadyGranted, ...(guestThread ? { targetThreadId: guestThread } : {}) },
+            { toBotId, message, reason: "asked while busy", depth, approvalAlreadyGranted, ...(guestThread ? { targetThreadId: guestThread } : {}),
+              ...externalCompletion(internalCapability) },
             MAX_COMMS_DEPTH,
             fromThreadId,
           );
@@ -17169,6 +17181,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             sourceThreadId: fromThreadId,
             sourceBotId: currentFrom.id,
             routineRunId: activeRoutineRunForThread(fromThreadId)?.id,
+            ...externalCompletion(internalCapability),
           });
           store.appendMessage(fromThreadId, {
             role: "bot",
@@ -17369,7 +17382,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const queued = queueDelegation(
           commsBus,
           from,
-          { toBotId, message, reason, depth, ...(guestThread ? { targetThreadId: guestThread } : {}) },
+          { toBotId, message, reason, depth, ...(guestThread ? { targetThreadId: guestThread } : {}), ...externalCompletion(internalCapability) },
           MAX_COMMS_DEPTH,
           fromThreadId,
         );

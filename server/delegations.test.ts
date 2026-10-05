@@ -858,6 +858,19 @@ describe("delegations survive a restart", () => {
     expect(pendingThreads()).toEqual([]);
   });
 
+  it("keeps an external runtime's completion owner across a restart and dispatches with it", async () => {
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "from the gateway", depth: 0, completionOwner: "external" }, 1);
+    expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId][0]).toMatchObject({ completionOwner: "external" });
+    _resetPending();
+    _loadPending();
+    const owners: Array<string | undefined> = [];
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, async (...args) => {
+      owners.push(args[9]);
+    });
+    await waitFor(() => owners.length === 1 && pendingThreads().length === 0);
+    expect(owners).toEqual(["external"]);
+  });
+
   it("tolerates a missing or corrupt file", () => {
     _resetPending();
     _loadPending(); // no file
@@ -1227,6 +1240,30 @@ describe("busy waits and expiry", () => {
       });
       expect(chipCount("Delegation to @Helper expired — not picked up within 24 hours")).toBe(1);
       expect(settled).toEqual(["expired"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records an external runtime's failed or expired handoff without waking the delegator", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const gone = store.createBot();
+      const failed = queueDelegation(commsBus, from, { toBotId: gone.id, message: "never runs", depth: 0, completionOwner: "external" }, 1);
+      store.deleteBot(gone.id);
+      store.patchBot(target.id, { busy: true });
+      const expired = queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0, completionOwner: "external" }, 1);
+      const runTarget = vi.fn();
+      const onSettled = vi.fn();
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget, onSettled);
+      await waitFor(() => findDelegationReceipt(failed.id!) && pendingDelegationInfo(expired.id!)?.waiting === true);
+
+      vi.setSystemTime(new Date(Date.now() + DELEGATION_TTL_MS));
+      expect(expireStaleDelegations(commsBus, Date.now(), onSettled)).toBe(1);
+      expect(findDelegationReceipt(failed.id!)).toMatchObject({ status: "error", result: "no such bot" });
+      expect(findDelegationReceipt(expired.id!)).toMatchObject({ status: "expired" });
+      expect(runTarget).not.toHaveBeenCalled();
+      expect(onSettled).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
