@@ -45,6 +45,12 @@ describe("credential request allowlist", () => {
     expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(6);
   });
 
+  // The key becomes OPENCODE_API_KEY, which only OpenCode Zen and Go read: the
+  // card must not promise other providers a key it never reaches.
+  it("says the OpenCode key is for Zen and Go only", () => {
+    expect(CREDENTIAL_TARGETS.opencodeGoApiKey.description).toBe("Used for OpenCode Zen and Go.");
+  });
+
   it("supersedes open room cards only for the bot that requested them", () => {
     const card = {
       kind: "secret",

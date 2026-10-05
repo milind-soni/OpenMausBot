@@ -8,6 +8,7 @@ import { useSyncExternalStore } from "react";
 import type { LiveCallState, LiveEndReason } from "../../shared/wire";
 import { api, ApiError } from "@/state/store";
 import { endCall, startCall } from "./call";
+import { desktopCapabilitiesNow } from "./desktop";
 import { t } from "./i18n";
 
 export type LiveMediaPhase = "idle" | "starting" | "live" | "ending" | "ended" | "failed";
@@ -51,6 +52,8 @@ export interface LiveMediaDeps {
   playRemote(track: MediaStreamTrack): Promise<void> | void;
   stopRemote(): void;
   iceTimeoutMs: number;
+  /** what this window is: the desktop app's own page, a server's page in it, or a browser */
+  capabilities(): DesktopCapabilities;
 }
 
 const IDLE: LiveMediaState = {
@@ -88,6 +91,7 @@ const defaults: LiveMediaDeps = {
     if (audio) audio.srcObject = null;
   },
   iceTimeoutMs: 10_000,
+  capabilities: desktopCapabilitiesNow,
 };
 let deps: LiveMediaDeps = defaults;
 
@@ -164,6 +168,18 @@ export function endNotice(reason: LiveEndReason | undefined): { text: string; dr
     case "sideband-lost":
     case "error": return { text: t("call.live.dropped"), dropped: true };
     default: return { text: t("call.live.ended"), dropped: false };
+  }
+}
+
+/** Who can allow a blocked microphone. The desktop app never gives a
+ * server's page (a Cloud included) the microphone, so no setting helps there:
+ * a web browser asks per site. The app's own window follows the computer's
+ * privacy settings. */
+function micBlockedNotice(capabilities: DesktopCapabilities): string {
+  switch (capabilities.dictation.reasonCode) {
+    case "remote-server": return t("call.live.micServerPage");
+    case "desktop-app-required": return t("call.live.micBlockedBrowser");
+    default: return t("call.live.micBlocked");
   }
 }
 
@@ -253,7 +269,7 @@ export async function startLiveCall(target: { botId: string; threadId: string })
     const hopeless = blocked || error instanceof LiveUnsupportedError || (error instanceof ApiError && error.status === 401);
     set({
       ...IDLE, phase: "failed", botId: target.botId, threadId: target.threadId, canRetry: !hopeless,
-      notice: blocked ? t("call.live.micBlocked") : error instanceof Error ? error.message : String(error),
+      notice: blocked ? micBlockedNotice(deps.capabilities()) : error instanceof Error ? error.message : String(error),
     });
   }
 }

@@ -347,8 +347,25 @@ describe("OpenCode catalog", () => {
 
   it("points a rejected Zen key at the key OpenMaus saves", () => {
     expect(describeOpenCodeAccountError("invalid_credentials", "opencode/big-pickle")).toContain("Settings → API keys");
+    // one next action, and one a Cloud owner (who has no terminal there) can take
+    for (const model of [undefined, "opencode/big-pickle", "opencode-go/minimax-m3"]) {
+      expect(describeOpenCodeAccountError("invalid_credentials", model)).not.toContain("opencode auth login");
+    }
     expect(describeOpenCodeAccountError("insufficient_funds", "opencode/big-pickle")).toContain("Zen");
     expect(describeOpenCodeAccountError("inactive_subscription", "opencode-go/minimax-m3")).toContain("OpenCode Go subscription");
+  });
+
+  // On a Cloud the owner has no terminal, and OpenCode never gets the
+  // provider keys saved in Settings there: choosing another model is the way on.
+  it("on a Cloud, sends another provider's refused key to another model, not a terminal", () => {
+    for (const model of ["openrouter/openai/gpt-4o-mini", "venice/llama-3.3-70b"]) {
+      const cloud = describeOpenCodeAccountError("invalid_credentials", model, { cloudHome: true });
+      expect(cloud).not.toContain("opencode auth login");
+      expect(cloud).not.toContain("Settings → API keys");
+      expect(cloud).toContain("Choose another model for this bot.");
+      // on the person's own computer the CLI's sign-in still fixes it
+      expect(describeOpenCodeAccountError("invalid_credentials", model, { cloudHome: false })).toContain("opencode auth login");
+    }
   });
 
   it("passes the person's provider keys through, as the CLI would see them", async () => {

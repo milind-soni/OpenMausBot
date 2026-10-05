@@ -28,8 +28,6 @@
   "approval.held.native": "このアクションにはプロバイダーがあなたの承認を求めています。",
   "approval.held.sandbox": "これはプロバイダーのサンドボックスを変更するため、自動で承認できるのはフルアクセスだけです。",
   "approval.held.localComputer": "コンピューターの操作は「常に許可」の対象になりません。あなたの判断が必要です。",
-  "approval.held.unattended": "このターンは Webhook か別のボットが開始したため、自動で承認は一時停止し、すべての操作で確認を求めます。",
-  "approval.held.unattendedFullAccess": "このターンは Webhook か別のボットが開始したため、自動で承認は一時停止し、すべての操作で確認を求めます。フルアクセスは無人でも動き続けます。",
   "approval.held.destructive": "破壊的に見えるため、自動で承認は止まって確認しています。",
   "approval.held.sensitive": "認証情報に関わるため、自動で承認は止まって確認しています。",
   "approval.held.needsYou": "この操作にはあなたが必要なため、自動で承認は止まって確認しています。",

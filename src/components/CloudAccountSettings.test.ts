@@ -90,6 +90,17 @@ it("OMB Cloud out of reach: the plan last verified stays named, calmly, with no 
   push({ status: "unavailable", message: "unreachable", account: { id: "fixture", email: "person@example.test" } });
   html = render().html; expect(html).toContain("Open your Cloud dashboard"); none(html, [...BUY, ...ALARM]);
 });
+// Windows has no keychain to unlock: the message names the button that fixes it.
+it("a saved sign-in that can't be read or cleared names the Sign out button on the card", async () => {
+  for (const message of ["restore-failed", "signout-storage-failed"]) {
+    f.values = [];
+    await ready({ status: "unavailable", message });
+    const { html } = render();
+    all(html, ["could not be read or cleared", "Choose Sign out of OMB Cloud, then sign in again."]);
+    none(html, ["keychain"]);
+    expect(button("Sign out of OMB Cloud")).toBeTruthy();
+  }
+});
 it("a sign-in that ended asks to sign in again, keeps the plan, and offers nothing to buy", async () => {
   await ready({ status: "reauth-required", message: "expired", account: { id: "fixture", email: "person@example.test" }, lastPlan: { tier: "max", active: true } });
   const { html } = render();

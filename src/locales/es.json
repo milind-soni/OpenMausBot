@@ -28,8 +28,6 @@
   "approval.held.native": "El proveedor exige tu aprobación para esta acción.",
   "approval.held.sandbox": "Esto cambia el sandbox del proveedor, así que solo Acceso total puede aprobarlo automáticamente.",
   "approval.held.localComputer": "Controlar tu equipo nunca entra en Permitir siempre, así que esto te necesita.",
-  "approval.held.unattended": "Un webhook u otro bot inició este turno, así que Aprobar por mí está en pausa y todas las acciones preguntan.",
-  "approval.held.unattendedFullAccess": "Un webhook u otro bot inició este turno, así que Aprobar por mí está en pausa y todas las acciones preguntan. Acceso total sigue funcionando sin supervisión.",
   "approval.held.destructive": "Esto parece destructivo, así que Aprobar por mí se detuvo a preguntar.",
   "approval.held.sensitive": "Esto toca credenciales, así que Aprobar por mí se detuvo a preguntar.",
   "approval.held.needsYou": "Esta acción te necesita, así que Aprobar por mí se detuvo a preguntar.",

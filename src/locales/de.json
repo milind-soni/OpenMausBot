@@ -107,8 +107,6 @@
   "approval.held.native": "Der Anbieter verlangt für diese Aktion deine Freigabe.",
   "approval.held.sandbox": "Das ändert die Sandbox des Anbieters, deshalb kann nur Voller Zugriff es automatisch genehmigen.",
   "approval.held.localComputer": "Die Steuerung deines Computers deckt Immer erlauben nie ab, deshalb musst du hier entscheiden.",
-  "approval.held.unattended": "Ein Webhook oder ein anderer Bot hat diesen Durchlauf gestartet, deshalb ist Für mich freigeben pausiert und jede Aktion fragt nach.",
-  "approval.held.unattendedFullAccess": "Ein Webhook oder ein anderer Bot hat diesen Durchlauf gestartet, deshalb ist Für mich freigeben pausiert und jede Aktion fragt nach. Voller Zugriff läuft unbeaufsichtigt weiter.",
   "approval.held.destructive": "Das sieht destruktiv aus, deshalb hat Für mich freigeben nachgefragt.",
   "approval.held.sensitive": "Das betrifft Zugangsdaten, deshalb hat Für mich freigeben nachgefragt.",
   "approval.held.needsYou": "Diese Aktion braucht dich, deshalb hat Für mich freigeben nachgefragt.",

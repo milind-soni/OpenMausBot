@@ -9,6 +9,9 @@ import type { Bot } from "@/state/store";
 const fixture = vi.hoisted(() => ({
   onCall: null as string | null,
   dictation: true,
+  /** the desktop this page runs in, and whether the page is a server's */
+  host: "darwin" as "darwin" | "win32",
+  serverPage: false,
   config: { tts: { configured: true, ready: true } } as Record<string, unknown> | null,
   bots: [] as unknown[],
   helpShown: false,
@@ -24,7 +27,15 @@ vi.mock("@/state/store", async (importOriginal) => {
 });
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
-  useDesktopCapabilities: () => ({ capabilities: { dictation: fixture.dictation ? { available: true } : { available: false, reasonCode: "unsupported-platform" } }, ready: true }),
+  useDesktopCapabilities: () => ({
+    capabilities: {
+      host: { platform: fixture.host },
+      dictation: fixture.dictation
+        ? { available: true }
+        : { available: false, reasonCode: fixture.serverPage ? "remote-server" : "unsupported-platform" },
+    },
+    ready: true,
+  }),
 }));
 vi.mock("@/lib/call", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/call")>(),
@@ -75,6 +86,8 @@ function render(placement: "composer" | "header" = "composer") {
 beforeEach(() => {
   fixture.onCall = null;
   fixture.dictation = true;
+  fixture.host = "darwin";
+  fixture.serverPage = false;
   fixture.config = { tts: { configured: true, ready: true } };
   fixture.bots = [bot];
   fixture.helpShown = false;
@@ -132,9 +145,25 @@ describe("composer call button", () => {
   it("keeps the same availability rules on devices that cannot call", () => {
     fixture.dictation = false;
     const { button } = render();
-    expect(button.props["aria-label"]).toBe("Calls currently need macOS");
+    expect(button.props["aria-label"]).toBe("Calls where you take turns need the Mac app");
     button.props.onClick!();
     expect(fixture.startCall).not.toHaveBeenCalled();
+  });
+
+  // A Windows desktop showing a server (its Cloud): This computer can't take
+  // turns either, so the help offers a Live call and no trip there.
+  it("offers only a Live call on a server's page in the Windows app", () => {
+    fixture.dictation = false;
+    fixture.serverPage = true;
+    fixture.host = "win32";
+    fixture.helpShown = true;
+    const windows = render().html;
+    expect(windows).toContain("Start a Live call instead");
+    expect(windows).not.toContain("Choose This computer");
+
+    // the Mac app still sends a server's page to This computer, which can
+    fixture.host = "darwin";
+    expect(render().html).toContain("Choose This computer");
   });
 
   it("leaves the header placement (rooms) as it was", () => {

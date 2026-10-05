@@ -984,11 +984,15 @@ export function SettingsModal() {
               <ApiKeyRow section="box" />
               <VpsConnection />
               <ApiKeyRow section="opencodeGo" />
-              <p className="-mt-2 text-[11.5px] leading-relaxed text-ink-secondary">
-                {/* {command} marks where the code chip goes, so a translator can move it */}
-                {t("keys.opencode.providersHint").split("{command}").flatMap((part, index) =>
-                  index === 0 ? [part] : [<code key={index} className="font-mono">opencode auth login</code>, part])}
-              </p>
+              {/* A Cloud owner has no terminal there: the keys for other
+                  providers, just below, are the way on. */}
+              {state.config?.cloudHome !== true && (
+                <p className="-mt-2 text-[11.5px] leading-relaxed text-ink-secondary">
+                  {/* {command} marks where the code chip goes, so a translator can move it */}
+                  {t("keys.opencode.providersHint").split("{command}").flatMap((part, index) =>
+                    index === 0 ? [part] : [<code key={index} className="font-mono">opencode auth login</code>, part])}
+                </p>
+              )}
               <OpenCodeProviderKeys />
               <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
                 <summary className="cursor-pointer text-[13px] text-ink-secondary">{t("settings.connections.selfHost")}</summary>

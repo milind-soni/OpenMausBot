@@ -712,3 +712,37 @@ describe("waiting for a Live call's audio to connect", () => {
     expect(endRequests()).toEqual([]);
   });
 });
+
+// A blocked microphone says who can allow it. The desktop app never gives a
+// server's page (a Cloud included) the microphone, so no setting there helps.
+describe("a blocked microphone", () => {
+  const blockedIn = (dictation: Partial<DesktopCapabilities["dictation"]>) => configureLiveMedia({
+    getUserMedia: async () => { throw new DOMException("denied", "NotAllowedError"); },
+    createPeer: () => peer as unknown as RTCPeerConnection,
+    request: request as never,
+    iceTimeoutMs: 50,
+    capabilities: () => ({ dictation: { available: false, engine: "none", onDevice: false, ...dictation } }) as DesktopCapabilities,
+  });
+
+  it("on a server's page in the desktop app, sends the call to the web browser instead of System Settings", async () => {
+    blockedIn({ reasonCode: "remote-server" });
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    expect(liveMedia()).toMatchObject({ phase: "failed", canRetry: false });
+    expect(liveMedia().notice).toBe("The desktop app doesn't let a server's page use your microphone. Open this server in your web browser to make a Live call.");
+  });
+
+  it("in a web browser, points at the site's microphone permission", async () => {
+    blockedIn({ reasonCode: "desktop-app-required" });
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    expect(liveMedia().notice).toBe("The microphone is blocked. Allow it for this site in your browser, then try again.");
+  });
+
+  it.each([
+    ["the Mac app", { available: true, engine: "apple-speech", onDevice: true }],
+    ["the Windows app", { reasonCode: "unsupported-platform" }],
+  ] as const)("in %s's own window, points at the computer's settings", async (_where, dictation) => {
+    blockedIn(dictation);
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    expect(liveMedia().notice).toBe("The microphone is blocked. Allow microphone access for this app in System Settings, then try again.");
+  });
+});
