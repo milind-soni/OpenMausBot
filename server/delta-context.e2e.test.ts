@@ -1148,6 +1148,38 @@ it("gives a Codex return today's fresh thread when explicit effort is cleared wh
   expect(count(f.prompt(f.turns().at(-1)), "CODEX_EFFORT_RESULT")).toBe(1);
 }, { codex: {} }), 90_000);
 
+it("moves a Codex chat to a new thread with its history when the person clears an effort its thread holds", () => fixture(async (f) => {
+  await f.useModel("codex");
+  const [model] = await f.codexModels();
+  await f.selectModel(model);
+  await warmUp(f);
+  // A level picked mid-chat reaches the thread it resumes.
+  await f.selectModel(model, { effort: "high" });
+  f.plan[f.chief.id] = { reply: "On high effort" };
+  await f.send("Think harder about this one.");
+  await f.wait();
+  expect(f.codexCalls().filter((call: any) => call.method === "thread/resume")).toHaveLength(1);
+  expect(f.codexCalls().find((call: any) => call.method === "turn/start")?.params.effort).toBe("high");
+
+  // turn/start cannot clear it: resuming would keep the thread on "high".
+  await f.selectModel(model);
+  f.plan[f.chief.id] = { reply: "On default effort" };
+  await f.send("What is the codename?");
+  await f.wait();
+  expect(f.codexCalls().filter((call: any) => call.method === "thread/resume")).toHaveLength(0);
+  expect(f.codexCalls().filter((call: any) => call.method === "thread/start")).toHaveLength(1);
+  expect(f.codexCalls().find((call: any) => call.method === "turn/start")?.params.effort).toBeUndefined();
+  expect(count(f.prompt(f.turns().at(-1)), "ORCHID_7Q")).toBe(1);
+
+  // That thread runs on the default effort: the next turn resumes it.
+  f.plan[f.chief.id] = { reply: "Still on default effort" };
+  await f.send("And now?");
+  await f.wait();
+  const next = f.turns().at(-1);
+  expect(next.resumedThread).toBeTruthy();
+  expect(f.prompt(next)).not.toContain("ORCHID_7Q");
+}, { codex: {} }), 90_000);
+
 it("keeps today's fresh return on a Claude CLI that cannot refresh a resumed system prompt", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "OLD_CLI_RESULT", gateFile: f.gate("lead") };

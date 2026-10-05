@@ -1768,8 +1768,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             // back. The app-server offers no way to clear a level either:
             // "" is rejected outright and thread/start takes no effort at
             // all. So a thread keeps the last level it was sent until it is
-            // sent another, and choosing Default lands on the bot's next new
-            // thread rather than the current one.
+            // sent another; back on Default, the harness gives a thread that
+            // holds a level a new thread instead of resuming it (server/index.ts).
             ...(turn.effort ? { effort: turn.effort } : {}),
           });
         };

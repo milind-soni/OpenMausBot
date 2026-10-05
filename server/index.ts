@@ -9598,7 +9598,11 @@ async function startTurn(
       );
       // Decided again at dispatch when setup outlasted a soul edit (config).
       const decideContext = (config: string) => {
-        const handedStale = Boolean(handed && (!unseen || (externalUpdate && handed.config !== config)));
+        // A Codex thread keeps the last effort it was sent and no turn can clear
+        // one: back on the default, a thread that holds a level is rebuilt from
+        // the transcript rather than resumed on that level.
+        const effortHeld = !effort && typeof handed?.effort === "string";
+        const handedStale = Boolean(handed && (!unseen || effortHeld || (externalUpdate && handed.config !== config)));
         const { block: unseenBlock, placed } = unseen && !handedStale ? renderUnseen(unseen) : { block: "", placed: [] };
         const { turnText: contextTurnText, resume } = buildTurnContext({
           text: userTurnText,
@@ -9631,6 +9635,7 @@ async function startTurn(
           resumeCursor, sessionReset: !resume, recoveryText, recoveryIsReplay,
           handoff: strictResume ? {
             botId: bot.id, instanceId, config, resumeCursor: typeof resumeCursor === "string" ? resumeCursor : undefined,
+            ...(instance.driverKind === "codex" ? { effort: effort ?? null } : {}),
             started: sessionStart(contextOrder, contextTurnText !== userTurnText ? windowIds : [], carried),
             recovery: sessionStart(contextOrder, recoveryText !== undefined ? windowIds : [], carried),
             resumed: sessionStart(contextOrder, [], [...placed, ...carried]),
