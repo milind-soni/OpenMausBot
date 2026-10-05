@@ -128,11 +128,11 @@ describe("t", () => {
 // the language. A key this build has never heard of must still read.
 describe("tFromServer", () => {
   it("translates a key the catalog knows", () => {
-    locales["zz"] = { "approval.held.destructive": "Sieht zerstoererisch aus." };
+    locales["zz"] = { "approval.held.native": "Der Anbieter verlangt deine Zustimmung." };
     try {
       setLocale("zz");
-      expect(tFromServer("approval.held.destructive", "This looks destructive, so Approve for me stopped to ask."))
-        .toBe("Sieht zerstoererisch aus.");
+      expect(tFromServer("approval.held.native", "The provider requires your approval for this action."))
+        .toBe("Der Anbieter verlangt deine Zustimmung.");
     } finally {
       delete locales["zz"];
       setLocale("en");
@@ -161,8 +161,8 @@ describe("tFromServer", () => {
   // instead; the selector reads the catalog now.
 
   it("prefers the catalog over stale text saved with an older card", () => {
-    expect(tFromServer("approval.held.destructive", "This looked destructive, so auto mode stopped to ask."))
-      .toBe(en["approval.held.destructive"]);
+    expect(tFromServer("approval.held.undelivered", "Auto mode couldn't answer this one."))
+      .toBe(en["approval.held.undelivered"]);
   });
 });
 

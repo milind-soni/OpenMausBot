@@ -140,10 +140,12 @@ describe("held notes", () => {
       .toBe("The provider requires your approval for this action.");
   });
 
-  it("has a catalog entry for every note, so the client can translate by key", () => {
-    for (const [key, text] of Object.entries(HELD_NOTE)) {
-      expect(englishCatalog[key as keyof typeof englishCatalog], key).toBe(text);
-    }
+  // Both ways: every note the server can send has a catalog entry, so the
+  // client translates by key, and the catalog holds no note the server no
+  // longer sends. A note left behind describes behaviour that has gone.
+  it("the catalog's held notes are exactly the ones the server sends", () => {
+    const catalog = Object.fromEntries(Object.entries(englishCatalog).filter(([key]) => key.startsWith("approval.held.")));
+    expect(catalog).toEqual(HELD_NOTE);
   });
 });
 

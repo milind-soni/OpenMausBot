@@ -5,7 +5,8 @@ export type CallCapabilityHelp = {
 };
 
 /** Only the Mac app listens on-device. Live calls need no on-device
- * listening, so where they are offered their button is the way on. */
+ * listening, so where they are offered (a browser, a Windows or Linux app)
+ * their button is the way on. */
 const TURNS_NEED_MAC: CallCapabilityHelp = {
   label: "Calls where you take turns need the Mac app",
   reason: "They listen with on-device speech recognition, which only the Mac app has.",
@@ -30,10 +31,6 @@ export function callCapabilityHelp(
           action: "choose-local-workspace",
         };
       case "desktop-app-required":
-        return {
-          label: "Calls need the macOS desktop app",
-          reason: "Open it in OpenMausBot for macOS to make calls with on-device speech recognition.",
-        };
       case "unsupported-platform":
         return TURNS_NEED_MAC;
       default:

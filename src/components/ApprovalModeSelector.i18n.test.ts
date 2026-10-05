@@ -1,7 +1,7 @@
 // A held note explains why a bot stopped by naming the button that would
-// have let it continue: "… so Approve for me stopped to ask." If the note and
-// the selector ever disagree, the note points at a control the reader cannot
-// find — which is the one thing this copy must never do.
+// have let it continue: "… so only Full access can approve it automatically."
+// If the note and the selector ever disagree, the note points at a control
+// the reader cannot find — which is the one thing this copy must never do.
 import { describe, expect, it, afterEach } from "vitest";
 
 import { setLocale, t } from "@/lib/i18n";
@@ -21,26 +21,10 @@ describe("held notes name the buttons the selector shows", () => {
       const label = (mode: string) =>
         approvalModeOptions().find((option) => option.mode === mode)!.label;
 
-      expect(t("approval.held.destructive"), code).toContain(label("auto"));
-      expect(t("approval.held.sensitive"), code).toContain(label("auto"));
-      expect(t("approval.held.needsYou"), code).toContain(label("auto"));
       expect(t("approval.held.undelivered"), code).toContain(label("auto"));
       expect(t("approval.held.sandbox"), code).toContain(label("full"));
       expect(t("approval.held.undeliveredFull"), code).toContain(label("full"));
-      // the same rule for the action button a held note can name
-      expect(t("approval.held.localComputer"), code).toContain(t("approval.action.alwaysAllow"));
     }
-  });
-
-  // A webhook's or another bot's turn runs at the bot's own level. A note
-  // saying it pauses Approve for me describes the opposite, and a customer
-  // quoted it back as how the app works.
-  // (Packs carry only keys English has: pnpm i18n:check.)
-  it("never says a webhook or another bot pauses Approve for me", () => {
-    const offending = Object.entries(locales.en)
-      .filter(([key, value]) => key.startsWith("approval.held.") && /webhook|another bot/i.test(value ?? ""))
-      .map(([key]) => key);
-    expect(offending).toEqual([]);
   });
 
   it("resolves the labels when they are read, not when the module loads", () => {

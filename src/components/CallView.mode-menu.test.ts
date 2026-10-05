@@ -155,7 +155,7 @@ describe("the call button", () => {
   // block there is the computer's, and on another server a browser is the way.
   it("tells a blocked microphone on a server's page whether it is the person's Cloud", async () => {
     for (const [cloudHome, notice] of [
-      [true, "Allow microphone access for this app in System Settings"],
+      [true, "Allow microphone access for this app in your computer's privacy settings"],
       [false, "Open this server in your web browser to make a Live call."],
     ] as const) {
       resetLiveMedia();

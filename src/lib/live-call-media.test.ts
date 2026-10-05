@@ -725,7 +725,7 @@ describe("a blocked microphone", () => {
     capabilities: () => ({ dictation: { available: false, engine: "none", onDevice: false, ...dictation } }) as DesktopCapabilities,
   });
 
-  it("on another server's page in the desktop app, sends the call to the web browser instead of System Settings", async () => {
+  it("on another server's page in the desktop app, sends the call to the web browser instead of the privacy settings", async () => {
     blockedIn({ reasonCode: "remote-server" });
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(liveMedia()).toMatchObject({ phase: "failed", canRetry: false });
@@ -738,7 +738,7 @@ describe("a blocked microphone", () => {
     blockedIn({ reasonCode: "remote-server" });
     await startLiveCall({ botId: "b1", threadId: "t1", cloudHome: true });
     expect(liveMedia()).toMatchObject({ phase: "failed", canRetry: false });
-    expect(liveMedia().notice).toBe("The microphone is blocked. Allow microphone access for this app in System Settings, then try again.");
+    expect(liveMedia().notice).toBe("The microphone is blocked. Allow microphone access for this app in your computer's privacy settings, then try again.");
   });
 
   it("in a web browser, points at the site's microphone permission", async () => {
@@ -765,6 +765,6 @@ describe("a blocked microphone", () => {
   ] as const)("in %s's own window, points at the computer's settings", async (_where, dictation) => {
     blockedIn(dictation);
     await startLiveCall({ botId: "b1", threadId: "t1" });
-    expect(liveMedia().notice).toBe("The microphone is blocked. Allow microphone access for this app in System Settings, then try again.");
+    expect(liveMedia().notice).toBe("The microphone is blocked. Allow microphone access for this app in your computer's privacy settings, then try again.");
   });
 });

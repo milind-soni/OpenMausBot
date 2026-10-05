@@ -62,15 +62,19 @@ describe("call capability guidance", () => {
     });
   });
 
-  it("tells a browser user to open the installed macOS app", () => {
+  // A browser can make Live calls (the button under this help starts one), so
+  // the help says only what needs the Mac app: taking turns.
+  it("tells a browser user only taking turns needs the Mac app", () => {
     const help = callCapabilityHelp(capabilities({
       available: false,
       engine: "none",
       onDevice: false,
       reasonCode: "desktop-app-required",
-    }), false);
-    expect(help?.label).toBe("Calls need the macOS desktop app");
-    expect(help).not.toHaveProperty("action");
+    }, "other"), false);
+    expect(help).toEqual({
+      label: "Calls where you take turns need the Mac app",
+      reason: "They listen with on-device speech recognition, which only the Mac app has.",
+    });
   });
 
   // Live calls work on Windows and Linux: only taking turns needs the Mac.
