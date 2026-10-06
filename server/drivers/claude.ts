@@ -1199,6 +1199,24 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           resolve(err ? null : stdout.trim() || null),
         );
       });
+    // The --help read while it runs: snapshots that overlap (the server's
+    // read at start and the app's first one) share it.
+    let helpRead: { version: string; done: Promise<void> } | null = null;
+    const readCliHelp = (version: string, env: NodeJS.ProcessEnv): Promise<void> => {
+      if (helpRead?.version === version) return helpRead.done;
+      const read = {
+        version,
+        done: new Promise<string | null>((resolve) => {
+          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
+        }).then((help) => {
+          cliHasAutocompact = help === null ? null : /^\s*--autocompact\b/m.test(help);
+          cliHelpVersion = version;
+          if (helpRead === read) helpRead = null;
+        }),
+      };
+      helpRead = read;
+      return read.done;
+    };
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
     const active = new Map<string, { stop: () => void; turnId: string; broker?: Awaited<ReturnType<typeof createPermissionBroker>> }>();
@@ -2476,13 +2494,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
       cliVersion = parseClaudeCliVersion(version);
       cliVersionChecked = true;
-      if (version !== cliHelpVersion) {
-        const help = await new Promise<string | null>((resolve) => {
-          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
-        });
-        cliHasAutocompact = help === null ? null : /^\s*--autocompact\b/m.test(help);
-        cliHelpVersion = version;
-      }
+      if (version !== cliHelpVersion) await readCliHelp(version, env);
       const update = claudeCliUpdate(version, config.cli);
       const warning = claudeInheritWarning(env);
       if (config.requireApiKey) {

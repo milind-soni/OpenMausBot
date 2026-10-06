@@ -129,6 +129,13 @@
 //   FAKE_CLAUDE_EXIT_DELAY_MS ms this process keeps running after SIGTERM
 //                      before it exits: a CLI that is slow to stop, as one
 //                      can be on Windows, where taskkill is asynchronous.
+//   FAKE_CLAUDE_PROBE_LOG path: each snapshot probe appends one line,
+//                      `<version|help|auth> <pid>`, as it starts, so a test
+//                      can count the probes and find one it is holding.
+//   FAKE_CLAUDE_HOLD_VERSION / _HELP / _AUTH path: that snapshot probe
+//                      (`--version`, `--help`, `auth status`) answers only
+//                      once <path> exists — a CLI that is slow to answer
+//                      (the real `auth status` can take a second).
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawnSync } from "node:child_process";
@@ -246,7 +253,14 @@ const argAfter = (flag: string): string | null => {
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 
-// Snapshot probes: both answer on argv alone and exit without reading stdin.
+// Snapshot probes: each answers on argv alone and exits without reading stdin.
+const probe = argv[0] === "--version" ? "version" : argv[0] === "--help" ? "help" : argv[0] === "auth" && argv[1] === "status" ? "auth" : null;
+if (probe) {
+  if (process.env.FAKE_CLAUDE_PROBE_LOG) appendFileSync(process.env.FAKE_CLAUDE_PROBE_LOG, `${probe} ${process.pid}\n`);
+  const hold = process.env[`FAKE_CLAUDE_HOLD_${probe.toUpperCase()}`];
+  while (hold && !existsSync(hold)) await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
 if (argv[0] === "--version") {
   // FAKE_CLAUDE_VERSION lets a test stand in for an older CLI: the driver
   // withholds flags that version predates (CLAUDE_FLAG_FLOORS).

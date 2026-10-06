@@ -2852,10 +2852,15 @@ export class Store {
     return bot;
   }
 
+  /** A first run: no bot yet, so seedIfEmpty makes one. */
+  needsSeed() {
+    return this.bots.length === 0;
+  }
+
   /** First-run seed: one bot so the app never opens empty — it gets a
    * random friendly name like every other bot. */
   seedIfEmpty() {
-    if (this.bots.length) return;
+    if (!this.needsSeed()) return;
     this.createBot();
   }
 }

@@ -1532,6 +1532,23 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
   });
 
+  it("reads --help once for snapshots that overlap", async () => {
+    // The server's own engine read at start can overlap the app's first one.
+    const probes = join(scratch, "probes.log");
+    const release = join(scratch, "release-help");
+    await create(undefined, { FAKE_CLAUDE_PROBE_LOG: probes, FAKE_CLAUDE_HOLD_HELP: release });
+    const both = Promise.all([instance.snapshot(), instance.snapshot()]);
+    await vi.waitFor(() => {
+      const log = readFileSync(probes, "utf8");
+      expect(log.match(/^version /gm)).toHaveLength(2);
+      expect(log).toMatch(/^help /m);
+    }, { timeout: 10_000 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    writeFileSync(release, "");
+    expect(await both).toMatchObject([{ state: "available" }, { state: "available" }]);
+    expect(readFileSync(probes, "utf8").match(/^help /gm)).toHaveLength(1);
+  });
+
   it("maps a CLI version onto the flags it accepts", () => {
     expect(parseClaudeCliVersion("2.1.232 (Claude Code)")).toEqual([2, 1, 232]);
     expect(parseClaudeCliVersion("banner\n1.0.60 (Claude Code)")).toEqual([1, 0, 60]);
