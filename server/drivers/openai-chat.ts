@@ -598,8 +598,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               continue;
             }
             if (toolFailed) {
-              stopReason = "tool_error";
-              throw new ChatProtocolError("One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.");
+              // In-turn resilience: a failed tool op must not end the turn.
+              // The model already saw the ok:false results; give it one
+              // explicit chance to retry or acknowledge, then accept whatever
+              // it answers. Bounded by MAX_CHAT_ROUNDS either way.
+              toolFailed = false;
+              messages.push({ role: "user", content: "Some tool operations in this turn failed (their tool results are marked ok:false). Re-run the failed operations with corrected inputs where possible, verify their state, and then give your final answer. Do not fabricate results." });
+              continue;
             }
             ok = true;
             break;
