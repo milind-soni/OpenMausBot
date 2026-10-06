@@ -35,7 +35,8 @@ import { PhoneAppDialog } from "./PhoneAppDialog";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { ShortcutHint } from "./ShortcutHint";
 import { useSidebarPhoneStatus } from "./SidebarPhoneButton";
-import { useStore, type Action } from "@/state/store";
+import { api, useStore, type Action } from "@/state/store";
+import { serverUpdateRow, type ServerUpdateCheck, type ServerUpdatePhase } from "@/lib/server-update";
 import type { CloudAccountBridge, CloudAccountState } from "../../electron/cloud-account.mjs";
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
@@ -203,6 +204,49 @@ export function useUpdateItem(): UpdateEntry | null {
   };
 }
 
+/** Without the packaged app's updater (a self-hosted server opened in a
+ * browser), the row asks the server whether a newer release exists and says
+ * how this install is updated, since it cannot update itself (MOCA-276). */
+function useServerUpdateItem(enabled: boolean): UpdateEntry | null {
+  const [phase, setPhase] = useState<ServerUpdatePhase>("idle");
+  const [check, setCheck] = useState<ServerUpdateCheck | null>(null);
+
+  // "up to date" is acknowledged for three seconds, as on the desktop
+  useEffect(() => {
+    if (phase !== "up-to-date") return;
+    const timer = setTimeout(() => setPhase("idle"), 3000);
+    return () => clearTimeout(timer);
+  }, [phase]);
+
+  if (!enabled) return null;
+  const row = serverUpdateRow(phase, check);
+  return {
+    phase,
+    pending: false,
+    label: row.label,
+    item: {
+      key: "update",
+      label: row.label,
+      subtitle: row.subtitle,
+      icon: <UpdateIcon phase={phase} pending={false} />,
+      disabled: phase === "checking",
+      keepOpen: true,
+      attention: phase === "available" || phase === "error",
+      attentionTone: phase === "error" ? "danger" : "accent",
+      onSelect: () => {
+        if (phase === "available" && check?.releaseUrl) return void openExternalLink(check.releaseUrl);
+        setPhase("checking");
+        void api<ServerUpdateCheck>("/api/updates/check")
+          .then((next) => {
+            setCheck(next);
+            setPhase(next.available ? "available" : "up-to-date");
+          })
+          .catch(() => setPhase("error"));
+      },
+    },
+  };
+}
+
 /** Connect your phone for this window, once it is known whether this
  * session may pair one. This computer's own phone flow needs no asking. */
 function useConnectPhoneEntry(cloudHome: boolean): ConnectPhoneEntry | null {
@@ -293,7 +337,9 @@ export function SidebarProfileMenu() {
   const connectPhone = useConnectPhoneEntry(state.config?.cloudHome === true);
   const cloudPhone = useCloudPhoneDestination(connectPhone?.target === "computer");
   const destinations = phoneDestinations(connectPhone, cloudPhone.cloud);
-  const update = useUpdateItem();
+  const desktopUpdate = useUpdateItem();
+  const serverUpdate = useServerUpdateItem(!window.ogb?.updater);
+  const update = desktopUpdate ?? serverUpdate;
   const [aboutOpen, setAboutOpen] = useState(false);
   const [phoneAppOpen, setPhoneAppOpen] = useState(false);
   const triggerRef = useRef<HTMLSpanElement>(null);
