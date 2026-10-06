@@ -34,6 +34,7 @@ let desktopTray = null;
 import { collisionFreeDownloadPath, defaultSaveName, revealDownloadWhenDone, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionHandlers, externalWebUrl } from "./app-permissions.mjs";
+import { writeClipboardText } from "./clipboard-write.mjs";
 import {
   ensureManagedComposioCredentials,
   managedComposioAccess,
@@ -2464,6 +2465,10 @@ ipcMain.handle("engine:open-terminal", localOnly("engine:open-terminal", async (
   return openBlankTerminal();
 }));
 
+// Fallback for the renderer's copy button when the web Clipboard API rejects
+// (unfocused page, denied permission). Plain text only; resolves false on failure.
+ipcMain.handle("clipboard:write-text", localOnly("clipboard:write-text", (_event, text) => writeClipboardText(clipboard, text)));
+
 // OAuth/connect links are returned asynchronously, after Chromium's direct
 // click gesture has ended. Opening them through window.open can therefore be
 // rejected as a popup before setWindowOpenHandler ever sees the URL. Keep the
@@ -3498,12 +3503,15 @@ app.whenReady().then(async () => {
   // serial) stay off. Client mode's loopback relay is the local UI. The
   // person's own Cloud, open in this window, also gets the microphone (only
   // that) for a Live call: it is theirs alone. No other server does. A call
-  // placed while the saved sign-in is still restoring waits for it.
+  // placed while the saved sign-in is still restoring waits for it. The active
+  // paired server, in this window's main frame, may also write the clipboard
+  // (never read it): re-evaluated per request, so a server switch withdraws it.
   appPermissions = appPermissionHandlers({
     rendererOrigin,
     mainContents: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null),
     cloudHomeOrigin: myCloud,
     cloudHomeRestoring: () => cloudAccountRestoring ? cloudAccountRestored() : null,
+    activeRemoteOrigin: () => activeEnvironment(environmentsState)?.origin ?? null,
   });
   session.defaultSession.setPermissionRequestHandler(appPermissions.request);
   session.defaultSession.setPermissionCheckHandler(appPermissions.check);

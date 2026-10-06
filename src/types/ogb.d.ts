@@ -240,6 +240,8 @@ const __APP_VERSION__: string;
       /** Copies an engine install command and opens a blank terminal. False
        * when no terminal could be launched; the clipboard still has it. */
       openInstallTerminal?(command: string): Promise<boolean>;
+      /** Writes plain text to the system clipboard; false on failure. Absent on older builds. */
+      copyText?(text: string): Promise<boolean>;
       /** Opens an http(s) link in the user's default browser. */
       openExternal?(url: string): Promise<boolean>;
       /** Recolor the native window chrome for a skin; absent on older builds. */

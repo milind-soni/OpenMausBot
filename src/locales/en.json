@@ -939,6 +939,8 @@
   "inspector.run.screen": "Screen observed",
   "inspector.run.response": "Response recorded",
   "chat.copyMessage": "Copy message",
+  "chat.copyMessageDone": "Copied",
+  "chat.copyMessageFailed": "Copy failed",
   "chat.showRawMarkdown": "Show raw markdown",
   "chat.showRenderedMarkdown": "Show rendered markdown",
   "chat.retry": "Retry",

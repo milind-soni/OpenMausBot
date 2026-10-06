@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { readFileSync } from "node:fs";
-import { appPermissionAllowed, appPermissionHandlers, externalWebUrl } from "./app-permissions.mjs";
+import { appPermissionAllowed, appPermissionHandlers, externalWebUrl, remoteClipboardWriteAllowed } from "./app-permissions.mjs";
 import { cloudPlanSnapshot, createCloudAccountClient } from "./cloud-account.mjs";
 import { myCloudOrigin, rememberedCloudHome } from "./cloud-home.mjs";
 
@@ -465,5 +465,38 @@ test("the page's answer is the request handler's answer for its microphone", asy
         }
       }
     }
+  }
+});
+
+const REMOTE = "https://viernes.tail1.ts.net:9444";
+
+test("a remote server may write clipboard text only as the active origin's main frame", () => {
+  const write = "clipboard-sanitized-write";
+  assert.equal(remoteClipboardWriteAllowed(write, `${REMOTE}/chat?x=1`, REMOTE, { isMainFrame: true }), true);
+  assert.equal(remoteClipboardWriteAllowed(write, REMOTE, `${REMOTE}/`, { isMainFrame: true }), true);
+  // Read and everything else stay denied for the same trusted origin.
+  for (const permission of ["clipboard-read", "notifications", "fullscreen", "media", "geolocation", "camera", "openExternal", "unknown", undefined]) {
+    assert.equal(remoteClipboardWriteAllowed(permission, REMOTE, REMOTE, { isMainFrame: true }), false, String(permission));
+  }
+  // Frame requirement: a child frame, or no frame information, never counts.
+  for (const details of [{ isMainFrame: false }, {}, undefined, null, { isMainFrame: "true" }]) {
+    assert.equal(remoteClipboardWriteAllowed(write, REMOTE, REMOTE, details), false);
+  }
+  // Exact origin only.
+  for (const requesting of [
+    "https://viernes.tail1.ts.net:9445/", "https://viernes.tail1.ts.net/", "http://viernes.tail1.ts.net:9444/",
+    "https://other.tail1.ts.net:9444/", "https://viernes.tail1.ts.net.evil.test:9444/", "https://evil.test/#https://viernes.tail1.ts.net:9444",
+    "about:blank", "data:text/html,x", "javascript:alert(1)", "not a url", "", null, undefined,
+  ]) assert.equal(remoteClipboardWriteAllowed(write, requesting, REMOTE, { isMainFrame: true }), false, String(requesting));
+  // No active remote server (Local, or a damaged value): nothing to match.
+  for (const active of [undefined, null, "", "not a url", "about:blank", "data:text/html,x"]) {
+    assert.equal(remoteClipboardWriteAllowed(write, REMOTE, active, { isMainFrame: true }), false, String(active));
+    assert.equal(remoteClipboardWriteAllowed(write, "about:blank", active, { isMainFrame: true }), false);
+  }
+});
+
+test("the base policy itself still grants a remote origin nothing", () => {
+  for (const permission of ["clipboard-sanitized-write", "clipboard-read", "notifications", "fullscreen"]) {
+    assert.equal(appPermissionAllowed(permission, REMOTE, LOCAL_ORIGIN, { isMainFrame: true }), false, permission);
   }
 });

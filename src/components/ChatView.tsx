@@ -1,5 +1,6 @@
 import { Component, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { useCopyFeedback } from "@/lib/copy-text";
 import {
   AlertTriangle,
   ArrowDown,
@@ -190,22 +191,20 @@ function DaySeparator({ at, today }: { at: number; today: number }) {
 
 /** Hover/focus-revealed copy control shared by user + bot bubbles. */
 function CopyButton({ text, className }: { text: string; className?: string }) {
-  const [copied, setCopied] = useState(false);
+  const { state, copy } = useCopyFeedback(text);
+  const label = t(state === "copied" ? "chat.copyMessageDone" : state === "failed" ? "chat.copyMessageFailed" : "chat.copyMessage");
   return (
     <button
-      onClick={() => {
-        void navigator.clipboard?.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1200);
-      }}
-      aria-label={t("chat.copyMessage")}
-      title={t("chat.copyMessage")}
+      onClick={copy}
+      aria-label={label}
+      title={label}
       className={cn(
         "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100",
+        state !== "idle" && "opacity-100",
         className,
       )}
     >
-      {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+      {state === "copied" ? <Check size={14} className="text-success" /> : state === "failed" ? <X size={14} className="text-danger" /> : <Copy size={14} />}
     </button>
   );
 }
