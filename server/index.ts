@@ -108,7 +108,7 @@ import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from 
 import * as boat from "./boat.ts";
 import { cloudComputerRpc } from "./cloud-computer-tools.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
-import { isEffortLevel, type BotVisibility, type CardAnswerer, type ResolvedSender, type SteerQueueReason, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isEffortLevel, type BotVisibility, type CardAnswerer, type ResolvedSender, type SteerQueueReason, type VmOs, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import { isPersistentQuestionCard, QUESTION_DISMISS_MESSAGE, shouldSettleRequestCard } from "../shared/ask-question.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
@@ -128,24 +128,38 @@ import { createMemoryUpkeep, upkeepEnabled } from "./memory-upkeep.ts";
 import { appendAboutMe, commitLearned, planLearned } from "./profile-learned.ts";
 import { canAccessTeam, canReachPeer, coordinatorSupervises, livePeerRoster, livePeerRosterBlock, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
 import {
-  containerComputerAction,
-  containerComputerExists,
-  containerComputerFrame,
-  containerComputerMcp,
-  containerComputerScreenshot,
   containerComputerStatus,
-  containerExec,
   containerRuntimeStatus,
-  localVmWakeAction,
   localVmWorkspaceExists,
   perBotLocalVmTarget,
   poolLocalVmTarget,
   SHARED_LOCAL_VM_TARGET,
-  setupCommands,
   VM_WORKSPACE_GUEST,
   type LocalVmTarget,
-  type Runtime,
 } from "./container-computer.ts";
+import {
+  cuaHost,
+  cuaSpaceRetitle,
+  cuaSpacesAvailability,
+  cuaSpaceTarget,
+  cuaSpaceTitle,
+  cuaSpaceViewerLink,
+  existingCuaSpaces,
+  stageCuaSpaceFile,
+} from "./cua-spaces-computer.ts";
+import { cuaSpaceOwnership } from "./cua-space-ownership.ts";
+import {
+  localVmAction,
+  localVmAutoAttachable,
+  localVmExec,
+  localVmFrame,
+  localVmMcp,
+  localVmScreenshot,
+  localVmSetupCommands,
+  localVmStatus,
+  localVmWake,
+  type LocalVmStatus,
+} from "./local-vm-backend.ts";
 import { attachForTurn, saveBotAttachment } from "./bot-attachment.ts";
 import {
   cacheUntilConfigChanges,
@@ -153,9 +167,11 @@ import {
   instanceConfigs,
   loadConfig,
   providerReloadKeys,
+  localVmBackend,
   localVmIdleTimeoutMinutes,
   localVmMaxInstances,
   localVmMode,
+  localVmSpacesOs,
   parseConfigPatch,
   roomTurnTimeoutMinutes,
   threadEventLogMaxBytes,
@@ -433,11 +449,14 @@ import { readCuaConnection, readCuaUnavailableReason, gatedLocalComputer } from 
 import {
   discoverExistingPerBotLocalVms,
   discoverExistingPoolLocalVms,
+  createLocalVmIdleTimer,
+  restoreLocalVmIdleTargets,
   localVmInventoryEntry,
   shouldArmLocalVmIdle,
+  type ExistingPerBotLocalVm,
 } from "./local-vm-inventory.ts";
-import { localVmStopReason, recordLocalVmIdleStop } from "./local-vm-stop-reason.ts";
-import { LocalVmIdleTimer } from "./local-vm-idle.ts";
+import { clearLocalVmSpaceIdleStop, localVmStopReason } from "./local-vm-stop-reason.ts";
+import type { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
@@ -517,7 +536,6 @@ import { OrgLibrary } from "./org-library.ts";
 import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
-import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { startAutoVmClaim, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 import { computerFreeAfterText, computerParkedText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
 import { modelContextWindow } from "./model-context-window.ts";
@@ -620,6 +638,7 @@ import { localDesktopTarget, localVmViewerStatus, viewerTargetId } from "./deskt
 import { createAntigravityLeftoverRoutes } from "./routes/antigravity-leftovers.ts";
 import { findAntigravityLeftovers, removeAntigravityLeftovers } from "./drivers/antigravity-temp.ts";
 import { createLiveRoutes } from "./routes/live.ts";
+import { createCuaSpacesRoutes } from "./routes/cua-spaces.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -3652,6 +3671,7 @@ function previewSystemPrompt(bot: BotRecord) {
       ? bot.cloudBackend === "vps" ? "vps" : "box" : previewComputer === "local" ? "local" : null,
     driverKind: instance?.driverKind,
     vmPrivate: localVmMode(cfg) === "per-bot",
+    vmSpaceOs: localVmTargetForStatus(bot.id).space?.os ?? null,
   });
   const peers = reachablePeers(store.bots, bot);
   const coordination = bot.chiefOfStaff
@@ -5177,6 +5197,11 @@ const groupWithThread = (group: GroupRecord) => ({
   ...(group.dm ? {} : { tasks: store.groupTasks(group.id) }),
 });
 
+/** The name each bot's per-bot Spaces are labelled with. Any path that
+ * renames a bot (Settings, a profile proposal, the Chief) emits a bot change;
+ * only an actual new name reaches Cua. Startup relabels the existing Spaces. */
+const cuaSpaceLabels = new Map(store.bots.map((bot) => [bot.id, bot.name] as const));
+
 // The store tells us what it wrote; this is the ONE place that turns those
 // into SSE frames. No mutation path can persist without emitting — the
 // property holds by construction, not by every call site remembering to
@@ -5227,6 +5252,7 @@ store.onChange((change) => {
     case "bot": {
       const bot = store.bot(change.botId);
       if (bot) broadcast({ kind: "bot", bot: { ...wireBot(bot), ...pageIfThreadChanged(bot.id, bot.threadId) } });
+      if (bot) relabelBotSpaces(bot);
       // A new audience narrows the rooms this bot is in, for good.
       if (bot) for (const group of store.groups.filter((candidate) => candidate.memberIds.includes(bot.id))) settleRoomFloor(group);
       break;
@@ -6396,8 +6422,9 @@ const LAZY_VM_CLAIM_GRACE_MS = 5_000;
  * only when one of these exists, so an ordinary Auto turn on a machine with
  * no VM never pays for a docker or podman call. */
 const localVmSeen = new Set<string>();
-function noteLocalVmSeen(target: LocalVmTarget, status: ContainerComputerStatus | null | undefined): void {
-  if (status && autoLocalVmAttachable(status)) localVmSeen.add(target.key);
+function noteLocalVmSeen(target: LocalVmTarget, status: LocalVmStatus | null | undefined): void {
+  if (status && localVmAutoAttachable(status) &&
+      (status.backend !== "cua-spaces" || (status.managed && status.container !== "missing"))) localVmSeen.add(target.key);
 }
 let localVmImageBusy = false;
 let localVmProvisionBusy = false;
@@ -6437,6 +6464,8 @@ const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
  * A cold XFCE desktop needs some seconds; past this the turn reports the
  * status it has rather than hanging on a container that will not come up. */
 const LOCAL_VM_DESKTOP_WAIT_MS = 90_000;
+/** A stopped macOS Cua Space boots a full Lume VM before cua-spacesd answers. */
+const LOCAL_VM_MACOS_BOOT_WAIT_MS = 5 * 60_000;
 const localVmIdles = new Map<string, LocalVmIdleTimer>();
 
 function inheritedTeamComputer(bot: Pick<BotRecord, "section" | "computer" | "cloudBackend">): TeamComputerRecord | undefined {
@@ -6827,8 +6856,8 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
   const target = localVmTargetForStatus(bot.id, threadId);
   // A Cloud home has neither place (cloud-home.ts), so Auto never shows one.
   if (!CLOUD_HOME && instance?.adapter.capabilities.computerMcp && localVmSeen.has(target.key)) {
-    const vm = await containerComputerStatus(undefined, undefined, target).catch(() => null);
-    if (vm && autoLocalVmAttachable(vm)) return "vm";
+    const vm = await localVmStatus(target).catch(() => null);
+    if (vm && localVmAutoAttachable(vm)) return "vm";
   }
   if (!CLOUD_HOME && shouldMountLocalComputer({ requested: undefined, hostPlatform: process.platform,
     providerSupportsLocal: instance?.adapter.capabilities.localComputerMcp === true }) && readCuaConnection()) return "local";
@@ -6874,9 +6903,9 @@ async function selectableComputers(bot: BotRecord) {
         }
       } else if (surface === "vm" && localEngine && caps?.computerMcp) {
         const target = localVmTargetForStatus(bot.id);
-        const status = await containerComputerStatus(undefined, undefined, target);
+        const status = await localVmStatus(target);
         ready = status.ready;
-        canCreate = !ready && autoLocalVmAttachable(status);
+        canCreate = !ready && localVmAutoAttachable(status);
         if (ready || canCreate) noteLocalVmSeen(target, status);
         reason = status.problem ?? reason;
       } else if (surface === "local") {
@@ -6999,12 +7028,37 @@ function claimManagedVpsMutation(containerName: string): () => void {
   return claimBotComputerLifecycle(owner.id);
 }
 
+/** The Cua Space for a container identity, labelled for Cua Spaces with the
+ * bot's name (per-bot), or as the shared desktop or a pool seat. */
+function cuaSpaceFor(base: LocalVmTarget, os: VmOs, botName?: string): LocalVmTarget {
+  const seat = /^pool:(\d+)$/.exec(base.key);
+  const label = base.key.startsWith("bot:") && botName ? botName : seat ? `pool ${Number(seat[1]) + 1}` : "shared";
+  return cuaSpaceTarget(base, os, cuaSpaceTitle(label, os));
+}
+
+/** The desktop a container identity maps to under the configured backend:
+ * itself, or the Cua Space for the bot's OS. Pool seats are shared by every
+ * bot, so they always use the default OS. */
+function localVmBackendTarget(base: LocalVmTarget, botId?: string): LocalVmTarget {
+  if (localVmBackend(cfg) !== "cua-spaces") return base;
+  const bot = botId ? store.bot(botId) : undefined;
+  return cuaSpaceFor(base, bot?.vmOs ?? localVmSpacesOs(cfg), bot?.name);
+}
+
+function sharedLocalVmTarget(): LocalVmTarget {
+  return localVmBackendTarget(SHARED_LOCAL_VM_TARGET);
+}
+
+function poolSeatTarget(seat: number): LocalVmTarget {
+  return localVmBackendTarget(poolLocalVmTarget(seat));
+}
+
 function localVmTargetForBot(botId: string): LocalVmTarget {
-  return localVmMode(cfg) === "per-bot" ? perBotLocalVmTarget(botId) : SHARED_LOCAL_VM_TARGET;
+  return localVmBackendTarget(localVmMode(cfg) === "per-bot" ? perBotLocalVmTarget(botId) : SHARED_LOCAL_VM_TARGET, botId);
 }
 
 function localVmPoolSeatHolder(seat: number): LocalVmSeatHolder | null {
-  return localVmLeases.forTarget(poolLocalVmTarget(seat).key).current(localVmOwnerBusy);
+  return localVmLeases.forTarget(poolSeatTarget(seat).key).current(localVmOwnerBusy);
 }
 
 /** The Local VM a conversation's turn addresses. In pool mode each thread
@@ -7012,7 +7066,7 @@ function localVmPoolSeatHolder(seat: number): LocalVmSeatHolder | null {
  * holds its login state; other modes are unchanged. */
 function localVmTargetForThread(botId: string, threadId: string): LocalVmTarget {
   if (localVmMode(cfg) !== "pool") return localVmTargetForBot(botId);
-  return poolLocalVmTarget(localVmSeatPool.assign(threadId, localVmPoolSeatHolder));
+  return poolSeatTarget(localVmSeatPool.assign(threadId, localVmPoolSeatHolder));
 }
 
 /** Best-effort seat for read-only surfaces (Computer panel previews,
@@ -7024,7 +7078,7 @@ function localVmTargetForStatus(botId: string, threadId?: string): LocalVmTarget
   // decays: prefer the live target so a preview cannot land on another seat.
   const activeTarget = threadId ? localVmThreadTargets.get(threadId) : undefined;
   if (activeTarget) return activeTarget;
-  return poolLocalVmTarget((threadId ? localVmSeatPool.affinitySeat(threadId) : null) ?? 0);
+  return poolSeatTarget((threadId ? localVmSeatPool.affinitySeat(threadId) : null) ?? 0);
 }
 
 function localVmLeaseFor(target: LocalVmTarget): LocalVmLease {
@@ -7034,24 +7088,16 @@ function localVmLeaseFor(target: LocalVmTarget): LocalVmLease {
 function localVmIdleFor(target: LocalVmTarget): LocalVmIdleTimer {
   let idle = localVmIdles.get(target.key);
   if (idle) return idle;
-  idle = new LocalVmIdleTimer(
-    localVmIdleMs(),
-    () => localVmImageBusy || localVmLifecycleBusy.has(target.key) || localVmActiveThreads.has(target.key),
-    async () => {
+  idle = createLocalVmIdleTimer(target, {
+    idleMs: localVmIdleMs(),
+    busy: () => localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(target.key) || localVmActiveThreads.has(target.key),
+    claim: () => {
       localVmLifecycleBusy.add(target.key);
-      try {
-        const status = await containerComputerStatus(undefined, undefined, target);
-        // The pinned VNC startup clears stale X locks. Keep the container's
-        // home and installed software so inactivity is a reversible stop.
-        if (status.container === "running" && status.managed) {
-          const stopped = await containerComputerAction("stop", undefined, undefined, target);
-          recordLocalVmIdleStop(target.key, stopped.stopped_at);
-        }
-      } finally {
-        localVmLifecycleBusy.delete(target.key);
-      }
+      return () => { localVmLifecycleBusy.delete(target.key); };
     },
-  );
+    status: () => localVmStatus(target),
+    stop: () => localVmAction("stop", target),
+  });
   localVmIdles.set(target.key, idle);
   return idle;
 }
@@ -7070,7 +7116,7 @@ function releaseLocalVmThread(threadId: string): void {
   // with the seat the turn actually ran on. A target recorded before a
   // mid-turn mode change is not a pool seat; touch still covers that.
   if (localVmMode(cfg) === "pool") {
-    const pooled = /^pool:(\d+)$/.exec(target.key);
+    const pooled = /^pool:(\d+)(?::|$)/.exec(target.key);
     if (pooled) localVmSeatPool.renew(threadId, Number(pooled[1]));
     else localVmSeatPool.touch(threadId);
   }
@@ -7079,11 +7125,76 @@ function releaseLocalVmThread(threadId: string): void {
   localVmThreadTargets.delete(threadId);
 }
 
+/** Every Space the Cua backend could own under the current mode: the shared
+ * Space of each OS, each bot's Space of each OS, or each pool seat's. */
+function cuaSpaceCandidates(): Array<{ bot?: BotRecord; target: LocalVmTarget }> {
+  const oses = ["linux", "macos"] as const;
+  const mode = localVmMode(cfg);
+  if (mode === "pool") return Array.from({ length: localVmMaxInstances(cfg) }, (_, seat) => ({ target: poolSeatTarget(seat) }));
+  if (mode !== "per-bot") return oses.map((os) => ({ target: cuaSpaceFor(SHARED_LOCAL_VM_TARGET, os) }));
+  return perBotCuaSpaceCandidates();
+}
+
+/** Per-bot Spaces regardless of mode, as the inventory lists per-bot
+ * containers regardless of mode: an old desktop stays visible and deletable. */
+function perBotCuaSpaceCandidates(): Array<{ bot: BotRecord; target: LocalVmTarget }> {
+  return store.bots.flatMap((bot) => (["linux", "macos"] as const).map((os) => ({
+    bot,
+    target: cuaSpaceFor(perBotLocalVmTarget(bot.id), os, bot.name),
+  })));
+}
+
+async function retitleIdleCuaSpace(target: LocalVmTarget): Promise<void> {
+  if (localVmLifecycleBusy.has(target.key)) return;
+  localVmLifecycleBusy.add(target.key);
+  try {
+    const status = await localVmStatus(target);
+    if (status.managed && status.container !== "missing") await cuaSpaceRetitle(target);
+  } finally {
+    localVmLifecycleBusy.delete(target.key);
+  }
+}
+
+function relabelBotSpaces(bot: BotRecord): void {
+  if (cuaSpaceLabels.get(bot.id) === bot.name) return;
+  cuaSpaceLabels.set(bot.id, bot.name);
+  if (localVmBackend(cfg) !== "cua-spaces") return;
+  const targets = (["linux", "macos"] as const).map((os) => cuaSpaceFor(perBotLocalVmTarget(bot.id), os, bot.name));
+  void existingCuaSpaces(targets)
+    .then((existing) => Promise.all(existing.map((target) => retitleIdleCuaSpace(target))))
+    .catch((error) => console.warn(`[cua-spaces] could not relabel ${bot.name}'s Spaces:`, error instanceof Error ? error.message : error));
+}
+
 // A running VM may have survived an app/server restart. Start its idle
 // backstop even if nobody opens Settings or begins a turn this session. The
 // bot's current destination is intentionally ignored: moving a bot to Cloud,
 // Browser, This computer, Auto, or Off does not delete its old Local VM.
 void (async () => {
+  if (localVmBackend(cfg) !== "cua-spaces" &&
+      !perBotCuaSpaceCandidates().some(({ target }) => target.space && cuaSpaceOwnership(target.space.name))) return;
+  const cua = await cuaSpacesAvailability();
+  if (cua.installed) {
+    // A backend/mode switch does not erase a bot's old Spaces. Keep their
+    // idle backstop alive alongside the currently selected desktops.
+    const candidates = [...perBotCuaSpaceCandidates(), ...(localVmBackend(cfg) === "cua-spaces" ? cuaSpaceCandidates() : [])];
+    const targets = [...new Map(candidates.map(({ target }) => [target.key, target])).values()];
+    const existing = await existingCuaSpaces(targets).catch(() => []);
+    await restoreLocalVmIdleTargets(existing, {
+      status: localVmStatus,
+      seen: noteLocalVmSeen,
+      idle: localVmIdleFor,
+      restored: (target, status) => {
+        if (status?.managed) void retitleIdleCuaSpace(target).catch(() => {});
+      },
+    });
+  }
+})().catch(() => {
+  // A later inventory read can report a Space that cannot be inspected yet.
+});
+
+// Container discovery stays independent of the optional Cua CLI.
+void (async () => {
+  if (localVmBackend(cfg) === "cua-spaces") return;
   if (localVmMode(cfg) === "pool") {
     // Same restore rule as per-bot: idle shutdown preserves the container and
     // its provisioned workspace, so every surviving seat stays Auto-eligible.
@@ -7096,7 +7207,7 @@ void (async () => {
     if (!runtime?.runtime || !runtime.daemonUp) return;
     const existing = await discoverExistingPoolLocalVms(seats, runtime.runtime).catch(() => []);
     const statuses = await Promise.all(existing.map((target) =>
-      containerComputerStatus(undefined, undefined, target).catch(() => null),
+      localVmStatus(target).catch(() => null),
     ));
     existing.forEach((target, index) => {
       noteLocalVmSeen(target, statuses[index]);
@@ -7105,7 +7216,7 @@ void (async () => {
     return;
   }
   if (localVmMode(cfg) !== "per-bot") {
-    const status = await containerComputerStatus(undefined, undefined, SHARED_LOCAL_VM_TARGET).catch(() => null);
+    const status = await localVmStatus(SHARED_LOCAL_VM_TARGET).catch(() => null);
     noteLocalVmSeen(SHARED_LOCAL_VM_TARGET, status);
     if (shouldArmLocalVmIdle(status)) localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
     return;
@@ -7120,7 +7231,7 @@ void (async () => {
   if (!runtime?.runtime || !runtime.daemonUp) return;
   const existing = await discoverExistingPerBotLocalVms(store.bots, runtime.runtime).catch(() => []);
   const statuses = await Promise.all(existing.map(({ target }) =>
-    containerComputerStatus(undefined, undefined, target).catch(() => null),
+    localVmStatus(target).catch(() => null),
   ));
   existing.forEach(({ target }, index) => {
     noteLocalVmSeen(target, statuses[index]);
@@ -7132,19 +7243,36 @@ void (async () => {
 });
 
 async function localVmInventoryPayload() {
-  const runtime = await containerRuntimeStatus();
-  if (!runtime.runtime || !runtime.daemonUp) {
-    return {
-      instances: [],
-      maxInstances: localVmMaxInstances(cfg),
-      available: false,
-      problem: runtime.runtime ? `Start ${runtime.runtime} first` : "Install a supported container runtime first",
-    };
+  const backend = localVmBackend(cfg);
+  let existing: ExistingPerBotLocalVm[];
+  if (backend === "cua-spaces") {
+    const candidates = perBotCuaSpaceCandidates();
+    try {
+      const present = new Set(await existingCuaSpaces(candidates.map(({ target }) => target)));
+      existing = candidates.filter(({ target }) => present.has(target));
+    } catch (error) {
+      return {
+        backend,
+        instances: [],
+        maxInstances: localVmMaxInstances(cfg),
+        available: false,
+        problem: error instanceof Error ? error.message : String(error),
+      };
+    }
+  } else {
+    const runtime = await containerRuntimeStatus();
+    if (!runtime.runtime || !runtime.daemonUp) {
+      return {
+        backend,
+        instances: [],
+        maxInstances: localVmMaxInstances(cfg),
+        available: false,
+        problem: runtime.runtime ? `Start ${runtime.runtime} first` : "Install a supported container runtime first",
+      };
+    }
+    existing = await discoverExistingPerBotLocalVms(store.bots, runtime.runtime);
   }
-  const existing = await discoverExistingPerBotLocalVms(store.bots, runtime.runtime);
-  const statuses = await Promise.all(existing.map(({ target }) =>
-    containerComputerStatus(undefined, undefined, target),
-  ));
+  const statuses = await Promise.all(existing.map(({ target }) => localVmStatus(target)));
   const instances = existing.flatMap(({ bot, target }, index) => {
     const status = statuses[index];
     if (!status) return [];
@@ -7154,7 +7282,7 @@ async function localVmInventoryPayload() {
     const entry = localVmInventoryEntry(bot, status, inUse);
     return entry ? [entry] : [];
   });
-  return { instances, maxInstances: localVmMaxInstances(cfg), available: true, problem: null };
+  return { backend, instances, maxInstances: localVmMaxInstances(cfg), available: true, problem: null };
 }
 
 bus.subscribe((event: RuntimeEvent) => {
@@ -9797,7 +9925,7 @@ async function startTurn(
         if (owner && owner.threadId !== claimThreadId) {
           throw new Error("the Local VM moved on to another turn");
         }
-        return containerComputerFrame(undefined, undefined, localVmTarget);
+        return localVmFrame(localVmTarget);
       };
       /** Pin the conversation at the moment its seat is actually claimed
        * (issue #1650): the same guards as the dispatch-time pin below, so
@@ -9826,7 +9954,7 @@ async function startTurn(
        * the target it mounted the tools against: the claim must lease that
        * desktop, not whatever localVmTargetForBot resolves to by the time
        * the first screen call arrives. */
-      const claimAutoLocalVm = async (claimThreadId: string, pinnedTarget?: LocalVmTarget): Promise<{ target: LocalVmTarget; runtime: Runtime }> => {
+      const claimAutoLocalVm = async (claimThreadId: string, pinnedTarget?: LocalVmTarget): Promise<{ target: LocalVmTarget; status: LocalVmStatus }> => {
         const localVmTarget = pinnedTarget ?? localVmThreadTargets.get(claimThreadId) ?? { ...localVmTargetForThread(bot.id, claimThreadId) };
         await bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
         if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
@@ -9867,7 +9995,7 @@ async function startTurn(
           dropLease();
           throw error;
         }
-        if (!localVm.ready || !localVm.runtime) {
+        if (!localVm.ready) {
           dropLease();
           throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Computers)`);
         }
@@ -9891,7 +10019,7 @@ async function startTurn(
         // alike — either way the conversation remembers the desktop this
         // turn actually took, not one it merely mounted (issue #1650).
         pinAutoSurface("vm");
-        return { target: localVmTarget, runtime: localVm.runtime };
+        return { target: localVmTarget, status: localVm };
       };
 
       // Issue #1369: a lazy claim that rejects must not leave its turn busy
@@ -9953,19 +10081,22 @@ async function startTurn(
           // fast path is about to skip must not reserve or refresh a seat.
           // Gate on the side-effect-free candidate assign() would pick —
           // the automationSource bypass below stays authoritative.
-          const poolCandidate = poolLocalVmTarget(localVmSeatPool.candidate(threadId, localVmPoolSeatHolder));
+          const poolCandidate = poolSeatTarget(localVmSeatPool.candidate(threadId, localVmPoolSeatHolder));
           if (!localVmSeen.has(poolCandidate.key) && !opts?.automationSource) return false;
         }
         const localVmTarget = { ...localVmTargetForThread(bot.id, threadId) };
-        let lazyReadyVm: { runtime: Runtime } | null = null;
+        let lazyReadyVm: LocalVmStatus | null = null;
         if (!strict) {
           // Nothing this process has ever seen for this target, and nobody is
           // relying on an unattended run: do not pay for a runtime probe.
           if (!localVmSeen.has(localVmTarget.key) && !opts?.automationSource) return false;
-          const seen = await containerComputerStatus(undefined, undefined, localVmTarget).catch(() => null);
-          if (!seen || !autoLocalVmAttachable(seen)) return false;
+          const seen = await localVmStatus(localVmTarget).catch(() => null);
+          if (!seen || !localVmAutoAttachable(seen)) return false;
+          // An explicit Space delete removes ownership too. Even unattended
+          // Auto turns must not turn that decision into a new image download.
+          if (seen.backend === "cua-spaces" && seen.container === "missing" && !seen.managed) return false;
           if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) return false;
-          if (seen.ready && seen.runtime) lazyReadyVm = { runtime: seen.runtime };
+          if (seen.ready) lazyReadyVm = seen;
         }
         try {
           if (lazyReadyVm) {
@@ -9976,8 +10107,8 @@ async function startTurn(
             // or recreated first keeps the eager claim below: the bridge
             // child needs the container to exist, and readyLocalVmForTurn
             // is what boots it.
-            integrations.localComputer = containerComputerMcp(
-              lazyReadyVm.runtime,
+            integrations.localComputer = localVmMcp(
+              lazyReadyVm,
               controlIntegration(bot.id, threadId, dispatchClaimId),
               localVmTarget,
             );
@@ -10012,8 +10143,8 @@ async function startTurn(
             return true;
           }
           const claimed = await claimAutoLocalVm(threadId);
-          integrations.localComputer = containerComputerMcp(
-            claimed.runtime,
+          integrations.localComputer = localVmMcp(
+            claimed.status,
             controlIntegration(bot.id, threadId, dispatchClaimId),
             claimed.target,
           );
@@ -10342,6 +10473,7 @@ async function startTurn(
         kind: computerKind,
         driverKind: instance.driverKind,
         vmPrivate: localVmMode(cfg) === "per-bot",
+        vmSpaceOs: localVmTargetForStatus(bot.id, threadId).space?.os ?? null,
       });
       const coordinationNode = opts?.coordination ? roomHandoffs.nodes.get(opts.coordination.id) : undefined;
       if (opts?.coordination && (!coordinationNode || coordinationNode.status !== "running" || roomHandoffProblem(coordinationNode,
@@ -11236,37 +11368,58 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         releaseComputerLifecycle();
         return deletionResponse( 409, { error: "this bot or one of its channels is securely saving a credential" });
       }
-      let claimedLocalVmTarget: LocalVmTarget | null = null;
+      let claimedLocalVmTargets: LocalVmTarget[] = [];
       try {
-        let localVmCleanup: { target: LocalVmTarget; removeContainer: boolean } | null = null;
-        if (localVmMode(cfg) === "per-bot") {
-          const target = perBotLocalVmTarget(bot.id);
-          if (localVmActiveThreads.has(target.key) || localVmLifecycleBusy.has(target.key)) {
-            return deletionResponse( 409, { error: "stop this bot's Local VM turn or setup action before deleting the bot" });
-          }
-          if (localVmLeaseFor(target).current(localVmOwnerBusy)) {
-            return deletionResponse(409, { error: "stop this bot's Local VM turn before deleting the bot" });
-          }
-          // Hold the target from preflight through deletion. A simultaneous
-          // mode change or lifecycle route must not recreate the container
-          // after we checked it and before its bot owner disappears.
-          localVmLifecycleBusy.add(target.key);
-          claimedLocalVmTarget = target;
-          const vm = await containerComputerStatus(undefined, undefined, target);
-          if (!vm.daemonUp && existsSync(target.workspaceDir)) {
-            return deletionResponse( 409, {
-              error: "start the container runtime so OpenMausBot can remove this bot's Local VM while deleting it",
-            });
-          }
-          if (vm.container !== "missing" && !vm.managed) {
+        const containerTarget = perBotLocalVmTarget(bot.id);
+        const spaceTargets = (["linux", "macos"] as const).map((os) => cuaSpaceTarget(containerTarget, os));
+        // Backend/mode changes leave old desktops intact. Deleting their bot
+        // must still erase its container workspace and both owned OS Spaces.
+        const targets = [containerTarget, ...spaceTargets];
+        if (targets.some((target) => localVmActiveThreads.has(target.key) || localVmLifecycleBusy.has(target.key))) {
+          return deletionResponse(409, { error: "stop this bot's Local VM turn or setup action before deleting the bot" });
+        }
+        if (targets.some((target) => localVmLeaseFor(target).current(localVmOwnerBusy))) {
+          return deletionResponse(409, { error: "stop this bot's Local VM turn before deleting the bot" });
+        }
+        for (const target of targets) localVmLifecycleBusy.add(target.key);
+        claimedLocalVmTargets = targets;
+        const vm = await containerComputerStatus(undefined, undefined, containerTarget);
+        if (!vm.daemonUp && existsSync(containerTarget.workspaceDir)) {
+          return deletionResponse(409, {
+            error: "start the container runtime so OpenMausBot can remove this bot's Local VM while deleting it",
+          });
+        }
+        if (vm.container !== "missing" && !vm.managed) {
+          return deletionResponse(409, {
+            error: `The container named ${vm.container_name} was not created by OpenMausBot. Remove it manually before deleting this bot`,
+          });
+        }
+        const localVmCleanup: Array<{ target: LocalVmTarget; removeDesktop: boolean }> = [
+          { target: containerTarget, removeDesktop: vm.container !== "missing" },
+        ];
+        // Only Spaces with this data folder's ownership receipt are ever
+        // deleted, so a bot without one never needs Cua (or its daemon).
+        const ownedSpaceTargets = spaceTargets.filter((target) => target.space && cuaSpaceOwnership(target.space.name));
+        const cua = ownedSpaceTargets.length > 0 ? await cuaSpacesAvailability() : null;
+        if (cua?.installed) {
+          const existing = await existingCuaSpaces(ownedSpaceTargets).catch(() => null);
+          if (!existing) {
             return deletionResponse(409, {
-              error: `The container named ${vm.container_name} was not created by OpenMausBot. Remove it manually before deleting this bot`,
+              error: "open Cua Spaces so OpenMausBot can remove this bot's Local VM while deleting it",
             });
           }
-          localVmCleanup = {
-            target,
-            removeContainer: vm.container !== "missing",
-          };
+          for (const target of existing) {
+            const status = await localVmStatus(target);
+            if (status.problem && status.container === "missing") {
+              return deletionResponse(409, { error: status.problem });
+            }
+            if (status.container !== "missing" && status.managed) localVmCleanup.push({ target, removeDesktop: true });
+          }
+          if (localVmCleanup.some(({ target }) => target.space) && (cua.problem || !cua.daemonUp)) {
+            return deletionResponse(409, {
+              error: cua.problem ?? "open Cua Spaces so OpenMausBot can remove this bot's Local VM while deleting it",
+            });
+          }
         }
 
         // Preflight every provider before deleting any resource. Cleanup can
@@ -11317,18 +11470,18 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           for (const instance of ownedVpsComputers) {
             await vps.removeManagedVpsComputer(cfg, managedBoatOwners(), instance.name, instance.name);
           }
-          if (localVmCleanup) {
-            if (localVmCleanup.removeContainer) {
-              await containerComputerAction("remove", undefined, undefined, localVmCleanup.target);
-            }
+          for (const cleanup of localVmCleanup) {
+            if (cleanup.removeDesktop) await localVmAction("remove", cleanup.target);
             // Unlike the standalone "Delete VM" action, deleting the bot is
             // a complete erasure: its now-ownerless desktop files and browser
             // session must not remain hidden on disk or block the event loop.
-            await removeDirectory(localVmCleanup.target.workspaceDir, { recursive: true, force: true });
-            localVmSeen.delete(localVmCleanup.target.key);
-            localVmIdles.get(localVmCleanup.target.key)?.cancel();
-            localVmIdles.delete(localVmCleanup.target.key);
-            localVmLeases.forget(localVmCleanup.target.key);
+            // A Space keeps its files inside the Space, removed above.
+            if (!cleanup.target.space) await removeDirectory(cleanup.target.workspaceDir, { recursive: true, force: true });
+            if (cleanup.target.space) clearLocalVmSpaceIdleStop(cleanup.target.key);
+            localVmSeen.delete(cleanup.target.key);
+            localVmIdles.get(cleanup.target.key)?.cancel();
+            localVmIdles.delete(cleanup.target.key);
+            localVmLeases.forget(cleanup.target.key);
           }
           // a running turn dies with its bot
           // Invalidate every bot-callable bearer before the first asynchronous
@@ -11360,9 +11513,11 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           discardDelegations(commsBus, bot.threadId);
           computerControl.forget(bot.id);
           computerControlRevision.delete(bot.id);
-          const target = perBotLocalVmTarget(bot.id);
-          localVmIdles.get(target.key)?.cancel();
-          localVmIdles.delete(target.key);
+          const container = perBotLocalVmTarget(bot.id);
+          for (const target of [container, cuaSpaceTarget(container, "linux"), cuaSpaceTarget(container, "macos")]) {
+            localVmIdles.get(target.key)?.cancel();
+            localVmIdles.delete(target.key);
+          }
           // Provider and local-computer teardown above can await for an
           // arbitrary amount of time. A reviewed Chief deletion is bound to
           // the exact target profile it presented; re-check that receipt at
@@ -11370,6 +11525,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           // cannot be erased under a stale approval.
           revalidate();
           store.deleteBot(bot.id, setupRequest);
+          cuaSpaceLabels.delete(bot.id);
           // Removing schedules is not a security revocation. Keep them intact
           // if the bot/receipt write fails, so a failed deletion is retryable.
           routines!.disableForBot(bot.id);
@@ -11394,7 +11550,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         }
         return deletionResponse( 200, { ok: true });
       } finally {
-        if (claimedLocalVmTarget) localVmLifecycleBusy.delete(claimedLocalVmTarget.key);
+        for (const target of claimedLocalVmTargets) localVmLifecycleBusy.delete(target.key);
         releaseComputerLifecycle();
         releasePhoneSecretMutation();
       }
@@ -12507,13 +12663,13 @@ async function runGroupMemberTurn(
       if (!setupIsCurrent()) {
         return false;
       }
-      if (!vm.ready || !vm.runtime) throw new Error(vm.problem ?? "the Local VM is not ready");
+      if (!vm.ready) throw new Error(vm.problem ?? "the Local VM is not ready");
       const owner = localVmLeaseFor(target).current(localVmOwnerBusy);
       if (owner?.threadId !== threadId || owner.botId !== readyBot.id) {
         throw new Error("the Local VM lease expired while preparing the turn");
       }
-      integrations.localComputer = containerComputerMcp(
-        vm.runtime,
+      integrations.localComputer = localVmMcp(
+        vm,
         controlIntegration(readyBot.id, threadId, internalGeneration, { localVmTarget: target }),
         target,
       );
@@ -12613,6 +12769,7 @@ async function runGroupMemberTurn(
     kind: roomTeamComputer || roomComputerKind === "box" ? "box" : roomVmTarget ? "vm" : roomComputerKind,
     driverKind: instance.driverKind,
     vmPrivate: localVmMode(cfg) === "per-bot",
+    vmSpaceOs: roomVmTarget?.space?.os ?? null,
   });
   {
     const crossing = claimRecallCrossings(threadId, recentLines.filter((line) => line.private).map((line) => line.threadId));
@@ -14798,16 +14955,19 @@ function stderrOf(err: unknown): string {
   return typeof s === "string" ? s : Buffer.isBuffer(s) ? s.toString("utf8") : "";
 }
 
-async function localVmPayload(target: LocalVmTarget, auth: RequestAuth) {
-  const status = await containerComputerStatus(undefined, undefined, target);
+function localVmStatusPayload(status: LocalVmStatus, target: LocalVmTarget, auth: RequestAuth) {
   return {
     ...localVmViewerStatus(status, auth),
     stop_reason: localVmStopReason(target.key, status),
-    commands: setupCommands(status.runtime, process.platform, target),
+    commands: localVmSetupCommands(status, target),
     idle_timeout_ms: localVmIdleMs(),
     mode: localVmMode(cfg),
     max_instances: localVmMaxInstances(cfg),
   };
+}
+
+async function localVmPayload(target: LocalVmTarget, auth: RequestAuth) {
+  return localVmStatusPayload(await localVmStatus(target), target, auth);
 }
 
 /** Wake an idle desktop, or recreate a missing one from an already prepared
@@ -14824,36 +14984,39 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
   const pooled = target.key.startsWith("pool:");
   const ownsProvision = !pooled && !localVmProvisionBusy;
   if (ownsProvision) localVmProvisionBusy = true;
-  let status: ContainerComputerStatus;
+  let status: LocalVmStatus;
   try {
-    status = await containerComputerStatus(undefined, undefined, target);
+    status = await localVmStatus(target);
     noteLocalVmSeen(target, status);
     if (!isCurrent()) return status;
-    const action = localVmWakeAction(status);
-    if (status.ready || !action || !status.runtime) return status;
+    const action = localVmWake(status);
+    if (status.ready || !action) return status;
     // Another creation is already mid-flight and its container is not yet
     // visible to a count, so the safe answer is the inspected status —
     // exactly what the over-cap path below returns.
     if (action === "run" && !pooled && !ownsProvision) return status;
 
     if (action === "run" && target.key.startsWith("bot:")) {
-      const count = await existingPerBotLocalVmCount(status.runtime);
-      if (!isCurrent() || count >= localVmMaxInstances(cfg)) return status;
+      const count = await existingPerBotLocalVmCount();
+      if (!isCurrent() || count === null || count >= localVmMaxInstances(cfg)) return status;
     }
 
     broadcast({ kind: "computer", botId, state: "provisioning" });
     try {
-      status = await containerComputerAction(action, undefined, undefined, target);
-    } catch {
+      if (target.space) clearLocalVmSpaceIdleStop(target.key);
+      status = await localVmAction(action, target);
+    } catch (error) {
       // Keep the inspected status: its `problem` names the real obstacle,
       // which is more use to the person than "podman run exited non-zero".
       // `run` can throw after the container exists, so arm the idle
       // backstop anyway — expiry defers while the target is busy and its
       // remove step no-ops unless a fresh probe sees a running container.
       // The problem text stays as inspected: cheaply telling a half-created
-      // container from none here would need another container probe.
+      // container from none here would need another container probe. Cua's
+      // own error is the specific one (a missing macOS Local Network grant,
+      // a failed image download), so a Space reports that instead.
       localVmIdleFor(target).touch();
-      return status;
+      return status.backend === "cua-spaces" && error instanceof Error ? { ...status, problem: error.message } : status;
     }
   } finally {
     if (ownsProvision) localVmProvisionBusy = false;
@@ -14863,21 +15026,30 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
 
   // The container is up before Cua Driver is. Waiting here rather than failing
   // the turn is the whole point: a person who has been away eight hours should
-  // not have to send their message twice.
-  const deadline = Date.now() + LOCAL_VM_DESKTOP_WAIT_MS;
+  // not have to send their message twice. A macOS Space boots a whole VM.
+  const deadline = Date.now() + (target.space?.os === "macos" ? LOCAL_VM_MACOS_BOOT_WAIT_MS : LOCAL_VM_DESKTOP_WAIT_MS);
   while (isCurrent() && !status.ready && status.container === "running" && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     if (!isCurrent()) break;
-    status = await containerComputerStatus(undefined, undefined, target);
+    status = await localVmStatus(target);
   }
   return status;
 }
 
-async function existingPerBotLocalVmCount(runtime: Runtime) {
-  return (await discoverExistingPerBotLocalVms(store.bots, runtime)).length;
+/** Per-bot desktops that exist now, for the capacity limit; null when the
+ * backend cannot be inspected, so a create is refused rather than guessed. */
+async function existingPerBotLocalVmCount(): Promise<number | null> {
+  if (localVmBackend(cfg) === "cua-spaces") {
+    const existing = await existingCuaSpaces(perBotCuaSpaceCandidates().map(({ target }) => target)).catch(() => null);
+    return existing ? existing.length : null;
+  }
+  const runtime = await containerRuntimeStatus();
+  if (!runtime.runtime || !runtime.daemonUp) return null;
+  return (await discoverExistingPerBotLocalVms(store.bots, runtime.runtime)).length;
 }
 
 async function perBotLocalVmCountForModeChange(): Promise<number | null> {
+  if (localVmBackend(cfg) === "cua-spaces") return existingPerBotLocalVmCount();
   const targets = [...new Map(store.bots.map((bot) => {
     const target = perBotLocalVmTarget(bot.id);
     return [target.key, target] as const;
@@ -14887,7 +15059,7 @@ async function perBotLocalVmCountForModeChange(): Promise<number | null> {
   if (!runtime.runtime || !runtime.daemonUp) {
     return targets.some((target) => existsSync(target.workspaceDir)) ? null : 0;
   }
-  return existingPerBotLocalVmCount(runtime.runtime);
+  return existingPerBotLocalVmCount();
 }
 
 /** What Settings needs about the edition: the features, and, once the key
@@ -14969,6 +15141,8 @@ function configStatus() {
       mode: localVmMode(cfg),
       maxInstances: localVmMaxInstances(cfg),
       idleTimeoutMinutes: localVmIdleTimeoutMinutes(cfg),
+      backend: localVmBackend(cfg),
+      spacesOs: localVmSpacesOs(cfg),
     },
     features: {
       skillAuthoring: skillAuthoringEnabled(cfg),
@@ -15418,6 +15592,15 @@ ROUTES.push(createAntigravityLeftoverRoutes({
 }));
 
 ROUTES.push(desktopViewer.route);
+ROUTES.push(createCuaSpacesRoutes({
+  availability: cuaSpacesAvailability,
+  previewBot: computerPreviewBot,
+  previewSurface: computerPreviewSurface,
+  target: localVmTargetForStatus,
+  status: localVmStatus,
+  touch: (target) => localVmIdleFor(target).touch(),
+  viewerLink: cuaSpaceViewerLink,
+}));
 
 // Live calls (GPT-Live as the voice, the bot as the brain). A client holds
 // the WebRTC audio; the harness creates the session with the key (which
@@ -16391,17 +16574,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const body = await readInternalBody();
         const requestedPath = typeof body.path === "string" ? body.path : "";
         const requestedName = typeof body.name === "string" ? body.name : undefined;
+        let vm: LocalVmTarget | undefined;
         try {
-          const vm = await attachmentVmForTurn(internalCapability);
+          vm = await attachmentVmForTurn(internalCapability);
+          // A Space mounts no host folder: stage the one requested file.
+          const staged = vm?.space ? await stageCuaSpaceFile(vm, requestedPath) : null;
           const outcome = await attachForTurn(internalCapability, MAX_ATTACHED_FILES_PER_TURN, {
             save: () => {
               // The agents capability carries no VM; the thread's claimed desktop does.
               return saveBotAttachment({
-                path: requestedPath,
+                path: staged?.path ?? requestedPath,
                 name: requestedName,
                 // The attachment store is not a source: only the bot's own files are.
                 roots: messageFileRootsForThread(from.id, threadId).filter((root) => root !== ATTACHMENTS_DIR),
-                ...(vm ? { guest: { root: VM_WORKSPACE_GUEST, host: vm.workspaceDir } } : {}),
+                ...(staged ? { guest: staged.guest } : vm && !vm.space ? { guest: { root: VM_WORKSPACE_GUEST, host: vm.workspaceDir } } : {}),
               });
             },
             // The copy is awaited: the turn may have been stopped, replaced or
@@ -16419,7 +16605,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             },
             // Each save gets its own stored file, so an unpublished one is ours to remove.
             discard: (saved) => deleteAttachment(saved.attachment.path),
-          });
+          }).finally(() => staged?.dispose());
           if (outcome.status === "limit") {
             return json(res, 429, { error: `You already attached ${MAX_ATTACHED_FILES_PER_TURN} files this turn. Put the rest in one document or archive summary instead.` });
           }
@@ -16434,7 +16620,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         } catch (error) {
           const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
           const message = status === 404
-            ? `No file was found at ${requestedPath}. Save it under /home/cua/workspace (or your working folder) and pass its exact path.`
+            ? `No file was found at ${requestedPath}. Save it in ${vm?.space ? "your home folder in the Space" : "/home/cua/workspace (or your working folder)"} and pass its exact path.`
             : error instanceof Error ? error.message : "could not attach that file";
           return json(res, status, { error: message });
         }
@@ -16450,14 +16636,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         try {
           const vm = await attachmentVmForTurn(internalCapability);
           if (!vm) return json(res, 409, { error: "You have no Local VM desktop in this turn, so there is nowhere to run a command." });
-          const runtime = (await containerRuntimeStatus()).runtime;
           requireActiveInternalCapability();
-          if (!runtime || !internalCapabilityIsActive({ ...internalCapability, localVmTarget: vm }) ||
+          if (!internalCapabilityIsActive({ ...internalCapability, localVmTarget: vm }) ||
               botComputerControlSnapshot(internalSender.id).held) {
             return json(res, 409, { error: "The Local VM is no longer available to this turn." });
           }
-          const result = await containerExec(vm, typeof body.command === "string" ? body.command : "", {
-            runtime,
+          const result = await localVmExec(vm, typeof body.command === "string" ? body.command : "", {
             timeoutSeconds: typeof body.timeout_seconds === "number" ? body.timeout_seconds : undefined,
           });
           localVmIdleFor(vm).touch();
@@ -21002,6 +21186,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const backendError = cloudBackendChangeError(Boolean(existingBot?.busy), activeVpsThreads.has(m[1]));
         if (backendError) return json(res, 409, { error: backendError });
       }
+      if (Object.prototype.hasOwnProperty.call(body, "vmOs")) {
+        if (body.vmOs !== null && body.vmOs !== "linux" && body.vmOs !== "macos") {
+          return json(res, 400, { error: "vmOs must be null (the default), linux, or macos" });
+        }
+        if (body.vmOs === "macos" && !cuaHost().macosSupported) {
+          return json(res, 409, { error: "macOS Spaces need a Mac with Apple silicon" });
+        }
+        // The OS picks which Space a turn claims; panel setup and target
+        // settings changes hold the same fence as a running conversation.
+        const osChanged = (body.vmOs ?? undefined) !== existingBot?.vmOs;
+        const containerTarget = perBotLocalVmTarget(m[1]);
+        const spaceTargets = (["linux", "macos"] as const).map((os) => cuaSpaceTarget(containerTarget, os));
+        if (osChanged && (existingBot?.busy || localVmModeChangeBusy ||
+          spaceTargets.some((target) => localVmLifecycleBusy.has(target.key) || localVmActiveThreads.has(target.key)))) {
+          return json(res, 409, { error: "stop this bot's work and Local VM setup before changing its Local VM OS" });
+        }
+        patch.vmOs = body.vmOs ?? undefined;
+      }
       if (body.cwd !== undefined) {
         const checked = validateBotCwd(body.cwd);
         if (!checked.ok) return json(res, 400, { error: checked.error });
@@ -21294,6 +21496,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           patch.browserProfile !== freshBrowserBot.browserProfile &&
           (freshBrowserBot.busy || browserRuntime.heldBy(currentBrowserSession(freshBrowserBot.id, freshBrowserBot.browserProfile)))) {
         return json(res, 409, { error: "Stop the bot and release browser control before changing its profile." });
+      }
+      if (Object.hasOwn(body, "vmOs") && (body.vmOs ?? undefined) !== freshBrowserBot?.vmOs) {
+        const containerTarget = perBotLocalVmTarget(m[1]);
+        if (freshBrowserBot?.busy || localVmModeChangeBusy || (["linux", "macos"] as const).some((os) => {
+          const target = cuaSpaceTarget(containerTarget, os);
+          return localVmLifecycleBusy.has(target.key) || localVmActiveThreads.has(target.key);
+        })) {
+          return json(res, 409, { error: "stop this bot's work and Local VM setup before changing its Local VM OS" });
+        }
       }
       if (profile.patch.soul !== undefined) {
         if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
@@ -22859,8 +23070,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // what the user's machine can host: which runtime is installed, whether
     // its daemon is up, and whether the desktop image and container exist
+    // (or, on the Cua Spaces backend, the default-OS shared Space)
     if (method === "GET" && path === "/api/local-computer") {
-      return json(res, 200, await localVmPayload(SHARED_LOCAL_VM_TARGET, auth));
+      return json(res, 200, await localVmPayload(sharedLocalVmTarget(), auth));
     }
     if (method === "GET" && path === "/api/local-computer/instances") {
       res.setHeader("cache-control", "private, no-store");
@@ -22876,7 +23088,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const action = z.enum(["pull", "run", "start", "stop", "remove"]).parse(m[1]);
-      if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(SHARED_LOCAL_VM_TARGET.key)) {
+      const target = sharedLocalVmTarget();
+      if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(target.key)) {
         return json(res, 409, { error: "another Local VM setup action is still running" });
       }
       if (localVmMode(cfg) === "per-bot" && action === "run") {
@@ -22885,43 +23098,41 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (localVmMode(cfg) === "pool" && action === "run") {
         return json(res, 409, { error: "Pool mode creates its desktops automatically from conversation turns" });
       }
-      const vmOwner = localVmLeaseFor(SHARED_LOCAL_VM_TARGET).current(localVmOwnerBusy);
+      const vmOwner = localVmLeaseFor(target).current(localVmOwnerBusy);
       if (vmOwner && (action === "stop" || action === "remove" || action === "run")) {
         return json(res, 409, { error: "the Local VM is being used by a bot — stop that turn first" });
       }
       // A lease can lapse under a long, quiet turn whose thread still holds
       // the desktop, so stop/remove must also refuse while the thread
       // registry or a setup action pins it — the same guard bot deletion uses.
-      if ((action === "stop" || action === "remove") && (localVmActiveThreads.has(SHARED_LOCAL_VM_TARGET.key) || localVmLifecycleBusy.has(SHARED_LOCAL_VM_TARGET.key))) {
-        return json(res, 409, { error: localVmActiveThreads.has(SHARED_LOCAL_VM_TARGET.key) ? "the Local VM is being used by a bot — stop that turn first" : "another Local VM setup action is still running" });
+      if ((action === "stop" || action === "remove") && (localVmActiveThreads.has(target.key) || localVmLifecycleBusy.has(target.key))) {
+        return json(res, 409, { error: localVmActiveThreads.has(target.key) ? "the Local VM is being used by a bot — stop that turn first" : "another Local VM setup action is still running" });
       }
       if (action === "pull") localVmImageBusy = true;
-      else localVmLifecycleBusy.add(SHARED_LOCAL_VM_TARGET.key);
+      else localVmLifecycleBusy.add(target.key);
       try {
-        const status = await containerComputerAction(action, undefined, undefined, SHARED_LOCAL_VM_TARGET);
+        if (target.space && (action === "run" || action === "start")) clearLocalVmSpaceIdleStop(target.key);
+        const status = await localVmAction(action, target);
         if (action === "run" || action === "start") {
-          localVmSeen.add(SHARED_LOCAL_VM_TARGET.key);
-          localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
+          localVmSeen.add(target.key);
+          localVmIdleFor(target).touch();
         }
-        if (action === "stop" || action === "remove") localVmIdleFor(SHARED_LOCAL_VM_TARGET).cancel();
-        return json(res, 200, {
-          ...localVmViewerStatus(status, auth),
-          commands: setupCommands(status.runtime, process.platform, SHARED_LOCAL_VM_TARGET),
-          idle_timeout_ms: localVmIdleMs(),
-          mode: localVmMode(cfg),
-          max_instances: localVmMaxInstances(cfg),
-        });
+        if (action === "stop" || action === "remove") localVmIdleFor(target).cancel();
+        if (target.space) {
+          if (action === "stop" || action === "remove") clearLocalVmSpaceIdleStop(target.key);
+          if (action === "remove") localVmSeen.delete(target.key);
+        }
+        return json(res, 200, localVmStatusPayload(status, target, auth));
       } finally {
         if (action === "pull") localVmImageBusy = false;
-        else localVmLifecycleBusy.delete(SHARED_LOCAL_VM_TARGET.key);
+        else localVmLifecycleBusy.delete(target.key);
       }
     }
     if (method === "POST" && path === "/api/local-computer/screenshot") {
-      localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
+      const target = sharedLocalVmTarget();
+      localVmIdleFor(target).touch();
       res.setHeader("cache-control", "private, no-store");
-      return json(res, 200, {
-        image: await containerComputerScreenshot(undefined, undefined, SHARED_LOCAL_VM_TARGET),
-      });
+      return json(res, 200, { image: await localVmScreenshot(target) });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/local-computer$/);
@@ -22941,8 +23152,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 409, { error: "this bot's computer is being changed or deleted — wait for it to finish" });
       }
       const action = z.enum(["run", "start", "stop", "remove"]).parse(m[2]);
-      const target = localVmTargetForBot(bot.id);
-      if (target.key === SHARED_LOCAL_VM_TARGET.key) {
+      // `os` names one of a bot's per-bot Spaces (Settings inventory rows);
+      // without it the route acts on the desktop this bot's turns use.
+      const request = z.object({ os: z.enum(["linux", "macos"]).optional() }).safeParse(await readBody(req));
+      if (!request.success) return json(res, 400, { error: "os must be linux or macos" });
+      const cuaSpaces = localVmBackend(cfg) === "cua-spaces";
+      if (request.data.os && !(cuaSpaces && action === "remove")) {
+        return json(res, 400, { error: "os applies only to deleting a Cua Space" });
+      }
+      const target = request.data.os
+        ? cuaSpaceFor(perBotLocalVmTarget(bot.id), request.data.os, bot.name)
+        : localVmTargetForBot(bot.id);
+      // A Space is addressed per bot OS even in shared mode, so its panel
+      // manages it; a shared container belongs to Settings, and pool seats
+      // to the turns that claim them.
+      if (!request.data.os && (localVmMode(cfg) === "pool" || (!cuaSpaces && target.key === SHARED_LOCAL_VM_TARGET.key))) {
         return json(res, 409, { error: "Shared mode manages this desktop in App Settings → Computers" });
       }
       if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(target.key)) {
@@ -22963,11 +23187,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       localVmLifecycleBusy.add(target.key);
       if (action === "run") localVmProvisionBusy = true;
       try {
-        if (action === "run") {
-          const before = await containerComputerStatus(undefined, undefined, target);
-          if (!before.runtime) return json(res, 409, { error: before.problem ?? "No container runtime is installed" });
-          if (!(await containerComputerExists(before.runtime, target))) {
-            const count = await existingPerBotLocalVmCount(before.runtime);
+        if (action === "run" && target.key.startsWith("bot:")) {
+          const before = await localVmStatus(target);
+          if (before.container === "missing") {
+            const count = await existingPerBotLocalVmCount();
+            if (count === null) return json(res, 409, { error: before.problem ?? "The Local VMs on this computer cannot be inspected" });
             if (count >= localVmMaxInstances(cfg)) {
               return json(res, 409, {
                 error: `The per-bot Local VM limit is ${localVmMaxInstances(cfg)} — delete an unused bot VM or raise the limit in App Settings`,
@@ -22975,19 +23199,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }
           }
         }
-        const status = await containerComputerAction(action, undefined, undefined, target);
+        if (target.space && (action === "run" || action === "start")) clearLocalVmSpaceIdleStop(target.key);
+        const status = await localVmAction(action, target);
         if (action === "run" || action === "start") {
           localVmSeen.add(target.key);
           localVmIdleFor(target).touch();
         }
         if (action === "stop" || action === "remove") localVmIdleFor(target).cancel();
-        return json(res, 200, {
-          ...localVmViewerStatus(status, auth),
-          commands: setupCommands(status.runtime, process.platform, target),
-          idle_timeout_ms: localVmIdleMs(),
-          mode: localVmMode(cfg),
-          max_instances: localVmMaxInstances(cfg),
-        });
+        if (target.space) {
+          if (action === "stop" || action === "remove") clearLocalVmSpaceIdleStop(target.key);
+          if (action === "remove") localVmSeen.delete(target.key);
+        }
+        return json(res, 200, localVmStatusPayload(status, target, auth));
       } finally {
         if (action === "run") localVmProvisionBusy = false;
         localVmLifecycleBusy.delete(target.key);
@@ -23003,9 +23226,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const target = localVmTargetForStatus(bot.id, url.searchParams.has("threadId") ? bot.threadId : undefined);
       localVmIdleFor(target).touch();
       res.setHeader("cache-control", "private, no-store");
-      return json(res, 200, {
-        image: await containerComputerScreenshot(undefined, undefined, target),
-      });
+      return json(res, 200, { image: await localVmScreenshot(target) });
     }
     // The Local VM's live desktop for a phone, granted only to the control
     // lease that holds this bot's computer right now. Two callers:
@@ -23045,7 +23266,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 409, { error: "Take control of this computer first" });
       }
       const target = localVmTargetForStatus(bot.id, threadId);
-      const status = await containerComputerStatus(undefined, undefined, target);
+      const status = await localVmStatus(target);
+      if (status.backend !== "container") {
+        return json(res, 409, { error: "Phone control is not available for Cua Spaces — open the Space from OpenMausBot on this computer" });
+      }
       if (!status.ready || !status.managed || status.container !== "running" || status.network !== "loopback"
         || !status.viewer_url) {
         return json(res, 409, { error: status.problem ?? "The Local VM is not ready" });
@@ -23907,7 +24131,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       ];
       providerConfigBusy = true;
       const changingLocalVmMode = patch.localVm?.mode !== undefined && patch.localVm.mode !== localVmMode(cfg);
-      if (changingLocalVmMode) localVmModeChangeBusy = true;
+      const changingLocalVmBackend = patch.localVm?.backend !== undefined && patch.localVm.backend !== localVmBackend(cfg);
+      const changingSpacesOs = patch.localVm?.spacesOs !== undefined && patch.localVm.spacesOs !== localVmSpacesOs(cfg);
+      // All three change which desktop a target key names, so they share the
+      // mode-change fence: no turn or setup action may straddle the switch.
+      const changingLocalVmTargets = changingLocalVmMode || changingLocalVmBackend || changingSpacesOs;
+      if (changingLocalVmTargets) localVmModeChangeBusy = true;
       try {
         for (const provider of transitioningProviders) {
           const conflict = providerOperationConflict(provider);
@@ -24011,15 +24240,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
         }
 
-        if (changingLocalVmMode) {
+        if (changingLocalVmTargets) {
           if (localVmActiveThreads.size > 0 || localVmLifecycleBusy.size > 0 || localVmImageBusy) {
-            return json(res, 409, { error: "stop Local VM turns and setup actions before changing the Local VM isolation mode" });
+            return json(res, 409, {
+              error: changingLocalVmMode
+                ? "stop Local VM turns and setup actions before changing the Local VM isolation mode"
+                : "stop Local VM turns and setup actions before changing where Local VMs run",
+            });
           }
-          if (localVmMode(cfg) === "per-bot" && patch.localVm?.mode === "shared") {
+          if (changingLocalVmMode && localVmMode(cfg) === "per-bot" && patch.localVm?.mode === "shared") {
             const existing = await perBotLocalVmCountForModeChange();
             if (existing === null) {
               return json(res, 409, {
-                error: "start the container runtime and delete every per-bot VM before switching to shared mode",
+                error: localVmBackend(cfg) === "cua-spaces"
+                  ? "open Cua Spaces and delete every per-bot VM before switching to shared mode"
+                  : "start the container runtime and delete every per-bot VM before switching to shared mode",
               });
             }
             if (existing > 0) {
@@ -24027,6 +24262,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 error: `delete the ${existing} per-bot Local VM${existing === 1 ? "" : "s"} before switching to shared mode`,
               });
             }
+          }
+          if (changingLocalVmBackend && patch.localVm?.backend === "cua-spaces") {
+            const cua = await cuaSpacesAvailability();
+            if (!cua.installed || cua.problem) return json(res, 409, { error: cua.problem ?? "Install Cua Spaces first" });
+          }
+          if (changingSpacesOs && patch.localVm?.spacesOs === "macos" && !cuaHost().macosSupported) {
+            return json(res, 409, { error: "macOS Spaces need a Mac with Apple silicon" });
           }
         }
       // A project key is useful only if it can create/reuse the Session that
@@ -24331,7 +24573,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, finalized.value);
       } finally {
         for (const provider of transitioningProviders) computerProviderConfigTransitions.delete(provider);
-        if (changingLocalVmMode) localVmModeChangeBusy = false;
+        if (changingLocalVmTargets) localVmModeChangeBusy = false;
         providerConfigBusy = false;
       }
     }

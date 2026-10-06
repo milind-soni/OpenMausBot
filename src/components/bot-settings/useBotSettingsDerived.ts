@@ -48,6 +48,7 @@ export type BotPatch = Partial<
   >
 > & {
   computer?: Bot["computer"] | null;
+  vmOs?: Bot["vmOs"] | null;
   /** null drops the explicit record and returns the bot to the legacy
    * all-tools boolean. */
   connectorTools?: Bot["connectorTools"] | null;

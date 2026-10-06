@@ -9,7 +9,7 @@ import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shar
 
 import { writeFileAtomic } from "./atomic.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
-import { EFFORT_LEVELS, type EffortLevel, type LiveSettings } from "../shared/wire.ts";
+import { EFFORT_LEVELS, type EffortLevel, type LiveSettings, type VmOs } from "../shared/wire.ts";
 import { isModelVariant, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
 import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-icon.ts";
 import type { McpServerSpec } from "./contracts.ts";
@@ -136,6 +136,12 @@ const localVmConfigSchema = z.object({
     .min(MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
     .max(MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
     .optional(),
+  /** "cua-spaces" hands Local VMs to the user-installed Cua Spaces CLI
+   * (cua-spaces-computer.ts); target keys differ per backend and OS, so a
+   * switch cold-starts desktops like a mode change does. */
+  backend: z.enum(["container", "cua-spaces"]).optional(),
+  /** Default OS of a Cua Space; a bot's `vmOs` overrides it. */
+  spacesOs: z.enum(["linux", "macos"]).optional(),
 });
 /** A named, shareable browser session ("Work", "Client A"). The id names a
  * durable Electron partition; user-controlled characters never reach it. */
@@ -629,7 +635,13 @@ export interface AppConfig {
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. Pool runs N
    * seats shared by all conversations, with per-thread affinity (#1654). */
-  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number };
+  localVm?: {
+    mode?: "shared" | "per-bot" | "pool";
+    maxInstances?: number;
+    idleTimeoutMinutes?: number;
+    backend?: LocalVmBackend;
+    spacesOs?: VmOs;
+  };
   /** Opt-in product experiments. Every flag defaults to disabled. */
   features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; autoRecall?: boolean; routinesInConversation?: boolean; skillsLibrary?: boolean };
   /** First-run progress; see onboardingConfigSchema. */
@@ -824,6 +836,16 @@ export function localVmMaxInstances(cfg: AppConfig): number {
 
 export function localVmIdleTimeoutMinutes(cfg: AppConfig): number {
   return cfg.localVm?.idleTimeoutMinutes ?? DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES;
+}
+
+export type LocalVmBackend = "container" | "cua-spaces";
+
+export function localVmBackend(cfg: AppConfig): LocalVmBackend {
+  return cfg.localVm?.backend ?? "container";
+}
+
+export function localVmSpacesOs(cfg: AppConfig): VmOs {
+  return cfg.localVm?.spacesOs ?? "linux";
 }
 
 /** On by default; only an explicit `false` (the Settings toggle, or a legacy

@@ -80,6 +80,7 @@ function windowsKnownDirs(): string[] {
     join(localAppData, "agy", "bin"), // Antigravity installer
     // Cursor installer: cursor-agent.* and its `agent` copies (MOCA-272)
     join(localAppData, "cursor-agent"),
+    join(localAppData, "Programs", "cua", "bin"), // Cua installer (install.ps1): cua.exe
     join(home, ".local", "bin"), // claude native installer
     join(home, ".claude", "local"),
     join(home, "bin"), // Factory droid installer (%USERPROFILE%\bin)

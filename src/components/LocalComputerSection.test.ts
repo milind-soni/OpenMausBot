@@ -12,6 +12,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 
 import {
   CloudComputersCard,
+  CuaSpacesSettings,
   LocalComputerSection,
   LocalVmIdleTimeoutSetting,
   LocalVmInventoryCard,
@@ -29,6 +30,7 @@ import {
   vpsComputerInventoryState,
   vpsComputerShortId,
   type CloudComputerInventoryInstance,
+  type CuaSpacesAvailability,
   type LocalVmInventoryInstance,
   type VpsComputerInventoryInstance,
 } from "./LocalComputerSection";
@@ -138,6 +140,16 @@ describe("computer inventory request wiring", () => {
     // Sleep is reversible and intentionally skips confirmation; all three
     // destructive actions above remain explicitly gated.
     expect(confirm).toHaveBeenCalledTimes(3);
+  });
+
+  it("includes the OS when deleting a Cua Space inventory row", () => {
+    const plan = perBotLocalVmDeletePlan({ ...cloudVm, os: "macos" });
+    expect(plan.request).toEqual([
+      "/api/bots/cloud-bot/local-computer/remove",
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ os: "macos" }) },
+    ]);
+    expect(plan.confirmation).toContain("Research's macOS Space");
+    expect(plan.confirmation).toContain("erased");
   });
 });
 
@@ -550,6 +562,65 @@ describe("Settings → Computers on an OMB Cloud home", () => {
     expect(titles).toContain("Cloud computers");
     expect(titles).not.toContain("Local VM");
     expect(titles).not.toContain("Setup");
+  });
+});
+
+describe("Cua Spaces settings", () => {
+  const availability: CuaSpacesAvailability = {
+    installed: false,
+    version: null,
+    daemonUp: false,
+    macosSupported: false,
+    problem: "Install Cua Spaces to use it for Local VMs",
+    installUrl: "https://cua.ai/docs/spaces/quickstart",
+  };
+  const renderSettings = (enabled: boolean, details = availability) => renderToStaticMarkup(createElement(CuaSpacesSettings, {
+    availability: details,
+    enabled,
+    os: "linux",
+    loading: false,
+    pending: false,
+    error: null,
+    onToggle: vi.fn(),
+    onOsChange: vi.fn(),
+    onCheck: vi.fn(),
+  }));
+
+  it("always shows a disabled toggle and install action when not installed", () => {
+    const markup = renderSettings(false);
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Use Cua Spaces for Local VMs"[^>]*role="switch"[^>]*aria-checked="false"/);
+    expect(markup).toContain("Install Cua Spaces to use it for Local VMs");
+    expect(markup).toContain("Install Cua Spaces</button>");
+    expect(markup).toContain("Check again</button>");
+  });
+
+  it("allows switching an unusable selected backend off", () => {
+    const markup = renderSettings(true);
+    const toggle = /<button[^>]*aria-label="Use Cua Spaces for Local VMs"[^>]*>/.exec(markup)?.[0];
+    expect(toggle).toContain('aria-checked="true"');
+    expect(toggle).not.toContain('disabled=""');
+    expect(markup).toContain("macOS Spaces require an Apple-silicon Mac.");
+    expect(markup).toContain('value="macos" disabled=""');
+  });
+
+  it("shows the installed version and app hint", () => {
+    const markup = renderSettings(false, { ...availability, installed: true, version: "0.2.0", problem: null });
+    expect(markup).toContain("Cua Spaces 0.2.0");
+    expect(markup).toContain("Keep the Cua Spaces app running");
+    expect(markup).not.toContain("Install Cua Spaces</button>");
+  });
+
+  it("hides container setup for the selected Cua backend", () => {
+    storeFixture.config = { localVm: { backend: "cua-spaces", spacesOs: "linux" } };
+    try {
+      const markup = renderToStaticMarkup(createElement(LocalComputerSection));
+      expect(markup).toContain("Shared Space");
+      expect(markup).not.toContain("Install a container runtime");
+      expect(markup).not.toContain("Safety and storage");
+      expect(markup).not.toContain("Prepare Cua desktop");
+    } finally {
+      storeFixture.config = null;
+    }
   });
 });
 

@@ -1,8 +1,8 @@
 import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Bot, InstanceInfo, Message, Task } from "@/state/store";
+import type { Bot, ConfigStatus, InstanceInfo, Message, Task } from "@/state/store";
 import type { FeatureFlagConfig } from "@/lib/feature-flags";
 
 // Same hook-by-call-order harness as ModelPicker.simple.test.ts: the panel's
@@ -24,9 +24,10 @@ const fixture = vi.hoisted(() => {
     index: 0,
     own: 0,
     seed: {} as Record<string, unknown>,
-    config: {} as FeatureFlagConfig & { cloudHome?: boolean; box?: { configured: boolean } },
+    config: {} as FeatureFlagConfig & { cloudHome?: boolean; box?: { configured: boolean }; localVm?: ConfigStatus["localVm"] },
     instances: [] as InstanceInfo[],
     android: false,
+    control: {} as Record<string, { held: boolean; helpReason: string | null }>,
     dispatch: (() => {}) as (...args: unknown[]) => void,
     api: (() => Promise.resolve({})) as (...args: unknown[]) => Promise<unknown>,
     setAdvancedMode: (() => {}) as (enabled: boolean) => void,
@@ -92,7 +93,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
     state: {
       config: { box: { configured: true }, ...fixture.config },
       instances: fixture.instances,
-      computerControl: {},
+      computerControl: fixture.control,
       routines: [],
       routineRuns: [],
     },
@@ -107,6 +108,7 @@ const { CloudBackendPicker } = await import("./CloudBackendPicker");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
 
 afterAll(() => vi.unstubAllGlobals());
+afterEach(() => vi.useRealTimers());
 
 type Node = ReactElement<Record<string, unknown> & { children?: ReactNode }>;
 function nodes(value: ReactNode): Node[] {
@@ -177,10 +179,14 @@ beforeEach(() => {
   fixture.config = { features: { browser: true }, browserEngine: { kind: "engine" } };
   fixture.instances = [engine()];
   fixture.android = false;
+  fixture.control = {};
   fixture.dispatch = vi.fn();
   fixture.api = vi.fn(() => Promise.resolve({ features: { browser: true } }));
   fixture.setAdvancedMode = vi.fn();
   for (const key of Object.keys(fixture.ogb)) delete fixture.ogb[key];
+  window.setTimeout = setTimeout as typeof window.setTimeout;
+  window.clearTimeout = clearTimeout as typeof window.clearTimeout;
+  window.confirm = vi.fn(() => true);
 });
 
 describe("Computer panel tabs", () => {
@@ -474,6 +480,200 @@ describe("Technical controls", () => {
     const advanced = render(vm(), { onOpenVmWorkspace });
     expect(advanced.html).toContain("two desktops");
     expect(advanced.buttons.some((node) => node.props.title === "Delete Scout's VM" || /Delete/.test(text(node.props.children)))).toBe(true);
+  });
+
+  it("opens a Cua Space in the app's desktop window for use alongside the bot, without pausing it", async () => {
+    fixture.advanced = true;
+    fixture.ogb.desktopWorkspace = {};
+    const open = vi.fn(async () => true);
+    fixture.ogb.desktopViewer = { open };
+    fixture.seed = {
+      phase: "vm",
+      resolved: { botId: "scout", threadId: "thread-scout", computer: "vm", cloudBackend: "box" },
+      vmViewerUrl: "http://127.0.0.1/old-vnc-link",
+      vmStatus: { backend: "cua-spaces", os: "macos", mode: "shared", container: "running", ready: true, managed: true },
+    };
+    fixture.api = vi.fn(async () => ({ url: "http://192.168.64.5:3211/viewer/#ticket=t", expiresAt: null }));
+    const rendered = render(makeBot({ computer: "vm" }), { onOpenVmWorkspace: vi.fn() });
+    expect(rendered.html).toContain("macOS Space");
+    expect(rendered.html).not.toContain("Open two desktops");
+    expect(rendered.button("Delete Space")).toBeDefined();
+    // One live-desktop action, the Space's — never the stale noVNC link.
+    expect(rendered.buttons.filter((node) => text(node.props.children) === "Open live desktop")).toHaveLength(1);
+    const onClick = rendered.button("Open live desktop")?.props.onClick;
+    if (typeof onClick !== "function") throw new Error("Missing Cua viewer action");
+    await onClick();
+    expect(fixture.api).toHaveBeenCalledTimes(1);
+    expect(fixture.api).toHaveBeenCalledWith(
+      "/api/bots/scout/local-computer/viewer?threadId=thread-scout",
+      expect.objectContaining({ method: "POST", body: "{}" }),
+    );
+    expect(open).toHaveBeenCalledWith("http://192.168.64.5:3211/viewer/#ticket=t", "Scout's live desktop", "scout");
+  });
+
+  it("takes control to pause the bot, then opens the same Space window", async () => {
+    let opened!: () => void;
+    const viewerOpened = new Promise<void>((resolve) => { opened = resolve; });
+    const open = vi.fn(async () => { opened(); return true; });
+    fixture.ogb.desktopViewer = { open };
+    fixture.seed = {
+      phase: "vm",
+      resolved: { botId: "scout", threadId: "thread-scout", computer: "vm", cloudBackend: "box" },
+      vmStatus: { backend: "cua-spaces", os: "linux", mode: "shared", container: "running", ready: true },
+    };
+    const api = vi.fn(async (url: unknown, _init?: unknown) => url === "/api/bots/scout/computer/control"
+      ? { held: true, helpReason: null }
+      : { url: "http://127.0.0.1:4321/viewer/#ticket=t", expiresAt: null });
+    fixture.api = api;
+    const rendered = render(makeBot({ computer: "vm" }));
+    const take = rendered.button("Take control");
+    expect(take?.props.disabled).toBe(false);
+    expect(rendered.button("Full screen")).toBeUndefined();
+    const onClick = take?.props.onClick;
+    if (typeof onClick !== "function") throw new Error("Missing take-control action");
+    await onClick();
+    await viewerOpened;
+    expect(api.mock.calls.map(([url, init]) => [url, init && typeof init === "object" && "body" in init ? init.body : undefined])).toEqual([
+      ["/api/bots/scout/computer/control", JSON.stringify({ action: "take" })],
+      ["/api/bots/scout/local-computer/viewer?threadId=thread-scout", "{}"],
+    ]);
+    expect(open).toHaveBeenCalledWith("http://127.0.0.1:4321/viewer/#ticket=t", "Scout's live desktop", "scout");
+  });
+
+  it("hides the Cua viewer on a paired client", () => {
+    fixture.ogb.remoteClient = { active: true };
+    fixture.ogb.desktopViewer = { open: vi.fn() };
+    fixture.seed = { phase: "vm", vmStatus: { backend: "cua-spaces", os: "linux", mode: "shared", container: "running", ready: true } };
+    const rendered = render(makeBot({ computer: "vm" }));
+    expect(rendered.button("Open live desktop")).toBeUndefined();
+    expect(rendered.button("Take control")?.props.disabled).toBe(true);
+  });
+
+  it("starts shared Cua Spaces through the bot endpoint", async () => {
+    fixture.seed = {
+      phase: "vm-unavailable",
+      resolved: { botId: "scout", threadId: "thread-scout", computer: "vm", cloudBackend: "box" },
+      vmStatus: { backend: "cua-spaces", os: "linux", mode: "shared", container: "stopped", resumable: true, ready: false, managed: true },
+    };
+    fixture.api = vi.fn(async () => ({ backend: "cua-spaces", ready: true, container: "running", problem: null }));
+    const rendered = render(makeBot({ computer: "vm" }));
+    const onClick = rendered.button("Start Space")?.props.onClick;
+    if (typeof onClick !== "function") throw new Error("Missing Space start action");
+    await onClick();
+    expect(fixture.api).toHaveBeenCalledWith(
+      "/api/bots/scout/local-computer/start",
+      expect.objectContaining({ method: "POST", body: "{}" }),
+    );
+    expect(fixture.api).not.toHaveBeenCalledWith("/api/local-computer/start", expect.anything());
+  });
+
+  it.each(["stopped", "missing", "running"])("never offers per-bot Space lifecycle controls for a %s pool seat", (container) => {
+    fixture.advanced = true;
+    fixture.seed = {
+      phase: container === "running" ? "vm" : "vm-unavailable",
+      resolved: { botId: "scout", threadId: "thread-scout", computer: "vm", cloudBackend: "box" },
+      vmStatus: { backend: "cua-spaces", os: "linux", mode: "pool", container, ready: container === "running", managed: true, resumable: container === "stopped", create_supported: true },
+    };
+    const rendered = render(makeBot({ computer: "vm" }));
+    expect(rendered.button("Start Space")).toBeUndefined();
+    expect(rendered.button("Create Space")).toBeUndefined();
+    expect(rendered.button("Delete Space")).toBeUndefined();
+    expect(fixture.api).not.toHaveBeenCalled();
+  });
+
+  it.each(["stopped", "missing", "running"])("blocks stale shared %s lifecycle controls once config selects pool", (container) => {
+    fixture.advanced = true;
+    fixture.config.localVm = { backend: "cua-spaces", mode: "pool", spacesOs: "linux", maxInstances: 2 };
+    fixture.seed = {
+      phase: container === "running" ? "vm" : "vm-unavailable",
+      vmStatus: { backend: "cua-spaces", os: "linux", mode: "shared", container, ready: container === "running", managed: true, resumable: container === "stopped", create_supported: true },
+    };
+    const rendered = render(makeBot({ computer: "vm" }));
+    expect(rendered.button("Start Space")).toBeUndefined();
+    expect(rendered.button("Create Space")).toBeUndefined();
+    expect(rendered.button("Delete Space")).toBeUndefined();
+  });
+
+  it.each(["shared", "per-bot"])("offers Create Space for a missing %s target", (mode) => {
+    fixture.seed = {
+      phase: "vm-unavailable",
+      vmStatus: { backend: "cua-spaces", os: "linux", mode, container: "missing", ready: false, managed: false, create_supported: true },
+    };
+    expect(render(makeBot({ computer: "vm" })).button("Create Space")).toBeDefined();
+  });
+
+  it.each(["shared", "per-bot", "pool"])("preserves container lifecycle gates in %s mode", (mode) => {
+    const status = { backend: "container", mode, container: "missing", image: true, ready: false, managed: true, create_supported: true };
+    fixture.seed = { phase: "vm-unavailable", vmStatus: status };
+    expect(Boolean(render(makeBot({ computer: "vm" })).button("Create Scout's VM"))).toBe(mode === "per-bot");
+    fixture.values = [];
+    phaseIndex = -1;
+    fixture.seed = { phase: "vm-unavailable", vmStatus: { ...status, container: "stopped", resumable: true } };
+    expect(Boolean(render(makeBot({ computer: "vm" })).button("Start Local VM"))).toBe(mode !== "pool");
+    fixture.values = [];
+    phaseIndex = -1;
+    fixture.advanced = true;
+    fixture.seed = { phase: "vm", vmStatus: { ...status, container: "running", ready: true } };
+    expect(Boolean(render(makeBot({ computer: "vm" })).button("Delete this bot's VM"))).toBe(mode === "per-bot");
+  });
+
+  it.each(["stopped", "running"])("does not start or delete an unmanaged %s Space", (container) => {
+    fixture.advanced = true;
+    fixture.seed = {
+      phase: container === "running" ? "vm" : "vm-unavailable",
+      vmStatus: { backend: "cua-spaces", os: "linux", mode: "shared", container, ready: container === "running", managed: false, resumable: true },
+    };
+    const rendered = render(makeBot({ computer: "vm" }));
+    expect(rendered.button("Start Space")).toBeUndefined();
+    expect(rendered.button("Delete Space")).toBeUndefined();
+  });
+
+  it("confirms shared deletion as the shared Space, never Scout's private Space", async () => {
+    fixture.advanced = true;
+    fixture.seed = {
+      phase: "vm",
+      vmStatus: { backend: "cua-spaces", os: "macos", mode: "shared", container: "running", ready: true, managed: true },
+    };
+    const confirm = vi.fn((_message?: string) => false);
+    window.confirm = confirm;
+    const onClick = render(makeBot({ computer: "vm" })).button("Delete Space")?.props.onClick;
+    if (typeof onClick !== "function") throw new Error("Missing Space delete action");
+    await onClick();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("delete the shared Space"));
+    expect(confirm.mock.calls[0]?.[0]).not.toContain("Scout");
+    expect(fixture.api).not.toHaveBeenCalled();
+  });
+
+  it.each(["shared", "per-bot"])("retains the last macOS status problem and releases %s Start Space after its deadline", async (mode) => {
+    vi.useFakeTimers();
+    window.setTimeout = setTimeout as typeof window.setTimeout;
+    window.clearTimeout = clearTimeout as typeof window.clearTimeout;
+    const stopped = { backend: "cua-spaces", os: "macos", mode, container: "stopped", ready: false, resumable: true, managed: true, problem: null };
+    fixture.seed = { phase: "vm-unavailable", vmStatus: stopped };
+    const started = { ...stopped, container: "running", resumable: false };
+    const last = { ...started, problem: "macOS guest desktop is still starting" };
+    fixture.api = vi.fn(async (url: unknown) => String(url).endsWith("/start") ? started : last);
+    const bot = makeBot({ computer: "vm" });
+    const onClick = render(bot).button("Start Space")?.props.onClick;
+    if (typeof onClick !== "function") throw new Error("Missing Space start action");
+    onClick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(render(bot).button("Starting Space…")?.props.disabled).toBe(true);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(render(bot).button("Starting Space…")?.props.disabled).toBe(true);
+    await vi.advanceTimersByTimeAsync(210_000);
+    const timedOut = render(bot);
+    expect(timedOut.html).toContain(last.problem);
+    expect(timedOut.button("Start Space")?.props.disabled).toBe(false);
+    expect(timedOut.button("Creating Space…")).toBeUndefined();
+    expect(fixture.values[phaseIndex + PHASE_OFFSETS.vmStatus]).toBe(last);
+    fixture.api = vi.fn(async () => ({ ...last, ready: true, problem: null }));
+    const retry = timedOut.button("Start Space")?.props.onClick;
+    if (typeof retry !== "function") throw new Error("Missing Space retry action");
+    retry();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.values[phaseIndex + PHASE_OFFSETS.phase]).toBe("vm");
+    expect(render(bot).button("Starting Space…")).toBeUndefined();
   });
 
   it("turns VPS setup into one friendly line and an Advanced switch", () => {

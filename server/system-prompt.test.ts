@@ -36,20 +36,25 @@ describe("resolveComputerPromptKind", () => {
   // agreement matrix artifact.
   it.each([
     // a VM plan is decided by the configured mode alone
-    [{ kind: "vm", driverKind: "claude", vmPrivate: false }, "vm-shared"],
-    [{ kind: "vm", driverKind: "claude", vmPrivate: true }, "vm-private"],
-    [{ kind: "vm", driverKind: "boxAgent", vmPrivate: false }, "vm-shared"],
+    [{ kind: "vm", driverKind: "claude", vmPrivate: false, vmSpaceOs: null }, "vm-shared"],
+    [{ kind: "vm", driverKind: "claude", vmPrivate: true, vmSpaceOs: null }, "vm-private"],
+    [{ kind: "vm", driverKind: "boxAgent", vmPrivate: false, vmSpaceOs: null }, "vm-shared"],
+    // …unless the Local VM is a Cua Space: then its OS decides, in any mode
+    [{ kind: "vm", driverKind: "claude", vmPrivate: true, vmSpaceOs: "linux" }, "space-linux"],
+    [{ kind: "vm", driverKind: "claude", vmPrivate: false, vmSpaceOs: "macos" }, "space-macos"],
+    // a Space OS never turns another place into a VM paragraph
+    [{ kind: "local", driverKind: "claude", vmPrivate: false, vmSpaceOs: "macos" }, "local"],
     // a boat plan: the Computer engine earns its own kind; every other
     // engine drives the boat through the same computer tools
-    [{ kind: "box", driverKind: "boxAgent", vmPrivate: false }, "box-agent"],
-    [{ kind: "box", driverKind: "codex", vmPrivate: false }, "box"],
-    [{ kind: "box", driverKind: "claude", vmPrivate: false }, "box"],
+    [{ kind: "box", driverKind: "boxAgent", vmPrivate: false, vmSpaceOs: null }, "box-agent"],
+    [{ kind: "box", driverKind: "codex", vmPrivate: false, vmSpaceOs: null }, "box"],
+    [{ kind: "box", driverKind: "claude", vmPrivate: false, vmSpaceOs: null }, "box"],
     // vps and local never depended on more than the plan
-    [{ kind: "vps", driverKind: "claude", vmPrivate: false }, "vps"],
-    [{ kind: "local", driverKind: "claude", vmPrivate: false }, "local"],
-    [{ kind: "local", driverKind: "boxAgent", vmPrivate: false }, "local"],
+    [{ kind: "vps", driverKind: "claude", vmPrivate: false, vmSpaceOs: null }, "vps"],
+    [{ kind: "local", driverKind: "claude", vmPrivate: false, vmSpaceOs: null }, "local"],
+    [{ kind: "local", driverKind: "boxAgent", vmPrivate: false, vmSpaceOs: null }, "local"],
     // and no plan earns no paragraph
-    [{ kind: null, driverKind: "claude", vmPrivate: true }, null],
+    [{ kind: null, driverKind: "claude", vmPrivate: true, vmSpaceOs: null }, null],
   ] as const)("resolves %j to %s", (input, expected) => {
     expect(resolveComputerPromptKind(input)).toBe(expected);
   });
@@ -64,6 +69,8 @@ describe("computerPrompt", () => {
     const paragraphs: Record<string, string> = {
       "vm-private": "your own isolated Cua sandbox",
       "vm-shared": "shared, isolated Cua sandbox",
+      "space-linux": "a Linux desktop whose whole disk persists",
+      "space-macos": "a macOS virtual machine",
       box: "You control the assigned cloud computer",
       vps: "This is the user's own VPS",
       local: "act on the user's computer",

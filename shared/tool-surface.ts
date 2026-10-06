@@ -20,6 +20,13 @@ export const SCREEN_TOUCHING_TOOLS: ReadonlySet<string> = new Set([
   "agent_browser_select", "agent_browser_check", "agent_browser_screenshot",
   // Cua Driver (local Mac, Local VM, VPS)
   "double_click", "right_click", "drag", "hotkey", "move_cursor", "launch_app", "bring_to_front", "zoom",
+  // Cua Spaces (`cua mcp`): its computer_* names whose bare form is too
+  // generic to match on its own (a bare `type` or `key` from another server
+  // must not count), so they are listed with their prefix.
+  "computer_type", "computer_key", "computer_key_down", "computer_key_up", "computer_mouse_down", "computer_mouse_up",
+  "computer_launch", "computer_window_open", "computer_window_focus", "computer_window_unfocus", "computer_window_minimize",
+  "computer_window_maximize", "computer_window_close", "computer_window_resize", "computer_window_move",
+  "computer_accessibility_act",
 ]);
 
 // Keep legacy MCP namespaces accepted; desktop server__tool names follow

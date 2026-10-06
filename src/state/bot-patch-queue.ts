@@ -42,6 +42,8 @@ export type BotUpdatePatch = Partial<
   /** null is the wire representation for clearing an explicit destination
    * and returning to Auto. Bot state itself keeps Auto as an absent field. */
   computer?: Bot["computer"] | null;
+  /** null clears the Cua Spaces OS override to the workspace default. */
+  vmOs?: Bot["vmOs"] | null;
   /** null is the wire representation for dropping an explicit grants record
    * and returning to the legacy all-tools boolean. Bot state keeps that as
    * an absent field. */
@@ -63,9 +65,10 @@ export type BotUpdatePatch = Partial<
 /** A wire patch after clear-only values have been normalized for Bot state. */
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "connectorTools" | "connectorScopes" | "acknowledgeLocalAuto" | "confirmFullAccess" | "applyToAllThreads"
+  "computer" | "vmOs" | "connectorTools" | "connectorScopes" | "acknowledgeLocalAuto" | "confirmFullAccess" | "applyToAllThreads"
 > & {
   computer?: Bot["computer"];
+  vmOs?: Bot["vmOs"];
   connectorTools?: Bot["connectorTools"];
   connectorScopes?: Bot["connectorScopes"];
 };
@@ -126,6 +129,7 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     computer,
     connectorTools,
     connectorScopes,
+    vmOs,
     ...fields
   } = patch;
   const normalized: BotStatePatch = { ...fields };
@@ -135,6 +139,8 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
   else if (connectorTools !== undefined) normalized.connectorTools = connectorTools;
   if (connectorScopes === null) normalized.connectorScopes = undefined;
   else if (connectorScopes !== undefined) normalized.connectorScopes = connectorScopes;
+  if (vmOs === null) normalized.vmOs = undefined;
+  else if (vmOs !== undefined) normalized.vmOs = vmOs;
   return normalized;
 };
 

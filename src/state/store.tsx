@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import type { BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, LiveSettings, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
+import type { BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, LiveSettings, ServerFrame, GroupThreadUsage, SteerQueueReason, VmOs } from "../../shared/wire";
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
@@ -423,6 +423,8 @@ export interface Bot {
   cloudBackend?: CloudBackend;
   /** Allow Auto to prepare/start the managed VPS container. Off by default. */
   autoStartVps?: boolean;
+  /** Cua Spaces Local VM OS; absent uses the workspace default. */
+  vmOs?: VmOs;
   /** where new tasks run their shell tools; absent = the private bot workspace */
   cwd?: string;
   /** auto mode: the bot approves its own tool permissions */
@@ -637,7 +639,7 @@ export interface ConfigStatus {
   newBots?: { effort?: EffortLevel };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
-  localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number };
+  localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number; backend?: "container" | "cua-spaces"; spacesOs?: VmOs };
   /** `providerKeys`: names of the keys saved for OpenCode's other
    * providers, never the keys. */
   opencodeGo?: { configured: boolean; providerKeys?: string[] };
@@ -2154,6 +2156,7 @@ export function reducer(state: AppState, action: Action): AppState {
         computer,
         connectorTools,
         connectorScopes,
+        vmOs,
         ...rest
       } = action.patch;
       const botPatch: Partial<Bot> = { ...rest };
@@ -2165,6 +2168,8 @@ export function reducer(state: AppState, action: Action): AppState {
       else if (connectorTools !== undefined) botPatch.connectorTools = connectorTools;
       if (connectorScopes === null) botPatch.connectorScopes = undefined;
       else if (connectorScopes !== undefined) botPatch.connectorScopes = connectorScopes;
+      if (vmOs === null) botPatch.vmOs = undefined;
+      else if (vmOs !== undefined) botPatch.vmOs = vmOs;
       return updateBot(next, action.botId, (b) => ({ ...b, ...botPatch }));
     }
     case "threadActive": {
@@ -3299,6 +3304,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             computer: source.computer,
             cloudBackend: source.cloudBackend,
             autoStartVps: source.autoStartVps,
+            vmOs: source.vmOs,
             avatarUrl: source.avatarUrl,
             avatarCrop: source.avatarCrop,
             avatarZoom: source.avatarZoom,

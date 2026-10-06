@@ -45,3 +45,32 @@ The bot's workspace and browser profile live in a durable mounted directory. Rec
 ## Ownership and reuse
 
 Local VM ownership uses a renewable lease. OpenMausBot validates the resolved image and container safety contract before reuse instead of trusting only a mutable image tag.
+
+## Cua Spaces (optional)
+
+If you use [Cua Spaces](https://cua.ai/docs/spaces/quickstart), Local VMs can run as Spaces instead of OpenMausBot's own container. A Space can be a Linux desktop or, on a Mac with Apple silicon, a macOS virtual machine.
+
+1. Install Cua Spaces (`curl -fsSL https://cua.ai/install.sh | sh`) and keep the Cua Spaces app running.
+2. Open **App Settings → Computers** and turn on **Use Cua Spaces for Local VMs**. Without a usable install the switch stays disabled and links to the installer.
+3. Choose the default OS. Bots can override it in shared or per-bot mode; pool seats always use the default OS.
+
+The Computer panel keeps showing a live preview from screenshots. **Open live desktop** opens the Space in its own window, where you and the bot can both work; **Take control** first pauses the bot, and closing the window or **Hand back** lets it continue. In Cua Spaces each Space is listed as `OpenMausBot: <bot name> (Linux|macOS)`, and the label follows when you rename the bot.
+
+A Space keeps its whole disk until you delete it; there is no mounted host folder. The first macOS Space downloads about 27 GB, and macOS allows two macOS virtual machines at a time. macOS Spaces also need **System Settings → Privacy & Security → Local Network** turned on for the Cua Spaces app, and for OpenMausBot to open a macOS Space's window.
+
+The idle timeout suspends a Linux Space or stops a macOS Space, preserving its files for the next turn. OpenMausBot restores idle timers for its already-running bot Spaces after a restart, even if you switched back to the container backend. Deleting a Space is different: Auto will not silently recreate it; explicitly create it again when you want it back. Deleting a bot also cleans its old per-bot container workspace and both OS Spaces, regardless of which backend is selected.
+
+Ownership is scoped to your OpenMausBot data directory. OpenMausBot records a Space before starting its creation and will not adopt, stop, relabel or delete a Space merely because its name matches. A name collision is shown as unmanaged; delete that Space in Cua or rename it before creating one here.
+
+For macOS Spaces, the viewer web origin is served inside the guest the bot controls. Its viewer window has clipboard, keyboard-lock and pointer-lock permissions, like the container noVNC viewer. Treat the guest and its viewer as bot-controlled content, not a trusted host application.
+
+```json
+{
+  "localVm": {
+    "backend": "cua-spaces",
+    "spacesOs": "linux"
+  }
+}
+```
+
+Cua Spaces is separate software under its own license; OpenMausBot does not include it and only calls the `cua` command you installed.

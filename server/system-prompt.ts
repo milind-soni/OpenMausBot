@@ -7,7 +7,7 @@
 // here too, so neither path can drift from the other or from the preview.
 import { soulSystemPrompt } from "./bot-folder.ts";
 import { teammateAvailabilityPrompt, type RosterMember } from "./peer-roster.ts";
-import type { ConnectorToolGrant } from "../shared/wire.ts";
+import type { ConnectorToolGrant, VmOs } from "../shared/wire.ts";
 
 export type PromptPart = { id: string; label: string; text: string };
 export type PromptSection = PromptPart & { bytes: number };
@@ -63,22 +63,25 @@ export function buildSystemPrompt(
 
 // The "box*" prompt kinds are Boat's historical kind literals; events and
 // persisted surfaces carry them, so only prose was renamed.
-export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent" | "vps" | "local";
+export type ComputerPromptKind = "vm-private" | "vm-shared" | "space-linux" | "space-macos" | "box" | "box-agent" | "vps" | "local";
 
 /** One ladder for the computer paragraph, so the settings preview, a direct
  * turn, and a room turn cannot disagree about which paragraph a computer plan
  * earns. Dispatch semantics are canonical: the mounts have already refused a
  * plan the engine cannot run, so the resolved kind alone decides here and no
  * capability gate is repeated. Call sites keep their own input resolution —
- * which computer, which driver — and pass the result in; `vmPrivate` keeps
- * this module pure (it is localVmMode(cfg) === "per-bot" at the call site). */
+ * which computer, which driver — and pass the result in; `vmPrivate` and
+ * `vmSpaceOs` keep this module pure (localVmMode(cfg) === "per-bot", and the
+ * Cua Space's OS or null on the container backend, at the call site). */
 export type ComputerPromptKindInput = {
   kind: "vm" | "box" | "vps" | "local" | null;
   driverKind: string | undefined;
   vmPrivate: boolean;
+  vmSpaceOs: VmOs | null;
 };
 
 export function resolveComputerPromptKind(input: ComputerPromptKindInput): ComputerPromptKind | null {
+  if (input.kind === "vm" && input.vmSpaceOs) return input.vmSpaceOs === "macos" ? "space-macos" : "space-linux";
   if (input.kind === "vm") return input.vmPrivate ? "vm-private" : "vm-shared";
   if (input.kind === "box") return input.driverKind === "boxAgent" ? "box-agent" : "box";
   if (input.kind === "vps") return "vps";
@@ -96,6 +99,10 @@ const COMPUTER_PARAGRAPH: Record<ComputerPromptKind, string> = {
     " You have your own isolated Cua sandbox: a Linux desktop in a container reserved for this bot. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Run every command with vm_exec, which returns the exit code and the output as text; do not type commands into a terminal window and read screenshots. Create files there with vm_exec too (a shell heredoc or a script it runs); your host file tools cannot reach the VM. To give the user a file you made there (a report, image, audio, video, spreadsheet or slides), call attach_file with its path once it is saved; it reports an error if the file is missing. A path inside the VM cannot be opened from chat, so do not paste one as a link. Use the computer tools for the desktop, accessibility and windows. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully.",
   "vm-shared":
     " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Run every command with vm_exec, which returns the exit code and the output as text; do not type commands into a terminal window and read screenshots. Create files there with vm_exec too (a shell heredoc or a script it runs); your host file tools cannot reach the VM. To give the user a file you made there (a report, image, audio, video, spreadsheet or slides), call attach_file with its path once it is saved; it reports an error if the file is missing. A path inside the VM cannot be opened from chat, so do not paste one as a link. Use the computer tools for the desktop, accessibility and windows. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully.",
+  "space-linux":
+    " You work in an isolated Cua Space on this machine: a Linux desktop whose whole disk persists until the Space is deleted, so keep downloads, repositories, working files, and browser profiles in your home folder. No host folder is mounted. Run every command with vm_exec, which returns the exit code and the output as text; do not type commands into a terminal window and read screenshots. Create files there with vm_exec too (a shell heredoc or a script it runs); your host file tools cannot reach the Space. To give the user a file you made there (a report, image, audio, video, spreadsheet or slides), call attach_file with its path once it is saved; it reports an error if the file is missing. A path inside the Space cannot be opened from chat, so do not paste one as a link. Use the computer tools (computer_screenshot, computer_click, computer_type, computer_key, the window and accessibility tools) for the desktop. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully.",
+  "space-macos":
+    " You work in an isolated Cua Space on this machine: a macOS virtual machine whose whole disk persists until the Space is deleted, so keep downloads, repositories and working files in your home folder. Safari and Google Chrome are installed; Homebrew and the developer tools are not. No host folder is mounted. Run every command with vm_exec, which returns the exit code and the output as text; do not type commands into Terminal and read screenshots. Create files there with vm_exec too (a shell heredoc or a script it runs); your host file tools cannot reach the Space. To give the user a file you made there (a report, image, audio, video, spreadsheet or slides), call attach_file with its path once it is saved; it reports an error if the file is missing. A path inside the Space cannot be opened from chat, so do not paste one as a link. Use the computer tools (computer_screenshot, computer_click, computer_type, computer_key, computer_hotkey, the window and accessibility tools) for the desktop; macOS shortcuts use the command key. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully.",
   box: " You control the assigned cloud computer. Inspect it with screenshots; click coordinates refer to the full image. Use the advertised computer tools for desktop actions and shell commands.",
   "box-agent": "",
   vps:

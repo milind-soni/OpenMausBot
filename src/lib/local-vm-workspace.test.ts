@@ -170,6 +170,23 @@ describe("Local VM workspace control", () => {
   });
 });
 
+describe("Cua Space workspace exclusion", () => {
+  it("never considers a Cua Space ready for a noVNC workspace", () => {
+    const status = {
+      backend: "cua-spaces",
+      container: "running",
+      ready: true,
+      desktopReady: true,
+      network: "loopback",
+      security: "hardened",
+      persistence: "durable",
+      viewer_url: "http://127.0.0.1/viewer",
+    };
+    expect(sanitizeLocalVmWorkspaceStatus(status).ready).toBe(false);
+    expect(readyLocalVmViewerUrl(status)).toBeNull();
+  });
+});
+
 describe("Local VM workspace status", () => {
   const ready = {
     mode: "per-bot",

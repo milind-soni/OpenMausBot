@@ -182,4 +182,33 @@ describe("AccessSection Works on", () => {
     fixture.config = { cloudHome: true } as Partial<ConfigStatus>;
     expect(places(render(makeBot()))).toEqual(["Auto", "Cloud", "Browser", "Off"]);
   });
+
+  it("offers a default and explicit Space OS for Local VM and Auto only", () => {
+    fixture.config = { localVm: { mode: "shared", maxInstances: 2, backend: "cua-spaces", spacesOs: "macos" } };
+    for (const computer of [undefined, "vm"] as const) {
+      const markup = render(makeBot({ computer }));
+      expect(markup).toContain('aria-label="Local VM OS"');
+      expect(markup).toContain("Default (macOS)");
+      expect(markup).toContain('value="macos" disabled=""');
+    }
+    expect(render(makeBot({ computer: "cloud" }))).not.toContain('aria-label="Local VM OS"');
+    fixture.config = { localVm: { mode: "shared", maxInstances: 2, backend: "container", spacesOs: "linux" } };
+    expect(render(makeBot({ computer: "vm" }))).not.toContain('aria-label="Local VM OS"');
+  });
+
+  it.each(["linux", "macos"] as const)("explains pool seats use default %s without an editable bot OS", (spacesOs) => {
+    fixture.config = { localVm: { mode: "pool", maxInstances: 2, backend: "cua-spaces", spacesOs } };
+    for (const computer of [undefined, "vm"] as const) {
+      const markup = render(makeBot({ computer, vmOs: spacesOs === "linux" ? "macos" : "linux" }));
+      expect(markup).not.toContain('aria-label="Local VM OS"');
+      expect(markup).toContain(`Pool seats use the default Space OS (${spacesOs === "macos" ? "macOS" : "Linux"})`);
+      expect(markup).toContain("OS override does not apply");
+    }
+  });
+
+  it.each(["shared", "per-bot"] as const)("keeps the %s OS selector disabled during a turn", (mode) => {
+    fixture.config = { localVm: { mode, maxInstances: 2, backend: "cua-spaces", spacesOs: "linux" } };
+    expect(render(makeBot({ computer: "vm", busy: true }))).toContain('aria-label="Local VM OS" disabled=""');
+    expect(render(makeBot({ computer: "vm" }))).not.toContain('aria-label="Local VM OS" disabled=""');
+  });
 });

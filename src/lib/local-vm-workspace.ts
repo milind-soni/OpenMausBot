@@ -166,6 +166,7 @@ export function reconcileLocalVmWorkspaceSlots(
 }
 
 const localVmStatusPayloadSchema = z.object({
+  backend: z.enum(["container", "cua-spaces"]).optional(),
   mode: z.enum(["shared", "per-bot", "pool"]).optional(),
   max_instances: z.number().int().positive().optional(),
   container: z.enum(["running", "stopped", "missing"]).optional(),
@@ -197,6 +198,7 @@ export function sanitizeLocalVmWorkspaceStatus(raw: JsonValue): LocalVmWorkspace
   const maxInstances = value?.max_instances ?? 0;
   const desktopReady = value?.desktopReady === true;
   const ready = Boolean(
+    value?.backend !== "cua-spaces" &&
     value?.ready === true &&
       container === "running" &&
       network === "loopback" &&

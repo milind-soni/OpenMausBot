@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
 import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
+import { openExternalLink } from "@/lib/app-links";
+import type { VmOs } from "../../shared/wire";
 import type { LocaleKey } from "@/locales";
 import {
   AlertTriangle,
@@ -17,7 +19,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-import { Card, CommandLine } from "./SettingsPrimitives";
+import { Card, CommandLine, Switch } from "./SettingsPrimitives";
 import { MacLocalControl } from "./MacLocalControl";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/state/store";
@@ -25,32 +27,36 @@ import { useStore } from "@/state/store";
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
 
 interface Status {
+  backend?: "container" | "cua-spaces";
+  os?: VmOs;
+  space_name?: string;
+  create_supported?: boolean;
   platform: string;
-  runtime: string | null;
-  available: string[];
-  daemonUp: boolean;
-  image: boolean;
-  imageMatches: boolean;
+  runtime?: string | null;
+  available?: string[];
+  daemonUp?: boolean;
+  image?: boolean;
+  imageMatches?: boolean;
   managed: boolean;
   container: "running" | "stopped" | "missing";
-  network: "loopback" | "unsafe" | "unknown";
-  security: "hardened" | "unsafe" | "unknown";
-  persistence: "durable" | "unsafe" | "unknown";
+  network?: "loopback" | "unsafe" | "unknown";
+  security?: "hardened" | "unsafe" | "unknown";
+  persistence?: "durable" | "unsafe" | "unknown";
   desktopReady: boolean;
   ready: boolean;
   problem: string | null;
   image_ref: string;
-  base_image_ref: string;
-  driver_version: string;
-  container_name: string;
-  workspace_path: string;
-  workspace_guest_path: string;
+  base_image_ref?: string;
+  driver_version?: string;
+  container_name?: string;
+  workspace_path?: string;
+  workspace_guest_path?: string;
   viewer_url: string;
   idle_timeout_ms: number;
   stop_reason?: "idle" | null;
   mode: "shared" | "per-bot" | "pool";
   max_instances: number;
-  commands: {
+  commands?: {
     install: string | null;
     runtimeStart: string | null;
     pull: string | null;
@@ -59,7 +65,105 @@ interface Status {
     stop: string | null;
     remove: string | null;
     view: string;
-  };
+  } | [];
+}
+
+export interface CuaSpacesAvailability {
+  installed: boolean;
+  version: string | null;
+  daemonUp: boolean;
+  macosSupported: boolean;
+  problem: string | null;
+  installUrl: string;
+}
+
+export function CuaSpacesSettings({
+  availability,
+  enabled,
+  os,
+  loading,
+  pending,
+  error,
+  onToggle,
+  onOsChange,
+  onCheck,
+}: {
+  availability: CuaSpacesAvailability | null;
+  enabled: boolean;
+  os: VmOs;
+  loading: boolean;
+  pending: boolean;
+  error: string | null;
+  onToggle: () => void;
+  onOsChange: (os: VmOs) => void;
+  onCheck: () => void;
+}) {
+  const usable = availability?.installed === true && availability.problem === null;
+  return (
+    <div className="mt-4 border-t border-hairline/40 pt-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-[14px] font-medium text-ink">{t("vm.cua.title")}</div>
+          <div className="mt-1 text-[13px] text-ink-secondary">{t("vm.cua.enable")}</div>
+        </div>
+        <Switch
+          checked={enabled}
+          disabled={pending || (!enabled && !usable)}
+          aria-label={t("vm.cua.enable")}
+          onClick={onToggle}
+        />
+      </div>
+      {loading && <p className="mt-2 text-[12px] text-ink-secondary">{t("common.checking")}</p>}
+      {availability?.installed && (
+        <p className="mt-2 text-[12px] text-ink-secondary">
+          {availability.version ? t("vm.cua.version", { version: availability.version }) : t("vm.cua.installed")}
+        </p>
+      )}
+      {availability?.installed && !availability.daemonUp && (
+        <p className="mt-1 text-[12px] text-ink-secondary">{t("vm.cua.appRunning")}</p>
+      )}
+      {!usable && availability && (
+        <>
+          <p className="mt-2 text-[12px] text-warning">{availability.problem ?? t("vm.cua.notInstalled")}</p>
+          <button
+            type="button"
+            onClick={() => void openExternalLink(availability.installUrl)}
+            className="mt-2 flex items-center gap-1.5 text-[13px] text-accent hover:underline"
+          >
+            <ExternalLink size={13} /> {t("vm.cua.install")}
+          </button>
+        </>
+      )}
+      <button
+        type="button"
+        onClick={onCheck}
+        disabled={loading || pending}
+        className="mt-2 flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control disabled:opacity-40"
+      >
+        <RefreshCw size={12} className={cn(loading && "animate-spin")} /> {t("vm.cua.checkAgain")}
+      </button>
+      {enabled && (
+        <div className="mt-3">
+          <label className="flex items-center justify-between gap-3 text-[13px] text-ink">
+            {t("vm.cua.defaultOs")}
+            <select
+              aria-label={t("vm.cua.defaultOs")}
+              value={os}
+              disabled={pending}
+              onChange={(event) => onOsChange(event.target.value === "macos" ? "macos" : "linux")}
+              className="rounded-lg border border-hairline/40 bg-control px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
+            >
+              <option value="linux">{t("vm.cua.os.linux")}</option>
+              <option value="macos" disabled={!availability?.macosSupported}>{t("vm.cua.os.macos")}</option>
+            </select>
+          </label>
+          {availability && !availability.macosSupported && <p className="mt-2 text-[12px] text-ink-secondary">{t("vm.cua.macosUnsupported")}</p>}
+          <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("vm.cua.macosNote")}</p>
+        </div>
+      )}
+      {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
 }
 
 export interface LocalVmInventoryInstance {
@@ -71,9 +175,11 @@ export interface LocalVmInventoryInstance {
   managed: boolean;
   problem: string | null;
   inUse: boolean;
+  os?: VmOs;
 }
 
 interface LocalVmInventoryPayload {
+  backend?: "container" | "cua-spaces";
   instances: LocalVmInventoryInstance[];
   maxInstances: number;
   available: boolean;
@@ -308,8 +414,10 @@ function jsonPostRequest(url: string, body: unknown): ComputerApiRequest {
 
 export function perBotLocalVmDeletePlan(instance: LocalVmInventoryInstance): ComputerActionPlan {
   return {
-    confirmation: t("vm.confirm.deleteBotVm", { name: instance.name }),
-    request: jsonPostRequest(`/api/bots/${instance.botId}/local-computer/remove`, {}),
+    confirmation: instance.os
+      ? t("vm.cua.confirmDeleteBot", { name: instance.name, os: t(instance.os === "macos" ? "vm.cua.os.macos" : "vm.cua.os.linux") })
+      : t("vm.confirm.deleteBotVm", { name: instance.name }),
+    request: jsonPostRequest(`/api/bots/${instance.botId}/local-computer/remove`, instance.os ? { os: instance.os } : {}),
   };
 }
 
@@ -643,6 +751,7 @@ export function LocalVmInventoryCard({
   deletingBotId,
   error,
   unavailableReason,
+  cua = false,
   onRefresh,
   onDelete,
 }: {
@@ -652,6 +761,7 @@ export function LocalVmInventoryCard({
   deletingBotId: string | null;
   error: string | null;
   unavailableReason: string | null;
+  cua?: boolean;
   onRefresh: () => void;
   onDelete: (instance: LocalVmInventoryInstance) => void;
 }) {
@@ -666,7 +776,7 @@ export function LocalVmInventoryCard({
     >
       <div className="flex items-center justify-between gap-3">
         <div className="text-[12px] text-ink-secondary">
-          {t("vm.perBot.deleteHint")}
+          {t(cua ? "vm.cua.deleteHint" : "vm.perBot.deleteHint")}
         </div>
         <button
           type="button"
@@ -707,11 +817,11 @@ export function LocalVmInventoryCard({
           <div className="px-3 py-4 text-[13px] text-ink-secondary">{t("vm.perBot.none")}</div>
         ) : instances.map((instance, index) => {
           const state = localVmInventoryState(instance);
-          const deleting = deletingBotId === instance.botId;
+          const deleting = deletingBotId === `${instance.botId}:${instance.os ?? ""}`;
           const managed = instance.managed === true;
           return (
             <div
-              key={instance.botId}
+              key={`${instance.botId}:${instance.os ?? ""}`}
               className={cn(
                 "flex items-start justify-between gap-3 px-3 py-3",
                 index > 0 && "border-t border-hairline/35",
@@ -720,6 +830,7 @@ export function LocalVmInventoryCard({
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="truncate text-[13.5px] font-medium text-ink">{instance.name}</span>
+                  {instance.os && <span className="rounded-full bg-control px-2 py-0.5 text-[11px] text-ink-secondary">{t(instance.os === "macos" ? "vm.cua.os.macos" : "vm.cua.os.linux")}</span>}
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-[11px]",
@@ -925,7 +1036,14 @@ export function LocalVmIdleTimeoutSetting({
 export function LocalComputerSection() {
   // An OMB Cloud home has no Local VM (shared/cloud-home.ts): it neither
   // checks for one nor explains how to set one up.
-  const cloudHome = useStore().state.config?.cloudHome === true;
+  const { state } = useStore();
+  const cloudHome = state.config?.cloudHome === true;
+  const cuaEnabled = state.config?.localVm?.backend === "cua-spaces";
+  const [cuaAvailability, setCuaAvailability] = useState<CuaSpacesAvailability | null>(null);
+  const [cuaLoading, setCuaLoading] = useState(true);
+  const [cuaPending, setCuaPending] = useState(false);
+  const [cuaError, setCuaError] = useState<string | null>(null);
+  const [cuaRefreshKey, setCuaRefreshKey] = useState(0);
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<Action | null>(null);
@@ -979,7 +1097,7 @@ export function LocalComputerSection() {
     const payload = body as LocalVmInventoryPayload;
     setInventory(payload.instances);
     setInventoryMax(payload.maxInstances);
-    setInventoryUnavailableReason(payload.available ? null : (payload.problem ?? t("vm.err.runtimeUnavailable")));
+    setInventoryUnavailableReason(payload.available ? null : (payload.problem ?? t(payload.backend === "cua-spaces" ? "vm.cua.inventoryUnavailable" : "vm.err.runtimeUnavailable")));
     setInventoryError(null);
   }, []);
 
@@ -1020,6 +1138,29 @@ export function LocalComputerSection() {
     );
     setVpsError(null);
   }, []);
+
+  useEffect(() => {
+    if (cloudHome) return;
+    const controller = new AbortController();
+    setCuaLoading(true);
+    void fetch("/api/local-computer/cua-spaces", { signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error ?? t("vm.cua.checkError"));
+        if (!controller.signal.aborted) {
+          setCuaAvailability(body);
+          setCuaError(null);
+        }
+      })
+      .catch((cause) => {
+        if (!controller.signal.aborted) {
+          setCuaAvailability(null);
+          setCuaError(cause instanceof Error ? cause.message : String(cause));
+        }
+      })
+      .finally(() => { if (!controller.signal.aborted) setCuaLoading(false); });
+    return () => controller.abort();
+  }, [cloudHome, cuaRefreshKey]);
 
   useEffect(() => {
     if (cloudHome) return;
@@ -1137,7 +1278,7 @@ export function LocalComputerSection() {
     setPending(action);
     setError(null);
     try {
-      if (action === "remove" && !(await confirmAction(t("vm.confirm.deleteShared")))) return;
+      if (action === "remove" && !(await confirmAction(t(cuaEnabled ? "vm.cua.confirmDeleteShared" : "vm.confirm.deleteShared")))) return;
       if (action === "recreate" && !(await confirmAction(t("vm.confirm.recreate")))) return;
       let result: Status;
       if (action === "recreate") {
@@ -1149,10 +1290,11 @@ export function LocalComputerSection() {
       if (action === "run" || action === "start" || action === "recreate") {
         result = await waitForLocalVmReady(
           result,
-          async () => (await refresh(controller.signal)) ?? result,
+          async (signal) => (await refresh(signal)) ?? result,
           controller.signal,
         );
-        if (!result.ready) throw new Error(result.problem ?? t("vm.err.start"));
+        setStatus(result);
+        if (!result.ready) throw new Error(result.problem ?? t(result.backend === "cua-spaces" ? "vm.err.readinessTimeout" : "vm.err.start"));
       }
       await refresh();
       setAnnouncement(
@@ -1191,6 +1333,27 @@ export function LocalComputerSection() {
     }
   };
 
+  const saveCua = async (localVm: { backend: "container" | "cua-spaces" } | { spacesOs: VmOs }) => {
+    if (cuaPending) return;
+    setCuaPending(true);
+    setCuaError(null);
+    try {
+      const response = await fetch("/api/config", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ localVm }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? t("vm.cua.saveError"));
+      await refresh();
+      setInventoryRefreshKey((key) => key + 1);
+    } catch (cause) {
+      setCuaError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setCuaPending(false);
+    }
+  };
+
   const saveIdleTimeout = async (idleTimeoutMinutes: number) => {
     const response = await fetch("/api/config", {
       method: "PATCH",
@@ -1212,7 +1375,7 @@ export function LocalComputerSection() {
       (message) => window.confirm(message),
     );
     if (!request) return;
-    setDeletingBotId(instance.botId);
+    setDeletingBotId(`${instance.botId}:${instance.os ?? ""}`);
     setInventoryError(null);
     try {
       const response = await fetch(...request);
@@ -1343,11 +1506,12 @@ export function LocalComputerSection() {
     }
   };
 
-  const c = status?.commands;
+  const cua = cuaEnabled || status?.backend === "cua-spaces";
+  const c = !cua && status?.commands && !Array.isArray(status.commands) ? status.commands : undefined;
   const ready = status?.ready === true;
   const existing = status?.container !== "missing";
   const needsRecreate = Boolean(
-    existing &&
+    !cua && existing &&
       (!status?.imageMatches ||
         !status?.managed ||
         status?.network === "unsafe" ||
@@ -1357,8 +1521,9 @@ export function LocalComputerSection() {
   const unavailable = !loading && !status;
   const host = status?.platform === "darwin" ? t("vm.host.mac") : t("vm.host.computer");
   const perBot = status?.mode === "per-bot";
+  const sharedSpaceMode = (state.config?.localVm?.mode ?? status?.mode ?? "shared") === "shared";
   const perBotRuntimeUnsupported = perBot && status?.runtime === "container";
-  const headerReady = perBot ? Boolean(status?.daemonUp && status?.image && !perBotRuntimeUnsupported) : ready;
+  const headerReady = cua ? perBot ? Boolean(cuaAvailability?.installed && cuaAvailability.problem === null && cuaAvailability.daemonUp) : ready : perBot ? Boolean(status?.daemonUp && status?.image && !perBotRuntimeUnsupported) : ready;
 
   return (
     <>
@@ -1392,9 +1557,11 @@ export function LocalComputerSection() {
       {!cloudHome && <>
       <Card
         title={t("vm.main.title")}
-        subtitle={perBot
-          ? t("vm.main.perBotSubtitle", { host })
-          : t("vm.main.sharedSubtitle", { host })}
+        subtitle={cua
+          ? t(perBot ? "vm.cua.perBotSubtitle" : "vm.cua.sharedSubtitle")
+          : perBot
+            ? t("vm.main.perBotSubtitle", { host })
+            : t("vm.main.sharedSubtitle", { host })}
       >
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -1428,7 +1595,7 @@ export function LocalComputerSection() {
           >
             <RefreshCw size={12} /> {t("vm.main.recheck")}
           </button>
-          {ready && !perBot && (
+          {ready && !perBot && !cua && (
             <a
               href={status?.viewer_url ?? c?.view}
               target="_blank"
@@ -1440,11 +1607,22 @@ export function LocalComputerSection() {
           )}
         </div>
         {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
+        <CuaSpacesSettings
+          availability={cuaAvailability}
+          enabled={cuaEnabled}
+          os={state.config?.localVm?.spacesOs ?? "linux"}
+          loading={cuaLoading}
+          pending={cuaPending}
+          error={cuaError}
+          onToggle={() => void saveCua({ backend: cuaEnabled ? "container" : "cua-spaces" })}
+          onOsChange={(spacesOs) => void saveCua({ spacesOs })}
+          onCheck={() => setCuaRefreshKey((key) => key + 1)}
+        />
       </Card>
 
       <Card
         title={t("vm.isolation.title")}
-        subtitle={t("vm.isolation.subtitle")}
+        subtitle={t(cua ? "vm.cua.isolationSubtitle" : "vm.isolation.subtitle")}
       >
         <div className="flex overflow-hidden rounded-lg border border-hairline/40">
           {(["shared", "per-bot"] as const).map((mode, index) => (
@@ -1468,7 +1646,7 @@ export function LocalComputerSection() {
           <div className="mt-3 flex items-center justify-between gap-3">
             <div>
               <div className="text-[13px] text-ink">{t("vm.isolation.max")}</div>
-              <div className="text-[11.5px] text-ink-secondary">{t("vm.isolation.maxDetail")}</div>
+              <div className="text-[11.5px] text-ink-secondary">{t(cua ? "vm.cua.maxDetail" : "vm.isolation.maxDetail")}</div>
             </div>
             <select
               aria-label={t("vm.isolation.maxAria")}
@@ -1489,6 +1667,21 @@ export function LocalComputerSection() {
         {policyPending && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-secondary"><Loader2 size={12} className="animate-spin" /> {t("vm.saving")}</div>}
       </Card>
 
+      {cua ? sharedSpaceMode && (
+        <Card title={t("vm.cua.sharedSpace")} subtitle={t("vm.cua.spaceStatus", {
+          os: t(status?.os === "macos" ? "vm.cua.os.macos" : "vm.cua.os.linux"),
+          name: status?.space_name ?? t("vm.cua.notCreated"),
+          state: t(status?.container === "running" ? "vm.state.running" : status?.container === "stopped" ? "vm.state.stopped" : "vm.cua.notCreated"),
+        })}>
+          {status?.problem && <p className="mb-3 text-[13px] text-warning">{status.problem}</p>}
+          <div className="flex flex-wrap gap-2">
+            {status?.container === "missing" && status.create_supported && <ActionButton action="run" pending={pending} onClick={() => void act("run")}>{t(pending === "run" ? "vm.cua.creating" : "vm.cua.create")}</ActionButton>}
+            {status?.managed && (status.container === "stopped" || (status.container === "running" && !status.ready)) && <ActionButton action="start" pending={pending} onClick={() => void act("start")}>{t(pending === "start" ? "vm.cua.starting" : "vm.cua.start")}</ActionButton>}
+            {status?.managed && status.container === "running" && <ActionButton action="stop" pending={pending} onClick={() => void act("stop")}><Square size={12} /> {t("vm.cua.stop")}</ActionButton>}
+            {status?.managed && status.container !== "missing" && <ActionButton action="remove" pending={pending} onClick={() => void act("remove")} danger><Trash2 size={12} /> {t("vm.cua.delete")}</ActionButton>}
+          </div>
+        </Card>
+      ) : (
       <Card title={t("vm.setup.title")} subtitle={t("vm.setup.subtitle")}>
         <div className="flex flex-col gap-4">
           <Step n={1} title={t("vm.setup.step1")} done={Boolean(status?.runtime)}>
@@ -1575,10 +1768,12 @@ export function LocalComputerSection() {
           </Step>
         </div>
       </Card>
+      )}
 
       {perBot && (
         <LocalVmInventoryCard
           instances={inventory}
+          cua={cua}
           maxInstances={inventoryMax || status?.max_instances || 2}
           loading={inventoryLoading}
           deletingBotId={deletingBotId}
@@ -1598,7 +1793,7 @@ export function LocalComputerSection() {
         </Card>
       )}
 
-      <Card
+      {!cua && <Card
         title={t("vm.safety.title")}
         subtitle={
           perBot
@@ -1626,7 +1821,7 @@ export function LocalComputerSection() {
           })}
           {status?.base_image_ref ? <> · {t("vm.safety.baseImage", { image: status.base_image_ref })}</> : null}
         </div>
-      </Card>
+      </Card>}
       </>}
     </>
   );

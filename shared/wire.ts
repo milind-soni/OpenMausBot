@@ -53,6 +53,10 @@ export interface ModelSelection {
 /** Which cloud computer backs computer: "cloud"; absent means Boat. */
 export type CloudBackend = "box" | "vps";
 
+/** The desktop OS of a Cua Spaces Local VM. Absent on a bot means the
+ * configured default (`localVm.spacesOs`). */
+export type VmOs = "linux" | "macos";
+
 /** A place a bot can act. cloud covers both cloud backends — from the
  * person's seat they are the same "cloud computer" panel. */
 export type Surface = "cloud" | "vm" | "local" | "browser";
@@ -280,6 +284,8 @@ export interface WireBot {
   cloudBackend?: CloudBackend;
   /** Auto mode may prepare/start this bot's managed VPS container. */
   autoStartVps?: boolean;
+  /** Cua Spaces backend only: this bot's Local VM OS; absent = the default. */
+  vmOs?: VmOs;
   /** where NEW tasks run their shell tools; absent = home folder. */
   cwd?: string;
   /** Auto mode: the bot approves its own tool permissions. */

@@ -160,6 +160,7 @@ describe("bot patch queue", () => {
           computer: patch.computer ?? undefined,
           connectorTools: patch.connectorTools ?? undefined,
           connectorScopes: patch.connectorScopes ?? undefined,
+          vmOs: patch.vmOs ?? undefined,
         });
       },
       reconcile: async () => bot(),
@@ -389,6 +390,24 @@ describe("bot patch queue", () => {
 
     expect(sent).toEqual([{ computer: null }]);
     expect(overlays).toEqual([{ computer: undefined }]);
+  });
+
+  it("sends null for the default Space OS and keeps vmOs absent in bot state", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        return bot();
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: vi.fn(),
+      onError: vi.fn(),
+    });
+    queue.enqueue("bot-1", { vmOs: null }, bot({ vmOs: "macos" }));
+    expect(queue.overlayFor("bot-1")).toEqual({ vmOs: undefined });
+    await vi.advanceTimersByTimeAsync(400);
+    await queue.flush("bot-1");
+    expect(sent).toEqual([{ vmOs: null }]);
   });
 
   it("sends null to drop a grants record but keeps bot state on the legacy boolean", async () => {

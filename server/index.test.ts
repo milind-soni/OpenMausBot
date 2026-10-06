@@ -1154,6 +1154,9 @@ beforeAll(async () => {
       OMB_PORT: String(PORT),
       OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
       OMB_EXTRA_PATH: fakeDockerDir,
+      // Cua Spaces are covered by cua-spaces-api.test.ts with a fake CLI; an
+      // empty override keeps this harness off a developer's real cua daemon.
+      OMB_CUA_CLI: "",
       OMB_BOX_API: `http://127.0.0.1:${boatStubPort}`,
       OMB_COMPOSIO_API: `http://127.0.0.1:${boatStubPort}/api/v3.1`,
       OMB_COMPOSIO_TOOLKITS_API: `http://127.0.0.1:${boatStubPort}/api/v3`,
@@ -9436,7 +9439,7 @@ describe("harness HTTP API", () => {
     const first = (await api("POST", "/api/bots")).body.bot;
     const second = (await api("POST", "/api/bots")).body.bot;
     const before = await api("GET", "/api/config");
-    expect(before.body.localVm).toEqual({ mode: "shared", maxInstances: 2, idleTimeoutMinutes: 480 });
+    expect(before.body.localVm).toEqual({ mode: "shared", maxInstances: 2, idleTimeoutMinutes: 480, backend: "container", spacesOs: "linux" });
 
     const shared = await api("GET", `/api/bots/${first.id}/local-computer`);
     expect(shared.status).toBe(200);
@@ -9446,7 +9449,7 @@ describe("harness HTTP API", () => {
       localVm: { mode: "per-bot", maxInstances: 5 },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480 });
+    expect(saved.body.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480, backend: "container", spacesOs: "linux" });
 
     const [firstStatus, secondStatus] = await Promise.all([
       api("GET", `/api/bots/${first.id}/local-computer`),
@@ -9486,7 +9489,7 @@ describe("harness HTTP API", () => {
     expect(invalid.body.error).toContain("localVm.maxInstances");
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-    expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480 });
+    expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480, backend: "container", spacesOs: "linux" });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
   });
 
@@ -9505,7 +9508,7 @@ describe("harness HTTP API", () => {
 
       const saved = await api("PATCH", "/api/config", { localVm: { idleTimeoutMinutes: 30 } });
       expect(saved.status).toBe(200);
-      expect(saved.body.localVm).toEqual({ mode: "shared", maxInstances: 2, idleTimeoutMinutes: 30 });
+      expect(saved.body.localVm).toEqual({ mode: "shared", maxInstances: 2, idleTimeoutMinutes: 30, backend: "container", spacesOs: "linux" });
       expect((await api("GET", "/api/config")).body.localVm.idleTimeoutMinutes).toBe(30);
       expect((await api("GET", "/api/local-computer")).body.idle_timeout_ms).toBe(30 * 60_000);
 

@@ -688,6 +688,10 @@ export class Store {
         delete b.autoStartVps;
         botsMigrated = true;
       }
+      if (b.vmOs !== undefined && b.vmOs !== "linux" && b.vmOs !== "macos") {
+        delete b.vmOs;
+        botsMigrated = true;
+      }
       if (b.managedSections !== undefined && (!b.chiefOfStaff || !Array.isArray(b.managedSections) ||
           b.managedSections.length > 100 || b.managedSections.some(section => typeof section !== "string" || section.length > 60))) {
         delete b.managedSections;

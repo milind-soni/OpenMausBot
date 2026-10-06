@@ -138,6 +138,10 @@ watching, takeover, input, and profile switching.
 The [Local VM resume fixture](local-vm-resume.md) checks idle stop, restart
 recovery, guarded resume and the stopped-to-ready Computer panel flow.
 
+The [Cua Spaces recipe](cua-spaces.md) checks the opt-in Cua Spaces Local VM
+backend: scripted CLI contract tests, then one disposable live Linux Space for
+creation, preview frames, viewer links, the turn's MCP mount and lifecycle.
+
 The [local computer launch regression](local-computer-launch.md) starts the
 host CUA gate through real Electron in a disposable home, without opening the
 desktop app or controlling the user's computer.

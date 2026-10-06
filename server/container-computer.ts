@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { DATA_DIR } from "./config.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import type { VmOs } from "../shared/wire.ts";
 
 const run = promisify(execFile);
 const SCREENSHOT_STATUS_TTL_MS = 10_000;
@@ -70,6 +71,11 @@ export interface LocalVmTarget {
    * targets let the runtime allocate a distinct ephemeral loopback port. */
   viewerPort: number | null;
   label: string;
+  /** Present when the Cua Spaces backend owns this desktop: the Space's
+   * derived name and OS (cua-spaces-computer.ts), and the display name Cua
+   * Spaces shows for it. Container fields stay the base identity so leases,
+   * seats and stop records keep one shape. */
+  space?: { name: string; os: VmOs; title?: string };
 }
 
 export const SHARED_LOCAL_VM_TARGET: LocalVmTarget = {
@@ -302,6 +308,7 @@ export async function containerRuntimeStatus(
 }
 
 export interface ContainerComputerStatus {
+  backend: "container";
   platform: NodeJS.Platform;
   runtime: Runtime | null;
   available: Runtime[];
@@ -336,6 +343,7 @@ export interface ContainerComputerStatus {
 
 function emptyStatus(platform: NodeJS.Platform, target: LocalVmTarget): ContainerComputerStatus {
   return {
+    backend: "container",
     platform,
     runtime: null,
     available: [],
@@ -1180,7 +1188,7 @@ export interface ContainerExecResult {
   timedOut: boolean;
 }
 
-type ContainerExecRunner = (
+export type ExecRunner = (
   command: string,
   args: string[],
   options: { timeout: number },
@@ -1197,7 +1205,7 @@ export function clipExecOutput(text: string, limit = EXEC_OUTPUT_LIMIT): string 
   return `${text.slice(0, head)}\n… ${text.length - limit} characters omitted …\n${text.slice(text.length - (limit - head))}`;
 }
 
-const defaultExecRunner: ContainerExecRunner = async (command, args, options) => {
+export const runExec: ExecRunner = async (command, args, options) => {
   const resolved = resolveCliSpawn(command, args);
   try {
     const { stdout, stderr } = await run(resolved.command, resolved.args, {
@@ -1218,6 +1226,17 @@ const defaultExecRunner: ContainerExecRunner = async (command, args, options) =>
   }
 };
 
+/** Validate a vm_exec request and clamp its limit, shared by both Local VM
+ * backends so a command means the same thing on a container and a Space. */
+export function checkedExecSeconds(command: string, timeoutSeconds: number | undefined): number {
+  if (!command.trim()) throw Object.assign(new Error("command is required"), { status: 400 });
+  if (command.length > 20_000) throw Object.assign(new Error("command is too long"), { status: 400 });
+  if (timeoutSeconds !== undefined && !Number.isFinite(timeoutSeconds)) {
+    throw Object.assign(new Error("timeout_seconds must be finite"), { status: 400 });
+  }
+  return Math.min(Math.max(Math.floor(timeoutSeconds ?? EXEC_DEFAULT_SECONDS), 1), EXEC_MAX_SECONDS);
+}
+
 /** Run one shell command inside a Local VM as the desktop user, in its durable
  * workspace, and return the exit code and text output. Bots use this instead of
  * typing into a terminal window and reading screenshots. The limit is enforced
@@ -1225,17 +1244,12 @@ const defaultExecRunner: ContainerExecRunner = async (command, args, options) =>
 export async function containerExec(
   target: LocalVmTarget,
   command: string,
-  options: { timeoutSeconds?: number; runtime?: Runtime; exec?: ContainerExecRunner } = {},
+  options: { timeoutSeconds?: number; runtime?: Runtime; exec?: ExecRunner } = {},
 ): Promise<ContainerExecResult> {
-  if (!command.trim()) throw Object.assign(new Error("command is required"), { status: 400 });
-  if (command.length > 20_000) throw Object.assign(new Error("command is too long"), { status: 400 });
-  if (options.timeoutSeconds !== undefined && !Number.isFinite(options.timeoutSeconds)) {
-    throw Object.assign(new Error("timeout_seconds must be finite"), { status: 400 });
-  }
+  const seconds = checkedExecSeconds(command, options.timeoutSeconds);
   const runtime = options.runtime ?? (await containerRuntimeStatus()).runtime;
   if (!runtime) throw Object.assign(new Error("No container runtime is available for the Local VM"), { status: 409 });
-  const seconds = Math.min(Math.max(Math.floor(options.timeoutSeconds ?? EXEC_DEFAULT_SECONDS), 1), EXEC_MAX_SECONDS);
-  const result = await (options.exec ?? defaultExecRunner)(
+  const result = await (options.exec ?? runExec)(
     runtime,
     [
       "exec",
@@ -1256,7 +1270,7 @@ export async function containerExec(
 /** Spawn contract handed directly to agent runtimes. The tiny host wrapper
  * only preserves stdio through the container CLI; Cua Driver owns the MCP
  * protocol and every computer tool. */
-type ContainerMcpLaunch = {
+export type LocalVmMcpLaunch = {
   command: string;
   args: string[];
   env: Record<string, string>;
@@ -1266,7 +1280,7 @@ export function containerComputerMcp(
   runtime: Runtime,
   control?: { url: string; token: string },
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
-): ContainerMcpLaunch {
+): LocalVmMcpLaunch {
   return {
     command: process.execPath,
     args: [containerMcpPath, runtime, target.containerName, CUA_SOCKET],

@@ -33,6 +33,7 @@ import {
 import { inputCls } from "./field";
 import type { ConnectorScope, ConnectorScopes } from "../../../shared/connector-scopes";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
+import type { CuaSpacesAvailability } from "../LocalComputerSection";
 
 /** Where a bot's shell tools run. Set per bot; each task pins its own copy
  * on its first turn (the server does the pinning — Claude keeps sessions
@@ -538,6 +539,26 @@ export function AccessSection({
   const browserInstallable = state.config?.browserEngine?.installable === true;
   const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
   const [inventory, setInventory] = useState<ConnectorInventory | null>(null);
+  const cua = state.config?.localVm?.backend === "cua-spaces";
+  const cuaPool = cua && state.config?.localVm?.mode === "pool";
+  const [cuaAvailability, setCuaAvailability] = useState<CuaSpacesAvailability | null>(null);
+  const [cuaAvailabilityError, setCuaAvailabilityError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!cua) return;
+    const controller = new AbortController();
+    void api("/api/local-computer/cua-spaces", { signal: controller.signal })
+      .then((availability: CuaSpacesAvailability) => {
+        if (!controller.signal.aborted) {
+          setCuaAvailability(availability);
+          setCuaAvailabilityError(null);
+        }
+      })
+      .catch((cause) => {
+        if (!controller.signal.aborted) setCuaAvailabilityError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => controller.abort();
+  }, [cua]);
 
   useEffect(() => {
     let cancelled = false;
@@ -607,6 +628,32 @@ export function AccessSection({
             </button>
           ))}
         </div>
+        {cua && (!bot.computer || bot.computer === "vm") && (
+          <div className="mt-3 rounded-lg bg-inset px-3 py-2.5">
+            {cuaPool ? (
+              <p className="text-[12px] text-ink-secondary">{t("vm.cua.poolOs", { os: t(state.config?.localVm?.spacesOs === "macos" ? "vm.cua.os.macos" : "vm.cua.os.linux") })}</p>
+            ) : (
+              <>
+                <label className="flex items-center justify-between gap-3 text-[13px] text-ink">
+                  {t("vm.cua.botOs")}
+                  <select
+                    aria-label={t("vm.cua.botOs")}
+                    value={bot.vmOs ?? "default"}
+                    disabled={bot.busy}
+                    onChange={(event) => patch({ vmOs: event.target.value === "default" ? null : event.target.value === "macos" ? "macos" : "linux" })}
+                    className="rounded-lg border border-hairline/40 bg-control px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
+                  >
+                    <option value="default">{t("vm.cua.os.default", { os: t(state.config?.localVm?.spacesOs === "macos" ? "vm.cua.os.macos" : "vm.cua.os.linux") })}</option>
+                    <option value="linux">{t("vm.cua.os.linux")}</option>
+                    <option value="macos" disabled={!cuaAvailability?.macosSupported}>{t("vm.cua.os.macos")}</option>
+                  </select>
+                </label>
+                {cuaAvailability && !cuaAvailability.macosSupported && <p className="mt-2 text-[12px] text-ink-secondary">{t("vm.cua.macosUnsupported")}</p>}
+                {cuaAvailabilityError && <p role="alert" className="mt-2 text-[12px] text-danger">{cuaAvailabilityError}</p>}
+              </>
+            )}
+          </div>
+        )}
         {bot.computer === "off" && (
           <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-ink-secondary">
             <span className="font-medium text-ink">Off means no screen.</span>{" "}
