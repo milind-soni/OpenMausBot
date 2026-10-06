@@ -237,7 +237,7 @@ it("a guest's request to a bot whose engine needs its shell is refused in one pl
   const guests = await guestThread(bot);
   const refused = await say(owner, bot, "Hello.", guests);
   expect(refused.status).toBe(409);
-  expect(refused.body.error).toBe("This conversation is from before your Cloud was only yours, and this bot's engine can't work in it. Start a new conversation.");
+  expect(refused.body.error).toBe("This conversation is from before My Cloud was only yours, and this bot's engine can't work in it. Start a new conversation.");
   // Nothing was recorded for the guest's words.
   expect(((await api("GET", `/api/threads/${guests}/messages`, { token: owner })).body.messages as any[]).filter((message) => message.role === "user")).toEqual([]);
   expect((await say(owner, bot, "Hello.", await ownThread(bot))).status).toBe(202);

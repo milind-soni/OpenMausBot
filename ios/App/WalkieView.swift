@@ -21,15 +21,16 @@ struct WalkieView: View {
     @State private var showingVoice = false
     @FocusState private var draftFocused: Bool
 
-    private var roster: [WalkieAgent] { session.state.walkieRoster }
     private var target: Bot? { session.state.bots.first { $0.id == targetId && $0.hidden != true } }
     private var targetName: String { target?.name ?? String(localized: "an agent") }
     private var reviewing: Bool { walkie.phase == .review || walkie.phase == .sending }
 
     var body: some View {
+        // Read once per render: the roster folds every bot's Updates line.
+        let roster = session.state.walkieRoster
         VStack(spacing: 14) {
             header
-            if roster.isEmpty { empty } else { agentList }
+            if roster.isEmpty { empty } else { agentList(roster) }
             liveCard
             keys
             if reviewing { reviewBar } else { talkBar }
@@ -53,7 +54,7 @@ struct WalkieView: View {
         }
         .onAppear {
             walkie.speaksReplies = speakReplies
-            if target == nil { targetId = roster.first?.bot.id ?? "" }
+            if target == nil { targetId = session.state.walkieRoster.first?.bot.id ?? "" }
             Task { await walkie.prepare() }
         }
         .onValueChange(of: scenePhase) { phase in
@@ -105,7 +106,7 @@ struct WalkieView: View {
 
     // MARK: - Agents
 
-    private var agentList: some View {
+    private func agentList(_ roster: [WalkieAgent]) -> some View {
         ScrollView {
             VStack(spacing: 4) {
                 ForEach(roster) { agent in
@@ -113,7 +114,9 @@ struct WalkieView: View {
                         Haptics.selection()
                         targetId = agent.bot.id
                     } label: {
+                        // Skipped unless its agent or the selection moved.
                         WalkieAgentRow(agent: agent, selected: agent.bot.id == targetId)
+                            .equatable()
                     }
                     .buttonStyle(.plain)
                 }
@@ -352,7 +355,7 @@ struct WalkieView: View {
 
 // MARK: - Pieces
 
-struct WalkieAgentRow: View {
+struct WalkieAgentRow: View, Equatable {
     let agent: WalkieAgent
     let selected: Bool
 

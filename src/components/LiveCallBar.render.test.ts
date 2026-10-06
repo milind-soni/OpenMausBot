@@ -2,7 +2,7 @@ import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Bot } from "@/state/store";
+import { BotEditorStore, initialState, StoreProvider, type AppState, type Bot } from "@/state/store";
 import { endCall } from "@/lib/call";
 import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 import { LiveCallBar } from "./LiveCallBar";
@@ -24,6 +24,13 @@ const bot: Bot = {
 
 const render = (element: ReturnType<typeof createElement>) =>
   renderToStaticMarkup(createElement(StoreProvider, null, element));
+/** Rendered by the person's own Cloud (its config answers `cloudHome`). */
+const renderOnCloud = (element: ReturnType<typeof createElement>) => {
+  const config = { cloudHome: true, live: { configured: true, voice: "marin", readTypedReplies: true, idleMinutes: 5 } } as AppState["config"];
+  const value = { state: { ...initialState, config }, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  return renderToStaticMarkup(createElement(BotEditorStore, { value, children: element }));
+};
+const CLOUD_DISCLOSURE = `A Live call sends your voice to OpenAI, along with the chat&#x27;s recent messages, the bot&#x27;s answers and the details of any approval it asks for. The OpenAI key stays on My Cloud.`;
 
 afterEach(() => {
   resetLiveMedia();
@@ -84,6 +91,25 @@ describe("LiveCallBar", () => {
     expect(markup).toMatch(/^<div role="region"[^>]* class="pointer-events-auto /);
   });
 
+  // A blocked microphone's notice carries one action: Open in browser where
+  // this app refused the page, Try again where the person can allow it.
+  it.each([
+    ["refused", "The app didn&#x27;t let this page use the microphone. Open it in your web browser to make the Live call.", "Open in browser", "Try again"],
+    ["allowed", "Allow microphone access for this app in your computer&#x27;s privacy settings, then try again.", "Try again", "Open in browser"],
+  ] as const)("shows a microphone the app %s with its one action", async (pageMic, text, action, other) => {
+    vi.stubGlobal("window", { ogb: { speechStop: vi.fn(async () => {}) } });
+    configureLiveMedia({
+      getUserMedia: async () => { throw new DOMException("denied", "NotAllowedError"); },
+      capabilities: () => ({ dictation: { available: false, engine: "none", onDevice: false, reasonCode: "remote-server" } }) as DesktopCapabilities,
+      pageMicrophone: async () => pageMic,
+    });
+    await startLiveCall({ botId: bot.id, threadId: bot.threadId });
+    const markup = render(createElement(LiveCallBar, { bot }));
+    expect(markup).toContain(text);
+    expect(markup).toContain(`aria-label="${action}"`);
+    expect(markup).not.toContain(`aria-label="${other}"`);
+  });
+
   it("names the keyboard chords on the mute and hang-up buttons", () => {
     vi.stubGlobal("window", { ogb: { platform: "darwin", speechStop: vi.fn(async () => {}) } });
     configureLiveMedia({ getUserMedia: () => new Promise<MediaStream>(() => {}) });
@@ -109,6 +135,12 @@ describe("LiveCallSettings", () => {
     // nothing to remove without a key
     expect(markup).not.toContain("Remove key");
     expect(markup).toMatch(/role="dialog" tabindex="-1"/);
+  });
+
+  it("says the key stays on the Cloud when the chat is on the person's Cloud", () => {
+    const markup = renderOnCloud(createElement(LiveCallSettings, { onClose: vi.fn() }));
+    expect(markup).toContain(CLOUD_DISCLOSURE);
+    expect(markup).not.toContain("stays on your computer");
   });
 
   it("takes focus when it opens, so Escape closes it", () => {
@@ -140,5 +172,12 @@ describe("LiveKeySetup", () => {
     expect(markup).toContain('aria-label="OpenAI API key for Live calls"');
     expect(markup).toContain("Save and start the call");
     expect(render(createElement(LiveKeySetup, { onSaved: vi.fn(), compact: true }))).toContain(">Save<");
+  });
+
+  // Pasted on the Cloud's page, the key is saved on the Cloud.
+  it("says the key stays on the Cloud when the chat is on the person's Cloud", () => {
+    const markup = renderOnCloud(createElement(LiveKeySetup, { onSaved: vi.fn() }));
+    expect(markup).toContain(CLOUD_DISCLOSURE);
+    expect(markup).not.toContain("stays on your computer");
   });
 });

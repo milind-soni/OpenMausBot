@@ -65,7 +65,7 @@ describe("computerPrompt", () => {
       "vm-private": "your own isolated Cua sandbox",
       "vm-shared": "shared, isolated Cua sandbox",
       box: "You control the assigned cloud computer",
-      vps: "This is a VPS, not Boat",
+      vps: "This is the user's own VPS",
       local: "act on the user's computer",
     };
     for (const [kind, distinct] of Object.entries(paragraphs)) {
@@ -277,16 +277,17 @@ describe("cloudHomePrompt", () => {
   it("says the bot runs in the cloud, offers what works there, and never asks for a place that cannot exist", () => {
     for (const tools of [true, false]) {
       const text = cloudHomePrompt(tools);
-      expect(text).toMatch(/^ You run on the user's OMB Cloud, a server in the cloud, not on their own computer\./);
-      expect(text).toContain("Offer what works here: the built-in browser and cloud computers.");
+      expect(text).toMatch(/^ You run on the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer\./);
+      expect(text).toContain("Offer what works here: the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does.");
+      expect(text).not.toMatch(/\bOMB\b|\bBoat\b|\bbox\b/);
       expect(text).toContain("Never ask them to set up this computer or a Local VM; neither exists here.");
       expect(text).not.toMatch(/Computer panel|container runtime|configure/i);
     }
   });
 
   it("points to a lent Mac only when the turn has the shared-computer tools", () => {
-    expect(cloudHomePrompt(true)).toContain("check list_shared_computers: a Mac they lend to their Cloud is reachable through shared_computer");
-    expect(cloudHomePrompt(true)).toContain("turn on Let my Cloud use this Mac under Settings → OMB Cloud in the desktop app on that Mac");
+    expect(cloudHomePrompt(true)).toContain("check list_shared_computers: a Mac they lend to My Cloud is reachable through shared_computer");
+    expect(cloudHomePrompt(true)).toContain("turn on Let My Cloud use this Mac under Settings → OpenMausBot Cloud in the desktop app on that Mac");
     expect(cloudHomePrompt(false)).not.toMatch(/shared_computer|list_shared_computers/);
     expect(cloudHomePrompt(false)).toContain("You cannot see or use their Mac or PC, its screen or its files from here.");
   });

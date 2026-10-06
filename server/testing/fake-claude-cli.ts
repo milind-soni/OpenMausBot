@@ -28,6 +28,12 @@
 //   FAKE_CLAUDE_EXIT_AFTER_TURN 1: the process exits once its turn is
 //                      answered, like a CLI that ended between turns, so
 //                      every later turn launches again (with --resume).
+//   FAKE_CLAUDE_GONE_AFTER_TURN path: once its turn is answered, the process
+//                      stops reading stdin, so a write to it fails (POSIX;
+//                      on Windows Node's stdin holds a duplicate handle, so
+//                      the write can still land), writes <path>.closed, and
+//                      exits once <path> exists — a CLI that ended between
+//                      turns before the driver saw it go.
 //   FAKE_CLAUDE_TEXT_FILE path whose contents are the one-shot text mode's
 //                      reply, read fresh each run so a suite sharing one
 //                      server can vary it per test. A missing file, or a body
@@ -120,7 +126,7 @@
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 
@@ -454,6 +460,14 @@ const finishIfDone = () => {
   if (startLateTurn()) return;
   if (stdinEnded) process.exit(0);
   if (process.env.FAKE_CLAUDE_EXIT_AFTER_TURN === "1") process.stdout.write("", () => process.exit(0));
+  const gone = process.env.FAKE_CLAUDE_GONE_AFTER_TURN;
+  if (gone) process.stdout.write("", () => {
+    // the read end itself: Node keeps fd 0 open through stdin.destroy()
+    process.stdin.pause();
+    closeSync(0);
+    writeFileSync(`${gone}.closed`, "closed");
+    setInterval(() => { if (existsSync(gone)) process.exit(0); }, 10);
+  });
 };
 
 const finishTurn = () => {

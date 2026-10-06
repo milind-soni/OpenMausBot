@@ -977,8 +977,9 @@ peers, ask, delegate, and read the status of its own delegations. Opening
 threads, creating bots or rooms, skills, memory and every other internal route
 answer 403. External mode advertises only `list_bots`, `ask_bot`, `delegate_bot`,
 `check_delegation` and `wait_delegation`. It can check a delegation from the
-same long-running process without inventing a turn end. The server still
-enforces peer access and approval settings. An idle source starts dispatch
+same long-running process without inventing a turn end, and a settled handoff
+never wakes the bot's own engine on that thread to answer it again. The server
+still enforces peer access and approval settings. An idle source starts dispatch
 immediately; a busy teammate is queued until available. Regular in-app turns
 keep their existing dispatch timing.
 

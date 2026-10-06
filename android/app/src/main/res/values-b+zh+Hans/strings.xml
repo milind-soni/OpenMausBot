@@ -154,6 +154,17 @@
     <string name="mobile_not_now_e4571490">暂不</string>
     <string name="mobile_ok_9ce3bd42">好</string>
     <string name="mobile_old_proposal_hint">此提案由较旧版本创建，无法安全激活。请拒绝此提案，并要求机器人重新创建。</string>
+    <string name="mobile_card_waiting_on_you">%1$s 正在等你处理</string>
+    <string name="mobile_card_send_to_app">发送到 %1$s？</string>
+    <string name="mobile_card_send_on_your_behalf">以你的名义发送？</string>
+    <string name="mobile_card_details">详情</string>
+    <string name="mobile_card_allowed">已允许</string>
+    <string name="mobile_card_denied">已拒绝</string>
+    <string name="mobile_card_no_longer_available">已不再可用</string>
+    <string name="mobile_card_remembered">已记住</string>
+    <string name="mobile_card_skipped">已跳过</string>
+    <string name="mobile_card_answered">已回答</string>
+    <string name="mobile_card_expired">已过期 — 请重新发起提案</string>
     <string name="mobile_on_this_network_4c9f524a">在此网络上</string>
     <string name="mobile_on_your_computer_9a621537">在你的电脑上</string>
     <string name="mobile_one_time_6fea9e4d">单次</string>
@@ -675,6 +686,7 @@
     <string name="mobile_chat_send_failed">无法发送此消息，请重试。</string>
     <string name="mobile_chat_opening_file">正在打开 %1$s…</string>
     <string name="mobile_chat_thread_update_failed">无法更新此对话，请重试。</string>
+    <string name="mobile_chat_typing">%1$s 正在输入</string>
     <string name="mobile_chat_attachment_unsupported">%1$s 不是受支持的附件格式。请尝试图片、PDF、文本、Word、Excel 或 PowerPoint 文件。</string>
     <string name="mobile_cloud_desktop_open_failed">无法打开云端桌面。</string>
     <string name="mobile_connected_apps_no_browser">此手机没有可用于打开授权页面的浏览器。</string>

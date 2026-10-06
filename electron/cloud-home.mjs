@@ -117,7 +117,7 @@ export function withCloudHome(state, machine, makeId) {
   return environments.withEnvironment(state, { origin: machine.origin, name: CLOUD_HOME_NAME }, makeId);
 }
 
-/** Where "Connect to my Cloud" opens: the machine's own pairing page with the
+/** Where "Open My Cloud" opens: the machine's own pairing page with the
  * one-time code in the hash (never a query), or the machine itself when this
  * app is already signed in there. `open` "phone" ("Use your Cloud on your
  * phone") adds the one fixed request `?desktop-settings=phone`: the Cloud

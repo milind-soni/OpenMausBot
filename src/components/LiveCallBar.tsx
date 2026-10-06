@@ -2,12 +2,13 @@
 // the person watches the bot work while they talk. The call itself (media)
 // lives app-wide in src/lib/live-call-media.ts; this is only its face.
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, PhoneOff, RotateCcw, Settings, X } from "lucide-react";
+import { ExternalLink, Mic, MicOff, PhoneOff, RotateCcw, Settings, X } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import { isMacPlatform } from "@/lib/keyboard-shortcuts";
 import {
-  dismissLiveNotice, hangUpLiveCall, isLiveCallRunning, liveCallChord, setLiveMuted, startLiveCall, useLiveMedia, type LiveMediaState,
+  dismissLiveNotice, hangUpLiveCall, isLiveCallRunning, liveCallChord, setLiveMuted, takeLiveCallAction, useLiveMedia,
+  type LiveCallAction, type LiveMediaState,
 } from "@/lib/live-call-media";
 import { api, liveCallFromFrame, nextLiveCallLookup, useStore, type Action, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -19,12 +20,14 @@ export type LiveCallBarView =
   | { kind: "local"; title: string; caption: string; heard: string; muted: boolean; ending: boolean; hint: string | null }
   /** a phone (or another window) holds this bot's call */
   | { kind: "remote"; title: string; callId: string }
-  | { kind: "notice"; text: string; retry: boolean };
+  /** `action`: the one thing that helps, if anything does */
+  | { kind: "notice"; text: string; action: LiveCallAction | null };
 
 const DEVICE_KEY = {
   ios: "call.live.device.ios",
   android: "call.live.device.android",
   desktop: "call.live.device.desktop",
+  web: "call.live.device.web",
 } as const satisfies Record<LiveClient, string>;
 
 function clock(ms: number): string {
@@ -41,7 +44,7 @@ export function liveCallBarView({ bot, media, server, now }: {
 }): LiveCallBarView | null {
   const here = media.botId === bot.id && media.threadId === bot.threadId;
   if (here && (media.phase === "failed" || media.phase === "ended") && media.notice) {
-    return { kind: "notice", text: media.notice, retry: media.phase === "failed" && media.canRetry };
+    return { kind: "notice", text: media.notice, action: media.phase === "failed" ? media.action : null };
   }
   if (here && isLiveCallRunning(media.phase)) {
     // the clock runs from the moment the call went live, also while it ends
@@ -139,17 +142,15 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
   const frame = "pointer-events-auto mx-5 mb-2 flex items-center rounded-xl border bg-panel px-3 py-2 text-[12.5px] text-ink";
 
   if (view.kind === "notice") {
+    const action = view.action === "open-in-browser"
+      ? { label: t("call.live.openInBrowser"), Icon: ExternalLink }
+      : view.action === "retry" ? { label: t("call.live.tryAgain"), Icon: RotateCcw } : null;
     return (
       <div role="status" className={cn(frame, "gap-2 border-hairline/60")}>
         <span className="min-w-0 flex-1 truncate" title={view.text}>{view.text}</span>
-        {view.retry && (
-          <button
-            type="button"
-            aria-label={t("call.live.tryAgain")}
-            className={cn(button, "bg-raised hover:bg-raised-hover")}
-            onClick={() => void startLiveCall({ botId: bot.id, threadId: bot.threadId })}
-          >
-            <RotateCcw className="size-3.5" /> <span className="hidden sm:inline">{t("call.live.tryAgain")}</span>
+        {action && (
+          <button type="button" aria-label={action.label} className={cn(button, "bg-raised hover:bg-raised-hover")} onClick={takeLiveCallAction}>
+            <action.Icon className="size-3.5" /> <span className="hidden sm:inline">{action.label}</span>
           </button>
         )}
         <button type="button" aria-label={t("call.live.close")} className={cn(button, "text-ink-secondary hover:text-ink")} onClick={dismissLiveNotice}>

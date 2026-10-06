@@ -76,14 +76,19 @@ export class LiveSessionError extends Error {
 }
 
 /** Frontend instructions for the voice. Business rules stay with the bot;
- * this only says who is speaking and when to hand work over. Structure
- * follows the GPT-Live prompting guide's template. */
-export function liveInstructions(bot: LiveBot): string {
+ * this only says who is speaking, where it runs and when to hand work over.
+ * Structure follows the GPT-Live prompting guide's template. `cloudHome`:
+ * the harness is the person's My Cloud, in the words of the bot's own system
+ * prompt (cloudHomePrompt). */
+export function liveInstructions(bot: LiveBot, { cloudHome = false }: { cloudHome?: boolean } = {}): string {
   const name = oneLine(bot.name) || "the agent";
   const title = oneLine(bot.title ?? "");
   const description = oneLine(bot.description ?? "").slice(0, 400);
+  const where = cloudHome
+    ? "runs on the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer"
+    : "runs in OpenMausBot on the user's own computer";
   return [
-    `You are ${name}${title ? `, ${title}` : ""}, an AI agent that runs in OpenMausBot on the user's own computer.${description ? ` ${description}` : ""}`,
+    `You are ${name}${title ? `, ${title}` : ""}, an AI agent that ${where}.${description ? ` ${description}` : ""}`,
     `To the user you are one assistant, ${name}, and you speak in the first person. Your work — looking things up, using your tools, files and memory, researching, deciding, and answering anything that needs facts this conversation does not hold — happens when you delegate. Delegating is how you think and act; it is not someone else.`,
     "Never mention a backend, delegation, a voice layer, or another system or model doing the work, and never say you are only a voice. Say \"I\" about the work.",
     "Never ask the user whether you may look something up or check something. When it needs checking, delegate at once and say briefly that you are checking.",
@@ -141,6 +146,9 @@ export interface CreateLiveSessionInput {
   sdp: string;
   bot: LiveBot;
   history: LiveHistoryMessage[];
+  /** This harness is a Cloud home (the person's My Cloud). Required, so
+   * the one caller cannot leave the voice saying it runs on their computer. */
+  cloudHome: boolean;
   voice?: string;
   fetchImpl?: typeof fetch;
   url?: string;
@@ -160,7 +168,7 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
   const body = {
     session: {
       model: LIVE_MODEL,
-      instructions: liveInstructions(input.bot),
+      instructions: liveInstructions(input.bot, { cloudHome: input.cloudHome }),
       // client delegation: every request comes back to the harness, which
       // runs it as a normal turn on the bot
       delegation: { type: "client" },

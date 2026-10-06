@@ -30,6 +30,7 @@ describe("createLiveSession", () => {
       bot: BOT,
       history: [{ role: "user", text: "Check the release notes" }, { role: "assistant", text: "Done: two fixes." }],
       voice: "cedar",
+      cloudHome: false,
       fetchImpl,
     });
     expect(result).toEqual({ sessionId: "live_123", sdp: "v=0 answer" });
@@ -53,9 +54,19 @@ describe("createLiveSession", () => {
     expect(String(init?.body)).not.toContain("sk-live-secret");
   });
 
+  it("tells the voice where it runs: the user's own computer, or their My Cloud", async () => {
+    const fetchImpl = okFetch();
+    await createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: true, fetchImpl });
+    await createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl });
+    const [cloud, computer] = fetchImpl.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).session.instructions as string);
+    expect(cloud).toContain("runs on the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer.");
+    expect(computer).toContain("runs in OpenMausBot on the user's own computer.");
+    expect(computer).not.toContain("My Cloud");
+  });
+
   it("falls back to the default voice and omits empty history", async () => {
     const fetchImpl = okFetch();
-    await createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], voice: "not a voice!", fetchImpl });
+    await createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, voice: "not a voice!", fetchImpl });
     const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
     expect(body.session.audio.output.voice).toBe(DEFAULT_LIVE_VOICE);
     expect(body.session).not.toHaveProperty("input");
@@ -63,22 +74,22 @@ describe("createLiveSession", () => {
 
   it("passes an unlisted but well-formed voice name through for OpenAI to judge", async () => {
     const fetchImpl = okFetch();
-    await createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], voice: " Sol ", fetchImpl });
+    await createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, voice: " Sol ", fetchImpl });
     expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body)).session.audio.output.voice).toBe("sol");
   });
 
   it("refuses without a key or with a bad offer before calling OpenAI", async () => {
     const fetchImpl = okFetch();
-    await expect(createLiveSession({ key: " ", sdp: OFFER, bot: BOT, history: [], fetchImpl })).rejects.toMatchObject({ status: 409 });
-    await expect(createLiveSession({ key: "k", sdp: " ", bot: BOT, history: [], fetchImpl })).rejects.toMatchObject({ status: 400 });
-    await expect(createLiveSession({ key: "k", sdp: "x".repeat(MAX_SDP_BYTES + 1), bot: BOT, history: [], fetchImpl })).rejects.toMatchObject({ status: 400 });
+    await expect(createLiveSession({ key: " ", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl })).rejects.toMatchObject({ status: 409 });
+    await expect(createLiveSession({ key: "k", sdp: " ", bot: BOT, history: [], cloudHome: false, fetchImpl })).rejects.toMatchObject({ status: 400 });
+    await expect(createLiveSession({ key: "k", sdp: "x".repeat(MAX_SDP_BYTES + 1), bot: BOT, history: [], cloudHome: false, fetchImpl })).rejects.toMatchObject({ status: 400 });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("turns OpenAI refusals into plain messages without echoing the body", async () => {
     const refuse = (status: number) => vi.fn(async () => new Response(JSON.stringify({ error: { message: "sk-live-secret is invalid" } }), { status }));
     for (const [status, text, returned] of [[400, "rejected the call settings", 502], [401, "rejected the API key", 502], [403, "no access to GPT-Live", 502], [429, "limiting Live sessions", 429], [500, "had a problem", 502]] as const) {
-      const error = await createLiveSession({ key: "sk-live-secret", sdp: OFFER, bot: BOT, history: [], fetchImpl: refuse(status) }).catch((e) => e);
+      const error = await createLiveSession({ key: "sk-live-secret", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl: refuse(status) }).catch((e) => e);
       expect(error).toBeInstanceOf(LiveSessionError);
       expect(error.status).toBe(returned);
       expect(error.message).toContain(text);
@@ -88,9 +99,9 @@ describe("createLiveSession", () => {
 
   it("reports network failures and malformed answers", async () => {
     const offline = vi.fn(async () => { throw new TypeError("fetch failed"); });
-    await expect(createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], fetchImpl: offline })).rejects.toMatchObject({ status: 502, message: expect.stringContaining("Could not reach OpenAI") });
+    await expect(createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl: offline })).rejects.toMatchObject({ status: 502, message: expect.stringContaining("Could not reach OpenAI") });
     const odd = vi.fn(async () => new Response(JSON.stringify({ session: {} }), { status: 201 }));
-    await expect(createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], fetchImpl: odd })).rejects.toMatchObject({ status: 502, message: expect.stringContaining("unexpected answer") });
+    await expect(createLiveSession({ key: "k", sdp: OFFER, bot: BOT, history: [], cloudHome: false, fetchImpl: odd })).rejects.toMatchObject({ status: 502, message: expect.stringContaining("unexpected answer") });
   });
 });
 
@@ -109,6 +120,15 @@ describe("live startup context", () => {
     const text = liveInstructions({ name: "  Rigel\n", title: "QA", description: "Line one\nline two" });
     expect(text.split("\n")[0]).toBe("You are Rigel, QA, an AI agent that runs in OpenMausBot on the user's own computer. Line one line two");
     expect(text).toContain("Never answer it yourself.");
+  });
+
+  // On a Cloud the harness is a server in the cloud: a voice that says it
+  // runs on the person's own computer offers what it cannot reach.
+  it("on a Cloud, says the voice runs on the user's My Cloud, not their own computer", () => {
+    const text = liveInstructions({ name: "Rigel", title: "QA" }, { cloudHome: true });
+    expect(text.split("\n")[0]).toBe("You are Rigel, QA, an AI agent that runs on the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer.");
+    expect(text).not.toContain("OMB");
+    expect(liveInstructions({ name: "Rigel" }, { cloudHome: false }).split("\n")[0]).toBe("You are Rigel, an AI agent that runs in OpenMausBot on the user's own computer.");
   });
 
   it("tells the voice to answer 'is it still working?' from the status notes, not by delegating", () => {
@@ -153,7 +173,7 @@ describe("live call summary line", () => {
 describe("session config for the untrusted client", () => {
   it("lets the client data channel send only session.close and receive captions", async () => {
     const fetchImpl = okFetch();
-    await createLiveSession({ key: "sk-test", sdp: "v=0\r\n", bot: { name: "Ada" } as never, history: [], fetchImpl });
+    await createLiveSession({ key: "sk-test", sdp: "v=0\r\n", bot: { name: "Ada" } as never, history: [], cloudHome: false, fetchImpl });
     const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
     expect(body.session.client).toEqual({
       data_channel: {

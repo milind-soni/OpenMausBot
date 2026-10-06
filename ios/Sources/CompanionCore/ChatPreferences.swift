@@ -185,11 +185,11 @@ func previewText(of message: Message) -> String {
         if let text = message.text, !text.isEmpty { return text }
         // A bot that only sent a file says so by its name.
         return message.attachedFiles.first?.name ?? ""
-    // a pending card's question is the preview; the roster row already
-    // says "waiting on you" beside it
+    // a pending card's question is the preview, in its short form; the
+    // roster row already says "waiting on you" beside it
     case .options:
         guard let card = message.card else { return "" }
-        return card.isPending && !card.subtitle.isEmpty ? card.subtitle : card.title
+        return card.isPending ? card.previewLine : card.headline
     case .secret:
         return message.secret?.label ?? message.text ?? "Credential required"
     case .activity: return message.tool?.label ?? ""
@@ -324,6 +324,7 @@ public func transcriptRows(_ messages: [Message], detail: ActivityDetail) -> [Tr
             continue
         }
         if hiddenIDs.contains(message.id) { continue }
+        if detail != .full, message.card?.leavesTranscriptWhenSettled == true { continue }
         if detail == .hidden && isActivityReceipt(message) && !isStatusNotice(message) && !isFailedTurn(message) { continue }
         // A turn that touched nothing leaves a digest with nothing to show;
         // an empty row would still cost the transcript a gap.

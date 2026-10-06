@@ -306,8 +306,8 @@ describe("Where the bot works", () => {
     const card = rendered.nodes.find((node) => node.props["data-testid"] === "where-works")!;
     expect(rendered.html).toContain("Where Scout works");
     expect(nodes(card.props.children).find((node) => node.props.role === "group")!.props.className).toContain("grid-cols-3");
-    expect(grid(rendered).map((node) => text(node.props.children))).toEqual(["Auto", "Cloud box", "Local VM", "This Mac", "Browser", "Off"]);
-    expect(rendered.html).toContain("Auto picks the cloud box, local VM, this Mac or just the browser for each task.");
+    expect(grid(rendered).map((node) => text(node.props.children))).toEqual(["Auto", "Cloud computer", "Local VM", "This Mac", "Browser", "Off"]);
+    expect(rendered.html).toContain("Auto picks the cloud computer, Local VM, this Mac or just the browser for each task.");
   });
 
   it("says This PC off a Mac", () => {
@@ -364,7 +364,7 @@ describe("A chat pinned to a place", () => {
     text(rendered.nodes.find((node) => node.props["data-testid"] === "place-pinned-note")!.props.children);
 
   it("names the place in the grid's words, without pointing Simple at a composer chip it no longer has", () => {
-    expect(note(render(pinned()))).toBe("This chat is pinned to “Cloud box”.");
+    expect(note(render(pinned()))).toBe("This chat is pinned to “Cloud computer”.");
 
     fixture.advanced = true;
     fixture.values = [];

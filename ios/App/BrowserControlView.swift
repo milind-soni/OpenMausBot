@@ -11,6 +11,12 @@ import UIKit
 @MainActor
 final class BrowserControlModel: ObservableObject {
     @Published var frame: BrowserFrame?
+    /// `frame`, decoded once when it arrives. The view used to decode it in
+    /// `body`, so every render — each Session publish, and each cursor or
+    /// zoom change while dragging — made a new `UIImage` and decoded the
+    /// JPEG again. Always set together with `frame`, so the image on screen
+    /// and the size `drawnSize` maps touches through describe one frame.
+    @Published private(set) var image: UIImage?
     @Published var status = BrowserStatus(connected: false, screencasting: false, viewportWidth: 1280, viewportHeight: 720)
     @Published var url = ""
     @Published var driving = false
@@ -48,6 +54,7 @@ final class BrowserControlModel: ObservableObject {
         queue = nil
         driving = false
         frame = nil
+        image = nil
         status = BrowserStatus(connected: false, screencasting: false, viewportWidth: 1280, viewportHeight: 720)
         sink = BrowserLiveSink()
         generation += 1
@@ -124,7 +131,14 @@ final class BrowserControlModel: ObservableObject {
     private func apply(_ message: BrowserLiveMessage) async {
         switch message {
         case let .frame(frame):
+            // Decoded off the main actor. The stream waits for this before
+            // reading on, so frames still land in order, and the ack below
+            // still follows the frame being shown.
+            let current = generation
+            let image = await Self.decode(frame).map { UIImage(cgImage: $0.cgImage) }
+            guard current == generation else { return }
             self.frame = frame
+            self.image = image
             sink.frameWidth = frame.deviceWidth
             sink.frameHeight = frame.deviceHeight
             await acknowledgements?.enqueue(frame.seq)
@@ -151,6 +165,15 @@ final class BrowserControlModel: ObservableObject {
         case let .error(message):
             failure = message
         }
+    }
+
+    /// Full size: the frame is drawn across the whole screen, so there is
+    /// nothing to downsample; the win is decoding it once, not per render.
+    private nonisolated static func decode(_ frame: BrowserFrame) async -> DecodedImage? {
+        let data = frame.data
+        return await Task.detached(priority: .userInitiated) {
+            ImageDownsampler.decode(base64: data)
+        }.value
     }
 
     private func makeQueue(viewerId: String) {
@@ -342,7 +365,7 @@ struct BrowserControlView: View {
     private var screen: some View {
         GeometryReader { proxy in
             ZStack {
-                if let image = model.frame?.bytes.flatMap(UIImage.init(data:)) {
+                if let image = model.image {
                     // Measured against the drawn frame, not the view. The
                     // gesture core maps coordinates through the same aspect
                     // fit, and on a letterboxed frame the two differ enough

@@ -16,7 +16,7 @@ import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type Cha
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval } from "./chat-tool-approval.ts";
-import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, MAX_CHAT_TOOL_CALLS, object, type ChatToolCall } from "./openai-chat-protocol.ts";
+import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 
@@ -124,6 +124,17 @@ const asError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
 
 class UnsupportedChatToolsError extends Error {}
+
+/** One turn's safety stops: model steps, and tool calls across all of them.
+ * Tool-heavy models (a memory server, a browser) take dozens of steps, and
+ * a stopped turn cannot simply be continued — the next turn is rebuilt from
+ * the text transcript, which holds none of these tool results. The calls
+ * that ran have taken effect, so the stop asks only for what is left: a
+ * retry of the whole task would repeat them. */
+const MAX_CHAT_ROUNDS = 64;
+const MAX_TURN_TOOL_CALLS = 200;
+const stoppedAfter = (count: string) =>
+  `Stopped after ${count} without a final answer. The steps so far already ran, so ask only for what's left.`;
 
 const NUDGE_ANNOUNCED_ACTION = "You said what you would do next but called no tool. Do it now with your tools, or reply with your final answer if nothing is left to do.";
 
@@ -495,7 +506,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (questionAllowed && !tools.definitions.some((definition) => definition.function.name === ASK_USER_TOOL)) {
           tools.definitions.push(ASK_USER_TOOL_DEFINITION);
         }
-        for (let round = 0; round < 16; round++) {
+        for (let round = 0; round < MAX_CHAT_ROUNDS; round++) {
           abort.signal.throwIfAborted();
           // Drain parked mid-turn input here, before the next completion
           // request: the previous round's tool results are complete, so a
@@ -598,7 +609,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             if (seenCalls.has(call.id)) throw new ChatProtocolError("provider reused a tool-call ID; refusing to repeat an operation");
             seenCalls.add(call.id);
           }
-          if (seenCalls.size > MAX_CHAT_TOOL_CALLS) throw new ChatProtocolError("tool-call limit reached");
+          // The whole batch is refused before any of it runs.
+          if (seenCalls.size > MAX_TURN_TOOL_CALLS) throw new ChatProtocolError(stoppedAfter(`${MAX_TURN_TOOL_CALLS} tool calls`));
           messages.push({ role: "assistant", content: completion.text || null, tool_calls: completion.toolCalls,
             ...(completion.protocolReasoning && !reasoningReplayRejected.has(model) ? { [options.reasoningReplayField ?? "reasoning_content"]: completion.protocolReasoning } : {}),
             ...(completion.protocolReasoningDetails.length ? { reasoning_details: completion.protocolReasoningDetails } : {}),
@@ -693,7 +705,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           if (screenshotParts.length) messages.push({ role: "user", content: screenshotParts });
         }
-        if (!ok) throw new ChatProtocolError("model-call limit reached before a final response");
+        if (!ok) throw new ChatProtocolError(stoppedAfter(`${MAX_CHAT_ROUNDS} steps`));
       } catch (value) {
         stopReason = abort.signal.aborted ? "interrupted" : stopReason ?? "error";
         failure = safeText(asError(value).message).slice(0, 2_000);

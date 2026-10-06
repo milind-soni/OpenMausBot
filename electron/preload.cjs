@@ -40,9 +40,11 @@ const isLocalPage = !localOrigin || location.origin === localOrigin;
 // its Settings → Backups); its Copy opens this computer's Settings on that
 // server's copy, except on the person's own verified Cloud. cloudLending and
 // cloudPlan: only that verified Cloud (its setup checklist, its plan line).
+// updater: this app's updates, answered on that verified Cloud too, so the
+// person sees "Restart to update" there; a remote page restarts only on a click.
 /** A saved server's id, forwarded only from this computer's own page. */
 const savedServer = id => isLocalPage && typeof id === "string" && /^[\w-]{1,64}$/.test(id) ? [id] : [];
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan", "updater"]);
 
 // Sandboxed preload cannot import TS or sibling modules. Keep this list in
 // parity with shared/workspace-backup-client.ts (covered by the preload test).
@@ -264,14 +266,15 @@ const bridge = {
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 
-  /** In-app auto-update. State object:
-   *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",
+  /** In-app auto-update. Updates download by themselves; install is the
+   *  person's "Restart to update". State object:
+   *  { status: "idle"|"checking"|"downloading"|"preparing"|"downloaded"|"installing"|"handed-off"|"error",
    *    version?, percent?, message? }. onState fires immediately with the
    *    current state, then on every transition. Dormant in dev (no bridge). */
   updater: {
     check: () => ipcRenderer.invoke("update:check"),
-    download: () => ipcRenderer.invoke("update:download"),
-    install: () => ipcRenderer.invoke("update:install"),
+    install: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("update:install") : Promise.reject(new Error("Choose Restart to update.")),
     onState: (cb) => {
       ipcRenderer
         .invoke("update:get-state")
@@ -349,12 +352,12 @@ const bridge = {
     open: () => ipcRenderer.invoke("cloud-lending:open"),
   } : undefined,
   /** The plan, read only, in Settings on the person's own Cloud: its name and
-   * whether it is active, Manage (the Cloud dashboard in the browser) and
+   * whether it is active, Manage (the Plan page in the browser) and
    * back to this computer. No arguments; a remote page acts only on a click. */
   cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-plan:state"),
     manage: () => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("cloud-plan:manage") : Promise.reject(new Error("Choose Manage to open your Cloud dashboard.")),
+      ? ipcRenderer.invoke("cloud-plan:manage") : Promise.reject(new Error("Choose Manage to open your Plan page.")),
     useThisComputer: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-plan:local") : Promise.reject(new Error("Choose Use this computer to switch.")),
   } : undefined,

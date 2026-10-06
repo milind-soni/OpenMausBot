@@ -206,6 +206,7 @@ class DecodingTest {
         assertEquals("deny", card.responseBehavior(" \tdeny \r\n"))
         assertEquals("deny", card.responseBehavior("Cancel"))
         assertEquals("deny", card.responseBehavior("Dismiss"))
+        assertEquals("deny", card.responseBehavior("Skip"), "team memory's refusal")
         assertTrue(OptionCard.isRefusal("\nDeNy\t"))
         assertTrue(card.shouldRememberPermission(" \nAlways allow\t"))
         assertFalse(card.shouldRememberPermission("Allow"))

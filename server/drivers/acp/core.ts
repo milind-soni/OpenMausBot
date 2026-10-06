@@ -322,8 +322,15 @@ export interface AcpSupport {
    * sends no prompt and discards the process (see approvalUnconfirmed). */
   sessionScopedApproval?: boolean;
   /** Mutate the child env in place: strip a key, inject a policy. Receives the
-   *  instance config so a support can vary with fullAuto. */
-  transformEnv?(env: Record<string, string | undefined>, config: AcpConfig, instanceId: string): void;
+   *  instance config so a support can vary with fullAuto, and the instance
+   *  environment so it can tell a key the server put there on purpose from
+   *  one riding along in the server's own env. */
+  transformEnv?(
+    env: Record<string, string | undefined>,
+    config: AcpConfig,
+    instanceId: string,
+    instanceEnvironment: Readonly<Record<string, string>>,
+  ): void;
   /** Resolve a managed or account-scoped executable just before use. */
   resolveCommand?(
     env: Record<string, string | undefined>,
@@ -674,7 +681,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         // The operator's own secrets are outside any driver's allowlist.
         stripControlPlaneEnv(env);
-        support.transformEnv?.(env, activeConfig, instanceId);
+        support.transformEnv?.(env, activeConfig, instanceId, input.environment);
         return env;
       };
       let models = support.models;

@@ -43,7 +43,7 @@ export function CloudEngineSignIn() {
       <div className="mx-auto w-full max-w-[560px] px-6 py-12">
         <h1 className="text-[20px] font-semibold text-ink">{t("cloudSignIn.title")}</h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-secondary">{t("cloudSignIn.intro")}</p>
-        <p role="note" className="mt-3 rounded-lg bg-warning/10 px-3 py-2 text-[12.5px] leading-relaxed text-ink">{t("cloudSignIn.limits")}</p>
+        <p role="note" className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudSignIn.limits")}</p>
 
         <div className="mt-5 divide-y divide-hairline/40 rounded-xl border border-hairline/40 bg-card">
           {choices.map((choice) => {

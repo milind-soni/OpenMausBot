@@ -2570,7 +2570,7 @@ describe("RoutineManager", () => {
         ...base,
         eventId: "runtime-error",
         type: "runtime.error",
-        message: "model-call limit reached before a final response",
+        message: "Stopped after 64 steps without a final answer. The steps so far already ran, so ask only for what's left.",
       });
       h.manager.handleRuntimeEvent({
         ...base,
@@ -2582,7 +2582,7 @@ describe("RoutineManager", () => {
 
       expect(h.manager.listRuns()[0]).toMatchObject({
         status: "failed",
-        error: "model-call limit reached before a final response",
+        error: "Stopped after 64 steps without a final answer. The steps so far already ran, so ask only for what's left.",
       });
     },
   );

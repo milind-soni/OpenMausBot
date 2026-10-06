@@ -217,7 +217,7 @@ describe("Settings → Engines → Claude accounts", () => {
     expect(markup).toContain("Personal or Work");
     expect(markup).toContain("Automatic private directory");
     expect(markup).toContain("not a signed-in session");
-    expect(markup).toContain("T3");
+    expect(markup).not.toContain("T3");
     expect(markup).not.toContain("Claude connected");
     expect(renderClaude(claude())).toContain("Add Claude account");
   });

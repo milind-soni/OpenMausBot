@@ -2,12 +2,13 @@
 //
 // English is the source catalog: every key in `Localizable.xcstrings` *is* the
 // English literal from the Swift, so a key a translation omits falls back to
-// copy that reads correctly rather than to a key name. A partial pack is a
-// usable pack, which is the same contract `docs/localization.md` sets for the
-// renderer.
+// copy that reads correctly rather than to a key name. That fallback is a
+// safety net, not the contract: unlike the renderer, the app ships every key
+// in every language, and `scripts/ios-strings.test.mjs` reads the cases below
+// and fails on a key one of them lacks (see `docs/localization.md`).
 //
-// Adding a language is one case here and one column in the catalog. Nothing
-// else in the app has to know.
+// Adding a language is one case here and one complete column in the catalog.
+// Nothing else in the app has to know.
 import Foundation
 import SwiftUI
 

@@ -69,15 +69,12 @@ describe("updatePhase", () => {
   // the acknowledgement is only for a genuinely quiet result — a found
   // update must not be papered over by a stale "up to date"
   it("lets a real status outrank the acknowledgement", () => {
-    expect(updatePhase(state({ status: "available" }), true)).toBe("available");
+    expect(updatePhase(state({ status: "downloading" }), true)).toBe("downloading");
   });
 });
 
 describe("updateLabel", () => {
-  it("names the version it found and the one it is ready to install", () => {
-    expect(updateLabel("available", state({ status: "available", version: "0.2.0" }))).toBe(
-      "Version 0.2.0 available — download",
-    );
+  it("names the version it is ready to install", () => {
     expect(updateLabel("downloaded", state({ status: "downloaded", version: "0.2.0" }))).toBe(
       "Version 0.2.0 ready — restart",
     );
@@ -123,16 +120,15 @@ describe("updateBusy", () => {
     expect(updateBusy("downloading")).toBe(true);
     expect(updateBusy("preparing")).toBe(true);
     expect(updateBusy("installing")).toBe(true);
-    expect(updateBusy("available")).toBe(false);
     expect(updateBusy("downloaded")).toBe(false);
     expect(updateBusy("idle")).toBe(false);
   });
 
   // the click starts a round-trip through main; until it lands, the status
-  // still reads "available" and the row would otherwise invite a second click
+  // still reads "downloaded" and the row would otherwise invite a second click
   it("blocks the gap between the click and the bridge catching up", () => {
-    expect(updateBusy("available", true)).toBe(true);
     expect(updateBusy("downloaded", true)).toBe(true);
+    expect(updateBusy("error", true)).toBe(true);
   });
 });
 
@@ -148,7 +144,6 @@ describe("platformLabel", () => {
 
 describe("updateNoteworthy", () => {
   it("puts a real update on the profile row", () => {
-    expect(updateNoteworthy("available")).toBe(true);
     expect(updateNoteworthy("downloading")).toBe(true);
     expect(updateNoteworthy("preparing")).toBe(true);
     expect(updateNoteworthy("downloaded")).toBe(true);
@@ -207,7 +202,7 @@ describe("the phone entries", () => {
   it("on this computer with a paid Cloud that is Ready: both, the Cloud first", () => {
     for (const tier of ["personal", "pro", "max"]) {
       expect(shown("computer", null, paid(tier, ready))).toEqual([
-        ["Connect your phone", "to your Cloud (always on)"],
+        ["Connect your phone", "to My Cloud (always on)"],
         ["Connect your phone", "to this computer"],
         APP,
       ]);
@@ -228,17 +223,17 @@ describe("the phone entries", () => {
   it("on this computer with a paid Cloud that is not Ready: only this computer, and a hint", () => {
     for (const machine of [undefined, { status: "provisioning" }, { status: "stopped", origin: ready.origin }, { status: "failed", origin: ready.origin }] as Array<CloudMachine | undefined>) {
       expect(shown("computer", null, paid("pro", machine))).toEqual([
-        ["Connect your phone", "to this computer", "Your Cloud shows here once it is ready."],
+        ["Connect your phone", "to this computer", "My Cloud shows here once it is ready."],
         APP,
       ]);
     }
   });
 
-  it("on the person's own Cloud: unchanged, one Connect your phone to your Cloud", () => {
-    expect(shown("cloud", admin)).toEqual([["Connect your phone", "to your Cloud"], APP]);
+  it("on the person's own Cloud: unchanged, one Connect your phone to My Cloud", () => {
+    expect(shown("cloud", admin)).toEqual([["Connect your phone", "to My Cloud"], APP]);
     // whatever the account says, the Cloud is never offered a second time from itself
-    expect(shown("cloud", admin, paid("max", ready))).toEqual([["Connect your phone", "to your Cloud"], APP]);
-    expect(shown("cloud", admin, paid("max"))).toEqual([["Connect your phone", "to your Cloud"], APP]);
+    expect(shown("cloud", admin, paid("max", ready))).toEqual([["Connect your phone", "to My Cloud"], APP]);
+    expect(shown("cloud", admin, paid("max"))).toEqual([["Connect your phone", "to My Cloud"], APP]);
   });
 
   it("on another server: to this server, and gone for a session that cannot make a pairing code", () => {
@@ -280,7 +275,7 @@ describe("choosing where the phone connects", () => {
   const readyCloud: CloudAccountState = { status: "connected", entitlement: { plan: "pro", status: "active", expiresAt: null, version: 1 }, machine: { status: "ready", origin: "https://home-7f3k2.fly.dev" } };
   const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
 
-  it("to your Cloud opens the Cloud on its phone pairing, as Use your Cloud on your phone does, sending nothing", async () => {
+  it("to My Cloud opens the Cloud on its phone pairing, as Use My Cloud on your phone does, sending nothing", async () => {
     const bridge = { connectHomeForPhone: vi.fn().mockResolvedValue({ status: "connected" }) };
     const dispatch = vi.fn();
     selectPhoneDestination(destinations(readyCloud)[0]!, { bridge, dispatch });
@@ -289,7 +284,7 @@ describe("choosing where the phone connects", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it("when the Cloud cannot be opened, lands on Settings → OMB Cloud, which says what to do", async () => {
+  it("when the Cloud cannot be opened, lands on Settings → OpenMausBot Cloud, which says what to do", async () => {
     const bridge = { connectHomeForPhone: vi.fn().mockRejectedValue(new Error("offline")) };
     const dispatch = vi.fn();
     selectPhoneDestination(destinations(readyCloud)[0]!, { bridge, dispatch });
@@ -338,7 +333,7 @@ describe("Get the phone app", () => {
   });
 
   it("offers every destination the menu does, in the same order", () => {
-    const html = render([to("cloud", "to your Cloud (always on)"), to("here", "to this computer")]);
+    const html = render([to("cloud", "to My Cloud (always on)"), to("here", "to this computer")]);
     expect(html.indexOf('data-phone-app-connect="cloud"')).toBeGreaterThan(-1);
     expect(html.indexOf('data-phone-app-connect="cloud"')).toBeLessThan(html.indexOf('data-phone-app-connect="here"'));
   });

@@ -29,28 +29,42 @@ extension MausState {
         if last?.kind == .options { return .curious }
 
         let profile = "\(bot.name) \(bot.title) \(bot.description)".lowercased()
-        func matches(_ words: [String]) -> Bool {
-            words.contains { word in
-                profile.range(of: "\\b\(NSRegularExpression.escapedPattern(for: word))\\b", options: .regularExpression) != nil
-            }
+        let range = NSRange(profile.startIndex..., in: profile)
+        for (pattern, state) in roleGuesses where pattern.firstMatch(in: profile, range: range) != nil {
+            return state
         }
-        if matches(["code", "coding", "developer", "development", "engineer", "engineering", "build", "debug", "program", "software"]) { return .working }
-        if matches(["research", "researcher", "search", "investigate", "strategy", "strategist", "study", "learn", "knowledge"]) { return .searching }
-        if matches(["marketing", "growth", "launch", "campaign", "social", "sales", "outreach", "brand"]) { return .excited }
-        if matches(["overnight", "night", "background", "async", "queue", "batch", "long-running"]) { return .drowsy }
-        if matches(["monitor", "monitoring", "incident", "alert", "watch", "status", "uptime"]) { return .radar }
-        if matches(["review", "reviewer", "audit", "critic", "critique", "quality", "qa", "test", "legal"]) { return .suspicious }
-        if matches(["security", "secure", "compliance", "risk", "privacy", "finance", "financial"]) { return .scared }
-        if matches(["design", "designer", "creative", "brainstorm", "art", "illustration", "music", "story"]) { return .playful }
-        if matches(["support", "help", "success", "onboarding", "coach", "teacher", "guide", "welcome"]) { return .happy }
         return .idle
     }
+
+    /// A guess from the bot's role, first match wins. Each list is one
+    /// pattern, `\b(?:code|coding|…)\b`, compiled once: it matches exactly
+    /// where one of its words would on its own, and compiling a pattern per
+    /// word for every row of every render was the roster's hottest line
+    /// while a fleet was busy.
+    private static let roleGuesses: [(NSRegularExpression, MausState)] = {
+        let lists: [([String], MausState)] = [
+            (["code", "coding", "developer", "development", "engineer", "engineering", "build", "debug", "program", "software"], .working),
+            (["research", "researcher", "search", "investigate", "strategy", "strategist", "study", "learn", "knowledge"], .searching),
+            (["marketing", "growth", "launch", "campaign", "social", "sales", "outreach", "brand"], .excited),
+            (["overnight", "night", "background", "async", "queue", "batch", "long-running"], .drowsy),
+            (["monitor", "monitoring", "incident", "alert", "watch", "status", "uptime"], .radar),
+            (["review", "reviewer", "audit", "critic", "critique", "quality", "qa", "test", "legal"], .suspicious),
+            (["security", "secure", "compliance", "risk", "privacy", "finance", "financial"], .scared),
+            (["design", "designer", "creative", "brainstorm", "art", "illustration", "music", "story"], .playful),
+            (["support", "help", "success", "onboarding", "coach", "teacher", "guide", "welcome"], .happy),
+        ]
+        return lists.map { words, state in
+            let alternatives = words.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+            // fixed, escaped words: this pattern always compiles
+            return (try! NSRegularExpression(pattern: "\\b(?:\(alternatives))\\b"), state)
+        }
+    }()
 
     /// The face for a chat as a whole: a bot's own, a room's is "happy" —
     /// which is what the desktop draws for room avatars.
     static func forChat(_ chat: Chat, in state: CompanionState) -> MausState {
         switch chat {
-        case let .bot(bot): return forBot(bot, last: state.visibleTranscript(forThread: bot.threadId).last)
+        case let .bot(bot): return forBot(bot, last: state.lastVisibleMessage(forThread: bot.threadId))
         case .room: return .happy
         }
     }

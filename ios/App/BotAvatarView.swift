@@ -13,11 +13,14 @@ struct BotAvatarView: View {
     var animated = false
     var comets = false
 
-    @EnvironmentObject private var session: Session
+    @Environment(\.avatarLoader) private var avatars
+    @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
     @State private var failed = false
 
     private var crop: AvatarCrop { bot.avatarCrop ?? .mascot }
+    /// The face's size on screen in pixels: what a still is decoded at.
+    private var pixelSize: Int { max(1, Int((size * displayScale).rounded(.up))) }
     /// Which of the two renderings this bot gets. The decision itself is a
     /// pure function in `CompanionCore` so it can be tested without a
     /// rendered `Canvas`; see `resolveBotAvatarOutcome`.
@@ -40,18 +43,23 @@ struct BotAvatarView: View {
         .frame(width: size, height: size)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(bot.name) avatar")
-        .task(id: "\(bot.avatarUrl ?? "")|\(crop.rawValue)") {
+        .task(id: "\(bot.avatarUrl ?? "")|\(crop.rawValue)|\(pixelSize)") {
             image = nil
             failed = false
             // Only the flat crops paint the bytes; the mascot never needs them.
-            guard crop != .mascot, bot.avatarUrl != nil else { return }
-            let data = await session.avatarData(for: bot)
+            guard crop != .mascot, let path = bot.avatarUrl else { return }
+            let data = await avatars.data(for: bot)
             guard !Task.isCancelled else { return }
-            guard let data, let decoded = Self.decode(data) else {
+            guard let data else {
                 failed = true
                 return
             }
+            let decoded = await AvatarImages.image(path: path, data: data, pixelSize: pixelSize)
             guard !Task.isCancelled else { return }
+            guard let decoded else {
+                failed = true
+                return
+            }
             image = decoded
         }
     }
@@ -68,18 +76,6 @@ struct BotAvatarView: View {
         } else {
             AnimatedAttachmentView(image: image)
         }
-    }
-
-    /// An animated GIF or WebP becomes an animated `UIImage`; everything else
-    /// — and anything whose frames will not decode — stays a still.
-    private static func decode(_ data: Data) -> UIImage? {
-        if let animation = AnimatedImageDecoder.decode(data) {
-            let frames = animation.frames.map { UIImage(cgImage: $0) }
-            if let animated = UIImage.animatedImage(with: frames, duration: animation.duration) {
-                return animated
-            }
-        }
-        return UIImage(data: data)
     }
 
     /// Only reached with a decoded image: `resolveBotAvatarOutcome` returns
@@ -107,6 +103,49 @@ struct BotAvatarView: View {
     }
 }
 
+/// Decoded faces, shared by every view that draws one. A bot's face is on
+/// screen in its Home row, the chat header, rooms and the Walkie sheet at
+/// once, and the session caches only the bytes: each view used to decode its
+/// own full-resolution copy — an uploaded avatar may be 10 MB, a 12 MP photo
+/// 48 MB decoded — to fill 26 to 112 points. Stills are now thumbnailed to
+/// the face's pixel size and kept, keyed by the attachment path, its byte
+/// count and that size, in a cache bounded by count and decoded bytes.
+private enum AvatarImages {
+    private struct Decoded: @unchecked Sendable {
+        let image: UIImage
+        let cost: Int
+    }
+
+    private static let cache = DecodedImageCache<Decoded>(
+        countLimit: 64, totalCostLimit: 32 * 1_024 * 1_024
+    ) { $0.cost }
+
+    static func image(path: String, data: Data, pixelSize: Int) async -> UIImage? {
+        await cache.value(for: "\(path)|\(data.count)|\(pixelSize)") {
+            decode(data, pixelSize: pixelSize)
+        }?.image
+    }
+
+    /// An animated GIF or WebP becomes an animated `UIImage` (its frames are
+    /// already bounded by `AnimatedImageDecoder`); everything else — and
+    /// anything whose frames will not decode — stays a still.
+    private static func decode(_ data: Data, pixelSize: Int) -> Decoded? {
+        if let animation = AnimatedImageDecoder.decode(data) {
+            let frames = animation.frames.map { UIImage(cgImage: $0) }
+            if let animated = UIImage.animatedImage(with: frames, duration: animation.duration) {
+                // Held longer frames repeat the same CGImage; count each once.
+                var seen = Set<ObjectIdentifier>()
+                let cost = animation.frames.reduce(0) { total, frame in
+                    seen.insert(ObjectIdentifier(frame)).inserted ? total + frame.bytesPerRow * frame.height : total
+                }
+                return Decoded(image: animated, cost: cost)
+            }
+        }
+        guard let still = ImageDownsampler.decode(data, fillingSquare: pixelSize) else { return nil }
+        return Decoded(image: UIImage(cgImage: still.cgImage), cost: still.byteCount)
+    }
+}
+
 /// `UIImageView` plays an animated `UIImage` on its own; SwiftUI has no
 /// equivalent. Sizing is left entirely to the SwiftUI frame around it, so the
 /// view never fights the layout with an intrinsic size taken from the file.
@@ -130,6 +169,34 @@ private struct AnimatedAttachmentView: UIViewRepresentable {
         guard view.image !== image else { return }
         view.image = image
         view.startAnimating()
+    }
+}
+
+/// Where a face's picture comes from: the session's cached, authenticated
+/// fetch. An environment value rather than `@EnvironmentObject Session`,
+/// which would redraw every face on screen whenever the session publishes —
+/// many times a second while a fleet works — for a fetch that runs once.
+struct AvatarLoader {
+    private weak var session: Session?
+
+    init(session: Session?) {
+        self.session = session
+    }
+
+    @MainActor
+    func data(for bot: Bot) async -> Data? {
+        await session?.avatarData(for: bot)
+    }
+}
+
+private struct AvatarLoaderKey: EnvironmentKey {
+    static let defaultValue = AvatarLoader(session: nil)
+}
+
+extension EnvironmentValues {
+    var avatarLoader: AvatarLoader {
+        get { self[AvatarLoaderKey.self] }
+        set { self[AvatarLoaderKey.self] = newValue }
     }
 }
 

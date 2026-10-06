@@ -197,8 +197,10 @@ extension VoiceNotePlayer: AVAudioPlayerDelegate {
 struct VoiceNoteBubble: View {
     let note: MessageVoiceNote
     var tint: Color = .accentColor
+    /// Fetches the clip. Not the session itself: observing it would redraw
+    /// every voice note in the transcript whenever any bot streams.
+    let actions: TranscriptActions
 
-    @EnvironmentObject private var session: Session
     @EnvironmentObject private var liveCall: LiveCallController
     @StateObject private var player = VoiceNotePlayer()
     @State private var loading = true
@@ -284,7 +286,7 @@ struct VoiceNoteBubble: View {
         .accessibilityIdentifier("voice-note")
         .task(id: "\(note.path)#\(attempt)") {
             guard player.loadedDuration == nil, !loadFailed else { return }
-            guard let data = await session.voiceNoteData(for: note), !Task.isCancelled else {
+            guard let data = await actions.voiceNoteData(for: note), !Task.isCancelled else {
                 if !Task.isCancelled {
                     loadFailed = true
                     loading = false

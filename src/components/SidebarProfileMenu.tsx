@@ -90,9 +90,6 @@ export function updatePhase(state: UpdaterState | null, upToDate: boolean): Upda
 
 export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): string {
   switch (phase) {
-    case "available":
-      // an unknown version leaves a double space behind, in every language
-      return t("sidebar.update.available", { version: state?.version ?? "" }).replace("  ", " ");
     case "downloading":
       return state?.percent == null
         ? t("sidebar.update.startingDownload")
@@ -100,6 +97,7 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
     case "preparing":
       return t("sidebar.update.preparing");
     case "downloaded":
+      // an unknown version leaves a double space behind, in every language
       return (
         state?.installMode === "handoff"
           ? t("sidebar.update.readyInstall", { version: state?.version ?? "" })
@@ -126,8 +124,8 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
 }
 
 /** A phase that is mid-flight takes no further clicks. `pending` covers the
- * gap between the click and the bridge reporting the state it started: both
- * download and install round-trip through main first, and without this the
+ * gap between the click and the bridge reporting the state it started: a
+ * check and an install round-trip through main first, and without this the
  * row would sit there looking clickable. */
 export function updateBusy(phase: UpdatePhase, pending = false): boolean {
   return pending || phase === "checking" || phase === "downloading" || phase === "preparing" || phase === "installing";
@@ -136,7 +134,7 @@ export function updateBusy(phase: UpdatePhase, pending = false): boolean {
 function UpdateIcon({ phase, pending, size = 18 }: { phase: UpdatePhase; pending: boolean; size?: number }) {
   if (updateBusy(phase, pending)) return <Loader2 size={size} className="animate-spin" />;
   if (phase === "up-to-date") return <Check size={size} />;
-  if (phase === "available" || phase === "downloaded") return <ArrowDownToLine size={size} />;
+  if (phase === "downloaded") return <ArrowDownToLine size={size} />;
   return <RefreshCw size={size} />;
 }
 
@@ -155,15 +153,16 @@ interface UpdateEntry {
 }
 
 /** The updater bridge exists only in the packaged app; in dev the entry is
- * absent rather than dead. */
-function useUpdateItem(): UpdateEntry | null {
+ * absent rather than dead. The desktop app answers only this computer's page
+ * and the person's own Cloud page, so until it does there is no entry. */
+export function useUpdateItem(): UpdateEntry | null {
   const state = useUpdaterState();
   const updater = window.ogb?.updater;
   const [pending, setPending] = useState(false);
   const [checkedAt, setCheckedAt] = useState(0);
   const status = state?.status ?? "idle";
 
-  // download and install both round-trip through main before the status
+  // a check and an install both round-trip through main before the status
   // changes — spin on the click itself, and let the new status clear it
   useEffect(() => setPending(false), [status]);
 
@@ -175,7 +174,7 @@ function useUpdateItem(): UpdateEntry | null {
     return () => clearTimeout(timer);
   }, [upToDate]);
 
-  if (!updater) return null;
+  if (!updater || !state) return null;
 
   const phase = updatePhase(state, upToDate);
   const label = updateLabel(phase, state);
@@ -196,10 +195,6 @@ function useUpdateItem(): UpdateEntry | null {
         if (phase === "downloaded") {
           setPending(true);
           return void updater.install();
-        }
-        if (phase === "available") {
-          setPending(true);
-          return void updater.download();
         }
         setCheckedAt(Date.now());
         void updater.check();

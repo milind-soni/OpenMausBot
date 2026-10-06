@@ -80,13 +80,26 @@ struct MausAvatar: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    /// Set by a screen that can show many busy faces at once (comfortable
+    /// Home), so only so many of them move; nil everywhere else.
+    @Environment(\.mascotMotionBudget) private var motionBudget
     @State private var engine = MausFaceEngine()
 
     var body: some View {
+        if animated, let motionBudget {
+            // Under a budget an opted-in face moves on its turn and holds
+            // its resting frame until then.
+            MascotMotionTurn(budget: motionBudget) { moving in face(moving: moving) }
+        } else {
+            face(moving: animated)
+        }
+    }
+
+    private func face(moving: Bool) -> some View {
         // Even an opted-in face stops when the app is not active: nothing is
         // watching, and in the background the redraws only cost battery.
-        let live = animated && !reduceMotion && scenePhase == .active
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !live)) { timeline in
+        let live = moving && !reduceMotion && scenePhase == .active
+        return TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !live)) { timeline in
             Canvas { context, canvasSize in
                 engine.setState(state, now: timeline.date)
                 if live { engine.step(now: timeline.date) }
@@ -95,6 +108,81 @@ struct MausAvatar: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+}
+
+/// How many opted-in faces may move at once on one screen.
+///
+/// Each moving face is its own 30 fps Canvas. Comfortable Home animates
+/// every working bot, so twenty working bots were twenty of them, about 600
+/// draws a second, for faces that all say "working". Under a budget the
+/// first `limit` faces to come on screen move (`MotionTurns`); the others
+/// hold their resting frame and take a turn as soon as a moving face leaves
+/// the screen or settles. Faces outside a budget (the island, a profile, a
+/// chat's header) move as before, and Reduce Motion and the scene phase
+/// still stop every face.
+@MainActor
+final class MascotMotionBudget {
+    private var turns: MotionTurns<ObjectIdentifier>
+    private var tickets: [ObjectIdentifier: MascotMotionTicket] = [:]
+
+    init(limit: Int) {
+        turns = MotionTurns(limit: limit)
+    }
+
+    fileprivate func ask(_ ticket: MascotMotionTicket) {
+        let id = ObjectIdentifier(ticket)
+        tickets[id] = ticket
+        turns.ask(id)
+        handOut()
+    }
+
+    fileprivate func leave(_ ticket: MascotMotionTicket) {
+        let id = ObjectIdentifier(ticket)
+        tickets[id] = nil
+        turns.leave(id)
+        ticket.moving = false
+        handOut()
+    }
+
+    private func handOut() {
+        for (id, ticket) in tickets {
+            let moves = turns.moves(id)
+            if ticket.moving != moves { ticket.moving = moves }
+        }
+    }
+}
+
+/// One face's place under a `MascotMotionBudget`. Its own object, so a
+/// turn changing hands redraws only the faces it moves between.
+@MainActor
+private final class MascotMotionTicket: ObservableObject {
+    @Published var moving = false
+}
+
+/// Asks for a turn while the face is on screen and wants to move, and gives
+/// it back when the face leaves or settles (`MausAvatar` then draws without
+/// this view).
+private struct MascotMotionTurn<Face: View>: View {
+    let budget: MascotMotionBudget
+    let face: (Bool) -> Face
+    @StateObject private var ticket = MascotMotionTicket()
+
+    var body: some View {
+        face(ticket.moving)
+            .onAppear { budget.ask(ticket) }
+            .onDisappear { budget.leave(ticket) }
+    }
+}
+
+private struct MascotMotionBudgetKey: EnvironmentKey {
+    static let defaultValue: MascotMotionBudget? = nil
+}
+
+extension EnvironmentValues {
+    var mascotMotionBudget: MascotMotionBudget? {
+        get { self[MascotMotionBudgetKey.self] }
+        set { self[MascotMotionBudgetKey.self] = newValue }
     }
 }
 

@@ -457,8 +457,12 @@ const appConfigSchema = z.object({
    * provider is Boat now and the key is kept for compatibility. */
   box: z.object({ token: optionalText }).optional(),
   vps: vpsConfigSchema.optional(),
-  /** Optional OpenCode key; persisted write-only and passed only to its child. */
-  opencodeGo: z.object({ apiKey: optionalText }).optional(),
+  /** Optional OpenCode key; persisted write-only and passed only to its child.
+   * `providerKeys`: keys for OpenCode's other providers (Venice, Groq…) by the
+   * environment name OpenCode reads, also write-only and only for its child.
+   * Settings changes go through mergeOpenCodeProviderKeys; the stored copy
+   * is read loosely (storedAppConfigSchema). */
+  opencodeGo: z.object({ apiKey: optionalText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
   /** Voice settings and the selected voice id. `provider` picks the
    * engine: "elevenlabs" (default; needs `key`), "fish" (needs its own
    * `fishKey`; `fishModel` picks its speech model), "system" (the Mac's
@@ -561,6 +565,15 @@ const appConfigSchema = z.object({
 });
 const storedAppConfigSchema = appConfigSchema.extend({
   browserProfiles: storedBrowserProfilesSchema.optional(),
+  /** Read loosely, like mcpServers: a hand-edited provider key that isn't
+   * text is dropped here, and a bad name or key later
+   * (openCodeProviderKeys), never the whole file. */
+  opencodeGo: z.object({
+    apiKey: optionalText,
+    providerKeys: z.record(z.string(), z.unknown()).catch({})
+      .transform((keys) => Object.fromEntries(Object.entries(keys).filter((entry): entry is [string, string] => typeof entry[1] === "string")))
+      .optional(),
+  }).optional(),
 });
 const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true })
   .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional() });
@@ -602,7 +615,7 @@ export interface AppConfig {
   box?: { token?: string };
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
-  opencodeGo?: { apiKey?: string };
+  opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
   tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel };
   /** The decision model; see the schema above and server/decider. */
   decider?: { enabled?: boolean; provider?: "jev" | "off"; key?: string; baseUrl?: string; jobs?: { roomRouting?: boolean } };
@@ -1218,6 +1231,80 @@ export const PROVIDER_CREDENTIAL_ENV = [
   "CURSOR_AUTH_TOKEN",
 ] as const;
 
+/** Provider keys OpenCode reads from its environment, as it does in a
+ * terminal: with ANTHROPIC_API_KEY set, `opencode` lists Anthropic's models.
+ * Keys OpenMaus saves for another engine (xAI, Mistral, the workspace
+ * Anthropic key) are workspace credentials under other names and never
+ * ride along. */
+export const OPENCODE_PROVIDER_ENV = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "KIMI_API_KEY",
+  "MOONSHOT_API_KEY",
+  "MINIMAX_API_KEY",
+] as const;
+
+/** Keys the owner saves in Settings for OpenCode's other providers (Venice,
+ * Groq, DeepSeek…), each under the environment name OpenCode reads. A Cloud
+ * has no terminal to export them in. They go to OpenCode's process only,
+ * never to this server's own environment. */
+export const OPENCODE_PROVIDER_KEY_LIMIT = 20;
+const OPENCODE_PROVIDER_KEY_NAME = /^[A-Z][A-Z0-9_]{0,59}_(?:API_KEY|KEY|TOKEN)$/;
+/** Printable, no spaces: no provider key has any, and a pasted sentence is not a key. */
+const OPENCODE_PROVIDER_KEY_VALUE = /^[\x21-\x7e]{1,4096}$/;
+
+/** Why OpenCode can't be given a key under this name, or undefined. A name
+ * OpenMaus keeps for itself or another engine would never reach OpenCode:
+ * every engine keeps only the credential names it reads (credentialEnv). */
+function openCodeProviderKeyNameRefusal(name: string): string | undefined {
+  if (!OPENCODE_PROVIDER_KEY_NAME.test(name)) {
+    return "Use the name the provider reads its key from: capitals, ending in _API_KEY, _KEY or _TOKEN, such as VENICE_API_KEY.";
+  }
+  if (name === "OPENCODE_API_KEY") return "Save the OpenCode key in the OpenCode API key box instead.";
+  const reserved = name.startsWith("OPENCODE_") || name.startsWith("OMB_")
+    || (WORKSPACE_CREDENTIAL_ENV as readonly string[]).includes(name)
+    || ((PROVIDER_CREDENTIAL_ENV as readonly string[]).includes(name) && !(OPENCODE_PROVIDER_ENV as readonly string[]).includes(name));
+  return reserved ? `OpenMaus keeps ${name} for itself, so OpenCode can't be given it here. Put this key in opencode.json instead.` : undefined;
+}
+
+/** The saved OpenCode provider keys that can be used, by name. A hand-edited
+ * entry OpenCode could not be given, or whose value is not a key, is
+ * skipped; so is anything past the limit. */
+export function openCodeProviderKeys(cfg: Pick<AppConfig, "opencodeGo">): Record<string, string> {
+  const saved = cfg.opencodeGo?.providerKeys ?? {};
+  const usable = Object.keys(saved).sort()
+    .filter((name) => !openCodeProviderKeyNameRefusal(name) && OPENCODE_PROVIDER_KEY_VALUE.test(saved[name] ?? ""))
+    .slice(0, OPENCODE_PROVIDER_KEY_LIMIT);
+  return Object.fromEntries(usable.map((name) => [name, saved[name]!]));
+}
+
+/** A Settings change to the saved OpenCode provider keys: a key saves or
+ * replaces its name, "" removes it, and every other saved key stays. Returns
+ * the whole new set to store, or why it was refused. */
+export function mergeOpenCodeProviderKeys(
+  cfg: Pick<AppConfig, "opencodeGo">,
+  change: Record<string, string>,
+): { ok: true; keys: Record<string, string> } | { ok: false; error: string } {
+  const keys = new Map(Object.entries(openCodeProviderKeys(cfg)));
+  for (const [name, raw] of Object.entries(change)) {
+    const value = raw.trim();
+    if (!value) {
+      keys.delete(name);
+      continue;
+    }
+    const refusal = openCodeProviderKeyNameRefusal(name);
+    if (refusal) return { ok: false, error: refusal };
+    if (!OPENCODE_PROVIDER_KEY_VALUE.test(value)) return { ok: false, error: "That doesn't look like a key. Paste only the key, with no spaces." };
+    keys.set(name, value);
+  }
+  if (keys.size > OPENCODE_PROVIDER_KEY_LIMIT) {
+    return { ok: false, error: `OpenCode can hold up to ${OPENCODE_PROVIDER_KEY_LIMIT} provider keys. Remove one you no longer use, then add this one.` };
+  }
+  return { ok: true, keys: Object.fromEntries([...keys].sort(([a], [b]) => (a < b ? -1 : 1))) };
+}
+
 const configSaveListeners = new Set<(before: JsonObject, after: JsonObject) => void>();
 
 /** Told, synchronously, what each saveConfig wrote: the file before and
@@ -1535,7 +1622,11 @@ function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string)
   // Only the person's own token: without one the driver itself falls back
   // to Cloud Pro's included token, which never enters an environment map.
   if (driver === "boxAgent" && cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
-  if (driver === "opencodeGo" && cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
+  if (driver === "opencodeGo") {
+    // Keys for OpenCode's other providers, under the names OpenCode reads.
+    for (const [name, key] of Object.entries(openCodeProviderKeys(cfg))) environment.set(name, key);
+    if (cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
+  }
   return environment;
 }
 

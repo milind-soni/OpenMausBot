@@ -127,7 +127,7 @@ interface VpsComputerInventoryPayload {
 
 const destinationLabelKeys: Record<LocalVmInventoryInstance["destination"], LocaleKey> = {
   auto: "vm.dest.auto",
-  cloud: "vm.dest.cloud",
+  cloud: "place.cloud",
   vm: "vm.dest.vm",
   local: "vm.dest.local",
   browser: "vm.dest.browser",

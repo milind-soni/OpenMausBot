@@ -207,7 +207,7 @@ test("a proxy that refuses large parts gets smaller ones; one that refuses even 
     assert.equal(result.phase, "failed");
     assert.equal(result.error.code, "proxy_limit");
     assert.equal(result.error.partBytes, 512 * 1024);
-    assert.match(result.error.message, /^A proxy in front of your Cloud refused a 512 KB upload\. Raise its request size limit \(nginx: client_max_body_size 64m\), then copy again\.$/);
+    assert.match(result.error.message, /^A proxy in front of My Cloud refused a 512 KB upload\. Raise its request size limit \(nginx: client_max_body_size 64m\), then copy again\.$/);
     assert.deepEqual(tight.cloud.state.puts, [3 * MB, 1.5 * MB, 768 * 1024, 512 * 1024]);
     // Nothing was replaced, and the prepared archive waits: copying again (limit raised) continues without a second export.
     assert.equal(result.resumable, true);

@@ -20,7 +20,7 @@ describe("remote VPS preview", () => {
   it("retries only known transient contention, not permanent 409 failures", () => {
     expect(isRemoteScreenshotContention({ status: 409, message: "this bot's cloud computer is being changed — wait for it to finish" })).toBe(true);
     expect(isRemoteScreenshotContention({ status: 409, message: "the VPS is being prepared — try again shortly" })).toBe(true);
-    for (const message of ["VPS is not configured", "The VPS computer is not ready", "Choose Cloud before changing or opening this Boat. Auto only checks existing computer state."]) {
+    for (const message of ["VPS is not configured", "The VPS computer is not ready", "Choose Cloud computer before changing or opening this cloud computer. Auto only checks existing computer state."]) {
       expect(isRemoteScreenshotContention({ status: 409, message })).toBe(false);
     }
     expect(isRemoteScreenshotContention({ status: 503, message: "this bot's cloud computer is being changed — wait for it to finish" })).toBe(false);

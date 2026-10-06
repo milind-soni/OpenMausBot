@@ -32,10 +32,14 @@ final class StoreTests: XCTestCase {
         for bot in state.bots {
             XCTAssertNotNil(state.messages[bot.threadId])
         }
-        for room in state.rooms {
+        for room in try fleet().groups {
             XCTAssertEqual(state.transcript(forThread: room.threadId).count, room.messages?.count)
             XCTAssertEqual(state.hasMore[room.threadId], room.hasMore)
         }
+        // One copy of each transcript: the bots and rooms do not keep the
+        // hydrate-time page beside it.
+        XCTAssertTrue(state.bots.allSatisfy { $0.messages == nil })
+        XCTAssertTrue(state.rooms.allSatisfy { $0.messages == nil })
     }
 
     func testBackgroundLiveTailStillNeedsItsInitialPage() throws {
@@ -229,6 +233,39 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(state.hasMore["t1"], true)
     }
 
+    func testMergeKeepsTheLastCopyOfARepeatedIdInsteadOfTrapping() {
+        // The held pages came from the computer as they were; one that
+        // repeats an id must not take the launch down with it.
+        var state = CompanionState()
+        state.messages["t1"] = [
+            message("a", at: 1, text: "first copy"),
+            message("a", at: 1, text: "last copy"),
+            message("b", at: 2),
+        ]
+        state.merge(ThreadPage(messages: [message("c", at: 3)], hasMore: false), intoThread: "t1")
+        XCTAssertEqual(state.transcript(forThread: "t1").map(\.id), ["a", "b", "c"])
+        XCTAssertEqual(state.transcript(forThread: "t1").first?.text, "last copy")
+    }
+
+    func testHydratingAWaitingThreadWhoseTranscriptRepeatsAnIdDoesNotTrap() throws {
+        // Every cold start merges the waiting threads into the transcripts
+        // the fleet carried: this is the path a duplicate would crash on.
+        var fleet = try fleet()
+        let threadId = try XCTUnwrap(fleet.bots.first?.threadId)
+        fleet.bots[0].messages = [message("dup", at: 1, text: "old"), message("dup", at: 1, text: "new")]
+        fleet.bots[0].activeLeafId = nil
+        var approval = Message(id: "ask", role: .bot, kind: .options, at: 2)
+        approval.card = OptionCard(
+            title: "Approval needed", subtitle: "ls", options: ["Allow", "Deny"],
+            answered: nil, dismissed: nil, requestId: "r1", tool: "Bash", held: nil, allowKey: "Bash:ls"
+        )
+        var state = CompanionState()
+        state.hydrate(fleet, waitingThreads: [threadId: ThreadPage(messages: [approval], hasMore: false)])
+        XCTAssertEqual(state.transcript(forThread: threadId).map(\.id), ["dup", "ask"])
+        XCTAssertEqual(state.transcript(forThread: threadId).first?.text, "new")
+        XCTAssertEqual(state.pendingApprovals.map(\.message.id), ["ask"])
+    }
+
     // MARK: - Bots
 
     func testABotFrameMergesRatherThanWipingTheTranscript() throws {
@@ -245,8 +282,9 @@ final class StoreTests: XCTestCase {
         state.apply(.bot(bot))
 
         XCTAssertEqual(state.bot(bot.id)?.busy, true)
-        XCTAssertEqual(state.transcript(forThread: threadId).count, count)
-        XCTAssertNotNil(state.bot(bot.id)?.messages, "the merged bot keeps the transcript it had")
+        XCTAssertEqual(state.transcript(forThread: threadId).count, count, "the thread keeps the transcript it had")
+        XCTAssertEqual(state.transcript(forThread: threadId).last?.id, "keep-me")
+        XCTAssertNil(state.bot(bot.id)?.messages, "the transcript lives in messages alone, not on a second copy")
     }
 
     func testATaskSwitchReplacesTheActiveTranscript() throws {
@@ -464,6 +502,86 @@ final class StoreTests: XCTestCase {
 
         state.apply(.thread(threadId: bot.threadId, activeLeafId: tail.id))
         XCTAssertEqual(state.visibleTranscript(forThread: bot.threadId).map(\.id), ["root", "fork", "tail"])
+    }
+
+    func testAnUnforkedThreadIsItsOwnBranch() throws {
+        var state = try hydrated()
+        let bot = try XCTUnwrap(state.bots.first)
+        var chain: [Message] = []
+        for index in 0..<40 {
+            var next = message("m\(index)", at: Double(index))
+            next.parentId = chain.last?.id
+            chain.append(next)
+        }
+        state.messages[bot.threadId] = chain
+        state.apply(.thread(threadId: bot.threadId, activeLeafId: "m39"))
+        XCTAssertEqual(state.visibleTranscript(forThread: bot.threadId).map(\.id), chain.map(\.id))
+        // a leaf further up hides what follows it
+        state.apply(.thread(threadId: bot.threadId, activeLeafId: "m9"))
+        XCTAssertEqual(state.visibleTranscript(forThread: bot.threadId).map(\.id), chain.prefix(10).map(\.id))
+    }
+
+    func testBranchWalkKeepsTheNewestCopyOfARepeatedIdAndStopsOnACycle() throws {
+        var state = try hydrated()
+        let bot = try XCTUnwrap(state.bots.first)
+        let first = message("a", at: 1, text: "older a")
+        var second = message("b", at: 2)
+        second.parentId = "a"
+        var repeated = message("a", at: 3, text: "newer a")
+        repeated.parentId = "b"
+        state.messages[bot.threadId] = [first, second, repeated]
+        state.apply(.thread(threadId: bot.threadId, activeLeafId: "a"))
+        // the newest "a" is the leaf; its parent "b" points back at it
+        let visible = state.visibleTranscript(forThread: bot.threadId)
+        XCTAssertEqual(visible.map(\.id), ["b", "a"])
+        XCTAssertEqual(visible.last?.text, "newer a")
+    }
+
+    func testLastVisibleMessageIsTheVisibleBranchsLast() throws {
+        var (state, threadId) = try editableConversation()
+        func check(_ label: String, file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertEqual(
+                state.lastVisibleMessage(forThread: threadId)?.id,
+                state.visibleTranscript(forThread: threadId).last?.id,
+                label, file: file, line: line
+            )
+        }
+        check("leaf at the end")
+        var fork = message("q2", at: 4, text: "second try")
+        fork.parentId = "root"
+        state.messages[threadId]?.append(fork)
+        check("a fork appended after the leaf")
+        state.apply(.thread(threadId: threadId, activeLeafId: "q2"))
+        check("the fork selected")
+        state.apply(.thread(threadId: threadId, activeLeafId: "nowhere"))
+        check("a leaf the transcript does not hold")
+        state.apply(.thread(threadId: threadId, activeLeafId: "a1"))
+        state.pendingEdits[threadId] = PendingEdit(sourceId: "q1", text: "third try", at: 5)
+        check("an edit in flight")
+        state.pendingEdits[threadId] = nil
+        state.messages[threadId]?.append(message("a1", at: 6, text: "replayed"))
+        check("a repeated id")
+        XCTAssertEqual(state.lastVisibleMessage(forThread: threadId)?.text, "replayed")
+        XCTAssertNil(state.lastVisibleMessage(forThread: "missing"))
+    }
+
+    func testAnApprovalOnAnotherBranchIsNotPending() throws {
+        var state = try hydrated()
+        let bot = try XCTUnwrap(state.bots.first)
+        let root = message("root")
+        var hidden = Message(id: "hidden-ask", role: .bot, kind: .options, at: 2)
+        hidden.parentId = root.id
+        hidden.card = OptionCard(
+            title: "Approval needed", subtitle: "ls", options: ["Allow", "Deny"],
+            answered: nil, dismissed: nil, requestId: "r1", tool: "Bash", held: nil, allowKey: "Bash:ls"
+        )
+        var visible = message("visible", at: 3)
+        visible.parentId = root.id
+        state.messages[bot.threadId] = [root, hidden, visible]
+        state.apply(.thread(threadId: bot.threadId, activeLeafId: "visible"))
+        XCTAssertFalse(state.pendingApprovals.contains { $0.message.id == "hidden-ask" })
+        state.apply(.thread(threadId: bot.threadId, activeLeafId: "hidden-ask"))
+        XCTAssertTrue(state.pendingApprovals.contains { $0.message.id == "hidden-ask" })
     }
 
     func testVersionsAreUserMessagesWithTheSameParent() {
@@ -732,37 +850,65 @@ final class StoreTests: XCTestCase {
         // lands while it is out; the lookup's older `null` must not end the
         // call that just began
         var state = try hydrated()
-        state.resetCursor("abc12345:7")
-        let cursor = state.cursor
-        let line = state.liveCall
+        let revision = state.liveCallRevision
         state.apply(.liveCall(botId: "b1", threadId: "t1", call: liveCall(.connecting)))
-        state.advance(to: 8)
-        XCTAssertFalse(state.applyLiveCallLookup(nil, ifCursorMatches: cursor, lineWas: line))
+        XCTAssertFalse(state.applyLiveCallLookup(nil, ifRevisionIs: revision))
         XCTAssertEqual(state.liveCall, liveCall(.connecting))
     }
 
     func testALookupThatStraddledAHangUpAnswerIsDropped() throws {
         // no frame, but the remote bar's hang-up answer changed the line
         var state = try hydrated()
-        state.resetCursor("abc12345:7")
         state.apply(.liveCall(botId: "b1", threadId: "t1", call: liveCall(.live)))
-        let cursor = state.cursor
-        let line = state.liveCall
+        let revision = state.liveCallRevision
         var ended = liveCall(.ended)
         ended.endReason = "hung-up"
         XCTAssertFalse(state.applyLiveCallEnd(callId: "c1", answer: ended))
-        XCTAssertFalse(state.applyLiveCallLookup(liveCall(.live), ifCursorMatches: cursor, lineWas: line))
+        XCTAssertFalse(state.applyLiveCallLookup(liveCall(.live), ifRevisionIs: revision))
         XCTAssertEqual(state.liveCall, ended)
+    }
+
+    func testALookupThatStraddledAFrameRestatingTheLineIsStillDropped() throws {
+        // a frame that wrote the same value is still newer than the answer
+        var state = try hydrated()
+        state.apply(.liveCall(botId: "b1", threadId: "t1", call: liveCall(.live)))
+        let revision = state.liveCallRevision
+        state.apply(.liveCall(botId: "b1", threadId: "t1", call: liveCall(.live)))
+        XCTAssertFalse(state.applyLiveCallLookup(nil, ifRevisionIs: revision))
+        XCTAssertEqual(state.liveCall, liveCall(.live))
+    }
+
+    func testALookupOutWhileOtherFramesFoldIsApplied() throws {
+        // The stream keeps folding while the lookup is out — tokens, tool
+        // steps, the cursor moving. None of it is about the line, so a phone
+        // that connects mid-call under a busy fleet still learns of the call.
+        var state = try hydrated()
+        state.resetCursor("abc12345:7")
+        let revision = state.liveCallRevision
+        state.applyBatch([
+            StreamFrame(frame: .runtime(RuntimeEvent(type: "content.delta", threadId: "t1", delta: "hi", streamKind: "assistant_text")), seq: 8),
+            StreamFrame(frame: .message(threadId: "t1", message: Message(id: "m-live", role: .bot, kind: .text, at: 9)), seq: 9),
+        ])
+        XCTAssertEqual(state.cursor, "abc12345:9")
+        XCTAssertTrue(state.applyLiveCallLookup(liveCall(.live), ifRevisionIs: revision))
+        XCTAssertEqual(state.liveCall, liveCall(.live))
     }
 
     func testALookupWithNothingNewerMeanwhileIsApplied() throws {
         var state = try hydrated()
-        state.resetCursor("abc12345:7")
-        let cursor = state.cursor
-        XCTAssertTrue(state.applyLiveCallLookup(liveCall(.live), ifCursorMatches: cursor, lineWas: nil))
+        XCTAssertTrue(state.applyLiveCallLookup(liveCall(.live), ifRevisionIs: state.liveCallRevision))
         XCTAssertEqual(state.liveCall, liveCall(.live), "a phone that connects mid-call learns about it")
-        XCTAssertTrue(state.applyLiveCallLookup(nil, ifCursorMatches: cursor, lineWas: liveCall(.live)))
+        XCTAssertTrue(state.applyLiveCallLookup(nil, ifRevisionIs: state.liveCallRevision))
         XCTAssertNil(state.liveCall)
+    }
+
+    func testHydrateLeavesTheLineRevisionAlone() throws {
+        // hydrate does not touch the line, so a lookup that straddles a
+        // hydrate (notification navigation) still lands
+        var state = try hydrated()
+        let revision = state.liveCallRevision
+        state.hydrate(try fleet())
+        XCTAssertEqual(state.liveCallRevision, revision)
     }
 
     func testHydrateKeepsTheCallTheStreamReported() throws {

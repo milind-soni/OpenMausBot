@@ -6,6 +6,7 @@ import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
+import com.openmausbot.companion.core.OutboundRequest
 import com.openmausbot.companion.core.PendingApproval
 import com.openmausbot.companion.core.QueuedSend
 import com.openmausbot.companion.core.ToolActivity
@@ -47,14 +48,29 @@ class UpdatesTest {
     }
 
     @Test
-    fun `an empty subtitle stays empty rather than falling back to the title`() {
+    fun `an empty subtitle falls back to the title, as the island always did`() {
         val state = CompanionState(
             bots = listOf(bot()),
             messages = mapOf(
                 "thread-bot-1" to listOf(options("m1", pendingCard().copy(subtitle = ""))),
             ),
         )
-        assertEquals("", state.updates(ActivityDetail.FULL).single().line)
+        assertEquals("Run a command", state.updates(ActivityDetail.FULL).single().line)
+    }
+
+    @Test
+    fun `a held send reads as its short line, never its raw arguments`() {
+        val card = pendingCard().copy(
+            title = "Send on your behalf?",
+            subtitle = "Linear · Create linear comment\n{\"issueId\":\"a\"}\n\nLinear · Create linear comment\n{\"issueId\":\"b\"}",
+            tool = "LINEAR_CREATE_LINEAR_COMMENT",
+            outboundRequest = OutboundRequest(tool = "LINEAR_CREATE_LINEAR_COMMENT", app = "Linear"),
+        )
+        val state = CompanionState(
+            bots = listOf(bot()),
+            messages = mapOf("thread-bot-1" to listOf(options("m1", card))),
+        )
+        assertEquals("Linear · Create linear comment ×2", state.updates(ActivityDetail.FULL).single().line)
     }
 
     @Test

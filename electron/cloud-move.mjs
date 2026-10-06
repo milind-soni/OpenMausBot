@@ -245,9 +245,9 @@ export function createCloudMove({ localRequest, fetchImpl = fetch, tempRoot, ava
   let target = null;
   const state = () => structuredClone(value);
   const publish = next => { value = target ? { ...next, destination: target } : next; try { onState(state()); } catch { /* a closed view must not stop the copy */ } return state(); };
-  // How messages name the destination: the Cloud as "your Cloud", any other server by its name.
-  const there = () => target?.kind === "cloud" ? "your Cloud" : target?.name || "the server";
-  const There = () => target?.kind === "cloud" ? "Your Cloud" : target?.name || "The server";
+  // How messages name the destination: the Cloud as "My Cloud", any other server by its name.
+  const there = () => target?.kind === "cloud" ? "My Cloud" : target?.name || "the server";
+  const There = () => target?.kind === "cloud" ? "My Cloud" : target?.name || "The server";
   // Byte counts at most four times a second; every step change at once.
   let progressAt = 0;
   const progress = (phase, bytesTransferred, totalBytes) => {
@@ -482,7 +482,7 @@ export function createCloudMove({ localRequest, fetchImpl = fetch, tempRoot, ava
       if (now() > deadline) {
         // The Cloud's launcher always starts it again; a server's does when
         // it is one of ours (server/restart.ts), and otherwise it installs at its next start.
-        fail("restart_timeout", target?.kind === "cloud" ? "Your Cloud is taking longer than usual to restart. Check it again in a few minutes."
+        fail("restart_timeout", target?.kind === "cloud" ? "My Cloud is taking longer than usual to restart. Check it again in a few minutes."
           : `${There()} hasn't come back yet. If it doesn't start again on its own, start OpenMausBot there; it finishes installing the copy when it starts.`);
       }
     }
@@ -495,11 +495,11 @@ export function createCloudMove({ localRequest, fetchImpl = fetch, tempRoot, ava
     const details = { freeBytes: fit.freeBytes, neededBytes: fit.neededBytes, maxBytes: fit.maxBytes };
     let answer = null;
     // No answer (offline, a slip): trying again later can work.
-    try { answer = await dest.grow(fit.sizeGb); } catch { signal.throwIfAborted(); fail("cloud_grow_unavailable", "Your Cloud could not make room for this move just now.", details); }
+    try { answer = await dest.grow(fit.sizeGb); } catch { signal.throwIfAborted(); fail("cloud_grow_unavailable", "My Cloud could not make room for this move just now.", details); }
     signal.throwIfAborted();
     // This Admin cannot grow a disk for a move: trying again will not help.
-    if (!answer?.supported) fail("cloud_grow_unsupported", "Your Cloud can't make room for a move this size yet.", details);
-    if (answer.refused) fail("cloud_full", "Your Cloud does not have enough space for this move.", details);
+    if (!answer?.supported) fail("cloud_grow_unsupported", "My Cloud can't make room for a move this size yet.", details);
+    if (answer.refused) fail("cloud_full", "My Cloud does not have enough space for this move.", details);
     const deadline = now() + growTimeoutMs;
     for (;;) {
       await sleep(pollMs, signal);
@@ -507,7 +507,7 @@ export function createCloudMove({ localRequest, fetchImpl = fetch, tempRoot, ava
       // A Cloud whose disk grew may restart: no answer for a moment is expected.
       try { status = await cloudStatus(session, signal); } catch (error) { if (signal.aborted || error?.code === "access_changed") throw error; }
       if (status && status.freeBytes + status.uploadReceived >= fit.neededBytes) return;
-      if (now() > deadline) fail("cloud_grow_unavailable", "Your Cloud could not make room for this move in time.", details);
+      if (now() > deadline) fail("cloud_grow_unavailable", "My Cloud could not make room for this move in time.", details);
     }
   }
 

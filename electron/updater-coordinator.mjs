@@ -66,9 +66,15 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
   updater.on("checking-for-update", () => {
     if (checkOwnsState()) setState({ status: "checking" });
   });
+  // Updates download by themselves; only the restart waits for the person.
+  // A failure stays quiet unless the person asked for this check, and the
+  // next hourly check tries again.
   updater.on("update-available", (info) => {
     if (checkOwnsState()) {
-      setState({ status: "available", version: info?.version, message: undefined });
+      void download({
+        manual: Boolean(checkOperation?.manual),
+        starting: { version: info?.version, percent: undefined, message: undefined },
+      });
     }
   });
   updater.on("update-not-available", () => {
@@ -82,7 +88,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
     // Shared error events do not identify their operation. If a download
     // overtook a check, let their individual promises route failures instead.
     if (checkOperation?.supersededByDownload && !installOperation) return;
-    const manual = Boolean(installOperation || downloadOperation || checkOperation?.manual || nativeStagingStarted);
+    const manual = Boolean(installOperation || downloadOperation?.manual || checkOperation?.manual || nativeStagingStarted);
     routeError(manual, error);
   });
   updater.on("download-progress", (progress) => {
@@ -114,6 +120,8 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
   });
 
   function check(manual = false) {
+    // Asking while an update downloads makes its outcome the person's to see.
+    if (manual && downloadOperation) downloadOperation.manual = true;
     if (recoveryRequired || installOperation || (nativeStaging && (downloadOperation || nativeStagingStarted)) || (!manual && actionOwnsState)) return Promise.resolve();
     if (checkOperation) {
       // A manual caller upgrades the shared operation; a timer never downgrades it.
@@ -140,18 +148,19 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
     return operation.promise;
   }
 
-  function download() {
+  // `manual`: the person asked (their check), so a failure is theirs to see.
+  // `starting`: what the check found, shown from the first "downloading".
+  function download({ manual = true, starting = {} } = {}) {
     if (recoveryRequired || installOperation || nativeStagingStarted) return Promise.resolve();
     if (checkOperation) checkOperation.supersededByDownload = true;
     if (downloadOperation) return downloadOperation.promise;
 
-    const operation = { downloadedInfo: null, failed: false, promise: null, timer: null };
+    const operation = { downloadedInfo: null, failed: false, manual, promise: null, timer: null };
     downloadOperation = operation;
     // Own the state before the request goes out: the first "download-progress"
-    // can be seconds away (connection setup, redirects), and until then the
-    // renderer would still show an untouched "Download" button. No percent yet
-    // — the UI reads a missing percent as "starting".
-    setState({ status: "downloading" });
+    // can be seconds away (connection setup, redirects). No percent yet — the
+    // UI reads a missing percent as "starting".
+    setState({ status: "downloading", ...starting });
     try {
       operation.promise = Promise.resolve(updater.downloadUpdate())
         .then((result) => {
@@ -165,13 +174,13 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
           }
           return result;
         })
-        .catch((error) => handleRejectedOperation(true, error))
+        .catch((error) => handleRejectedOperation(operation.manual, error))
         .finally(() => {
           clearTimeout(operation.timer);
           if (downloadOperation === operation) downloadOperation = null;
         });
     } catch (error) {
-      handleRejectedOperation(true, error);
+      handleRejectedOperation(manual, error);
       downloadOperation = null;
       operation.promise = Promise.resolve();
     }

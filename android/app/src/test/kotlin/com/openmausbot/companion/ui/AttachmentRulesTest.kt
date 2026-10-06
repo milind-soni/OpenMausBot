@@ -84,6 +84,24 @@ class AttachmentRulesTest {
     }
 
     @Test
+    fun `a transcript image keeps its own shape within the card's range`() {
+        // The shapes iOS pins in TranscriptImageFitTests, with the same numbers.
+        assertEquals(4f, AttachmentImageRules.inlineAspect(2_400, 260))
+        assertEquals(4f, AttachmentImageRules.inlineAspect(1_600, 240))
+        assertEquals(16f / 9f, AttachmentImageRules.inlineAspect(1_920, 1_080)!!, 0.0001f)
+        assertEquals(1f, AttachmentImageRules.inlineAspect(1_024, 1_024))
+        assertEquals(0.75f, AttachmentImageRules.inlineAspect(600, 1_300))
+        assertEquals(0.75f, AttachmentImageRules.inlineAspect(1_179, 2_556))
+        assertEquals(null, AttachmentImageRules.inlineAspect(0, 100))
+        assertEquals(null, AttachmentImageRules.inlineAspect(100, 0))
+        // A tall card narrows so it stops at the height cap; others take the bubble up to 360.
+        assertEquals(225f, AttachmentImageRules.inlineMaxWidthDp(0.75f))
+        assertEquals(300f, AttachmentImageRules.inlineMaxWidthDp(1f))
+        assertEquals(360f, AttachmentImageRules.inlineMaxWidthDp(16f / 9f))
+        assertEquals(360f, AttachmentImageRules.inlineMaxWidthDp(4f))
+    }
+
+    @Test
     fun `android eight sampling bounds its intermediate without needless blur`() {
         assertEquals(4, AttachmentImageRules.legacySampleSize(4_000, 3_000, 768))
         // The no-undershoot plan is sample 2 (36 MP). One extra step yields a

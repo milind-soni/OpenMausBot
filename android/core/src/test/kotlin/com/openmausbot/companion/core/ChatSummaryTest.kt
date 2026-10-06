@@ -80,8 +80,9 @@ class ChatSummaryTest {
                 requestId = "req",
             )),
         )
+        // A blank subtitle has no first line to show, so the title stands in.
         assertEquals(
-            "   ",
+            "Allow shell?",
             optionPreview(OptionCard(
                 title = "Allow shell?",
                 subtitle = "   ",

@@ -271,12 +271,38 @@ describe("ModelPicker trigger", () => {
   const effortChip = (markup: string) =>
     markup.match(/<span data-model-effort[^>]*>(.*?)<\/span>/s)?.[1].replace(/<!--.*?-->/g, "").trim();
 
+  /** The trigger's native tooltip as plain text, split into its lines. React
+   * HTML-escapes the apostrophe and may encode the newline numerically; both
+   * are undone here so the assertions read as the user sees them. */
+  const tooltipLines = (markup: string): string[] => {
+    const encoded = markup.match(/<button[^>]*\stitle="([^"]*)"/s)?.[1];
+    if (encoded === undefined) return [];
+    const amp = String.fromCharCode(38);
+    const newline = String.fromCharCode(10);
+    return encoded
+      .replaceAll(amp + "#x27;", "'")
+      .replaceAll(amp + "#10;", newline)
+      .split(newline);
+  };
+
   it("names the thread in busy header help and the bot in profile settings", () => {
     fixture.instances = [engine()];
     for (const threadId of ["independent-thread", undefined]) {
       const markup = renderToStaticMarkup(createElement(ModelPicker, { bot: { ...bot(), busy: true }, threadId }));
-      expect(markup).toContain(`Stop this ${threadId ? "thread" : "bot"}&#x27;s turn before changing its model`);
+      expect(tooltipLines(markup)).toEqual([
+        "Codex · GPT-5.6",
+        `Stop this ${threadId ? "thread" : "bot"}'s turn before changing its model`,
+      ]);
     }
+  });
+
+  it("puts the current model and effort above the busy advisory", () => {
+    fixture.instances = [engine(["low", "high"])];
+    const markup = renderToStaticMarkup(createElement(ModelPicker, { bot: { ...bot("high"), busy: true }, threadId: "independent-thread" }));
+    expect(tooltipLines(markup)).toEqual([
+      "Codex · GPT-5.6 · High effort",
+      "Stop this thread's turn before changing its model",
+    ]);
   });
 
   it("shows the model and its effort together in the header", () => {

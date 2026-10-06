@@ -67,6 +67,17 @@ public struct OptionCard: Codable, Hashable, Sendable {
     /// Terminal: the proposal went stale while open. The computer clears
     /// its options and nothing can answer it; a fresh proposal is needed.
     public var expired: Bool? = nil
+    /// `"permission"` or `"question"` on provider asks; absent elsewhere and
+    /// on cards from older computers.
+    public var requestType: String? = nil
+    /// Catalog key for `held` when it is one of the computer's fixed notes
+    /// ("why this asked"); absent when `held` is free text such as an error.
+    public var heldCode: String? = nil
+    /// Present on "Send on your behalf?" cards: an outbound app action the
+    /// computer held for a person. See ApprovalCard.swift.
+    public var outboundRequest: OutboundRequest? = nil
+    /// Present on "Remember this for the team?" cards.
+    public var teamMemoryRequest: TeamMemoryRequest? = nil
 
     /// A card is actionable while it is unanswered and still has a request
     /// behind it. Everything else is transcript.
@@ -101,9 +112,11 @@ public struct OptionCard: Codable, Hashable, Sendable {
     }
 
     /// Shared by all of the app's card surfaces and by Live Activities.
+    /// "Skip" is the team-memory card's refusal; answering it as allow
+    /// would remember the very thing the person skipped.
     public static func isRefusal(_ choice: String) -> Bool {
         let normalized = choice.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return ["deny", "cancel", "dismiss"].contains(normalized)
+        return ["deny", "cancel", "dismiss", "skip"].contains(normalized)
     }
 
     /// A provider may include the standing grant as an option of its own.

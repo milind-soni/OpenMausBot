@@ -29,7 +29,12 @@ struct TaskManagerView: View {
         }
     }
 
-    private var tasks: [BotTask] {
+    /// Every thread, in list order. Each read sorts and groups them, so a
+    /// render reads it once and hands the count down; the actions read it
+    /// afresh, after their awaits.
+    private var tasks: [BotTask] { tasks(of: current) }
+
+    private func tasks(of current: Chat) -> [BotTask] {
         switch current {
         case let .bot(bot):
             return bot.threadGroups(includingClosed: true, queuedThreadIds: session.state.queuedThreadIds).flatMap(\.tasks)
@@ -37,19 +42,21 @@ struct TaskManagerView: View {
         }
     }
 
-    private var matchingRoomTasks: [BotTask] {
+    private func matchingRoomTasks(_ tasks: [BotTask]) -> [BotTask] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         return tasks.filter { query.isEmpty || $0.displayTitle.localizedCaseInsensitiveContains(query) }
     }
 
-    private var matchingTasks: [BotTask] {
+    private func matchingTasks(of current: Chat, tasks: [BotTask]) -> [BotTask] {
         switch current {
         case let .bot(bot): return bot.threadGroups(matching: search, includingClosed: true).flatMap(\.tasks)
-        case .room: return matchingRoomTasks
+        case .room: return matchingRoomTasks(tasks)
         }
     }
 
     var body: some View {
+        let current = self.current
+        let tasks = self.tasks(of: current)
         NavigationStack {
             List {
                 if let taskToRename {
@@ -73,7 +80,7 @@ struct TaskManagerView: View {
                     }
                 }
 
-                threadSections
+                threadSections(current: current, tasks: tasks)
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let errorMessage {
@@ -123,7 +130,7 @@ struct TaskManagerView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if isSelecting { bulkDeleteBar }
+                if isSelecting { bulkDeleteBar(current: current, tasks: tasks) }
             }
             .overlay(alignment: .bottom) {
                 if isMutating {
@@ -173,13 +180,18 @@ struct TaskManagerView: View {
         }
     }
 
-    private var bulkDeleteBar: some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private func bulkDeleteBar(current: Chat, tasks: [BotTask]) -> some View {
+        let selectable = matchingTasks(of: current, tasks: tasks).filter {
+            canSelectForBulkDelete($0, current: current, taskCount: tasks.count)
+        }
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 Button("Select all") {
-                    selectedThreadIDs.formUnion(matchingTasks.filter(canSelectForBulkDelete).map(\.threadId))
+                    // what is selectable when tapped, not when last drawn
+                    let live = matchingTasks(of: self.current, tasks: self.tasks)
+                    selectedThreadIDs.formUnion(live.filter { canSelectForBulkDelete($0) }.map(\.threadId))
                 }
-                .disabled(isMutating || !matchingTasks.contains(where: canSelectForBulkDelete))
+                .disabled(isMutating || selectable.isEmpty)
                 .accessibilityIdentifier("select-all-threads")
                 Spacer()
                 Button("Delete \(selectedThreadIDs.count)", role: .destructive) {
@@ -197,7 +209,7 @@ struct TaskManagerView: View {
         .background(.regularMaterial)
     }
 
-    @ViewBuilder private var threadSections: some View {
+    @ViewBuilder private func threadSections(current: Chat, tasks: [BotTask]) -> some View {
         switch current {
         case let .bot(bot):
             // The manage sheet is the "all threads" surface: closed ones
@@ -220,7 +232,7 @@ struct TaskManagerView: View {
                     if !rows.isEmpty {
                         Section {
                             ForEach(rows, id: \.threadId) { task in
-                                threadButton(task)
+                                threadButton(task, current: current, taskCount: tasks.count)
                             }
                             if group.tasks.isEmpty {
                                 Text("No threads in this folder")
@@ -245,7 +257,7 @@ struct TaskManagerView: View {
                 if !archived.isEmpty {
                     Section {
                         ForEach(archived, id: \.threadId) { task in
-                            threadButton(task)
+                            threadButton(task, current: current, taskCount: tasks.count)
                         }
                     } header: {
                         Text("Archived (\(archived.count))")
@@ -253,12 +265,13 @@ struct TaskManagerView: View {
                 }
             }
         case .room:
+            let matching = matchingRoomTasks(tasks)
             Section {
-                if matchingRoomTasks.isEmpty {
+                if matching.isEmpty {
                     emptySearch
                 } else {
-                    ForEach(matchingRoomTasks, id: \.threadId) { task in
-                        threadButton(task)
+                    ForEach(matching, id: \.threadId) { task in
+                        threadButton(task, current: current, taskCount: tasks.count)
                     }
                 }
             } header: {
@@ -275,7 +288,7 @@ struct TaskManagerView: View {
         EmptyStateView<EmptyView>.search(text: search)
     }
 
-    @ViewBuilder private func threadButton(_ task: BotTask) -> some View {
+    @ViewBuilder private func threadButton(_ task: BotTask, current: Chat, taskCount: Int) -> some View {
         if isSelecting {
             let selected = selectedThreadIDs.contains(task.threadId)
             Button {
@@ -293,7 +306,7 @@ struct TaskManagerView: View {
                 }
                 .contentShape(Rectangle())
             }
-            .disabled(isMutating || (!selected && !canSelectForBulkDelete(task)))
+            .disabled(isMutating || (!selected && !canSelectForBulkDelete(task, current: current, taskCount: taskCount)))
             .accessibilityLabel("\(selected ? "Deselect" : "Select") \(task.displayTitle)")
             .accessibilityIdentifier("select-thread-\(task.threadId)")
         } else {
@@ -350,13 +363,13 @@ struct TaskManagerView: View {
                     .disabled(isMutating || task.isWorking)
                 }
                 Button("Delete", systemImage: "trash", role: .destructive) { taskToDelete = task }
-                    .disabled(!canDelete(task))
+                    .disabled(!canDelete(task, current: current, taskCount: taskCount))
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 Button(role: .destructive) { taskToDelete = task } label: {
                     Label("Delete", systemImage: "trash")
                 }
-                .disabled(!canDelete(task))
+                .disabled(!canDelete(task, current: current, taskCount: taskCount))
                 Button {
                     togglePin(task)
                 } label: {
@@ -385,12 +398,16 @@ struct TaskManagerView: View {
         }
     }
     private func canSelectForBulkDelete(_ task: BotTask) -> Bool {
-        tasks.count > 1 && task.threadId != current.threadId && !task.isWorking
+        canSelectForBulkDelete(task, current: current, taskCount: tasks.count)
+    }
+
+    private func canSelectForBulkDelete(_ task: BotTask, current: Chat, taskCount: Int) -> Bool {
+        taskCount > 1 && task.threadId != current.threadId && !task.isWorking
             && (current.isBot || !current.busy)
     }
 
-    private func canDelete(_ task: BotTask) -> Bool {
-        !isMutating && tasks.count > 1 && (current.isBot ? !task.isWorking : !current.busy)
+    private func canDelete(_ task: BotTask, current: Chat, taskCount: Int) -> Bool {
+        !isMutating && taskCount > 1 && (current.isBot ? !task.isWorking : !current.busy)
     }
 
     /// The desktop disables thread actions while a reply is in flight; the
@@ -552,7 +569,7 @@ struct TaskManagerView: View {
         let pending = tasks.filter { selectedThreadIDs.contains($0.threadId) }
         guard !pending.isEmpty,
               pending.count == selectedThreadIDs.count,
-              pending.allSatisfy(canSelectForBulkDelete) else {
+              pending.allSatisfy({ canSelectForBulkDelete($0) }) else {
             showError("The selection changed. Deselect unavailable threads and try again.")
             return
         }

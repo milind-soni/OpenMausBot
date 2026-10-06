@@ -227,7 +227,7 @@ class TranscriptPresentationTest {
         compose.onNodeWithText("Thinking…").assertIsDisplayed()
         compose.runOnIdle { scene.environment.chatPreferences.setActivityDetail(ActivityDetail.HIDDEN) }
         compose.onNodeWithText("Thinking…").assertDoesNotExist()
-        compose.onNodeWithContentDescription("Scout is working").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Scout is typing").assertIsDisplayed()
         compose.runOnIdle { scene.environment.chatPreferences.setActivityDetail(ActivityDetail.REDUCED) }
         compose.onNodeWithText("Thinking…").assertIsDisplayed()
     }

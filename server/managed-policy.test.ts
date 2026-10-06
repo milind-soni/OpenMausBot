@@ -101,7 +101,7 @@ describe("organisation desktop policy overlay", () => {
     expect(computerKindForResource("computer:phone")).toBeUndefined();
     const { managed } = overlay(policy({ computers: { thisComputer: false, localVm: true, box: false, vps: true } }));
     expect(managed.computerRefusal("thisComputer")).toBe("Fixture Agency does not allow bots to use this computer.");
-    expect(managed.computerRefusal("box")).toBe("Fixture Agency does not allow bots to use Boat cloud computers.");
+    expect(managed.computerRefusal("box")).toBe("Fixture Agency does not allow bots to use cloud computers.");
     expect(managed.computerAllowed("localVm")).toBe(true);
   });
 
