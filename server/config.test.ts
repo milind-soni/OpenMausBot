@@ -21,6 +21,7 @@ import { cacheUntilConfigChanges,
   persistableInstanceConfigs,
   roomHandoffLimits,
   roomTurnTimeoutMinutes,
+  mcpCallTimeoutMinutes,
   maxConcurrentBotThreads,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
@@ -504,6 +505,27 @@ describe("configuration boundaries", () => {
       );
     },
   );
+
+  it("accepts a persisted MCP call timeout and supplies the legacy default", () => {
+    expect(parseStoredConfig({ mcp: { callTimeoutMinutes: 30 } })).toEqual({
+      mcp: { callTimeoutMinutes: 30 },
+    });
+    expect(mcpCallTimeoutMinutes({ mcp: { callTimeoutMinutes: 30 } })).toBe(30);
+    expect(mcpCallTimeoutMinutes({})).toBe(10);
+  });
+
+  it.each([0, 0.5, 61, 1440, "20", null])(
+    "rejects an invalid MCP call timeout: %j",
+    (callTimeoutMinutes) => {
+      expect(() => parseConfigPatch({ mcp: { callTimeoutMinutes } })).toThrow(
+        "mcp.callTimeoutMinutes",
+      );
+    },
+  );
+
+  it("rejects unknown keys under the mcp config section", () => {
+    expect(() => parseConfigPatch({ mcp: { callTimeoutMinutes: 10, surprise: 1 } })).toThrow("mcp");
+  });
 
   it("preserves shared Local VM behavior by default and accepts bounded per-bot mode", () => {
     expect(localVmMode({})).toBe("shared");

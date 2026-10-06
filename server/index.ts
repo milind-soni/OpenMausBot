@@ -160,6 +160,7 @@ import {
   localVmMode,
   parseConfigPatch,
   roomTurnTimeoutMinutes,
+  mcpCallTimeoutMinutes,
   threadEventLogMaxBytes,
   maxConcurrentBotThreads,
   threadEventLogRetentionDays,
@@ -10700,6 +10701,7 @@ async function startTurn(
         mentionTurn: tagged.length > 0,
         integrations,
         mcpFromUserConfig: claudeUserMcpEnabled(cfg) && !managedPolicy.restrictsMcp(),
+        mcpCallTimeoutMs: mcpCallTimeoutMinutes(cfg) * 60_000,
         cwd,
       }), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
         await instance.adapter.interruptTurn(threadId).catch(() => {});
@@ -13074,6 +13076,7 @@ async function runGroupMemberTurn(
         cwd,
         integrations,
         mcpFromUserConfig: claudeUserMcpEnabled(cfg) && !managedPolicy.restrictsMcp(),
+        mcpCallTimeoutMs: mcpCallTimeoutMinutes(cfg) * 60_000,
         ...(instance.instanceId === readyBot.modelSelection.instanceId
           ? memberTurnSelection(readyBot.modelSelection)
           : { model: instance.models.default }),
@@ -15259,6 +15262,7 @@ function configStatus() {
     // not a secret — the settings picker shows it; "" = follow the system
     language: cfg.language ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
+    mcp: { callTimeoutMinutes: mcpCallTimeoutMinutes(cfg) },
     automaticRecovery: cfg.automaticRecovery ?? { enabled: false },
     // absent effort = no level is sent, so clients can tell it from any level
     newBots: cfg.newBots?.effort ? { effort: cfg.newBots.effort } : {},

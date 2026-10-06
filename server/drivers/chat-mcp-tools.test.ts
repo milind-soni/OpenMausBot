@@ -395,4 +395,19 @@ describe("Chat MCP schema validation", () => {
     await expect(f.mount()).rejects.toThrow("schema could not be validated");
     expect(alive(f.read().pid)).toBe(false);
   });
+
+  it("honors the configured per-call timeout instead of the fixed default", async () => {
+    // The fixture answers tools/call only after a delay; a short callTimeoutMs
+    // must trip the timeout, a generous one lets the same call complete.
+    const delayed = `if (message.method === "tools/call") { setTimeout(() => reply(message, {content:[{type:"text",text:"recorded:"+message.params.arguments.value}]}), 400); return; }`;
+    const f = fixture(delayed);
+    const short = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, 100);
+    sessions.push(short);
+    await expect(short.execute("audit_write", { value: "x" }, f.controller.signal)).rejects.toThrow("MCP request timed out");
+    await expect(f.read().calls.filter((call) => call.method === "tools/call")).toHaveLength(1);
+
+    const long = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, 5_000);
+    sessions.push(long);
+    await expect(long.execute("audit_write", { value: "y" }, f.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
+  });
 });

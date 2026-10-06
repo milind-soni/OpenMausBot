@@ -41,6 +41,7 @@ import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
 import { FONT_IDS, applyFont, readFont, type FontId } from "@/lib/fonts";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
+import { McpCallTimeoutSettings } from "./McpCallTimeoutSettings";
 import { AboutMeSettings } from "./AboutMeSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { AutomaticRecoverySettings } from "./AutomaticRecoverySettings";
@@ -918,6 +919,9 @@ export function SettingsModal() {
             </div>
             <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
               <RoomTurnTimeoutSettings />
+            </Card>
+            <Card title={t("settings.mcpCalls.title")} subtitle={t("settings.mcpCalls.subtitle")}>
+              <McpCallTimeoutSettings />
             </Card>
             <ThreadConcurrencySettings />
             {!remoteActive && <RoutinesInConversationRow />}

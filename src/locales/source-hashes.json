@@ -11333,7 +11333,14 @@
       "place.view.ccNew.short": "5fa7aac5375c5815787fba3f49559f9b45b14023147ce0652803387974144e5f",
       "place.view.ccAtOnce.short": "750af77aa42eea62726061b574cf8ab011cf3f7f60926532aad4b0da028ed046",
       "place.view.localUnavailable.short": "330010f40240ecd83defa493b21a57b0504ddea6d30810be14e06debba8ad55b",
-      "place.view.autoTeam.short": "e3c4b39d6d5013477c98cd58236fed455f37aa7017b7168ce1980a449aaf438a"
+      "place.view.autoTeam.short": "e3c4b39d6d5013477c98cd58236fed455f37aa7017b7168ce1980a449aaf438a",
+      "settings.mcpCalls.title": "5ff0b66ef13ab5ab7cda9e62a2f56cc7e8394469d8857e8efddcc291935d56e7",
+      "settings.mcpCalls.subtitle": "44ac68d58dc5c46e38b0a4da484b097899fc0f9538e52194319cfaa3b3834fe9",
+      "settings.mcpCalls.label": "94d4d9eca65e3abf671e6c9c25c876de7f1155b7a07f96d24a1fa0c979d1654b",
+      "settings.mcpCalls.minutes": "90e63d85fa1ab2c8ed65222f3ebd794b1e524b4b7cf84bec451542d0451b2985",
+      "settings.mcpCalls.help": "ab68b50dacfde418b196b13a3bf56f942f61071126f02d0e65e7241197ddefd5",
+      "settings.mcpCalls.error": "be999a512b832def08c23ad6e85145183598f18ff9bb79075a419fbec42aba1f",
+      "settings.mcpCalls.range": "5023bf6d4be92ea4f7aab1f63c9d193d628b8ca27ea9983e530b2c4e0c257f70"
     },
     "zh-tw": {
       "pro.getPro": "12657108fe5682e937f179e5f394191b99fad614dbb3bf8759376d5da35d4992",

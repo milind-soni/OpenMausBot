@@ -543,7 +543,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
-        tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse, scope);
+        tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs);
         const questionAllowed = options.tools !== false && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
         let optionalQuestionOnly = questionAllowed && tools.definitions.length === 0;
         // The runtime's one built-in tool rides the same list: ask_user is
