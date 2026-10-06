@@ -166,6 +166,27 @@ describe("ProviderRegistry", () => {
     expect(described.broken.snapshot).toMatchObject({ state: "unavailable", reason: "boom at create" });
   });
 
+  it("does not bring back an instance disposed while a slower one is still loading", async () => {
+    const fast = makeFakeDriver({ kind: "fast" });
+    const slow = makeFakeDriver({ kind: "slow" });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const create = slow.driver.create.bind(slow.driver);
+    slow.driver.create = async (input) => {
+      await gate;
+      return create(input);
+    };
+    const registry = new ProviderRegistry([fast.driver, slow.driver]);
+    const loading = registry.load({ fast: { driver: "fast" }, slow: { driver: "slow" } });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(registry.get("fast")).not.toBeNull();
+    await registry.disposeAll();
+    release();
+    await loading;
+    expect(registry.get("fast")).toBeNull();
+    expect(registry.entries().map((e) => e.instanceId)).toEqual(["slow"]);
+  });
+
   it("describe() reports a snapshot() failure as unavailable rather than throwing", async () => {
     const fake = makeFakeDriver({ failSnapshot: "provider probe exploded" });
     const registry = new ProviderRegistry([fake.driver]);

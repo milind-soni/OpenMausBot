@@ -91,8 +91,10 @@ export class ProviderRegistry {
       }),
     );
     // Config order, not completion order: entries()/describe() are the UI's
-    // list and must not shuffle when a slow CLI lands last.
+    // list and must not shuffle when a slow CLI lands last. An entry that a
+    // dispose replaced or removed meanwhile is no longer this load's to place.
     for (const entry of loaded) {
+      if (this.byId.get(entry.instanceId) !== entry) continue;
       this.byId.delete(entry.instanceId);
       this.byId.set(entry.instanceId, entry);
     }
