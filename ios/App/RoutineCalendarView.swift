@@ -67,7 +67,9 @@ struct RoutineCalendarView: View {
             .task { await reload() }
             .refreshable { await reload() }
             .sheet(item: $editor) { target in
+                // iOS-on-Mac sheet hosting does not inherit environment objects.
                 RoutineEditorView(routine: target.routine) { await reload() }
+                    .environmentObject(session)
             }
         }
     }

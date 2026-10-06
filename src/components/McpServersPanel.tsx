@@ -22,7 +22,9 @@ import type { LocaleKey } from "@/locales";
 import { updateMcpServers } from "@/lib/mcp-servers";
 import { completeMcpSignIn, mcpSignInLink, runMcpSignIn, type McpSignInStatus } from "@/lib/mcp-sign-in";
 import { api, useStore, type ConfigStatus } from "@/state/store";
+import { OUTLOOK_SIGN_IN_PATH, directAppByName, directAppCreateBody, outlookTenant, type DirectApp } from "../../shared/direct-apps.ts";
 
+import { DirectAppsSection } from "./DirectAppsSection";
 import { Switch } from "./SettingsPrimitives";
 
 /** A server this computer starts (a command) or one reached at a URL —
@@ -193,6 +195,26 @@ function draftFor(server: McpServerListing): McpDraft {
   };
 }
 
+function directAppServers(
+  servers: McpServerListing[],
+  outlookAuth: "none" | "needs-sign-in" | "signed-in",
+) {
+  const listed = servers.map((server) => ({
+    name: server.name,
+    url: isRemoteMcpListing(server) ? server.url : undefined,
+    enabled: server.enabled,
+    auth: isRemoteMcpListing(server) ? server.auth : undefined,
+  }));
+  const outlook = directAppByName("outlook");
+  if (!outlook || outlookAuth === "none" || listed.some((server) => server.name === "outlook")) return listed;
+  return [...listed, {
+    name: "outlook",
+    url: outlook.url,
+    enabled: outlookAuth === "signed-in",
+    auth: outlookAuth,
+  }];
+}
+
 /** `embedded`: a section of the Apps pop-up's one scrolling view, rather
  * than a page that owns its own scroll. */
 export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {}) {
@@ -211,6 +233,8 @@ export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {
   const [signingIn, setSigningIn] = useState<string | null>(null);
   const signInAbort = useRef<AbortController | null>(null);
   const signInComplete = useRef<((result: McpSignInStatus) => void) | null>(null);
+  const signInBase = useRef<string | undefined>(undefined);
+  const [outlookAuth, setOutlookAuth] = useState<"none" | "needs-sign-in" | "signed-in">("none");
   const [signInFlow, setSignInFlow] = useState<McpSignInStatus | null>(null);
   const [callbackUrl, setCallbackUrl] = useState("");
   const [callbackError, setCallbackError] = useState<string | null>(null);
@@ -249,11 +273,16 @@ export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {
     const generation = ++loadGeneration.current;
     setBusy("load");
     setError(null);
-    return api("/api/mcp/servers")
-      .then((result) => {
+    return Promise.all([
+      api("/api/mcp/servers"),
+      api("/api/outlook").catch(() => null),
+    ])
+      .then(([result, outlook]) => {
         if (generation === loadGeneration.current) {
           setServers(result.servers ?? []);
           updateMcpServers(result.servers ?? []);
+          const auth = outlook?.auth;
+          if (auth === "none" || auth === "needs-sign-in" || auth === "signed-in") setOutlookAuth(auth);
         }
       })
       .catch((cause) => {
@@ -378,9 +407,18 @@ export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {
   };
 
   const signIn = async (server: McpServerListing) => {
+    await runSignIn(server.name, { server });
+  };
+
+  const runSignIn = async (
+    name: string,
+    options: { server?: McpServerListing; base?: string; startBody?: unknown } = {},
+  ) => {
+    const server = options.server;
     const controller = new AbortController();
     signInAbort.current = controller;
-    setSigningIn(server.name);
+    signInBase.current = options.base;
+    setSigningIn(name);
     setSignInFlow(null);
     setCallbackUrl("");
     setCallbackError(null);
@@ -388,20 +426,43 @@ export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {
     setNotice(null);
     setProbe((current) => {
       const next = { ...current };
-      delete next[server.name];
+      delete next[name];
       return next;
     });
     try {
-      const result = await runMcpSignIn(server.name, { api, open: openExternalLink, signal: controller.signal, onStarted: (status, complete) => {
-        setSignInFlow(status);
-        signInComplete.current = complete;
-      } });
-      if (result.phase === "succeeded") setNotice({ key: "mcp.auth.done", params: { name: server.name } });
+      const result = await runMcpSignIn(name, {
+        api,
+        open: openExternalLink,
+        signal: controller.signal,
+        base: options.base,
+        startBody: options.startBody,
+        onStarted: (status, complete) => {
+          setSignInFlow(status);
+          signInComplete.current = complete;
+        },
+      });
+      if (result.phase === "succeeded") {
+        const app = directAppByName(name);
+        const matched = app && server && isRemoteMcpListing(server) && server.url === app.url ? app : null;
+        if (matched && server && !server.enabled) {
+          const enabled = await api(`/api/mcp/servers/${encodeURIComponent(name)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ enabled: true }),
+          });
+          setServers(enabled.servers ?? []);
+          updateMcpServers(enabled.servers ?? []);
+        }
+        const outlook = options.base === OUTLOOK_SIGN_IN_PATH;
+        setNotice({
+          key: matched || outlook ? "directApps.signedIn" : "mcp.auth.done",
+          params: { name: outlook ? "Outlook" : matched ? matched.title : name },
+        });
+      }
       else if (result.phase !== "cancelled") {
-        setProbe((current) => ({ ...current, [server.name]: { ok: false, error: result.message || t("mcp.auth.failed") } }));
+        setProbe((current) => ({ ...current, [name]: { ok: false, error: result.message || t("mcp.auth.failed") } }));
       }
     } catch (cause) {
-      setProbe((current) => ({ ...current, [server.name]: { ok: false, error: cause instanceof Error ? cause.message : String(cause) } }));
+      setProbe((current) => ({ ...current, [name]: { ok: false, error: cause instanceof Error ? cause.message : String(cause) } }));
     } finally {
       if (signInAbort.current === controller) {
         signInAbort.current = null;
@@ -422,12 +483,72 @@ export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {
     setCompletingSignIn(true);
     setCallbackError(null);
     try {
-      const result = await completeMcpSignIn(signingIn, signInFlow.flowId, callbackUrl, api);
+      const result = await completeMcpSignIn(signingIn, signInFlow.flowId, callbackUrl, api, signInBase.current);
       if (signInAbort.current === controller) signInComplete.current?.(result);
     } catch (cause) {
       if (signInAbort.current === controller) setCallbackError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (signInAbort.current === controller) setCompletingSignIn(false);
+    }
+  };
+
+  const authorizeDirect = async (app: DirectApp, input: { clientId: string; clientSecret: string; tenant?: string }) => {
+    if (app.transport === "graph") {
+      const tenant = outlookTenant(input.tenant);
+      if (!tenant) {
+        setError({ key: "directApps.tenantInvalid" });
+        return;
+      }
+      const clientId = input.clientId.trim();
+      const clientSecret = input.clientSecret.trim();
+      if (!clientId) {
+        setError({ key: "directApps.missingId" });
+        return;
+      }
+      if (!clientSecret) {
+        setError({ key: "directApps.missingSecret" });
+        return;
+      }
+      const taken = servers?.find((server) => server.name === app.name);
+      if (taken && (!isRemoteMcpListing(taken) || taken.url !== app.url)) {
+        setError({ key: "directApps.nameTaken", params: { name: app.name } });
+        return;
+      }
+      await runSignIn(app.name, {
+        base: OUTLOOK_SIGN_IN_PATH,
+        startBody: { clientId, clientSecret, tenant },
+      });
+      return;
+    }
+    const prepared = directAppCreateBody(app, input);
+    if (!prepared.ok) {
+      setError({ key: prepared.error === "client-id" ? "directApps.missingId" : "directApps.missingSecret" });
+      return;
+    }
+    const existing = servers?.find((server) => server.name === app.name);
+    if (existing) {
+      if (!isRemoteMcpListing(existing) || existing.url !== app.url) {
+        setError({ key: "directApps.nameTaken", params: { name: app.name } });
+        return;
+      }
+      await signIn(existing);
+      return;
+    }
+    setBusy(`direct:${app.name}`);
+    loadGeneration.current += 1;
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await api("/api/mcp/servers", { method: "POST", body: JSON.stringify(prepared.body) });
+      const next = (result.servers ?? []) as McpServerListing[];
+      setServers(next);
+      updateMcpServers(next);
+      const created = next.find((server) => server.name === app.name);
+      setBusy(null);
+      if (created) await signIn(created);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      setBusy(null);
     }
   };
 
@@ -570,6 +691,31 @@ export function McpServersPanel({ embedded = false }: { embedded?: boolean } = {
             </div>
           </div>
         )}
+
+        <DirectAppsSection
+          servers={directAppServers(servers ?? [], outlookAuth)}
+          restricted={restricted}
+          busy={busy !== null}
+          signingIn={signingIn}
+          onAuthorize={authorizeDirect}
+          onSignIn={(name) => {
+            if (name === "outlook") {
+              void runSignIn(name, { base: OUTLOOK_SIGN_IN_PATH });
+              return;
+            }
+            const server = servers?.find((candidate) => candidate.name === name);
+            if (server) void signIn(server);
+          }}
+          onSignOut={(app) => {
+            if (app.transport !== "graph") return;
+            void api("/api/outlook/sign-out", { method: "POST" })
+              .then((result) => {
+                const auth = result?.auth;
+                if (auth === "none" || auth === "needs-sign-in" || auth === "signed-in") setOutlookAuth(auth);
+              })
+              .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+          }}
+        />
 
         <div className="mt-4 rounded-xl border border-hairline/50 bg-raised/35 px-4 py-3 text-[12px] leading-relaxed text-ink-secondary">
           {t("mcp.trustNotice")}

@@ -217,6 +217,7 @@ import {
   type ModelSelection,
   type RequestOutcome,
   type RuntimeEvent,
+  type McpServerSpec,
   type SendTurnInput,
   type SteerOutcome,
   newId,
@@ -235,6 +236,7 @@ import {
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
 import { McpOAuthError, McpSignInError, McpOAuthManager, mcpOAuthRedirectUri, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
+import { OutlookMail, mountOutlookMail } from "./outlook-mail.ts";
 import { probeMcpServer } from "./mcp-probe.ts";
 import {
   GROUP_GOAL_MAX_TURNS,
@@ -1871,6 +1873,11 @@ const mcpOAuth = new McpOAuthManager({
     const parsed = raw === undefined ? null : parseStoredMcpServer(name, raw);
     return parsed?.ok && isRemoteMcpServer(parsed.server) && parsed.server.url === url ? parsed.server.oauth : undefined;
   },
+});
+/** Outlook mailbox grant. The Graph token stays in its own file; turns receive a loopback gate. */
+const outlookMail = new OutlookMail({
+  file: join(DATA_DIR, "outlook-oauth.json"),
+  isOwnerLive: (owner) => owner === "loopback" || sessions.isLive(owner),
 });
 // OpenCode reads provider keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) from
 // its environment, as it does in a terminal, but only where that environment
@@ -3692,7 +3699,7 @@ function previewSystemPrompt(bot: BotRecord) {
     }, { note: previewPlan.note, cloudHome: Boolean(CLOUD_HOME) }) },
     { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(agentsMounted && lendingEnabled()) : "" },
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? composioSystemPrompt(bot.connectorTools) + describeConnectorScopes(bot.connectorScopes) : "" },
-    { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(engineMcpServers(bot))) : "" },
+    { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(mountedCustomMcp(engineMcpServers(bot)))) : "" },
     { id: "browser", label: "Browser", text: previewPlan.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "coordination", label: "Team", text: agentsMounted && coordination ? ` ${coordination}` : "" },
     { id: "credential", label: "Credentials", text: agentsMounted ? CREDENTIAL_PROMPT : "" },
@@ -9692,7 +9699,7 @@ async function startTurn(
       // composio — only to a driver that can mount them. Their tools are
       // never pre-allowed, so every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true) {
-        const custom = await withMcpSignIn(engineMcpServers(bot), mcpOAuth);
+        const custom = mountedCustomMcp(await withMcpSignIn(engineMcpServers(bot), mcpOAuth));
         if (Object.keys(custom).length) integrations.custom = custom;
       }
       // CLI engines work inside the bot's own workspace directory rather
@@ -12240,7 +12247,7 @@ async function runGroupMemberTurn(
   }
   // user-configured MCP servers: same gating as the 1:1 site above.
   if (instance.adapter.capabilities.customMcp === true) {
-    const custom = await withMcpSignIn(engineMcpServers(bot), mcpOAuth);
+    const custom = mountedCustomMcp(await withMcpSignIn(engineMcpServers(bot), mcpOAuth));
     if (Object.keys(custom).length) integrations.custom = custom;
   }
   // Connected-app discovery is intentionally awaited before a provider owns
@@ -15064,6 +15071,15 @@ function engineMcpServers(bot: BotRecord) {
   return withoutPendingSignIn(managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers)), mcpOAuth);
 }
 
+/** User MCP servers plus the direct Outlook mailbox, when one is signed in.
+ * A server the person already named outlook is left as they configured it. */
+function mountedCustomMcp(servers: Record<string, McpServerSpec>): Record<string, McpServerSpec> {
+  return mountOutlookMail(servers, outlookMail.engineSpec(PORT), {
+    restricted: managedPolicy.restrictsMcp(),
+    userNamedOutlook: Object.hasOwn(cfg.mcpServers ?? {}, "outlook"),
+  });
+}
+
 function persistMcpServers(next: Record<string, unknown>): void {
   saveConfig({ mcpServers: next });
   // Do not reload the provider fleet: integrations are assembled from cfg at
@@ -15732,6 +15748,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // name and icon before anyone has a session, and it holds nothing secret.
     if (method === "GET" && path === "/api/brand" && !gate.auth) {
       return json(res, 200, loadBrand());
+    }
+    // The engine calls this loopback MCP with a process-local gate. A
+    // missing gate is indistinguishable from an unknown route.
+    if (path === "/api/outlook/mcp") {
+      if (!outlookMail.allowsMcp(req)) return json(res, 404, { error: "not found" });
+      await outlookMail.handleMcp(req, res);
+      return;
     }
     if (!gate.auth) return json(res, gate.status, { error: gate.error });
     const auth = gate.auth;
@@ -23679,6 +23702,33 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         throw error;
       }
       return json(res, 405, { error: "method not allowed" });
+    }
+
+    if (path === "/api/outlook" || path.startsWith("/api/outlook/sign-in") || path === "/api/outlook/sign-out") {
+      res.setHeader("Cache-Control", "no-store");
+      if ((method === "POST" || method === "PUT") && !String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const owner = auth.kind === "session" ? auth.session.id : "loopback";
+      try {
+        const body = method === "POST" || method === "PUT" ? await readBody(req, 20_480) : undefined;
+        const outcome = await outlookMail.route({
+          method,
+          path,
+          owner,
+          body,
+          restricted: managedPolicy.restrictsMcp(),
+        });
+        if (!outcome) return json(res, 404, { error: "not found" });
+        if (outcome.status === 200 && method === "POST" && path === "/api/outlook/sign-in" && auth.kind === "session" && !sessions.isLive(owner)) {
+          outlookMail.cancel(owner);
+          return json(res, 401, { error: "Your session ended. Start a new sign-in." });
+        }
+        return json(res, outcome.status, outcome.body);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Outlook sign-in could not start.";
+        return json(res, 400, { error: message });
+      }
     }
 
     if (method === "POST" && path === "/api/mcp/servers") {

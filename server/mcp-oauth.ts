@@ -13,10 +13,13 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
 
+import { MCP_OAUTH_CALLBACK_PATH, mcpOAuthRedirectPort, mcpOAuthRedirectUri } from "../shared/mcp-oauth-redirect.ts";
 import type { McpServerSpec } from "./contracts.ts";
 import { discoverMcpAuth, type McpAuthMetadata } from "./mcp-oauth-discovery.ts";
 import { McpOAuthStore, type McpOAuthRecord, type McpOAuthTokens } from "./mcp-oauth-store.ts";
 import type { McpOAuthClientConfig } from "./mcp-registry.ts";
+
+export { mcpOAuthRedirectUri };
 
 export type McpSignInPhase = "waiting" | "succeeded" | "failed" | "cancelled" | "expired";
 
@@ -46,7 +49,7 @@ const DEFAULT_LIFETIME_MS = 5 * 60_000;
  * that lapses mid-way. */
 const REFRESH_MARGIN_MS = 2 * 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
-const CALLBACK_PATH = "/mcp-oauth/callback";
+const CALLBACK_PATH = MCP_OAUTH_CALLBACK_PATH;
 /** complete()'s answer for a flow that ended while its code was spent. */
 const DISCARDED = "discarded";
 
@@ -83,20 +86,7 @@ export class McpSignInError extends Error {
 
 /** A port derived from the server URL: the same redirect URI on every
  * attempt, so a registered client can be reused instead of re-registered. */
-function preferredPort(url: string): number {
-  let hash = 0x811c9dc5;
-  for (const char of url) {
-    hash ^= char.charCodeAt(0);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return 20_000 + (hash % 20_000);
-}
-
-/** The redirect URI a sign-in for this server uses, to register with an
- * app made in advance for it. */
-export function mcpOAuthRedirectUri(url: string): string {
-  return `http://127.0.0.1:${preferredPort(url)}${CALLBACK_PATH}`;
-}
+const preferredPort = mcpOAuthRedirectPort;
 
 type TokenAuthMethod = "none" | "client_secret_post" | "client_secret_basic";
 

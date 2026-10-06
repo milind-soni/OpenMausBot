@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { directAppCreateBody, directAppByName } from "../shared/direct-apps.ts";
 import {
   addDisabledMcpServer,
   listMcpServers,
@@ -281,6 +282,30 @@ describe("a url server's sign-in app", () => {
     expect(parseStoredMcpServer("docs", { url, oauth: { clientId: "corp-app", clientSecret: true } })).toMatchObject({ ok: false });
     // leaving the app out removes it, secret and all
     expect(parseMcpServerMutation("docs", { url }, saved)).toEqual({ ok: true, server: { type: "http", url, headers: {}, enabled: true } });
+  });
+
+  it("accepts a direct Gmail grant and leaves the new server switched off", () => {
+    const created = directAppCreateBody(directAppByName("gmail")!, { clientId: "google-client", clientSecret: "google-secret" });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const { name, ...body } = created.body;
+    expect(parseMcpServerMutation(String(name), body)).toEqual({
+      ok: true,
+      server: {
+        type: "http",
+        url: "https://gmailmcp.googleapis.com/mcp/v1",
+        headers: {},
+        enabled: false,
+        oauth: {
+          clientId: "google-client",
+          clientSecret: "google-secret",
+          scopes: [
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.compose",
+          ],
+        },
+      },
+    });
   });
 
   it("refuses an empty client id, a scope with spaces and unknown fields, with a sentence that teaches", () => {

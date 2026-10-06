@@ -757,6 +757,17 @@ export function PluginsPanel() {
               >
                 {t("connectors.openSettings")}
               </button>
+              {" "}
+              <button
+                type="button"
+                className={cn(
+                  "font-medium underline underline-offset-2",
+                  setupNotice.tone === "info" && "text-ink",
+                )}
+                onClick={() => chooseFilter("mcp")}
+              >
+                {t("connectors.setupDirect")}
+              </button>
             </div>
           )}
           {botsWithoutApps.length > 0 && (

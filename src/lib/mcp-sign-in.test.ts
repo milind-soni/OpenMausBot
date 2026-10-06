@@ -95,6 +95,27 @@ it("cancels an attempt aborted while the start request was pending without openi
   expect(calls).toContainEqual(["DELETE", `/api/mcp/servers/hf/sign-in/${waiting.flowId}`]);
 });
 
+it("starts a direct mailbox against its own path and sends the app credentials", async () => {
+  const body = { clientId: "app", clientSecret: "secret", tenant: "common" };
+  const api = vi.fn(async () => ({ auth: { ...waiting, phase: "succeeded", authorizationUrl: null } }));
+  const result = await runMcpSignIn("outlook", {
+    api,
+    base: "/api/outlook/sign-in",
+    startBody: body,
+    open: async () => {},
+    sleep: async () => {},
+  });
+  expect(result.phase).toBe("succeeded");
+  expect(api).toHaveBeenCalledWith("/api/outlook/sign-in", { method: "POST", body: JSON.stringify(body) });
+});
+
+it("submits a pasted Outlook callback on the Outlook sign-in path", async () => {
+  const callback = "http://127.0.0.1:23456/mcp-oauth/callback?code=private&state=private";
+  const api = vi.fn(async () => ({ auth: { ...waiting, phase: "succeeded", authorizationUrl: null } }));
+  await completeMcpSignIn("outlook", waiting.flowId, callback, api, "/api/outlook/sign-in");
+  expect(api).toHaveBeenCalledWith(`/api/outlook/sign-in/${waiting.flowId}`, { method: "POST", body: JSON.stringify({ callbackUrl: callback }) });
+});
+
 it("submits a pasted URL only in the completion body for the selected flow", async () => {
   const callback = "http://127.0.0.1:23456/mcp-oauth/callback?code=private&state=private";
   const api = vi.fn(async () => ({ auth: { ...waiting, phase: "succeeded", authorizationUrl: null } }));

@@ -18,6 +18,10 @@ interface Deps {
   sleep?: (ms: number) => Promise<void>;
   signal?: AbortSignal;
   onStarted?: (status: McpSignInStatus, complete: (result: McpSignInStatus) => void) => void;
+  /** Sign-in collection. Defaults to the MCP server routes. */
+  base?: string;
+  /** JSON body for the start request. */
+  startBody?: unknown;
 }
 
 const POLL_MS = 1_500;
@@ -37,9 +41,12 @@ export function mcpSignInLink(value: string | null | undefined): string | null {
  * A start the server refuses (a server without OAuth, another owner's flow)
  * rejects with the server's message. */
 export async function runMcpSignIn(name: string, deps: Deps): Promise<McpSignInStatus> {
-  const base = `/api/mcp/servers/${encodeURIComponent(name)}/sign-in`;
+  const base = deps.base ?? `/api/mcp/servers/${encodeURIComponent(name)}/sign-in`;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const started = (await deps.api(base, { method: "POST" })).auth as McpSignInStatus;
+  const started = (await deps.api(base, {
+    method: "POST",
+    ...(deps.startBody !== undefined ? { body: JSON.stringify(deps.startBody) } : {}),
+  })).auth as McpSignInStatus;
   if (started.phase !== "waiting") return started;
   let cancellation: Promise<unknown> | undefined;
   const cancel = () => cancellation ??= started.flowId
@@ -96,8 +103,9 @@ export async function runMcpSignIn(name: string, deps: Deps): Promise<McpSignInS
 }
 
 /** Send the callback as a JSON body, never as a query parameter or a fetch target. */
-export async function completeMcpSignIn(name: string, flowId: string, callbackUrl: string, api: Deps["api"]): Promise<McpSignInStatus> {
-  const result = await api(`/api/mcp/servers/${encodeURIComponent(name)}/sign-in/${encodeURIComponent(flowId)}`, {
+export async function completeMcpSignIn(name: string, flowId: string, callbackUrl: string, api: Deps["api"], base?: string): Promise<McpSignInStatus> {
+  const root = base ?? `/api/mcp/servers/${encodeURIComponent(name)}/sign-in`;
+  const result = await api(`${root}/${encodeURIComponent(flowId)}`, {
     method: "POST", body: JSON.stringify({ callbackUrl: callbackUrl.trim() }),
   });
   return result.auth as McpSignInStatus;

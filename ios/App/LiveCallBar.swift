@@ -14,6 +14,7 @@ import SwiftUI
 
 struct LiveCallBar: View {
     let botName: String
+    @EnvironmentObject private var session: Session
     @EnvironmentObject private var liveCall: LiveCallController
     @State private var showingSettings = false
 
@@ -113,7 +114,12 @@ struct LiveCallBar: View {
                 LiveCallCaptionLine(feed: liveCall.feed)
             }
         }
-        .sheet(isPresented: $showingSettings) { LiveCallSettingsSheet() }
+        // iOS-on-Mac sheet hosting does not inherit environment objects.
+        .sheet(isPresented: $showingSettings) {
+            LiveCallSettingsSheet()
+                .environmentObject(session)
+                .environmentObject(liveCall)
+        }
         .modifier(BarChrome(tint: LiveCallColor.tint))
     }
 

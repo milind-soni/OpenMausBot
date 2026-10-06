@@ -352,13 +352,19 @@ struct ChatView: View {
         .onValueChange(of: dictation.isListening) { listening in
             if listening { composerFocused = false }
         }
+        // The sheet's hosting controller on iOS-on-Mac does not inherit
+        // @EnvironmentObject; see the same note on ChatListView.
         .sheet(isPresented: $showingTasks) {
             if current.supportsTasks {
                 TaskManagerView(chat: current) { selectedThreadId = $0 }
+                    .environmentObject(session)
             }
         }
         .sheet(isPresented: $showingProfile) {
-            if case let .bot(bot) = current { AgentProfileView(bot: bot) }
+            if case let .bot(bot) = current {
+                AgentProfileView(bot: bot)
+                    .environmentObject(session)
+            }
         }
         .sheet(item: $shareFile) { file in
             ActivityShareSheet(items: [file.url])
