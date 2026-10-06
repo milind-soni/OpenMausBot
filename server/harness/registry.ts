@@ -78,52 +78,74 @@ export class ProviderRegistry {
   }
 
   async load(configs: InstanceConfigMap, decorate?: (instance: ProviderInstance) => ProviderInstance) {
-    for (const [instanceId, entry] of Object.entries(configs)) {
-      // Account edits replace only their own process/session state.
-      await this.dispose(instanceId);
-      const driver = this.driversByKind.get(entry.driver);
-      if (!driver) {
-        this.byId.set(instanceId, {
+    // Create instances concurrently: a driver's create may probe its CLI with
+    // a multi-second timeout, and N slow CLIs must not queue on each other.
+    // Each entry resolves to the RegistryEntry it becomes — a create or
+    // decode failure stays local to its instance, exactly as before.
+    const loaded = await Promise.all(
+      Object.entries(configs).map(async ([instanceId, entry]) => {
+        const ready = await this.createEntry(instanceId, entry, decorate);
+        // Usable as soon as it is ready, not after the slowest CLI.
+        this.byId.set(instanceId, ready);
+        return ready;
+      }),
+    );
+    // Config order, not completion order: entries()/describe() are the UI's
+    // list and must not shuffle when a slow CLI lands last.
+    for (const entry of loaded) {
+      this.byId.delete(entry.instanceId);
+      this.byId.set(entry.instanceId, entry);
+    }
+  }
+
+  private async createEntry(
+    instanceId: InstanceId,
+    entry: InstanceConfigMap[string],
+    decorate?: (instance: ProviderInstance) => ProviderInstance,
+  ): Promise<RegistryEntry> {
+    // Account edits replace only their own process/session state.
+    await this.dispose(instanceId);
+    const driver = this.driversByKind.get(entry.driver);
+    if (!driver) {
+      return {
+        instanceId,
+        shadow: {
           instanceId,
-          shadow: {
-            instanceId,
-            driverKind: entry.driver,
-            displayName: entry.displayName,
-            cli: cliOfRaw(entry.config),
-            shadow: true,
-            reason: `unknown driver "${entry.driver}" — kept as configured, unavailable here`,
-          },
-        });
-        continue;
-      }
-      try {
-        const config = entry.config === undefined ? driver.defaultConfig() : driver.decodeConfig(entry.config);
-        // Override detection is on the RAW config, never the decoded one:
-        // decodeConfig fills in the driver default ("claude", "codex", …),
-        // so reading `cli` there would flag every instance as overridden.
-        const rawCli = cliOfRaw(entry.config);
-        if (rawCli) this.cliByInstance.set(instanceId, rawCli);
-        const live = await driver.create({
+          driverKind: entry.driver,
+          displayName: entry.displayName,
+          cli: cliOfRaw(entry.config),
+          shadow: true,
+          reason: `unknown driver "${entry.driver}" — kept as configured, unavailable here`,
+        },
+      };
+    }
+    try {
+      const config = entry.config === undefined ? driver.defaultConfig() : driver.decodeConfig(entry.config);
+      // Override detection is on the RAW config, never the decoded one:
+      // decodeConfig fills in the driver default ("claude", "codex", …),
+      // so reading `cli` there would flag every instance as overridden.
+      const rawCli = cliOfRaw(entry.config);
+      if (rawCli) this.cliByInstance.set(instanceId, rawCli);
+      const live = await driver.create({
+        instanceId,
+        displayName: entry.displayName ?? driver.metadata.displayName,
+        environment: entry.environment ?? {},
+        enabled: entry.enabled ?? true,
+        config,
+      });
+      return { instanceId, live: decorate ? decorate(live) : live };
+    } catch (e) {
+      return {
+        instanceId,
+        shadow: {
           instanceId,
+          driverKind: entry.driver,
           displayName: entry.displayName ?? driver.metadata.displayName,
-          environment: entry.environment ?? {},
-          enabled: entry.enabled ?? true,
-          config,
-        });
-        this.byId.set(instanceId, { instanceId, live: decorate ? decorate(live) : live });
-      } catch (e) {
-        this.byId.set(instanceId, {
-          instanceId,
-          shadow: {
-            instanceId,
-            driverKind: entry.driver,
-            displayName: entry.displayName ?? driver.metadata.displayName,
-            cli: cliOfRaw(entry.config),
-            shadow: true,
-            reason: e instanceof Error ? e.message : String(e),
-          },
-        });
-      }
+          cli: cliOfRaw(entry.config),
+          shadow: true,
+          reason: e instanceof Error ? e.message : String(e),
+        },
+      };
     }
   }
 
