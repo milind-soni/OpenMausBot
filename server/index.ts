@@ -12919,13 +12919,15 @@ async function runGroupMemberTurn(
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
   ]);
 
+  // The engines read at start is part of setup (it learns what this engine
+  // supports): wait for it before the claim below.
+  if (enginesRead) await enginesRead;
   // run the turn and wait for it to settle, folding the reply text so a
   // chained @mention can be routed afterwards
   // Claim only after setup succeeded. An unavailable, busy, unsupported, or
   // connector-failed first responder must not silently consume /learn for the
   // next eligible room member.
   if (skillAuthoring) skillAuthoringClaim.claimed = true;
-  if (enginesRead) await enginesRead;
   // A stopped room handshake may not have revealed its provider turn id yet.
   // Do not launch a replacement into that ambiguous window; once the old id
   // is known it is retired and this bounded gate clears immediately.
@@ -25242,16 +25244,18 @@ restoreChannelMessages();
 server.listen(PORT, "127.0.0.1", async () => {
   companyRuntimeReady();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
-  // The work below starts turns and wakes delegators, and a woken delegator
-  // keeps its session only on an engine that records what it was handed: it
-  // starts once the engines read at start is done.
+  // Words queued before the restart start first, ahead of anything sent from
+  // now on. Their turns wait for the engines read at start like every turn.
+  followupsReady = true;
+  drainQueuedSends();
+  drainQueuedChannelSends();
+  // The work below wakes delegators, and a woken delegator keeps its session
+  // only on an engine that records what it was handed, which that read finds
+  // out: it starts once the read is done.
   if (enginesRead) {
     await enginesRead;
     if (companyShutdown) return;
   }
-  followupsReady = true;
-  drainQueuedSends();
-  drainQueuedChannelSends();
   // Startup work uses the same turn dispatcher and local tool endpoint as
   // ordinary chat. Start only once every registry is initialized and the
   // endpoint is listening; earlier dispatch can hit uninitialized bindings.

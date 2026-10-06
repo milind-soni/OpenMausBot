@@ -8,6 +8,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
@@ -105,4 +106,30 @@ it("answers on a later start while an engine CLI is still being probed, and runs
   const { instances } = await server.get("/api/instances");
   expect(instances.find((instance: { instanceId: string }) => instance.instanceId === "claude")?.snapshot)
     .toMatchObject({ state: "available", authenticated: true });
+}, 60_000);
+
+it("starts the words a later start restored before a message sent while the engines are read", async () => {
+  const home = freshHome();
+  const first = await boot(home);
+  const [starter] = (await first.get("/api/bots?messages=0")).bots;
+  await first.stop();
+  // Words still queued for the conversation when the last run stopped.
+  const db = new DatabaseSync(join(home, "messages.db"));
+  try {
+    db.prepare("INSERT INTO chat_followups(id, kind, owner_id, thread_id, send_id, status, payload) VALUES (?, 'bot', ?, ?, NULL, 'pending', ?)")
+      .run("queued_before_restart", starter.id, starter.threadId, JSON.stringify({ text: "Queued before the restart" }));
+  } finally { db.close(); }
+
+  const probes = join(home, "probes.log");
+  const release = join(home, "release-auth");
+  const server = await boot(home, { FAKE_CLAUDE_PROBE_LOG: probes, FAKE_CLAUDE_HOLD_AUTH: release });
+  await expect.poll(() => existsSync(probes) && /^auth \d+$/m.test(readFileSync(probes, "utf8")), { timeout: 10_000 }).toBe(true);
+  await server.control("send", "--bot", starter.id, "--task", starter.threadId, "--text", "Sent while the engines are read");
+  writeFileSync(release, "");
+
+  const said = async () => ((await server.get(`/api/threads/${starter.threadId}/messages?limit=100`)).messages as Array<{ role: string; text?: string }>)
+    .filter((message) => message.role === "user").map((message) => message.text);
+  await expect.poll(said, { timeout: 30_000 }).toHaveLength(2);
+  expect(await said()).toEqual(["Queued before the restart", "Sent while the engines are read"]);
+  expect((await server.control("wait", "--bot", starter.id, "--task", starter.threadId, "--timeout", "30")).status).toBe("settled");
 }, 60_000);
