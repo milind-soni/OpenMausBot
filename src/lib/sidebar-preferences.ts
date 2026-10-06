@@ -2,10 +2,13 @@ import { useSyncExternalStore } from "react";
 import { z } from "zod";
 
 export type SidebarDensity = "comfortable" | "compact" | "icons";
+export type SidebarToolsLayout = "rows" | "toolbar";
 
 export const SIDEBAR_DENSITIES: readonly SidebarDensity[] = ["comfortable", "compact", "icons"];
+export const SIDEBAR_TOOLS_LAYOUTS: readonly SidebarToolsLayout[] = ["rows", "toolbar"];
 
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
+export const SIDEBAR_TOOLS_LAYOUT_KEY = "openmausbot.sidebarToolsLayout";
 export const SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth";
 export const SIDEBAR_ATTENTION_PINNED_KEY = "openmausbot.sidebarAttentionPinned.v1";
 export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSections.v1";
@@ -40,6 +43,38 @@ export function saveSidebarDensity(
   try {
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
     target?.setItem(SIDEBAR_DENSITY_KEY, density);
+  } catch {
+    // Private browsing and locked-down webviews may reject localStorage.
+    // The in-memory React state still makes the control useful this session.
+  }
+}
+
+export function parseSidebarToolsLayout(value: string | null): SidebarToolsLayout {
+  switch (value) {
+    case "rows":
+    case "toolbar":
+      return value;
+    default:
+      return "rows";
+  }
+}
+
+export function loadSidebarToolsLayout(storage?: Pick<Storage, "getItem"> | null): SidebarToolsLayout {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    return parseSidebarToolsLayout(target?.getItem(SIDEBAR_TOOLS_LAYOUT_KEY) ?? null);
+  } catch {
+    return "rows";
+  }
+}
+
+export function saveSidebarToolsLayout(
+  layout: SidebarToolsLayout,
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    target?.setItem(SIDEBAR_TOOLS_LAYOUT_KEY, layout);
   } catch {
     // Private browsing and locked-down webviews may reject localStorage.
     // The in-memory React state still makes the control useful this session.
@@ -93,6 +128,53 @@ export function setSidebarDensity(density: SidebarDensity): void {
 
 export function useSidebarDensity(): SidebarDensity {
   return useSyncExternalStore(subscribeDensity, currentSidebarDensity, () => "comfortable");
+}
+
+// The footer tools and Settings → Appearance share this store the way density
+// does, so one choice is live in both without a reload.
+let toolsLayoutSessionChoice: SidebarToolsLayout | undefined;
+const toolsLayoutListeners = new Set<() => void>();
+
+function currentSidebarToolsLayout(): SidebarToolsLayout {
+  return toolsLayoutSessionChoice ?? loadSidebarToolsLayout();
+}
+
+function notifyToolsLayout() {
+  for (const listener of toolsLayoutListeners) listener();
+}
+
+function onToolsLayoutStorage(event: StorageEvent) {
+  if (event.key !== SIDEBAR_TOOLS_LAYOUT_KEY && event.key !== null) return;
+  try {
+    if (event.storageArea && event.storageArea !== globalThis.localStorage) return;
+  } catch {
+    return;
+  }
+  toolsLayoutSessionChoice = undefined;
+  notifyToolsLayout();
+}
+
+export function subscribeSidebarToolsLayout(listener: () => void): () => void {
+  toolsLayoutListeners.add(listener);
+  if (toolsLayoutListeners.size === 1 && typeof window !== "undefined") {
+    window.addEventListener("storage", onToolsLayoutStorage);
+  }
+  return () => {
+    toolsLayoutListeners.delete(listener);
+    if (toolsLayoutListeners.size === 0 && typeof window !== "undefined") {
+      window.removeEventListener("storage", onToolsLayoutStorage);
+    }
+  };
+}
+
+export function setSidebarToolsLayout(layout: SidebarToolsLayout): void {
+  toolsLayoutSessionChoice = layout;
+  saveSidebarToolsLayout(layout);
+  notifyToolsLayout();
+}
+
+export function useSidebarToolsLayout(): SidebarToolsLayout {
+  return useSyncExternalStore(subscribeSidebarToolsLayout, currentSidebarToolsLayout, () => "rows");
 }
 
 export function clampSidebarWidth(width: number, viewportWidth: number): number {

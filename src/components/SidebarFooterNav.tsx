@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { isRoutineProblemRun } from "@/lib/routines";
-import type { SidebarDensity } from "@/lib/sidebar-preferences";
+import { useSidebarToolsLayout, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
 
 
@@ -87,7 +87,11 @@ export function SidebarAppsButton() {
 export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
   const { state, dispatch } = useStore();
   const advanced = useAdvancedMode();
+  const toolsLayout = useSidebarToolsLayout();
   const iconsOnly = density === "icons";
+  // The toolbar is the same NavRows rendered icon-only in a line; icons
+  // density already renders that way, so its output never changes.
+  const toolbar = !iconsOnly && toolsLayout === "toolbar";
   const iconSize = iconsOnly ? 20 : 18;
   const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
   const routinesNeedYou = state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt);
@@ -97,12 +101,16 @@ export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
 
   return (
     // `tools` is the guided tour's anchor for "the places down here".
-    <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">
+    <nav
+      data-tour="tools"
+      aria-label={t("sidebar.tools")}
+      className={toolbar ? "flex flex-row gap-1" : "flex flex-col gap-0.5"}
+    >
       {advanced && <NavRow
         id="routines"
         label={t("sidebar.nav.routines")}
         tourId="nav-automations"
-        iconsOnly={iconsOnly}
+        iconsOnly={iconsOnly || toolbar}
         active={state.activeView === "routines"}
         attention={routinesNeedYou}
         icon={(active) => <CalendarDays size={iconSize} className={tone(active)} />}
@@ -111,7 +119,7 @@ export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
       {advanced && <NavRow
         id="triggers"
         label={t("sidebar.nav.triggers")}
-        iconsOnly={iconsOnly}
+        iconsOnly={iconsOnly || toolbar}
         active={state.triggersOpen}
         icon={(active) => <Zap size={iconSize} className={tone(active)} />}
         onClick={() => dispatch({ type: "toggleTriggers", open: true })}
@@ -120,7 +128,7 @@ export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
         id="apps"
         label={t("sidebar.nav.apps")}
         tourId="nav-apps"
-        iconsOnly={iconsOnly}
+        iconsOnly={iconsOnly || toolbar}
         active={state.pluginsOpen}
         icon={(active) => <Puzzle size={iconSize} className={tone(active)} />}
         onClick={() => dispatch({ type: "togglePlugins", open: true })}
@@ -130,7 +138,7 @@ export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
           id="team-map"
           label={t("sidebar.nav.teamMap")}
           tourId="team-tools"
-          iconsOnly={iconsOnly}
+          iconsOnly={iconsOnly || toolbar}
           active={state.activeView === "team-map"}
           icon={(active) => <Network size={iconSize} className={tone(active)} />}
           onClick={() => dispatch({ type: "showTeamMap" })}
