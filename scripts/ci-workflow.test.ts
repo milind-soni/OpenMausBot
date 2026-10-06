@@ -74,17 +74,13 @@ describe("CI concurrency", () => {
     expect(workflow.jobs.vitest["timeout-minutes"]).toBe("${{ matrix.os == 'ubuntu-latest' && 20 || 35 }}");
   });
 
-  it("keeps each PR to one macOS job unless native code changed", () => {
+  it("keeps each PR to one macOS job", () => {
     const macosJobs = Object.entries(workflow.jobs as Record<string, { "runs-on": string; strategy?: { matrix?: { os?: unknown } } }>)
       .filter(([, job]) => job["runs-on"] === "macos-latest" || JSON.stringify(job.strategy?.matrix?.os ?? "").includes("macos"))
       .map(([name]) => name);
-    expect(macosJobs.sort()).toEqual(["electron-smokes", "ios"]);
+    expect(macosJobs.sort()).toEqual(["electron-smokes"]);
     const smokes = workflow.jobs["electron-smokes"].steps.map((step: { run?: string }) => step.run);
     expect(smokes).toContain("pnpm test:packaged-server");
-    expect(workflow.jobs.ios.steps.some((step: { run?: string }) => step.run?.includes("verify-ios-thread-navigation"))).toBe(false);
-    const ui = parse(readFileSync(new URL("../.github/workflows/ios-thread-ui.yml", import.meta.url), "utf8"));
-    expect(ui.jobs["thread-ui"].steps.some((step: { run?: string }) => step.run === "bash scripts/verify-ios-thread-navigation-ci.sh")).toBe(true);
-    expect(Object.keys(ui.on).sort()).toEqual(["push", "schedule", "workflow_dispatch"]);
   });
 
   it("makes a release wait for its commit's CI gate before any draft", () => {
@@ -129,7 +125,7 @@ describe("CI concurrency", () => {
     expect(workflow.jobs.static.steps[0].with["fetch-depth"]).toBe(0);
     expect(workflow.jobs.static.steps.find((step: { id?: string }) => step.id === "scope").run).toBe("node scripts/ci-scope.mjs");
     expect(workflow.jobs.static.outputs).toEqual({
-      runtime: "${{ steps.scope.outputs.runtime }}", mobile: "${{ steps.scope.outputs.mobile }}",
+      runtime: "${{ steps.scope.outputs.runtime }}",
       vitest_os: "${{ steps.scope.outputs.vitest_os }}",
     });
     expect(workflow.jobs.static.steps.some((step: { run?: string }) =>
@@ -153,7 +149,7 @@ describe("CI concurrency", () => {
         continue;
       }
       expect(job.needs).toBe("static");
-      expect(job.if).toBe(`needs.static.outputs.${["ios", "android"].includes(name) ? "mobile" : "runtime"} == 'true'`);
+      expect(job.if).toBe("needs.static.outputs.runtime == 'true'");
     }
   });
 

@@ -3,26 +3,17 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// The native apps build from ios/ and android/ alone: their server payloads
-// are committed fixtures (scripts/capture-companion-fixtures.mjs refreshes
-// them by hand), so a server or renderer change cannot move a mobile result.
-// The workflow and this selector can, and .gitattributes pins generated
-// Swift/Kotlin line endings.
-const MOBILE_PATHS = /^(?:ios\/|android\/|\.github\/workflows\/ci\.yml$|scripts\/ci-scope\.mjs$|\.gitattributes$)/;
-
 export function selectCiScope(files) {
   let runtime = false;
-  let mobile = false;
-  if (!Array.isArray(files) || files.length === 0) return { runtime: true, mobile: true };
+  if (!Array.isArray(files) || files.length === 0) return { runtime: true };
   for (const file of files) {
     if (typeof file !== "string" || file.split("/").some((part) => !part || part === "." || part === "..")) {
-      return { runtime: true, mobile: true };
+      return { runtime: true };
     }
     if (/^(?:[^/]+\.md|docs\/.+\.md|\.github\/FUNDING\.yml)$/.test(file)) continue;
     runtime = true;
-    if (MOBILE_PATHS.test(file)) mobile = true;
   }
-  return { runtime, mobile };
+  return { runtime };
 }
 
 // macOS runners are the scarce ones (five at a time for the whole account),
@@ -33,7 +24,7 @@ const ALL_OS = ["macos-latest", "ubuntu-latest", "windows-latest"];
 const PR_OS = ["ubuntu-latest", "windows-latest"];
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  let scope = { runtime: true, mobile: true };
+  let scope = { runtime: true };
   let vitestOs = ALL_OS;
   if (process.env.GITHUB_EVENT_NAME === "pull_request") {
     try {
@@ -58,6 +49,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   appendFileSync(
     process.env.GITHUB_OUTPUT,
-    `runtime=${scope.runtime}\nmobile=${scope.mobile}\nvitest_os=${JSON.stringify(vitestOs)}\n`,
+    `runtime=${scope.runtime}\nvitest_os=${JSON.stringify(vitestOs)}\n`,
   );
 }

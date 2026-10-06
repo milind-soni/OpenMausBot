@@ -270,7 +270,6 @@ GitHub-wide scheduling backlog.
 - **vitest (os, shard n/4)** — the suite split into four shards per platform: Ubuntu and Windows on a PR; macOS as well on main, in the merge queue and on manual runs (macOS runners are scarce and only a couple of tests are macOS-only). The suite runs its files serially on purpose (fake CLIs and a real harness server), so the whole suite takes about 70 minutes of Windows runner time and 50 of Ubuntu. The shards split it by each file's recorded CI time rather than by file count ([docs/ci.md](docs/ci.md#vitest-shards)). To reproduce a shard's failure locally, run the same `pnpm exec vitest run --shard=n/4`. Failures also appear as annotations on the PR.
 - **packaged server smoke (os)** — the server bundle copied out of the repo and started with no `node_modules` in reach.
 - **Windows CUA host smoke**, **macOS smokes (packaged server + Electron)** — real Electron utility processes against disposable homes; never the live app.
-- **Swift tests + iOS build**, **Kotlin tests + Android build** — only when `ios/` or `android/` (or the CI setup) changes. The iPhone/iPad simulator UI suite runs nightly in `ios-thread-ui.yml`.
 - **CI** — the one check the branch rules require. It only aggregates the jobs above; if it is red, the failing job is named in its log.
 
 A `pre-push` hook installed by `pnpm install` runs lint, typecheck and the locale check before a push (about a minute). `git push --no-verify` skips it once; `OMB_SKIP_HOOKS=1` skips it for a session.

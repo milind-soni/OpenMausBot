@@ -5,13 +5,8 @@ typecheck, lint, Electron checks, the UI build, CI-selection tests and the
 verification-documentation checks. Selection never skips the entire workflow.
 
 - Root Markdown files, Markdown under `docs/`, and `.github/FUNDING.yml` alone
-  do not run the runtime or mobile jobs.
+  do not run the runtime jobs.
 - Any other change runs the runtime suite.
-- The native iOS/Android jobs run only for `ios/`, `android/` (Android's core
-  tests read the iOS fixtures), `.github/workflows/ci.yml`,
-  `scripts/ci-scope.mjs` and `.gitattributes`. The apps read committed server
-  fixtures (refreshed by hand with `scripts/capture-companion-fixtures.mjs`),
-  so a server change cannot move their result.
 - Main pushes, merge groups and manual runs always run all jobs. Empty or
   unreadable PR diffs also fall back to all jobs.
 
@@ -64,8 +59,6 @@ half hours. Now:
   macOS-only.
 - Every PR's macOS checks are one job: the packaged-server smoke and the
   Electron smokes.
-- The iPhone/iPad simulator UI suite is `ios-thread-ui.yml`: nightly, on main
-  pushes that touch `ios/`, and by hand.
 - `ci-stop-closed.yml` cancels a PR's CI run when the PR is merged or closed. PR runs share a group named by the PR number (`ci-pr-<n>`), never by `github.ref`: a merged PR's closed event reports the base branch as `github.ref`, which made every merge cancel main's CI (fixed Oct 3 2026).
 
 ## Main and releases

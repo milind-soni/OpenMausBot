@@ -184,36 +184,6 @@ steer messages from external interfaces. It also verifies bounded request
 lineage snapshots, Chief continuations and exact-execution Stop without
 interrupting a newer request.
 
-The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
-search and draft isolation using disposable simulators and an offline fixture.
-
-The [iOS Local VM view](ios-local-vm.md) pairs a disposable simulator with an
-isolated server, companion sidecar and synthetic Local VM to check on-demand
-stills and the per-device computer-access gate.
-
-The [Android stream recovery checks](android-stream-recovery.md) exercise early
-stream closure and fallback through disposable HTTP endpoints.
-
-The [iOS transcript checks](ios-transcript.md) cover completed-turn folds,
-Hidden activity, and compact webhook messages using bundled offline data.
-
-The [iOS responsiveness checks](ios-responsiveness.md) exercise ordinary chat
-typing and navigation during a synthetic busy-fleet stream, plus batched
-delivery, compact off-main widget writes and bounded Markdown parse reuse.
-
-The [Android thread checks](android-threads.md) cover the Compose thread tree,
-local selection, draft isolation and installable preview APK.
-
-The [Android server pairing checks](android-server-pairing.md) cover server QR
-confirmation, manual codes, retries and saved-server identity validation.
-
-The [Android transcript checks](android-transcript.md) cover completed-turn
-folds, Hidden reasoning, and compact webhook messages through real Compose UI.
-
-The [Android Live call checks](android-live-calls.md) cover the `/api/live/*`
-client, the `live.call` frame, the call manager's state machine, the call bar,
-and an emulator smoke against the fixture and the fake GPT-Live.
-
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.
 
