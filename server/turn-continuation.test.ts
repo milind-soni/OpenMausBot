@@ -77,7 +77,7 @@ interface FakeHarness {
   failNextStart: () => void;
 }
 
-function harness(options?: { taskTitle?: string; taskForEveryThread?: boolean }): FakeHarness {
+function harness(options?: { taskTitle?: string; taskForEveryThread?: boolean; canContinue?: (threadId: string) => boolean }): FakeHarness {
   const calls: FakeHarness["calls"] = { createTask: [], startTurn: [], append: [] };
   const task = { threadId: "thread-cont", title: "Continue: Whatever", projectId: undefined as string | undefined, approvalMode: "ask" as const, modelSelection: undefined };
   let clock = 1_000_000;
@@ -98,6 +98,7 @@ function harness(options?: { taskTitle?: string; taskForEveryThread?: boolean })
     store: store as unknown as Parameters<typeof makeCapContinuationSubscriber>[0]["store"],
     startTurn: startTurn as unknown as Parameters<typeof makeCapContinuationSubscriber>[0]["startTurn"],
     now: () => clock,
+    canContinue: options?.canContinue,
   });
   return {
     sub, calls,
@@ -170,4 +171,23 @@ describe("makeCapContinuationSubscriber", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.calls.createTask.length).toBe(0);
   });
+});
+
+it("keeps channel-owned tasks out of automatic continuation without blocking ordinary app tasks", async () => {
+  const owned = new Set(["phone-thread"]);
+  const h = harness({ taskForEveryThread: true, canContinue: threadId => !owned.has(threadId) });
+  h.sub(capEvent("phone-thread"));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(h.calls.createTask).toEqual([]); expect(h.calls.startTurn).toEqual([]); expect(h.calls.append).toEqual([]);
+  h.sub(capEvent("app-thread"));
+  await vi.waitFor(() => expect(h.calls.startTurn).toHaveLength(1));
+  expect(h.calls.append[0]?.[0]).toBe("app-thread");
+});
+it("wires explicit messaging ownership from restored and newly created tasks before continuation", () => {
+  const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  expect(source).toContain("const messagingOwnedThreads = new Set<string>()");
+  expect(source).toMatch(/makeCapContinuationSubscriber\(\{[^}]*canContinue: threadId => !messagingOwnedThreads\.has\(threadId\)/);
+  const channel = source.slice(source.indexOf("const makeInkboxChannel ="), source.indexOf("const inkbox = makeInkboxChannel"));
+  expect(channel).toMatch(/createAskTask:[\s\S]*?messagingOwnedThreads\.add\(threadId\)[\s\S]*?return threadId;[\s\S]*?send:/);
+  expect(channel).toContain("if (conversation.activeThreadId) messagingOwnedThreads.add(conversation.activeThreadId)");
 });

@@ -1192,6 +1192,18 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     }
   });
 
+  it("pre-allows only the dedicated host Inkbox mount with credentials off argv", async () => {
+    await create(); const dump = join(scratch, "inkbox.json"); process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-inkbox", text: "check inbox", approvalMode: "ask",
+      integrations: { inkbox: { command: process.execPath, args: ["/tmp/harness-mcp-proxy.js", "inkbox"],
+        env: { OMB_INKBOX_MCP_TOKEN: "inkbox-turn-capability", OMB_HARNESS_URL: "http://127.0.0.1:8799" } } } });
+    await recorder.until(event => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain('mcp_servers.inkbox.default_tools_approval_mode="auto"');
+    expect(seen.argv.join(" ")).not.toContain("inkbox-turn-capability");
+    expect(seen.env.OMB_INKBOX_MCP_TOKEN).toBe("inkbox-turn-capability");
+  });
+
   it("mounts the Local VM computer MCP server without placing credentials in argv", async () => {
     await create();
     const dump = join(scratch, "local-computer.json");

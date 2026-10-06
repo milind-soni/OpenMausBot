@@ -1188,10 +1188,12 @@ export const WORKSPACE_CREDENTIAL_ENV = [
  * control plane injects under `OMB_CLOUD_` (the readiness token, the bootstrap
  * document and its gateway token). Only this process reads them. The prefix
  * ends in an underscore on purpose: `OMB_CLOUDFLARED_PATH` is not one of them.
+ * Inkbox account and webhook secrets likewise stay in the host; its tools
+ * receive a separate turn capability, never these credentials.
  * What an engine is meant to receive arrives under another name through its
  * instance environment (the hosted model token as ANTHROPIC_API_KEY or
  * OPENMAUSBOT_COMPANY_API_KEY), so nothing here is ever an engine's input. */
-export const CONTROL_PLANE_ENV = ["OMB_LICENSE_KEY", "OMB_INSTALLATION_CREDENTIAL"] as const;
+export const CONTROL_PLANE_ENV = ["OMB_LICENSE_KEY", "OMB_INSTALLATION_CREDENTIAL", "OMB_INKBOX_API_KEY", "OMB_INKBOX_SIGNING_SECRET"] as const;
 export const CONTROL_PLANE_ENV_PREFIX = "OMB_CLOUD_";
 
 /** Drop every control-plane secret from a child-process env (in place). No

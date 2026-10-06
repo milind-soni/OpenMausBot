@@ -784,6 +784,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (turn.integrations?.composio) {
           mountSelected("composio", "openmausbot_connectors", turn.integrations.composio);
         }
+        if (turn.integrations?.inkbox) mountSelected("inkbox", "inkbox", turn.integrations.inkbox);
         if (turn.integrations?.agents) {
           mountSelected("agents", "agents", turn.integrations.agents);
         }
@@ -804,6 +805,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           for (const name of declaredInCodexConfig) appServerArgs.push("-c", `mcp_servers.${name}.enabled=false`);
         }
         for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
+          if (name === "inkbox" && turn.integrations?.inkbox) continue;
           // codex speaks streamable HTTP to a remote server, not the older
           // SSE transport: such an entry still reaches Claude bots, and is
           // left out here rather than mounted as something it is not

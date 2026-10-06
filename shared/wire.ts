@@ -381,8 +381,8 @@ export type CardAnswerer = (
   | { kind: "loopback" }
   | { kind: "worker" }
 ) & {
-  /** "call": decided by voice on a Live call, not tapped. */
-  via?: "call";
+  /** How the owner answered: Live voice or a verified messaging channel. */
+  via?: "call" | "message";
 };
 
 /** One transcript line. Serialized as stored — the durable delivery

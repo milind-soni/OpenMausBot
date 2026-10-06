@@ -865,6 +865,8 @@ export interface InstanceInfo {
 }
 
 export type AppSettingsSection =
+  | "inkbox"
+  | "trustedContacts"
   | "general"
   | "desktopWorkspaces"
   | "organization"

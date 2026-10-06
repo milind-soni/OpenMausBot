@@ -40,3 +40,7 @@ The iOS companion app bundles a prebuilt WebRTC library for Live calls
 (stasel/WebRTC), built from the WebRTC project, Copyright (c) 2011, The WebRTC
 project authors, used under the BSD 3-Clause License. WebRTC includes
 third-party components under their own licenses, listed with the library.
+
+The iMessage desktop connection uses the official @inkbox/sdk 0.7.14,
+Copyright (c) 2026 Inkbox-AI, under the MIT License. The SDK and its bundled
+dependencies retain their license texts in third_party/inkbox/LICENSES.txt.

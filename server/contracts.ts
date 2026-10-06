@@ -207,6 +207,9 @@ export interface SendTurnInput {
      * through the harness so this bot can message other bots. The harness
      * owns turns, permissions, and recursion limits; the proxy only forwards. */
     agents?: { command: string; args: string[]; env: Record<string, string> };
+    /** Host-owned Inkbox relay. Its exact turn capability enforces Ask before
+     * every mutation; drivers must not add a second generic MCP approval. */
+    inkbox?: { command: string; args: string[]; env: Record<string, string> };
     /** Physical Android phone tools over authorized USB debugging. */
     phone?: { command: string; args: string[]; env: Record<string, string> };
     /** The app's built-in browser: an MCP proxy (server/harness-mcp-proxy browser)

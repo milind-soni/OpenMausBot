@@ -154,14 +154,14 @@ describe("Settings in Simple mode", () => {
     expect(blocks(html)).toEqual(["cloudAccount", "organization"]);
   });
 
-  it("adds People and Activity to Account for a hosted workspace's admins in a browser", () => {
+  it("adds People, trusted contacts and Activity to Account for a hosted workspace's admins in a browser", () => {
     vi.stubGlobal("window", {});
     fixture.ownerOrAdmin = true;
     fixture.section = "people";
     const html = render();
     // no Servers page without the desktop bridge, and no desktop-only account pages
     expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account"]);
-    expect(blocks(html)).toEqual(["people", "activity"]);
+    expect(blocks(html)).toEqual(["people", "inkbox", "trustedContacts", "activity"]);
   });
 
   it("drops Account when nothing on it is shown", () => {

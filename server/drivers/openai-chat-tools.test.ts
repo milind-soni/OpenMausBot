@@ -156,6 +156,26 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
   };
 }
 
+describe("host-owned Inkbox approval", () => {
+  it.each([true, false])("delegates approval only for the host-owned mount (%s)", async (builtIn) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [toolCall("inkbox_write")] }, "tool_calls")]);
+      else answer(response);
+    });
+    const stop = f.instance.adapter.onEvent(event => {
+      if (event.type === "request.opened") void f.instance.adapter.respondToRequest(f.threadId, event.requestId!, { behavior: "deny" });
+    });
+    const descriptor = f.integrations!.custom!.audit;
+    await f.start({ approvalMode: "ask", integrations: builtIn
+      ? { inkbox: descriptor as NonNullable<SendTurnInput["integrations"]>["inkbox"] }
+      : { custom: { inkbox: descriptor } } });
+    await f.completed();
+    stop();
+    expect(f.recorder.events.filter(event => event.type === "request.opened")).toHaveLength(builtIn ? 0 : 1);
+    expect(f.effects()).toHaveLength(builtIn ? 1 : 0);
+  });
+});
+
 describe("optional built-in question compatibility", () => {
   const unsupported = { error: { message: "This model does not support tools." } };
   it.each([

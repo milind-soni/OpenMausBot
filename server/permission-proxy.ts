@@ -166,7 +166,7 @@ const TOOLS = [
   {
     name: "ask_user",
     description:
-      "Ask the human who owns this bot a question and wait for their answer. Use whenever you need a decision, a preference, missing information, or sign-off before doing something consequential — do not guess on things the owner would want to decide. Returns their answer as text.",
+      "Ask the human who owns this bot a question and wait for their answer. Use whenever you need a decision, a preference, missing information, or sign-off before doing something consequential — do not guess on things the owner would want to decide. Offer concrete options where they exist; they can always answer in their own words. Returns their answer as text.",
     inputSchema: {
       type: "object",
       properties: {
@@ -174,7 +174,7 @@ const TOOLS = [
         choices: {
           type: "array",
           items: { type: "string" },
-          description: "Optional 2-5 suggested answers, shown as one-tap buttons",
+          description: "Provide 2-5 suggested answers when useful concrete alternatives exist, shown as one-tap buttons. Omit for genuinely open-ended questions; the person can always write their own answer.",
         },
       },
       required: ["question"],

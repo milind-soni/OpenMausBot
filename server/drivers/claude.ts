@@ -1527,6 +1527,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpServers.composio = { ...turn.integrations.composio };
         allowed.push("mcp__composio");
       }
+      if (turn.integrations?.inkbox) {
+        mcpServers.inkbox = { ...turn.integrations.inkbox };
+        allowed.push("mcp__inkbox");
+      }
       if (turn.integrations?.localComputer) {
         const local = turn.integrations.localComputer;
         mcpServers.computer = {

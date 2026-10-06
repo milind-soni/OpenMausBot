@@ -87,6 +87,7 @@
   "dependencies": {
     "@clack/prompts": "1.7.0",
     "@hpke/core": "1.9.0",
+    "@inkbox/sdk": "0.7.14",
     "@novnc/novnc": "1.7.0",
     "@tanstack/react-virtual": "^3.14.13",
     "@trycua/cua-driver": "0.28.2",

@@ -36,6 +36,7 @@ describe("workspace backup data boundary", () => {
   it.each([
     "providers/account/.credentials.json", "providers/antigravity/profile/antigravity-acp/acp_token.json",
     "workspace-credentials.json", "browser-engine-key", "caddy/data/certificates/private.key",
+    "trusted-contacts.json", "trusted-peers.json", "inkbox-deliveries.json", "trusted-peers.json.123.05a7b3e0-1234.tmp",
     "external-runtimes.json", "external-runtimes.json.123.tmp",
     "command-allowlist.json", "command-allowlist.json.123.05a7b3e0-1234.tmp",
     "chrome-profile/Default/Cookies", ".agent-browser/auth/site.json",
@@ -49,6 +50,15 @@ describe("workspace backup data boundary", () => {
   it("never exports or restores MCP sign-in tokens", () => {
     for (const path of ["mcp-oauth.json", "mcp-oauth.json.4242.05a7b3e0-1234-4abc-8def-0123456789ab.tmp"]) expect(excludedWorkspaceAuthPath(path)).toBe(true);
     for (const path of ["mcp-oauth.json.md", "workspaces/bot/mcp-oauth.json"]) expect(excludedWorkspaceAuthPath(path)).toBe(false);
+  });
+
+  it("keeps Inkbox machine tunnel state and delivery receipts out of portable backups", () => {
+    for (const path of ["inkbox", "inkbox/binding/deliveries.json", "inkbox/binding/tunnel/credentials.json", "inkbox/binding/tunnel/private.key"]) {
+      expect(excludedWorkspaceAuthPath(path)).toBe(true);
+    }
+    for (const path of ["inkbox.md", "inkbox-archive/notes.md", "workspaces/bot/inkbox/notes.md"]) {
+      expect(excludedWorkspaceAuthPath(path)).toBe(false);
+    }
   });
 
   it("never exports the per-turn hook token directory, and only that directory", () => {

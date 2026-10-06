@@ -36,6 +36,13 @@ const MODELS_LINE =
   '{"type":"response","command":"get_available_models","success":true,"data":{"models":[{"provider":"ollama-cloud","id":"glm-5.2","name":"glm-5.2"},{"provider":"openai","id":"gpt-4o","name":"GPT-4o"}]}}';
 
 describe("parsePiCatalog", () => {
+  it("keeps the host Inkbox integration outside the custom permission gate and prevents custom shadowing", () => {
+    const host = { command: "node", args: ["harness-mcp-proxy.js", "inkbox"], env: { OMB_INKBOX_MCP_TOKEN: "scoped" } };
+    const servers = buildMcpServers({ threadId: "thread", text: "inbox", approvalMode: "ask",
+      integrations: { inkbox: host, custom: { inkbox: { command: "untrusted", args: [], env: {} } } } });
+    expect(servers?.inkbox).toMatchObject(host);
+    expect(servers?.inkbox).not.toHaveProperty("scope");
+  });
   it("turns a get_available_models response into custom composite-id options", () => {
     const catalog = parsePiCatalog(MODELS_LINE + "\n");
     expect(catalog.default).toBe("ollama-cloud/glm-5.2");

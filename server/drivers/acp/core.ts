@@ -846,6 +846,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           servers.push({ name: "agents", command: agents.command, args: agents.args, env: acpEnv(agents.env) });
         }
         const composio = turn.integrations?.composio;
+        const inkbox = turn.integrations?.inkbox;
+        if (inkbox) servers.push({ name: "inkbox", command: inkbox.command, args: inkbox.args, env: acpEnv(inkbox.env) });
         if (composio) {
           servers.push({
             name: "composio",

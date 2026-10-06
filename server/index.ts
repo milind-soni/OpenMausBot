@@ -617,6 +617,19 @@ import {
 // loading the table after everything above leaves module start-up order as is.
 import { json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
 import { ROUTES, dispatchRoutes } from "./routes/table.ts";
+import { TrustedContacts, ContactError } from "./trusted-contacts.ts";
+import { createContactIngress, replyToContactText, TrustedPeers } from "./trusted-contacts-http.ts";
+import { createTrustedContactRoutes } from "./routes/trusted-contacts.ts";
+import { CALENDAR_AVAILABILITY_TOOL, readCalendarBusy, calendarRpcFrame } from "./trusted-calendar.ts";
+import { InkboxChannel, readInkboxConfig, type InkboxConfig } from "./inkbox-channel.ts";
+import { ChannelConversation } from "./channel-conversation.ts";
+import { prepareInkboxConversationState } from "./inkbox-conversation-state.ts";
+import { assertChannelCardTarget, assertChannelOutboundLease } from "./channel-card-guard.ts";
+import { InkboxSetup } from "./inkbox-setup.ts";
+import { InkboxProvider, InkboxSetupError } from "./inkbox-provider.ts";
+import { InkboxMcpRelay, type InkboxToolConnection } from "./inkbox-mcp.ts";
+import { createInkboxSecretStore } from "./inkbox-secrets.ts";
+import { createInkboxSetupRoutes } from "./routes/inkbox-setup.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
@@ -649,6 +662,11 @@ ensureDirs();
 // The desktop parent owns the primary lease and delegates one private child
 // claim; a standalone/headless server owns the primary lease itself. Acquire
 // before any durable identity, sessions, config, or Store state is loaded.
+// Capture transport credentials once, then keep them out of child agent environments.
+const inkboxConfig = readInkboxConfig(process.env);
+delete process.env.OMB_INKBOX_API_KEY;
+delete process.env.OMB_INKBOX_SIGNING_SECRET;
+
 const dataDirLease = acquireDataDirLeaseForProcess(DATA_DIR);
 let dataDirLeaseReleaseAttempted = false;
 function releaseDataDirLeaseAtExit(): void {
@@ -1389,7 +1407,7 @@ function cloudCardAnswerer(card: { requestId?: string; answeredBy?: { kind: stri
  * answerer, and a card this answer settled records who settled it (and
  * `via: "call"` when it was decided by voice on a Live call). A card that
  * was already settled keeps whatever it said. */
-async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: string, work: () => Promise<unknown>, via?: "call"): Promise<void> {
+async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: string, work: () => Promise<unknown>, via?: "call" | "message"): Promise<void> {
   const open = (() => {
     const card = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId)?.card;
     return Boolean(card && !card.answered && !card.dismissed && !card.expired);
@@ -2143,7 +2161,9 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone";
+  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "inkbox";
+  /** Exact host-owned Inkbox connection mounted for this turn. */
+  inkboxBinding?: string;
   skillAuthoring: boolean;
   createdBots: number;
   createdRooms?: number;
@@ -3144,6 +3164,28 @@ function connectedAppsIntegration(bot: Pick<BotRecord, "id" | "connectorTools">,
     // stays the authority for every call.
     connectorTools: bot.connectorTools,
   });
+}
+
+async function inkboxToolsIntegration(botId: string, threadId: string, generation: string) {
+  // Legacy environment keys must prove the same narrow identity scope as the
+  // encrypted in-app setup. Never send an admin key to the generic MCP server.
+  if (!inkboxSetup.hasConfiguration && inkboxConfig?.botId === botId && !legacyInkboxToolCheck) {
+    legacyInkboxToolCheck = (async () => {
+      try {
+        const key = await new InkboxProvider(inkboxConfig.apiKey).inspectKey();
+        if (key.scoped_identity_id === inkboxConfig.identityId) legacyInkboxToolConnection = {
+          identityId: inkboxConfig.identityId, apiKey: inkboxConfig.apiKey, binding: randomUUID(),
+        };
+      } catch { /* Disconnected tools stay unmounted; no credential fallback. */ }
+    })();
+  }
+  if (!inkboxSetup.hasConfiguration && inkboxConfig?.botId === botId) await legacyInkboxToolCheck;
+  const connection = currentInkboxToolConnection(botId);
+  if (!connection || activeInternalGenerationByThread.get(threadId) !== generation) return null;
+  const token = mintInternalCapability({ botId, threadId, generation, inkboxBinding: connection.binding,
+    kind: "inkbox", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 });
+  return { command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, "inkbox"],
+    env: { ...AGENTS_NODE_FLAG, OMB_INKBOX_MCP_TOKEN: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}` } };
 }
 
 // ── computer control (who is driving) ──────────────────────────────────
@@ -5416,7 +5458,7 @@ function pageSize(raw: string | null): number | null | undefined {
 /** A screen message without its pixels, for live frames and pages alike.
  * The client fetches those from `/api/threads/:threadId/messages/:id/image`
  * when it actually shows one; `mime` stays so it can name a download. */
-function slimMessage(message: Message): Message | Record<string, unknown> {
+function slimMessage(message: Message): Message & { hasImage?: true } {
   if (message.kind !== "screen" || !message.png) return message;
   const { png: _png, ...rest } = message;
   return { ...rest, hasImage: true };
@@ -6109,10 +6151,11 @@ bus.subscribe((event: RuntimeEvent) => {
   } else if (event.type !== "session.exited") watchdog.touch(event.threadId);
 });
 
-// Automatic continuity: a turn that died on its budget or on tool errors gets
-// a `Continue:` task on the same bot, seeded with the persisted handoff — the
-// work moves forward without a person noticing and re-dispatching.
-bus.subscribe(makeCapContinuationSubscriber({ store, startTurn }));
+// Budget continuity may create a separate app task. Messaging conversations
+// retain their exact registered task so replies cannot lose their owner.
+const messagingOwnedThreads = new Set<string>();
+bus.subscribe(makeCapContinuationSubscriber({ store, startTurn,
+  canContinue: threadId => !messagingOwnedThreads.has(threadId) }));
 
 // Memory journal turn boundary (server/memory-journal.ts). A bot's own
 // file-tool writes to MEMORY.md and memory/ have no hook to tap, so the
@@ -7476,7 +7519,10 @@ bus.subscribe((event: RuntimeEvent) => {
     const routedBy = routed && speaker && routed.botId === speaker.botId ? routed.routedBy : undefined;
     if (routedBy) routedRoomReplies.delete(event.threadId);
     const message = store.appendMessage(event.threadId, group && m.role === "bot" ? { ...m, from: speaker, ...(routedBy ? { routedBy } : {}) }
-      : proven ? { ...m, requestMessageId: owner.messageId } : m);
+      // Provider cards need the same proven turn identity as their source.
+      // The event may omit turnId; only this exact live owner can supply it.
+      : proven ? { ...m, requestMessageId: owner.messageId,
+        ...(m.kind === "options" && m.card?.requestId ? { turnId: owner.turnId! } : {}) } : m);
     return message;
   };
 
@@ -9122,7 +9168,7 @@ async function deliverLateQuestionAnswer(
   answer: string,
   cardMessage: Message,
   owner: BotRecord,
-  via?: "call",
+  via?: "call" | "message",
 ): Promise<{ queued: boolean }> {
   const group = store.groupByThread(threadId);
   const roomTarget = group
@@ -9185,7 +9231,7 @@ async function deliverLateQuestionAnswer(
       startGroupTurn(current.id, text, cardMessage, sendId, "chat", undefined, { threadId, sender, trigger });
       return { queued: false };
     }
-    const direct = await startOrQueueDirectMessage(owner.id, threadId, text, cardMessage, sendId, sender, trigger, via);
+    const direct = await startOrQueueDirectMessage(owner.id, threadId, text, cardMessage, sendId, sender, trigger, via === "call" ? via : undefined);
     return { queued: "queued" in direct && Boolean(direct.queued) };
   });
 
@@ -9933,6 +9979,8 @@ async function startTurn(
       // never pre-allowed, so every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true) {
         const custom = await withMcpSignIn(engineMcpServers(bot), mcpOAuth);
+        const inkboxTools = await inkboxToolsIntegration(bot.id, threadId, dispatchClaimId);
+        if (inkboxTools) integrations.inkbox = inkboxTools;
         if (Object.keys(custom).length) integrations.custom = custom;
       }
       // CLI engines work inside the bot's own workspace directory rather
@@ -11678,6 +11726,9 @@ const validateModelProposal = (selection: ModelSelection, current?: BotRecord): 
 };
 const teamMemory = new TeamMemory(join(DATA_DIR, "team-memory.json"));
 const outboundRequests = new OutboundRequestService();
+// Only proven direct turns get a channel-answerable hold. Keep its original
+// capability lease private; transcript data cannot reconstruct that lease.
+const channelOutboundCapabilities = new Map<string, InternalCapability>();
 const outboundCounts = new OutboundCounts(join(DATA_DIR, "outbound-counts.json"));
 const OUTBOUND_HOLD_MS = 9 * 60_000;
 
@@ -12096,11 +12147,195 @@ const webhooks = new WebhookManager({
   },
 });
 
+const trustedContacts = new TrustedContacts({
+  file: join(DATA_DIR, "trusted-contacts.json"),
+  botExists: (id) => Boolean(store.bot(id)),
+  busy: (config, window) => readCalendarBusy(config, window, async payload => {
+    const check = () => {
+      const bot = store.bot(config.botId);
+      if (!bot || bot.composio === false || !composio.configured(cfg) ||
+          (bot.connectorScopes !== undefined && !Object.hasOwn(bot.connectorScopes.apps, "googlecalendar")) ||
+          !evaluateConnectorTools([CALENDAR_AVAILABILITY_TOOL], bot.connectorTools).allowed) {
+        throw new ContactError("This bot cannot read calendar availability", 403);
+      }
+    };
+    check();
+    const result = await composio.relayMcp(cfg, payload, undefined, check);
+    check();
+    if (result.status !== 200) throw new ContactError("Calendar availability is unavailable", 503);
+    return calendarRpcFrame(result.bytes);
+  }),
+});
+const trustedPeers = new TrustedPeers(join(DATA_DIR, "trusted-peers.json"));
+const contactIngress = createContactIngress(trustedContacts);
+let inkboxClosing = false;
+const makeInkboxChannel = (config: InkboxConfig | undefined, file: string, active = () => true) => {
+  const closed = () => inkboxClosing || !active();
+  let channel!: InkboxChannel;
+  const conversationState = prepareInkboxConversationState(join(DATA_DIR, "inkbox"), config ? {
+    identityId: config.identityId, botId: config.botId, ownerPhone: config.ownerPhone, phoneNumberId: config.phoneNumberId ?? null,
+  } : null);
+  const conversation = new ChannelConversation({
+    ...conversationState,
+    createAskTask: () => {
+      const threadId = config ? store.createTask(config.botId, "iMessage / SMS", false, undefined, undefined, "ask")?.threadId ?? null : null;
+      if (threadId) messagingOwnedThreads.add(threadId);
+      return threadId;
+    },
+    send: (threadId, sendId, text, target) => acceptDirectSend({ botId: config!.botId, threadId, sendId, text, trigger: { kind: "user" }, personPresent: true }, async current => {
+      // Every channel turn must still own this exact idle Ask branch. Ordinary
+      // send admission may steer or queue, neither of which has this request's
+      // guarded lineage available for safe result/approval observation.
+      const projected = botForThread(config!.botId, threadId);
+      if (closed() || !projected || approvalModeFor(current) !== "ask" || approvalModeFor(projected) !== "ask" ||
+          current.autoApprove || current.alwaysAllow?.length || projected.autoApprove || projected.alwaysAllow?.length ||
+          store.activeLeaf(threadId) !== target.expectedActiveLeafId) throw requestConflict("This channel conversation is no longer the expected Ask task.");
+      const admission = admit("guarded", {}, { botBusy: current.busy, threadBusy: threadBusy(current.id, threadId),
+        atCapacity: botAtThreadCapacity(current.id), parksBehindCoordination: parksBehindCoordination(current.id, threadId),
+        groupTurn: Boolean(activeGroupTurnForBot(current.id)) });
+      if (admission.action === "refuse") throw requestConflict("The channel conversation is busy; no message was delivered.");
+      const message = await startTurn(current.id, text, { threadId, sendId, trigger: { kind: "user" } });
+      return { ok: true as const, threadId, message };
+    }),
+    snapshot: (threadId, sendId) => guardedRequestSnapshot(config!.botId, threadId, sendId),
+    closed,
+    notify: (id, text, medium, isCurrent) => channel.notifyOwner(id, text, medium, isCurrent),
+    respond: async (target, behavior, message) => {
+      // This closure is reachable only through InkboxChannel's signed, exact
+      // configured-owner route. It is not an HTTP bearer or loopback grant.
+      const validate = () => {
+        if (!config || closed()) throw requestConflict("The message channel is disconnected.");
+        const bot = store.bot(config.botId);
+        const task = store.taskByThread(config.botId, target.threadId);
+        const configured = store.projectBotForTask(config.botId, target.threadId);
+        const projected = botForThread(config.botId, target.threadId);
+        if (!bot || !task || !configured || !projected || approvalModeFor(configured) !== "ask" || approvalModeFor(projected) !== "ask") {
+          throw requestConflict("This channel conversation is no longer an Ask task.");
+        }
+        const cardMessage = assertChannelCardTarget(guardedRequestSnapshot(config.botId, target.threadId, target.sendId), target, behavior);
+        return { bot, projected, cardMessage };
+      };
+      const { bot, projected, cardMessage } = validate();
+      if (behavior === "answer" && !message?.trim()) throw requestConflict("A question answer is required.");
+      const owner: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
+      let continuation: { sendId?: string } = {};
+      await answeringCardAs(owner, target.threadId, target.requestId, async () => {
+        // No await separates validation from delivery. Ordinary approvals
+        // remain once-only: never pass always or rememberCommand grants.
+        validate();
+        if (cardMessage.card?.outboundRequest) {
+          const capability = channelOutboundCapabilities.get(target.requestId);
+          assertChannelOutboundLease(target, bot.id, capability, Boolean(capability && internalCapabilityIsActive(capability)));
+          if (behavior === "answer") throw requestConflict("An outbound approval needs Allow or Deny.");
+          const result = outboundRequests.resolve({ threadId: target.threadId, requestId: target.requestId, behavior });
+          if (!result.claimed || result.state === "already_settled") throw requestConflict("That outbound approval is no longer open.");
+          store.patchMessage(target.threadId, cardMessage.id, { card: { ...cardMessage.card,
+            answered: result.state === "allowed" ? "allow" : "deny" } });
+          appendDecision(DATA_DIR, { threadId: target.threadId, requestId: target.requestId, botId: bot.id, botName: bot.name,
+            tool: cardMessage.card.tool, summary: cardMessage.card.subtitle,
+            decision: result.state === "allowed" ? "user-approved" : "user-denied", source: "user" });
+          return;
+        }
+        if (resolvePeerComms(approvalBus, target.requestId, behavior)) return;
+        const outcome = await answerRequest(target.threadId, projected.modelSelection.instanceId,
+          target.requestId, behavior, message, { id: bot.id, name: bot.name });
+        if (outcome === "unavailable" && behavior === "answer" && isPersistentQuestionCard(cardMessage.card)) {
+          // A persistent question can receive a late answer; permissions can
+          // never be revived. Recheck after the provider's asynchronous reply.
+          validate();
+          await deliverLateQuestionAnswer(owner, target.threadId, target.requestId, message!.trim(), cardMessage, bot, "message");
+          continuation = { sendId: `late-question-${createHash("sha256").update(`${target.threadId}:${target.requestId}`).digest("hex").slice(0, 32)}` };
+        } else if (outcome === "unavailable") {
+          throw requestConflict("That approval is no longer open; the action was not run.");
+        } else if (behavior === "answer" && outcome !== "answered") {
+          throw requestConflict("The provider did not accept that answer. Try an offered option.");
+        }
+      }, "message");
+      return continuation;
+    },
+  });
+  if (conversation.activeThreadId) messagingOwnedThreads.add(conversation.activeThreadId);
+  channel = new InkboxChannel({
+    file, config,
+    contactForPhone: phone => trustedContacts.contactForPhone(phone),
+    onContact: (contactId, eventId, text) => replyToContactText(trustedContacts, contactId, eventId, text),
+    approvalMode: () => conversation.approvalMode,
+    onOwnerReceived: (text, metadata) => conversation.revokeAutomaticForOwnerMessage(text, metadata),
+    onOwner: (eventId, text, medium, metadata) => conversation.handle(eventId, text,
+      { channel: medium, maxReplyCharacters: medium === "text" ? 1600 : 18995, ...metadata }),
+  });
+  if (config) conversation.resume();
+  return channel;
+};
+const inkbox = makeInkboxChannel(inkboxConfig, join(DATA_DIR, "inkbox-deliveries.json"));
+const inkboxSecrets = createInkboxSecretStore(utilityParentPort);
+const inkboxSetup = new InkboxSetup({ directory: DATA_DIR, port: WEBHOOK_PORT, secrets: inkboxSecrets,
+  botExists: id => Boolean(store.bot(id)), makeChannel: (config, file, active) => {
+    if (!webhookIngress) throw new InkboxSetupError("The local message receiver is unavailable. Restart the app and reconnect.", 503);
+    return makeInkboxChannel(config, file, active);
+  } });
+let legacyInkboxToolConnection: InkboxToolConnection | null = null;
+let legacyInkboxToolCheck: Promise<void> | undefined;
+function currentInkboxToolConnection(botId: string): InkboxToolConnection | null {
+  if (inkboxClosing || !store.bot(botId)) return null;
+  return inkboxSetup.hasConfiguration ? inkboxSetup.toolConnection(botId)
+    : inkboxConfig?.botId === botId ? legacyInkboxToolConnection : null;
+}
+const inkboxToolRelay = new InkboxMcpRelay({ connection: currentInkboxToolConnection });
+
+/** Unknown effects and mutations always cross a one-time host approval. The
+ * complete payload is reviewed; a truncated preview can never authorize it. */
+async function requestInkboxToolApproval(capability: InternalCapability, input: { tool: string; arguments: Record<string, unknown> }, assertActive: () => void): Promise<boolean> {
+  assertActive();
+  const bot = store.bot(capability.botId);
+  const owner = bot && connectorThread(bot.id, capability.threadId);
+  if (!bot || !owner) throw requestConflict("The Inkbox conversation is no longer available.");
+  const summary = `${input.tool}\n${JSON.stringify(input.arguments, null, 2)}`;
+  if (summary.length > 16_000) throw requestConflict("This Inkbox action is too large to review safely. Reduce its arguments before trying again; nothing was sent.");
+  const held = outboundRequests.open({ botId: bot.id, threadId: capability.threadId, tool: input.tool, timeoutMs: OUTBOUND_HOLD_MS });
+  const requestOwner = directRequestOwners.get(capability.threadId);
+  const proven = !owner.group && requestOwner?.messageId && requestOwner.turnId && !requestOwner.stopped &&
+    requestOwner.generation === capability.generation && directTurnGenerationByThread.get(capability.threadId) === capability.generation;
+  if (proven) channelOutboundCapabilities.set(held.requestId, { ...capability });
+  const card = store.appendMessage(capability.threadId, { role: "bot", kind: "options",
+    ...(proven ? { turnId: requestOwner.turnId!, requestMessageId: requestOwner.messageId } : {}),
+    ...(owner.group ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}),
+    card: { title: "Allow this Inkbox action?", subtitle: summary, options: ["Allow", "Deny"], requestId: held.requestId,
+      requestType: "permission", tool: input.tool, held: "This action requires your one-time approval.",
+      outboundRequest: { tool: input.tool, app: "Inkbox", calls: [{ app: "Inkbox", label: input.tool }] } } });
+  appendDecision(DATA_DIR, { threadId: capability.threadId, requestId: held.requestId, botId: bot.id, botName: bot.name,
+    tool: input.tool, summary, decision: "card-shown", source: "outbound" });
+  if (!owner.group && store.taskByThread(bot.id, capability.threadId)?.busy) store.setTaskActivity(bot.id, capability.threadId, "waiting-on-you");
+  notify(buildNotification("approval", bot, capability.threadId, summary, { avatarUrl: bot.avatarUrl }));
+  // A stopped turn or disconnected account must release a held HTTP call
+  // without waiting for a person to answer a card that is no longer live.
+  let cancelled = false;
+  const validityTimer = setInterval(() => {
+    try { assertActive(); }
+    catch { cancelled = true; outboundRequests.resolve({ threadId: capability.threadId, requestId: held.requestId, behavior: "deny" }); }
+  }, 250);
+  validityTimer.unref();
+  let answer: Awaited<typeof held.answer>;
+  try { answer = await held.answer; }
+  finally { clearInterval(validityTimer); channelOutboundCapabilities.delete(held.requestId); outboundRequests.forget(held.requestId); }
+  if (answer === "timeout" || cancelled) {
+    const current = store.messagesFor(capability.threadId).find(message => message.id === card.id)?.card;
+    if (current && !current.answered) store.patchMessage(capability.threadId, card.id, { card: { ...current, answered: "unavailable", dismissed: true } });
+  }
+  assertActive();
+  if (!owner.group && store.taskByThread(bot.id, capability.threadId)?.activity === "waiting-on-you") store.setTaskActivity(bot.id, capability.threadId, "working");
+  return answer === "allow";
+}
+
 let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
+// Load only local credentials before exposing ingress so saved setup retains
+// precedence over legacy environment config, including paused/error states.
+await inkboxSetup.prepareRestore();
 try {
   webhookIngress = await listenWebhookIngress(webhooks, {
     port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL,
+    external: async (req, res) => await contactIngress(req, res) || (inkboxSetup.hasConfiguration ? await inkboxSetup.handle(req, res) : await inkbox.handle(req, res)),
     claimRequest: () => workspaceMaintenance.request(),
   });
   const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
@@ -12109,6 +12344,7 @@ try {
   webhookIngressError = error instanceof Error ? error.message : String(error);
   console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
 }
+
 
 const webhookIngressStatus = () => ({
   available: Boolean(webhookIngress),
@@ -12488,6 +12724,8 @@ async function runGroupMemberTurn(
   // user-configured MCP servers: same gating as the 1:1 site above.
   if (instance.adapter.capabilities.customMcp === true) {
     const custom = await withMcpSignIn(engineMcpServers(bot), mcpOAuth);
+    const inkboxTools = await inkboxToolsIntegration(bot.id, threadId, internalGeneration);
+    if (inkboxTools) integrations.inkbox = inkboxTools;
     if (Object.keys(custom).length) integrations.custom = custom;
   }
   // Connected-app discovery is intentionally awaited before a provider owns
@@ -15648,6 +15886,8 @@ const cloudMoveRoutes = createCloudMoveRoutes({
 
 // Route modules (server/routes/README.md). `workspaceAccess` is assigned at
 // boot, after this line, so the dependency reads it per request.
+ROUTES.push(createTrustedContactRoutes({ contacts: trustedContacts, peers: trustedPeers, ingress: webhookIngressStatus, messaging: () => inkboxSetup.hasConfiguration ? { configured: ["connecting", "awaiting_phone", "connected"].includes(inkboxSetup.snapshot().phase), deliveries: inkboxSetup.snapshot().deliveries } : inkbox.status() }));
+ROUTES.push(createInkboxSetupRoutes({ setup: inkboxSetup }));
 ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") }));
 // Install statuses come from the organization library's own state, never
 // its file, so New bot cannot disagree with it. No organization: none.
@@ -16303,6 +16543,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? "phone"
         : path.startsWith("/api/internal/connectors/")
         ? "connectors"
+        : path === "/api/internal/inkbox/mcp"
+        ? "inkbox"
         : path === "/api/internal/computer-control" || path === "/api/internal/computer/mcp"
           ? "computer"
           : "agents";
@@ -16363,6 +16605,25 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         task: store.taskByThread(internalSender.id, internalCapability.threadId),
         threadId: internalCapability.threadId,
       });
+      if (method === "POST" && path === "/api/internal/inkbox/mcp") {
+        const body = await readInternalBody();
+        const binding = internalCapability.inkboxBinding;
+        if (!binding) return json(res, 403, { error: "This turn has no Inkbox connection." });
+        const assertActive = () => {
+          abort.signal.throwIfAborted();
+          requireActiveInternalCapability();
+          if (!connectorThread(internalCapability.botId, internalCapability.threadId) ||
+              currentInkboxToolConnection(internalCapability.botId)?.binding !== binding) {
+            throw requestConflict("The Inkbox connection changed. Start a new turn.");
+          }
+        };
+        const abort = new AbortController();
+        res.once("close", () => { if (!res.writableEnded) abort.abort(); });
+        const result = await inkboxToolRelay.request(body, { botId: internalCapability.botId, binding, assertActive,
+          signal: abort.signal, approve: input => requestInkboxToolApproval(internalCapability, input, assertActive) });
+        assertActive();
+        return json(res, 200, { result });
+      }
       if (path === "/api/internal/computer/select" && (method === "GET" || method === "POST")) {
         const source = computerSelectionTurns.get(internalCapability.threadId);
         const bot = store.projectBotForTask(internalSender.id, internalCapability.threadId);
@@ -18658,9 +18919,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           } else {
             const owner = connectorThread(currentSender.id, threadId);
             const held = outboundRequests.open({ botId: currentSender.id, threadId, tool: outboundTool, timeoutMs: OUTBOUND_HOLD_MS });
+            const requestOwner = directRequestOwners.get(threadId);
+            const proven = !owner?.group && store.taskByThread(currentSender.id, threadId) &&
+              requestOwner?.messageId && requestOwner.turnId && !requestOwner.stopped &&
+              requestOwner.generation === internalCapability.generation &&
+              directTurnGenerationByThread.get(threadId) === internalCapability.generation && internalCapabilityIsActive(internalCapability);
+            if (proven) channelOutboundCapabilities.set(held.requestId, { ...internalCapability });
             const card = store.appendMessage(threadId, {
               role: "bot",
               kind: "options",
+              ...(proven ? { turnId: requestOwner.turnId!, requestMessageId: requestOwner.messageId } : {}),
               ...(owner?.group ? { from: { botId: currentSender.id, name: currentSender.name, color: currentSender.color } } : {}),
               card: {
                 title: "Send on your behalf?",
@@ -18684,6 +18952,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }
             notify(buildNotification("approval", currentSender, threadId, summary, { avatarUrl: currentSender.avatarUrl }));
             const answer = await held.answer;
+            channelOutboundCapabilities.delete(held.requestId);
             outboundRequests.forget(held.requestId);
             if (internalCapabilityIsActive(internalCapability)) {
               const waiting = store.bot(currentSender.id);
@@ -25245,6 +25514,9 @@ restoreChannelMessages();
 }
 
 server.listen(PORT, "127.0.0.1", async () => {
+  // Provider discovery and tunnel startup can exceed the desktop boot deadline.
+  // Keep Settings reachable so a slow restore can be inspected or disconnected.
+  void inkboxSetup.restore();
   companyRuntimeReady();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
   // Words queued before the restart start first, ahead of anything sent from
@@ -25317,10 +25589,12 @@ const gracefulShutdown = createGracefulShutdown({
       routines?.stop();
       calendarCalls?.stop();
       memoryUpkeep.stop();
+      inkboxClosing = true;
+      inkbox.close();
       webhookIngress?.server.close();
       tunnelListener?.close();
     },
-    async () => { await managedDesktop.close(); await registry.disposeAll(); },
+    async () => { await inkboxSetup.close(); inkboxSecrets.close(); await managedDesktop.close(); await registry.disposeAll(); },
     async () => {
       await Promise.all([...temporaryBrowserSessions.keys()].map((botId) => forgetTemporaryBrowser(botId)));
       await browserRuntime.closeAll();

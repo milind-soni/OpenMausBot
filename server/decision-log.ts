@@ -98,8 +98,8 @@ export interface DecisionRow {
   unattended?: boolean;
   /** who answered, on rows a person's answer produced */
   actor?: DecisionActor;
-  /** "call": that person answered by voice on a Live call, not with a tap */
-  via?: "call";
+  /** How the person answered: Live voice or a verified messaging channel. */
+  via?: "call" | "message";
   /** how the ask reached the fold: a tool call (absent) or a block parsed
    * out of model-authored output ("output", only in rows the removed
    * Computer engine wrote). Question cards only. */
@@ -138,12 +138,12 @@ export function decisionRetentionDays(configured: number | undefined, env: NodeJ
   return DEFAULT_DECISION_RETENTION_DAYS;
 }
 
-const actorScope = new AsyncLocalStorage<{ actor: DecisionActor; via?: "call" }>();
+const actorScope = new AsyncLocalStorage<{ actor: DecisionActor; via?: "call" | "message" }>();
 
 /** Run `work` as a person's card answer: every `source: "user"` row it
  * writes names `actor` (and `via`, for an answer spoken on a Live call),
  * without each resolver having to thread it through. */
-export function withDecisionActor<T>(actor: DecisionActor, work: () => T, via?: "call"): T {
+export function withDecisionActor<T>(actor: DecisionActor, work: () => T, via?: "call" | "message"): T {
   return actorScope.run(via ? { actor, via } : { actor }, work);
 }
 
@@ -332,7 +332,7 @@ export function decisionsCsv(rows: DecisionRow[]): string {
       row.summary ?? "",
       row.rule ?? "",
       row.unattended ? "yes" : "",
-      row.via === "call" ? `${actorLabel(row.actor)} (by voice)` : actorLabel(row.actor),
+      row.via === "call" ? `${actorLabel(row.actor)} (by voice)` : row.via === "message" ? `${actorLabel(row.actor)} (by message)` : actorLabel(row.actor),
       row.threadId,
       row.requestId ?? "",
     ].map(csvCell).join(","));

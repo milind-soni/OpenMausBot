@@ -58,6 +58,10 @@ Use only mapped, tested commands:
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
+- [Trusted contacts, scheduling and remote peers](trusted-contacts.md)
+- [Inkbox iMessage and SMS](inkbox.md)
+- [Inkbox communication release](inkbox-release.md)
+- [Inkbox host tools and protected resources](inkbox-tools.md)
 - [In-chat team coordination](room-coordination.md)
 - [Chief access to additional teams](team-access.md)
 - [Engines and Doctor](engines.md)
@@ -92,6 +96,9 @@ Other renderer-only behavior—Settings, sidebar drag-and-drop, the VM modal, th
 built-in browser panel, and updater UI—is still not proven by the harness. Use
 the relevant Electron/package smoke test and state that limitation. Add a map
 entry only after the shared control surface can really drive it.
+
+The [Inkbox settings smoke](inkbox-setup-ui.md) uses an isolated Electron
+renderer fixture to verify API-key setup, channel status, and messaging approvals.
 
 The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
 paste-back, MCP tools and logout cancellation through the real settings panel

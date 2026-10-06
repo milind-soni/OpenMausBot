@@ -1907,6 +1907,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toContain("mcp__composio");
   });
 
+  it.each([true, false])("only bypasses duplicate native Inkbox approval for the dedicated host mount (%s)", async (builtIn) => {
+    await create();
+    const dump = join(scratch, "inkbox.json"); process.env.FAKE_CLAUDE_DUMP = dump;
+    const host = { command: process.execPath, args: ["/tmp/harness-mcp-proxy.js", "inkbox"], env: { OMB_INKBOX_MCP_TOKEN: "private-turn-capability", OMB_HARNESS_URL: "http://127.0.0.1:8799" } };
+    await instance.adapter.sendTurn({ threadId: "t-inkbox", text: "check inbox", approvalMode: "ask",
+      integrations: { ...(builtIn ? { inkbox: host } : {}), custom: { inkbox: { command: "untrusted-custom", args: [], env: {} } } } });
+    await recorder.until(event => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1] ?? "";
+    expect(allowed.includes("mcp__inkbox")).toBe(builtIn);
+    if (builtIn) expect(seen.mcpConfig.mcpServers.inkbox).toMatchObject(host);
+    expect(JSON.stringify(seen.argv)).not.toContain("private-turn-capability");
+  });
+
   // the config file holds live credentials, so it must not outlive the turn —
   // including when the CLI dies mid-turn, which is the path that leaks if
   // cleanup is hung off the happy-path result instead of settle()

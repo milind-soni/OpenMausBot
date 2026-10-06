@@ -1,0 +1,17 @@
+# Messaging questions and approvals
+
+> Historical design stage. Later conversation, approval and release decisions are documented in [the current Inkbox release guide](../../verification/inkbox-release.md). The user has now tested iMessage and authorized one PR.
+
+The user tested iMessage successfully but could not answer bot questions or approvals from the phone. They explicitly requested a shared layer for messaging channels and another OMB2 build. Keep all work on the existing uncommitted feature branch for their later single PR. No reference-repository source copying, real messages, or verification mutations on their live workspace.
+
+A transport-neutral conversation manager sits after authenticated owner admission and before existing host Ask execution. It persists the exact originating thread/send, pending card fingerprint, short correlation code, per-question answers, expiry, and applying fence in a private binding-specific file. Inkbox remains responsible for signature validation, exact owner matching, ingress deduplication, and bounded reply delivery. Future email adapters can use this manager after supplying equivalent authenticated-sender and deduplication guarantees; this change does not implement an email provider.
+
+Questions preserve actual model-authored options and descriptions, numbered for text replies. One question at a time supports multi-question cards; accept a number, offered label, multiple numeric selections when allowed, or free text. Pass the complete formatted answer to the exact original request. Never fabricate options. The observed open-ended greeting contained no choices in the provider payload; clarify legacy tool guidance to offer useful alternatives when available.
+
+Ordinary tool approvals show the full card details and explicit APPROVE CODE / DENY CODE instructions, permitting one action only. Bare YES never grants authority. Approval codes expire and must match current thread, request, card fingerprint, provider turn and execution identity. Recheck the actual host state immediately before responding. Questions can use the host's existing persistent-question continuation when their original provider run ended, returning its new send identity to the manager. Never revive a dead approval or create an always-allow grant.
+
+Disconnect/restart preserves question state but never retries an applying response automatically. Uncertain outcomes require STATUS; stale/settled cards do not receive replies. NEW <request> explicitly starts separate work. Ordinary fresh requests retain the existing fresh-Ask behavior; replies to pending questions resume their original task. Native proposals requiring screen review and secret/account-connection flows retain precise app-only handling; they must not masquerade as generic approval cards.
+
+Tasks exceeding the initial wait are observed in the background. Persist observation state; deliver the next prompt/result through the transport’s durable at-most-once inbox. Inbound commands supersede old observation. Rotate explicit answer codes between questions, and never offer an actionable prompt that exceeds its transport’s message limit.
+
+Validate with isolated unit and real fake-engine HTTP fixtures: option text and selection, free text, sequential questions, approve/deny, invalid/bare/old tokens, stale branches/executions, UI-settled cards, duplicates, restart, and real continuation. Rebuild signed OMB2 for user phone testing; do not claim live delivery validated by synthetic tests.

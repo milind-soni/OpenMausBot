@@ -115,6 +115,8 @@ export interface CapContinuationDeps {
   store: Pick<Store, "botByThread" | "taskByThread" | "createTask" | "appendMessage">;
   startTurn: (botId: string, text: string, opts?: { threadId?: string; unattended?: boolean }) => Promise<unknown>;
   now?: () => number;
+  /** External conversations retain their own exact task/request identity. */
+  canContinue?: (threadId: string) => boolean;
 }
 
 const CONTINUE_TITLE = /^Continue: /;
@@ -130,6 +132,7 @@ export function makeCapContinuationSubscriber(deps: CapContinuationDeps): (event
   const state = new Map<string, { last: number; count: number; continued: Set<string> }>();
   return (event: RuntimeEvent) => {
     if (event.type !== "cap.exhausted" || !event.handoffPath) return;
+    if (deps.canContinue && !deps.canContinue(event.threadId)) return;
     void (async () => {
       const bot = deps.store.botByThread(event.threadId);
       if (!bot) return;

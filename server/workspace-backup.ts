@@ -41,6 +41,7 @@ const EXCLUDED = new Set([
   "cloud-owner.json",
 ]);
 const EXCLUSION_NOTES = [
+  "Trusted contacts, their permissions, peer credentials and phone delivery receipts stay on this machine and are not transferred.",
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
   "Saved credentials, provider and MCP connections, managed provider login homes and browser login profiles are not transferred. Destination connections are preserved; reconnect on a new device.",
   "Downloaded tools and caches; these can be installed again.",

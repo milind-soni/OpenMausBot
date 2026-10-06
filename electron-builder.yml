@@ -50,6 +50,8 @@ files:
 asar: true
 
 extraResources:
+  - from: third_party/inkbox/LICENSES.txt
+    to: licenses/inkbox-SDK-LICENSES.txt
   # Ship the app's own license terms in every desktop distribution.
   - from: LICENSE
     to: licenses/OpenMausBot-LICENSE.txt

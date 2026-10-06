@@ -6307,6 +6307,14 @@ describe("harness HTTP API", () => {
             queueMicrotask(() => callback({ data: identity }));
           },
           postMessage(message) {
+            // This fixture has no saved Inkbox connection. Model Electron's
+            // secure read response so startup cannot wait on an absent bridge.
+            if (message?.type === "openmausbot:inkbox-secret:request" && message.operation === "read") {
+              queueMicrotask(() => messages.emit("message", { data: {
+                type: "openmausbot:inkbox-secret:response", requestId: message.requestId, ok: true, value: null,
+              } }));
+              return;
+            }
             if (message?.type !== "openmausbot:phone-secret-save") return;
             writeFileSync(join(gate, message.requestId + ".started"), message.target);
             saves = saves.then(async () => {
@@ -9106,6 +9114,14 @@ describe("harness HTTP API", () => {
         value: {
           on(event, callback) { messages.on(event, callback); },
           postMessage(message) {
+            // This fixture has no saved Inkbox connection. Model Electron's
+            // secure read response so startup cannot wait on an absent bridge.
+            if (message?.type === "openmausbot:inkbox-secret:request" && message.operation === "read") {
+              queueMicrotask(() => messages.emit("message", { data: {
+                type: "openmausbot:inkbox-secret:response", requestId: message.requestId, ok: true, value: null,
+              } }));
+              return;
+            }
             if (message?.requestId && /browser-(?:bot|profile)-deleted/.test(message.type ?? "")) {
               queueMicrotask(() => messages.emit("message", { data: {
                 type: "openmausbot:browser-lifecycle-result",

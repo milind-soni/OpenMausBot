@@ -49,6 +49,7 @@ import {
   withoutManagedCompanionTunnelAccess,
 } from "./managed-companion-tunnel.mjs";
 import { createSecureCredentialState } from "./secure-credential-state.mjs";
+import { createInkboxCredentialBridge } from "./inkbox-credentials.mjs";
 import {
   createPhoneSecretSaveCoordinator,
   createPhoneSecretIdentity,
@@ -402,6 +403,7 @@ const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
  * server's view of "configured", and whether we may register a fresh
  * installation — keys off this rather than off an empty object. */
 let credentialStoreUnavailable = false;
+let inkboxCredentialBridge = null;
 
 async function loadSecureCredentials() {
   const result = await readSecureCredentials({
@@ -1349,6 +1351,7 @@ async function startServerOn(port) {
       if (managedDesktopRelay.receive(proc, message)) return;
       if (orgLibrary?.receive(message)) return;
       if (receivePhoneSecretSave(proc, message)) return;
+      if (inkboxCredentialBridge?.receive(proc, message)) return;
     } catch (error) {
       slog(`desktop private sync rejected: ${error?.message ?? error}`);
     }
@@ -3389,6 +3392,14 @@ app.whenReady().then(async () => {
     writable: !credentialStoreUnavailable,
   });
   secureCredentials = secureCredentialState.read();
+  inkboxCredentialBridge = createInkboxCredentialBridge({
+    workspacePath: desktopDataDir(),
+    credentials: { read: () => secureCredentialState.read(), update: updateSecureCredentialDocument },
+    isCurrent: proc => serverSupervisor.isCurrent(proc) && !desktopShutdownStarted,
+    isAvailable: async () => app.isPackaged && !credentialStoreUnavailable &&
+      (await safeStorage.isAsyncEncryptionAvailable()) &&
+      (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text"),
+  });
   if (app.isPackaged) await ensurePhoneSecretIdentity();
   desktopRemoteAccess = desktopCompanionAccess(secureCredentials);
   const hostedAccount = desktopRemoteAccess ? null : ensureCompanionAccountService();

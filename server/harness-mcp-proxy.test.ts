@@ -23,10 +23,28 @@ beforeAll(async () => {
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });
 afterAll(async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); });
-const connection = (kind: "browser" | "computer" = "browser") => ({ url, token: "scoped-capability", kind });
+const connection = (kind: "browser" | "computer" | "inkbox" = "browser") => ({ url, token: "scoped-capability", kind });
 const frame = (method: string, params: unknown = {}) => ({ jsonrpc: "2.0", id: 1, method, params });
 
 describe("harness MCP capability proxy", () => {
+  it("mounts Inkbox using only its turn capability and preserves uncertain-action refusals", async () => {
+    status = 200;
+    payload = { result: { tools: [{ name: "inkbox_email_send" }, { name: "inkbox_slack_send" }] } };
+    await expect(harnessMcpRequest(frame("initialize"), connection("inkbox"))).resolves.toMatchObject({ result: { serverInfo: { name: "openmausbot-inkbox" } } });
+    await expect(harnessMcpRequest(frame("tools/list"), connection("inkbox"))).resolves.toMatchObject({ result: { tools: [{ name: "inkbox_email_send" }, { name: "inkbox_slack_send" }] } });
+    expect(requests.at(-1)).toEqual({ path: "/api/internal/inkbox/mcp", auth: "Bearer scoped-capability", body: { method: "tools/list", params: {} } });
+    status = 409; payload = { error: "The Inkbox connection changed." };
+    await expect(harnessMcpRequest(frame("tools/call", { name: "inkbox_email_send" }), connection("inkbox"))).resolves.toMatchObject({ result: { isError: true, content: [{ text: expect.stringContaining("Do not resend") }] } });
+  });
+  it("advertises and relays native resource reads only for Inkbox", async () => {
+    status = 200; payload = { result: { contents: [{ uri: "inkbox://files/one", text: "file" }] } };
+    await expect(harnessMcpRequest(frame("initialize"), connection("inkbox"))).resolves.toMatchObject({ result: { capabilities: { resources: {} } } });
+    await expect(harnessMcpRequest(frame("resources/read", { uri: "inkbox://files/one" }), connection("inkbox"))).resolves.toEqual({ jsonrpc: "2.0", id: 1, ...payload as object });
+    expect(requests.at(-1)).toMatchObject({ path: "/api/internal/inkbox/mcp", body: { method: "resources/read", params: { uri: "inkbox://files/one" } } });
+    payload = { result: { resources: [{ uri: "inkbox://files/one", name: "one" }] } };
+    await expect(harnessMcpRequest(frame("resources/list"), connection("inkbox"))).resolves.toEqual({ jsonrpc: "2.0", id: 1, ...payload as object });
+    await expect(harnessMcpRequest(frame("resources/read"), connection("computer"))).resolves.toMatchObject({ error: { code: -32601 } });
+  });
   it("answers initialize/ping locally and ignores notifications", async () => {
     const count = requests.length;
     await expect(harnessMcpRequest(frame("initialize"), connection())).resolves.toMatchObject({ result: { capabilities: { tools: {} } } });
@@ -80,11 +98,12 @@ describe("harness MCP capability proxy", () => {
     expect(requests.length).toBe(count);
   });
 
-  it("runs as the actual stdin/stdout MCP entry point with no engine credentials", async () => {
+  it.each(["computer", "inkbox"] as const)("runs %s as the actual stdin/stdout entry point with no credential collision", async (kind) => {
     status = 200;
     payload = { result: { tools: [{ name: "agent_browser_snapshot" }] } };
-    const child: ChildProcessWithoutNullStreams = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./harness-mcp-proxy.ts", import.meta.url)), "computer"], {
-      env: { OMB_HARNESS_URL: url, OMB_MCP_TOKEN: "entrypoint-capability" }, stdio: ["pipe", "pipe", "pipe"],
+    const child: ChildProcessWithoutNullStreams = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./harness-mcp-proxy.ts", import.meta.url)), kind], {
+      env: { OMB_HARNESS_URL: url, OMB_MCP_TOKEN: kind === "inkbox" ? "other-browser-capability" : "entrypoint-capability",
+        ...(kind === "inkbox" ? { OMB_INKBOX_MCP_TOKEN: "entrypoint-capability" } : {}) }, stdio: ["pipe", "pipe", "pipe"],
     });
     let output = "";
     const result = new Promise<unknown>((resolve, reject) => {
@@ -98,7 +117,7 @@ describe("harness MCP capability proxy", () => {
     try {
       child.stdin.write(`${JSON.stringify(frame("tools/list"))}\n`);
       await expect(result).resolves.toMatchObject({ result: { tools: [{ name: "agent_browser_snapshot" }] } });
-      expect(requests.at(-1)).toMatchObject({ path: "/api/internal/computer/mcp", auth: "Bearer entrypoint-capability" });
+      expect(requests.at(-1)).toMatchObject({ path: `/api/internal/${kind}/mcp`, auth: "Bearer entrypoint-capability" });
     } finally {
       child.kill();
       await new Promise<void>((resolve) => child.once("close", () => resolve()));

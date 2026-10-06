@@ -105,7 +105,7 @@ describe("Settings rail groups", () => {
     expect(SETTINGS_GROUPS.map((group) => group.id)).toEqual(["you", "ai", "computers", "account"]);
     const ids = SECTIONS.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(17); // 16 + the shared Skills library (AI group)
+    expect(ids).toHaveLength(19); // Includes iMessage setup, the shared Skills library and trusted contacts
     for (const entry of SECTIONS) expect(SETTINGS_GROUPS.map((group) => group.id)).toContain(entry.group);
   });
 
@@ -127,10 +127,17 @@ describe("Settings rail groups", () => {
   it("keeps the browser-only pages for a hosted workspace's admins", () => {
     fixture.ownerOrAdmin = true;
     const groups = rail(render());
-    expect(groups.account).toEqual(["usage", "backups", "people", "activity", "experimental"]);
+    expect(groups.account).toEqual(["usage", "backups", "inkbox", "trustedContacts", "people", "activity", "experimental"]);
     // desktop-only pages stay out of a browser
     expect(Object.values(groups).flat()).not.toContain("desktopWorkspaces");
     expect(Object.values(groups).flat()).not.toContain("cloudAccount");
+  });
+
+  it("makes iMessage setup discoverable for a local desktop owner", () => {
+    fixture.ownerOrAdmin = true;
+    vi.stubGlobal("window", { ogb: { environments: {} } });
+    expect(rail(render()).account).toContain("inkbox");
+    expect(render()).toContain("Inkbox");
   });
 
   it("shows a paired remote client only Appearance, Remote access and Servers", () => {

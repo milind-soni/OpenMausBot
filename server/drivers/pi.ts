@@ -136,6 +136,7 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
   if (!parsed.ok) throw new Error(parsed.error);
   const servers: Record<string, unknown> = {};
   if (turn.integrations?.composio) servers.composio = { ...turn.integrations.composio };
+  if (turn.integrations?.inkbox) servers.inkbox = { ...turn.integrations.inkbox };
   if (turn.integrations?.localComputer) {
     const local = turn.integrations.localComputer;
     servers.computer = {
@@ -157,10 +158,13 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
     };
   }
   if (turn.integrations?.browser) servers.browser = { ...turn.integrations.browser };
-  for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) servers[name] = { ...server, scope: "custom" };
+  for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
+    if (name === "inkbox" && turn.integrations?.inkbox) continue;
+    servers[name] = { ...server, scope: "custom" };
+  }
   for (const [name, server] of Object.entries(servers)) {
     if (parsed.scope !== undefined && !canUseMcpServer(parsed.scope, name)) { delete servers[name]; continue; }
-    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, budget: name in (turn.integrations?.custom ?? {}) ? resultBudget() : 0, nodeEnv: NODE_ENV_FLAG });
+    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, budget: name in (turn.integrations?.custom ?? {}) && !(name === "inkbox" && turn.integrations?.inkbox) ? resultBudget() : 0, nodeEnv: NODE_ENV_FLAG });
     const stdio = gated ?? mcpStdioServer(server, { nodeEnv: NODE_ENV_FLAG });
     if (!stdio) throw new Error("Pi MCP server configuration is invalid");
     const original = server as { scope?: string };
