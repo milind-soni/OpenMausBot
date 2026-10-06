@@ -57,6 +57,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -114,6 +116,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.openmausbot.companion.R
+import com.openmausbot.companion.dictation.DictationLanguage
 import com.openmausbot.companion.audio.MicrophoneAccess
 import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.AttachmentPolicy
@@ -2100,33 +2103,51 @@ private fun Composer(
                     }
                 }
 
-                if (!stoppable || dictationListening) TouchTarget(
-                    onClick = onToggleDictation,
-                    contentDescription = if (dictationListening) {
-                        "Stop dictation"
-                    } else {
-                        "Start dictation"
-                    },
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .background(
-                                if (dictationListening) {
-                                    Color.Red.copy(alpha = 0.2f)
-                                } else {
-                                    secondaryTint.copy(alpha = 0.12f)
-                                },
-                                CircleShape,
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_mic),
-                            contentDescription = null,
-                            tint = if (dictationListening) Color.Red else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(16.dp),
-                        )
+                if (!stoppable || dictationListening) {
+                    val dictationContext = LocalContext.current
+                    var languageMenu by remember { mutableStateOf(false) }
+                    Box {
+                        TouchTarget(
+                            onClick = onToggleDictation,
+                            onLongClick = { languageMenu = true },
+                            contentDescription = if (dictationListening) {
+                                "Stop dictation"
+                            } else {
+                                "Start dictation"
+                            },
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(
+                                        if (dictationListening) {
+                                            Color.Red.copy(alpha = 0.2f)
+                                        } else {
+                                            secondaryTint.copy(alpha = 0.12f)
+                                        },
+                                        CircleShape,
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_mic),
+                                    contentDescription = null,
+                                    tint = if (dictationListening) Color.Red else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                        DropdownMenu(expanded = languageMenu, onDismissRequest = { languageMenu = false }) {
+                            DictationLanguage.choices.forEach { choice ->
+                                DropdownMenuItem(
+                                    text = { Text(choice.label) },
+                                    onClick = {
+                                        DictationLanguage.save(dictationContext, choice.tag)
+                                        languageMenu = false
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
 

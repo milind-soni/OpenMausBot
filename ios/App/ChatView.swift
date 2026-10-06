@@ -30,6 +30,8 @@ struct ChatView: View {
     /// The composer's text. Held, not observed: a keystroke redraws the
     /// composer (`DraftReader`) and leaves this body and the transcript be.
     @State private var composerDraft = ComposerDraft()
+    @State private var dictationLanguageMenu = false
+    @State private var dictationLongPress = false
     /// Where the transcript rows' taps go (see `TranscriptRouter`).
     @State private var router = TranscriptRouter()
     /// The last render's reading of the thread, reused while it is unchanged.
@@ -1886,6 +1888,11 @@ struct ChatView: View {
         let listening = dictation.isListening
         let fill: Color = listening ? Color.red.opacity(0.2) : Color.secondary.opacity(0.12)
         return Button {
+            // A long-press opens the language menu and must not also start listening.
+            if dictationLongPress {
+                dictationLongPress = false
+                return
+            }
             composerFocused = false
             dictation.toggle(capturing: draft)
         } label: {
@@ -1900,6 +1907,20 @@ struct ChatView: View {
         .disabled(preparingAttachments || sendingMessage || liveCall.machine.isActive)
         .padding(.bottom, 6)
         .accessibilityLabel(listening ? "Stop dictation" : "Start dictation")
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                dictationLongPress = true
+                dictationLanguageMenu = true
+            }
+        )
+        .confirmationDialog("Dictation language", isPresented: $dictationLanguageMenu, titleVisibility: .visible) {
+            ForEach(DictationLanguageChoice.allCases) { choice in
+                Button(choice.label) {
+                    DictationLanguageChoice.save(choice.tag)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     private func sendButton(canSend: Bool) -> some View {

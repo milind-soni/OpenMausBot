@@ -29,6 +29,16 @@ func fail(_ message: String) -> Never {
   exit(1)
 }
 
+let requestedLocale: Locale? = {
+  let args = CommandLine.arguments
+  guard let index = args.firstIndex(of: "--locale"), index + 1 < args.count else { return nil }
+  let value = args[index + 1]
+  guard !value.isEmpty, value != "auto",
+    value.range(of: #"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$"#, options: .regularExpression) != nil
+  else { return nil }
+  return Locale(identifier: value)
+}()
+
 let endpointMs: Int = {
   let args = CommandLine.arguments
   guard
@@ -133,7 +143,8 @@ SFSpeechRecognizer.requestAuthorization { status in
   // transcribes everyone else into nonsense. First preference that has an
   // available recognizer wins, with en-US as the last resort.
   let candidates =
-    Locale.preferredLanguages.map { Locale(identifier: $0) }
+    (requestedLocale.map { [$0] } ?? [])
+    + Locale.preferredLanguages.map { Locale(identifier: $0) }
     + [Locale.current, Locale(identifier: "en-US")]
   guard
     let recognizer = candidates.lazy.compactMap({ SFSpeechRecognizer(locale: $0) })

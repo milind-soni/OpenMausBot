@@ -88,8 +88,14 @@ function localComputerReady(platform, connection) {
   return false;
 }
 
+function whisperHost(platform, arch) {
+  return (platform === "win32" && arch === "x64")
+    || (platform === "linux" && (arch === "x64" || arch === "arm64"));
+}
+
 function desktopCapabilities({
   platform = process.platform,
+  arch = process.arch,
   env = process.env,
   packaged = false,
   localConnection = null,
@@ -122,6 +128,10 @@ function desktopCapabilities({
     available: isMac,
     engine: isMac ? "apple-speech" : "none",
     onDevice: isMac,
+    // Windows and Linux can download Whisper. Mac stays on Apple speech.
+    // `available` stays false here so call mode does not treat this as a
+    // Mac recognizer.
+    whisper: !remote && whisperHost(hostPlatform, arch),
   };
   if (!isMac) dictation.reasonCode = "unsupported-platform";
   const localComputer = {
@@ -171,7 +181,7 @@ function desktopCapabilities({
   if (remote) {
     const unavailable = { reasonCode: "remote-server" };
     Object.assign(screenPreview, { available: false, interaction: "none" }, unavailable);
-    Object.assign(dictation, { available: false, engine: "none", onDevice: false }, unavailable);
+    Object.assign(dictation, { available: false, engine: "none", onDevice: false, whisper: false }, unavailable);
     Object.assign(localComputer, {
       available: false,
       support: "unsupported",

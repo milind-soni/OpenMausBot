@@ -45,6 +45,8 @@ const __APP_VERSION__: string;
       available: boolean;
       engine: "apple-speech" | "none";
       onDevice: boolean;
+      /** Local Whisper download on Windows and Linux. Absent on older builds. */
+      whisper?: boolean;
       reasonCode?: string;
     };
     localComputer: {
@@ -114,6 +116,8 @@ const __APP_VERSION__: string;
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      /** Host CPU architecture, when the shell reports it. */
+      arch?: string;
       organization?: import("../../electron/managed-desktop.mjs").ManagedDesktopBridge;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
       /** Copy this computer here: this computer's page names a saved server (or
@@ -213,7 +217,15 @@ const __APP_VERSION__: string;
       };
       /** Start native dictation. Call mode supplies endpointMs so silence
        * finalizes a turn; composer dictation omits it and remains manual. */
-      speechStart(options?: { endpointMs?: number }): Promise<void>;
+      speechStart(options?: { endpointMs?: number; locale?: string }): Promise<void>;
+      /** Whisper Large v3 Turbo on this computer. Absent on Mac and remote pages. */
+      whisperStatus?(): Promise<{ installed: boolean; model: string; modelBytes: number }>;
+      whisperDownload?(): Promise<{ installed: boolean; model: string; modelBytes: number }>;
+      whisperCancel?(): Promise<void>;
+      whisperTranscribe?(payload: { wav: Uint8Array; language: string }): Promise<{ text: string }>;
+      onWhisperProgress?(
+        cb: (progress: { received: number; total: number; phase: "model" | "engine" }) => void,
+      ): () => void;
       speechStop(): Promise<void>;
       /** Finish capture and emit the recognizer's final transcript. */
       speechFinish?(): Promise<void>;

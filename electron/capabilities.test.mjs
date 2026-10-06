@@ -72,6 +72,29 @@ describe("desktop capabilities", () => {
     expect(localComputer).toMatchObject({ available: false, enabled: false, status: "unavailable" });
   });
 
+  it("offers a local Whisper download on Windows and Linux without turning on Apple dictation", () => {
+    expect(desktopCapabilities({ platform: "win32", arch: "x64" }).dictation).toMatchObject({
+      available: false,
+      engine: "none",
+      whisper: true,
+      reasonCode: "unsupported-platform",
+    });
+    expect(desktopCapabilities({ platform: "linux", arch: "arm64", env: {} }).dictation.whisper).toBe(true);
+    expect(desktopCapabilities({ platform: "linux", arch: "arm64", env: {} }).dictation.available).toBe(false);
+    expect(desktopCapabilities({ platform: "darwin", arch: "arm64" }).dictation).toMatchObject({
+      available: true,
+      engine: "apple-speech",
+      whisper: false,
+    });
+    expect(desktopCapabilities({ platform: "win32", arch: "arm64" }).dictation.whisper).toBe(false);
+    expect(desktopCapabilities({ platform: "freebsd", arch: "x64" }).dictation.whisper).toBe(false);
+    expect(desktopCapabilities({ platform: "win32", arch: "x64", remote: true }).dictation).toMatchObject({
+      available: false,
+      whisper: false,
+      reasonCode: "remote-server",
+    });
+  });
+
   it("reports the renderer-caption window chrome on Windows", () => {
     const capabilities = desktopCapabilities({
       platform: "win32",

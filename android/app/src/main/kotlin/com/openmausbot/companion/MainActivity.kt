@@ -16,6 +16,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.openmausbot.companion.core.Dictation
+import com.openmausbot.companion.dictation.DictationLanguage
 import com.openmausbot.companion.dictation.SpeechDictation
 import com.openmausbot.companion.lifecycle.AlwaysOnConnectionService
 import com.openmausbot.companion.notifications.notificationTarget
@@ -316,11 +318,12 @@ class MainActivity : ComponentActivity() {
 
     private fun preferredLanguageTags(): List<String> {
         val list = LocaleList.getDefault()
-        return buildList(list.size()) {
+        val system = buildList(list.size()) {
             for (i in 0 until list.size()) {
                 add(list[i].toLanguageTag())
             }
         }
+        return Dictation.prependSavedLanguage(DictationLanguage.savedTag(this), system)
     }
 
     private companion object {

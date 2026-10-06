@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { startCua, stopCua, registerCuaIpc, setCuaStateListener } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
+import { downloadWhisper, transcribeWav, whisperStatus } from "./whisper-dictation.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
 import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState } from "./updater.mjs";
@@ -2677,6 +2678,63 @@ ipcMain.handle("speech:stop", localOnly("speech:stop", () => {
 }));
 ipcMain.handle("speech:finish", localOnly("speech:finish", () => {
   if (nativeActions.appleSpeech) finishSpeech();
+}));
+
+let whisperDownloadAbort = null;
+
+function whisperWav(value) {
+  let data = null;
+  if (Buffer.isBuffer(value)) data = value;
+  else if (value instanceof ArrayBuffer) data = Buffer.from(value);
+  else if (ArrayBuffer.isView(value)) data = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  if (!data || data.length < 44 || data.length > 12_000_000) return null;
+  if (data.toString("ascii", 0, 4) !== "RIFF" || data.toString("ascii", 8, 12) !== "WAVE") return null;
+  return data;
+}
+
+ipcMain.handle("whisper:status", localOnly("whisper:status", () => whisperStatus(app.getPath("userData"))));
+ipcMain.handle("whisper:download", localOnly("whisper:download", async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return { installed: false, model: "Whisper Large v3 Turbo", modelBytes: 0 };
+  whisperDownloadAbort?.abort();
+  const controller = new AbortController();
+  whisperDownloadAbort = controller;
+  try {
+    return await downloadWhisper({
+      userData: app.getPath("userData"),
+      signal: controller.signal,
+      onProgress: (progress) => {
+        if (win.isDestroyed()) return;
+        win.webContents.send("whisper:progress", {
+          received: Number(progress?.received) || 0,
+          total: Number(progress?.total) || 0,
+          phase: progress?.phase === "engine" ? "engine" : "model",
+        });
+      },
+    });
+  } finally {
+    if (whisperDownloadAbort === controller) whisperDownloadAbort = null;
+  }
+}));
+ipcMain.handle("whisper:cancel", localOnly("whisper:cancel", () => {
+  whisperDownloadAbort?.abort();
+  return true;
+}));
+ipcMain.handle("whisper:transcribe", localOnly("whisper:transcribe", async (_event, payload) => {
+  const data = whisperWav(payload?.wav);
+  if (!data) throw new Error("That recording is empty.");
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omb-whisper-"));
+  const wavPath = path.join(dir, "dictation.wav");
+  try {
+    await fs.promises.writeFile(wavPath, data);
+    return await transcribeWav({
+      userData: app.getPath("userData"),
+      wavPath,
+      language: typeof payload?.language === "string" ? payload.language : "auto",
+    });
+  } finally {
+    await fs.promises.rm(dir, { recursive: true, force: true });
+  }
 }));
 
 // ── companion sidecar ──────────────────────────────────────────────────

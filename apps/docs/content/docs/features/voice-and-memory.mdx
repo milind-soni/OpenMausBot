@@ -72,7 +72,7 @@ Live calls need an OpenAI API key from a project with GPT-Live access; OpenMausB
 
 ## Dictation
 
-The composer microphone uses Apple's local speech recognition in the macOS desktop build. Linux and Windows dictation are not currently shipped.
+The composer microphone uses on-device speech recognition. macOS uses Apple's recognizer. Windows and Linux download Whisper Large v3 Turbo (about 1.6 GB) the first time you use the microphone; the model stays on that computer and the audio is not sent out to be transcribed. Phones keep the system recognizer. Hover the microphone to pick a language, or long-press it on a phone. Calls still need macOS.
 
 ## Memory
 

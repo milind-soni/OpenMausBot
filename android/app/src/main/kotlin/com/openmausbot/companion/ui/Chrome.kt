@@ -6,6 +6,7 @@ import androidx.compose.ui.res.stringResource
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.padding
@@ -180,13 +181,24 @@ internal fun TouchTarget(
     size: Dp = MIN_TOUCH_TARGET,
     enabled: Boolean = true,
     contentDescription: String? = null,
+    onLongClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    val activation = if (onLongClick == null) {
+        Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+    } else {
+        Modifier.combinedClickable(
+            enabled = enabled,
+            role = Role.Button,
+            onClick = onClick,
+            onLongClick = onLongClick,
+        )
+    }
     Box(
         modifier = modifier
             .size(if (size > MIN_TOUCH_TARGET) size else MIN_TOUCH_TARGET)
             .clip(CircleShape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .then(activation)
             .then(
                 if (contentDescription == null) {
                     Modifier

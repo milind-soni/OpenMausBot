@@ -130,7 +130,10 @@ final class SpeechDictation: ObservableObject {
     // MARK: - Capture
 
     private func beginCapture(generation gen: Int) throws {
-        let recognizer = Dictation.localeCandidates()
+        let saved = UserDefaults.standard.string(forKey: DictationLanguageChoice.storageKey)
+        let recognizer = Dictation.localeCandidates(
+            preferredLanguages: Dictation.prependSavedLanguage(saved, to: Locale.preferredLanguages)
+        )
             .compactMap { SFSpeechRecognizer(locale: $0) }
             .first { $0.isAvailable }
         guard let recognizer else {

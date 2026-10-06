@@ -104,6 +104,13 @@ final class DictationTests: XCTestCase {
 
     // MARK: - Locale candidates
 
+    func testSavedLanguageIsTriedBeforeTheSystemList() {
+        XCTAssertEqual(Dictation.prependSavedLanguage("he-IL", to: ["en-US"]), ["he-IL", "en-US"])
+        XCTAssertEqual(Dictation.prependSavedLanguage("auto", to: ["en-US"]), ["en-US"])
+        XCTAssertEqual(Dictation.prependSavedLanguage("../etc", to: ["en-US"]), ["en-US"])
+        XCTAssertEqual(Dictation.prependSavedLanguage(nil, to: ["en-US"]), ["en-US"])
+    }
+
     func testPreferredLanguageComesFirst() {
         let locales = Dictation.localeCandidates(
             preferredLanguages: ["fr-FR", "de-DE"],

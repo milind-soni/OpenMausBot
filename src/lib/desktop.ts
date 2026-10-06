@@ -15,6 +15,7 @@ const browserCapabilities: DesktopCapabilities = {
     available: false,
     engine: "none",
     onDevice: false,
+    whisper: false,
     reasonCode: "desktop-app-required",
   },
   localComputer: {
@@ -33,10 +34,18 @@ export function initialDesktopCapabilities(): DesktopCapabilities {
   const platform = typeof window === "undefined" ? undefined : window.ogb?.platform;
   if (!platform) return browserCapabilities;
   const isMac = platform === "darwin";
+  const remote = window.ogb?.remoteClient?.active === true;
+  const arch = window.ogb?.arch;
+  const whisper = !remote && (
+    arch
+      ? (platform === "win32" && arch === "x64") || (platform === "linux" && (arch === "x64" || arch === "arm64"))
+      : platform === "win32" || platform === "linux"
+  );
   const dictation: DesktopCapabilities["dictation"] = {
     available: isMac,
     engine: isMac ? "apple-speech" : "none",
     onDevice: isMac,
+    whisper,
   };
   if (!isMac) dictation.reasonCode = "unsupported-platform";
   return {

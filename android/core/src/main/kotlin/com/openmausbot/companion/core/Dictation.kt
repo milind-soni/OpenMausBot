@@ -42,6 +42,19 @@ data class VolatileDraft(
  */
 object Dictation {
     private const val MAXIMUM_PREFERRED_LANGUAGES = 3
+    private val SAVED_LANGUAGE_TAG = Regex("^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$")
+
+    /**
+     * The composer's saved language goes first. Blank, Auto, and anything
+     * that is not a language tag leave the system list alone.
+     */
+    fun prependSavedLanguage(savedTag: String?, preferredLanguages: List<String>): List<String> {
+        val tag = savedTag?.trim()?.replace('_', '-').orEmpty()
+        if (tag.isEmpty() || tag.equals("auto", ignoreCase = true) || !SAVED_LANGUAGE_TAG.matches(tag)) {
+            return preferredLanguages
+        }
+        return listOf(tag) + preferredLanguages
+    }
 
     /**
      * Combine already-typed composer text with the current transcript.

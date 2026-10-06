@@ -130,6 +130,17 @@ class DictationTest {
     }
 
     @Test
+    fun aSavedLanguageIsTriedBeforeTheSystemList() {
+        assertEquals(
+            listOf("he-IL", "en-US"),
+            Dictation.prependSavedLanguage("he-IL", listOf("en-US")),
+        )
+        assertEquals(listOf("en-US"), Dictation.prependSavedLanguage("auto", listOf("en-US")))
+        assertEquals(listOf("en-US"), Dictation.prependSavedLanguage("../etc", listOf("en-US")))
+        assertEquals(listOf("en-US"), Dictation.prependSavedLanguage(null, listOf("en-US")))
+    }
+
+    @Test
     fun preferredLanguageComesFirst() {
         val locales = Dictation.localeCandidates(
             preferredLanguages = listOf("fr-FR", "de-DE"),

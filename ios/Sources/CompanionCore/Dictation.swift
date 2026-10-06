@@ -18,6 +18,19 @@ import Foundation
 public enum Dictation {
     private static let maximumPreferredLanguages = 3
 
+    /// The composer's saved language goes first. Blank, Auto, and anything
+    /// that is not a language tag leave the system list alone.
+    public static func prependSavedLanguage(_ savedTag: String?, to preferred: [String]) -> [String] {
+        let tag = (savedTag ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: "-")
+        guard !tag.isEmpty, tag.lowercased() != "auto" else { return preferred }
+        guard tag.range(of: #"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$"#, options: .regularExpression) != nil else {
+            return preferred
+        }
+        return [tag] + preferred
+    }
+
     /// Combine already-typed composer text with the current transcript.
     ///
     /// `base` is whatever was in the field when listening started, frozen

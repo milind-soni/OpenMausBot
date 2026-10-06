@@ -22,6 +22,7 @@ import {
   speechHelperBinary,
   speechHelperBundle,
 } from "./build-speech-helper.mjs";
+import { speechLocale } from "./dictation-languages.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(__dirname, "resources", "speech-helper.swift");
@@ -63,7 +64,10 @@ export function startSpeech(win, options = {}) {
   const endpointMs = Number.isFinite(requested) && requested > 0
     ? Math.min(5_000, Math.max(250, Math.round(requested)))
     : 0;
-  const args = endpointMs ? ["--endpoint-ms", String(endpointMs)] : [];
+  const args = [];
+  if (endpointMs) args.push("--endpoint-ms", String(endpointMs));
+  const locale = speechLocale(options?.locale);
+  if (locale) args.push("--locale", locale);
 
   try {
     ensureBuilt();

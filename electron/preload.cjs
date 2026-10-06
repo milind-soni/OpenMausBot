@@ -84,6 +84,7 @@ if (isLocalPage && !desktopRemoteClient && process.argv.includes("--omb-company-
 const bridge = {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
+  arch: process.arch,
   // Safe even on a cloud page: the user chooses in a native menu owned by
   // Electron. No direct switching, saved-list reads, host files or secrets.
   workspaces: {
@@ -169,6 +170,15 @@ const bridge = {
     const handler = (_event, info) => cb(info);
     ipcRenderer.on("speech:end", handler);
     return () => ipcRenderer.removeListener("speech:end", handler);
+  },
+  whisperStatus: () => ipcRenderer.invoke("whisper:status"),
+  whisperDownload: () => ipcRenderer.invoke("whisper:download"),
+  whisperCancel: () => ipcRenderer.invoke("whisper:cancel"),
+  whisperTranscribe: (payload) => ipcRenderer.invoke("whisper:transcribe", payload),
+  onWhisperProgress: (cb) => {
+    const handler = (_event, progress) => cb(progress);
+    ipcRenderer.on("whisper:progress", handler);
+    return () => ipcRenderer.removeListener("whisper:progress", handler);
   },
   /** The app menu's Preferences… item; local shell only (the remote-safe
    * subset never sees it). */
