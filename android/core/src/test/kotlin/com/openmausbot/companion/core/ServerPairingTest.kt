@@ -2,8 +2,11 @@ package com.openmausbot.companion.core
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlinx.serialization.encodeToString
 
 class ServerPairingTest {
     @Test
@@ -39,5 +42,29 @@ class ServerPairingTest {
             "ftp://mini.example/pair#code=ABCDEFGHJKLM",
         )) assertNull(PairingInvite.parse(bad), bad)
         assertNotNull(PairingInvite.parse("openmausbot://pair?address=192.168.1.9:8810&code=123456"))
+    }
+
+    @Test
+    fun onlyAnAdminScopedServerSessionMayAdminister() {
+        val companion = Connection(name = "Ada's computer", host = "192.168.1.9", port = 8810)
+        assertTrue(companion.canAdminister, "the sidecar applies its own policy to each request")
+
+        val chatOnly = assertNotNull(Connection.parse("https://c-7f3a9c.openmausbot.com"))
+            .copy(serverEnvironmentId = "env_7f3a9c", serverScopes = listOf("client"))
+        assertFalse(chatOnly.canAdminister)
+
+        val owner = chatOnly.copy(serverScopes = listOf("admin", "client"))
+        assertTrue(owner.canAdminister)
+        val round = CompanionJson.decodeFromString<Connection>(CompanionJson.encodeToString(owner))
+        assertEquals(listOf("admin", "client"), round.serverScopes)
+        assertTrue(round.canAdminister)
+
+        // A server pairing saved with no scopes is treated as chat-only, as on iOS.
+        val earlier = CompanionJson.decodeFromString<Connection>(
+            """{"id":"s1","name":"cab mini","host":"c-7f3a9c.openmausbot.com","port":443,"serverEnvironmentId":"env_7f3a9c"}""",
+        )
+        assertTrue(earlier.pairedWithServer)
+        assertNull(earlier.serverScopes)
+        assertFalse(earlier.canAdminister)
     }
 }

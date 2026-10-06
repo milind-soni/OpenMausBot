@@ -67,7 +67,7 @@ describe("openmausbot command line", () => {
 
   it("takes the phone kind non-interactively, because a scripted pair never sees the chooser", () => {
     // `docker compose exec … pair` and any piped run skip the interactive
-    // chooser, and an Android phone is the one that needs a different QR.
+    // chooser, and an Android phone is the one that gets a different QR.
     expect(parseArgs(["pair", "--phone", "android"], {})).toMatchObject({ command: "pair", phone: "android" });
     expect(parseArgs(["pair", "--phone", "iOS"], {})).toMatchObject({ phone: "ios" });
     expect(parseArgs(["pair", "--phone", "blackberry"], {})).toEqual({ error: expect.stringContaining("ios or android") });
@@ -90,7 +90,7 @@ describe("openmausbot command line", () => {
     const block = (over: Record<string, unknown> = {}) =>
       pairingBlock({ code: "ABCD-EFGH-JKLM", url, inviteUrl: invite, expiresAt: Date.now() + 60_000, ...over });
 
-    it("gives an Android phone the app-scheme QR, because its scanner rejects https", () => {
+    it("gives an Android phone the app-scheme QR, which every Android version scans", () => {
       const out = block({ phone: "android" });
       expect(out).toContain(qrToString(invite));
       expect(out).not.toContain(qrToString(url));
@@ -110,12 +110,16 @@ describe("openmausbot command line", () => {
       expect(out).toContain(`open or scan:  ${url}`);
     });
 
-    it("says plainly when an Android phone asked for an app link this server cannot build", () => {
+    it("falls back to the web QR, which Android 1.5 and later scans, when this server cannot build the app link", () => {
       const out = block({ phone: "android", inviteUrl: null });
       expect(out).toContain(qrToString(url));
-      expect(out).toContain("The Android app needs the phone-app link");
+      expect(out).toContain(`open or scan:  ${url}`);
+      expect(out).toContain("the Android app 1.5 or later scans it");
+      // An older Android app still rejects an https QR, so it is told what it needs instead.
+      expect(out).toContain("Older Android versions need the phone-app link");
       expect(out).toContain("OMB_PUBLIC_URL");
-      // It must not claim the QR is scannable in the app when it is not.
+      // The line that told every Android phone the QR was useless described a limitation 1.5 removed.
+      expect(out).not.toContain("The Android app needs the phone-app link");
       expect(out).not.toContain("Scan that in the OpenMausBot app");
     });
   });

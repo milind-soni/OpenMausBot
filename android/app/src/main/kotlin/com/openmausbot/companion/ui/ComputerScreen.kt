@@ -64,12 +64,16 @@ fun ComputerScreen(botId: String, onBack: () -> Unit, onOpenBrowser: (String) ->
     val session = environment.session
     val scope = rememberCoroutineScope()
     val state by session.state.collectAsState()
+    val connection by session.connection.collectAsState()
 
     val bot = remember(state, botId) { state.bot(botId) }
     if (bot == null) {
         LaunchedEffect(botId) { onBack() }
         return
     }
+    // Opening a cloud desktop needs the admin scope on a server; a chat-only
+    // phone keeps the preview and the browser, as on iOS.
+    val showsCloudDesktop = ComputerPolicy.showsCloudDesktop(bot) && connection?.canAdminister == true
 
     // Enter asks the stream for screens, leave asks it to stop and drops the
     // frame. Backgrounding does not pass through here: the stream is torn down
@@ -156,7 +160,7 @@ fun ComputerScreen(botId: String, onBack: () -> Unit, onOpenBrowser: (String) ->
                 .padding(horizontal = 18.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (!ComputerPolicy.showsCloudDesktop(bot)) {
+            if (!showsCloudDesktop) {
                 OutlinedButton(
                     onClick = { onOpenBrowser(botId) },
                     modifier = Modifier.fillMaxWidth(),
@@ -164,7 +168,7 @@ fun ComputerScreen(botId: String, onBack: () -> Unit, onOpenBrowser: (String) ->
             }
         }
 
-        if (ComputerPolicy.showsCloudDesktop(bot)) {
+        if (showsCloudDesktop) {
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)

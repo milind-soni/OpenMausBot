@@ -560,6 +560,7 @@ class Session(
     /** Remove only the selected computer. Other saved computers remain usable. */
     private suspend fun unpairLocked() {
         val id = _connection.value?.id ?: registry.activeConnectionId
+        id?.let(registry::connection)?.let { endServerSessionLocked(it) }
         stopActiveRuntimeLocked()
         if (id != null) tokenStore.remove(id)
         registry = id?.let(registry::remove) ?: ConnectionRegistry()
@@ -625,8 +626,9 @@ class Session(
         scope.launch {
             awaitRestored()
             gate.withLock {
-                if (registry.connection(id) == null) return@withLock
+                val forgotten = registry.connection(id) ?: return@withLock
                 val wasActive = registry.activeConnectionId == id
+                endServerSessionLocked(forgotten)
                 if (wasActive) stopActiveRuntimeLocked()
                 tokenStore.remove(id)
                 registry = registry.remove(id)
@@ -641,6 +643,34 @@ class Session(
                 }
             }
             connect()
+        }
+    }
+
+    /**
+     * A server session is ended on the server too, best effort, as `forgetConnection(id:)` in
+     * `ios/App/Session.swift` does. The bearer is read here, before the caller discards it,
+     * and the request runs on its own: an unreachable or refusing server neither holds up the
+     * forget nor undoes it. A companion pairing has no server session to end.
+     */
+    private suspend fun endServerSessionLocked(forgotten: Connection) {
+        if (!forgotten.pairedWithServer) return
+        val stored = try {
+            tokenStore.read(forgotten.id)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            return
+        }
+        val bearer = (stored as? TokenStore.ReadResult.Found)?.token ?: return
+        val serverClient = clientFactory(forgotten, bearer)
+        scope.launch {
+            try {
+                serverClient.logout()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // The bearer is gone from this phone either way.
+            }
         }
     }
 

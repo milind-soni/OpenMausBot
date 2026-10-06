@@ -99,6 +99,10 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
     val environment = LocalCompanion.current
     val session = environment.session
     val state by session.state.collectAsState()
+    val connection by session.connection.collectAsState()
+    // Changing the model and generating avatars need the admin scope on a
+    // server; a chat-only phone is shown neither.
+    val canAdminister = connection?.canAdminister == true
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -158,7 +162,9 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
         val loaded = coroutineScope {
             val status = async { session.configStatus() }
             val options = async { session.voiceOptions() }
-            val catalog = async { session.modelInstances() }
+            // The provider list is admin-only on a server: asking without the
+            // scope would only put a 403 on screen for a picker that is not shown.
+            val catalog = async { if (canAdminister) session.modelInstances() else emptyList() }
             Triple(status.await(), options.await(), catalog.await())
         }
         config = loaded.first
@@ -275,102 +281,104 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
                     }
                 }
 
-                FormSection(header = "Model", footer = ModelRules.FOOTER) {
-                    val instanceChoices = ModelRules.instanceChoices(instances, savedModel)
-                    if (!modelsLoaded) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().heightIn(min = MIN_TOUCH_TARGET),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(localizedMobileCopy(ModelRules.LOADING), fontSize = 15.sp, modifier = Modifier.weight(1f))
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                        }
-                    } else if (instanceChoices.isEmpty()) {
-                        IconNote(text = ModelRules.NONE_AVAILABLE, icon = Icons.Filled.Warning)
-                    } else {
-                        val providerRows = buildList {
-                            if (ModelRules.providerMissing(instances, selectedInstanceId)) {
-                                add(
-                                    VoiceChoice(
-                                        id = selectedInstanceId,
-                                        label = ModelRules.CURRENT_PROVIDER_UNAVAILABLE,
-                                        detail = null,
-                                        enabled = false,
-                                    ),
-                                )
+                if (canAdminister) {
+                    FormSection(header = "Model", footer = ModelRules.FOOTER) {
+                        val instanceChoices = ModelRules.instanceChoices(instances, savedModel)
+                        if (!modelsLoaded) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().heightIn(min = MIN_TOUCH_TARGET),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(localizedMobileCopy(ModelRules.LOADING), fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp))
                             }
-                            instanceChoices.forEach {
-                                add(
-                                    VoiceChoice(
-                                        id = it.instanceId,
-                                        label = ModelRules.instanceLabel(it),
-                                        detail = null,
-                                        enabled = it.snapshot.isAvailable,
-                                    ),
-                                )
+                        } else if (instanceChoices.isEmpty()) {
+                            IconNote(text = ModelRules.NONE_AVAILABLE, icon = Icons.Filled.Warning)
+                        } else {
+                            val providerRows = buildList {
+                                if (ModelRules.providerMissing(instances, selectedInstanceId)) {
+                                    add(
+                                        VoiceChoice(
+                                            id = selectedInstanceId,
+                                            label = ModelRules.CURRENT_PROVIDER_UNAVAILABLE,
+                                            detail = null,
+                                            enabled = false,
+                                        ),
+                                    )
+                                }
+                                instanceChoices.forEach {
+                                    add(
+                                        VoiceChoice(
+                                            id = it.instanceId,
+                                            label = ModelRules.instanceLabel(it),
+                                            detail = null,
+                                            enabled = it.snapshot.isAvailable,
+                                        ),
+                                    )
+                                }
                             }
-                        }
-                        ChoicePicker(
-                            label = stringResource(R.string.mobile_provider_7ceee3f3),
-                            choices = providerRows,
-                            selected = selectedInstanceId,
-                            onSelect = { id ->
-                                val instance = instances.firstOrNull { it.instanceId == id }
-                                if (instance != null) showModel(ModelRules.defaultsFor(instance, savedModel))
-                            },
-                        )
-                        ChoicePicker(
-                            label = stringResource(R.string.mobile_model_68c2cc7f),
-                            choices = ModelRules.modelChoices(selectedInstance, selectedModelId).map {
-                                VoiceChoice(id = it.id, label = it.label, detail = null, enabled = true)
-                            },
-                            selected = selectedModelId,
-                            enabled = selectedInstance?.snapshot?.isAvailable == true,
-                            onSelect = { selectedModelId = it },
-                        )
-                        val effortLevels = ModelRules.effortLevels(selectedInstance)
-                        if (effortLevels.isNotEmpty()) {
                             ChoicePicker(
-                                label = stringResource(R.string.mobile_reasoning_effort_cd32c0f5),
-                                choices = buildList {
-                                    add(VoiceChoice(id = "", label = ModelRules.DEFAULT_EFFORT_LABEL, detail = null, enabled = true))
-                                    effortLevels.forEach {
-                                        add(VoiceChoice(id = it, label = ModelRules.effortLabel(it), detail = null, enabled = true))
+                                label = stringResource(R.string.mobile_provider_7ceee3f3),
+                                choices = providerRows,
+                                selected = selectedInstanceId,
+                                onSelect = { id ->
+                                    val instance = instances.firstOrNull { it.instanceId == id }
+                                    if (instance != null) showModel(ModelRules.defaultsFor(instance, savedModel))
+                                },
+                            )
+                            ChoicePicker(
+                                label = stringResource(R.string.mobile_model_68c2cc7f),
+                                choices = ModelRules.modelChoices(selectedInstance, selectedModelId).map {
+                                    VoiceChoice(id = it.id, label = it.label, detail = null, enabled = true)
+                                },
+                                selected = selectedModelId,
+                                enabled = selectedInstance?.snapshot?.isAvailable == true,
+                                onSelect = { selectedModelId = it },
+                            )
+                            val effortLevels = ModelRules.effortLevels(selectedInstance)
+                            if (effortLevels.isNotEmpty()) {
+                                ChoicePicker(
+                                    label = stringResource(R.string.mobile_reasoning_effort_cd32c0f5),
+                                    choices = buildList {
+                                        add(VoiceChoice(id = "", label = ModelRules.DEFAULT_EFFORT_LABEL, detail = null, enabled = true))
+                                        effortLevels.forEach {
+                                            add(VoiceChoice(id = it, label = ModelRules.effortLabel(it), detail = null, enabled = true))
+                                        }
+                                    },
+                                    selected = selectedEffort,
+                                    onSelect = { selectedEffort = it },
+                                )
+                            }
+                            ModelRules.note(currentTask?.busy, selectedInstance)?.let { note ->
+                                IconNote(text = note, icon = Icons.Filled.Info)
+                            }
+                            ActionRow(
+                                text = "Apply model",
+                                icon = Icons.Filled.Check,
+                                enabled = !busy && currentTask != null && ModelRules.canApply(
+                                    loaded = modelsLoaded,
+                                    botBusy = currentTask?.busy,
+                                    instance = selectedInstance,
+                                    draft = modelDraft,
+                                    saved = savedModel,
+                                ),
+                                onClick = {
+                                    scope.launch {
+                                        busy = true
+                                        try {
+                                            val target = liveBot().forTask(opened.threadId) ?: return@launch
+                                            val updated = session.updateModel(modelDraft, target)
+                                            if (updated != null) {
+                                                savedModel = updated.modelSelection
+                                                showModel(updated.modelSelection)
+                                            }
+                                        } finally {
+                                            busy = false
+                                        }
                                     }
                                 },
-                                selected = selectedEffort,
-                                onSelect = { selectedEffort = it },
                             )
                         }
-                        ModelRules.note(currentTask?.busy, selectedInstance)?.let { note ->
-                            IconNote(text = note, icon = Icons.Filled.Info)
-                        }
-                        ActionRow(
-                            text = "Apply model",
-                            icon = Icons.Filled.Check,
-                            enabled = !busy && currentTask != null && ModelRules.canApply(
-                                loaded = modelsLoaded,
-                                botBusy = currentTask?.busy,
-                                instance = selectedInstance,
-                                draft = modelDraft,
-                                saved = savedModel,
-                            ),
-                            onClick = {
-                                scope.launch {
-                                    busy = true
-                                    try {
-                                        val target = liveBot().forTask(opened.threadId) ?: return@launch
-                                        val updated = session.updateModel(modelDraft, target)
-                                        if (updated != null) {
-                                            savedModel = updated.modelSelection
-                                            showModel(updated.modelSelection)
-                                        }
-                                    } finally {
-                                        busy = false
-                                    }
-                                }
-                            },
-                        )
                     }
                 }
 
@@ -442,56 +450,58 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
                     }
                 }
 
-                FormSection(
-                    header = "Generate an avatar",
-                    footer = ProfileRules.generateFooter(config),
-                ) {
-                    OutlinedTextField(
-                        value = prompt,
-                        onValueChange = { prompt = it },
-                        label = { Text(stringResource(R.string.mobile_art_direction_52d878a2)) },
-                        minLines = 2,
-                        maxLines = 5,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    ActionRow(
-                        text = "Generate on computer",
-                        painter = R.drawable.ic_sparkles,
-                        enabled = ProfileRules.canGenerate(busy, config, prompt),
-                        onClick = {
-                            scope.launch {
-                                busy = true
-                                try {
-                                    val intended = AvatarImageRules.intendedUploadCrop(form.crop)
-                                    val generated = session.generateAvatar(
-                                        ProfileRules.generatePrompt(prompt),
-                                        liveBot(),
-                                    ) ?: return@launch
-                                    // Generation picks a safe crop server-side;
-                                    // the selector is the user's explicit choice,
-                                    // so persist it against the returned
-                                    // attachment rather than leaving the two out
-                                    // of sync.
-                                    val updated = session.updateProfile(
-                                        BotProfilePatch(avatarCrop = intended),
-                                        generated,
-                                    )
-                                    val crop = if (updated != null) {
-                                        updated.avatarCrop ?: intended
-                                    } else {
-                                        // Generation itself succeeded: reflect its
-                                        // authoritative fallback rather than
-                                        // claiming the requested crop was saved.
-                                        generated.avatarCrop ?: AvatarCrop.MASCOT
+                if (canAdminister) {
+                    FormSection(
+                        header = "Generate an avatar",
+                        footer = ProfileRules.generateFooter(config),
+                    ) {
+                        OutlinedTextField(
+                            value = prompt,
+                            onValueChange = { prompt = it },
+                            label = { Text(stringResource(R.string.mobile_art_direction_52d878a2)) },
+                            minLines = 2,
+                            maxLines = 5,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        ActionRow(
+                            text = "Generate on computer",
+                            painter = R.drawable.ic_sparkles,
+                            enabled = ProfileRules.canGenerate(busy, config, prompt),
+                            onClick = {
+                                scope.launch {
+                                    busy = true
+                                    try {
+                                        val intended = AvatarImageRules.intendedUploadCrop(form.crop)
+                                        val generated = session.generateAvatar(
+                                            ProfileRules.generatePrompt(prompt),
+                                            liveBot(),
+                                        ) ?: return@launch
+                                        // Generation picks a safe crop server-side;
+                                        // the selector is the user's explicit choice,
+                                        // so persist it against the returned
+                                        // attachment rather than leaving the two out
+                                        // of sync.
+                                        val updated = session.updateProfile(
+                                            BotProfilePatch(avatarCrop = intended),
+                                            generated,
+                                        )
+                                        val crop = if (updated != null) {
+                                            updated.avatarCrop ?: intended
+                                        } else {
+                                            // Generation itself succeeded: reflect its
+                                            // authoritative fallback rather than
+                                            // claiming the requested crop was saved.
+                                            generated.avatarCrop ?: AvatarCrop.MASCOT
+                                        }
+                                        form = form.copy(crop = crop)
+                                        baseline = baseline.copy(crop = crop)
+                                    } finally {
+                                        busy = false
                                     }
-                                    form = form.copy(crop = crop)
-                                    baseline = baseline.copy(crop = crop)
-                                } finally {
-                                    busy = false
                                 }
-                            }
-                        },
-                    )
+                            },
+                        )
+                    }
                 }
 
                 FormSection(header = "Identity") {

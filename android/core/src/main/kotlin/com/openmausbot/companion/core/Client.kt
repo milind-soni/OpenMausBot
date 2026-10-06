@@ -296,6 +296,15 @@ class CompanionClient(
         )
     }
 
+    /**
+     * End this session on the server (server-paired connections only) — `logout()` in
+     * `ios/Sources/CompanionCore/Client.swift`. Like every authenticated action, the bearer
+     * goes only to the server whose identity this pairing recorded.
+     */
+    suspend fun logout() {
+        sendUnit(makeRequest("POST", "/api/auth/logout"))
+    }
+
     suspend fun health(): JsonObject = send(makeRequest("GET", "/api/health"))
 
     /** Wire support for P1-03; applying the snapshot to a live session is deliberately later. */

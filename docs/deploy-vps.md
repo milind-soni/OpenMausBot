@@ -197,7 +197,7 @@ open or scan:  https://c-7f3a9c.openmausbot.com/pair#code=RR8Y-BLR6-H939
 
 - **A browser:** open the link. The code is filled in; press **Connect**. That browser is paired for 30 days, renewed on use as above.
 - **The desktop app:** copy the link, then in the app's **Server** menu choose **Add Server from Copied Pairing Link…**. The menu switches between your own machine and every server you added.
-- **The phone:** scan the QR code from the iOS app's pairing screen, or paste the whole link into its address field. The phone can chat, approve, and read; creating bots, changing models, and connecting apps stay with you in the server's UI.
+- **The phone:** in the iOS app or the Android app (1.5 or later), scan the QR code from the pairing screen, or type the `https://` address there and then the 12-character code. Pasting the whole link into the address field also works in the iOS app, and in Android releases after 1.6. The phone can chat, approve, and read; creating bots, changing models, and connecting apps stay with you in the server's UI.
 
 Worth knowing: a code works **once** and expires after **five minutes**; the link only works on that address (typing the code by hand: open `…/pair` and enter it); ten wrong codes in a minute from one address pause pairing for that address for a minute; `--client` mints a code for a device that may chat and approve but not change settings or pair others.
 

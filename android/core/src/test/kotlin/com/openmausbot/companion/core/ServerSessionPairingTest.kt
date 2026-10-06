@@ -213,6 +213,59 @@ class ServerSessionPairingTest {
     }
 
     @Test
+    fun forgettingAServerPairedConnectionEndsItsSessionOnTheServer() = runBlocking<Unit> {
+        val saved = serverConnection()
+        Fixture(saved = saved).use { f ->
+            f.session.awaitRestored()
+            f.session.forgetConnection(saved.id)
+            withTimeout(5_000) { f.session.connections.first { it.isEmpty() } }
+            val logout = f.awaitLogouts(1).single()
+            assertEquals("mini.example", logout.url.host)
+            // Read before the forget discarded it: the bearer is no longer on the phone.
+            assertEquals("Bearer omb_sess_fixture", logout.header("Authorization"))
+            assertTrue(f.tokens.values.isEmpty())
+            assertNull(f.store.saved)
+            delay(100)
+            assertEquals(1, f.logouts().size)
+        }
+    }
+
+    @Test
+    fun forgettingACompanionPairedConnectionCallsNoServer() = runBlocking<Unit> {
+        val companion = Connection(name = "desktop", host = "192.168.1.20", port = 8810)
+        val server = serverConnection()
+        Fixture(saved = companion, extraSaved = server).use { f ->
+            f.session.awaitRestored()
+            f.session.forgetConnection(companion.id)
+            withTimeout(5_000) { f.session.connections.first { it.size == 1 } }
+            assertNull(f.tokens.values[companion.id])
+            // The server forget after it is the fence: by the time its logout lands, any the
+            // companion forget had started would have landed first.
+            f.session.forgetConnection(server.id)
+            withTimeout(5_000) { f.session.connections.first { it.isEmpty() } }
+            assertEquals(listOf("mini.example"), f.awaitLogouts(1).map { it.url.host })
+            assertTrue(f.requests.none { it.url.host == "192.168.1.20" })
+        }
+    }
+
+    @Test
+    fun aFailingLogoutStillSignsTheServerOut() = runBlocking<Unit> {
+        val saved = serverConnection()
+        Fixture(saved = saved, response = { request ->
+            if (request.url.encodedPath == "/api/auth/logout") throw IOException("server unreachable") else null
+        }).use { f ->
+            f.session.awaitRestored()
+            f.session.signOutAndAwait()
+            assertEquals(Session.Status.Unpaired, f.session.status.value)
+            assertNull(f.session.connection.value)
+            assertTrue(f.session.connections.value.isEmpty())
+            assertTrue(f.tokens.values.isEmpty())
+            assertNull(f.store.saved)
+            assertEquals(1, f.awaitLogouts(1).size)
+        }
+    }
+
+    @Test
     fun legacyConnectionsDecodeWithoutServerFields() {
         val old = CompanionJson.decodeFromString<Connection>("""{"name":"Mac","host":"192.168.1.9","port":8810}""")
         assertFalse(old.pairedWithServer)
@@ -245,8 +298,16 @@ class ServerSessionPairingTest {
             scope, store, tokens, InMemoryOnboardingStore(), { "Pixel" }, httpClient = http,
             eventsFn = { _, _, _ -> flow { streamStarts++; awaitCancellation() } },
         )
+        fun logouts() = requests.filter { it.method == "POST" && it.url.encodedPath == "/api/auth/logout" }
+        suspend fun awaitLogouts(count: Int): List<Request> = withTimeout(5_000) {
+            while (logouts().size < count) delay(10)
+            logouts()
+        }
         override fun close() { session.disconnect(); scope.cancel() }
     }
+
+    private fun serverConnection(): Connection = assertNotNull(Connection.parse("https://mini.example"))
+        .copy(serverEnvironmentId = "env-fixture", serverScopes = listOf("client"))
 
     private class Store(var saved: Connection?, val extra: Connection? = null) : ConnectionStore {
         override suspend fun loadRegistry() = ConnectionRegistryRestore(

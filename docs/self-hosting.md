@@ -792,8 +792,11 @@ apps and cloud desktops — those stay with the owner. A server reinstalled at
 the same address has a new identity; the app then asks to pair again rather
 than present the old session to it.
 
-Both native apps pair this way. `openmausbot pair --phone android` prints the
-app-scheme QR that Android's scanner needs, and the iOS app accepts either
+Both native apps pair this way and hide the same controls for a `--client`
+code. The Android app (1.5 or later) scans the same `https://…/pair#code=…`
+QR or takes the address and then the code; releases after 1.6 also take the
+pasted link. `openmausbot pair --phone android` prints the app-scheme QR
+instead, which every Android version scans, and the iOS app accepts either
 that QR or the web link. Pass `--phone` whenever nothing is watching the
 terminal, such as `docker compose exec omb node dist-server/openmausbot.js
 pair --phone android --public-url https://your-domain`, since a scripted run

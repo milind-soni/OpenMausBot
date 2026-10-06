@@ -560,6 +560,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                 }
             },
             canCreateBot = !creatingBot,
+            canAdminister = connection?.canAdminister == true,
             onCreateSection = {
                 haptics.play(TactileAction.START_NEW_SECTION)
                 showingNewSection = true
@@ -1037,6 +1038,8 @@ private fun RosterBottomBar(
     onOpenSearch: () -> Unit,
     onCreateBot: () -> Unit,
     canCreateBot: Boolean,
+    /** Whether this pairing may create bots and sections: `Connection.canAdminister`. */
+    canAdminister: Boolean,
     onCreateSection: () -> Unit,
     canCreateSection: Boolean,
     modifier: Modifier = Modifier,
@@ -1124,23 +1127,27 @@ private fun RosterBottomBar(
                 onClick = onOpenSearch,
                 size = MIN_TOUCH_TARGET,
             )
-            ChromeButton(
-                icon = Icons.Filled.Add,
-                contentDescription = stringResource(R.string.mobile_organize_bots_into_a_section_9293c5af),
-                onClick = onCreateSection,
-                enabled = canCreateSection,
-                size = MIN_TOUCH_TARGET,
-            )
-            // Writing something new, which is what making a bot is. The empty
-            // tile in the groups strip wears a plus because gathering existing
-            // bots into a room is the other thing — two glyphs, two actions.
-            ChromeButton(
-                icon = Icons.Filled.Create,
-                contentDescription = stringResource(R.string.mobile_new_bot_66d3c052),
-                onClick = onCreateBot,
-                enabled = canCreateBot,
-                size = MIN_TOUCH_TARGET,
-            )
+            // Creating bots and sections needs the admin scope on a server; a
+            // chat-only phone is not shown buttons the server would refuse.
+            if (canAdminister) {
+                ChromeButton(
+                    icon = Icons.Filled.Add,
+                    contentDescription = stringResource(R.string.mobile_organize_bots_into_a_section_9293c5af),
+                    onClick = onCreateSection,
+                    enabled = canCreateSection,
+                    size = MIN_TOUCH_TARGET,
+                )
+                // Writing something new, which is what making a bot is. The empty
+                // tile in the groups strip wears a plus because gathering existing
+                // bots into a room is the other thing — two glyphs, two actions.
+                ChromeButton(
+                    icon = Icons.Filled.Create,
+                    contentDescription = stringResource(R.string.mobile_new_bot_66d3c052),
+                    onClick = onCreateBot,
+                    enabled = canCreateBot,
+                    size = MIN_TOUCH_TARGET,
+                )
+            }
         }
     }
 }

@@ -32,6 +32,16 @@ data class Connection(
 ) {
     val pairedWithServer: Boolean get() = serverEnvironmentId != null
 
+    /**
+     * Whether this pairing may administer the workspace: create bots and sections, change
+     * models, generate avatars, connect apps, open cloud desktops — `Connection.canAdminister`
+     * in `ios/Sources/CompanionCore/Client.swift`. A companion pairing always may; the sidecar
+     * applies its own policy to each request. A server session may only with the `admin`
+     * scope (`openmausbot pair` grants it; `--client` does not). The server answers 403
+     * otherwise, so the app hides those controls instead of offering buttons that can only fail.
+     */
+    val canAdminister: Boolean get() = !pairedWithServer || serverScopes?.contains("admin") == true
+
     val baseUrl: URI?
         get() {
             activeEndpoint?.let { endpoint ->

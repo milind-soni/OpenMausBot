@@ -258,8 +258,11 @@ fun SettingsScreen(
 
             // Routine schedules live on the computer this phone is bound to.
             // With no binding there is nothing to schedule against, so the row
-            // is absent rather than present and dead.
-            if (onOpenRoutines != null || onOpenConnectedApps != null) {
+            // is absent rather than present and dead. Connecting apps also needs
+            // the admin scope; a chat-only server session leaves it to the
+            // owner, in the server's UI.
+            val connectedApps = onOpenConnectedApps?.takeIf { connection?.canAdminister == true }
+            if (onOpenRoutines != null || connectedApps != null) {
                 SettingsSection(stringResource(R.string.mobile_settings_workspace_section)) {
                     onOpenRoutines?.let { openRoutines ->
                         SettingsButton(
@@ -268,7 +271,7 @@ fun SettingsScreen(
                             onClick = openRoutines,
                         )
                     }
-                    onOpenConnectedApps?.let { openConnectedApps ->
+                    connectedApps?.let { openConnectedApps ->
                         SettingsButton(
                             text = stringResource(R.string.mobile_connected_apps_8ab72a8e),
                             onClick = openConnectedApps,
