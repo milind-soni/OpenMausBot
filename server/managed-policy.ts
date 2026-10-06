@@ -19,7 +19,7 @@ const policySchema = z.object({
 }).strict();
 export type ManagedPolicy = z.infer<typeof policySchema>;
 export type ComputerKind = keyof ManagedPolicy["computers"];
-const computerLabels: Record<ComputerKind, string> = { thisComputer: "this computer", localVm: "local virtual machines", box: "Boat cloud computers", vps: "VPS computers" };
+const computerLabels: Record<ComputerKind, string> = { thisComputer: "this computer", localVm: "local virtual machines", box: "cloud computers", vps: "VPS computers" };
 
 export function parseManagedPolicy(raw: unknown, now = Date.now()): ManagedPolicy | null {
   if (raw === null) return null;

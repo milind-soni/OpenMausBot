@@ -7,11 +7,11 @@
 // failure mode that loses nothing.
 import Foundation
 
-public enum MarkdownTableAlignment: Equatable, Sendable {
+public enum MarkdownTableAlignment: Hashable, Sendable {
     case leading, trailing, center
 }
 
-public struct MarkdownTable: Equatable, Sendable {
+public struct MarkdownTable: Hashable, Sendable {
     public var headers: [String]
     public var alignments: [MarkdownTableAlignment]
     public var rows: [[String]]
@@ -38,8 +38,11 @@ public enum Markdown {
         init(_ blocks: [MarkdownBlock]) { self.blocks = blocks }
     }
 
-    // Pure parse results only. Large replies and old streaming prefixes are
-    // not retained indefinitely; NSCache also releases them under pressure.
+    // Settled text only: finished replies, previews, spoken text. Large
+    // replies are not retained indefinitely; NSCache also releases them under
+    // pressure. A reply that is still streaming never goes in here — its text
+    // is new on almost every update, and one-use prefixes would push out the
+    // messages above it in the transcript.
     static let blockCache: NSCache<NSString, CachedBlocks> = {
         let cache = NSCache<NSString, CachedBlocks>()
         cache.countLimit = 128
@@ -47,11 +50,172 @@ public enum Markdown {
         return cache
     }()
 
+    /// The live bubble's last few texts, so a redraw caused by something else
+    /// (another bot, a keystroke) is a lookup. Small and separate from
+    /// `blockCache` on purpose: each new streaming prefix evicts an older one
+    /// of its own kind, never a settled message.
+    static let liveBlockCache: NSCache<NSString, CachedBlocks> = {
+        let cache = NSCache<NSString, CachedBlocks>()
+        cache.countLimit = 4
+        cache.totalCostLimit = 1_048_576
+        return cache
+    }()
+
+    /// Where each streaming reply's settled blocks end. See `parse`.
+    static let settledPrefixes = SettledPrefixes()
+
     /// Split into blocks. Never throws and never drops input: an unparseable
     /// line ends up in a paragraph, which is what the reader wanted anyway.
     public static func blocks(_ source: String) -> [MarkdownBlock] {
+        parse(source, streaming: false).blocks
+    }
+
+    /// The same blocks as `blocks(_:)`. Pass `streaming: true` for a reply
+    /// that is still arriving: its text is not kept as a whole, only the part
+    /// no later text can change, so the next update parses just what came
+    /// after that.
+    public static func blocks(_ source: String, streaming: Bool) -> [MarkdownBlock] {
+        parse(source, streaming: streaming).blocks
+    }
+
+    struct Parsed {
+        let blocks: [MarkdownBlock]
+        /// UTF-8 bytes that went through the line parser on this call: 0 on a
+        /// cache hit, otherwise what followed the longest settled prefix.
+        let parsedUTF8: Int
+    }
+
+    /// A reply streams in 50 ms batches, so the live bubble asks for the
+    /// blocks of a slightly longer text every time. Parsing all of it again
+    /// is quadratic over the reply. Instead, while parsing, note the last line
+    /// where nothing was left open — no paragraph being gathered, no list
+    /// whose next item could nest, no fence (a fence swallows lines whole, so
+    /// the loop never stands on one inside it), and every line the parser
+    /// has looked at, including a table's one-line lookahead, already ended
+    /// in a line break. The blocks before that line cannot change whatever
+    /// arrives next, and the rest parses exactly as it would have in the
+    /// whole text. The next update that starts with the same bytes picks up
+    /// from there.
+    static func parse(_ source: String, streaming: Bool) -> Parsed {
         let key = source as NSString
-        if let cached = blockCache.object(forKey: key) { return cached.blocks }
+        if let cached = blockCache.object(forKey: key) { return Parsed(blocks: cached.blocks, parsedUTF8: 0) }
+        if streaming, let cached = liveBlockCache.object(forKey: key) {
+            return Parsed(blocks: cached.blocks, parsedUTF8: 0)
+        }
+
+        let start = settledPrefixes.longest(prefixOf: source)
+        let base = start?.resume ?? 0
+        let tail = base == 0 ? source : String(decoding: source.utf8.dropFirst(base), as: UTF8.self)
+        let lines = splitLines(tail)
+        let parsed = parseLines(lines)
+        var blocks = start?.blocks ?? []
+        let settledCount = blocks.count
+        blocks.append(contentsOf: parsed.blocks)
+
+        if streaming {
+            if let point = settledPoint(parsed, lines: lines, tail: tail),
+               base + point.keyEnd <= SettledPrefixes.maxKeyBytes {
+                let entry = SettledPrefixes.Entry(
+                    key: String(decoding: source.utf8.prefix(base + point.keyEnd), as: UTF8.self),
+                    resume: base + point.resume,
+                    blocks: Array(blocks.prefix(settledCount + point.blocks))
+                )
+                settledPrefixes.remember(entry, replacing: start)
+            } else if let start {
+                settledPrefixes.touch(start)
+            }
+        }
+
+        let bytes = source.utf8.count
+        if bytes <= 65_536 {
+            let cache = streaming ? liveBlockCache : blockCache
+            cache.setObject(CachedBlocks(blocks), forKey: key, cost: bytes * 4 + blocks.count * 32)
+        }
+        return Parsed(blocks: blocks, parsedUTF8: tail.utf8.count)
+    }
+
+    /// The whole text through the line parser, no caches. What `blocks`
+    /// must always agree with; tests compare against it.
+    static func blocksFromScratch(_ source: String) -> [MarkdownBlock] {
+        parseLines(splitLines(source)).blocks
+    }
+
+    // Normalise the line endings before splitting, because
+    // `CharacterSet.newlines` contains \r and \n *separately* and
+    // `components(separatedBy:)` breaks on each of them: "a\r\nb" comes
+    // back as ["a", "", "b"], one phantom empty line per CRLF. That empty
+    // line is not cosmetic — it calls `flushParagraph`, so a paragraph
+    // written across several lines arrives as one paragraph per line, and
+    // a fenced block gains a blank line between every line of code. Tool
+    // output and pasted text reach chat bubbles with CRLF intact, so this
+    // is a path real messages take.
+    private static func splitLines(_ source: String) -> [String] {
+        source.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+    }
+
+    struct LineParse {
+        var blocks: [MarkdownBlock] = []
+        /// Lines the loop reached with no paragraph and no list open, and
+        /// how many blocks were done by then. Line 0 is never listed.
+        var clean: [(line: Int, blocks: Int)] = []
+    }
+
+    /// The last clean line that is safe to resume from, as UTF-8 offsets into
+    /// `tail`: `resume` is where that line starts and `keyEnd` is just past
+    /// its line break. The line itself must be complete, because the parser
+    /// may already have peeked at it (a table looks one line ahead), and its
+    /// break must contain "\n": a lone "\r" at the end of a key could still
+    /// turn out to be the start of "\r\n", or, before a combining mark, not a
+    /// break at all. Nil when no line qualifies or the bytes do not line up
+    /// with the split lines, which never costs more than a full parse.
+    private static func settledPoint(
+        _ parse: LineParse,
+        lines: [String],
+        tail: String
+    ) -> (resume: Int, keyEnd: Int, blocks: Int)? {
+        let complete = lines.count - 1
+        guard let furthest = parse.clean.last(where: { $0.line < complete }) else { return nil }
+        let utf8 = tail.utf8
+        var cursor = utf8.startIndex
+        var offset = 0
+        var starts: [Int] = []
+        var endsInNewline: [Bool] = []
+        starts.reserveCapacity(furthest.line + 2)
+        endsInNewline.reserveCapacity(furthest.line + 1)
+        for index in 0...furthest.line {
+            starts.append(offset)
+            let length = lines[index].utf8.count
+            guard let end = utf8.index(cursor, offsetBy: length, limitedBy: utf8.endIndex),
+                  end < utf8.endIndex else { return nil }
+            // The split lines are the source with only the breaks rewritten,
+            // so each line's bytes are followed by "\n", "\r\n" or a lone "\r".
+            cursor = utf8.index(after: end)
+            var breakLength = 1
+            switch utf8[end] {
+            case 0x0A:
+                endsInNewline.append(true)
+            case 0x0D:
+                if cursor < utf8.endIndex, utf8[cursor] == 0x0A {
+                    cursor = utf8.index(after: cursor)
+                    breakLength = 2
+                }
+                endsInNewline.append(breakLength == 2)
+            default:
+                return nil
+            }
+            offset += length + breakLength
+        }
+        starts.append(offset)
+        for candidate in parse.clean.reversed() where candidate.line < complete && endsInNewline[candidate.line] {
+            return (starts[candidate.line], starts[candidate.line + 1], candidate.blocks)
+        }
+        return nil
+    }
+
+    private static func parseLines(_ all: [String]) -> LineParse {
+        var result = LineParse()
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
         /// Marker indents of lists that are still open, outermost first.
@@ -66,19 +230,14 @@ public enum Markdown {
             paragraph.removeAll()
         }
 
-        // Normalise the line endings before splitting, because
-        // `CharacterSet.newlines` contains \r and \n *separately* and
-        // `components(separatedBy:)` breaks on each of them: "a\r\nb" comes
-        // back as ["a", "", "b"], one phantom empty line per CRLF. That empty
-        // line is not cosmetic — it calls `flushParagraph`, so a paragraph
-        // written across several lines arrives as one paragraph per line, and
-        // a fenced block gains a blank line between every line of code. Tool
-        // output and pasted text reach chat bubbles with CRLF intact, so this
-        // is a path real messages take.
-        let normalised = source.replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        var lines = normalised.components(separatedBy: "\n")[...]
+        var lines = all[...]
         while let line = lines.first {
+            // The only state carried from line to line is `paragraph` and
+            // `listIndents`; with both empty, what follows parses the same
+            // with or without the lines before it.
+            if lines.startIndex > 0, paragraph.isEmpty, listIndents.isEmpty {
+                result.clean.append((lines.startIndex, blocks.count))
+            }
             lines = lines.dropFirst()
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
@@ -156,11 +315,8 @@ public enum Markdown {
             paragraph.append(trimmed)
         }
         flushParagraph()
-        let bytes = source.utf8.count
-        if bytes <= 65_536 {
-            blockCache.setObject(CachedBlocks(blocks), forKey: key, cost: bytes * 4 + blocks.count * 32)
-        }
-        return blocks
+        result.blocks = blocks
+        return result
     }
 
     private static func leadingCount(_ line: String) -> Int {
@@ -462,5 +618,105 @@ public enum Markdown {
             if character == "`" { count += 1 }
         }
         return count % 2 == 1
+    }
+}
+
+/// The settled start of each reply that is still streaming: the source up to
+/// the last line `Markdown.parse` found safe to resume from, and the blocks
+/// before it. One entry per live reply — each new one replaces the entry it
+/// grew from — so a stream never fills this with its own prefixes, and the
+/// settled messages in `Markdown.blockCache` are never what makes room.
+final class SettledPrefixes: @unchecked Sendable {
+    final class Entry {
+        /// The source through the end of the last line the parser looked at.
+        /// A later text continues from `resume` only if it starts with all of
+        /// these bytes.
+        let key: String
+        let keyUTF8: Int
+        /// UTF-8 offset where parsing picks up: the start of that last line.
+        let resume: Int
+        let blocks: [MarkdownBlock]
+
+        init(key: String, resume: Int, blocks: [MarkdownBlock]) {
+            self.key = key
+            self.keyUTF8 = key.utf8.count
+            self.resume = resume
+            self.blocks = blocks
+        }
+    }
+
+    /// A bubble streams one reply; a handful at once is the most a screen
+    /// shows. Keys past a megabyte are not kept.
+    static let countLimit = 16
+    static let byteLimit = 8 * 1_048_576
+    static let maxKeyBytes = 1_048_576
+
+    private let lock = NSLock()
+    /// Most recently used first.
+    private var entries: [Entry] = []
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.count
+    }
+
+    /// The entry with the longest key that `source` starts with, byte for
+    /// byte. Comparing bytes rather than `String ==` matters: Swift compares
+    /// strings by canonical equivalence, and "e" + U+0301 is not the "é" the
+    /// parser saw.
+    func longest(prefixOf source: String) -> Entry? {
+        lock.lock()
+        let snapshot = entries
+        lock.unlock()
+        let available = source.utf8.count
+        var best: Entry?
+        for entry in snapshot where entry.keyUTF8 <= available && entry.keyUTF8 > (best?.keyUTF8 ?? 0) {
+            if Self.hasPrefix(source, entry.key, count: entry.keyUTF8) { best = entry }
+        }
+        return best
+    }
+
+    /// Keep `entry` in front. The entry it grew from goes, and so does any
+    /// other whose key it extends: an older checkpoint of the same reply.
+    func remember(_ entry: Entry, replacing old: Entry?) {
+        lock.lock()
+        defer { lock.unlock() }
+        entries.removeAll { existing in
+            existing === old
+                || (existing.keyUTF8 <= entry.keyUTF8 && Self.hasPrefix(entry.key, existing.key, count: existing.keyUTF8))
+        }
+        entries.insert(entry, at: 0)
+        var bytes = entries.reduce(0) { $0 + $1.keyUTF8 }
+        while entries.count > Self.countLimit || (bytes > Self.byteLimit && entries.count > 1) {
+            bytes -= entries.removeLast().keyUTF8
+        }
+    }
+
+    /// Move a reply that is still streaming to the front, so other replies
+    /// age out first.
+    func touch(_ entry: Entry) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let index = entries.firstIndex(where: { $0 === entry }), index > 0 else { return }
+        entries.insert(entries.remove(at: index), at: 0)
+    }
+
+    func removeAll() {
+        lock.lock()
+        defer { lock.unlock() }
+        entries.removeAll()
+    }
+
+    private static func hasPrefix(_ source: String, _ prefix: String, count: Int) -> Bool {
+        guard count > 0 else { return true }
+        let fast = source.utf8.withContiguousStorageIfAvailable { whole in
+            prefix.utf8.withContiguousStorageIfAvailable { start in
+                whole.count >= count && start.count == count
+                    && memcmp(whole.baseAddress!, start.baseAddress!, count) == 0
+            }
+        }
+        if let fast, let result = fast { return result }
+        return source.utf8.starts(with: prefix.utf8)
     }
 }

@@ -107,7 +107,10 @@ struct RoutineCalendarView: View {
                 Text(day, format: .dateTime.weekday(.narrow))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
-                Text(day, format: .dateTime.day())
+                // The bare number, as Calendar's week strip draws it: the date
+                // style's day is "28日" in Chinese and Japanese, which the
+                // 34-point circle cuts to "2…".
+                Text(calendar.component(.day, from: day), format: .number)
                     .font(.system(size: 17, weight: isSelected || isToday ? .semibold : .regular))
                     // Selected reads as the inverse of the page (white on black
                     // in dark mode, black on white in light); today, in the accent.

@@ -19,18 +19,18 @@ This page is the OpenMausBot half of a contract with three parties:
   the app, holds the machine's signing secret, and answers the desktop's Cloud
   session;
 - **the desktop app**: signs in to Cloud, lists the machine under Servers,
-  and offers **Connect to my Cloud**.
+  and offers **Open My Cloud**.
 
 Contract version: `1` (`cloudContractVersion` on the wire).
 
 ## What the person sees
 
 1. They subscribe on the Cloud site. The Admin creates the Fly app and machine.
-2. They open the desktop app, go to **Settings → OMB Cloud** and sign in (the
+2. They open the desktop app, go to **Settings → OpenMausBot Cloud** and sign in (the
    existing device sign-in). A **Your Cloud** card says **Setting up** until
    the machine is up.
 3. When it is ready, the machine appears under **Servers** as **My Cloud**, and
-   the card offers **Connect to my Cloud**. One click opens the machine in the
+   the card offers **Open My Cloud**. One click opens the machine in the
    app window, signed in. There is no second confirmation.
 4. The first thing the Cloud shows is its engine sign-in
    (`src/components/CloudEngineSignIn.tsx`), with three choices:
@@ -38,10 +38,11 @@ Contract version: `1` (`cloudContractVersion` on the wire).
      page, paste the code back);
    - **Sign in to ChatGPT (Codex)**: the existing device-code flow;
    - **Use an API key**: the existing model-provider keys in **Settings →
-     Connections** (Anthropic, or an OpenAI-compatible key such as OpenRouter).
+     API keys** (Anthropic, or an OpenAI-compatible key such as OpenRouter).
 
-   It says plainly that the account's plan limits apply to bots running 24/7,
-   and that a Claude Max plan or an API key is recommended for heavy use.
+   It says plainly that the person's AI plan limits apply to bots that work
+   around the clock, and that Anthropic's Claude Max plan or an API key works
+   best for heavy use.
 5. Until one of those engines can run, every bot on the Cloud, including the
    default one, shows this sign-in rather than a chat that fails its first
    turn. Once one can run, the chat takes its place. Sign-ins stay on the
@@ -52,12 +53,12 @@ session; that is how the web UI knows to open the engine sign-in instead of
 the welcome flow, which describes the person's own computer (it can still be
 replayed from Settings).
 
-### Use your Cloud on your phone
+### Use My Cloud on your phone
 
 1. Get the phone app: the menu under your name → **Get the phone app** (App
    Store for iPhone, APK for Android).
 2. The same menu → **Connect your phone · to your Cloud (always on)**, or
-   **Settings → OMB Cloud → Use your Cloud on your phone**. The Cloud opens in
+   **Settings → OpenMausBot Cloud → Use My Cloud on your phone**. The Cloud opens in
    the app window at its phone pairing.
 3. **Create pairing code**, and scan the QR code with the phone app.
 
@@ -71,17 +72,17 @@ How it fits together (`src/lib/phone-pairing.ts`):
   that machine or an admin session, where pairing codes are on).
 - On this computer, when the verified snapshot shows a paid plan (any tier)
   and a Ready Cloud, the menu has two **Connect your phone** lines: *to your
-  Cloud (always on)* first, which does what **Use your Cloud on your phone**
+  Cloud (always on)* first, which does what **Use My Cloud on your phone**
   does, then *to this computer*. A paid plan whose Cloud is not Ready keeps
   the single *to this computer* line, with a note that the Cloud will show
-  there. A failed switch opens Settings → OMB Cloud.
-- **Use your Cloud on your phone** shows for a paid plan. With a Ready Cloud it
+  there. A failed switch opens Settings → OpenMausBot Cloud.
+- **Use My Cloud on your phone** shows for a paid plan. With a Ready Cloud it
   calls `cloud-account:connectHomeForPhone`, which takes no arguments and
-  connects as **Connect to my Cloud** does, adding the one fixed request
+  connects as **Open My Cloud** does, adding the one fixed request
   `?desktop-settings=phone` (on `/pair` too, which carries it on once paired).
   The Cloud's page opens Settings on its phone pairing. It never makes a code
   by itself. Before the Cloud is Ready, or if opening it failed, the card
-  lists the two steps instead. On the Cloud itself, Settings → OMB Cloud
+  lists the two steps instead. On the Cloud itself, Settings → OpenMausBot Cloud
   offers the same button and opens the pairing directly.
 
 ### Only your own devices
@@ -136,6 +137,11 @@ Every other routine is nobody's: it runs confined, like a guest's, and
 reports into a conversation that is nobody's. An owner's routine reports
 into a conversation that is the owner's.
 
+A webhook is the owner's: only their own devices can create, edit or rotate
+one, so its runs work at the bot's own level, in its project folder, with its
+shell, as on the desktop. What a webhook brings in still never reaches the
+lent Mac, whether it starts a run or posts to chat (below).
+
 The routines a revoked session wrote are paused at that start, and the
 conversations it opened lose their working folder: their next turn works in
 a folder of their own, never the owner's project.
@@ -185,7 +191,7 @@ runs.
 
 ### Setup checklist
 
-On a Cloud home a small card, **Set up your Cloud**, sits at the bottom left
+On a Cloud home a small card, **Set up My Cloud**, sits at the bottom left
 until its steps are done or the person hides it (`src/components/CloudSetup.tsx`,
 `src/lib/cloud-setup.ts`). Only the owner's own devices (an admin session on a
 Cloud home) see it; desktop and self-hosted installs never do and keep their
@@ -197,7 +203,7 @@ box the person ticks:
    the engine sign-in above.
 2. **Bring your bots from your computer**: only in the desktop app, while the
    Copy this computer here card would be offered (an empty Cloud, a computer
-   with work to bring; docs/copy-workspace.md). **Move to Cloud** opens that
+   with work to bring; docs/copy-workspace.md). **Copy to My Cloud** opens that
    offer in place (the size, what stays, **Copy** and **Not now**). Done after
    a copy; skipped after **Not now**,
    which the Cloud keeps (`cloud-setup-move-skipped` in its onboarding record)
@@ -209,7 +215,7 @@ box the person ticks:
    stopped one) in a bot's conversation or a room. The onboarding record never
    travels with a copy, so copied-in chats do not count.
 4. **Optional: Let your Cloud use this Mac**: only in the desktop app on
-   macOS. **Choose what to lend** opens Settings → OMB Cloud on this Mac,
+   macOS. **Choose what to lend** opens Settings → OpenMausBot Cloud on this Mac,
    leaving the Cloud's page as the menu-bar item's **Lending settings…** does
    (`cloudLending.open()`: no arguments, answered only for the verified Cloud
    page or the app's own window). Done when `GET /api/shared-computers` lists
@@ -230,7 +236,7 @@ Cloud · always on**; in a browser, a plain label says the same.
 A Cloud home is a headless Linux server, so its bots have two places: the
 built-in browser and cloud computers. It never offers **This computer** (that
 would be the server itself) or a **Local VM** (a Fly machine has no container
-runtime). The person's own Mac is reached only when they lend it (**Let my
+runtime). The person's own Mac is reached only when they lend it (**Let My
 Cloud use this Mac**, below), through the shared-computer tools.
 
 - Neither place is listed in the Computer panel, the composer's place chip, a
@@ -251,6 +257,33 @@ Cloud use this Mac**, below), through the shared-computer tools.
 `shared/cloud-home.ts` decides which places are offered, for the server and
 the app alike.
 
+### Live calls
+
+A Cloud is personal, so in the desktop app its own page may use the
+microphone for a Live call, as this computer's own page does. That is the
+microphone only, never the camera or screen capture, and only for the main
+frame of the app's window at the exact origin the verified Cloud sign-in
+reports (`electron/app-permissions.mjs`, `appPermissionHandlers`). Signing out
+of Cloud takes it away at once; every other server's page stays refused. In a
+web browser, the browser asks for the microphone for the Cloud's address.
+
+- **The key is the person's own.** No Cloud plan includes Live calls: the
+  person pastes an OpenAI API key from a project with GPT-Live access. It is
+  saved on the Cloud (`PUT /api/config`, as a server page has no credential
+  store), and the Live copy says so.
+- **The voice knows where it runs.** Like the bot's own system prompt, it
+  is told it runs on the person's My Cloud, not on their own computer
+  (`liveInstructions` in `server/live-call.ts`).
+- **A busy line names the browser.** A call started from a web browser says
+  so (`client: "web"`). A second call started in another window is told
+  "Another Live call is running in a web browser. Hang up there first."
+  instead of "on this computer", and that window's call bar reads "Ada is on
+  a Live call from a web browser". The phone apps show a client they don't
+  know as "another device".
+- **Take turns stays on the Mac.** Take-turns calls listen with the Mac app's
+  on-device speech recognition, which a Cloud's page can't use. On a Cloud,
+  the call with one bot is a Live call, and a room has no call.
+
 ### Open in the app: `openmausbot://cloud`
 
 The Cloud page (`https://cloud.openmausbot.com/cloud`) can offer **Open in the
@@ -265,7 +298,7 @@ decides everything from its own verified state (`electron/cloud-entry.mjs`).
    that arrives before the app is ready). If the window already shows
    **My Cloud**, coming forward is all it does.
 2. Otherwise the window returns to this computer (a hosted server that was
-   showing stays saved under **Servers**) and opens **Settings → OMB Cloud**.
+   showing stays saved under **Servers**) and opens **Settings → OpenMausBot Cloud**.
    Before that view acts, the app gives a saved Cloud sign-in up to five
    seconds to finish restoring, so it is never mistaken for signed out.
 3. Opened this way, the view acts on its own, with no confirmation:
@@ -273,7 +306,7 @@ decides everything from its own verified state (`electron/cloud-entry.mjs`).
      the browser approval page with the code filled in
      (`/cloud/desktop?code=…`);
    - signed in and the Cloud is **Ready**: it connects to **My Cloud**,
-     exactly like **Connect to my Cloud**;
+     exactly like **Open My Cloud**;
    - after that sign-in completes, or when the Cloud becomes **Ready** while
      the view is still open, it connects then;
    - anything else: the card shows the status and the person decides.
@@ -283,7 +316,7 @@ sign-out in that view starts nothing) and one automatic connection per link.
 A failed connection shows the card's error; clicking the link again retries.
 Closing Settings or choosing another section ends it. While it is open, the
 first-run welcome waits, as it does for Organization settings. A normal visit
-to **Settings → OMB Cloud** never signs in or connects by itself.
+to **Settings → OpenMausBot Cloud** never signs in or connects by itself.
 
 The link does nothing in development builds, and in companion client mode it
 explains that the app must be disconnected from the other computer first.
@@ -367,7 +400,7 @@ The web UI's pages are sent with `Content-Security-Policy: frame-ancestors
 (`serveStatic`, `server/index.ts`): no other page can frame them. Nothing
 frames the web UI: the desktop app shows it in its own window.
 
-## Let my Cloud use this Mac
+## Let My Cloud use this Mac
 
 The Cloud is home: bots and chats live there. The person's Mac is a computer
 the Cloud can borrow while it is awake. Lending is off until the person turns
@@ -378,8 +411,8 @@ computer sharing exactly as before: off unless a maintainer sets
 
 ### What the person sees
 
-In **Settings → OMB Cloud**, the **Your Cloud** card has a **Let my Cloud use
-this Mac** switch under **Connect to my Cloud** (it is part of connecting, not
+In **Settings → OpenMausBot Cloud**, the **My Cloud** card has a **Let My Cloud use
+this Mac** switch under **Open My Cloud** (it is part of connecting, not
 a dialog). Turning it on shows what can be lent; each change applies at once,
 with no confirmation. The switch and the chosen scopes are the consent.
 
@@ -395,7 +428,7 @@ with no confirmation. The switch and the chosen scopes are the consent.
   computer control set up first.
 - **No terminal.** The shell grant of maintainer sharing is never offered here.
 
-The switch can be turned on before the first **Connect to my Cloud**; lending
+The switch can be turned on before the first **Open My Cloud**; lending
 starts once this Mac is signed in to the Cloud. Lending runs while the app is
 open: quitting it (or the Mac sleeping) only pauses lending, and it resumes
 when the app runs again with the switch still on. Below the choices, **Activity
@@ -473,9 +506,11 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   it and it holds nobody else's words, anywhere in it, before or during the
   turn: one line from a guest, a teammate bot or a local process (sent,
   queued, steered or handed in, or history imported with a move), one card
-  answer from someone else, or one report of a routine the owner did not
-  write, takes that conversation out of lending for good, because a resumed
-  session carries everything said in it. A conversation a guest opened (and
+  answer from someone else, one report of a routine the owner did not
+  write, or one message a webhook posted (a webhook that posts to chat
+  writes into the bot's Updates conversation), takes that conversation out
+  of lending for good, because a resumed session carries everything said in
+  it. A conversation a guest opened (and
   named) is never the owner's, whoever writes in it. The bot is told "Someone else wrote in this
   conversation, so it can't use your Mac. Start a new conversation to use it."
   and the lending switch says the same. The owner's own edits count as theirs,
@@ -900,13 +935,13 @@ sign-in. Nobody signed in with a paid plan, in payment trouble, with a payment
 being linked, or whose state is unknown is offered a plan anywhere in the app.
 
 In the Server menu, **My Cloud** goes through the same connection as
-**Connect to my Cloud** (no pairing code to type); when it cannot, the app
-opens **Settings → OMB Cloud**, which says the next step. In the desktop app a
+**Open My Cloud** (no pairing code to type); when it cannot, the app
+opens **Settings → OpenMausBot Cloud**, which says the next step. In the desktop app a
 `/pair#code=` link connects without a second click; a browser still asks. On a
 Cloud home the pairing page says where its connection starts (the environment
 descriptor's `capabilities.cloudHome`).
 
-On the person's own Cloud, open in the app's window, **Settings → OMB Cloud**
+On the person's own Cloud, open in the app's window, **Settings → OpenMausBot Cloud**
 shows the plan read only (`cloud-plan:*`: its name and whether it is active,
 **Manage in your browser** and **Switch to this computer**). It is listed only
 on an OMB Cloud home (`config.cloudHome`), never on another server open in the
@@ -916,7 +951,7 @@ while a check is failing or the sign-in has ended, so that page says
 app cannot vouch for the Cloud it only says the plan is managed in the app on
 the computer.
 
-**Connect to my Cloud** first asks the machine whether this app is already
+**Open My Cloud** first asks the machine whether this app is already
 signed in there (`GET <origin>/api/auth/session` with its cookie). If not, it
 calls `POST /api/cloud/desktop/pairing` (same device token) and expects
 `{"cloudContractVersion":1,"origin":…,"code":…,"expiresAt":…}` for the same
@@ -935,12 +970,12 @@ section is only what the Cloud adds.
 
 - **The Admin's grant.** Main signs in to the Cloud through the Admin: it
   opens a single-use pairing window for the signed-in owner
-  (`POST /api/cloud/desktop/pairing`, `pairHome`), so **Settings → OMB Cloud**
+  (`POST /api/cloud/desktop/pairing`, `pairHome`), so **Settings → OpenMausBot Cloud**
   can copy before the Cloud was ever opened in this app. No session in the
   window yet is therefore not a block on the Cloud, as it is on other servers.
   A saved "My Cloud" entry that is not this account's verified Cloud is copied
   to like any other server.
-- **Settings → OMB Cloud**, under Your Cloud once it is Ready, opens the same
+- **Settings → OpenMausBot Cloud**, under My Cloud once it is Ready, opens the same
   panel as Settings → Servers, named "My Cloud".
 - **The setup checklist.** While the Cloud's setup checklist is up, the copy
   offer is its second step instead of a card (Setup checklist, above).
@@ -965,7 +1000,7 @@ section is only what the Cloud adds.
 - **The restart.** The Cloud's launcher (`server/cloud-home-start.ts`) starts
   only the server again on exit 75, and startup settles who owns what came
   (`server/cloud-owner.ts`): a copied routine is the owner's.
-- **Older Clouds.** A Cloud from before Move to Cloud answers `404` and the app
+- **Older Clouds.** A Cloud from before Copy to My Cloud answers `404` and the app
   says it has not updated yet; one from before any server could receive a copy
   still receives one from this app (its routes are the same).
 
@@ -991,7 +1026,7 @@ section is only what the Cloud adds.
 - A volume binds to one machine and is never adopted by another.
 - Each customer's app lives in its own Fly private network.
 - A lent Mac is reached only through its own outbound connection, within the
-  scopes the person chose, which the Mac itself enforces (see "Let my Cloud use
+  scopes the person chose, which the Mac itself enforces (see "Let My Cloud use
   this Mac").
 
 ## Published image

@@ -5,7 +5,11 @@
 // pill reads into the App Group whenever they change — the same 400 ms
 // window the Dynamic Island rides — and tells WidgetKit to reload only
 // when the payload differs, or its unchanged timestamp needs a minute's
-// renewal. Once the app is gone they age the last snapshot and say so.
+// renewal. A working row's streamed line alone is narration a widget
+// cannot show live, so it republishes at most every 30 seconds
+// (`WidgetSnapshot.workingLineInterval`); the write on the way to the
+// background is exact. Once the app is gone they age the last snapshot
+// and say so.
 import Combine
 import CompanionCore
 import Foundation
@@ -97,7 +101,9 @@ final class WidgetSyncBridge {
     }
 
     private func publish(_ snapshot: WidgetSnapshot?, flushGeneration: Int?) {
-        writer?.publish(snapshot) { [weak self] changed in
+        // A flush is the last write before suspension: no later window may
+        // come to carry a held-back working line, so it lands now.
+        writer?.publish(snapshot, exact: flushGeneration != nil) { [weak self] changed in
             Task { @MainActor in
                 if changed { WidgetCenter.shared.reloadAllTimelines() }
                 if let flushGeneration, self?.flushGeneration == flushGeneration {

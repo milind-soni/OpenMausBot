@@ -35,30 +35,69 @@ enum CompactRosterMetrics {
 }
 
 /// One bot on one line, with its threads beneath it when opened.
-struct CompactBotEntry: View {
+///
+/// Drawn only from values the list hands it, and shown `.equatable()`, so a
+/// row whose bot has not moved is skipped. Under a busy fleet the session
+/// publishes many times a second; a row that observed it, or that read the
+/// list's state through `Binding(get:set:)` (a new location every render),
+/// ran its body for every visible bot on every publish. What the row
+/// changes goes back to the list through the callbacks instead.
+struct CompactBotEntry: View, Equatable {
+    /// The bot as the state holds it now.
     let bot: Bot
+    /// Its face (`MausState.forChat`), worked out by the list.
+    let face: MausState
     /// When the bot's current thread last moved, from the roster summary.
     let lastActivity: Double
+    /// The day the list drew on (`RosterDay.today`). The stamps say "9:15 AM",
+    /// "Yesterday" or a weekday against the clock, so a new day must redraw
+    /// a row whose bot has not moved.
+    let today: Date
     /// An unanswered approval or question sits in one of its threads.
     let hasPendingCard: Bool
-    @Binding var query: String
-    @Binding var expanded: Bool
-    @Binding var collapsedFolders: Set<String>
-    @Binding var creating: Bool
+    /// Threads holding a held send: `CompanionState.queuedThreadIds`.
+    let queuedThreadIds: Set<String>
+    /// The roster search: a match lists the bot's threads beneath it.
+    let query: String
+    /// Its thread list is open ("› N").
+    let expanded: Bool
+    /// Closed folders, keyed `botID:folderID`, for every bot.
+    let collapsedFolders: Set<String>
+    /// A thread asked for from this row is being made.
+    let creating: Bool
+    /// For the row's actions only. A plain reference is not observed, so
+    /// nothing the session publishes redraws the row by itself.
+    let session: Session
+    /// Opens or closes the thread list, from the list's own state.
+    let toggleExpanded: () -> Void
+    let collapse: () -> Void
+    let toggleFolder: (String) -> Void
+    /// Marks a thread as being made from this row; false when one already is.
+    let beginCreating: () -> Bool
+    let endCreating: () -> Void
     /// The row itself: the bot's last-opened thread, as before.
     let openRow: () -> Void
     /// An exact thread, or one just created.
     let open: (Chat) -> Void
     let manage: (Chat) -> Void
 
-    @EnvironmentObject private var session: Session
+    /// Everything the row draws. The callbacks are left out: they write
+    /// the list's own state, which a skipped row still reaches.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.bot == rhs.bot && lhs.face == rhs.face && lhs.lastActivity == rhs.lastActivity
+            && lhs.today == rhs.today && lhs.hasPendingCard == rhs.hasPendingCard && lhs.queuedThreadIds == rhs.queuedThreadIds
+            && lhs.query == rhs.query && lhs.expanded == rhs.expanded
+            && lhs.collapsedFolders == rhs.collapsedFolders && lhs.creating == rhs.creating
+            && lhs.session === rhs.session
+    }
+
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .body) private var scaledFace = CompactRosterMetrics.face
     /// Wakes the list when a timed snooze ends, so the count and the list
     /// fold that thread back in without waiting for a snapshot.
     @State private var snoozeTick = 0
 
-    private var face: CGFloat { min(scaledFace, CompactRosterMetrics.maxFace) }
+    private var faceSize: CGFloat { min(scaledFace, CompactRosterMetrics.maxFace) }
 
     private var searching: Bool {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -66,24 +105,22 @@ struct CompactBotEntry: View {
 
     var body: some View {
         let _ = snoozeTick
-        let live = session.state.bot(bot.id) ?? bot
-        let queued = session.state.queuedThreadIds
         let row = CompactBotRow(
-            bot: live, hasPendingCard: hasPendingCard, queuedThreadIds: queued, creatingThread: creating
+            bot: bot, hasPendingCard: hasPendingCard, queuedThreadIds: queuedThreadIds, creatingThread: creating
         )
         VStack(alignment: .leading, spacing: 0) {
-            rowLine(live, row)
+            rowLine(bot, row)
             if row.listsThreads(expanded: expanded, searching: searching) {
-                threadList(live, row: row, queued: queued)
+                threadList(bot, row: row, queued: queuedThreadIds)
             }
         }
-        .snoozeExpiryTick(live.visibleTasks.nextSnoozeExpiry(), tick: $snoozeTick)
+        .snoozeExpiryTick(bot.visibleTasks.nextSnoozeExpiry(), tick: $snoozeTick)
         // A list opened with "› N" closes when the control goes away (the
         // bot is down to one thread), so it cannot reopen by itself when the
         // bot gains a thread again. Also clears a stale open state carried
         // over from comfortable, where every bot has a Threads row.
         .onValueChange(of: row.showsThreadControl, initial: true) { shows in
-            if !shows && expanded { expanded = false }
+            if !shows && expanded { collapse() }
         }
     }
 
@@ -94,11 +131,7 @@ struct CompactBotEntry: View {
             Button(action: openRow) {
                 HStack(spacing: 0) {
                     UnreadDot(visible: row.showsUnreadDot, color: bot.color)
-                    BotAvatarView(
-                        bot: bot, size: face,
-                        state: MausState.forChat(.bot(bot), in: session.state),
-                        animated: false
-                    )
+                    BotAvatarView(bot: bot, size: faceSize, state: face, animated: false)
                     .accessibilityHidden(true)
                     .padding(.trailing, CompactRosterMetrics.faceSpacing)
 
@@ -199,7 +232,7 @@ struct CompactBotEntry: View {
         let listed = searching || expanded
         return Button {
             Haptics.selection()
-            withAnimation(.snappy(duration: 0.2)) { expanded.toggle() }
+            withAnimation(.snappy(duration: 0.2)) { toggleExpanded() }
         } label: {
             HStack(spacing: 3) {
                 Image(systemName: "chevron.right")
@@ -248,7 +281,7 @@ struct CompactBotEntry: View {
                 newThreadLine(bot)
             }
         }
-        .padding(.leading, CompactRosterMetrics.nameInset(face: face))
+        .padding(.leading, CompactRosterMetrics.nameInset(face: faceSize))
         .padding(.trailing, CompactRosterMetrics.trailing)
         .padding(.bottom, 4)
     }
@@ -258,8 +291,7 @@ struct CompactBotEntry: View {
     private func folderHeader(_ folder: BotProject) -> some View {
         let open = searching || !collapsedFolders.contains(folderKey(folder))
         return Button {
-            let key = folderKey(folder)
-            if collapsedFolders.contains(key) { collapsedFolders.remove(key) } else { collapsedFolders.insert(key) }
+            toggleFolder(folderKey(folder))
         } label: {
             HStack(spacing: 6) {
                 if let emoji = folder.emoji, !emoji.isEmpty {
@@ -303,10 +335,7 @@ struct CompactBotEntry: View {
         ForEach(tasks, id: \.threadId) { task in
             if let projected = bot.projected(forThread: task.threadId) {
                 NavigationLink(value: Chat.bot(projected)) {
-                    CompactThreadLine(
-                        task: task,
-                        queued: session.state.pendingQueued[task.threadId]?.isEmpty == false
-                    )
+                    CompactThreadLine(task: task, queued: queuedThreadIds.contains(task.threadId), today: today)
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
@@ -345,10 +374,9 @@ struct CompactBotEntry: View {
     }
 
     private func createThread(for bot: Bot) {
-        guard !creating else { return }
-        creating = true
+        guard beginCreating() else { return }
         Task {
-            defer { creating = false }
+            defer { endCreating() }
             if let created = await session.createRosterThread(for: bot) {
                 open(.bot(created))
             }
@@ -361,6 +389,8 @@ struct CompactThreadLine: View {
     let task: BotTask
     /// A held send, from the client's queue state (never in `activity`).
     var queued = false
+    /// The day its stamp was worded on; see `CompactBotEntry.today`.
+    let today: Date
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -473,13 +503,26 @@ struct CompactThreadLine: View {
 }
 
 /// A group on one line: two of its members' faces, overlapping, then its name.
-struct CompactRoomRow: View {
+///
+/// Shown `.equatable()`, so a group whose room and members have not moved
+/// does not redraw its two faces on every publish.
+struct CompactRoomRow: View, Equatable {
     let room: Room
+    /// Its members as the state holds them, looked up by the list rather
+    /// than by observing the session from every row.
+    let members: [Bot]
     let lastActivity: Double
+    /// The day its stamp was worded on; see `CompactBotEntry.today`.
+    let today: Date
     /// An unanswered approval or question sits in the group's thread.
     var waiting = false
 
-    @EnvironmentObject private var session: Session
+    /// Everything the row draws (the scaled sizes follow the environment).
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.room == rhs.room && lhs.members == rhs.members && lhs.lastActivity == rhs.lastActivity
+            && lhs.today == rhs.today && lhs.waiting == rhs.waiting
+    }
+
     @ScaledMetric(relativeTo: .body) private var scaledFace = CompactRosterMetrics.face
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -489,7 +532,7 @@ struct CompactRoomRow: View {
     var body: some View {
         HStack(spacing: 0) {
             UnreadDot(visible: room.unread && !busy, color: "blue")
-            RoomFaces(members: room.memberIds.compactMap { session.state.bot($0) }, size: face)
+            RoomFaces(members: members, size: face)
                 .accessibilityHidden(true)
                 .padding(.trailing, CompactRosterMetrics.faceSpacing)
             let name = Text(verbatim: room.name)
@@ -658,4 +701,11 @@ struct ChiefBadge: View {
             .accessibilityLabel("Chief of Staff")
             .accessibilityIdentifier("chief-badge")
     }
+}
+
+/// The day a roster render words its stamps on. The compact rows no longer
+/// redraw on every publish, so the list hands them this instead: a row whose
+/// bot has not moved still redraws once the day turns over.
+enum RosterDay {
+    static var today: Date { Calendar.current.startOfDay(for: Date()) }
 }

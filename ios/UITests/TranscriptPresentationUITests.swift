@@ -47,6 +47,9 @@ final class TranscriptPresentationUITests: XCTestCase {
         XCTAssertFalse(contains("AUTHENTICATED WEBHOOK", in: app))
         XCTAssertFalse(contains("Delivery ID", in: app))
         XCTAssertFalse(app.staticTexts["webhook-payload"].exists)
+        // Pepper is still marked busy, but the turn's final reply is in:
+        // nothing left to type.
+        XCTAssertFalse(app.descendants(matching: .any)["typing-indicator"].exists, "a finished reply ends the typing")
         screenshot("Compact transcript with Hidden activity", in: app)
 
         fold.tap()
@@ -72,7 +75,25 @@ final class TranscriptPresentationUITests: XCTestCase {
         XCTAssertTrue(line.label.contains("The build failed because a dependency is missing."), line.label)
         XCTAssertFalse(contains("Let me inspect", in: app))
         XCTAssertFalse(app.buttons["assistant-turn.preview-turn"].exists, "nothing folds before the turn ends")
+        // The dots say the bot is working; the line says what at.
+        assertTypingBubbleInView(app)
         screenshot("Hidden: live narration as one status line", in: app)
+    }
+
+    /// The moment after a send: your message lands, then the turn starts and
+    /// the bot's typing bubble appears under it, on screen above the composer.
+    @MainActor
+    func testTypingBubbleAppearsUnderYourMessageWhenTheTurnStarts() {
+        for detail in ["hidden", "full"] {
+            let app = launchPreview(detail: detail, typing: true)
+            let sent = app.staticTexts["Can you check the Android build too?"]
+            XCTAssertTrue(sent.waitForExistence(timeout: 5), detail)
+            let typing = assertTypingBubbleInView(app)
+            XCTAssertGreaterThanOrEqual(typing.frame.minY, sent.frame.maxY, "the bubble sits under your message (\(detail))")
+            XCTAssertFalse(app.descendants(matching: .any)["live-status-line"].exists, "nothing said yet, so no status line (\(detail))")
+            screenshot("Typing bubble after a send (\(detail))", in: app)
+            app.terminate()
+        }
     }
 
     @MainActor
@@ -88,7 +109,8 @@ final class TranscriptPresentationUITests: XCTestCase {
         let app = launchPreview(detail: "hidden", reasoning: true)
         XCTAssertTrue(app.buttons["assistant-turn.preview-turn"].waitForExistence(timeout: 5))
         XCTAssertFalse(contains("Thinking…", in: app))
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Pepper is working")).firstMatch.exists)
+        // Thinking hidden, the bubble still says the bot is on it.
+        assertTypingBubbleInView(app)
     }
 
     @MainActor
@@ -98,8 +120,25 @@ final class TranscriptPresentationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["assistant-turn.preview-turn"].exists)
     }
 
+    /// The typing bubble is on screen, not merely in the tree: XCUITest
+    /// reports an element scrolled out of sight as existing, so this asks
+    /// for hittable, and for the bubble to end above the composer.
     @MainActor
-    private func launchPreview(detail: String, reasoning: Bool = false, focused: Bool = false, receipts: Bool = false, update: Bool = false, live: Bool = false) -> XCUIApplication {
+    @discardableResult
+    private func assertTypingBubbleInView(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        let typing = app.descendants(matching: .any)["typing-indicator"]
+        XCTAssertTrue(typing.waitForExistence(timeout: 5), "no typing bubble", file: file, line: line)
+        XCTAssertEqual(typing.label, "Pepper is typing", file: file, line: line)
+        let inView = expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: typing)
+        wait(for: [inView], timeout: 5)
+        let composer = app.descendants(matching: .any)["message-input"]
+        XCTAssertTrue(composer.exists, "no composer", file: file, line: line)
+        XCTAssertLessThanOrEqual(typing.frame.maxY, composer.frame.minY, "the typing bubble runs under the composer", file: file, line: line)
+        return typing
+    }
+
+    @MainActor
+    private func launchPreview(detail: String, reasoning: Bool = false, focused: Bool = false, receipts: Bool = false, update: Bool = false, live: Bool = false, typing: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = [
@@ -119,6 +158,7 @@ final class TranscriptPresentationUITests: XCTestCase {
         if receipts { app.launchArguments.append("-chat-compaction-preview") }
         if update { app.launchArguments.append("-chat-update-preview") }
         if live { app.launchArguments.append("-chat-live-narration-preview") }
+        if typing { app.launchArguments.append("-chat-typing-preview") }
         app.launch()
         let threads = app.buttons["threads-toggle.preview-pepper"]
         XCTAssertTrue(threads.waitForExistence(timeout: 10))

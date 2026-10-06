@@ -154,10 +154,10 @@ it("names every plan's price and that tax is added at checkout", () => {
 it("in Settings, someone with a plan sees that plan and the way to it, never Get Pro", () => {
   const card = (state: CloudAccountState) => { f.values = [state]; f.index = 0; return renderToStaticMarkup(createElement(ProSettingsCard)); };
   for (const [state, text] of [
-    [plan({ entitlement: paid("max") }), "Max active · verified by OMB Cloud"],
+    [plan({ entitlement: paid("max") }), "Max active · verified by OpenMausBot Cloud"],
     [plan({ entitlement: paid("pro", "inactive") }), "Pro · not active right now"],
     [plan({ purchase: { state: "confirming", tier: "personal" } }), "Personal · payment received"],
-    [{ status: "unavailable", lastPlan: { tier: "personal", active: true } }, "Personal · checking with OMB Cloud…"],
+    [{ status: "unavailable", lastPlan: { tier: "personal", active: true } }, "Personal · checking with OpenMausBot Cloud…"],
     [{ status: "reauth-required", message: "expired", lastPlan: { tier: "max", active: true } }, "Sign in again to use your Cloud on this computer"],
   ] as const) {
     const html = card(state as CloudAccountState);

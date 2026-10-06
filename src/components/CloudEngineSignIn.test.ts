@@ -62,9 +62,9 @@ it("offers the three ways in and says plainly whose plan limits apply", () => {
   const { html } = render();
   expect(html).toContain("data-cloud-sign-in");
   for (const label of ["Sign in to Claude", "Sign in to ChatGPT (Codex)", "Use an API key"]) expect(html).toContain(label);
-  expect(html).toContain("plan limits apply to bots running 24/7");
-  // OMB sells a plan called Max too: the recommendation names Anthropic's.
-  expect(html).toContain("Anthropic&#x27;s Claude Max subscription or an API key is recommended");
+  expect(html).toContain("plan&#x27;s limits apply to bots that work around the clock");
+  // OpenMausBot Cloud sells a plan called Max too: the recommendation names Anthropic's.
+  expect(html).toContain("Anthropic&#x27;s Claude Max plan or an API key works best");
   expect(html).not.toMatch(/included/i);
   // nothing is opened on the person's behalf
   expect(html).not.toContain("data-engine-setup");
@@ -92,5 +92,5 @@ it("picks the person's own engine, never a local-model or read-only one, and say
   expect(cloudEngine([local, company], "claudeAgent")).toBeUndefined();
   store.instances = [codex];
   choose("claude");
-  expect(render().html).toContain("not available on your Cloud yet");
+  expect(render().html).toContain("not available on My Cloud yet");
 });

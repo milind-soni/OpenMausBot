@@ -8,6 +8,18 @@
             "state": "translated",
             "value": "Densidade da lista"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列表密度"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "列表密度"
+          }
         }
       }
     },
@@ -17,6 +29,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Confortável"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "宽松"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "寬鬆"
           }
         }
       }
@@ -28,6 +52,18 @@
             "state": "translated",
             "value": "Compacta"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "紧凑"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "緊湊"
+          }
         }
       }
     },
@@ -37,6 +73,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Rostos maiores, com a última mensagem de cada bot abaixo do nome."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "头像更大，机器人名称下会显示最新消息。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "頭像更大，機器人名稱下會顯示最新訊息。"
           }
         }
       }
@@ -48,6 +96,18 @@
             "state": "translated",
             "value": "Uma linha por bot. Bots com mais de uma thread ativa mostram quantas têm; toque no número para listá-las."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每个机器人占一行。拥有多个活跃对话的机器人会显示对话数量；点按数字即可列出对话。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每個機器人佔一行。擁有多個活躍對話的機器人會顯示對話數量；點按數字即可列出對話。"
+          }
         }
       }
     },
@@ -57,6 +117,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nova thread"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建对话"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新增對話"
           }
         }
       }
@@ -68,6 +140,18 @@
             "state": "translated",
             "value": "Gerenciar threads"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理对话"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理對話"
+          }
         }
       }
     },
@@ -77,6 +161,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Chefe de gabinete"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "总协调机器人"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "幕僚長"
           }
         }
       }
@@ -88,6 +184,18 @@
             "state": "translated",
             "value": "Expandido"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已展开"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已展開"
+          }
         }
       }
     },
@@ -97,6 +205,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Recolhido"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已折叠"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已收合"
           }
         }
       }
@@ -298,28 +418,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "一個區段只能有一位 Chief。請返回並選擇一位 Chief，或改用沒有 Chief 的區段。"
-          }
-        }
-      }
-    },
-    "A task is one conversation and result, with its own context and working folder.": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Uma tarefa é uma conversa e um resultado, com contexto e pasta de trabalho próprios."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "一项任务包含一段对话与结果，并有自己的上下文和工作文件夹。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "一項任務包含一段對話與結果，並有自己的上下文和工作資料夾。"
           }
         }
       }
@@ -676,28 +774,6 @@
         }
       }
     },
-    "Agent tasks": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tarefas do agente"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "机器人任务"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "機器人任務"
-          }
-        }
-      }
-    },
     "Agents with an ElevenLabs voice picked on your computer use it when this is on. Everyone else uses the voice above.": {
       "localizations": {
         "pt-BR": {
@@ -826,6 +902,204 @@
           "stringUnit": {
             "state": "translated",
             "value": "永遠允許此工具"
+          }
+        }
+      }
+    },
+    "Send to %@?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviar para %@?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发送到 %@？"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "傳送到 %@？"
+          }
+        }
+      }
+    },
+    "Send on your behalf?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviar em seu nome?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以你的名义发送？"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以你的名義傳送？"
+          }
+        }
+      }
+    },
+    "Details": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detalhes"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "详情"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "詳細資料"
+          }
+        }
+      }
+    },
+    "Allowed": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permitido"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已允许"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已允許"
+          }
+        }
+      }
+    },
+    "Denied": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Negado"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已拒绝"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已拒絕"
+          }
+        }
+      }
+    },
+    "No longer available": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não está mais disponível"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已不再可用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已無法使用"
+          }
+        }
+      }
+    },
+    "Remembered": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memorizado"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已记住"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已記住"
+          }
+        }
+      }
+    },
+    "Skipped": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignorado"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已跳过"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已略過"
+          }
+        }
+      }
+    },
+    "Answered": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Respondido"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已回答"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已回答"
           }
         }
       }
@@ -984,28 +1258,6 @@
         }
       }
     },
-    "Bot chats": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Conversas com bots"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "机器人聊天"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "機器人聊天"
-          }
-        }
-      }
-    },
     "Bot intro animation": {
       "localizations": {
         "pt-BR": {
@@ -1112,28 +1364,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "內建 Mac 語音無法使用"
-          }
-        }
-      }
-    },
-    "Built-in Mac voices need no key, and this computer has none available. Switch the voice engine to ElevenLabs in this agent's profile on the computer to keep using voice.": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "As vozes nativas do Mac não precisam de chave, e este computador não tem nenhuma disponível. Troque o motor de voz para ElevenLabs no perfil deste agente no computador para continuar usando voz."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "内置 Mac 语音不需要密钥，但这部电脑没有可用的内置语音。若要继续使用语音，请在电脑上的此机器人设置档中将语音引擎切换为 ElevenLabs。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "內建 Mac 語音不需要金鑰，但這部電腦沒有可用的內建語音。若要繼續使用語音，請在電腦上的此機器人設定檔中將語音引擎切換為 ElevenLabs。"
           }
         }
       }
@@ -1248,50 +1478,6 @@
         }
       }
     },
-    "Channel name (optional)": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nome do canal (opcional)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "频道名称（选填）"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "頻道名稱（選填）"
-          }
-        }
-      }
-    },
-    "Channel tasks": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tarefas do canal"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "频道任务"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "頻道任務"
-          }
-        }
-      }
-    },
     "Channels": {
       "localizations": {
         "pt-BR": {
@@ -1320,28 +1506,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Conversa"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "聊天"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "聊天"
-          }
-        }
-      }
-    },
-    "Chats": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Conversas"
           }
         },
         "zh-Hans": {
@@ -3106,50 +3270,6 @@
         }
       }
     },
-    "Each occurrence creates a fresh task. If the previous run is still active, the next occurrence is skipped instead of queued.": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cada ocorrência cria uma tarefa nova. Se a execução anterior ainda estiver ativa, a próxima ocorrência é pulada em vez de entrar na fila."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每次调度都会创建新的任务。若上次运行仍在进行，下一次调度会略过，不会排入队列。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每次排程都會建立新的任務。若上次執行仍在進行，下一次排程會略過，不會排入佇列。"
-          }
-        }
-      }
-    },
-    "Each occurrence creates a fresh task. No cron syntax is used.": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cada ocorrência cria uma tarefa nova. Nenhuma sintaxe de cron é usada."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每次调度都会创建新的任务，不使用 cron 语法。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "每次排程都會建立新的任務，不使用 cron 語法。"
-          }
-        }
-      }
-    },
     "Edit": {
       "localizations": {
         "pt-BR": {
@@ -3479,28 +3599,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "在此手機上安全輸入"
-          }
-        }
-      }
-    },
-    "Enter the 6-digit code shown on your computer": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Digite o código de 6 dígitos mostrado no seu computador"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "输入电脑上显示的 6 位数代码"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "輸入電腦上顯示的 6 位數代碼"
           }
         }
       }
@@ -4172,6 +4270,18 @@
             "state": "translated",
             "value": "Ir para o mais recente"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳到最新"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳至最新"
+          }
         }
       }
     },
@@ -4181,6 +4291,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ir para as mensagens mais recentes"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳到最新消息"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳至最新訊息"
           }
         }
       }
@@ -4643,28 +4765,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "新增機器人"
-          }
-        }
-      }
-    },
-    "New channel": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Novo canal"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "添加频道"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新增頻道"
           }
         }
       }
@@ -5633,28 +5733,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "開啟即時螢幕與桌面控制"
-          }
-        }
-      }
-    },
-    "Open task": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Abrir tarefa"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "打开任务"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "開啟任務"
           }
         }
       }
@@ -6655,28 +6733,6 @@
         }
       }
     },
-    "Rename task": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Renomear tarefa"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重命名任务"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重新命名任務"
-          }
-        }
-      }
-    },
     "Repeats": {
       "localizations": {
         "pt-BR": {
@@ -6941,28 +6997,6 @@
         }
       }
     },
-    "Routine = a schedule that creates a fresh task": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rotina = um agendamento que cria uma tarefa nova"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "例行工作 = 会创建新任务的调度"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "例行工作 = 會建立新任務的排程"
-          }
-        }
-      }
-    },
     "Routine name": {
       "localizations": {
         "pt-BR": {
@@ -7172,13 +7206,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 Box 虚拟机中运行机器人及其工具。每次运行时 VM 都会自动启动；请保持 OpenMausBot 运行，调度器才能启动工作。"
+            "value": "在 Boat 虚拟机中运行机器人及其工具。每次运行时 VM 都会自动启动；请保持 OpenMausBot 运行，调度器才能启动工作。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 Box 虛擬機器中執行機器人及其工具。每次執行時 VM 都會自動啟動；請保持 OpenMausBot 執行，排程器才能啟動工作。"
+            "value": "在 Boat 虛擬機器中執行機器人及其工具。每次執行時 VM 都會自動啟動；請保持 OpenMausBot 執行，排程器才能啟動工作。"
           }
         }
       }
@@ -7465,28 +7499,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "搜尋應用程式"
-          }
-        }
-      }
-    },
-    "Search chats": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Buscar conversas"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "搜索聊天"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "搜尋聊天"
           }
         }
       }
@@ -8415,72 +8427,6 @@
         }
       }
     },
-    "Task = one conversation and result": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tarefa = uma conversa e um resultado"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "任务 = 一段对话与结果"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "任務 = 一段對話與結果"
-          }
-        }
-      }
-    },
-    "Tasks": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tarefas"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "任务"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "任務"
-          }
-        }
-      }
-    },
-    "Tasks & Routines": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tarefas e rotinas"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "任务与例行工作"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "任務與例行工作"
-          }
-        }
-      }
-    },
     "Temporarily on": {
       "localizations": {
         "pt-BR": {
@@ -8789,28 +8735,6 @@
         }
       }
     },
-    "This chat as Markdown": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Esta conversa em Markdown"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "将此聊天导出为 Markdown"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "將此聊天匯出為 Markdown"
-          }
-        }
-      }
-    },
     "This computer": {
       "localizations": {
         "pt-BR": {
@@ -8976,13 +8900,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已保留目前的云端 VM 选择，但必须先在已配对的电脑上设置 Box API 密钥并备妥 Box 代理程序，才能运行。"
+            "value": "已保留目前的云端 VM 选择，但必须先在已配对的电脑上设置 Boat API 密钥并备妥 Boat 代理程序，才能运行。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "已保留目前的雲端 VM 選擇，但必須先在已配對的電腦上設定 Box API 金鑰並備妥 Box 代理程式，才能執行。"
+            "value": "已保留目前的雲端 VM 選擇，但必須先在已配對的電腦上設定 Boat API 金鑰並備妥 Boat 代理程式，才能執行。"
           }
         }
       }
@@ -9163,28 +9087,6 @@
         }
       }
     },
-    "This task is waiting for your answer.": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Esta tarefa está esperando sua resposta."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此任务正在等待你回答。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此任務正在等待你回答。"
-          }
-        }
-      }
-    },
     "Thought Process": {
       "localizations": {
         "pt-BR": {
@@ -9225,28 +9127,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "標題"
-          }
-        }
-      }
-    },
-    "Title (optional)": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Título (opcional)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "标题（选填）"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "標題（選填）"
           }
         }
       }
@@ -9489,28 +9369,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "未知"
-          }
-        }
-      }
-    },
-    "Untitled task": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tarefa sem título"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "未命名任务"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "未命名任務"
           }
         }
       }
@@ -9775,28 +9633,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "檢視差異"
-          }
-        }
-      }
-    },
-    "View and manage bot task threads": {
-      "localizations": {
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ver e gerenciar as threads de tarefas do bot"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "查看并管理机器人任务对话"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "檢視並管理機器人任務對話"
           }
         }
       }
@@ -10402,6 +10238,18 @@
             "state": "translated",
             "value": "O acesso ao computador está desativado para este celular"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此手机的电脑访问权已关闭"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此手機的電腦存取權已關閉"
+          }
         }
       }
     },
@@ -10411,6 +10259,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Este celular foi pareado com acesso somente ao chat. Pareie-o de novo com acesso total (openmausbot pair, sem --client) para ver e controlar a VM local."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此手机配对时仅获得聊天权限。请以「完全访问」重新配对（openmausbot pair，不加 --client），即可查看并控制本地虚拟机。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此手機配對時僅取得聊天權限。請以「完整存取權」重新配對（openmausbot pair，不加 --client），即可檢視並控制本機 VM。"
           }
         }
       }
@@ -10422,6 +10282,18 @@
             "state": "translated",
             "value": "Ative Permitir ver o computador para este celular em OpenMausBot → Configurações → Acesso remoto no seu computador."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在电脑上打开 OpenMausBot →「设置」→「远程访问」，为此手机打开「允许查看电脑」。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請在電腦上開啟 OpenMausBot →「設定」→「遠端存取」，為此手機開啟「允許存取電腦畫面」。"
+          }
         }
       }
     },
@@ -10431,6 +10303,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Não é possível mostrar a VM local"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法显示本地虚拟机"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法顯示本機 VM"
           }
         }
       }
@@ -10442,6 +10326,18 @@
             "state": "translated",
             "value": "Não foi possível atualizar: %@"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法刷新：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法重新整理：%@"
+          }
         }
       }
     },
@@ -10451,6 +10347,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Assumir o controle"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接管控制"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接手控制"
           }
         }
       }
@@ -10462,6 +10370,18 @@
             "state": "translated",
             "value": "O bot pausa o trabalho no computador até você devolver o controle."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "机器人会暂停电脑上的工作，直到你交还控制。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "機器人會暫停電腦上的工作，直到你交還控制。"
+          }
         }
       }
     },
@@ -10471,6 +10391,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Devolver"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "交还控制"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "交還控制"
           }
         }
       }
@@ -10482,6 +10414,18 @@
             "state": "translated",
             "value": "Devolve o computador ao bot"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将电脑交还给机器人"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "將電腦交還給機器人"
+          }
         }
       }
     },
@@ -10491,6 +10435,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "VM local"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地虚拟机"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本機 VM"
           }
         }
       }
@@ -10502,6 +10458,18 @@
             "state": "translated",
             "value": "Trackpad"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "触控板"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "觸控式軌跡板"
+          }
         }
       }
     },
@@ -10511,6 +10479,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Deslize para mover · Toque para clicar · Segure para arrastar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滑动以移动 · 点一下以点按 · 按住以拖移"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滑動以移動 · 點一下以點按 · 按住以拖移"
           }
         }
       }
@@ -10522,6 +10502,18 @@
             "state": "translated",
             "value": "Deslize para mover o ponteiro, toque para clicar, segure para arrastar"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滑动以移动指针，点一下以点按，按住以拖移"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滑動以移動指標，點一下以點按，按住以拖移"
+          }
         }
       }
     },
@@ -10531,6 +10523,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Conectando à VM local…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在连接本地虚拟机…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在連線至本機 VM…"
           }
         }
       }
@@ -10542,6 +10546,18 @@
             "state": "translated",
             "value": "A área de trabalho se desconectou"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "桌面已断开连接"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "桌面已中斷連線"
+          }
         }
       }
     },
@@ -10551,6 +10567,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mostrar teclado"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示键盘"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "顯示鍵盤"
           }
         }
       }
@@ -10562,6 +10590,18 @@
             "state": "translated",
             "value": "Ocultar teclado"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏键盘"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隱藏鍵盤"
+          }
         }
       }
     },
@@ -10571,6 +10611,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mais teclas"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更多按键"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更多按鍵"
           }
         }
       }
@@ -10582,6 +10634,18 @@
             "state": "translated",
             "value": "Esc"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esc 键"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esc 鍵"
+          }
         }
       }
     },
@@ -10591,6 +10655,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tab"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tab 键"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tab 鍵"
           }
         }
       }
@@ -10602,6 +10678,18 @@
             "state": "translated",
             "value": "Clique direito"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "右键点按"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "右鍵點按"
+          }
         }
       }
     },
@@ -10611,6 +10699,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Copiar (Ctrl+C)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拷贝（Ctrl+C）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製（Ctrl+C）"
           }
         }
       }
@@ -10622,6 +10722,18 @@
             "state": "translated",
             "value": "Colar (Ctrl+V)"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "粘贴（Ctrl+V）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "貼上（Ctrl+V）"
+          }
         }
       }
     },
@@ -10632,12 +10744,36 @@
             "state": "translated",
             "value": "Selecionar tudo (Ctrl+A)"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全选（Ctrl+A）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全選（Ctrl+A）"
+          }
         }
       }
     },
     "Ctrl+Alt+Del": {
       "localizations": {
         "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ctrl+Alt+Del"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ctrl+Alt+Del"
+          }
+        },
+        "zh-Hant": {
           "stringUnit": {
             "state": "translated",
             "value": "Ctrl+Alt+Del"
@@ -10652,6 +10788,18 @@
             "state": "translated",
             "value": "VM local de %@"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 的本地虚拟机"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 的本機 VM"
+          }
         }
       }
     },
@@ -10661,6 +10809,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "O controle pode ter sido retomado no computador, ou a conexão caiu. Devolva e assuma o controle de novo."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "控制权可能已在电脑上被收回，或连接已中断。请交还控制，然后重新接管控制。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "控制權可能已在電腦上被收回，或連線已中斷。請交還控制，然後重新接手控制。"
           }
         }
       }
@@ -10672,25 +10832,17 @@
             "state": "translated",
             "value": "Notas de voz não podem ser reproduzidas durante uma ligação ao vivo."
           }
-        }
-      }
-    },
-    "Runs the agent and its tools inside its Box virtual machine. The VM wakes automatically for each run; keep OpenMausBot running so its scheduler can launch the job.": {
-      "localizations": {
-        "pt-BR": {
+        },
+        "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Roda o agente e as ferramentas dele dentro da máquina virtual Box. A VM acorda automaticamente a cada execução; mantenha o OpenMausBot rodando para que o agendador consiga iniciar o trabalho."
+            "value": "实时通话期间无法播放语音留言。"
           }
-        }
-      }
-    },
-    "This existing Cloud VM choice is preserved, but it cannot run until the paired computer has a configured Box API key and an available Box agent.": {
-      "localizations": {
-        "pt-BR": {
+        },
+        "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esta escolha de Cloud VM é mantida, mas não pode rodar enquanto o computador pareado não tiver uma chave de API do Box configurada e um agente Box disponível."
+            "value": "即時通話期間無法播放語音留言。"
           }
         }
       }
@@ -10702,6 +10854,18 @@
             "state": "translated",
             "value": "Ligando para %@…"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在呼叫 %@…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在呼叫 %@…"
+          }
         }
       }
     },
@@ -10711,6 +10875,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ao vivo com %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "与 %@ 通话中"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "與 %@ 通話中"
           }
         }
       }
@@ -10722,6 +10898,18 @@
             "state": "translated",
             "value": "Desligando…"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在挂断…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在掛斷…"
+          }
         }
       }
     },
@@ -10731,6 +10919,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Silenciar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "静音"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "靜音"
           }
         }
       }
@@ -10742,6 +10942,18 @@
             "state": "translated",
             "value": "Ativar som"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消静音"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消靜音"
+          }
         }
       }
     },
@@ -10751,6 +10963,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Desligar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "挂断"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "掛斷"
           }
         }
       }
@@ -10762,6 +10986,18 @@
             "state": "translated",
             "value": "Tentar novamente"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再試一次"
+          }
         }
       }
     },
@@ -10771,6 +11007,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "As ligações ao vivo precisam de acesso ao Microfone. Ative em Ajustes → MausBot."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实时通话需要麦克风权限。请前往「设置 → MausBot」开启。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即時通話需要麥克風權限。請前往「設定 → MausBot」啟用。"
           }
         }
       }
@@ -10782,6 +11030,18 @@
             "state": "translated",
             "value": "Configure as ligações ao vivo no seu computador primeiro."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先在电脑上设置实时通话。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請先在電腦上設定即時通話。"
+          }
         }
       }
     },
@@ -10791,6 +11051,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ está em uma ligação com %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@正在与 %@ 通话。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@正在與 %@ 通話。"
+          }
+        }
+      }
+    },
+    "%@ is typing": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ está digitando"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 正在输入"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 正在輸入"
           }
         }
       }
@@ -10802,6 +11096,18 @@
             "state": "translated",
             "value": "um bot"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "某个机器人"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "某個機器人"
+          }
         }
       }
     },
@@ -10811,6 +11117,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Não foi possível alcançar seu computador. %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接你的电脑。%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法連線至你的電腦。%@"
           }
         }
       }
@@ -10822,6 +11140,18 @@
             "state": "translated",
             "value": "A ligação não pôde começar: %@"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法开始通话：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法開始通話：%@"
+          }
         }
       }
     },
@@ -10831,6 +11161,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "A ligação caiu."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通话已中断。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通話已中斷。"
           }
         }
       }
@@ -10842,6 +11184,18 @@
             "state": "translated",
             "value": "A ligação caiu: não foi possível conectar o áudio."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通话已中断：音频无法连接。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通話已中斷：音訊無法連線。"
+          }
         }
       }
     },
@@ -10851,6 +11205,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ligação encerrada."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通话已结束。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通話已結束。"
           }
         }
       }
@@ -10862,6 +11228,18 @@
             "state": "translated",
             "value": "Ligação encerrada após um longo silêncio."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "长时间没有声音，通话已结束。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "長時間沒有聲音，通話已結束。"
+          }
         }
       }
     },
@@ -10871,6 +11249,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ligação encerrada: atingiu o limite de tempo da OpenAI."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通话已结束：已达到 OpenAI 的时长上限。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通話已結束：已達到 OpenAI 的時間上限。"
           }
         }
       }
@@ -10882,6 +11272,18 @@
             "state": "translated",
             "value": "A OpenAI encerrou a ligação pelas regras de conteúdo dela."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenAI 依据其内容规则结束了通话。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenAI 依據其內容規範結束了通話。"
+          }
         }
       }
     },
@@ -10891,6 +11293,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ligação encerrada: a conversa foi apagada."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通话已结束：聊天已被删除。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通話已結束：聊天已被刪除。"
           }
         }
       }
@@ -10902,6 +11316,18 @@
             "state": "translated",
             "value": "Ligação encerrada: o OpenMausBot reiniciou."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通话已结束：OpenMausBot 已重新启动。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通話已結束：OpenMausBot 已重新啟動。"
+          }
         }
       }
     },
@@ -10911,6 +11337,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ligação encerrada: sua sessão foi encerrada."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通话已结束：你已退出登录。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通話已結束：你已登出。"
           }
         }
       }
@@ -10922,6 +11360,18 @@
             "state": "translated",
             "value": "Seu computador"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的电脑"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的電腦"
+          }
         }
       }
     },
@@ -10931,6 +11381,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Um iPhone"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一部 iPhone 手机"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一支 iPhone 手機"
           }
         }
       }
@@ -10942,6 +11404,18 @@
             "state": "translated",
             "value": "Um celular Android"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一部 Android 手机"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一支 Android 手機"
+          }
         }
       }
     },
@@ -10951,6 +11425,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Outro dispositivo"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一台设备"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一個裝置"
           }
         }
       }
@@ -10962,6 +11448,18 @@
             "state": "translated",
             "value": "Do seu computador"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自你的电脑"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "來自你的電腦"
+          }
         }
       }
     },
@@ -10971,6 +11469,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "De um iPhone"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 iPhone"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "來自 iPhone"
           }
         }
       }
@@ -10982,6 +11492,18 @@
             "state": "translated",
             "value": "De um celular Android"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 Android 手机"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "來自 Android 手機"
+          }
         }
       }
     },
@@ -10991,6 +11513,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "De outro dispositivo"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自另一台设备"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "來自另一個裝置"
           }
         }
       }
@@ -11002,6 +11536,18 @@
             "state": "translated",
             "value": "Em ligação com %@ · %@"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在与 %@ 通话 · %@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在與 %@ 通話 · %@"
+          }
         }
       }
     },
@@ -11011,6 +11557,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Iniciar uma ligação ao vivo com %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "与 %@ 开始实时通话"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "與 %@ 開始即時通話"
           }
         }
       }
@@ -11022,6 +11580,18 @@
             "state": "translated",
             "value": "Iniciar ligação"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始通话"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開始通話"
+          }
         }
       }
     },
@@ -11031,6 +11601,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "por ligação"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自通话"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "來自通話"
           }
         }
       }
@@ -11042,6 +11624,18 @@
             "state": "translated",
             "value": "As prévias de voz ficam pausadas durante uma ligação ao vivo."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实时通话期间已暂停语音预览。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即時通話期間已暫停語音預覽。"
+          }
         }
       }
     },
@@ -11051,6 +11645,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Este computador está offline."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此电脑已离线。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此電腦已離線。"
           }
         }
       }
@@ -11062,6 +11668,18 @@
             "state": "translated",
             "value": "Ajustes da ligação ao vivo"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实时通话设置"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即時通話設定"
+          }
         }
       }
     },
@@ -11071,6 +11689,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Vale a partir da próxima ligação."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下次通话时生效。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下次通話時生效。"
           }
         }
       }
@@ -11082,6 +11712,18 @@
             "state": "translated",
             "value": "Saída de som"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "声音输出"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "聲音輸出"
+          }
         }
       }
     },
@@ -11091,6 +11733,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Alto-falante"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "扬声器"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "擴音"
           }
         }
       }
@@ -11102,6 +11756,18 @@
             "state": "translated",
             "value": "Fone interno"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "听筒"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "聽筒"
+          }
         }
       }
     },
@@ -11111,6 +11777,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Vale para as ligações neste iPhone. Se houver um fone de ouvido conectado, a ligação vai para ele."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "适用于此 iPhone 上的通话。连接耳机时会改用耳机通话。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "適用於此 iPhone 上的通話。連接耳機時會改用耳機通話。"
           }
         }
       }
@@ -11122,6 +11800,18 @@
             "state": "translated",
             "value": "Ler respostas a mensagens digitadas"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "朗读对文字消息的回复"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "朗讀對文字訊息的回覆"
+          }
         }
       }
     },
@@ -11132,6 +11822,18 @@
             "state": "translated",
             "value": "Quando isto está desligado, as mensagens que você digita durante uma ligação e as respostas do bot a elas não são enviadas à OpenAI."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭后，你在通话期间输入的消息以及机器人对这些消息的回答都不会发送至 OpenAI。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關閉後，你在通話期間輸入的訊息以及機器人對這些訊息的回答都不會傳送至 OpenAI。"
+          }
         }
       }
     },
@@ -11141,6 +11843,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Desligar após silêncio"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "静默后挂断"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "靜默後掛斷"
           }
         }
       }
@@ -11182,6 +11896,18 @@
               }
             }
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 分钟"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 分鐘"
+          }
         }
       }
     },
@@ -11191,6 +11917,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Chave da OpenAI"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenAI 密钥"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenAI 金鑰"
           }
         }
       }
@@ -11202,6 +11940,18 @@
             "state": "translated",
             "value": "Gerenciada no seu computador"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在你的电脑上管理"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在你的電腦上管理"
+          }
         }
       }
     },
@@ -11211,6 +11961,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Uma ligação ao vivo envia sua voz à OpenAI, junto com as mensagens recentes do chat, as respostas do bot e os detalhes de qualquer aprovação que ele pedir. A chave da OpenAI fica no seu computador."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实时通话会将你的语音连同聊天的近期消息、机器人的回答，以及它请求的任何核准的详细信息一起发送至 OpenAI。OpenAI 密钥会保留在你的电脑上。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即時通話會將你的語音連同聊天的近期訊息、機器人的回答，以及它請求的任何核准的詳細資訊一起傳送至 OpenAI。OpenAI 金鑰會保留在你的電腦上。"
           }
         }
       }
@@ -11250,6 +12012,18 @@
             "state": "translated",
             "value": "Expirou — peça uma nova proposta"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已过期 — 请要求新的提案"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已過期 — 請要求新的提案"
+          }
         }
       }
     },
@@ -11282,6 +12056,18 @@
             "state": "translated",
             "value": "Toque para reproduzir"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点一下以播放"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點一下以播放"
+          }
         }
       }
     },
@@ -11291,6 +12077,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Nada agendado"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有安排"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有安排"
           }
         }
       }
@@ -11302,6 +12100,18 @@
             "state": "translated",
             "value": "As rotinas que rodam neste dia aparecem aqui."
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当天运行的例行工作会显示在这里。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "當天執行的例行工作會顯示在這裡。"
+          }
         }
       }
     },
@@ -11311,6 +12121,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Semana anterior"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一周"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一週"
           }
         }
       }
@@ -11322,6 +12144,18 @@
             "state": "translated",
             "value": "Próxima semana"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一周"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下一週"
+          }
         }
       }
     },
@@ -11331,6 +12165,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Hoje"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今天"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今天"
           }
         }
       }
@@ -11342,6 +12188,18 @@
             "state": "translated",
             "value": "Agendada"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安排"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已排程"
+          }
         }
       }
     },
@@ -11352,6 +12210,18 @@
             "state": "translated",
             "value": "Calendário de rotinas"
           }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例行工作日历"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例行工作行事曆"
+          }
         }
       }
     },
@@ -11361,6 +12231,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld execuções"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 次运行"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 次執行"
           }
         }
       }

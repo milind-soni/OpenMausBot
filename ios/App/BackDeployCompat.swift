@@ -220,16 +220,21 @@ private struct ScrollAnchor: ViewModifier {
     }
 }
 
-/// Runs `action` when the person starts dragging a scroll view.
-/// `onScrollPhaseChange` is iOS 18; below that this is a no-op, so callers
-/// must treat "never called" as "do not know".
+/// Runs `action(true)` when the person starts dragging a scroll view and
+/// `action(false)` when the scroll comes to rest. `onScrollPhaseChange` is
+/// iOS 18; below that this is a no-op, so callers must treat "never called"
+/// as "do not know".
 private struct OnUserScroll: ViewModifier {
-    let action: () -> Void
+    let action: (Bool) -> Void
 
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
             content.onScrollPhaseChange { _, phase in
-                if phase == .interacting { action() }
+                switch phase {
+                case .interacting: action(true)
+                case .idle: action(false)
+                default: break
+                }
             }
         } else {
             content
@@ -309,7 +314,7 @@ extension View {
         modifier(ScrollAnchor(anchor: anchor))
     }
 
-    func onUserScrollCompat(_ action: @escaping () -> Void) -> some View {
+    func onUserScrollCompat(_ action: @escaping (_ scrolling: Bool) -> Void) -> some View {
         modifier(OnUserScroll(action: action))
     }
 

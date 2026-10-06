@@ -461,7 +461,7 @@ class LiveCallManager internal constructor(
     /**
      * The call is over: close the media, tell OpenAI, tell the computer unless
      * it told us, keep the bar up with the reason. [canRetry]: only a drop
-     * offers Try again (the desktop's `canRetry: notice.dropped`).
+     * offers Try again (the desktop's `action: notice.dropped ? "retry" : null`).
      */
     private fun endLocally(notice: String, tellComputer: Boolean, canRetry: Boolean) {
         val callId = _state.value.callId

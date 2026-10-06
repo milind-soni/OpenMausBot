@@ -12,7 +12,8 @@ import UIKit
 struct ClaudeUpdateCard: View {
     let instanceId: String
     let tint: Color
-    @EnvironmentObject private var session: Session
+    /// Runs the updater; the card reads nothing from the session.
+    let actions: TranscriptActions
     @State private var phase: Phase = .ask
     @State private var copied = false
 
@@ -144,7 +145,7 @@ struct ClaudeUpdateCard: View {
         phase = .updating
         Task {
             do {
-                let version = try await session.updateClaude(instanceId: instanceId)
+                let version = try await actions.updateClaude(instanceId: instanceId)
                 phase = .updated(version: version)
             } catch {
                 phase = .failed(error: error.localizedDescription)

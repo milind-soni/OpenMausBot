@@ -105,7 +105,7 @@ it("off a Cloud home, and to a Cloud guest, there is no checklist: the plain Cop
     vi.mocked(bridge.state).mockResolvedValue(overview({ suggest: true, destination: server }));
     await mount();
     const { html } = render();
-    expect(html).not.toContain("Set up your Cloud");
+    expect(html).not.toContain("Set up My Cloud");
     expect(html).toContain("Bring your bots and chats from this Mac");
     expect(html).toContain("bots.example.test is empty. Copy 4 bots and 37 chats here (about 1.5 GB).");
   }
@@ -115,9 +115,9 @@ it("off a Cloud home, and to a Cloud guest, there is no checklist: the plain Cop
 it("on a new Cloud lists the four steps, sign-in first and required, each from the Cloud's own state", async () => {
   await mount();
   const { html } = render();
-  expect(html).toContain("Set up your Cloud");
+  expect(html).toContain("Set up My Cloud");
   expect(html).toContain("0 of 4 done");
-  for (const title of ["Sign in to Claude or ChatGPT", "Bring your bots from your computer", "Try something that runs while you&#x27;re away", "Optional: Let your Cloud use this Mac"]) expect(html).toContain(title);
+  for (const title of ["Sign in to Claude or ChatGPT", "Bring your bots from this computer", "Try something that runs while you&#x27;re away", "Optional: Let My Cloud use this Mac"]) expect(html).toContain(title);
   expect(html).toContain("Required.");
   expect(statuses()).toEqual({ engine: "todo", move: "todo", try: "todo", lend: "todo" });
   expect(bridge.state).toHaveBeenCalledOnce();
@@ -147,9 +147,9 @@ it("try something is done by the server's record of a finished turn, and Try it 
   await mount();
   // Signed in, the next step open is bringing bots; trying something is a click away.
   expect(button("Try it")).toBeUndefined();
-  expect(button("Move to Cloud")).toBeTruthy();
+  expect(button("Copy to My Cloud")).toBeTruthy();
   expand("Try something that runs while you're away");
-  expect(button("Move to Cloud")).toBeUndefined();
+  expect(button("Copy to My Cloud")).toBeUndefined();
   button("Try it")!.props.onClick!();
   expect(dispatched).toEqual([{ type: "select", id: "b1" }]);
   expect(appendComposerDraft).toHaveBeenCalledExactlyOnceWith("bot:b1:t1", "Every morning at 8, check the top stories on Hacker News and send me a short summary.");
@@ -190,9 +190,9 @@ it("bringing bots opens the copy in place; Copy starts it, and Not now is kept a
   await mount();
   expect(render().html).not.toContain("Copy 4 bots and 37 chats");
   // One step is open at a time: here, signing in.
-  expect(button("Move to Cloud")).toBeUndefined();
-  expand("Bring your bots from your computer");
-  button("Move to Cloud")!.props.onClick!();
+  expect(button("Copy to My Cloud")).toBeUndefined();
+  expand("Bring your bots from this computer");
+  button("Copy to My Cloud")!.props.onClick!();
   let { html } = render();
   expect(html).toContain("My Cloud is empty. Copy 4 bots and 37 chats here (about 1.5 GB).");
   expect(html).toContain("API keys and sign-ins stay on this computer");
@@ -206,8 +206,8 @@ it("bringing bots opens the copy in place; Copy starts it, and Not now is kept a
   // Another Cloud, where the person says Not now instead.
   f.values = []; f.effects = [];
   await mount();
-  expand("Bring your bots from your computer");
-  button("Move to Cloud")!.props.onClick!();
+  expand("Bring your bots from this computer");
+  button("Copy to My Cloud")!.props.onClick!();
   button("Not now")!.props.onClick!(); await flush();
   expect(bridge.dismiss).toHaveBeenCalledOnce();
   expect(api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen: [CLOUD_SETUP_MOVE_SKIPPED] } }) });
@@ -218,7 +218,7 @@ it("bringing bots opens the copy in place; Copy starts it, and Not now is kept a
 
 it("lending opens the lending switch on this Mac and is done when the Cloud lists a lent computer", async () => {
   await mount();
-  expand("Optional: Let your Cloud use this Mac");
+  expand("Optional: Let My Cloud use this Mac");
   button("Choose what to lend")!.props.onClick!(); await flush();
   expect(open).toHaveBeenCalledExactlyOnceWith();
   expect(statuses().lend).toBe("todo");
@@ -230,7 +230,7 @@ it("lending opens the lending switch on this Mac and is done when the Cloud list
   open.mockRejectedValueOnce(new Error("only available"));
   lent = []; f.values = [];
   await mount();
-  expand("Optional: Let your Cloud use this Mac");
+  expand("Optional: Let My Cloud use this Mac");
   button("Choose what to lend")!.props.onClick!(); await flush();
   expect(render().html).toContain("Could not open Settings on this Mac. Try again.");
 });

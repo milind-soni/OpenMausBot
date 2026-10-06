@@ -1280,7 +1280,7 @@ export function ComputerPanel({
   const managedPolicy = state.config?.managedPolicy;
   const placeOptions = ([
     [null, "vm.dest.auto", "computer.dest.autoDesc", Sparkles, "vm.dest.auto"],
-    ["cloud", "vm.dest.cloud", "computer.dest.cloudDesc", Cloud, "computer.simple.dest.cloud"],
+    ["cloud", "place.cloud", "computer.dest.cloudDesc", Cloud, "place.cloud"],
     ["vm", "vm.dest.vm", "computer.dest.vmDesc", Box, "vm.dest.vm"],
     ["local", "vm.dest.local", "computer.dest.localDesc", Monitor, isMacHost ? "computer.simple.dest.thisMac" : "computer.simple.dest.thisPc"],
     ["browser", "vm.dest.browser", "computer.dest.browserDesc", Globe, "vm.dest.browser"],
@@ -1583,7 +1583,7 @@ export function ComputerPanel({
                       : emptyState[phase]}
               </span>
               {currentTeamComputer && <>
-                <p className="text-[12px]">Shared files and signed-in accounts. Auto uses this Boat, not a private computer.</p>
+                <p className="text-[12px]">Shared files and signed-in accounts. Auto uses this cloud computer, not a private one.</p>
                 <button type="button" onClick={() => dispatch({ type: "showTeamMap" })}
                   className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover">Open Team map</button>
                 <button type="button" onClick={() => setRetry(n => n + 1)}

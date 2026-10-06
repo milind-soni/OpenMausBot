@@ -5,7 +5,9 @@
 // stream is foreground-only and there is no push path yet, so the island is
 // exact while the app is alive and goes quiet with it; iOS keeps the last
 // state on screen for a while, then the activity is ended on the next
-// launch if the bot has moved on.
+// launch if the bot has moved on. Asks, kind changes and endings go out in
+// the next 400 ms window; a working bot's streamed line alone is paced to
+// one update every few seconds (`LiveActivityPacer`).
 import ActivityKit
 import Combine
 import Foundation
@@ -18,12 +20,40 @@ import CompanionCore
 @available(iOS 16.2, *)
 @MainActor
 final class LiveActivityCoordinator {
+    private typealias BotActivity = Activity<BotActivityAttributes>
+
     private var cancellable: AnyCancellable?
-    private var lastSent: [String: BotActivityAttributes.ContentState] = [:]
+    private weak var session: Session?
+    /// One authorization reader for the coordinator's life, rather than a new
+    /// one on every 400 ms sync. The reader itself is cheap (about 0.2 ms);
+    /// most of a sync's main-thread time under a busy fleet is ActivityKit
+    /// reading `Activity.activities`, which a sync now does once.
+    private let authorization = ActivityAuthorizationInfo()
+    /// Live Activities allowed in Settings: read once, then kept current by
+    /// the reader's own update sequence, so a change there still applies.
+    private var activitiesEnabled = false
+    private var enablementTask: Task<Void, Never>?
+    /// What each bot's activity last showed, and when: a working line alone
+    /// updates at most every few seconds (`LiveActivityPacer`).
+    private var pacer = LiveActivityPacer()
     /// When each bot's current kind began, so an update does not reset the clock.
-    private var since: [String: (kind: String, at: Date)] = [:]
+    private var since: [String: (kind: ChatUpdate.Kind, at: Date)] = [:]
+    /// One more sync when the earliest held line falls due, so a line held
+    /// back just before the fleet went quiet still reaches the island.
+    private var heldLineSync: Task<Void, Never>?
+    private var heldLineDue: Date?
 
     func attach(to session: Session) {
+        self.session = session
+        activitiesEnabled = authorization.areActivitiesEnabled
+        // A language change re-runs the scene's onAppear; the previous
+        // reader loop must not outlive the attach that started it.
+        enablementTask?.cancel()
+        enablementTask = Task { [weak self, authorization] in
+            for await enabled in authorization.activityEnablementUpdates {
+                self?.activitiesEnabled = enabled
+            }
+        }
         // Answer from the island: the intent runs in this process.
         AnswerApprovalIntent.handler = { [weak self, weak session] threadId, requestId, choice, isPermission in
             await self?.answer(session: session, threadId: threadId, requestId: requestId, choice: choice, isPermission: isPermission)
@@ -37,7 +67,7 @@ final class LiveActivityCoordinator {
     }
 
     private func answer(session: Session?, threadId: String, requestId: String, choice: String, isPermission: Bool) async {
-        guard Activity<BotActivityAttributes>.activities.contains(where: {
+        guard BotActivity.activities.contains(where: {
             $0.content.state.canAnswer(threadId: threadId, requestId: requestId, choice: choice, isPermission: isPermission)
         }) else {
             session?.actionError = "This request has changed. Open the chat to review it."
@@ -47,57 +77,95 @@ final class LiveActivityCoordinator {
     }
 
     private func sync(_ state: CompanionState) {
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        let wanted = state.liveActivityUpdates(detail: .stored)
+        guard activitiesEnabled else { return }
+        let now = Date()
+        // One ActivityKit read per sync; the first activity per bot is the
+        // one updated, as before, and every unwanted one is ended below.
+        let running = BotActivity.activities
+        var byBot: [String: BotActivity] = [:]
+        for activity in running where byBot[activity.attributes.botId] == nil {
+            byBot[activity.attributes.botId] = activity
+        }
         var wantedIds = Set<String>()
+        var earliestHeld: Date?
 
-        for update in wanted {
+        for update in state.liveActivityUpdates(detail: .stored) {
             guard case let .bot(bot) = update.chat else { continue }
             wantedIds.insert(bot.id)
-            let face = MausState.forBot(bot, last: state.visibleTranscript(forThread: bot.threadId).last)
-            let kind = update.kind == .needsYou ? "needsYou" : "working"
-            if since[bot.id]?.kind != kind { since[bot.id] = (kind, Date()) }
+            if since[bot.id]?.kind != update.kind { since[bot.id] = (update.kind, now) }
+            let face = MausState.forBot(bot, last: state.lastVisibleMessage(forThread: bot.threadId))
             let content = BotActivityAttributes.ContentState(
-                face: face.rawValue,
-                kind: update.kind == .needsYou ? "needsYou" : "working",
-                headline: update.kind == .needsYou ? "\(bot.name) needs you" : "\(bot.name) is working",
-                line: update.line.isEmpty ? (update.card?.title ?? "") : update.line,
-                threadId: update.chat.threadId,
-                card: update.card,
-                since: since[bot.id]?.at ?? Date()
+                update: update, face: face.rawValue, since: since[bot.id]?.at ?? now
             )
-            if lastSent[bot.id] == content { continue }
-            defer { lastSent[bot.id] = content }
-
-            // A bot stopping for you is worth an alert: the island pops open
-            // on its own and the lock screen lights up. Working is not.
-            let alert: AlertConfiguration? = update.kind == .needsYou
-                ? AlertConfiguration(
-                    title: LocalizedStringResource(stringLiteral: content.headline),
-                    body: LocalizedStringResource(stringLiteral: content.line),
-                    sound: .default
-                )
-                : nil
-            if let activity = Activity<BotActivityAttributes>.activities.first(where: { $0.attributes.botId == bot.id }) {
-                let newAsk = update.kind == .needsYou && (
-                    lastSent[bot.id]?.threadId != content.threadId || lastSent[bot.id]?.requestId != content.requestId
-                )
-                Task { await activity.update(.init(state: content, staleDate: nil), alertConfiguration: newAsk ? alert : nil) }
-            } else {
-                let attributes = BotActivityAttributes(botId: bot.id, threadId: bot.threadId, name: bot.name, color: bot.color)
-                _ = try? Activity.request(attributes: attributes, content: .init(state: content, staleDate: nil), pushType: nil)
-                // a fresh activity cannot alert on request; one immediate alerting update does it
-                if let alert, let activity = Activity<BotActivityAttributes>.activities.first(where: { $0.attributes.botId == bot.id }) {
-                    Task { await activity.update(.init(state: content, staleDate: nil), alertConfiguration: alert) }
-                }
+            switch pacer.decision(for: content, bot: bot.id, at: now) {
+            case .unchanged:
+                continue
+            case let .held(until):
+                earliestHeld = min(earliestHeld ?? until, until)
+                continue
+            case .send:
+                let previous = pacer.lastSent(forBot: bot.id)
+                pacer.record(content, bot: bot.id, at: now)
+                send(content, replacing: previous, for: bot, isAsk: update.kind == .needsYou, to: byBot[bot.id])
             }
         }
 
         // bots that went quiet: let the island go
-        for activity in Activity<BotActivityAttributes>.activities where !wantedIds.contains(activity.attributes.botId) {
-            lastSent.removeValue(forKey: activity.attributes.botId)
+        for activity in running where !wantedIds.contains(activity.attributes.botId) {
+            pacer.forget(bot: activity.attributes.botId)
             since.removeValue(forKey: activity.attributes.botId)
             Task { await activity.end(nil, dismissalPolicy: .immediate) }
+        }
+        scheduleHeldLineSync(at: earliestHeld)
+    }
+
+    private func send(
+        _ content: BotActivityAttributes.ContentState,
+        replacing previous: BotActivityAttributes.ContentState?,
+        for bot: Bot,
+        isAsk: Bool,
+        to existing: BotActivity?
+    ) {
+        // A bot stopping for you is worth an alert: the island pops open
+        // on its own and the lock screen lights up. Working is not.
+        let alert: AlertConfiguration? = isAsk
+            ? AlertConfiguration(
+                title: LocalizedStringResource(stringLiteral: content.headline),
+                body: LocalizedStringResource(stringLiteral: content.line),
+                sound: .default
+            )
+            : nil
+        if let existing {
+            let newAsk = isAsk && (previous?.threadId != content.threadId || previous?.requestId != content.requestId)
+            Task { await existing.update(.init(state: content, staleDate: nil), alertConfiguration: newAsk ? alert : nil) }
+            return
+        }
+        let attributes = BotActivityAttributes(botId: bot.id, threadId: bot.threadId, name: bot.name, color: bot.color)
+        let created = try? BotActivity.request(attributes: attributes, content: .init(state: content, staleDate: nil), pushType: nil)
+        // a fresh activity cannot alert on request; one immediate alerting update does it
+        if let alert, let created {
+            Task { await created.update(.init(state: content, staleDate: nil), alertConfiguration: alert) }
+        }
+    }
+
+    /// Windows only close when the session publishes. A line held back in
+    /// the last one before the fleet went quiet would otherwise stay
+    /// unsent, so one more sync runs when the earliest hold falls due.
+    private func scheduleHeldLineSync(at due: Date?) {
+        guard due != heldLineDue else { return }
+        heldLineSync?.cancel()
+        heldLineDue = due
+        guard let due else {
+            heldLineSync = nil
+            return
+        }
+        heldLineSync = Task { [weak self] in
+            let wait = max(0, due.timeIntervalSinceNow)
+            do { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) } catch { return }
+            guard let self else { return }
+            self.heldLineSync = nil
+            self.heldLineDue = nil
+            if let state = self.session?.state { self.sync(state) }
         }
     }
 }
@@ -113,7 +181,10 @@ final class LiveActivityBridge {
 
     func attach(to session: Session) {
         guard #available(iOS 16.2, *) else { return }
-        let coordinator = LiveActivityCoordinator()
+        // The scene's onAppear runs again after a language change. Re-attach
+        // the coordinator already here, so its enablement loop is replaced
+        // rather than orphaned and what the island shows is not resent.
+        let coordinator = (self.coordinator as? LiveActivityCoordinator) ?? LiveActivityCoordinator()
         coordinator.attach(to: session)
         self.coordinator = coordinator
     }

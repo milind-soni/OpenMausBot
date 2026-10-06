@@ -499,6 +499,7 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(card.responseBehavior(for: " deny "), "deny")
         XCTAssertEqual(card.responseBehavior(for: "Cancel"), "deny")
         XCTAssertEqual(card.responseBehavior(for: "Dismiss"), "deny")
+        XCTAssertEqual(card.responseBehavior(for: "Skip"), "deny", "team memory's refusal")
         XCTAssertTrue(card.shouldRememberPermission(for: "Always allow"))
         XCTAssertFalse(card.shouldRememberPermission(for: "Allow"))
         XCTAssertFalse(card.shouldRememberPermission(for: " deny "))

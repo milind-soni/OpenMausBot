@@ -90,6 +90,21 @@ export function managedPortalOrigin(value) {
 
 /** A separate OS-encrypted record; never copy company tokens into config.json,
  * backups, renderer storage, environment variables or personal CLI homes. */
+/** Electron 43's safeStorage.decryptStringAsync (main.mjs's adapters) resolves to { shouldReEncrypt, result }, not a string;
+ * the tests' fakes resolve to the string itself. Reading `result` keeps a saved sign-in readable after a restart. */
+export function decryptedText(decrypted) {
+  return typeof decrypted === "string" ? decrypted : decrypted?.result;
+}
+
+/** A saved record that can never be read: not a small regular file, this
+ * computer's key no longer opens it (Windows after a reinstall onto a new
+ * profile), or it opens to something that is not JSON. Removing it loses
+ * nothing. A locked keychain is never this: that record is read again later. */
+export const unreadableRecord = error => error?.code === "unreadable_record";
+const unreadable = message => Object.assign(new Error(message), { code: "unreadable_record" });
+/** A record that may only be locked is read again after 15 s, 30 s, then every minute. */
+export const restoreRetryDelay = attempt => [15_000, 30_000, 60_000][Math.min(Math.max(attempt, 1), 3) - 1];
+
 export function createManagedDesktopStore({ file, encryption }) {
   let tail = Promise.resolve();
   const available = async () => {
@@ -101,10 +116,19 @@ export function createManagedDesktopStore({ file, encryption }) {
       try {
         handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
         const stat = await handle.stat();
-        if (!stat.isFile() || stat.size > 64 * 1024) throw new Error("Invalid company connection record.");
+        if (!stat.isFile() || stat.size > 64 * 1024) throw unreadable("Invalid company connection record.");
         await available();
-        return JSON.parse(await encryption.decrypt(await handle.readFile()));
-      } catch (error) { if (error?.code === "ENOENT") return null; throw new Error("Your company connection could not be read. Unlock your system keychain and try again."); }
+        const encrypted = await handle.readFile();
+        let text;
+        try { text = decryptedText(await encryption.decrypt(encrypted)); } catch { throw unreadable("This computer can no longer decrypt the record."); }
+        // An answer in a shape this app does not know is this app's mistake, never the record's.
+        if (typeof text !== "string") throw new Error("Unexpected decrypt result.");
+        try { return JSON.parse(text); } catch { throw unreadable("The record is not JSON."); }
+      } catch (error) {
+        if (error?.code === "ENOENT") return null;
+        throw Object.assign(new Error("Your company connection could not be read. Unlock your system keychain and try again."),
+          unreadableRecord(error) ? { code: error.code } : {});
+      }
       finally { await handle?.close(); }
     },
     write(value) {
@@ -142,7 +166,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   // Revocation or expiry lifts the policy with company access, even though the
   // saved grant stays until the person disconnects.
   let policyLifted = false;
-  let issuedGrant = null, cleanupGrant = null, cleanupNeeded = false, clearing = null;
+  let issuedGrant = null, cleanupGrant = null, cleanupNeeded = false, clearing = null, restoreFailures = 0;
   let generation = 0, timer = null, closed = false, controller = new AbortController(), refreshing = null;
   let branding = parseOrganizationBranding(null);
   // capabilities.library, from the config renew() reads once per start. Until
@@ -450,21 +474,41 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       schedule(poll, attempt.interval);
     }
   }
+  const RESTORE_FAILED = "Company sign-in could not be restored. Unlock your system keychain and restart OpenMausBot.";
+  /** The saved enrollment could not be used. One that never will be is
+   * removed, and signing in again is the one next step. One that may only be
+   * locked (the keychain) is kept, never removed, and read again shortly. */
+  async function restoreFailed(stamp, unreadable) {
+    if (unreadable) {
+      const removed = await store.write(null).then(() => true, () => false);
+      if (!current(stamp)) return snapshot();
+      if (removed) { restoreFailures = 0; return publish({ status: "signed-out", message: "This computer's company sign-in couldn't be read, so it was removed. Sign in again." }); }
+    }
+    restoreFailures++;
+    if (state.message !== RESTORE_FAILED) publish({ status: "unavailable", message: RESTORE_FAILED });
+    schedule(start, restoreRetryDelay(restoreFailures));
+    return snapshot();
+  }
+  async function start() {
+    const stamp = generation;
+    let saved, failed = false, unreadable = false;
+    try { saved = await store.read(); } catch (error) { failed = true; unreadable = unreadableRecord(error); }
+    // Read, but not an enrollment this app can use: as unreadable as a record the key no longer opens.
+    if (!failed && current(stamp)) try { grant = saved ? validateGrant(saved) : null; } catch { failed = unreadable = true; }
+    if (!current(stamp) || failed) { markRestored(); return current(stamp) ? restoreFailed(stamp, unreadable) : snapshot(); }
+    restoreFailures = 0;
+    // Restore the organisation's last policy before any network call, and
+    // move references to this enrollment's old device-scoped ids.
+    if (grant?.policy && grant.expiresAt > now()) await sendPolicy(grant);
+    // The saved library catalog reaches the runtime before any network call too.
+    if (library && grant && grant.expiresAt > now()) await Promise.resolve().then(() => library.restore(libraryIdentity(grant))).catch(() => {});
+    markRestored();
+    await sendIdentity(grant);
+    return refresh();
+  }
   return {
     state: snapshot,
-    async start() {
-      const stamp = generation;
-      try { const saved = await store.read(); if (!current(stamp)) { markRestored(); return snapshot(); } grant = saved ? validateGrant(saved) : null; }
-      catch { markRestored(); return current(stamp) ? publish({ status: "unavailable", message: "Company sign-in could not be restored. Unlock your system keychain and restart OpenMausBot." }) : snapshot(); }
-      // Restore the organisation's last policy before any network call, and
-      // move references to this enrollment's old device-scoped ids.
-      if (grant?.policy && grant.expiresAt > now()) await sendPolicy(grant);
-      // The saved library catalog reaches the runtime before any network call too.
-      if (library && grant && grant.expiresAt > now()) await Promise.resolve().then(() => library.restore(libraryIdentity(grant))).catch(() => {});
-      markRestored();
-      await sendIdentity(grant);
-      return refresh();
-    },
+    start,
     async begin(input) {
       if (clearing) throw new Error("Wait for company sign-out to finish before starting another sign-in.");
       if (closed || grant || issuedGrant || cleanupNeeded) throw new Error("Disconnect your current organization before connecting another.");

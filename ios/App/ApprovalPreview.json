@@ -1,0 +1,124 @@
+{
+ "bots": [
+  {
+   "id": "preview-kiwi",
+   "threadId": "preview-thread-kiwi",
+   "name": "Kiwi",
+   "title": "Discord tracking bot",
+   "description": "Turns Discord reports into Linear issues.",
+   "notifications": true,
+   "color": "teal",
+   "unread": true,
+   "modelSelection": {
+    "instanceId": "preview",
+    "model": "preview"
+   },
+   "createdAt": 1789000000000,
+   "activeLeafId": "kiwi-approval",
+   "tasks": [
+    {
+     "threadId": "preview-thread-kiwi",
+     "title": "Discord triage",
+     "createdAt": 1789000000000,
+     "activity": "waiting-on-you"
+    }
+   ],
+   "messages": [
+    {
+     "id": "kiwi-user",
+     "role": "user",
+     "kind": "text",
+     "at": 1789100000000,
+     "text": "Post the triage notes on both Linear issues."
+    },
+    {
+     "id": "kiwi-earlier",
+     "role": "bot",
+     "kind": "options",
+     "at": 1789100060000,
+     "parentId": "kiwi-user",
+     "card": {
+      "title": "Send on your behalf?",
+      "subtitle": "Linear · Create linear comment\n{\"issueId\":\"9a11e2d0-77c1-4f0e-9d39-0b6a4b1c2f10\",\"body\":\"Ledger 871 → 909. Cursor committed.\"}",
+      "options": [
+       "Allow",
+       "Deny"
+      ],
+      "requestId": "preview-outbound-old",
+      "tool": "LINEAR_CREATE_LINEAR_COMMENT",
+      "held": "This sends something on your behalf, so it always asks first.",
+      "heldCode": "approval.held.outbound",
+      "outboundRequest": {
+       "tool": "LINEAR_CREATE_LINEAR_COMMENT",
+       "app": "Linear"
+      },
+      "answered": "allow"
+     }
+    },
+    {
+     "id": "kiwi-push",
+     "role": "bot",
+     "kind": "options",
+     "at": 1789100120000,
+     "parentId": "kiwi-earlier",
+     "card": {
+      "title": "Approval needed",
+      "subtitle": "git push origin fix/sidebar-search-collapse",
+      "options": [
+       "Allow",
+       "Deny"
+      ],
+      "requestId": "preview-permission",
+      "requestType": "permission",
+      "tool": "Bash",
+      "held": "The provider requires your approval for this action.",
+      "heldCode": "approval.held.native",
+      "answered": "deny"
+     }
+    },
+    {
+     "id": "kiwi-reply",
+     "role": "bot",
+     "kind": "text",
+     "at": 1789100180000,
+     "parentId": "kiwi-push",
+     "text": "Drafted both comments. Linear needs your OK before I post them."
+    },
+    {
+     "id": "kiwi-approval",
+     "role": "bot",
+     "kind": "options",
+     "at": 1789100240000,
+     "parentId": "kiwi-reply",
+     "card": {
+      "title": "Send on your behalf?",
+      "subtitle": "Linear · Create linear comment\n{\"issueId\":\"2f04bc73-5d4f-4c0f-a159-29183e854eef\",\"body\":\"**In flight** — open PR [#2295](https://github.com/milind-soni/OpenMausBot/pull/2295) \\\"fix(sidebar): a search no longer leaves every bot's thread list open\\\" (branch `fix/sidebar-search-collapse`) covers this. Filed 2026-10-04, PR found on the 2026-10-05 Discord sweep.\\n\\nNote the PR title only addresses the *collapse* half. @ronakdesigns … [arguments truncated]\n\nLinear · Create linear comment\n{\"issueId\":\"1c2755f-4b38-4017-a353-ef034b5c1ed6\",\"body\":\"**Adjacent request from Discord**, 2026-10-05 — not counted as a new reporter on this issue, because it is a different ask.\\n\\n@jihoonH in #general (https://discord.com/channels/1496552238640926740/1496552239071261322/1556629731963576881):\\n\\n> is there any reason why the mobile app is just a companion for desktop and not a standalone app?\"}",
+      "options": [
+       "Allow",
+       "Deny"
+      ],
+      "requestId": "preview-outbound",
+      "tool": "LINEAR_CREATE_LINEAR_COMMENT",
+      "held": "This sends something on your behalf, so it always asks first.",
+      "heldCode": "approval.held.outbound",
+      "outboundRequest": {
+       "tool": "LINEAR_CREATE_LINEAR_COMMENT",
+       "app": "Linear",
+       "calls": [
+        {
+         "app": "Linear",
+         "label": "Create linear comment"
+        },
+        {
+         "app": "Linear",
+         "label": "Create linear comment"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "groups": []
+}

@@ -43,6 +43,18 @@ final class UpdatesTests: XCTestCase {
         XCTAssertFalse(updates.contains { $0.line == "SecretTool" })
     }
 
+    func testUpdatesFromApprovalsTheCallerHoldsAreTheSameUpdates() throws {
+        // Home reads the approvals once per render and hands them in.
+        var state = try hydrated
+        state.streaming["t-busy"] = "half a sentence"
+        for detail in [ActivityDetail.full, .hidden] {
+            XCTAssertEqual(
+                state.updates(detail: detail, pendingApprovals: state.pendingApprovals),
+                state.updates(detail: detail)
+            )
+        }
+    }
+
     func testNewestApprovalHeadsTheListAndEachChatKeepsOneRow() throws {
         let needsYou = try hydrated.updates(detail: .full).filter { $0.kind == .needsYou }
         XCTAssertEqual(needsYou.map(\.chat.name), ["Pesto", "Sage"])

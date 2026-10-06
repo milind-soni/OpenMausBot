@@ -129,6 +129,7 @@ import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.ThreadRef
 import com.openmausbot.companion.core.TranscriptRow
 import com.openmausbot.companion.core.liveNarration
+import com.openmausbot.companion.core.showsTyping
 import com.openmausbot.companion.core.takeLastCharacters
 import com.openmausbot.companion.core.target
 import com.openmausbot.companion.core.transcriptRows
@@ -490,9 +491,19 @@ private fun LoadedChat(
     }
     val streaming = state.streaming[threadId]
     val reasoning = state.reasoning[threadId]
-    // Stream, then reasoning, then the bare fact of being busy — the order in
+    // The typing bubble's rule, shared with iOS (core TurnTail): busy, not
+    // waiting on you, and the last row on screen is not a finished reply.
+    val typing = remember(chat, rawTranscript, live, streaming.isNullOrEmpty(), reasoning.isNullOrEmpty()) {
+        chat.showsTyping(
+            rawTranscript, live.hiddenIds,
+            streaming = !streaming.isNullOrEmpty() || !reasoning.isNullOrEmpty(),
+        )
+    }
+    // Stream, then reasoning, then the typing bubble — the order in
     // `ChatView.swift`, and the reason it is a rule rather than three `if`s here.
-    val tail = LiveTail.of(streaming = streaming, reasoning = reasoning, busy = chat.busy, detail = activityDetail)
+    val tail = LiveTail.of(
+        streaming = streaming, reasoning = reasoning, busy = chat.busy, detail = activityDetail, typing = typing,
+    )
     val liveText = streaming?.takeIf { tail == TranscriptTail.STREAM }
     // The status line's words: the reply as it streams, else the newest
     // in-between message. Null unless Hidden and the bot is working.
@@ -988,7 +999,7 @@ private fun LoadedChat(
                     if (liveCount == 1) {
                         item(key = LIVE_BUBBLE_KEY) {
                             if (tail == TranscriptTail.WORKING) {
-                                WorkingBubble(name = chat.name, color = chat.color)
+                                WorkingBubble(name = chat.name)
                             } else {
                                 StreamingBubble(text = liveText, reasoning = liveReasoning)
                             }
@@ -1646,7 +1657,8 @@ private fun LiveStatusLine(text: String) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp, color = secondaryTint)
+        // No spinner of its own: the typing bubble in the transcript says the
+        // bot is working, and this line says what at.
         Text(
             text = text.replace('\n', ' '),
             fontSize = 13.sp,

@@ -39,6 +39,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.draw.rotate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -75,6 +77,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -104,6 +107,14 @@ import com.openmausbot.companion.core.routineExecutionRef
 import com.openmausbot.companion.core.TranscriptCard
 import com.openmausbot.companion.core.TranscriptCards
 import com.openmausbot.companion.core.webhookContent
+import com.openmausbot.companion.core.CardOutcome
+import com.openmausbot.companion.core.CardPresentation
+import com.openmausbot.companion.core.hasDetails
+import com.openmausbot.companion.core.outboundApp
+import com.openmausbot.companion.core.outcome
+import com.openmausbot.companion.core.presentation
+import com.openmausbot.companion.core.showsHeldNote
+import com.openmausbot.companion.core.summaryLine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -660,6 +671,24 @@ private sealed interface AttachmentThumbnailState {
     data object Failed : AttachmentThumbnailState
 }
 
+/**
+ * Card shapes seen this run. The transcript is a lazy list, so a card that
+ * scrolls away and back is composed afresh; without this it would come back
+ * at the placeholder height and jump when its thumbnail decodes again.
+ */
+private object InlineImageShapes {
+    private const val LIMIT = 256
+    private val shapes = object : LinkedHashMap<String, Float>(LIMIT, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Float>?): Boolean = size > LIMIT
+    }
+
+    @Synchronized fun aspect(key: String): Float? = shapes[key]
+
+    @Synchronized fun remember(key: String, aspect: Float) {
+        shapes[key] = aspect
+    }
+}
+
 @Composable
 private fun SharedImageAttachment(
     threadId: String,
@@ -669,6 +698,7 @@ private fun SharedImageAttachment(
 ) {
     val foreground = if (message.role == Message.Role.USER) BubbleColor.mineText else MaterialTheme.colorScheme.onSurface
     val session = LocalCompanion.current.session
+    val shapeKey = "$threadId\u001F${message.id}\u001F${attachment.path}"
     var attempt by remember(message.id, attachment.path) { mutableStateOf(0) }
     var state by remember(message.id, attachment.path) {
         mutableStateOf<AttachmentThumbnailState>(AttachmentThumbnailState.Loading)
@@ -691,14 +721,24 @@ private fun SharedImageAttachment(
         val bitmap = withContext(Dispatchers.Default) {
             decodeAttachmentImage(downloaded.data, AttachmentImageRules.THUMBNAIL_EDGE)
         }
+        bitmap?.let { image ->
+            AttachmentImageRules.inlineAspect(image.width, image.height)?.let { InlineImageShapes.remember(shapeKey, it) }
+        }
         state = bitmap?.let { AttachmentThumbnailState.Ready(downloaded, it) }
             ?: AttachmentThumbnailState.Failed
     }
 
     val ready = state as? AttachmentThumbnailState.Ready
+    // The whole image at its own shape, fitted to the bubble: the frame's size
+    // comes from the bubble's width and the clamped shape, and the picture is
+    // fitted inside it — a wide screenshot is no longer cropped and zoomed into
+    // a 4:3 window, and a tall one stops at the height cap on the card's tint.
+    val aspect = ready?.let { AttachmentImageRules.inlineAspect(it.image.width, it.image.height) }
+        ?: InlineImageShapes.aspect(shapeKey)
+    val maxWidth = aspect?.let(AttachmentImageRules::inlineMaxWidthDp) ?: AttachmentImageRules.INLINE_MAX_WIDTH_DP
     Column(
         modifier = Modifier
-            .widthIn(max = 360.dp)
+            .widthIn(max = maxWidth.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(foreground.copy(alpha = 0.10f))
             .clickable(enabled = ready != null && onOpen != null, role = Role.Button) {
@@ -711,7 +751,14 @@ private fun SharedImageAttachment(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(4f / 3f),
+                .then(
+                    if (aspect != null) {
+                        Modifier.aspectRatio(aspect)
+                    } else {
+                        Modifier.height(AttachmentImageRules.INLINE_PLACEHOLDER_HEIGHT_DP.dp)
+                    },
+                )
+                .testTag(SHARED_IMAGE_FRAME_TAG),
             contentAlignment = Alignment.Center,
         ) {
             when (val current = state) {
@@ -725,8 +772,8 @@ private fun SharedImageAttachment(
                 is AttachmentThumbnailState.Ready -> Image(
                     bitmap = current.image,
                     contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f),
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
@@ -736,11 +783,14 @@ private fun SharedImageAttachment(
             fontWeight = FontWeight.Medium,
             color = foreground,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            overflow = TextOverflow.MiddleEllipsis,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
         )
     }
 }
+
+/** The fitted frame an inline image is drawn in; tests measure it. */
+internal const val SHARED_IMAGE_FRAME_TAG = "shared-image-frame"
 
 @Composable
 private fun AttachmentLoadFailure(label: String, foreground: Color = BubbleColor.mineText, onRetry: () -> Unit) {
@@ -1198,7 +1248,10 @@ private fun CardView(chat: Chat, message: Message, haptics: Haptics) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
     var answering by remember(message.id) { mutableStateOf(false) }
+    // The full request behind a short card, collapsed until asked for.
+    var showingDetails by remember(message.id) { mutableStateOf(false) }
     val skillRequest = card.skillRequest
+    val presentation = card.presentation
 
     Column(
         modifier = Modifier
@@ -1218,14 +1271,47 @@ private fun CardView(chat: Chat, message: Message, haptics: Haptics) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(card.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        // The detail of what is being approved is the thing worth copying.
-        SelectionContainer {
-            Text(card.subtitle, fontSize = 15.sp, color = secondaryTint)
+        if (card.isPending) {
+            Text(
+                stringResource(R.string.mobile_card_waiting_on_you, chat.name),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        // "Send to Linear?" for a held send to one app, the generic question
+        // for several, and the computer's own title for every other card.
+        val headline = when {
+            presentation != CardPresentation.OUTBOUND -> card.title
+            card.outboundApp != null -> stringResource(R.string.mobile_card_send_to_app, card.outboundApp.orEmpty())
+            else -> stringResource(R.string.mobile_card_send_on_your_behalf)
+        }
+        Text(headline, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        if (presentation == CardPresentation.STANDARD) {
+            // Proposals are reviewed in full; the detail is the thing worth copying.
+            SelectionContainer {
+                Text(card.subtitle, fontSize = 15.sp, color = secondaryTint)
+            }
+        } else {
+            // An approval leads with one line; the request itself, raw
+            // arguments and all, waits under Details.
+            val summary = card.summaryLine
+            if (summary.isNotEmpty()) {
+                Text(
+                    summary,
+                    fontSize = 15.sp,
+                    color = secondaryTint,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (card.hasDetails) {
+                CardDetails(card.subtitle, showingDetails) { showingDetails = !showingDetails }
+            }
         }
 
-        card.held?.let {
-            Text(it, fontSize = 13.sp, color = Color(MausPalette.argb("orange")))
+        if (card.showsHeldNote) {
+            Text(card.held.orEmpty(), fontSize = 13.sp, color = Color(MausPalette.argb("orange")))
         }
 
         skillRequest?.let { skill ->
@@ -1348,22 +1434,75 @@ private fun CardView(chat: Chat, message: Message, haptics: Haptics) {
                 }
             }
         } else {
-            val answered = card.answered
-            if (answered != null) {
+            val outcome = card.outcome
+            if (outcome != null) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.Check,
+                        imageVector = if (outcome.isPositive) Icons.Filled.Check else Icons.Filled.Close,
                         contentDescription = null,
                         tint = secondaryTint,
                         modifier = Modifier.size(16.dp),
                     )
-                    Text(answered, fontSize = 14.sp, color = secondaryTint)
+                    Text(outcomeText(outcome), fontSize = 14.sp, color = secondaryTint)
                 }
             } else if (card.expired == true) {
-                Text("Expired — ask for a fresh proposal", fontSize = 14.sp, color = secondaryTint)
+                Text(stringResource(R.string.mobile_card_expired), fontSize = 14.sp, color = secondaryTint)
+            }
+        }
+    }
+}
+
+/** What a settled card says happened, in words rather than the stored verdict. */
+@Composable
+private fun outcomeText(outcome: CardOutcome): String = when (outcome) {
+    CardOutcome.Allowed -> stringResource(R.string.mobile_card_allowed)
+    CardOutcome.Denied -> stringResource(R.string.mobile_card_denied)
+    CardOutcome.Unavailable -> stringResource(R.string.mobile_card_no_longer_available)
+    CardOutcome.Remembered -> stringResource(R.string.mobile_card_remembered)
+    CardOutcome.Skipped -> stringResource(R.string.mobile_card_skipped)
+    is CardOutcome.Answered -> outcome.text.ifEmpty { stringResource(R.string.mobile_card_answered) }
+    is CardOutcome.Chose -> outcome.option
+    is CardOutcome.Other -> outcome.value
+}
+
+/** Long requests scroll inside a capped box; the text stays selectable. */
+@Composable
+private fun CardDetails(text: String, expanded: Boolean, toggle: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.clickable(onClick = toggle),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.mobile_card_details),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = secondaryTint,
+            )
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = secondaryTint,
+                modifier = Modifier.size(16.dp).rotate(if (expanded) 90f else 0f),
+            )
+        }
+        if (expanded) {
+            SelectionContainer {
+                Text(
+                    text,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 220.dp)
+                        .background(secondaryTint.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                        .verticalScroll(rememberScrollState())
+                        .padding(10.dp),
+                )
             }
         }
     }
@@ -1486,30 +1625,29 @@ fun StreamingBubble(text: String?, reasoning: String?) {
 }
 
 /**
- * The beat between "go" and the first token — the port of the `else if
- * current.busy` branch of `ChatView.swift` and of `TypingIndicatorView`.
+ * The bot is typing — the port of the `else if showsTyping` branch of
+ * `ChatView.swift` and of `TypingIndicatorView`: three dots hopping in turn, the
+ * way Messages shows someone typing.
  *
- * The reason this exists is the sentence in the semantics block, not the dots.
- * Busy already reaches a sighted reader twice over — the mascot wears a working
- * face and the composer offers an interrupt — and reached a TalkBack reader
- * through neither. The row is a polite live region, so it is spoken when it
- * appears, and it carries a name of its own, so it can also be found by swiping
- * to the end of the transcript.
+ * The semantics block matters as much as the dots. Busy already reaches a
+ * sighted reader twice over — the mascot wears a working face and the composer
+ * offers an interrupt — and reached a TalkBack reader through neither. The row
+ * is a polite live region, so it is spoken when it appears, and it carries a name
+ * of its own ("Pepper is typing"), so it can also be found by swiping to the end
+ * of the transcript.
  *
- * Drawn in the same bubble as the reply that will replace it, and in the bot's
- * own colour, so the handover is the text arriving rather than the shape
- * changing. Everything Apple about the original — the capsule, the secondary
- * fill, the `TimelineView`, the scale wave — is left where it was; see
- * [WorkingDots].
+ * Drawn in the same bubble, padding and tail as the reply that will replace it,
+ * one line of text high, so the handover is the text arriving rather than the
+ * shape changing. The dots are the bubble's quiet foreground, as on iOS.
  */
 @Composable
-fun WorkingBubble(name: String, color: String) {
+fun WorkingBubble(name: String) {
     val clock = remember { MausFrameClock() }
     // Android says "reduce motion" through the animator duration scale, and this
     // reads it the way MausAvatar does — through a snapshotFlow, so turning the
     // setting off while a turn is running stops the dots on the next frame
-    // rather than at the end of the turn. At zero they hold their rest alpha:
-    // still three dots, just still ones.
+    // rather than at the end of the turn. At zero they sit still on the line, a
+    // little fainter: still three dots, just still ones.
     var moving by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         val durationScale = coroutineContext[MotionDurationScale]
@@ -1521,8 +1659,8 @@ fun WorkingBubble(name: String, color: String) {
             }
     }
 
-    val dots = Color(MausPalette.argb(color))
-    val label = LiveTail.workingLabel(name)
+    val dots = secondaryTint
+    val label = stringResource(R.string.mobile_chat_typing, name)
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
         Box(
             modifier = Modifier
@@ -1534,18 +1672,24 @@ fun WorkingBubble(name: String, color: String) {
                     liveRegion = LiveRegionMode.Polite
                 },
         ) {
-            Canvas(modifier = Modifier.size(WORKING_DOTS_WIDTH, WORKING_DOT)) {
+            Canvas(modifier = Modifier.size(WORKING_DOTS_WIDTH, WORKING_DOTS_HEIGHT)) {
                 // Read in the draw phase: a tick repaints the dots without
                 // recomposing the bubble, let alone the transcript around it.
                 val elapsed = clock.nanos.longValue
                 val live = moving
-                val radius = size.height * 0.5f
-                val step = size.height + WORKING_DOT_GAP.toPx()
+                val radius = WORKING_DOT.toPx() * 0.5f
+                val step = WORKING_DOT.toPx() + WORKING_DOT_GAP.toPx()
+                // Resting on a line just below the middle, so the hop rises
+                // into the bubble's centre rather than out of it.
+                val rest = (size.height + WORKING_DOT_BOUNCE.toPx()) * 0.5f
                 for (index in 0 until WorkingDots.COUNT) {
                     drawCircle(
                         color = dots,
                         radius = radius,
-                        center = Offset(radius + index * step, radius),
+                        center = Offset(
+                            radius + index * step,
+                            rest - WorkingDots.lift(index, elapsed, live) * WORKING_DOT_BOUNCE.toPx(),
+                        ),
                         alpha = WorkingDots.alpha(index, elapsed, live),
                     )
                 }
@@ -1555,7 +1699,10 @@ fun WorkingBubble(name: String, color: String) {
     }
 }
 
-private val WORKING_DOT = 7.dp
+private val WORKING_DOT = 8.dp
 private val WORKING_DOT_GAP = 5.dp
+private val WORKING_DOT_BOUNCE = 3.dp
 private val WORKING_DOTS_WIDTH =
     WORKING_DOT * WorkingDots.COUNT + WORKING_DOT_GAP * (WorkingDots.COUNT - 1)
+/** A line of body text tall, so the bubble matches a one-line reply. */
+private val WORKING_DOTS_HEIGHT = 22.dp

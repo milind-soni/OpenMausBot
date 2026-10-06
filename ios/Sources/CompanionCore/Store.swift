@@ -44,9 +44,44 @@ public struct CompanionState: Sendable {
     public var bots: [Bot] = []
     public var rooms: [Room] = []
     /// Transcripts by thread, which is the key both bots and rooms share.
-    public var messages: [String: [Message]] = [:]
+    ///
+    /// The fold never writes through this: it changes `transcripts` in
+    /// place and keeps the indexes below in step one message at a time. A
+    /// write from outside (tests, the DEBUG previews) replaces the whole
+    /// dictionary, so the indexes are rebuilt for every thread — correct,
+    /// and fine at that rate.
+    public var messages: [String: [Message]] {
+        get { transcripts }
+        set {
+            transcripts = newValue
+            reindexAllThreads()
+        }
+    }
+    /// The storage behind `messages`. Changed in place
+    /// (`transcripts[id, default: []].append`, `transcripts[id]![i] = …`) so
+    /// that a frame touches one element rather than copying its thread.
+    private var transcripts: [String: [Message]] = [:]
+    /// Threads holding at least one unanswered card, kept by the fold. What
+    /// `pendingApprovals` visits instead of every message of every thread;
+    /// it must always equal the threads a full scan would find.
+    public private(set) var pendingCardThreads: Set<String> = []
+    /// Threads held as one unforked chain: every message the child of the
+    /// one before it and no id twice. Their active branch is the transcript
+    /// itself up to the leaf, with no lookup table to build. Only ever a
+    /// subset of the truth — a thread missing from it takes the full walk,
+    /// which is always right.
+    private var linearThreads: Set<String> = []
+    /// How many messages a thread held right after a fetch the reader made
+    /// (Load earlier, a search landing). Live growth does not trim those
+    /// until `heldMessages` newer ones have arrived after them.
+    private var readerExtents: [String: Int] = [:]
+    /// The newest `at` trimmed from each thread: a patch for a message we do
+    /// not hold from at or before it is a change to history, not a new line.
+    private(set) var trimmedThrough: [String: Double] = [:]
     /// Whether there is more transcript above a fetched page, per thread.
     /// An absent entry means no page has loaded; SSE tails do not set this.
+    /// A trimmed thread sets it, because the computer still has what was
+    /// trimmed and Load earlier fetches it back.
     public var hasMore: [String: Bool] = [:]
     /// Branch heads belong to threads, not the bot's globally selected tab.
     public var activeLeafIds: [String: String] = [:]
@@ -87,16 +122,36 @@ public struct CompanionState: Sendable {
     /// `live.call` frame, `GET /api/live/call` (Session) or the harness's
     /// answer to a hang-up (`applyLiveCallEnd`) is the only source. Kept as
     /// `ended` until the harness clears it, so the bar can say why.
-    public var liveCall: LiveCallState?
+    public var liveCall: LiveCallState? {
+        didSet { liveCallRevision &+= 1 }
+    }
+    /// Counts writes to `liveCall`, whoever made them: what a lookup that
+    /// was out meanwhile checks before it puts its older answer on the line.
+    public private(set) var liveCallRevision = 0
 
     public init() {}
+
+    /// The newest messages a thread keeps in memory however long the app
+    /// stays connected. Ten pages of the 50 a chat opens on: far more than
+    /// a screen, and the most a live chat drags along — every frame a
+    /// thread receives costs at least one copy of it per publish (Session
+    /// folds into a copy of the published state), and every derived read
+    /// walks it. Older messages stay on the computer; Load earlier fetches
+    /// them back, a page at a time, the way it always has.
+    static let heldMessages = 500
+    /// How far a thread may grow past `heldMessages` before one trim takes
+    /// it back, so the shift is paid once per hundred messages, not per one.
+    static let trimSlack = 100
+    /// The window this state keeps: the two above everywhere but in tests,
+    /// which shrink it to reach a trim within a few dozen frames.
+    var window = (held: CompanionState.heldMessages, slack: CompanionState.trimSlack)
 
     // MARK: - Reading
 
     /// Named `transcript`, not `messages`: sharing a base name with the
     /// stored property compiles but reads as if one shadows the other.
     public func transcript(forThread threadId: String) -> [Message] {
-        messages[threadId] ?? []
+        transcripts[threadId] ?? []
     }
 
     /// Threads holding at least one queued send. The row label, the Updates
@@ -129,19 +184,49 @@ public struct CompanionState: Sendable {
         return Array(branch[..<index]) + [standIn]
     }
 
+    /// The last line of `visibleTranscript(forThread:)` without building
+    /// the branch, which ends at the leaf. A list row's face needs only
+    /// this, and the roster asks for it for every bot on every render.
+    public func lastVisibleMessage(forThread threadId: String) -> Message? {
+        guard pendingEdits[threadId] == nil else { return visibleTranscript(forThread: threadId).last }
+        let all = transcript(forThread: threadId)
+        guard let leafId = activeLeafIds[threadId] ?? bot(forThread: threadId)?.activeLeafId else { return all.last }
+        // The newest of a duplicated id, as in `activeBranch`.
+        return all.last { $0.id == leafId } ?? all.last
+    }
+
     private func activeBranch(forThread threadId: String) -> [Message] {
         let all = transcript(forThread: threadId)
         guard let leafId = activeLeafIds[threadId] ?? bot(forThread: threadId)?.activeLeafId else { return all }
-        let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { _, newest in newest })
-        guard var current = byId[leafId] else { return all }
-        var visible: [Message] = []
-        var visited = Set<String>()
-        while visited.insert(current.id).inserted {
-            visible.append(current)
-            guard let parentId = current.parentId, let parent = byId[parentId] else { break }
+        // An unforked chain — what a thread nobody has edited is — needs no
+        // walk: the branch is the transcript, up to the leaf. This is the
+        // common case, asked for by every surface on every publish, and the
+        // walk below hashes every id in the thread to answer it.
+        if linearThreads.contains(threadId) {
+            if all.last?.id == leafId { return all }
+            guard let leaf = all.lastIndex(where: { $0.id == leafId }) else { return all }
+            return Array(all[...leaf])
+        }
+        // Walk positions, not copies: every render of a busy roster asks for
+        // most threads' branches, and copying each message into a lookup
+        // table cost more than the walk. The newest of a duplicated id wins.
+        var positions: [String: Int] = [:]
+        positions.reserveCapacity(all.count)
+        for position in all.indices { positions[all[position].id] = position }
+        guard var current = positions[leafId] else { return all }
+        var path: [Int] = []
+        var visited = Set<Int>()
+        while visited.insert(current).inserted {
+            path.append(current)
+            guard let parentId = all[current].parentId, let parent = positions[parentId] else { break }
             current = parent
         }
-        return visible.reversed()
+        // An unforked thread is stored in branch order: the branch is the
+        // transcript itself, with nothing to copy.
+        if path.count == all.count, path.enumerated().allSatisfy({ $0.element == all.count - 1 - $0.offset }) {
+            return all
+        }
+        return path.reversed().map { all[$0] }
     }
 
     public func bot(_ id: String) -> Bot? {
@@ -234,14 +319,27 @@ public struct CompanionState: Sendable {
     /// Every unanswered approval or question, newest first. This is the
     /// screen the whole companion exists for.
     public var pendingApprovals: [(threadId: String, message: Message)] {
+        // Most threads hold no open card at all, and the fold already knows
+        // which do: only those pay for working out which of their cards are
+        // on the visible branch. Home, Live Activities and the widgets each
+        // ask on every publish, so this must not walk every message.
+        guard !pendingCardThreads.isEmpty else { return [] }
         var out: [(threadId: String, message: Message)] = []
-        let activeThreads = Set(bots.flatMap { [$0.threadId] + ($0.tasks ?? []).map(\.threadId) } + rooms.map(\.threadId))
-        for threadId in activeThreads {
+        // Sorted for a stable order between equal times; the set's own
+        // order changes from launch to launch.
+        for threadId in pendingCardThreads.sorted() where isActiveThread(threadId) {
             for message in visibleTranscript(forThread: threadId) where message.card?.isPending == true {
                 out.append((threadId: threadId, message: message))
             }
         }
         return out.sorted { $0.message.at > $1.message.at }
+    }
+
+    /// A thread some bot, bot task or room still owns. A card left in a
+    /// thread nobody owns any more is not something anyone can answer.
+    private func isActiveThread(_ threadId: String) -> Bool {
+        bots.contains { $0.threadId == threadId || $0.tasks?.contains(where: { $0.threadId == threadId }) == true }
+            || rooms.contains { $0.threadId == threadId }
     }
 
     /// Visible conversations worth a badge. The bot-level flag is an
@@ -278,17 +376,31 @@ public struct CompanionState: Sendable {
     public mutating func hydrate(_ fleet: Fleet, waitingThreads: [String: ThreadPage] = [:]) {
         bots = fleet.bots
         rooms = fleet.groups
-        messages.removeAll()
+        transcripts.removeAll()
         hasMore.removeAll()
         activeLeafIds.removeAll()
-        for bot in fleet.bots {
-            messages[bot.threadId] = bot.messages ?? []
+        pendingCardThreads.removeAll()
+        linearThreads.removeAll()
+        readerExtents.removeAll()
+        trimmedThrough.removeAll()
+        // The transcript lives in `messages` alone. A copy left on the bot
+        // or room would share the buffer until the first frame, then hold
+        // the hydrate-time transcript for the rest of the session — memory
+        // nothing reads, and an O(n) `==` for every comparison of the bot.
+        for index in bots.indices {
+            let bot = bots[index]
+            transcripts[bot.threadId] = bot.messages ?? []
             if bot.messages != nil { hasMore[bot.threadId] = bot.hasMore ?? false }
             activeLeafIds[bot.threadId] = bot.activeLeafId
+            bots[index].messages = nil
+            reindex(bot.threadId)
         }
-        for room in fleet.groups {
-            messages[room.threadId] = room.messages ?? []
+        for index in rooms.indices {
+            let room = rooms[index]
+            transcripts[room.threadId] = room.messages ?? []
             if room.messages != nil { hasMore[room.threadId] = room.hasMore ?? false }
+            rooms[index].messages = nil
+            reindex(room.threadId)
         }
         for (threadId, page) in waitingThreads where bot(forThread: threadId) != nil {
             merge(page, intoThread: threadId)
@@ -303,26 +415,33 @@ public struct CompanionState: Sendable {
 
     /// Prepend an older page fetched for scrollback.
     public mutating func prepend(_ page: ThreadPage, toThread threadId: String) {
-        let existing = messages[threadId] ?? []
+        let existing = transcripts[threadId] ?? []
         let known = Set(existing.map(\.id))
-        messages[threadId] = page.messages.filter { !known.contains($0.id) } + existing
+        transcripts[threadId] = page.messages.filter { !known.contains($0.id) } + existing
         hasMore[threadId] = page.hasMore ?? false
+        noteReaderFetch(threadId)
         reconcileQueued(threadId: threadId)
     }
 
     /// Merge a search landing window into the pages already held.
+    ///
+    /// The held pages can repeat an id — they came from the computer as
+    /// they were, and hydrate merges waiting threads on every cold start —
+    /// so the last copy wins instead of trapping the launch.
     public mutating func merge(_ page: ThreadPage, intoThread threadId: String) {
         var byId = Dictionary(
-            uniqueKeysWithValues: (messages[threadId] ?? []).map { ($0.id, $0) }
+            (transcripts[threadId] ?? []).map { ($0.id, $0) },
+            uniquingKeysWith: { _, newest in newest }
         )
         for message in page.messages { byId[message.id] = message }
-        messages[threadId] = byId.values.sorted {
+        transcripts[threadId] = byId.values.sorted {
             $0.at == $1.at ? $0.id < $1.id : $0.at < $1.at
         }
         // Legacy full pages omit hasMore. They still satisfy initial load,
         // while a sparse landing window preserves an existing boundary.
         hasMore[threadId] = page.hasMore ?? hasMore[threadId] ?? false
         if let leaf = page.activeLeafId { activeLeafIds[threadId] = leaf }
+        noteReaderFetch(threadId)
         reconcileQueued(threadId: threadId)
     }
 
@@ -332,7 +451,7 @@ public struct CompanionState: Sendable {
     /// or below the fork stays put, so a reply that arrived is never hidden.
     public mutating func adoptEdit(_ message: Message, inThread threadId: String, expectedPending: PendingEdit? = nil) {
         let currentLeaf = activeLeafIds[threadId] ?? bot(forThread: threadId)?.activeLeafId
-        append(message, to: threadId)
+        place(message, in: threadId)
         if let pending = expectedPending {
             guard pendingEdits[threadId] == pending, currentLeaf == pending.baseLeafId else { return }
         }
@@ -367,8 +486,12 @@ public struct CompanionState: Sendable {
     public mutating func applyBatch(_ frames: [StreamFrame]) {
         for frame in frames {
             apply(frame)
-            advance(to: frame.seq)
         }
+        // Once per delivery, to the last frame that carried a seq — where
+        // advancing frame by frame would have left it. Nothing in the fold
+        // reads the cursor, so the positions in between were never seen;
+        // building them cost two strings a frame.
+        advance(to: frames.last(where: { $0.seq != nil })?.seq)
     }
 
     public mutating func apply(_ frame: Frame) {
@@ -380,7 +503,7 @@ public struct CompanionState: Sendable {
             break
 
         case let .message(threadId, message):
-            append(message, to: threadId)
+            place(message, in: threadId)
             noteThreadActivity(threadId: threadId, at: message.at)
             // The line a held send finally became. Landing in the transcript
             // retires the row and leaves a tombstone, so the POST response
@@ -405,14 +528,11 @@ public struct CompanionState: Sendable {
             }
 
         case let .messagePatch(threadId, message):
-            var thread = messages[threadId] ?? []
-            if let index = thread.firstIndex(where: { $0.id == message.id }) {
-                thread[index] = message
-                messages[threadId] = thread
-            } else {
-                // a patch for something we never saw — the append is more
-                // useful than dropping it, and dedupes on id anyway
-                append(message, to: threadId)
+            // A patch for something we never saw is appended — more useful
+            // than dropping it, and dedupes on id anyway. One for something
+            // we held is a change, not activity; nor is one for something we
+            // trimmed, which stays history.
+            if place(message, in: threadId, patch: true) == .appended {
                 noteThreadActivity(threadId: threadId, at: message.at)
             }
 
@@ -434,24 +554,26 @@ public struct CompanionState: Sendable {
             if let index = bots.firstIndex(where: { $0.id == bot.id }) {
                 var merged = bot
                 merged.tasks = mergingStamps(merged.tasks, previous: bots[index].tasks)
+                // The transcript lives in `messages` alone (see hydrate).
+                merged.messages = nil
                 if let replacement = bot.messages {
-                    messages[bot.threadId] = replacement
+                    replaceTranscript(bot.threadId, with: replacement)
                     hasMore[bot.threadId] = bot.hasMore ?? false
-                    merged.messages = replacement
                     if bot.currentTaskBusy != true { clearStream(bot.threadId) }
                     reconcileQueued(threadId: bot.threadId)
                 } else {
-                    merged.messages = messages[bot.threadId]
                     merged.activeLeafId = activeLeafIds[bot.threadId]
                 }
                 bots[index] = merged
                 if merged.currentTaskBusy == false { clearStream(bot.threadId) }
             } else {
-                bots.append(bot)
+                var added = bot
+                added.messages = nil
+                bots.append(added)
                 if let page = bot.messages {
                     merge(ThreadPage(messages: page, hasMore: bot.hasMore ?? false), intoThread: bot.threadId)
-                } else if messages[bot.threadId] == nil {
-                    messages[bot.threadId] = []
+                } else if transcripts[bot.threadId] == nil {
+                    replaceTranscript(bot.threadId, with: [])
                 }
             }
 
@@ -459,7 +581,7 @@ public struct CompanionState: Sendable {
             if let index = bots.firstIndex(where: { $0.id == botId }) {
                 let threadIds = Set([bots[index].threadId] + (bots[index].tasks ?? []).map(\.threadId))
                 for threadId in threadIds {
-                    messages.removeValue(forKey: threadId)
+                    forgetTranscript(threadId)
                     hasMore.removeValue(forKey: threadId)
                     activeLeafIds.removeValue(forKey: threadId)
                     pendingQueued.removeValue(forKey: threadId)
@@ -482,31 +604,32 @@ public struct CompanionState: Sendable {
                 // Ordinary room frames are metadata-only and preserve the
                 // active transcript. A task switch includes messages and is
                 // authoritative, just like a bot task switch.
+                // The transcript lives in `messages` alone (see hydrate).
+                merged.messages = nil
                 if let replacement = room.messages {
-                    messages[room.threadId] = replacement
+                    replaceTranscript(room.threadId, with: replacement)
                     hasMore[room.threadId] = room.hasMore ?? false
-                    merged.messages = replacement
                     reconcileQueued(threadId: room.threadId)
                     clearStream(previous.threadId)
                     if previous.threadId != room.threadId { clearStream(room.threadId) }
-                } else {
-                    merged.messages = previous.messages
                 }
                 merged.tasks = mergingStamps(merged.tasks, previous: previous.tasks)
                 rooms[index] = merged
             } else {
-                rooms.append(room)
+                var added = room
+                added.messages = nil
+                rooms.append(added)
                 if let page = room.messages {
                     merge(ThreadPage(messages: page, hasMore: room.hasMore ?? false), intoThread: room.threadId)
-                } else if messages[room.threadId] == nil {
-                    messages[room.threadId] = []
+                } else if transcripts[room.threadId] == nil {
+                    replaceTranscript(room.threadId, with: [])
                 }
             }
 
         case let .roomDeleted(groupId):
             if let index = rooms.firstIndex(where: { $0.id == groupId }) {
                 let threadId = rooms[index].threadId
-                messages.removeValue(forKey: threadId)
+                forgetTranscript(threadId)
                 hasMore.removeValue(forKey: threadId)
                 pendingQueued.removeValue(forKey: threadId)
                 // Same reasoning as a deleted bot: the thread is gone, so the
@@ -622,21 +745,18 @@ public struct CompanionState: Sendable {
     }
 
     /// The harness's answer to `GET /api/live/call`, applied only if nothing
-    /// newer reached the line while the request was out: no frame folded
-    /// (the cursor is where it was) and no hang-up answer applied (the line
-    /// is what it was). A lookup that straddles a start could otherwise put
-    /// back a `null` from before the 201 and end the call that just began.
-    /// Mirrors `hydrate(_:waitingThreads:ifCursorMatches:)`.
+    /// newer reached the line while the request was out: no `live.call`
+    /// frame, hang-up answer or other lookup wrote it since `revision` was
+    /// read from `liveCallRevision`. A lookup that straddles a start could
+    /// otherwise put back a `null` from before the 201 and end the call that
+    /// just began. Frames about anything else leave the line alone, so they
+    /// do not void the answer: the stream keeps folding while it is out.
     ///
     /// Returns false when the answer was stale and dropped; the stream
     /// already carried something newer.
     @discardableResult
-    public mutating func applyLiveCallLookup(
-        _ call: LiveCallState?,
-        ifCursorMatches expectedCursor: String?,
-        lineWas expectedLine: LiveCallState?
-    ) -> Bool {
-        guard cursor == expectedCursor, liveCall == expectedLine else { return false }
+    public mutating func applyLiveCallLookup(_ call: LiveCallState?, ifRevisionIs revision: Int) -> Bool {
+        guard liveCallRevision == revision else { return false }
         liveCall = call
         return true
     }
@@ -750,18 +870,161 @@ public struct CompanionState: Sendable {
     /// slow POST, short enough that other clients cannot grow it forever.
     private static let maxDrainedQueueIds = 64
 
+    // MARK: - Transcript storage
+
+    private enum Placement: Equatable {
+        /// New to this thread: it is the newest message now.
+        case appended
+        /// Already held: replaced where it stands.
+        case replaced
+        /// A change to the history trimmed from this thread: left on the
+        /// computer, where Load earlier finds it with the change applied.
+        case history
+    }
+
     /// Append, unless we already hold it. Replaying a resumed stream can
     /// legitimately deliver a message twice — the cursor is the last frame
     /// *received*, and a frame in flight when the socket dropped arrives
     /// again on reconnect.
-    private mutating func append(_ message: Message, to threadId: String) {
-        var thread = messages[threadId] ?? []
-        if let index = thread.firstIndex(where: { $0.id == message.id }) {
-            thread[index] = message
-        } else {
-            thread.append(message)
+    ///
+    /// Both writes go through the dictionary in place. Reading the thread
+    /// into a local first, as this used to, holds a second reference to its
+    /// buffer, so every frame copied the whole thread to add one message.
+    @discardableResult
+    private mutating func place(_ message: Message, in threadId: String, patch: Bool = false) -> Placement {
+        if let index = transcripts[threadId]?.firstIndex(where: { $0.id == message.id }) {
+            replace(at: index, with: message, in: threadId)
+            return .replaced
         }
-        messages[threadId] = thread
+        // The harness sends every change to an existing message as a patch
+        // (a message frame is always a new line, stamped now). A patch for
+        // one we do not hold, from no later than what this thread trimmed —
+        // an old screenshot losing its pixels, a routine card moving on — is
+        // a change to the history above. Appended, it would read as the
+        // newest line.
+        if patch, let through = trimmedThrough[threadId], message.at <= through { return .history }
+        let previous = transcripts[threadId]?.last
+        transcripts[threadId, default: []].append(message)
+        if message.card?.isPending == true { pendingCardThreads.insert(threadId) }
+        // The id is new to the thread (looked for above), so the thread
+        // stays a chain exactly when this hangs off the message before it.
+        if let previous {
+            if message.parentId != previous.id { linearThreads.remove(threadId) }
+        } else {
+            linearThreads.insert(threadId)
+        }
+        trimIfNeeded(threadId)
+        return .appended
+    }
+
+    private mutating func replace(at index: Int, with message: Message, in threadId: String) {
+        let old = transcripts[threadId]![index]
+        transcripts[threadId]![index] = message
+        if message.card?.isPending == true {
+            pendingCardThreads.insert(threadId)
+        } else if old.card?.isPending == true {
+            // The card this patch answered may not have been the thread's
+            // only open one; look before saying the thread has none.
+            refreshPendingCards(threadId)
+        }
+        // A re-parented message (the harness inserting a late artifact
+        // above it) can break the chain; it never mends one.
+        if message.parentId != old.parentId { linearThreads.remove(threadId) }
+    }
+
+    /// Install a transcript that arrived whole, replacing the held one.
+    private mutating func replaceTranscript(_ threadId: String, with replacement: [Message]) {
+        transcripts[threadId] = replacement
+        readerExtents.removeValue(forKey: threadId)
+        trimmedThrough.removeValue(forKey: threadId)
+        reindex(threadId)
+    }
+
+    private mutating func forgetTranscript(_ threadId: String) {
+        transcripts.removeValue(forKey: threadId)
+        readerExtents.removeValue(forKey: threadId)
+        trimmedThrough.removeValue(forKey: threadId)
+        pendingCardThreads.remove(threadId)
+        linearThreads.remove(threadId)
+    }
+
+    /// The reader fetched part of this thread themselves: it stays held
+    /// until `heldMessages` newer messages have arrived after it.
+    private mutating func noteReaderFetch(_ threadId: String) {
+        readerExtents[threadId] = transcripts[threadId]?.count
+        reindex(threadId)
+    }
+
+    /// Keep a thread to its newest `heldMessages` once live growth takes it
+    /// `trimSlack` past that (or past what the reader fetched). What goes is
+    /// the oldest of it, which the computer still has: `hasMore` says so and
+    /// Load earlier pages it back in from the first message held.
+    ///
+    /// Two things never go, so nothing on screen changes meaning: an open
+    /// card (Updates, the Island and the widgets read only what is held) and
+    /// the branch head (a head that is not held reads as no head at all).
+    private mutating func trimIfNeeded(_ threadId: String) {
+        guard let count = transcripts[threadId]?.count else { return }
+        let limit = max(window.held + window.slack, (readerExtents[threadId] ?? 0) + window.held)
+        guard count > limit else { return }
+        var cut = count - window.held
+        if pendingCardThreads.contains(threadId),
+           let card = transcripts[threadId]?.firstIndex(where: { $0.card?.isPending == true }) {
+            cut = min(cut, card)
+        }
+        if let leafId = activeLeafIds[threadId] ?? bot(forThread: threadId)?.activeLeafId,
+           let leaf = transcripts[threadId]?.lastIndex(where: { $0.id == leafId }) {
+            cut = min(cut, leaf)
+        }
+        guard cut > 0 else { return }
+        let newestDropped = transcripts[threadId]![..<cut].reduce(-Double.infinity) { max($0, $1.at) }
+        transcripts[threadId]!.removeFirst(cut)
+        trimmedThrough[threadId] = max(trimmedThrough[threadId] ?? -.infinity, newestDropped)
+        hasMore[threadId] = true
+        readerExtents.removeValue(forKey: threadId)
+        // A fork that has scrolled out of the held window leaves a chain.
+        if !linearThreads.contains(threadId), Self.isLinear(transcripts[threadId]!) {
+            linearThreads.insert(threadId)
+        }
+    }
+
+    /// Re-derive one thread's indexes from what it holds.
+    private mutating func reindex(_ threadId: String) {
+        refreshPendingCards(threadId)
+        if let thread = transcripts[threadId], Self.isLinear(thread) {
+            linearThreads.insert(threadId)
+        } else {
+            linearThreads.remove(threadId)
+        }
+    }
+
+    private mutating func refreshPendingCards(_ threadId: String) {
+        if transcripts[threadId]?.contains(where: { $0.card?.isPending == true }) == true {
+            pendingCardThreads.insert(threadId)
+        } else {
+            pendingCardThreads.remove(threadId)
+        }
+    }
+
+    /// After an outside write to `messages`: every thread, from scratch.
+    private mutating func reindexAllThreads() {
+        pendingCardThreads.removeAll()
+        linearThreads.removeAll()
+        for threadId in transcripts.keys { reindex(threadId) }
+        readerExtents = readerExtents.filter { transcripts[$0.key] != nil }
+        trimmedThrough = trimmedThrough.filter { transcripts[$0.key] != nil }
+    }
+
+    /// Each message the child of the one before it, and no id twice — the
+    /// shape whose branch to any leaf is the transcript up to that leaf.
+    /// The chain is checked first because it fails fast on a forked thread
+    /// and costs no hashing.
+    private static func isLinear(_ thread: [Message]) -> Bool {
+        for index in thread.indices.dropFirst() where thread[index].parentId != thread[index - 1].id {
+            return false
+        }
+        var seen = Set<String>(minimumCapacity: thread.count)
+        return thread.allSatisfy { seen.insert($0.id).inserted }
     }
 }
 

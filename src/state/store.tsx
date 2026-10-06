@@ -112,7 +112,9 @@ export interface OptionCardData {
   routineRequest?: RoutineRequestCardData;
   /** Staged learned-skill change; applied only after the user confirms this card. */
   skillRequest?: SkillRequestCardData;
-  outboundRequest?: { tool: string; app: string | null };
+  /** calls: one per outbound call the card covers, in subtitle order. Absent
+   * on cards from older computers. */
+  outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
   teamMemoryRequest?: { section: string; entryId: string; kind: string };
   /** Persisted profile proposal used by the server when the user confirms it. */
   profileRequest?: ProfileRequestCardData;
@@ -636,7 +638,9 @@ export interface ConfigStatus {
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number };
-  opencodeGo?: { configured: boolean };
+  /** `providerKeys`: names of the keys saved for OpenCode's other
+   * providers, never the keys. */
+  opencodeGo?: { configured: boolean; providerKeys?: string[] };
   /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
    * Fish Audio key, or a Chatterbox server address); `ready` = that AND a voice, which is
    * what it takes to actually speak. The key itself is never echoed back;

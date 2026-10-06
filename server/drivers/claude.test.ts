@@ -1932,6 +1932,66 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
   });
 
+  // Stop is acknowledged at once and the process tree reaped after it, slowly
+  // on Windows (taskkill is asynchronous). A Stop that lands while a turn is
+  // starting lets the harness send the next message before that reap is done.
+  it("waits for a stopped turn's process to be gone before the next turn, instead of refusing it", async () => {
+    const release = join(scratch, "slow-stop-release");
+    const dump = join(scratch, "slow-stop-dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    // the CLI keeps running for a while after SIGTERM
+    await create("hang", { FAKE_CLAUDE_EXIT_DELAY_MS: "700", FAKE_CLAUDE_RELEASE: release });
+    const threadId = "t-slow-stop";
+    const first = await instance.adapter.sendTurn({ threadId, text: "first" });
+    await recorder.until((e) => e.type === "session.started" && e.turnId === first.turnId);
+    const firstPid = dumpedPid(dump);
+    void instance.adapter.interruptTurn(threadId);
+    const second = instance.adapter.sendTurn({ threadId, text: "second" });
+    expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId)).toMatchObject({ ok: false, stopReason: "interrupted" });
+    writeFileSync(release, "go");
+    const { turnId } = await second;
+    expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId)).toMatchObject({ ok: true });
+    expect(dumpedPid(dump)).not.toBe(firstPid);
+    // the new turn began only once the stopped one had settled
+    const order = recorder.events.filter((e) => (e.type === "turn.completed" && e.turnId === first.turnId) || (e.type === "turn.started" && e.turnId === turnId));
+    expect(order.map((e) => e.type)).toEqual(["turn.completed", "turn.started"]);
+  });
+
+  // A process kept warm between turns can end just before the next one is
+  // written, and the driver learns of an exit only when its event loop gets
+  // to it (later still on Windows). The write fails; nothing was submitted.
+  it("resumes the next turn on a fresh process when the warm one is gone before it takes it", async () => {
+    const gone = join(scratch, "gone-after-turn");
+    const dump = join(scratch, "gone-after-turn-dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await create(undefined, { FAKE_CLAUDE_GONE_AFTER_TURN: gone });
+    const threadId = "t-gone-after-turn";
+    const first = await instance.adapter.sendTurn({ threadId, text: "first" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const firstPid = dumpedPid(dump);
+    const argv: string[] = JSON.parse(readFileSync(dump, "utf8")).argv;
+    const sessionId = argv[argv.indexOf("--session-id") + 1];
+    // the warm process no longer reads stdin, and has not exited yet
+    await expect.poll(() => existsSync(`${gone}.closed`)).toBe(true);
+    const { turnId } = await instance.adapter.sendTurn({ threadId, text: "second", resumeCursor: sessionId });
+    // The failed write itself ends the warm process: it has not exited, and
+    // nothing else would end the turn before a Stop. POSIX only: with fd 0
+    // closed the pipe has no reader. On Windows Node's stdin keeps its own
+    // duplicate of the pipe handle, so the write can land there and only the
+    // exit below ends the process.
+    if (process.platform !== "win32") {
+      expect(readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8")).toContain('"close":"stdin write failed"');
+    }
+    writeFileSync(gone, "go");
+    expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId)).toMatchObject({ ok: true });
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.pid).not.toBe(firstPid);
+    expect(seen.argv[seen.argv.indexOf("--resume") + 1]).toBe(sessionId);
+    expect(seen.prompt.message.content).toBe("second");
+    // a session ending between turns is not a failure: no error, no retry row
+    expect(recorder.events.filter((e) => e.type === "runtime.error" || e.type === "turn.retrying")).toEqual([]);
+  });
+
   it.each([false, true])("interrupt kills the turn and settles it as interrupted, not hung (retained: %s)", async (retained) => {
     const gate = join(scratch, "stop-interrupt.gate");
     const dump = join(scratch, "stop-interrupt-dump.json");

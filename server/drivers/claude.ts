@@ -1243,6 +1243,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         retryAbort: AbortController;
         settled: boolean;
         sawStreamDelta: boolean;
+        /** written to a process kept warm from an earlier turn, which has
+         * not announced this turn with its `init` yet. A process that ends
+         * before that never took the prompt (see the close handler). */
+        awaitingInit?: boolean;
         authFailed?: boolean;
         updateRequired?: boolean;
         stopRequested?: boolean;
@@ -1276,6 +1280,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       costTotal: number | null | undefined;
       /** Root close can precede a failed group stop; retry its finalization. */
       finishClose?: () => Promise<void>;
+      /** resolves once the process's close has been handled: a turn it was
+       * running has settled and left `active` (unless its tree could not be
+       * confirmed stopped) */
+      closed: Promise<void>;
     }
     const sessions = new Map<string, Session>();
     const { idleMs: SESSION_IDLE_MS } = sessionIdlePolicy("CLAUDE");
@@ -1359,7 +1367,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // logical turn's stop handle in `active` while it sets up, so Stop is
       // never a silent no-op between two CLI processes of the same turn.
       const relaunch = logicalTurnId !== undefined;
-      if (active.has(threadId) && !relaunch) throw new Error("a turn is already running on this thread");
+      if (!relaunch) {
+        // Stop is acknowledged at once and the process tree reaped after it
+        // (taskkill is asynchronous on Windows); the stopped turn leaves
+        // `active` only when its close is handled. A Stop that lands while
+        // a turn is still starting lets the harness send the next message
+        // before then. That turn waits for the stopped process to be gone,
+        // never overlapping its helpers, instead of being refused.
+        const stopped = sessions.get(threadId);
+        if (stopped?.turn?.stopRequested && active.get(threadId)?.turnId === stopped.turn.turnId &&
+            await killCliTree(stopped.child)) await stopped.closed;
+        if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      }
       // A bot-level mode is authoritative for this turn. In particular, an
       // old provider instance may still be configured with
       // `bypassPermissions`; Ask/Auto must restore Claude's interactive
@@ -1657,7 +1676,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const live = sessions.get(threadId);
       if (!turn.sessionReset && live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
         if (live.idleTimer) clearTimeout(live.idleTimer);
-        live.turn = { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null };
+        live.turn = { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, awaitingInit: true, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null };
         active.set(threadId, { stop: () => {
           if (live.turn) live.turn.stopRequested = true;
           closeSession(threadId, "interrupted");
@@ -1672,19 +1691,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           : claudeUserMessage(withVolatileNote(turn.text, volatile), turn.images);
         live.volatile = volatile;
         const running = live.turn;
-        const written = await writeUser(live, threadId, message);
-        if (!written && !running?.stopRequested) {
-          active.delete(threadId);
-          live.turn = null;
-          closeSession(threadId, "stdin write failed");
-          retryState.delete(threadId);
-          if (mcpConfigPath) {
-            try {
-              rmSync(dirname(mcpConfigPath), { recursive: true, force: true });
-            } catch {}
-          }
-          throw new Error("claude session stdin is not writable");
-        }
+        // A warm process can end between turns just as the next one is
+        // written: this driver learns of an exit only when the event loop
+        // gets to it (later still on Windows), so the check above can find it
+        // live and the write then fail. Nothing was submitted; its close
+        // resumes this same turn on a fresh process (see `awaitingInit`).
+        if (!(await writeUser(live, threadId, message)) && !running?.stopRequested) closeSession(threadId, "stdin write failed");
         // the MCP config was for the first spawn; nothing to clean here
         if (mcpConfigPath) {
           try {
@@ -1826,7 +1838,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         cleanupUnownedLaunch();
         throw error;
       }
+      let markClosed!: () => void;
       const session: Session = {
+        closed: new Promise<void>((resolve) => { markClosed = resolve; }),
         child,
         broker,
         mcpConfigPath,
@@ -1942,6 +1956,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 break;
               }
               session.sawInit = true;
+              if (session.turn) session.turn.awaitingInit = false;
               session.nativePermissionMode = typeof o.permissionMode === "string" ? o.permissionMode : null;
               if (typeof o.session_id === "string") session.sessionId = o.session_id;
               // The turn the CLI starts for a steered message it could not
@@ -2222,12 +2237,21 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
+          // A process kept warm from an earlier turn ended before it
+          // announced this one: it never took the prompt. That is a session
+          // ending between turns, not a failed turn, so the same turn
+          // resumes the session on a fresh process at once — no retry row,
+          // no retry budget spent. (A fresh process is never retained, so
+          // this happens at most once per turn.)
+          const endedBeforeTurn = session.turn.awaitingInit === true;
           if (
             !retry.cancelled &&
-            code !== 0 &&
-            verdict.transient &&
-            !session.turn.sawStreamDelta &&
-            retry.attempt < RETRY_MAX_ATTEMPTS - 1
+            (endedBeforeTurn || (
+              code !== 0 &&
+              verdict.transient &&
+              !session.turn.sawStreamDelta &&
+              retry.attempt < RETRY_MAX_ATTEMPTS - 1
+            ))
           ) {
             // the CLI is gone but the TURN continues: keep the thread busy,
             // emit no terminal event, and relaunch after the backoff. The
@@ -2249,15 +2273,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             sessions.delete(threadId);
             session.turn = null;
-            retry.attempt++;
-            const delayMs = computeBackoff(retry.attempt - 1);
-            emit({
-              ...base(threadId, turnId),
-              type: "turn.retrying",
-              attempt: retry.attempt,
-              delayMs,
-              reason: verdict.reason,
-            });
+            let delayMs = 0;
+            if (!endedBeforeTurn) {
+              retry.attempt++;
+              delayMs = computeBackoff(retry.attempt - 1);
+              emit({
+                ...base(threadId, turnId),
+                type: "turn.retrying",
+                attempt: retry.attempt,
+                delayMs,
+                reason: verdict.reason,
+              });
+            }
             void (async () => {
               const wait = interruptibleDelay(delayMs * retryScale, retryAbort.signal);
               await wait.promise;
@@ -2389,7 +2416,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       };
       child.on("close", (code) => {
         session.finishClose = () => finalizeClose(code);
-        void session.finishClose();
+        void session.finishClose().finally(markClosed);
       });
 
       const stop = () => {

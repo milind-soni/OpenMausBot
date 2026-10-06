@@ -57,14 +57,19 @@ class UnreadyWindow extends Window {
 
 test("a loading screen that never becomes ready cannot block server startup", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const { splash, calls } = fixture({ BrowserWindow: UnreadyWindow });
+  const { splash, win, calls } = fixture({ BrowserWindow: UnreadyWindow });
   let ready = false;
   void splash.ready.then(() => { ready = true; });
   t.mock.timers.tick(9999); await flush();
   assert.equal(ready, false);
   t.mock.timers.tick(1); await flush();
   assert.equal(ready, true);
-  assert.equal(splash.window.destroyed, true);
+  // Still the app's only window: destroying it would quit before the workspace exists.
+  assert.equal(splash.window.destroyed, false);
+  assert.deepEqual(calls, []);
+  splash.attach(win);
+  win.webContents.emit("did-finish-load"); await flush();
+  assert.equal(win.visible, true); assert.equal(splash.window.destroyed, true);
   assert.deepEqual(calls, ["finished"]);
 });
 
@@ -75,8 +80,31 @@ test("a loading renderer crash unblocks startup before ready-to-show", async () 
   splash.window.webContents.emit("render-process-gone");
   await flush();
   assert.equal(ready, true);
-  assert.equal(splash.window.destroyed, true);
-  assert.deepEqual(calls, ["finished"]);
+  assert.equal(splash.window.destroyed, false);
+  assert.deepEqual(calls, []);
+});
+
+test("a loaded page shows without ready-to-show, as on COSMIC Wayland", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { splash, calls } = fixture({ BrowserWindow: UnreadyWindow });
+  let ready = false;
+  void splash.ready.then(() => { ready = true; });
+  splash.window.webContents.emit("did-finish-load");
+  t.mock.timers.tick(499); await flush();
+  assert.equal(splash.window.visible, false); assert.equal(ready, false);
+  t.mock.timers.tick(1); await flush();
+  assert.equal(splash.window.visible, true); assert.equal(ready, true);
+  assert.deepEqual(calls, []);
+});
+
+test("ready-to-show and a loaded page show the splash once", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let shows = 0;
+  const { splash } = fixture({ onShow: () => { shows += 1; } });
+  await splash.ready;
+  splash.window.webContents.emit("did-finish-load");
+  t.mock.timers.tick(500); await flush();
+  assert.equal(shows, 1);
 });
 
 test("loading screen waits for mounted content before revealing the restored workspace", async () => {

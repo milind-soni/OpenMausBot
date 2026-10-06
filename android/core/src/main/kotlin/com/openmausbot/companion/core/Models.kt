@@ -94,6 +94,17 @@ data class OptionCard(
      * options and nothing can answer it; a fresh proposal is needed.
      */
     val expired: Boolean? = null,
+    /** `"permission"` or `"question"` on provider asks; absent elsewhere and on older computers. */
+    val requestType: String? = null,
+    /**
+     * Catalog key for [held] when it is one of the computer's fixed "why this
+     * asked" notes; absent when [held] is free text such as an error.
+     */
+    val heldCode: String? = null,
+    /** Present on "Send on your behalf?" cards. See ApprovalCard.kt. */
+    val outboundRequest: OutboundRequest? = null,
+    /** Present on "Remember this for the team?" cards. */
+    val teamMemoryRequest: TeamMemoryRequest? = null,
 ) {
     val isPending: Boolean get() =
         requestId != null && answered == null && dismissed != true && expired != true
@@ -118,8 +129,9 @@ data class OptionCard(
             else -> "allow"
         }
 
+        /** "Skip" is the team-memory card's refusal; as allow it would remember what was skipped. */
         fun isRefusal(choice: String): Boolean = choice.trim().lowercase() in
-            setOf("deny", "cancel", "dismiss")
+            setOf("deny", "cancel", "dismiss", "skip")
     }
 }
 

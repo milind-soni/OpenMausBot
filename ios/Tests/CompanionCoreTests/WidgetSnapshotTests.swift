@@ -104,6 +104,105 @@ final class WidgetSnapshotTests: XCTestCase {
             .shouldReplace(WidgetSnapshot(writtenAt: now, connectionID: "computer-1", rows: [oldRow])))
     }
 
+    func testAWorkingLineAloneWaitsItsIntervalAndEverythingElsePublishesAtOnce() throws {
+        var state = try hydrated
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        func snapshot(at offset: TimeInterval, face: String = "idle") -> WidgetSnapshot {
+            state.widgetSnapshot(connectionID: "computer-1", detail: .full, now: now.addingTimeInterval(offset)) { _ in face }
+        }
+        state.streaming["t-busy"] = "Reading the schema"
+        let first = snapshot(at: 0)
+        state.streaming["t-busy"]? += " and the migrations"
+        let narrated = snapshot(at: 0.4)
+        XCTAssertNotEqual(narrated.rows, first.rows, "the streamed tail is in the row")
+        XCTAssertFalse(narrated.shouldReplace(first), "a streamed word is not worth a reload")
+        XCTAssertFalse(snapshot(at: WidgetSnapshot.workingLineInterval - 0.1).shouldReplace(first))
+        XCTAssertTrue(snapshot(at: WidgetSnapshot.workingLineInterval).shouldReplace(first))
+        // Unpaced, as before this gate existed.
+        XCTAssertTrue(narrated.shouldReplace(first, workingLineInterval: 0))
+        // The narration interval never outlasts the renewal.
+        XCTAssertTrue(snapshot(at: WidgetSnapshot.renewalInterval).shouldReplace(first, workingLineInterval: 600))
+        XCTAssertFalse(snapshot(at: WidgetSnapshot.renewalInterval - 0.1).shouldReplace(first, workingLineInterval: 600))
+
+        // While narration is held, anything else still goes in its window.
+        XCTAssertTrue(snapshot(at: 0.4, face: "alerting").shouldReplace(first), "a face change")
+        XCTAssertTrue(state.widgetSnapshot(connectionID: "computer-2", detail: .full, now: now.addingTimeInterval(0.4)) { _ in "idle" }
+            .shouldReplace(first), "another computer")
+        var changed = state
+        let busy = try XCTUnwrap(changed.bots.firstIndex { $0.id == "bot-busy" })
+        changed.bots[busy].tasks?[0].busy = false
+        changed.bots[busy].tasks?[0].activity = "waiting-on-you"
+        XCTAssertTrue(changed.widgetSnapshot(connectionID: "computer-1", detail: .full, now: now.addingTimeInterval(0.4)) { _ in "idle" }
+            .shouldReplace(first), "the bot stopped to ask")
+        changed = state
+        changed.bots[busy].tasks?[0].busy = false
+        XCTAssertTrue(changed.widgetSnapshot(connectionID: "computer-1", detail: .full, now: now.addingTimeInterval(0.4)) { _ in "idle" }
+            .shouldReplace(first), "the bot finished")
+        changed = state
+        let idle = try XCTUnwrap(changed.bots.firstIndex { $0.id == "bot-idle" })
+        changed.bots[idle].busy = true
+        changed.bots[idle].tasks = changed.bots[idle].tasks?.map { task in
+            var task = task
+            task.busy = true
+            return task
+        }
+        XCTAssertGreaterThan(
+            changed.widgetSnapshot(connectionID: "computer-1", detail: .full) { _ in "idle" }.rows.count, first.rows.count
+        )
+        XCTAssertTrue(changed.widgetSnapshot(connectionID: "computer-1", detail: .full, now: now.addingTimeInterval(0.4)) { _ in "idle" }
+            .shouldReplace(first), "another bot started")
+        changed = state
+        changed.bots[busy].name = "Renamed"
+        XCTAssertTrue(changed.widgetSnapshot(connectionID: "computer-1", detail: .full, now: now.addingTimeInterval(0.4)) { _ in "idle" }
+            .shouldReplace(first), "a rename")
+
+        // Only a working row's line is narration: an ask's line is the
+        // question, a finished chat's is its reply.
+        for kind in [ChatUpdate.Kind.needsYou, .toReview] {
+            let row = try XCTUnwrap(first.rows.first { $0.kind == kind })
+            let edited = WidgetSnapshot.Row(chat: row.chat, kind: kind, line: row.line + " (edited)", card: row.card, face: row.face, since: row.since)
+            let rows = first.rows.map { $0.chat.threadId == row.chat.threadId ? edited : $0 }
+            XCTAssertTrue(WidgetSnapshot(writtenAt: now.addingTimeInterval(0.4), connectionID: "computer-1", rows: rows, detail: first.detail)
+                .shouldReplace(first), "\(kind) line change")
+        }
+    }
+
+    func testTheLastWriteBeforeSuspensionLandsAHeldWorkingLine() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("widget-writer-exact-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = WidgetSnapshotStore(directory: directory)
+        let writer = WidgetSnapshotWriter(store: store)
+        var state = try hydrated
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        state.streaming["t-busy"] = "Reading the schema"
+        let first = state.widgetSnapshot(connectionID: "computer-1", detail: .full, now: now) { _ in "idle" }
+        state.streaming["t-busy"]? += " and the migrations"
+        let narrated = state.widgetSnapshot(connectionID: "computer-1", detail: .full, now: now.addingTimeInterval(1)) { _ in "idle" }
+        let unchanged = state.widgetSnapshot(connectionID: "computer-1", detail: .full, now: now.addingTimeInterval(2)) { _ in "idle" }
+        let completed = expectation(description: "paced, then exact")
+        completed.expectedFulfillmentCount = 4
+        writer.publish(first) { changed in
+            XCTAssertTrue(changed)
+            completed.fulfill()
+        }
+        writer.publish(narrated) { changed in
+            XCTAssertFalse(changed, "a window's narration waits")
+            XCTAssertEqual(store.read(), first)
+            completed.fulfill()
+        }
+        writer.publish(narrated, exact: true) { changed in
+            XCTAssertTrue(changed, "the flush writes it")
+            XCTAssertEqual(store.read(), narrated)
+            completed.fulfill()
+        }
+        writer.publish(unchanged, exact: true) { changed in
+            XCTAssertFalse(changed, "an exact write still skips an identical payload until its renewal")
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 5)
+    }
+
     func testRowsMirrorUpdatesOneToOneWithFacesResolvedAtWriteTime() throws {
         let state = try hydrated
         let now = Date(timeIntervalSince1970: 1_700_000_000)

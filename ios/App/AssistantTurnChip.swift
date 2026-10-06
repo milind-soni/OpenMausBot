@@ -5,11 +5,10 @@ import CompanionCore
 /// to tool receipts independently, so Hidden still offers this compact row.
 struct AssistantTurnChip: View {
     let turn: AssistantTurnFold
-    let chat: Chat
-    let openLink: (URL, Message) -> OpenURLAction.Result
-    var openThread: ((ThreadRef) -> Void)? = nil
+    let context: TranscriptRowContext
+    let actions: TranscriptActions
+    /// A search hit inside this fold: open it and bring the reply into view.
     var revealedMessageId: String? = nil
-    var scrollToMessage: ((String) -> Void)? = nil
     @State private var expanded = false
 
     var body: some View {
@@ -38,12 +37,13 @@ struct AssistantTurnChip: View {
             if expanded {
                 ForEach(Array(turn.messages.enumerated()), id: \.element.id) { index, message in
                     MessageRow(
-                        chat: chat, message: message, endsRun: index == turn.messages.count - 1,
-                        openLink: openLink, openThread: openThread
+                        message: message, endsRun: index == turn.messages.count - 1,
+                        context: context, actions: actions
                     )
+                    .equatable()
                     .id(message.id)
                     .onAppear {
-                        if revealedMessageId == message.id { scrollToMessage?(message.id) }
+                        if revealedMessageId == message.id { actions.reveal(messageId: message.id) }
                     }
                 }
             }

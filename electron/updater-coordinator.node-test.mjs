@@ -327,31 +327,38 @@ test("a background failure stays silent before a later download failure", async 
   });
 });
 
-test("available, not-available, progress, and downloaded events preserve success behavior", async () => {
-  const available = harness();
-  available.updater.checkForUpdates = () => {
-    available.updater.emit("checking-for-update");
-    queueMicrotask(() => available.updater.emit("update-available", { version: "2.0.0" }));
-    return Promise.resolve({ isUpdateAvailable: true });
-  };
-  await available.coordinator.check(true);
-  assert.equal(available.getState().status, "available");
-  assert.equal(available.getState().version, "2.0.0");
+const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-  available.updater.downloadUpdate = () => {
-    available.updater.emit("download-progress", { percent: 42.4 });
-    return Promise.resolve().then(() => {
-      available.updater.emit("update-downloaded", { version: "2.0.0" });
-      return ["update.zip"];
-    });
-  };
-  await available.coordinator.download();
-  assert.deepEqual(available.getState(), {
-    status: "downloaded",
-    version: "2.0.0",
-    message: undefined,
-    percent: 42,
-  });
+test("an update a check finds downloads without a click; only the restart waits for the person", async () => {
+  // The hourly check and "Check for updates" alike: there is no Download step.
+  for (const manual of [false, true]) {
+    const found = harness();
+    let downloads = 0;
+    const transfer = deferred();
+    found.updater.checkForUpdates = () => {
+      found.updater.emit("checking-for-update");
+      queueMicrotask(() => found.updater.emit("update-available", { version: "2.0.0" }));
+      return Promise.resolve({ isUpdateAvailable: true });
+    };
+    found.updater.downloadUpdate = () => {
+      downloads += 1;
+      found.updater.emit("download-progress", { percent: 42.4 });
+      return transfer.promise.then(() => {
+        found.updater.emit("update-downloaded", { version: "2.0.0" });
+        return ["update.zip"];
+      });
+    };
+    found.updater.quitAndInstall = () => assert.fail("nothing restarts without the person's click");
+
+    await found.coordinator.check(manual);
+    assert.equal(downloads, 1, "the check itself started the download");
+    assert.deepEqual(found.getState(), { status: "downloading", version: "2.0.0", percent: 42, message: undefined });
+    assert.equal(found.states.some((entry) => entry.status === "available"), false, "no state waits for a Download click");
+
+    transfer.resolve();
+    await settle();
+    assert.deepEqual(found.getState(), { status: "downloaded", version: "2.0.0", percent: 42, message: undefined });
+  }
 
   const notAvailable = harness();
   notAvailable.updater.checkForUpdates = () => {
@@ -361,6 +368,79 @@ test("available, not-available, progress, and downloaded events preserve success
   };
   await notAvailable.coordinator.check();
   assert.equal(notAvailable.getState().status, "idle");
+});
+
+test("a download the hourly check started fails quietly, and the next check tries again", async () => {
+  const h = harness();
+  let downloads = 0;
+  h.updater.checkForUpdates = async () => {
+    h.updater.emit("checking-for-update");
+    h.updater.emit("update-available", { version: "2.0.0" });
+  };
+  let transfer;
+  h.updater.downloadUpdate = () => {
+    downloads += 1;
+    transfer = deferred();
+    return transfer.promise;
+  };
+  // The transfer breaks after the check has finished: electron-updater emits
+  // "error", then rejects the download.
+  const breakTransfer = async () => {
+    const error = new Error("ECONNRESET");
+    h.updater.emit("error", error);
+    transfer.reject(error);
+    await settle();
+  };
+
+  await h.coordinator.check();
+  assert.equal(h.getState().status, "downloading");
+  await breakTransfer();
+  assert.equal(h.getState().status, "idle");
+  assert.equal(errorStates(h.states).length, 0, "nobody asked, so nothing failed in front of them");
+
+  await h.coordinator.check();
+  await breakTransfer();
+  assert.equal(downloads, 2, "a quiet failure leaves the next check free to download again");
+
+  // A rejection with no "error" event of its own is just as quiet.
+  await h.coordinator.check();
+  transfer.reject(new Error("ETIMEDOUT"));
+  await settle();
+  assert.equal(downloads, 3);
+  assert.equal(h.getState().status, "idle");
+  assert.equal(errorStates(h.states).length, 0);
+});
+
+test("checking while an update downloads by itself makes its failure the person's to see", async () => {
+  const h = harness();
+  const transfer = deferred();
+  h.updater.checkForUpdates = async () => {
+    h.updater.emit("update-available", { version: "2.0.0" });
+  };
+  h.updater.downloadUpdate = () => transfer.promise;
+
+  await h.coordinator.check();
+  assert.equal(h.getState().status, "downloading");
+  await h.coordinator.check(true);
+  transfer.reject(new Error("download failed"));
+  await settle();
+
+  assert.equal(h.getState().status, "error");
+  assert.equal(h.getState().message, "download failed");
+});
+
+test("a download that the person's own check started reports its failure", async () => {
+  const h = harness();
+  h.updater.checkForUpdates = async () => {
+    h.updater.emit("update-available", { version: "2.0.0" });
+  };
+  h.updater.downloadUpdate = () => Promise.reject(new Error("download failed"));
+
+  await h.coordinator.check(true);
+  await settle();
+
+  assert.equal(h.getState().status, "error");
+  assert.equal(h.getState().message, "download failed");
 });
 
 test("an updater error event and rejected promise produce one deterministic state", async () => {
@@ -470,9 +550,15 @@ test("a staged update survives hourly checks until the user explicitly checks ag
   assert.equal(checks, 0);
   assert.deepEqual(h.getState(), staged);
 
+  // Checking again finds the newer one, and it downloads by itself.
+  h.updater.downloadUpdate = async () => {
+    h.updater.emit("update-downloaded", { version: "2.1.0" });
+    return ["/tmp/OpenMausBot-2.1.0-amd64.deb"];
+  };
   await h.coordinator.check(true);
+  await settle();
   assert.equal(checks, 1);
-  assert.equal(h.getState().status, "available");
+  assert.equal(h.getState().status, "downloaded");
   assert.equal(h.getState().version, "2.1.0");
 });
 
@@ -533,8 +619,13 @@ test("failed download and hand-off actions survive automatic checks but remain r
     await h.coordinator.check();
     assert.equal(checks, 0);
     assert.deepEqual(h.getState(), failed);
+    h.updater.downloadUpdate = async () => {
+      h.updater.emit("update-downloaded", { version: "2.0.0" });
+      return ["/tmp/OpenMausBot-2.0.0-amd64.deb"];
+    };
     await h.coordinator.check(true);
+    await settle();
     assert.equal(checks, 1);
-    assert.equal(h.getState().status, "available");
+    assert.equal(h.getState().status, "downloaded");
   }
 });

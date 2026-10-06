@@ -23,7 +23,7 @@ import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0123456789ab.fly.dev";
-const PERSONAL = "OMB Cloud is personal: only your own devices can connect.";
+const PERSONAL = "My Cloud is personal: only your own devices can connect.";
 const secret = randomBytes(32).toString("base64url");
 let home = "", dataDir = "", base = "", port = 0, log = "";
 let child: ChildProcess | undefined;

@@ -11,7 +11,11 @@ import UserNotifications
 
 @main
 struct CompanionApp: App {
-    @StateObject private var session = Session()
+    /// Held, not observed: nothing in the scene reads the session's state,
+    /// and observing it here re-created the root view on every publish —
+    /// a second full Home render each time a busy fleet sent a batch. The
+    /// views that draw from the session observe it themselves.
+    @State private var session = Session()
     @StateObject private var liveCall = LiveCallController.forThisLaunch()
     @Environment(\.scenePhase) private var scenePhase
     @State private var liveActivities = LiveActivityBridge()
@@ -23,6 +27,7 @@ struct CompanionApp: App {
             RootView()
                 .environmentObject(session)
                 .environmentObject(liveCall)
+                .environment(\.avatarLoader, AvatarLoader(session: session))
                 // One modifier is the whole language seam. SwiftUI resolves a
                 // `LocalizedStringKey` against the environment's locale, so
                 // every `Text("…")`, `Button("…")`, `Section("…")` and

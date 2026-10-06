@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
-import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore, managedPortalOrigin } from "./managed-desktop.mjs";
+import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore, managedPortalOrigin, unreadableRecord } from "./managed-desktop.mjs";
 
 const origin = "https://company.example.test";
 const token = `omd_${"a".repeat(43)}`;
@@ -27,13 +27,13 @@ test("branding refreshes with the granted organization and disappears on disconn
   assert.deepEqual(f.client.state().branding, { logo: null, icons: [] });
   await f.client.disconnect(); assert.equal(f.client.state().branding, undefined);
 });
-function fixture(t, { saved = null, handler, apply, write, now, appVersion } = {}) {
+function fixture(t, { saved = null, handler, apply, write, now, appVersion, store } = {}) {
   // A second client in the same test (a restart) shares the mocked clock.
   try { t.mock.timers.enable({ apis: ["setTimeout"] }); } catch (error) { if (error?.code !== "ERR_INVALID_STATE") throw error; }
   const applied = [], policies = [], identities = [], requests = [], opened = [], states = [], record = { value: saved };
   let writes = Promise.resolve();
   let approved = false;
-  const client = createManagedDesktopClient({ platform: "linux", deviceName: "Fixture laptop", store: {
+  const client = createManagedDesktopClient({ platform: "linux", deviceName: "Fixture laptop", store: store ?? {
     read: async () => record.value,
     write: value => {
       const operation = writes.catch(() => {}).then(async () => { await write?.(value); record.value = structuredClone(value); });
@@ -301,6 +301,66 @@ test("secure record is encrypted, atomic, bounded and does not follow a symlink 
     await assert.rejects(createManagedDesktopStore({ file: link, encryption }).read(), /could not be read/);
     assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
   }
+});
+
+/** Electron 43's safeStorage shape over a one-byte key, counting finished reads. `lock.locked` stands in for a locked keychain. */
+function electron43Store(file, lock = { locked: false }, decrypt) {
+  const store = createManagedDesktopStore({ file, encryption: { available: async () => !lock.locked,
+    encrypt: async text => Buffer.from(text).map(byte => byte ^ 0x5a),
+    decrypt: decrypt ?? (async buffer => ({ shouldReEncrypt: false, result: Buffer.from(buffer).map(byte => byte ^ 0x5a).toString() })) } });
+  const counted = { reads: 0, read: () => store.read().finally(() => { counted.reads++; }), write: value => store.write(value) };
+  return counted;
+}
+// The fixture mocks setTimeout; real file reads finish on their own time.
+const until = async check => { const end = Date.now() + 5000; while (!check()) { if (Date.now() > end) assert.fail("did not happen"); await new Promise(resolve => setImmediate(resolve)); } };
+
+test("a saved company sign-in that can never be read is removed, and signing in again is the one next step", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "omb-managed-unreadable-")); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "company-connection.bin");
+  for (const decrypt of [
+    // This computer's key no longer opens it (Windows after a reinstall onto a new profile).
+    async () => { throw new Error("Error while decrypting the ciphertext provided to safeStorage.decryptString."); },
+    // It opens to something that is not JSON, or to JSON that is not an enrollment.
+    async () => ({ shouldReEncrypt: false, result: "not json" }),
+    async () => ({ shouldReEncrypt: false, result: JSON.stringify({ token: "not-a-company-token" }) }),
+  ]) {
+    await electron43Store(file).write(grant());
+    const f = fixture(t, { store: electron43Store(file, undefined, decrypt) });
+    assert.deepEqual(await f.client.start(), { status: "signed-out", message: "This computer's company sign-in couldn't be read, so it was removed. Sign in again." });
+    await assert.rejects(fs.stat(file), { code: "ENOENT" });
+    assert.equal((await f.client.begin({ portalOrigin: origin })).status, "connecting");
+  }
+});
+
+test("a locked keychain never removes the saved company sign-in: it is read again, sooner then each minute, until it opens", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "omb-managed-locked-")); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "company-connection.bin"), lock = { locked: false }, saved = grant();
+  await electron43Store(file).write(saved);
+  lock.locked = true;
+  const store = electron43Store(file, lock);
+  const f = fixture(t, { store, handler: (url, options) => url.endsWith("/api/desktop/session") && options.method !== "DELETE" ? Response.json(session(saved)) : null });
+  const first = await f.client.start();
+  assert.equal(first.status, "unavailable"); assert.equal(f.policies.length, 0);
+  for (const delay of [15_000, 30_000, 60_000]) {
+    const reads = store.reads;
+    await f.tick(delay - 1); assert.equal(store.reads, reads, "not read again early");
+    await f.tick(1); await until(() => store.reads === reads + 1);
+  }
+  assert.ok((await fs.stat(file)).isFile(), "a locked sign-in is never removed");
+  assert.equal(f.states.filter(state => state.status === "unavailable").length, 1, "said once, not on every try");
+  lock.locked = false; await f.tick(60_000);
+  await until(() => f.client.state().status === "connected");
+  assert.equal(f.client.state().email, saved.email);
+});
+
+test("a decrypt answer in a shape this app does not know is never taken for an unreadable company sign-in", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "omb-managed-shape-")); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "company-connection.bin");
+  await electron43Store(file).write(grant());
+  await assert.rejects(electron43Store(file, undefined, async () => ({ shouldReEncrypt: false })).read(), error => !unreadableRecord(error));
+  const f = fixture(t, { store: electron43Store(file, undefined, async () => ({ shouldReEncrypt: false })) });
+  assert.equal((await f.client.start()).status, "unavailable");
+  assert.ok((await fs.stat(file)).isFile());
 });
 
 test("a captured backup generation cannot send a later account's backup request", async t => {

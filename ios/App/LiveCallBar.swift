@@ -254,7 +254,7 @@ struct RemoteLiveCallBar: View {
                 .accessibilityLabel("Hang up")
                 .accessibilityIdentifier("live-call-remote-hangup")
             }
-            Text(LiveCallNotice.fromDevice(call.client))
+            LiveCallNotice.fromDevice(call.client)
                 .font(.system(size: 13))
                 .foregroundStyle(LiveCallColor.detail)
                 .lineLimit(1)
@@ -378,7 +378,7 @@ extension LiveCallNotice {
         case .needsKey:
             return Text("Set up Live calls on your computer first.")
         case let .busy(client, botName):
-            return Text("\(Self.deviceName(client)) is on a call with \(botName ?? String(localized: "a bot")).")
+            return Text("\(Self.deviceName(client)) is on a call with \(botName.map { Text(verbatim: $0) } ?? Text("a bot")).")
         case let .unreachable(detail):
             return Text("Can't reach your computer. \(detail)")
         case let .refused(message):
@@ -416,25 +416,27 @@ extension LiveCallNotice {
     }
 
     /// "Your computer", for the start of a sentence. Not "your Mac": the
-    /// harness runs on Linux too.
-    static func deviceName(_ client: String) -> String {
+    /// harness runs on Linux too. A `Text`, not a `String(localized:)`, so it
+    /// follows the in-app language like the sentence it sits in; a String
+    /// would follow the phone's and mix two languages in one line.
+    static func deviceName(_ client: String) -> Text {
         switch client {
-        case "desktop": return String(localized: "Your computer")
-        case "ios": return String(localized: "An iPhone")
-        case "android": return String(localized: "An Android phone")
-        default: return String(localized: "Another device")
+        case "desktop": return Text("Your computer")
+        case "ios": return Text("An iPhone")
+        case "android": return Text("An Android phone")
+        default: return Text("Another device")
         }
     }
 
     /// Where a call another device holds is: the remote bar's second line.
     /// The desktop's remote bar says it the same way ("Pepper is on a Live
     /// call from an iPhone"), and so does Android's.
-    static func fromDevice(_ client: String) -> String {
+    static func fromDevice(_ client: String) -> Text {
         switch client {
-        case "desktop": return String(localized: "From your computer")
-        case "ios": return String(localized: "From an iPhone")
-        case "android": return String(localized: "From an Android phone")
-        default: return String(localized: "From another device")
+        case "desktop": return Text("From your computer")
+        case "ios": return Text("From an iPhone")
+        case "android": return Text("From an Android phone")
+        default: return Text("From another device")
         }
     }
 }

@@ -14,11 +14,11 @@ import kotlin.test.assertTrue
  * Kotlin:
  *
  * - `ios/App/ChatView.swift`, the `if let live = session.state.streaming …` /
- *   `else if let thinking = session.state.reasoning …` / `else if current.busy`
- *   chain and its `.accessibilityLabel("\(current.name) is working")`;
- * - `ios/App/Composer/TypingIndicatorView.swift`, whose dots hold still under
- *   `accessibilityReduceMotion` — `scaleEffect(reduceMotion ? 1 : …)`, a still
- *   dot rather than an absent one;
+ *   `else if let thinking = session.state.reasoning …` / `else if showsTyping`
+ *   chain;
+ * - `ios/App/Composer/TypingIndicatorView.swift`, whose dots hop in turn (8pt,
+ *   3pt up, 0.15 s apart, 1.2 s a pass) and hold still under
+ *   `accessibilityReduceMotion`, fainter but there;
  * - `ios/App/ChatView.swift`'s `ActivityChip`, which is
  *   `tool.ok.map { $0 ? "success" : "error" } ?? "running"`;
  * - the audit's instruction to leave `SkillExecutionReceiptView`'s duration,
@@ -102,9 +102,26 @@ class LiveTailTest {
     }
 
     @Test
-    fun `the working row is announced with the bot's own name`() {
-        assertEquals("Maus is working", LiveTail.workingLabel("Maus"))
-        assertEquals("Scout is working", LiveTail.workingLabel("Scout"))
+    fun `the typing rule, not busy alone, decides the working row`() {
+        // Busy with a finished reply at the tail, or waiting on an approval:
+        // the shared rule says no, and the row stays away.
+        assertEquals(
+            TranscriptTail.NONE,
+            LiveTail.of(streaming = null, reasoning = null, busy = true, typing = false),
+        )
+        assertEquals(
+            TranscriptTail.WORKING,
+            LiveTail.of(streaming = null, reasoning = null, busy = true, typing = true),
+        )
+        // At Hidden the stream still goes to the status line and the row is the
+        // rule's to show.
+        assertEquals(
+            TranscriptTail.NONE,
+            LiveTail.of("Answer", null, busy = true, detail = ActivityDetail.HIDDEN, typing = false),
+        )
+        // A stream or reasoning on screen wins over the row whatever the rule says.
+        assertEquals(TranscriptTail.STREAM, LiveTail.of("Hel", null, busy = true, typing = true))
+        assertEquals(TranscriptTail.REASONING, LiveTail.of(null, "hmm", busy = true, typing = true))
     }
 }
 
@@ -120,9 +137,41 @@ class WorkingDotsTest {
                 )
             }
         }
-        // Still, not gone: iOS draws the dots at full scale under Reduce Motion
-        // rather than dropping the row.
-        assertTrue(WorkingDots.REST_ALPHA > WorkingDots.MIN_ALPHA)
+        // Still, not gone: iOS draws the dots, fainter, under Reduce Motion
+        // rather than dropping the row — and none of them leaves the line.
+        assertTrue(WorkingDots.REST_ALPHA > 0f)
+        for (index in 0 until WorkingDots.COUNT) {
+            assertEquals(0f, WorkingDots.lift(index, 300_000_000L, moving = false))
+        }
+    }
+
+    @Test
+    fun `each dot hops up and lands, then waits on the line`() {
+        for (index in 0 until WorkingDots.COUNT) {
+            for (step in 0..48) {
+                val elapsed = step * WorkingDots.PERIOD_NANOS / 48
+                val lift = WorkingDots.lift(index, elapsed, moving = true)
+                assertTrue(lift >= -TOLERANCE && lift <= 1f + TOLERANCE, "dot $index at $elapsed ns was $lift")
+            }
+        }
+        // The first dot is at the top of its hop a quarter of the way through,
+        // and back on the line for the second half of the pass.
+        assertEquals(1f, WorkingDots.lift(0, WorkingDots.PERIOD_NANOS / 4, moving = true), TOLERANCE)
+        assertEquals(0f, WorkingDots.lift(0, WorkingDots.PERIOD_NANOS * 3 / 4, moving = true), TOLERANCE)
+    }
+
+    @Test
+    fun `each dot hops a stagger behind its neighbour`() {
+        for (at in listOf(0L, 90_000_000L, 400_000_000L, 1_000_000_000L)) {
+            for (index in 1 until WorkingDots.COUNT) {
+                assertEquals(
+                    WorkingDots.lift(index - 1, at, moving = true),
+                    WorkingDots.lift(index, at + WorkingDots.STAGGER_NANOS, moving = true),
+                    TOLERANCE,
+                    "dot $index at ${at + WorkingDots.STAGGER_NANOS} ns",
+                )
+            }
+        }
     }
 
     @Test

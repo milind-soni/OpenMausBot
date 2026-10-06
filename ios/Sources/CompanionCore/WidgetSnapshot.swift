@@ -35,6 +35,22 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         public var answerOptions: [String] {
             ChatUpdate.answerOptions(kind: kind, card: card)
         }
+
+        /// Everything a widget draws from this row except `line`. `Chat`'s
+        /// own equality is ids only, so the identity a widget renders —
+        /// the thread it deep-links to, the name, the colour, the thread
+        /// title — is compared here field by field.
+        func matchesExceptLine(_ other: Row) -> Bool {
+            chat == other.chat
+                && kind == other.kind
+                && card == other.card
+                && face == other.face
+                && since == other.since
+                && chat.threadId == other.chat.threadId
+                && chat.name == other.chat.name
+                && chat.color == other.chat.color
+                && chat.threadTitle == other.chat.threadTitle
+        }
     }
 
     /// When the app wrote this snapshot; widgets age their content from it.
@@ -51,20 +67,48 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 }
 
 extension WidgetSnapshot {
-    /// Payload changes publish immediately. An unchanged live view only
-    /// renews once a minute, without changing the widget's answer-age gate.
-    public func shouldReplace(_ previous: WidgetSnapshot?) -> Bool {
+    /// How often an unchanged snapshot renews `writtenAt`, so a widget can
+    /// tell a live picture from one the app stopped refreshing.
+    public static let renewalInterval: TimeInterval = 60
+
+    /// How often a working row's line alone may republish. While a bot
+    /// streams, that line is the reply's last words and changes on every
+    /// batch, but a widget cannot show live text: it redraws only when the
+    /// app asks WidgetKit to reload, and each reload re-runs every widget's
+    /// provider. Thirty seconds is two writes a minute instead of one per
+    /// 400 ms window (about 150), and stays inside the minute renewal. On
+    /// iPhone the home screen is hidden while the app streams anyway; the
+    /// write on the way to the background is exact
+    /// (`WidgetSnapshotWriter.publish(exact:)`).
+    public static let workingLineInterval: TimeInterval = 30
+
+    /// Payload changes publish immediately — a new ask, a kind change, a
+    /// chat arriving or leaving, a rename, a colour, a face, another
+    /// computer. The one exception is a working row whose line alone
+    /// moved: that is narration, and it waits for `workingLineInterval`.
+    /// An unchanged live view only renews once a minute, without changing
+    /// the widget's answer-age gate.
+    public func shouldReplace(
+        _ previous: WidgetSnapshot?,
+        workingLineInterval: TimeInterval = WidgetSnapshot.workingLineInterval
+    ) -> Bool {
         guard let previous, connectionID == previous.connectionID,
-              rows == previous.rows,
-              zip(rows, previous.rows).allSatisfy({ current, held in
-                  current.chat.threadId == held.chat.threadId
-                      && current.chat.name == held.chat.name
-                      && current.chat.color == held.chat.color
-                      && current.chat.threadTitle == held.chat.threadTitle
-              })
+              rows.count == previous.rows.count
         else { return true }
+        var narrationOnly = false
+        for (current, held) in zip(rows, previous.rows) {
+            guard current.matchesExceptLine(held) else { return true }
+            if current.line != held.line {
+                // Any other row's line is what it says to a person: the
+                // ask's subtitle, the finished reply.
+                guard current.kind == .working else { return true }
+                narrationOnly = true
+            }
+        }
         let elapsed = writtenAt.timeIntervalSince(previous.writtenAt)
-        return elapsed < 0 || elapsed >= 60
+        guard elapsed >= 0 else { return true }
+        let interval = narrationOnly ? min(workingLineInterval, Self.renewalInterval) : Self.renewalInterval
+        return elapsed >= interval
     }
 
     /// An empty write from "now" — what a placeholder renders, so a
@@ -281,10 +325,21 @@ public final class WidgetSnapshotWriter: @unchecked Sendable {
     public init(store: WidgetSnapshotStore) { self.store = store }
 
     /// Completion runs on the writer queue, even for a skipped/failed write.
-    public func publish(_ snapshot: WidgetSnapshot?, completion: @escaping @Sendable (Bool) -> Void) {
+    /// `exact` is the last write before suspension: a working row's line
+    /// lands now instead of waiting out `workingLineInterval`, because no
+    /// later window may come to carry it.
+    public func publish(
+        _ snapshot: WidgetSnapshot?,
+        exact: Bool = false,
+        completion: @escaping @Sendable (Bool) -> Void
+    ) {
         queue.async { [self] in
             if let snapshot {
-                guard snapshot.shouldReplace(lastWritten) else { completion(false); return }
+                let interval = exact ? 0 : WidgetSnapshot.workingLineInterval
+                guard snapshot.shouldReplace(lastWritten, workingLineInterval: interval) else {
+                    completion(false)
+                    return
+                }
                 do {
                     try store.write(snapshot)
                     lastWritten = snapshot

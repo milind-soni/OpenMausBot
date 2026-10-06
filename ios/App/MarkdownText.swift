@@ -36,6 +36,54 @@ struct MarkdownText: View {
         cache.totalCostLimit = 524_288
         return cache
     }()
+    /// The live reply's last block is different text on almost every update.
+    /// It gets its own small cache so a redraw for some other reason is still
+    /// a lookup, while its one-use prefixes never push settled messages out
+    /// of `inlineCache`.
+    private static let liveInlineCache: NSCache<NSString, CachedInline> = {
+        let cache = NSCache<NSString, CachedInline>()
+        cache.countLimit = 64
+        cache.totalCostLimit = 131_072
+        return cache
+    }()
+
+    private final class CachedWidths: NSObject {
+        let widths: [CGFloat]
+        init(_ widths: [CGFloat]) { self.widths = widths }
+    }
+    /// A table's column widths, measured once per table rather than once per
+    /// cell per render. Bold Text changes what the system font measures, so
+    /// it is part of the key.
+    private final class TableKey: NSObject {
+        let table: MarkdownTable
+        let boldText: Bool
+        init(_ table: MarkdownTable, boldText: Bool) {
+            self.table = table
+            self.boldText = boldText
+        }
+        override var hash: Int {
+            var hasher = Hasher()
+            hasher.combine(table)
+            hasher.combine(boldText)
+            return hasher.finalize()
+        }
+        override func isEqual(_ object: Any?) -> Bool {
+            guard let other = object as? TableKey else { return false }
+            return boldText == other.boldText && table == other.table
+        }
+    }
+    private static let widthCache: NSCache<TableKey, CachedWidths> = {
+        let cache = NSCache<TableKey, CachedWidths>()
+        cache.countLimit = 64
+        return cache
+    }()
+    /// Same split as the inline caches: a table that is still streaming is a
+    /// new value on almost every update.
+    private static let liveWidthCache: NSCache<TableKey, CachedWidths> = {
+        let cache = NSCache<TableKey, CachedWidths>()
+        cache.countLimit = 4
+        return cache
+    }()
 
     let source: String
     /// Draws a caret after the last block. The streaming bubble sets this so
@@ -61,7 +109,9 @@ struct MarkdownText: View {
     }
 
     var body: some View {
-        let blocks = Markdown.blocks(source)
+        // The caret marks the live bubble, whose text grows every batch: its
+        // settled blocks are parsed once and only the open tail again.
+        let blocks = Markdown.blocks(source, streaming: caret)
         VStack(alignment: .leading, spacing: 8) {
             let firstTable = blocks.firstIndex { if case .table = $0 { return true }; return false }
             ForEach(Array(blocks.enumerated()), id: \.offset) { item in
@@ -146,7 +196,8 @@ struct MarkdownText: View {
 
     private func taskRow(indent: Int, number: Int?, checked: Bool, text: String, tail: Bool) -> some View {
         let state = String(localized: checked ? "completed" : "not completed")
-        let words = renderedInline(text)
+        let attributed = attributedInline(text, live: tail)
+        let words = String(attributed.characters)
         let label = words.isEmpty ? state : "\(state), \(words)"
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
             if let number {
@@ -159,7 +210,7 @@ struct MarkdownText: View {
                 Image(systemName: checked ? "checkmark.square.fill" : "square")
                     .font(.system(size: 17))
                     .foregroundStyle(Color.secondary)
-                inline(text, tail: tail).font(.system(size: 17))
+                inline(attributed, tail: tail).font(.system(size: 17))
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(label)
@@ -168,8 +219,10 @@ struct MarkdownText: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// `tail` is set on the live reply's last block: the caret goes after its
+    /// last cell, and nothing measured from it is kept with settled tables.
     private func tableView(_ table: MarkdownTable, tail: Bool, scrollIdentifier: String?) -> some View {
-        let widths = columnWidths(table)
+        let widths = columnWidths(table, live: tail)
         return ScrollView(.horizontal, showsIndicators: false) {
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                 GridRow {
@@ -180,6 +233,7 @@ struct MarkdownText: View {
                             alignment: table.alignments[index],
                             weight: .semibold,
                             tail: tail && table.rows.isEmpty && index == table.headers.count - 1,
+                            live: tail,
                             identifier: scrollIdentifier.map { "\($0)-cell-0-\(index)" }
                         )
                     }
@@ -197,6 +251,7 @@ struct MarkdownText: View {
                                 alignment: table.alignments[index],
                                 weight: .regular,
                                 tail: tail && isLast,
+                                live: tail,
                                 identifier: scrollIdentifier.map { "\($0)-cell-\(rowIndex + 1)-\(index)" }
                             )
                         }
@@ -220,18 +275,21 @@ struct MarkdownText: View {
         alignment: MarkdownTableAlignment,
         weight: Font.Weight,
         tail: Bool,
+        live: Bool,
         identifier: String?
     ) -> some View {
-        Color.clear
+        // One inline render serves both the drawn words and the spoken ones.
+        let attributed = attributedInline(text, live: live)
+        return Color.clear
             .frame(width: tail ? width + caretWidth : width, height: 22)
             .overlay(alignment: frameAlignment(alignment)) {
-                inline(text, tail: tail)
+                inline(attributed, tail: tail)
                     .font(.system(size: 15, weight: weight))
                     .lineLimit(1)
                     .accessibilityHidden(true)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(renderedInline(text))
+            .accessibilityLabel(String(attributed.characters))
             .modifier(OptionalIdentifier(identifier: identifier))
     }
 
@@ -243,39 +301,42 @@ struct MarkdownText: View {
         }
     }
 
+    private func columnWidths(_ table: MarkdownTable, live: Bool) -> [CGFloat] {
+        let key = TableKey(table, boldText: UIAccessibility.isBoldTextEnabled)
+        let cache = live ? Self.liveWidthCache : Self.widthCache
+        if let cached = cache.object(forKey: key) { return cached.widths }
+        let widths = measuredColumnWidths(table, live: live)
+        cache.setObject(CachedWidths(widths), forKey: key)
+        return widths
+    }
+
     /// Column width is the widest single-line cell, measured on the words
     /// that are actually drawn. A code span is also measured in monospace,
     /// which is wider than the proportional font.
-    private func columnWidths(_ table: MarkdownTable) -> [CGFloat] {
+    private func measuredColumnWidths(_ table: MarkdownTable, live: Bool) -> [CGFloat] {
         let headerFont = UIFont.systemFont(ofSize: 15, weight: .semibold)
         let bodyFont = UIFont.systemFont(ofSize: 15, weight: .regular)
         return table.headers.indices.map { index in
-            var widest = textWidth(table.headers[index], font: headerFont)
+            var widest = textWidth(table.headers[index], font: headerFont, live: live)
             for row in table.rows where index < row.count {
-                widest = max(widest, textWidth(row[index], font: bodyFont))
+                widest = max(widest, textWidth(row[index], font: bodyFont, live: live))
             }
             return max(widest + 8, 24)
         }
     }
 
     private var caretWidth: CGFloat {
-        textWidth("\u{2007}▍", font: UIFont.systemFont(ofSize: 15))
+        textWidth("\u{2007}▍", font: UIFont.systemFont(ofSize: 15), live: false)
     }
 
-    private func textWidth(_ text: String, font: UIFont) -> CGFloat {
-        let plain = renderedInline(text)
+    private func textWidth(_ text: String, font: UIFont, live: Bool) -> CGFloat {
+        let plain = String(attributedInline(text, live: live).characters)
         var width = ceil((plain as NSString).size(withAttributes: [.font: font]).width)
         if text.contains("`") {
             let mono = UIFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
             width = max(width, ceil((plain as NSString).size(withAttributes: [.font: mono]).width))
         }
         return width
-    }
-
-    /// The words VoiceOver should hear, with inline markers removed. The
-    /// visible text still goes through Foundation so emphasis stays styled.
-    private func renderedInline(_ text: String) -> String {
-        String(attributedInline(text).characters)
     }
 
     private func marker(_ symbol: String, indent: Int, text: String, tail: Bool) -> some View {
@@ -297,20 +358,32 @@ struct MarkdownText: View {
     /// Falling back to the raw string on a parse failure is the point: a
     /// half-typed link mid-stream should show as the characters the model has
     /// sent so far, not vanish until it closes the bracket.
+    ///
+    /// `tail` is only ever set on the live reply's last block, which is also
+    /// the one block whose text is still changing.
     private func inline(_ text: String, tail: Bool = false) -> Text {
-        Text(attributedInline(text)) + caretText(tail)
+        inline(attributedInline(text, live: tail), tail: tail)
     }
 
-    private func attributedInline(_ text: String) -> AttributedString {
+    private func inline(_ attributed: AttributedString, tail: Bool) -> Text {
+        Text(attributed) + caretText(tail)
+    }
+
+    /// The words VoiceOver should hear are this with the markers gone:
+    /// `String(attributed.characters)`. The visible text still goes through
+    /// Foundation so emphasis stays styled.
+    private func attributedInline(_ text: String, live: Bool) -> AttributedString {
         let key = text as NSString
         if let cached = Self.inlineCache.object(forKey: key) { return cached.text }
+        if live, let cached = Self.liveInlineCache.object(forKey: key) { return cached.text }
         let attributed = (try? AttributedString(
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )) ?? AttributedString(text)
         let bytes = text.utf8.count
         if bytes <= 8_192 {
-            Self.inlineCache.setObject(CachedInline(attributed), forKey: key, cost: bytes * 4)
+            let cache = live ? Self.liveInlineCache : Self.inlineCache
+            cache.setObject(CachedInline(attributed), forKey: key, cost: bytes * 4)
         }
         return attributed
     }

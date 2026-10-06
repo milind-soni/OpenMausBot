@@ -3432,7 +3432,7 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "do not create a replacement" })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.bots.find(
         (bot: { id: string }) => bot.id === botIds[0],
-      )), { timeout: 5_000 }).toMatch(/team's Boat computer is missing/);
+      )), { timeout: 5_000 }).toMatch(/team's cloud computer is missing/);
       await idle(botIds[0]);
       expect(existsSync(fakeClaudeDump)).toBe(false);
       expect(boatRouteCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(createCount);
@@ -10909,7 +10909,7 @@ describe("harness HTTP API", () => {
     });
     expect(saved.status).toBe(200);
     expect(saved.body.composio).toEqual({ configured: true, mode: "self-hosted" });
-    expect(saved.body.opencodeGo).toEqual({ configured: true });
+    expect(saved.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
     expect(saved.body.profile).toEqual({ name: "External Store", email: "", aboutMe: "" });
     expect(JSON.stringify(saved.body)).not.toContain("ak_good");
 
@@ -11432,11 +11432,11 @@ describe("harness HTTP API", () => {
   it("stores OpenCode Go credentials as a configured-only status", async () => {
     const put = await api("PUT", "/api/config", { opencodeGo: { apiKey: "opencode-secret" } });
     expect(put.status).toBe(200);
-    expect(put.body.opencodeGo).toEqual({ configured: true });
+    expect(put.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
     expect(JSON.stringify(put.body)).not.toContain("opencode-secret");
 
     const after = await api("GET", "/api/config");
-    expect(after.body.opencodeGo).toEqual({ configured: true });
+    expect(after.body.opencodeGo).toEqual({ configured: true, providerKeys: [] });
     expect(JSON.stringify(after.body)).not.toContain("opencode-secret");
   });
 

@@ -51,6 +51,11 @@ struct ComputerView: View {
     /// The take in flight, cancelled if the person leaves before it lands.
     @State private var taking: Task<Void, Never>?
     @State private var controlError: String?
+    /// The picture on screen, decoded once per new frame or still. Decoding
+    /// in `body` base64- and PNG-decoded the same desktop frame on every
+    /// Session publish (~12 a second while a fleet streams). Until the next
+    /// one is decoded, the last stays up.
+    @State private var shownImage: UIImage?
 
     private enum LocalVmProblem: Equatable {
         /// The Mac has not allowed computer access for this phone.
@@ -61,11 +66,19 @@ struct ComputerView: View {
 
     private var frame: ScreenFrame? { session.state.screens[bot.id] }
 
-    /// Whichever picture is newer: a streamed frame of a working bot, or a
-    /// still fetched on demand.
-    private var shownImageData: Data? {
-        if let polled, streamFrameAt.map({ $0 < polled.at }) ?? true { return polled.shot.data }
-        return frame?.data
+    /// Which picture is on screen, by identity rather than by its pixels:
+    /// whichever is newer of a streamed frame of a working bot or a still
+    /// fetched on demand. A new identity is what triggers a decode.
+    private enum ShownPicture: Equatable {
+        case polled(Date)
+        case streamed(String)
+        case none
+    }
+
+    private var shownPicture: ShownPicture {
+        if let polled, streamFrameAt.map({ $0 < polled.at }) ?? true { return .polled(polled.at) }
+        if let png = frame?.png { return .streamed(png) }
+        return .none
     }
 
     /// Cloud computers have their own viewer below; every other kind may be
@@ -82,7 +95,7 @@ struct ComputerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let image = shownImageData.flatMap(UIImage.init(data:)) {
+            if let image = shownImage {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
@@ -217,6 +230,7 @@ struct ComputerView: View {
         .onValueChange(of: frame?.png) { png in
             if png != nil { streamFrameAt = Date() }
         }
+        .task(id: shownPicture) { await decodeShownPicture() }
         // Restarted when the bot starts or stops working (the cadence
         // changes); stopped in the background and while this phone is
         // driving the VM live.
@@ -308,6 +322,22 @@ struct ComputerView: View {
         handingBack = true
         defer { handingBack = false }
         await session.handBackLocalVm(for: current, leaseId: taken.leaseId, client: taken.client)
+    }
+
+    /// Desktop frames are drawn across the screen, so they are decoded at
+    /// full size; the point is doing it once per picture, off the main actor.
+    private func decodeShownPicture() async {
+        let picture = shownPicture
+        let still = polled?.shot.data
+        let decoded: DecodedImage? = await Task.detached(priority: .userInitiated) {
+            switch picture {
+            case .polled: return still.flatMap { ImageDownsampler.decode($0) }
+            case let .streamed(png): return ImageDownsampler.decode(base64: png)
+            case .none: return nil
+            }
+        }.value
+        guard !Task.isCancelled else { return }
+        shownImage = decoded.map { UIImage(cgImage: $0.cgImage) }
     }
 
     /// Fetch Local VM stills while this view is on screen. Stops on a 409

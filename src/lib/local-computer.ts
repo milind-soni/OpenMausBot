@@ -62,7 +62,7 @@ export function localComputerDisabledReason({
 }
 
 export function linuxAutoDescription(): string {
-  return "Auto reuses an existing Boat cloud computer; otherwise computer use stays off.";
+  return "Auto reuses an existing cloud computer; otherwise computer use stays off.";
 }
 
 export type BoatPanelAction =

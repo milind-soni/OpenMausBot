@@ -10,6 +10,7 @@ import com.openmausbot.companion.core.PendingApproval
 import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.isStatusNotice
 import com.openmausbot.companion.core.label
+import com.openmausbot.companion.core.previewLine
 import com.openmausbot.companion.core.rosterPreview
 import com.openmausbot.companion.core.takeLastCharacters
 import com.openmausbot.companion.core.visibleTasks
@@ -60,10 +61,9 @@ internal fun CompanionState.updates(pending: List<PendingApproval>, detail: Acti
         val chat = ThreadResolution.chatOrNull(this, approval.threadId) ?: continue
         if (!seen.add(chat.conversationId)) continue
         val card = approval.message.card
-        // iOS writes `card?.subtitle ?? card?.title ?? ""`, where `subtitle` is
-        // not optional — so the title arm is reachable only for a null card, and
-        // an empty subtitle stays empty rather than falling back to the title.
-        out += ChatUpdate(chat, UpdateKind.NEEDS_YOU, card?.subtitle.orEmpty(), card)
+        // The short form, as iOS writes it: a held send reads "Linear · Create
+        // linear comment ×2", never its raw arguments.
+        out += ChatUpdate(chat, UpdateKind.NEEDS_YOU, card?.previewLine.orEmpty(), card)
     }
 
     for (bot in bots) {

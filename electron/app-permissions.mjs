@@ -9,6 +9,11 @@
 // host sensors and devices exposed if an untrusted payload ever executes.
 // The allow-list also applies only to the verified renderer origin; any
 // opaque or cross-origin request is refused outright.
+//
+// One exception: the person's own Cloud, open in the main window, may use the
+// microphone (for a Live call) and nothing else. A Cloud is personal, so its
+// page hearing the microphone is the person's own page hearing it. Any other
+// server's page stays refused.
 
 const ALLOWED_APP_PERMISSIONS = new Set([
   "notifications",
@@ -57,6 +62,63 @@ export function appPermissionAllowed(permission, requestingUrlOrOrigin, renderer
   }
 
   return ALLOWED_APP_PERMISSIONS.has(permission);
+}
+
+/**
+ * Whether the person's own Cloud may use a capability: only the microphone,
+ * only in the main frame, only at the exact origin the verified Cloud sign-in
+ * reports. Never the camera, screen capture, notifications or the clipboard.
+ *
+ * @param {string} permission The Electron/Chromium permission name
+ * @param {string} requestingUrlOrOrigin The URL or origin requesting the permission
+ * @param {string | null} homeOrigin The verified Cloud's origin, or null when there is none
+ * @param {{ isMainFrame?: boolean, mediaTypes?: string[], mediaType?: string }} [details] Request details
+ * @returns {boolean} True only for the Cloud's own microphone request
+ */
+function cloudHomeMicrophoneAllowed(permission, requestingUrlOrOrigin, homeOrigin, details) {
+  const requesting = webOrigin(requestingUrlOrOrigin);
+  const home = webOrigin(homeOrigin);
+  if (permission !== "media" || !requesting || !home || requesting !== home || details?.isMainFrame !== true) return false;
+  if (details.mediaType !== undefined && details.mediaType !== "audio") return false;
+  // A request names its media; empty is getDisplayMedia, which a Cloud never gets.
+  if (details.mediaTypes !== undefined) {
+    return Array.isArray(details.mediaTypes) && details.mediaTypes.length > 0 && details.mediaTypes.every((type) => type === "audio");
+  }
+  return details.mediaType === "audio";
+}
+
+/**
+ * The session's permission handlers. This computer's own page gets
+ * appPermissionAllowed; the Cloud gets the microphone, and only while it is
+ * the page open in the main window.
+ *
+ * @param {{ rendererOrigin: () => string, mainContents: () => unknown, cloudHomeOrigin: () => string | null }} context
+ *   `mainContents`: the main window's webContents, or null; `cloudHomeOrigin`:
+ *   the Cloud the sign-in verified, asked on every request so signing out
+ *   takes the microphone away at once.
+ */
+export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeOrigin }) {
+  const allowed = (contents, permission, requesting, details) => {
+    if (appPermissionAllowed(permission, requesting, rendererOrigin(), details)) return true;
+    const main = mainContents();
+    return Boolean(contents) && contents === main && cloudHomeMicrophoneAllowed(permission, requesting, cloudHomeOrigin(), details);
+  };
+  return {
+    request: (contents, permission, callback, details) => {
+      callback(allowed(contents, permission, details?.requestingUrl ?? contents?.getURL?.() ?? "", details));
+    },
+    check: (contents, permission, requestingOrigin, details) =>
+      allowed(contents, permission, requestingOrigin || contents?.getURL?.() || "", details),
+    /** perm:status's `pageMic`: what `request` answers the asking page's
+     * microphone request, so a blocked Live call can say whether this app
+     * refused it (a web browser can make the call) or the computer did. */
+    pageMicrophone: (event) => {
+      const contents = event?.sender;
+      const frame = event?.senderFrame;
+      const isMainFrame = Boolean(frame) && frame === contents?.mainFrame;
+      return allowed(contents, "media", frame?.url ?? "", { isMainFrame, mediaTypes: ["audio"] }) ? "allowed" : "refused";
+    },
+  };
 }
 
 // Both explicit IPC links and window.open must use the same web-only policy.

@@ -124,6 +124,10 @@ final class Session: ObservableObject {
     /// the replacement's handle.
     private var streamGeneration = 0
     private var runtimeGeneration = 0
+    /// Bumped as each Live-call lookup starts. Only the newest one may write
+    /// its answer: an older one still out (from before a reconnect, or from
+    /// a computer this phone left and came back to) is not newer than it.
+    private var liveCallLookup = 0
     private var reconnectDelay: UInt64 = 0
     /// Resumes that closed right after hello; enough of them start over (MOCA-179).
     private var streamResume = StreamResume()
@@ -202,7 +206,7 @@ final class Session: ObservableObject {
         let arguments = ProcessInfo.processInfo.arguments
         if (arguments.contains("-store-preview") || arguments.contains("-computer-switcher-preview")),
            let url = Bundle.main.url(
-               forResource: arguments.contains("-images-preview") ? "ImagePreview" : arguments.contains("-chat-update-preview") ? "ChatUpdatePreview" : arguments.contains("-chat-presentation-preview") ? "ChatPresentationPreview" : arguments.contains("-roster-preview") ? "RosterPreview" : arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
+               forResource: arguments.contains("-images-preview") ? "ImagePreview" : arguments.contains("-approval-preview") ? "ApprovalPreview" : arguments.contains("-chat-update-preview") ? "ChatUpdatePreview" : arguments.contains("-chat-presentation-preview") ? "ChatPresentationPreview" : arguments.contains("-roster-preview") ? "RosterPreview" : arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
                withExtension: "json"
            ),
            let data = try? Data(contentsOf: url),
@@ -305,6 +309,16 @@ final class Session: ObservableObject {
                 messages[index].turnTerminal = nil
                 state.messages["preview-gmail"] = messages
             }
+            // The moment after you send: your message is the newest row and
+            // the thread is idle; ChatView starts the turn a beat after the
+            // chat opens, the order the computer sends them in.
+            if arguments.contains("-chat-typing-preview"),
+               let sent = try? JSONDecoder().decode(Message.self, from: Data(
+                #"{"id":"preview-sent","role":"user","kind":"text","at":1789088460000,"text":"Can you check the Android build too?","parentId":"answer"}"#.utf8
+               )) {
+                setPreviewTurn(busy: false, threadId: "preview-gmail")
+                state.apply(.message(threadId: "preview-gmail", message: sent))
+            }
             if arguments.contains("-chat-compaction-preview"),
                var receipt = state.messages["preview-gmail"]?.last {
                 receipt.id = "preview-compaction"
@@ -353,6 +367,28 @@ final class Session: ObservableObject {
     }
 
 #if DEBUG
+    /// The preview fixtures' turn switch: flips one thread busy or idle with
+    /// the same metadata-only bot frame the computer sends.
+    func setPreviewTurn(busy: Bool, threadId: String) {
+        guard var bot = state.bots.first(where: {
+            $0.threadId == threadId || $0.tasks?.contains { $0.threadId == threadId } == true
+        }) else { return }
+        let activity = busy ? "working" : "idle"
+        if bot.threadId == threadId {
+            bot.busy = busy
+            bot.activity = activity
+        }
+        bot.tasks = bot.tasks?.map { task in
+            guard task.threadId == threadId else { return task }
+            var task = task
+            task.busy = busy
+            task.activity = activity
+            return task
+        }
+        bot.messages = nil
+        state.apply(.bot(bot))
+    }
+
     /// Ordinary chat under synthetic fleet traffic: no client, pairing,
     /// microphone or provider. Uses the same delivery/fold as the live stream.
     private func startBusyFleetPreview() {
@@ -1106,7 +1142,10 @@ final class Session: ObservableObject {
                 guard let self, self.runtimeGeneration == runtime else { return }
                 self.steeringInstanceIds = Set(engines.filter { $0.capabilities?.queueing == true }.map(\.instanceId))
             }
-            await refreshLiveCall(using: client)
+            // Nor must the line: run() waits for this hydrate before it folds
+            // another frame, so awaiting the lookup here held the whole
+            // stream behind one more request (up to its 20 s timeout).
+            Task { [weak self] in await self?.refreshLiveCall(using: client) }
             return
         }
         throw APIError.status(code: 409, message: "Conversations changed while loading. Please try opening this notification again.")
@@ -2502,15 +2541,21 @@ final class Session: ObservableObject {
     ///
     /// The stream keeps running while the lookup is out. A `live.call` frame
     /// (or a hang-up's answer) that lands meanwhile is newer than the
-    /// lookup, so the answer is applied only if the line and the cursor
-    /// are still where they were — the same guard `hydrate` uses.
+    /// lookup, so the answer is applied only if nothing wrote the line in
+    /// the meantime; frames about anything else do not void it. Lookups can
+    /// overlap now that hydrate no longer waits for one, and the revision
+    /// starts again at 0 with every fresh state, so an answer also needs to
+    /// be from the newest lookup of the same runtime.
     private func refreshLiveCall(using client: CompanionClient) async {
-        let expectedCursor = state.cursor
-        let expectedLine = state.liveCall
+        liveCallLookup &+= 1
+        let lookup = liveCallLookup
+        let runtime = runtimeGeneration
+        let revision = state.liveCallRevision
         do {
             let call = try await client.liveCall()
-            guard self.client?.connection.id == client.connection.id else { return }
-            if !state.applyLiveCallLookup(call, ifCursorMatches: expectedCursor, lineWas: expectedLine) {
+            guard runtimeGeneration == runtime, liveCallLookup == lookup,
+                  self.client?.connection.id == client.connection.id else { return }
+            if !state.applyLiveCallLookup(call, ifRevisionIs: revision) {
                 log.info("live call lookup dropped: the stream moved on while it was out")
             }
         } catch {
@@ -2901,11 +2946,23 @@ extension CompanionState {
     ///   asked to see. The preview honours it the same way the transcript
     ///   does; `lastActivity` deliberately does not, because a thread that
     ///   just ran a tool has still moved and should still rise in the list.
-    func chatSummaries(activity: ActivityDetail = .full) -> [ChatSummary] {
+    /// - Parameter previews: false leaves every preview empty. Compact rows
+    ///   never show one, and without it a summary needs only the thread's
+    ///   last message rather than its whole visible branch and a fold of it,
+    ///   for every chat, on every render of a busy roster.
+    func chatSummaries(activity: ActivityDetail = .full, previews: Bool = true) -> [ChatSummary] {
         let bots = self.bots.filter { $0.hidden != true }.map(Chat.bot)
         let rooms = self.rooms.map(Chat.room)
         return (bots + rooms)
             .map { chat in
+                guard previews else {
+                    return ChatSummary(
+                        chat: chat,
+                        preview: "",
+                        lastActivity: lastVisibleMessage(forThread: chat.threadId)?.at ?? 0,
+                        pinned: Self.pinned(chat)
+                    )
+                }
                 let messages = visibleTranscript(forThread: chat.threadId)
                 return ChatSummary(
                     chat: chat,

@@ -18,10 +18,25 @@ export const CALL_MODES: ReadonlyArray<{ id: CallMode; label: LocaleKey }> = [
   { id: "live", label: "call.mode.live" },
 ];
 
+/** What a Live call sends to OpenAI, and where the key stays: on the
+ * person's Cloud (`cloudHome`) the key is saved there, not on this computer. */
+export function liveDisclosure({ cloudHome = false }: { cloudHome?: boolean } = {}): string {
+  return t(cloudHome ? "call.live.disclosureCloud" : "call.live.disclosure");
+}
+
 /** What a mode means, in the app's language. Choosing Live is where Live is
  * turned on, so its hint says what a Live call sends to OpenAI. */
-export function callModeHint(mode: CallMode): string {
-  return mode === "live" ? `${t("call.mode.liveHint")} ${t("call.live.disclosure")}` : t("call.mode.turnsHint");
+export function callModeHint(mode: CallMode, where: { cloudHome?: boolean } = {}): string {
+  return mode === "live" ? `${t("call.mode.liveHint")} ${liveDisclosure(where)}` : t("call.mode.turnsHint");
+}
+
+/** The call the button makes here. Taking turns listens on this device,
+ * which only the Mac app's own page can (`turnsHere`). Anywhere else (a
+ * browser, the Windows or Linux app, any server's page such as My Cloud) a
+ * call that can be Live is Live, whatever was picked before. The pick is
+ * kept for the pages where it applies. */
+export function effectiveCallMode(stored: CallMode, { turnsHere, canLive }: { turnsHere: boolean; canLive: boolean }): CallMode {
+  return canLive && !turnsHere ? "live" : stored;
 }
 
 export function parseCallMode(value: string | null): CallMode {

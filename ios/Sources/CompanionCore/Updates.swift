@@ -49,6 +49,15 @@ extension CompanionState {
     /// setting: these lines fold tool calls and webhooks by the same rule as
     /// the roster, so Hidden means hidden on every surface (MOCA-204).
     public func updates(detail: ActivityDetail) -> [ChatUpdate] {
+        updates(detail: detail, pendingApprovals: pendingApprovals)
+    }
+
+    /// The same, from `pendingApprovals` the caller already holds: Home
+    /// reads them for its rows too, and each walk visits every thread.
+    public func updates(
+        detail: ActivityDetail,
+        pendingApprovals: [(threadId: String, message: Message)]
+    ) -> [ChatUpdate] {
         var out: [ChatUpdate] = []
         var seen = Set<String>()
 
@@ -57,7 +66,9 @@ extension CompanionState {
         for pending in pendingApprovals {
             guard let chat = chat(forThread: pending.threadId), seen.insert(chat.conversationID).inserted else { continue }
             let card = pending.message.card
-            out.append(ChatUpdate(chat: chat, kind: .needsYou, line: card?.subtitle ?? card?.title ?? "", card: card))
+            // The short form: a held send reads "Linear · Create linear
+            // comment ×2", never its raw arguments.
+            out.append(ChatUpdate(chat: chat, kind: .needsYou, line: card?.previewLine ?? "", card: card))
         }
 
         for bot in bots where bot.hidden != true {
@@ -116,8 +127,9 @@ extension CompanionState {
             return String(live.suffix(120)).replacingOccurrences(of: "\n", with: " ")
         }
         // A tool's name is often its raw command line. Only a reader who
-        // wants tool calls sees it; a status notice is for everyone.
-        if let last = visibleTranscript(forThread: threadId).last, last.kind == .activity, let tool = last.tool,
+        // wants tool calls sees it; a status notice is for everyone. Only the
+        // branch's last line matters here, so do not build the branch.
+        if let last = lastVisibleMessage(forThread: threadId), last.kind == .activity, let tool = last.tool,
            detail != .hidden || isStatusNotice(last) {
             return tool.label
         }

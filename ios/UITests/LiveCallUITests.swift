@@ -489,7 +489,7 @@ final class LiveCallUITests: XCTestCase {
         let newest = Self.text(Self.newestMessage, in: app)
         XCTAssertTrue(newest.exists, "the newest message is not on screen", file: file, line: line)
         XCTAssertLessThanOrEqual(newest.frame.maxY, bar.frame.minY, "the newest message runs under the bar", file: file, line: line)
-        let working = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Pepper is working")).firstMatch
+        let working = app.descendants(matching: .any)["typing-indicator"]
         if working.exists {
             XCTAssertLessThanOrEqual(working.frame.maxY, bar.frame.minY, "the typing dots run under the bar", file: file, line: line)
         }

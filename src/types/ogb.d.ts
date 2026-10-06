@@ -226,8 +226,11 @@ const __APP_VERSION__: string;
       getPathForFile?(file: File): string;
       /** {mic} TCC status: granted|denied|not-determined|unknown. Screen
        * status is deliberately absent — macOS 15+ caches it per-process,
-       * so it lies for the whole session after a grant. */
-      permStatus(): Promise<{ mic: string }>;
+       * so it lies for the whole session after a grant. `pageMic`: whether
+       * this app lets the asking page use the microphone (this computer's
+       * page always; a server's page only on the person's own Cloud).
+       * Absent in older builds of the shell. */
+      permStatus(): Promise<{ mic: string; pageMic?: "allowed" | "refused" }>;
       /** Triggers the macOS microphone prompt; resolves true when granted. */
       permRequestMic(): Promise<boolean>;
       /** Opens System Settings on a privacy pane: mic|screen|speech|accessibility. */
@@ -300,12 +303,14 @@ const __APP_VERSION__: string;
         name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey",
         value: string,
       ): Promise<ConfigStatus>;
-      /** In-app auto-update (packaged app only; dormant in dev). onState
-       * fires immediately with the current state, then on transitions. */
+      /** In-app auto-update (packaged app only; dormant in dev). Updates
+       * download by themselves. On this computer's page and the person's own
+       * Cloud page; any other server's page gets no state. onState fires
+       * with the current state, then on transitions. */
       updater?: {
         check(): Promise<void>;
-        download(): Promise<void>;
-        /** apply the download: quit-and-install, or copy the command and open a terminal */
+        /** apply the download: quit-and-install, or copy the command and open
+         * a terminal. On a server's page, only from the person's click. */
         install(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
@@ -330,7 +335,6 @@ export interface UpdaterState {
   status:
     | "idle"
     | "checking"
-    | "available"
     | "downloading"
     /** downloaded bytes are being staged by the native macOS updater */
     | "preparing"

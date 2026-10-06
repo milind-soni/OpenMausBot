@@ -30,7 +30,9 @@ public enum Walkie {
             return text.isEmpty ? nil : text
         case .options:
             guard let card = message.card else { return nil }
-            let line = [card.title, card.subtitle].filter { !$0.isEmpty }.joined(separator: " ")
+            // A held send is read as its headline and summary, never as
+            // the JSON arguments behind it.
+            let line = card.spokenLine
             return line.isEmpty ? nil : line
         case .secret:
             return "It needs a credential from you. Open the chat to enter it."

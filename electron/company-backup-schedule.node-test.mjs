@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
+import { createManagedDesktopStore } from "./managed-desktop.mjs";
 
 const DAY = 24 * 60 * 60_000, HOUR = DAY / 24;
 const ENABLE = { enabled: true, confirmation: "BACK UP THIS WORKSPACE DAILY" };
+const REMOVED = "The saved daily backup schedule couldn't be read, so it was turned off. Turn daily backups on again.";
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
 const turn = () => new Promise(resolve => setImmediate(resolve));
 function fixture(saved = null) {
@@ -132,12 +137,47 @@ test("late startup read cannot resurrect a disabled record", async () => {
 });
 
 test("locked or malformed storage is fail-closed and secret-free", async () => {
+  // A malformed schedule can never be read: it is removed and the schedule is off, saying so.
   for (const saved of [{ version: 1 }, { version: 1, scope: "scope", password: "synthetic old password", nextBackupAt: -1 }]) {
-    const f = fixture(saved); await f.scheduler.start(); assert.equal(f.scheduler.state().status, "error"); assert.equal(f.calls.length, 0);
+    const f = fixture(saved); await f.scheduler.start();
+    assert.deepEqual(f.scheduler.state(), { enabled: false, status: "off", message: REMOVED });
+    assert.equal(f.saved, null); assert.equal(f.calls.length, 0); assert.equal(f.timers.size, 0);
   }
   const f = fixture(); f.failWrite = true;
   await assert.rejects(f.scheduler.configure(ENABLE));
   assert.equal(f.scheduler.state().enabled, false); assert.equal(f.timers.size, 0);
+});
+
+test("a saved schedule this computer can no longer decrypt is removed, and turning backups on again is the one next step", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "omb-schedule-unreadable-")); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "company-backup-schedule.bin");
+  const encryption = { available: async () => true, encrypt: async text => Buffer.from(text).map(byte => byte ^ 0x33),
+    decrypt: async () => { throw new Error("Error while decrypting the ciphertext provided to safeStorage.decryptString."); } };
+  const saved = { version: 2, scope: "fixture-portal:org:email:device:workspace", nextBackupAt: 1_800_000_000_000 + DAY };
+  await createManagedDesktopStore({ file, encryption }).write(saved);
+  const f = fixture(saved); const real = createManagedDesktopStore({ file, encryption }); f.read = () => real.read();
+  await f.scheduler.start();
+  assert.deepEqual(f.scheduler.state(), { enabled: false, status: "off", message: REMOVED });
+  assert.deepEqual(f.writes, [null]); assert.equal(f.timers.size, 0); assert.equal(f.calls.length, 0);
+  await f.scheduler.configure(ENABLE); assert.equal(f.scheduler.state().status, "waiting");
+});
+
+test("a locked keychain never removes the saved schedule: it is read again, sooner then each minute, until it opens", async () => {
+  const original = fixture(); await original.scheduler.configure(ENABLE);
+  const f = fixture(original.saved), stored = f.saved; let locked = true, reads = 0;
+  f.read = async () => { reads++; if (locked) throw new Error("Your company connection could not be read. Unlock your system keychain and try again."); return stored; };
+  await f.scheduler.start();
+  assert.equal(f.scheduler.state().status, "error"); assert.equal(f.saved, stored); assert.deepEqual(f.writes, []);
+  for (const delay of [15_000, 30_000, 60_000, 60_000]) {
+    assert.equal([...f.timers.values()][0].delay, delay);
+    const before = reads; await f.fire(delay); assert.equal(reads, before + 1);
+  }
+  f.scheduler.reconcile(); assert.equal(f.timers.size, 1, "a connection change does not cancel the next read");
+  assert.equal(f.states.filter(state => state.status === "error").length, 1, "said once, not on every try");
+  assert.deepEqual(f.writes, [], "a locked schedule is never removed");
+  locked = false; await f.fire(60_000);
+  assert.equal(f.scheduler.state().status, "waiting"); assert.equal(f.scheduler.state().enabled, true);
+  assert.equal(f.scheduler.state().nextBackupAt, stored.nextBackupAt);
 });
 
 test("existing daily consent migrates without retaining the old archive password", async () => {

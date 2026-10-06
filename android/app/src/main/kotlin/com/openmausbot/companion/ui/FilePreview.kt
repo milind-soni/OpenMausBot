@@ -71,6 +71,7 @@ import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -121,10 +122,35 @@ object FilePreviewRules {
 
 /** Bounds shared by sent-image thumbnails, full-screen previews, and screenshots. */
 object AttachmentImageRules {
-    const val THUMBNAIL_EDGE: Int = 768
+    /** Long edge of a transcript thumbnail: the widest card at xxhdpi, so a screenshot's text stays legible. */
+    const val THUMBNAIL_EDGE: Int = 1_080
     const val FULL_SCREEN_EDGE: Int = 3_072
     const val LEGACY_INTERMEDIATE_PIXELS: Long = 12_000_000
     const val LEGACY_NEAR_TARGET_MAX_PIXELS: Long = 14_000_000
+
+    /*
+     * The transcript card shows the whole image at its own shape, fitted to
+     * the bubble and never cropped — iOS draws the same card from
+     * `TranscriptImageFit`; keep the numbers in step. Its width ÷ height stays
+     * between 3:4 and 4:1: a phone screenshot sits whole on the card's tint in
+     * a 3:4 frame instead of a thin sliver, and a panorama keeps a strip tall
+     * enough to tap.
+     */
+    const val INLINE_MAX_HEIGHT_DP: Float = 300f
+    const val INLINE_MAX_WIDTH_DP: Float = 360f
+    /** The card's height while the thumbnail loads and its shape is unknown. */
+    const val INLINE_PLACEHOLDER_HEIGHT_DP: Float = 168f
+    const val INLINE_MIN_ASPECT: Float = 0.75f
+    const val INLINE_MAX_ASPECT: Float = 4f
+
+    /** The card's width ÷ height for an image of this size, or null when the size says nothing. */
+    fun inlineAspect(width: Int, height: Int): Float? {
+        if (width <= 0 || height <= 0) return null
+        return (width.toFloat() / height.toFloat()).coerceIn(INLINE_MIN_ASPECT, INLINE_MAX_ASPECT)
+    }
+
+    /** The widest the card may be at this shape, so a tall one stays within the height cap. */
+    fun inlineMaxWidthDp(aspect: Float): Float = min(INLINE_MAX_WIDTH_DP, INLINE_MAX_HEIGHT_DP * aspect)
 
     /** Largest power-of-two sample whose decoded edge still reaches the requested size. */
     fun sampleSize(width: Int, height: Int, maximumEdge: Int): Int {

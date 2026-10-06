@@ -15,9 +15,12 @@ import SwiftUI
 /// The answer text is built by `AskQuestionAnswer.format`, so an answer given
 /// here is byte-for-byte the one the Mac would have sent.
 struct QuestionCardView: View {
-    let chat: Chat
     let message: Message
-    @EnvironmentObject private var session: Session
+    /// The chat's name and colour, as values: the card redraws when its
+    /// message does, not whenever the session publishes.
+    let context: TranscriptRowContext
+    /// Sends the answer; nothing here reads the session.
+    let actions: TranscriptActions
 
     /// Per question: the option labels ticked, and the free-text reply.
     @State private var picked: [Int: Set<String>] = [:]
@@ -30,7 +33,7 @@ struct QuestionCardView: View {
     @State private var sent: String?
     @FocusState private var otherFocused: Bool
 
-    private var tint: Color { MausPalette.color(chat.color) }
+    private var tint: Color { MausPalette.color(context.color) }
 
     private var card: OptionCard? { message.card }
     private var questions: [AskQuestion] { card?.questions ?? [] }
@@ -100,7 +103,7 @@ struct QuestionCardView: View {
     @ViewBuilder
     private func header(_ card: OptionCard) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Label("\(chat.name) has a question", systemImage: "questionmark.bubble.fill")
+            Label("\(context.name) has a question", systemImage: "questionmark.bubble.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(settled ? Color.secondary : tint)
             Spacer(minLength: 8)
@@ -301,12 +304,7 @@ struct QuestionCardView: View {
         Task {
             // A question only ever answers with text; the harness rejects an
             // allow/deny on one, so this never takes the permission path.
-            await session.answer(
-                threadId: chat.threadId,
-                requestId: requestId,
-                choice: answer,
-                isPermission: false
-            )
+            await actions.answerQuestion(requestId: requestId, choice: answer)
             answering = false
         }
     }
