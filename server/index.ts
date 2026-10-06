@@ -8197,6 +8197,9 @@ async function compactConversation(input: {
   const { bot, threadId, generation, instance, model, excludedIds, manual } = input;
   const task = store.taskByThread(bot.id, threadId);
   if (!task || (!manual && cfg.context?.autoCompact === false)) return;
+  // An engine that compacts its own session in place (omp) keeps its own
+  // schedule: a fold here would start a new native session from a summary.
+  if (!manual && instance.adapter.capabilities.selfCompaction) return;
   const messages = store.activePath(threadId);
   const context = directContext(bot, threadId, messages);
   const record = latestCompaction(messages);

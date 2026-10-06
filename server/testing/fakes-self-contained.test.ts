@@ -41,6 +41,9 @@ describe("provider fakes stay self-contained", () => {
   it.each(fakes)("%s imports nothing from outside server/testing", (file) => {
     const specifiers = importSpecifiers(readFileSync(join(HERE, file), "utf8"));
     const outside = specifiers.filter((specifier) => specifier.startsWith("../"));
+    if (file === "fake-omp-cli.ts") {
+      expect(specifiers.filter((specifier) => !specifier.startsWith("node:")), "omp fake must run without node_modules").toEqual([]);
+    }
     expect(
       outside,
       `${file} imports ${outside.join(", ")} from outside server/testing. Fakes run as bare node subprocesses, some copied out of the repo; inline the helper instead.`,

@@ -13,7 +13,7 @@ import { createApprovalModeSupport } from "./harness-capabilities.ts";
 
 describe("approval modes", () => {
   it("resets only grants that cannot safely carry to the selected provider", () => {
-    for (const driver of ["codex", "claudeAgent", "grokAgent", "antigravityAgent", "piAgent", "customAcp"]) {
+    for (const driver of ["codex", "claudeAgent", "grokAgent", "antigravityAgent", "piAgent", "ompAgent", "customAcp"]) {
       expect(modelSwitchNeedsAsk("ask", "codex", driver)).toBe(false);
       expect(modelSwitchNeedsAsk("auto", "codex", driver)).toBe(false);
       expect(modelSwitchNeedsAsk("full", "codex", driver)).toBe(driver !== "codex");
@@ -22,16 +22,19 @@ describe("approval modes", () => {
     expect(modelSwitchNeedsAsk("edits", "claudeAgent", "codex")).toBe(true);
     expect(modelSwitchNeedsAsk("edits", "claudeAgent", "grokAgent")).toBe(false);
     expect(modelSwitchNeedsAsk("full", "claudeAgent", "claudeAgent")).toBe(false);
+    expect(modelSwitchNeedsAsk("edits", "claudeAgent", "ompAgent")).toBe(false);
+    expect(modelSwitchNeedsAsk("full", "ompAgent", "ompAgent")).toBe(false);
+    expect(modelSwitchNeedsAsk("full", "ompAgent", "piAgent")).toBe(true);
     expect(modelSwitchNeedsAsk("full", "codex", undefined)).toBe(true);
   });
   it("only exposes implemented provider capabilities", () => {
-    for (const driver of ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo", "qwenAgent", "geminiAgent"]) {
+    for (const driver of ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo", "qwenAgent", "geminiAgent", "ompAgent"]) {
       expect(supportsApprovalMode(driver, "full")).toBe(true);
       expect(supportsApprovalMode(driver, "custom")).toBe(driver === "codex");
-      // Qwen's `--approval-mode auto` is an LLM classifier; Gemini has no reviewer
+      // Qwen's `--approval-mode auto` is an LLM classifier; Gemini and omp have no reviewer.
       expect(hasNativeAutoReview(driver)).toBe(["codex", "claudeAgent", "cursorAgent", "grokAgent", "qwenAgent"].includes(driver));
       // auto-accept edits exists only where the engine has such a mode
-      expect(supportsApprovalMode(driver, "edits")).toBe(["claudeAgent", "grokAgent", "antigravityAgent", "qwenAgent", "geminiAgent"].includes(driver));
+      expect(supportsApprovalMode(driver, "edits")).toBe(["claudeAgent", "grokAgent", "antigravityAgent", "qwenAgent", "geminiAgent", "ompAgent"].includes(driver));
     }
     expect(supportsApprovalMode(undefined, "full")).toBe(false);
     expect(supportsApprovalMode(undefined, "edits")).toBe(false);
@@ -147,7 +150,7 @@ describe("approval support bound to a registry", () => {
   });
 
   it("agrees with the pure table across every mode", () => {
-    for (const driverKind of ["codex", "claudeAgent", "boxAgent", "piAgent", undefined] as const) {
+    for (const driverKind of ["codex", "claudeAgent", "boxAgent", "piAgent", "ompAgent", undefined] as const) {
       for (const mode of APPROVAL_MODES) {
         expect(supports({ driverKind }, mode)).toBe(supportsApprovalMode(driverKind, mode));
       }

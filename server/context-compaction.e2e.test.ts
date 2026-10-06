@@ -7,14 +7,14 @@ import { launchVerificationServer, runControlOmb, verificationServerEnvironment 
 import { request } from "../scripts/mcp-server.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 
-async function fixture(test: (f: Awaited<ReturnType<typeof setup>>) => Promise<void>, hang = false, fakeEnv: NodeJS.ProcessEnv = {}) {
-  const f = await setup(hang, fakeEnv);
+async function fixture(test: (f: Awaited<ReturnType<typeof setup>>) => Promise<void>, hang = false, fakeEnv: NodeJS.ProcessEnv = {}, providers: Array<"omp"> = []) {
+  const f = await setup(hang, fakeEnv, providers);
   try { await test(f); } finally { await f.close(); }
 }
 
-async function setup(hang: boolean, fakeEnv: NodeJS.ProcessEnv) {
+async function setup(hang: boolean, fakeEnv: NodeJS.ProcessEnv, providers: Array<"omp">) {
   const env = { ...process.env, ...fakeEnv, FAKE_CLAUDE_VERSION: "2.1.270", ...(hang ? { FAKE_CLAUDE_TEXT_HANG: "1" } : {}) };
-  const session = await launchVerificationServer(env, undefined, undefined, undefined, undefined, { scripted: true });
+  const session = await launchVerificationServer(env, undefined, undefined, undefined, undefined, { scripted: true }, providers);
   let ready = false;
   try {
     let restarted: ChildProcess | undefined;
@@ -133,6 +133,19 @@ it("automatically folds old exchanges while keeping the two latest and the incom
   expect(prompt).toContain("INCOMING do not summarize this request");
   expect(f.turns().at(-1).resumed).toBe(false);
 }), 70_000);
+
+it("leaves an omp thread to omp's own compaction, and still folds it when the person asks", () => fixture(async f => {
+  await f.api("/api/config", { context: { compactAt: 1 } }, "PATCH");
+  await f.api(`/api/bots/${f.bot.id}/tasks/${f.thread}`, {
+    modelSelection: { instanceId: "omp", model: "anthropic/claude-sonnet" },
+  }, "PATCH");
+  // The same threshold folds a Claude thread on its fourth request (above).
+  for (const text of ["FIRST historical request", "SECOND keep recent", "THIRD correction", "INCOMING follow-up"]) await f.send(text);
+  expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(0);
+  await f.compact();
+  await f.idle();
+  expect((await f.messages()).filter(m => m.kind === "compaction").map(m => m.compaction.by)).toEqual(["person"]);
+}, false, {}, ["omp"]), 90_000);
 
 it("Stop cancels a stalled summary without writing a late record or starting an agent", () => fixture(async f => {
   await f.send("Keep this original chat intact");

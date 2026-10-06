@@ -413,7 +413,7 @@ export async function launchVerificationServer(
   enterprise?: { dir: string; licenseKey: string },
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
-  extraProviders: Array<"codex"> = [],
+  extraProviders: Array<"codex" | "omp"> = [],
   /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
   boatFixtureApi?: string,
 ): Promise<VerificationServer> {
@@ -450,6 +450,9 @@ export async function launchVerificationServer(
       ...(boatFixtureApi ? { computer: { driver: "boxAgent" } } : {}),
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
+      } } : {}),
+      ...(extraProviders.includes("omp") ? { omp: {
+        driver: "ompAgent", displayName: "Verification omp", config: { cli: fileURLToPath(new URL("../server/testing/fake-omp-cli.ts", import.meta.url)) },
       } } : {}),
       claude: {
         driver: "claudeAgent",

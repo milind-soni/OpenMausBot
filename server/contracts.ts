@@ -326,6 +326,12 @@ export interface ProviderAdapter {
      * for that new session. The harness then keeps such a session across
      * externally appended messages and sends only those. */
     strictResume?: boolean;
+    /** True when the engine compacts its own session, in place, on its own
+     * configured schedule. The harness then never folds such a thread
+     * automatically: its fold starts a new native session from a summary
+     * and would discard what the engine keeps across its own compaction.
+     * A person's explicit compaction request still runs. */
+    selfCompaction?: boolean;
     /** True when sendTurn can register the harness's hook helper with the
      * engine (integrations.hooks). Only Claude Code today; other engines
      * deliver the same information through their protocols. */

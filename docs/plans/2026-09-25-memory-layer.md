@@ -50,7 +50,7 @@ shows in the Memory panel and **Undo** works on it.
 | --- | --- | --- | --- |
 | Claude | full | full (`generateText`, Haiku) | full |
 | Grok, OpenAI-compatible, Mistral, MiniMax | full | full (`generateText`, tool-free completion) | full |
-| Codex, Pi, ACP kinds, Antigravity, Box | full | **not supported** — no one-shot text call; the switch says so | full |
+| Codex, Pi, omp, ACP kinds, Antigravity, Box | full | **not supported** — no one-shot text call; the switch says so | full |
 
 Recall and the index are prompt text, so every engine reads them. The
 capture/contradiction steps need a one-shot model call; an engine without

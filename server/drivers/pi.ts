@@ -91,7 +91,7 @@ type PiPromptImage = {
   mimeType: TurnImageInput["mime"];
 };
 
-function readPiPromptImages(turn: SendTurnInput): PiPromptImage[] {
+export function readPiPromptImages(turn: SendTurnInput): PiPromptImage[] {
   return (turn.images ?? []).map((image) => ({
     type: "image",
     data: readFileSync(image.path).toString("base64"),
@@ -100,8 +100,9 @@ function readPiPromptImages(turn: SendTurnInput): PiPromptImage[] {
 }
 
 /** Provider-native logs are designed for bug reports. Preserve the RPC
- * shape and encoded size, but never persist a user's image bytes in them. */
-function piNativeLogMessage(message: Record<string, unknown>): Record<string, unknown> {
+ * shape and encoded size, but never persist a user's image bytes in them.
+ * Shared with the omp driver, whose prompt frames carry images the same way. */
+export function piNativeLogMessage(message: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(message.images)) return message;
   return {
     ...message,
@@ -465,7 +466,7 @@ interface PiEvent {
   title?: string;
 }
 
-function piEnvironment(source: Record<string, string | undefined>): Record<string, string | undefined> {
+export function piEnvironment(source: Record<string, string | undefined>): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...source, PATH: augmentedPath() };
   // pi is BYOK and reads provider keys straight from its environment: an
   // inherited key would silently flip billing onto one the user never granted

@@ -2,7 +2,7 @@ import { narrowsNativeTools, parseToolScope, type ToolScope } from "./tool-scope
 
 /** Native contracts and app-supplied MCP gates are separate capabilities. */
 export const TOOL_SCOPE_SUPPORT = {
-  grok: "native-and-mcp", grokAgent: "native-and-mcp", piAgent: "native-and-mcp",
+  grok: "native-and-mcp", grokAgent: "native-and-mcp", piAgent: "native-and-mcp", ompAgent: "native-and-mcp",
   "openai-compat": "native-and-mcp", mistral: "native-and-mcp", minimax: "native-and-mcp", cerebras: "native-and-mcp",
   claudeAgent: "mcp", codex: "mcp", geminiAgent: "mcp", kimiAgent: "mcp", droidAgent: "mcp",
   cursorAgent: "mcp", opencodeGo: "mcp", qwenAgent: "mcp", hermesAgent: "mcp", customAcp: "mcp", antigravityAgent: "mcp",

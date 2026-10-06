@@ -84,7 +84,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       ghost: { driver: "not-a-real-driver", displayName: "Preserved shadow" },
       // The `claude` product fleet auto-adds these IDs unless configured.
       // Pin shadows so this test never probes an installed provider CLI.
-      ...Object.fromEntries(["cursor", "openaiCompat", "qwen", "hermes", "pi"].map(id => [id, { driver: "not-a-real-driver" }])),
+      ...Object.fromEntries(["cursor", "openaiCompat", "qwen", "hermes", "pi", "omp"].map(id => [id, { driver: "not-a-real-driver" }])),
       "broken-account": {
         driver: "claudeAgent", displayName: "Repairable shadow", config: { cli, configDir: "relative/saved-directory" },
       },

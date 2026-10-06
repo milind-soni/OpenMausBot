@@ -31,7 +31,7 @@ on the configured server named `mail`. Partial wildcards, such as
 nothing; it does not fall back to all tools. The Allow and Exclude lists each
 accept up to 256 selectors, with at most 1024 characters per selector.
 
-**Pi drafting**, with Only allow listed tools checked:
+**Pi or omp drafting**, with Only allow listed tools checked:
 
 ```text
 native:read
@@ -47,7 +47,7 @@ native:search_replace
 native:write
 ```
 
-**Pi with one custom MCP tool**:
+**Pi or omp with one custom MCP tool**:
 
 ```text
 mcp:mail:read_notes
@@ -68,13 +68,13 @@ mcp:mail:read_notes
 
 Grok uses those two helpers to discover and call the selected MCP tools.
 Their results and calls are checked against the same original selectors.
-Pi sends the selected MCP schemas directly to the model.
+Pi and omp send the selected MCP schemas directly to the model.
 
 ## Engine support
 
 | Engines | Available selection |
 | --- | --- |
-| Pi, Grok CLI, Grok API, OpenAI compatible, Mistral, MiniMax | Native and app-supplied MCP tools |
+| Pi, omp, Grok CLI, Grok API, OpenAI compatible, Mistral, MiniMax | Native and app-supplied MCP tools |
 | Claude, Codex, Gemini, Kimi, Droid, Cursor, OpenCode Go, Qwen, Hermes, Custom ACP, Antigravity | App-supplied MCP tools; keep `native:*` in Allow and do not exclude native tools |
 | Boat native | Meaningful tool restrictions are unsupported |
 

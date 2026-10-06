@@ -92,7 +92,7 @@ process.env.FAKE_CLAUDE_VERSION = "2.1.284";
 if (process.argv[2] !== "--version") { process.env.FAKE_CLAUDE_DUMP = ${JSON.stringify(home)} + "/${name}.json"; process.env.FAKE_CLAUDE_MODE = "hang"; process.env.FAKE_CLAUDE_RELEASE = ${JSON.stringify(join(home, "release"))}; }`);
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
-      ...Object.fromEntries(["cursor", "openaiCompat", "qwen", "hermes", "pi", "claude"].map((id) => [id, { driver: "not-a-real-driver" }])),
+      ...Object.fromEntries(["cursor", "openaiCompat", "qwen", "hermes", "pi", "omp", "claude"].map((id) => [id, { driver: "not-a-real-driver" }])),
       codex: { driver: "codex", displayName: "Codex", config: { cli: codex } },
       held: { driver: "claudeAgent", displayName: "Held", config: { cli: held("claude") } },
       teammate: { driver: "claudeAgent", displayName: "Teammate", config: { cli: held("teammate") } },

@@ -40,6 +40,7 @@ const ENGINES = [
   { id: "claude", driver: "claudeAgent", cli: "fake-claude-cli.ts", env: {}, tools: ["Bash"] },
   { id: "codex", driver: "codex", cli: "fake-codex-app-server.ts", env: {}, tools: ["*"] },
   { id: "pi", driver: "piAgent", cli: "fake-pi-cli.ts", env: { FAKE_PI_MODE: "tooluse" }, tools: ["bash"] },
+  { id: "omp", driver: "ompAgent", cli: "fake-omp-cli.ts", env: { FAKE_OMP_MODE: "tooluse" }, tools: ["bash"] },
 ] as const;
 
 posixOnly("work digest e2e (every fake engine)", () => {

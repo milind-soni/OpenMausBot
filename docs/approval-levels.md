@@ -10,7 +10,7 @@ Access, OMB also applies its own configuration tools without another approval.
 | Level | Behavior |
 | --- | --- |
 | **Ask for approval** | Requests approval for commands and file changes, the way the provider's supervised mode does. |
-| **Auto-accept edits** | Approves file edits automatically; other actions can still require approval. Offered where the provider has such a mode (Claude, Grok, Antigravity). |
+| **Auto-accept edits** | Approves file edits automatically; other actions can still require approval. Offered where the provider has such a mode (Claude, Grok, Antigravity, omp). |
 | **Approve for me** | Uses the provider's automatic review on Codex, Claude, Cursor, and Grok to approve routine actions and ask about others. Providers without an equivalent fall back to asking. |
 | **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native permission prompts are answered for you. OMB profile changes, routine actions, team setup, bot deletion, and enabled skill authoring apply without a second approval. Peer-review prompts are skipped within the bot's authorized scope. Delegation uses the receiving bot's setting, never the sender's — except from a Chief of Staff, whose level flows down (below). Actual questions and missing credentials still need your input. |
 | **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
@@ -117,6 +117,7 @@ card for a person. What differs per engine is only how the ask travels:
 | Grok Build, Minimax, OpenAI-compatible endpoints | The injected `ask_user` tool | Yes — up to 6 |
 | ACP engines (Cursor, Antigravity, Gemini CLI, Qwen Code, OpenCode, …) | Option-match round-trip on the ACP permission request | One at a time — the request carries one choice set |
 | Pi | Free-text round-trip over `extension_ui_request` | One at a time |
+| omp | Structured round-trip over the rpc-ui `ask` dialog; free text always available | Yes — up to 6 |
 | BoatAgent (cloud computer) | A fenced `omb-ask` block in the run's final output; the turn stays open until you answer or the ask times out | Yes — up to 6 |
 
 A question the harness parsed out of model-authored output rather than a
@@ -138,6 +139,7 @@ multi-question card renders its structured form on current apps instead.
 | OpenCode | Ask | not offered | Ask | Approve individual ACP permission requests, never task questions |
 | Qwen Code | Native `default` | Native `--approval-mode auto-edit` | Native `--approval-mode auto` (Qwen's LLM classifier approves safe actions, blocks risky ones) | `--yolo`, plus automatic approval of remaining ACP permission requests |
 | Gemini CLI | Native `default` | Native `--approval-mode auto_edit` | Ask (no reviewer) | `--yolo`, plus automatic approval of remaining ACP permission requests |
+| omp | Native `--approval-mode always-ask` (reads auto-approved; writes and shell commands ask) | Native `--approval-mode write` (reads and edits auto-approved; shell commands ask) | Ask (no reviewer) | Native `--approval-mode yolo`, plus answering residual permission prompts |
 | Other/custom engines | Ask | not offered | Ask | Not offered until a provider mapping is implemented |
 
 These settings apply on each turn, including resumed conversations. Switching

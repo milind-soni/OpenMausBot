@@ -420,9 +420,39 @@ describe("Pi MCP extension registration", () => {
     });
 
     expect(tools).toHaveLength(1);
+    // omp would otherwise mount it as an on-demand xd:// device
+    expect(tools[0]).toMatchObject({ loadMode: "essential" });
     await expect(
       tools[0].execute("call-1", {}, undefined, undefined, { ui: { confirm: async () => true } }),
     ).rejects.toThrow("remote failure");
     await handlers.get("session_shutdown")?.();
+  });
+
+  it("registers a picked local model host for the turn and refuses a runtime that cannot", async () => {
+    const config = join(tempDir(), "mcp.json");
+    writeFileSync(config, JSON.stringify({
+      mcpServers: {},
+      localProvider: { name: "omlx", baseUrl: "http://127.0.0.1:8080/v1", apiKey: "omlx", model: "MiniMax-M3-4bit" },
+    }));
+    process.env.OMB_MCP_CONFIG = config;
+    const providers: Array<{ name: string; config: Record<string, unknown> }> = [];
+    await extension({
+      registerTool() {},
+      on() {},
+      registerProvider(name, providerConfig) {
+        providers.push({ name, config: providerConfig });
+      },
+    });
+    expect(providers).toEqual([{
+      name: "omlx",
+      config: expect.objectContaining({
+        baseUrl: "http://127.0.0.1:8080/v1",
+        apiKey: "omlx",
+        api: "openai-completions",
+        models: [expect.objectContaining({ id: "MiniMax-M3-4bit" })],
+      }),
+    }]);
+    // Without registration the turn's set_model would fall back to another model.
+    await expect(extension({ registerTool() {}, on() {} })).rejects.toThrow(/registerProvider/);
   });
 });

@@ -47,7 +47,7 @@ export function ToolSelectionCard({ bot, engineKind }: { bot: Bot; engineKind?: 
       if (alive.current) setSaving(false);
     }
   };
-  const example = engineKind === "piAgent" ? "native:read\nnative:edit\nnative:write"
+  const example = engineKind === "piAgent" || engineKind === "ompAgent" ? "native:read\nnative:edit\nnative:write"
     : engineKind === "grokAgent" ? "native:read_file\nnative:search_replace\nnative:write"
       : support === "mcp" ? "native:*\nmcp:mail:read_notes" : "native:ask_user\nmcp:mail:read_notes";
 

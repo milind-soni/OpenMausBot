@@ -709,10 +709,12 @@ describe("default fleet", () => {
     expect(env).toEqual({ KEEP: "yes" });
   });
 
-  it("ships Qwen and Hermes as custom-only engines", () => {
+  it("ships Qwen, Hermes, Pi and omp as custom-only engines", () => {
     const map = instanceConfigs({});
     expect(map.qwen).toEqual({ driver: "qwenAgent", environment: {} });
     expect(map.hermes).toEqual({ driver: "hermesAgent", environment: {} });
+    expect(map.pi).toEqual({ driver: "piAgent", environment: {} });
+    expect(map.omp).toEqual({ driver: "ompAgent", environment: {} });
   });
 
   it("ships Cursor as a default-fleet subscription engine", () => {
@@ -898,6 +900,8 @@ describe("default fleet", () => {
     expect(map.claude.driver).toBe("claudeAgent");
     expect(map.qwen?.driver).toBe("qwenAgent");
     expect(map.hermes?.driver).toBe("hermesAgent");
+    expect(map.pi?.driver).toBe("piAgent");
+    expect(map.omp?.driver).toBe("ompAgent");
     expect(map.cursor?.driver).toBe("cursorAgent");
     expect(map.openaiCompat?.driver).toBe("openai-compat");
   });

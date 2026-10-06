@@ -31,6 +31,7 @@ const instances: InstanceInfo[] = [
   ["hermes", "hermesAgent", "Hermes", false, ""],
   ["qwen", "qwenAgent", "Qwen", false, ""],
   ["pi", "piAgent", "Pi", false, ""],
+  ["omp", "ompAgent", "omp", false, ""],
 ].map(([id, driver, name, ready, version]) => ({
   instanceId: String(id), driverKind: String(driver), displayName: String(name),
   cliDefault: String(id),

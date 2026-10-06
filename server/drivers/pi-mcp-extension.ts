@@ -1,11 +1,11 @@
-// pi-mcp-extension — the Pi-side half of "hands" for the pi engine.
+// pi-mcp-extension — the Pi-side half of "hands" for the pi and omp engines.
 //
 // Pi core deliberately ships no MCP client (see pi's docs: "does not include
 // built-in MCP"). This extension is that client: loaded into the per-turn
-// `pi --mode rpc --no-session` process via `-e`, it reads a JSON file whose
-// path is handed in through OMB_MCP_CONFIG and mounts every server described
-// there as first-class pi tools (pi.registerTool). OpenMausBot ships this file
-// and the pi driver spawns it — the pi repo itself is never touched.
+// `pi --mode rpc` / `omp --mode rpc-ui` process via `-e`, it reads a JSON
+// file whose path is handed in through OMB_MCP_CONFIG and mounts every server
+// described there as first-class tools (pi.registerTool). OpenMausBot ships
+// this file and the drivers spawn it — neither upstream repo is touched.
 //
 // Protocol: the OpenMausBot proxies speak raw JSON-RPC 2.0 over stdio, one
 // frame per line (no MCP SDK, no Content-Length framing) — see
@@ -25,11 +25,22 @@ interface McpServerDef {
   scope?: string;
 }
 
+/** A live local model host (oMLX, Ollama, LM Studio, …) the turn picked. omp
+ * registers it for this process only, so the person's own models.yml is
+ * never rewritten. The key rides here, in the 0600 config, never on argv. */
+interface LocalProviderDef {
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
 interface McpConfig {
   mcpServers?: Record<string, McpServerDef>;
   toolScope?: unknown;
   scopeReadyPath?: string;
   approvalMode?: string;
+  localProvider?: LocalProviderDef;
 }
 
 interface McpTool {
@@ -62,6 +73,10 @@ interface PiToolDefinition {
   label: string;
   description: string;
   parameters: TSchema;
+  /** omp mounts extension tools as on-demand `xd://` devices unless they are
+   * `essential`; OpenMausBot's tools stay first-class like on every other
+   * engine. Upstream pi has no such field and ignores it. */
+  loadMode?: "essential";
   execute(
     toolCallId: string,
     params: unknown,
@@ -79,6 +94,8 @@ interface PiExtensionApi {
   on(event: string, handler: (event?: Record<string, unknown>, context?: { abort?(): void }) => unknown): void;
   getActiveTools?(): string[];
   setActiveTools?(names: string[]): void;
+  /** omp's provider registration (models.yml's runtime counterpart). */
+  registerProvider?(name: string, config: Record<string, unknown>): void;
 }
 
 const MCP_STARTUP_TIMEOUT_MS = 8_000;
@@ -556,6 +573,28 @@ export default async function (pi: PiExtensionApi): Promise<void> {
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
   if (scope !== undefined && (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function")) throw new Error("Pi tool selection enforcement APIs are unavailable");
+  // A picked local host must be reachable before the driver's set_model: a
+  // runtime that cannot register it fails the load loudly instead of letting
+  // the turn fall back to another (possibly paid) model.
+  if (config.localProvider) {
+    const local = config.localProvider;
+    if (typeof pi.registerProvider !== "function") throw new Error("Local model hosts need omp's registerProvider API");
+    pi.registerProvider(local.name, {
+      baseUrl: local.baseUrl,
+      apiKey: local.apiKey,
+      api: "openai-completions",
+      models: [{
+        id: local.model,
+        name: local.model,
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 16384,
+        compat: { supportsDeveloperRole: false, supportsReasoningEffort: true },
+      }],
+    });
+  }
 
   const used = new Set<string>();
   const identities = new Map<string, ToolIdentity>();
@@ -655,6 +694,7 @@ export default async function (pi: PiExtensionApi): Promise<void> {
           label: `${serverName}:${toolName}`,
           description: typeof tool.description === "string" ? tool.description : `${toolName} (MCP tool from ${serverName})`,
           parameters,
+          loadMode: "essential",
           async execute(_toolCallId, params, signal, _onUpdate, ctx) {
             if (scope !== undefined && (enforcementFailed || !allowsTool(scope, identity))) throw new Error("Tool selection excludes this tool");
             // Host tools ask first, using pi's native permission card

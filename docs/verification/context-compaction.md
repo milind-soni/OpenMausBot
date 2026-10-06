@@ -51,6 +51,8 @@ headroom below the selected account's numeric native-compaction setting.
 That account's setting takes precedence over the inherited launch environment.
 Native `auto`/`off` settings supply no known numeric bound; other engines keep
 their own model-window threshold. The native CLI setting itself is unchanged.
+An engine that compacts its own session in place (omp, `selfCompaction`) is
+never folded automatically; only a person's explicit compaction runs there.
 
 The selected account's tool-free helper can produce a historical summary, with
 a 20-second timeout and source-labelled fallback when unavailable. Summaries

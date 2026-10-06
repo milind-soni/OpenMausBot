@@ -77,7 +77,7 @@ else if (args.at(-1) === "--version") console.log("9.9.9 (Claude Code)");
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
       // Pin the fleet's other defaults so this never probes an installed CLI.
-      ...Object.fromEntries(["codex", "cursor", "openaiCompat", "mistral", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+      ...Object.fromEntries(["codex", "cursor", "openaiCompat", "mistral", "qwen", "hermes", "pi", "omp"].map((id) => [id, { driver: "not-a-real-driver" }])),
       claude: { driver: "claudeAgent", displayName: "Claude", config: { cli: stubCli() } },
     },
   }));
