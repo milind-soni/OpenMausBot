@@ -346,7 +346,7 @@ import { createDecider, deciderIncludedHere, deciderReady, deciderSavePatch, des
 import { decideRoomResponder, type RoomRoutingInput } from "./decider/room-routing.ts";
 import { createLiveSession, liveAttachUrl, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError, type LiveSocket } from "./live-call-controller.ts";
-import { spokenLineFields } from "./live-call-record.ts";
+import { recordLiveCall, spokenLineFields } from "./live-call-record.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { turnStartLogLine } from "./turn-log.ts";
 import { makeCapContinuationSubscriber } from "./turn-continuation.ts";
@@ -15798,6 +15798,14 @@ const liveCalls = new LiveCallController({
   openSocket: (url, key) => new WebSocket(url, { headers: { authorization: `Bearer ${key}` } } as unknown as string[]) as unknown as LiveSocket,
   attachUrl: (sessionId) => liveAttachUrl(sessionId),
   speakable: (text) => toUtterances(text),
+  // A call that went live leaves one "call" row in its chat when it ends:
+  // its id, times and length, never anything said on it.
+  recordCall: (input) => {
+    recordLiveCall({
+      chatExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
+      appendMessage: (threadId, message) => store.appendMessage(threadId, message),
+    }, input);
+  },
   log: (line) => console.log(line),
 });
 // A signed-out or revoked sign-in ends the call it started at once (the idle

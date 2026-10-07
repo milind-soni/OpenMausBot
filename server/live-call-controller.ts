@@ -18,7 +18,7 @@ import {
   LIVE_COPY, liveCardKind, liveStepLabel, spokenApprovalPrompt, spokenConnectorPrompt, spokenQuestionPrompt, spokenReviewPrompt, spokenSecretPrompt,
 } from "../shared/live-approval.ts";
 import { clampAppend, commentaryChunks, LiveTranscript } from "../shared/live-call.ts";
-import type { LiveCallState, LiveClient, LiveEndReason } from "../shared/wire.ts";
+import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason } from "../shared/wire.ts";
 import { liveCallSummaryLine, LiveSessionError, liveVoice } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
@@ -79,6 +79,10 @@ export interface LiveCallDeps {
   openSocket(url: string, key: string): LiveSocket;
   attachUrl(sessionId: string): string;
   speakable(text: string): string[];
+  /** A call that went live has ended: write its one "call" row on the
+   * call's chat. Called once per such call, never for a call that did not
+   * attach. Omitted: no row. */
+  recordCall?(input: { threadId: string; botName: string; record: LiveCallRecord }): void;
   log(line: string): void;
   now?(): number;
 }
@@ -403,6 +407,7 @@ export class LiveCallController {
       try { socket.close(1000, "call ended"); } catch { /* already closed */ }
     }
     this.emit(call);
+    this.writeRecord(call, reason);
     this.deps.log(liveCallSummaryLine({
       botId: call.state.botId,
       voice: call.state.voice,
@@ -419,6 +424,29 @@ export class LiveCallController {
     }));
     if (this.call === call) this.call = null;
     for (const resolve of call.closeWaiters.splice(0)) resolve();
+  }
+
+  /** The one row a call that went live leaves in its chat (deps.recordCall):
+   * its id, times and length, never anything said on it. A call that never
+   * attached leaves none. Writing it may fail; the call still ends. */
+  private writeRecord(call: Call, reason: LiveEndReason): void {
+    if (!call.attached || !this.deps.recordCall) return;
+    const endedAt = this.now();
+    const record: LiveCallRecord = {
+      callId: call.state.callId,
+      botId: call.state.botId,
+      client: call.state.client,
+      startedAt: call.state.startedAt,
+      endedAt,
+      // OpenAI's usage seconds when it sent them, else wall clock: the summary line's source
+      seconds: Math.max(0, Math.round(call.stats.seconds ?? (endedAt - call.state.startedAt) / 1000)),
+      endReason: reason,
+    };
+    try {
+      this.deps.recordCall({ threadId: call.state.threadId, botName: call.botName, record });
+    } catch {
+      this.recordError(call, "record");
+    }
   }
 
   private checkIdle(call: Call): void {

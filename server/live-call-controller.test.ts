@@ -1145,3 +1145,58 @@ describe("LiveCallController relay", () => {
     });
   });
 });
+
+describe("LiveCallController record", () => {
+  const recorded = (t: ReturnType<typeof setup>) => vi.mocked(t.deps.recordCall!).mock.calls.map(([input]) => input);
+
+  it("records a call that went live once, with OpenAI's usage seconds and nothing said on it", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    const { call } = await t.start();
+    t.socket().receive({ type: "session.input_transcript.delta", delta: "what is on my calendar", start_ms: 100, end_ms: 900 });
+    const ending = t.controller.end(call.callId);
+    t.socket().receive({ type: "session.closed", reason: "close_requested", usage: { seconds: 61.4 } });
+    await ending;
+    await t.controller.shutdown(); // already over: nothing more is written
+    expect(recorded(t)).toEqual([{
+      threadId: "t1",
+      botName: "Ada",
+      record: { callId: call.callId, botId: "bot1", client: "desktop", startedAt: call.startedAt, endedAt: expect.any(Number), seconds: 61, endReason: "hung-up" },
+    }]);
+    expect(recorded(t)[0]!.record.endedAt).toBeGreaterThanOrEqual(call.startedAt);
+    expect(JSON.stringify(recorded(t))).not.toContain("calendar");
+  });
+
+  it("counts wall-clock seconds when OpenAI sent none", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    await t.start();
+    await vi.advanceTimersByTimeAsync(95_400);
+    t.socket().drop();
+    expect(recorded(t)).toEqual([expect.objectContaining({ record: expect.objectContaining({ seconds: 95, endReason: "sideband-lost" }) })]);
+  });
+
+  it("records nothing for a call that never went live", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    await t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });
+    t.socket().refuse();
+    expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "sideband-lost" });
+    expect(t.deps.recordCall).not.toHaveBeenCalled();
+  });
+
+  it("records a call the harness shut down", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    await t.start();
+    await t.controller.shutdown();
+    expect(recorded(t)).toEqual([expect.objectContaining({ record: expect.objectContaining({ endReason: "shutdown" }) })]);
+  });
+
+  it("ends the call cleanly, and counts it, when writing the record fails", async () => {
+    const t = setup({ recordCall: vi.fn(() => { throw new Error("disk full"); }) });
+    await t.start();
+    t.socket().drop();
+    expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "sideband-lost" });
+    expect(t.controller.current()).toBeNull();
+    expect(t.logs.at(-1)).toContain("errors=record");
+    // the line is free for the next call
+    await expect(t.start()).resolves.toBeTruthy();
+  });
+});

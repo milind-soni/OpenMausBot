@@ -6,7 +6,8 @@
 // attaches, a delegation becomes a user message "via call" on the bot's
 // thread, the bot's answer comes back as spoken commentary on that
 // delegation, and hanging up (or losing the sideband) ends the call for
-// every client — with one summary line in the log and no words in it.
+// every client — with one summary line in the log and no words in it, and
+// one "call" row in the chat (none when the call never went live).
 //
 // POSIX-gated like the other CLI e2es (the fakes are shebang scripts).
 import { randomBytes } from "node:crypto";
@@ -54,8 +55,8 @@ posixOnly("Live call e2e", () => {
     });
     return { status: res.status, body: await res.json() };
   };
-  const createBot = async (instanceId = "claude", model = "claude-fake"): Promise<{ id: string; threadId: string }> => {
-    const { bot } = (await post("/api/bots", {})).body as { bot: { id: string; threadId: string } };
+  const createBot = async (instanceId = "claude", model = "claude-fake"): Promise<{ id: string; threadId: string; name: string }> => {
+    const { bot } = (await post("/api/bots", {})).body as { bot: { id: string; threadId: string; name: string } };
     const res = await fetch(`${base}/api/bots/${bot.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -189,6 +190,18 @@ posixOnly("Live call e2e", () => {
       expect(ended).toMatchObject({ status: 200, body: { call: { status: "ended", endReason: "hung-up" } } });
       expect(session.commands.some((c) => c.type === "session.close")).toBe(true);
       await sse.until((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "ended");
+      // The call went live, so it leaves one row in its chat: times and
+      // length only (the fake reports 42 s of usage), never what was said.
+      const row = await sse.until((frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message?.kind === "call");
+      expect(row.message).toMatchObject({
+        role: "bot",
+        text: `Call with ${bot.name} · 0:42`,
+        call: { callId: call.callId, botId: bot.id, client: "desktop", startedAt: call.startedAt, seconds: 42, endReason: "hung-up" },
+      });
+      expect(row.message.call.endedAt).toBeGreaterThanOrEqual(call.startedAt);
+      expect(JSON.stringify(row.message)).not.toMatch(/six times seven/i);
+      const { messages } = (await (await fetch(`${base}/api/threads/${bot.threadId}/messages`)).json()) as { messages: Array<{ kind: string; call?: { callId: string } }> };
+      expect(messages.filter((message) => message.kind === "call" && message.call?.callId === call.callId)).toHaveLength(1);
       // The summary line is printed as the call finishes; the pipe can
       // deliver it a moment after the HTTP answer.
       await expect.poll(serverOutput, { timeout: 5_000 }).toMatch(/\[live\] call ended bot=\S+ .*client=desktop .*end=hung-up/);
@@ -523,11 +536,60 @@ posixOnly("Live call e2e", () => {
         (frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "ended",
       );
       expect(ended).toMatchObject({ botId: bot.id, threadId: bot.threadId, call: { endReason: "sideband-lost" } });
+      // it went live before it dropped, so it still leaves its one row
+      const row = await sse.until((frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message?.kind === "call");
+      expect(row.message.call).toMatchObject({ callId: call.callId, endReason: "sideband-lost" });
       // a client that connects now sees no call, and the slot is free again
       const current = await (await fetch(`${base}/api/live/call`)).json();
       expect(current).toEqual({ call: null });
       await expect.poll(serverOutput, { timeout: 5_000 }).toContain("end=sideband-lost");
     } finally {
+      sse.close();
+    }
+  }, 40_000);
+
+  it("leaves no row for a call that never went live", async () => {
+    const bot = await createBot();
+    const sse = await openSse(`${base}/api/events`);
+    let callId = "";
+    try {
+      // 404, not 401: Node's WebSocket retries a refused 401 upgrade, and the
+      // retry is accepted, so the call would go live and stay open.
+      live.refuseNextAttach(404);
+      const { call } = await startCall(bot.id);
+      callId = call.callId;
+      await sse.until((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "ended", 20_000);
+      expect(sse.frames.some((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "live")).toBe(false);
+      const { messages } = (await (await fetch(`${base}/api/threads/${bot.threadId}/messages`)).json()) as { messages: Array<{ kind: string }> };
+      expect(messages.some((message) => message.kind === "call")).toBe(false);
+    } finally {
+      if (callId) await post("/api/live/call/end", { callId });
+      await expect.poll(() => isBusy(bot.id), { timeout: 20_000 }).toBe(false);
+      sse.close();
+    }
+  }, 40_000);
+
+  // The row is for a chat that still exists: a call whose bot is deleted
+  // while it runs ends as "deleted", writes nothing, and counts no error.
+  it("leaves no row, and no error, for a call whose bot is deleted during it", async () => {
+    const bot = await createBot();
+    const sse = await openSse(`${base}/api/events`);
+    let callId = "";
+    try {
+      const { call, session } = await startCall(bot.id);
+      callId = call.callId;
+      await live.waitForAttach(session.id);
+      await sse.until((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "live");
+      expect((await fetch(`${base}/api/bots/${bot.id}`, { method: "DELETE" })).status).toBeLessThan(300);
+      const ended = await sse.until((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "ended", 20_000);
+      expect(ended.call.endReason).toBe("deleted");
+      await expect.poll(serverOutput, { timeout: 5_000 }).toMatch(/\[live\] call ended bot=\S+ .*end=deleted errors=none/);
+      expect(sse.frames.some((frame) => frame.kind === "message" && frame.message?.kind === "call")).toBe(false);
+      // the line is free again
+      expect(await (await fetch(`${base}/api/live/call`)).json()).toEqual({ call: null });
+    } finally {
+      if (callId) await post("/api/live/call/end", { callId });
+      await expect.poll(() => isBusy(bot.id), { timeout: 20_000 }).toBe(false);
       sse.close();
     }
   }, 40_000);
