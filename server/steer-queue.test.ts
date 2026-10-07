@@ -180,13 +180,15 @@ describe("steer-queue module", () => {
     queueSteeredMessage(bot.id, bot.threadId, "what is on my calendar", { via: "call" });
     restoreSteeredMessages(); // a restart reads via back from the durable row
     bot.busy = false;
-    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run); // the typed line starts its own turn
+    drainSteeredMessages(store, run); // then the spoken one starts its own
     expect(store.messages.map((message) => [message.text, message.via])).toEqual([
       ["typed while the bot worked", undefined],
       ["what is on my calendar", "call"],
     ]);
     expect("via" in store.messages[0]).toBe(false);
-    expect(run.mock.calls[0][3].via).toBe("call");
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1][3].via).toBe("call");
   });
 
   it("keeps a call's id on the line it drains, also after a restart", () => {
@@ -197,14 +199,59 @@ describe("steer-queue module", () => {
     queueSteeredMessage(bot.id, bot.threadId, "what is on my calendar", { via: "call", callId: "call-1" });
     restoreSteeredMessages(); // a restart reads the id back from the durable row
     bot.busy = false;
-    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run); // the typed line starts its own turn
+    drainSteeredMessages(store, run); // then the spoken one starts its own
     expect(store.messages.map((message) => [message.text, message.via, message.callId])).toEqual([
       ["typed while the bot worked", undefined, undefined],
       ["what is on my calendar", "call", "call-1"],
     ]);
     expect("callId" in store.messages[0]!).toBe(false);
-    // the line handed to the turn is the stamped one
-    expect(run.mock.calls[0]![3].callId).toBe("call-1");
+    // the line handed to each turn is the stamped one
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[0]![3].callId).toBeUndefined();
+    expect(run.mock.calls[1]![3].callId).toBe("call-1");
+  });
+
+  // A merged turn's request is only its last line, so a call's record (its
+  // work is found by the lines the call spoke) could not tell a typed line's
+  // work from a spoken one's: a spoken line never shares a turn with a line
+  // that was not spoken on the same call, though one person sent both.
+  it.each([
+    ["a spoken line, then a typed one", "spoken-typed", { via: "call", callId: "call-1" }, {}],
+    ["a typed line, then a spoken one", "typed-spoken", {}, { via: "call", callId: "call-1" }],
+    ["a spoken line with no call id (an older build's row), then a typed one", "legacy-typed", { via: "call" }, {}],
+  ] as const)("drains %s as two turns", (_what, slug, first, second) => {
+    const bot = fakeBot(`bot-call-split-${slug}`, `thread-call-split-${slug}`, true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "first words", first);
+    queueSteeredMessage(bot.id, bot.threadId, "second words", second);
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0]![2]).toBe("first words");
+    drainSteeredMessages(store, run);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1]![2]).toBe("second words");
+    expect(store.messages.map((message) => message.text)).toEqual(["first words", "second words"]);
+  });
+
+  it("drains one call's spoken lines as one turn, and the next call's as its own", () => {
+    const bot = fakeBot("bot-call-groups", "thread-call-groups", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "check the build", { via: "call", callId: "call-1" });
+    queueSteeredMessage(bot.id, bot.threadId, "and the tests", { via: "call", callId: "call-1" });
+    queueSteeredMessage(bot.id, bot.threadId, "then deploy", { via: "call", callId: "call-2" });
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls.map((call) => call[2])).toEqual(["check the build\n\nand the tests", "then deploy"]);
+    expect(store.messages.map((message) => [message.text, message.callId])).toEqual([
+      ["check the build", "call-1"],
+      ["and the tests", "call-1"],
+      ["then deploy", "call-2"],
+    ]);
   });
 
   it("never puts a call id on a line that was not spoken", () => {

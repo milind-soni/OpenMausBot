@@ -4,7 +4,7 @@
 // and speaker over WebRTC, straight to OpenAI. This controller holds the
 // sideband WebSocket to the same GPT-Live session and runs every rule that
 // connects the voice to the bot, so all three clients behave the same:
-//   delegation → a user message "via call" on the bot's thread;
+//   delegation → a user message "via call", carrying the call's id, on the bot's thread;
 //   bot progress → quiet thinking; the turn's final text → spoken commentary;
 //   an approval card → a strict spoken yes/no; a question card → the next request;
 //   a typed message → nothing until the bot answers it; then the answer is read
@@ -57,10 +57,13 @@ export type LiveRespondResult = { ok: true } | { ok: false; error: string };
 
 export interface LiveCallDeps {
   store: { onChange(listener: (change: StoreChange) => void): () => void };
-  /** Throws LiveCallSignedOutError once the sign-in that started the call has ended. */
-  send(input: { auth: RequestAuth; botId: string; threadId: string; text: string }): Promise<LiveSendResult>;
-  /** Throws LiveCallSignedOutError once the sign-in that started the call has ended. */
-  respond(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "allow" | "deny" | "answer"; message?: string }): Promise<LiveRespondResult>;
+  /** Throws LiveCallSignedOutError once the sign-in that started the call has ended.
+   * `callId`: the call the words were spoken on; the harness stores it on the line. */
+  send(input: { auth: RequestAuth; botId: string; threadId: string; text: string; callId: string }): Promise<LiveSendResult>;
+  /** Throws LiveCallSignedOutError once the sign-in that started the call has ended.
+   * `callId` comes with a spoken answer to a question: an answer that arrives
+   * after its turn ended is stored as one of the call's lines. */
+  respond(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "allow" | "deny" | "answer"; message?: string; callId?: string }): Promise<LiveRespondResult>;
   /** Whether a call request that send() queued still waits in the thread's
    * queue. Editing or cancelling it in a client removes it undelivered. */
   queued(botId: string, threadId: string, queueId: string): boolean;
@@ -514,7 +517,7 @@ export class LiveCallController {
       // answer. When that leaves nothing, the person spoke over the voice:
       // keep everything heard.
       const answer = heard.withoutEcho || said;
-      const result = await this.respond(call, { auth: call.auth, threadId: call.state.threadId, requestId: question.requestId, behavior: "answer", message: answer }, id);
+      const result = await this.respond(call, { auth: call.auth, threadId: call.state.threadId, requestId: question.requestId, behavior: "answer", message: answer, callId: call.state.callId }, id);
       if (!result) return;
       if (result.ok) {
         this.append(call, "thinking", LIVE_COPY.answerPassed, id);
@@ -540,7 +543,7 @@ export class LiveCallController {
     call.stats.sentToBot += 1;
     this.append(call, "thinking", LIVE_COPY.working, id);
     try {
-      const result = await this.deps.send({ auth: call.auth, botId: call.state.botId, threadId: call.state.threadId, text: said });
+      const result = await this.deps.send({ auth: call.auth, botId: call.state.botId, threadId: call.state.threadId, text: said, callId: call.state.callId });
       if (result.kind === "queued") call.queuedIds.add(result.queueId);
       else if (result.kind === "steered") {
         call.pendingCall.add(result.messageId);

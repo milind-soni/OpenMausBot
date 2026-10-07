@@ -183,13 +183,15 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
       // The narrowest crash window: the dispatch claim reached disk, the
       // transcript line did not. One row names its sender; one was written by
       // a build that did not keep one and must still recover; one was spoken
-      // in a Live call and must still say so.
+      // in a Live call and must still say so, with its call; one typed row
+      // carries a stray call id it must never get back.
       const claim = crashed.prepare(
         "INSERT INTO chat_followups(id, kind, owner_id, thread_id, send_id, status, payload) VALUES (?, 'bot', ?, ?, NULL, 'dispatching', ?)",
       );
       claim.run("claimed_before_append_named", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed, never appended", sender: PAIRED_ROW }));
       claim.run("claimed_before_append_legacy", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed by an older build" }));
-      claim.run("claimed_before_append_call", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed from a call", via: "call" }));
+      claim.run("claimed_before_append_call", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed from a call", via: "call", callId: "call-restart-fixture" }));
+      claim.run("claimed_before_append_stray", unappended.id, unappended.threadId, JSON.stringify({ text: "Typed, with a stray call id", callId: "call-stray" }));
       crashed.prepare("UPDATE messages SET json = json_set(json, '$.text', '') WHERE thread_id = ? AND id = ?")
         .run(lost.threadId, lostTarget.message.id);
     } finally { crashed.close(); }
@@ -202,10 +204,11 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     expect((await api("POST", `/api/bots/${bot.id}/messages`, body, 202)).message).toMatchObject({
       sendId: body.sendId, queueId: queued.queueId, replyToId, text, sender: PAIRED,
     });
-    expect((await messages(unappended.threadId)).filter((message) => message.role === "user").map((message) => [message.queueId, message.text, message.sender, message.via])).toEqual([
-      ["claimed_before_append_named", "Claimed, never appended", PAIRED_ROW, undefined],
-      ["claimed_before_append_legacy", "Claimed by an older build", undefined, undefined],
-      ["claimed_before_append_call", "Claimed from a call", undefined, "call"],
+    expect((await messages(unappended.threadId)).filter((message) => message.role === "user").map((message) => [message.queueId, message.text, message.sender, message.via, message.callId])).toEqual([
+      ["claimed_before_append_named", "Claimed, never appended", PAIRED_ROW, undefined, undefined],
+      ["claimed_before_append_legacy", "Claimed by an older build", undefined, undefined, undefined],
+      ["claimed_before_append_call", "Claimed from a call", undefined, "call", "call-restart-fixture"],
+      ["claimed_before_append_stray", "Typed, with a stray call id", undefined, undefined, undefined],
     ]);
     await expect.poll(async () => (await messages(lost.threadId)).some((message) => message.tool?.name?.includes("queued channel message could not start")), { timeout: 15_000 }).toBe(true);
     expect((await messages(lost.threadId)).filter((message) => message.queueId === lostQueued.queueId)).toEqual([

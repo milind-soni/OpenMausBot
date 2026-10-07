@@ -11,7 +11,7 @@
 // POSIX-gated like the other CLI e2es (the fakes are shebang scripts).
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,7 @@ import { openSse } from "./testing/sse.ts";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 const FAKE_ACP = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
+const FAKE_CODEX = join(SERVER_DIR, "testing", "fake-codex-app-server.ts");
 const LIVE_KEY = "sk-fake-e2e";
 const SDP = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n";
 const posixOnly = describe.skipIf(process.platform === "win32");
@@ -38,6 +39,10 @@ posixOnly("Live call e2e", () => {
   let base = "";
   let output = "";
   let live: FakeOpenAiLive;
+  /** while missing, the `steer` engine holds its turn open after its tool result */
+  let steerGate = "";
+  /** while present, the `codexQueue` engine refuses a live steer */
+  let queueSteerGate = "";
 
   /** Everything the harness printed: stdout is where server.log comes from. */
   const serverOutput = () => output;
@@ -78,9 +83,12 @@ posixOnly("Live call e2e", () => {
   beforeAll(async () => {
     chmodSync(FAKE_CLAUDE, 0o755);
     chmodSync(FAKE_ACP, 0o755);
+    chmodSync(FAKE_CODEX, 0o755);
     live = await startFakeOpenAiLive();
     home = mkdtempSync(join(tmpdir(), "omb-live-call-"));
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    steerGate = join(home, "steer.gate");
+    queueSteerGate = join(home, "queue-steer.gate");
     writeFileSync(
       join(home, ".openmausbot", "config.json"),
       JSON.stringify({
@@ -90,8 +98,23 @@ posixOnly("Live call e2e", () => {
             environment: { FAKE_CLAUDE_REPLIES: JSON.stringify(["Six times seven is 42."]) },
             config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" },
           },
+          // pauses after its tool result until steerGate exists: a request
+          // spoken then is steered into the running turn
+          steer: {
+            driver: "claudeAgent",
+            environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: steerGate },
+            config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" },
+          },
           // cannot steer and never finishes: a request made while it works waits in the queue
           acp: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "hang" }, config: { cli: FAKE_ACP, fullAuto: true } },
+          // parks its turn on a question and can steer, but refuses to while
+          // queueSteerGate exists: a request made then waits in the queue until
+          // the gate is cleared and Steer is pressed
+          codexQueue: {
+            driver: "codex",
+            environment: { FAKE_CODEX_MODE: "question", FAKE_CODEX_ASK_HOLD: "1", FAKE_CODEX_STEER_ERROR_FILE: queueSteerGate },
+            config: { cli: FAKE_CODEX },
+          },
           // every turn asks permission to run a command
           asks: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "permission" }, config: { cli: FAKE_ACP, fullAuto: false } },
           questions: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "question" }, config: { cli: FAKE_ACP, fullAuto: false } },
@@ -157,6 +180,8 @@ posixOnly("Live call e2e", () => {
         (frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message?.role === "user" && frame.message?.via === "call",
       );
       expect(asked.message.text).toBe("what is six times seven");
+      // the request carries the call it was spoken on
+      expect(asked.message.callId).toBe(call.callId);
       const spoken = await live.waitForCommand(session.id, (c) => c.type === "session.commentary.append" && String(c.content).includes("42"), 20_000);
       expect(spoken.delegation_id).toBe("del_1");
 
@@ -217,7 +242,7 @@ posixOnly("Live call e2e", () => {
         (frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message?.text === "spell the word banana",
         20_000,
       );
-      expect(drained.message).toMatchObject({ role: "user", via: "call" });
+      expect(drained.message).toMatchObject({ role: "user", via: "call", callId: call.callId });
       await expect.poll(spokenTurnsLogged, { timeout: 10_000 }).toBeGreaterThan(logged);
       expect(serverOutput()).not.toMatch(/banana/i);
 
@@ -261,6 +286,77 @@ posixOnly("Live call e2e", () => {
       await live.waitForCommand(session.id, (c) => c.type === "session.commentary.append" && c.content === LIVE_COPY.noAnswer, 20_000);
       expect(await post("/api/live/call/end", { callId: call.callId })).toMatchObject({ status: 200 });
     } finally {
+      sse.close();
+    }
+  }, 60_000);
+
+  it("steers a request spoken while the bot works into its turn, with the call's id", async () => {
+    rmSync(steerGate, { force: true });
+    const bot = await createBot("steer", "claude-fake");
+    const sse = await openSse(`${base}/api/events`);
+    let callId = "";
+    try {
+      const { call, session } = await startCall(bot.id);
+      callId = call.callId;
+      await live.waitForAttach(session.id);
+      expect((await post(`/api/bots/${bot.id}/messages`, { text: "start the report" })).status).toBe(202);
+      // the fake holds its turn open after the tool result: a request said now is steered
+      await sse.until((frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message?.kind === "activity", 20_000);
+      live.emit(session.id, { type: "session.input_transcript.delta", delta: "and add the totals", start_ms: 100, end_ms: 900 });
+      live.emit(session.id, { type: "session.delegation.created", offset_ms: 950, delegation: { id: "del_steer", target: "client", type: "delegation" } });
+      const steered = await sse.until(
+        (frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message?.role === "user" && frame.message?.steered === true,
+        20_000,
+      );
+      expect(steered.message).toMatchObject({ text: "and add the totals", via: "call", callId: call.callId });
+    } finally {
+      writeFileSync(steerGate, "finish");
+      await expect.poll(() => isBusy(bot.id), { timeout: 20_000 }).toBe(false);
+      if (callId) await post("/api/live/call/end", { callId });
+      sse.close();
+    }
+  }, 60_000);
+
+  // The engine refused the live steer, so the spoken request waits in the
+  // queue. Pressing Steer in a client folds it into the running turn later:
+  // it is still the call's line, and says so.
+  it("keeps the call's id on a queued spoken request that is steered from the queue", async () => {
+    writeFileSync(queueSteerGate, "refuse live steers until this test clears the gate");
+    const { instances } = (await (await fetch(`${base}/api/instances`)).json()) as { instances: Array<{ instanceId: string; models: { default: string } }> };
+    const bot = await createBot("codexQueue", instances.find((instance) => instance.instanceId === "codexQueue")!.models.default);
+    type Line = { id: string; role: string; text?: string; steered?: boolean; via?: string; callId?: string; card?: { requestId?: string } };
+    const lines = async (): Promise<Line[]> => ((await (await fetch(`${base}/api/threads/${bot.threadId}/messages`)).json()) as { messages: Line[] }).messages;
+    const sse = await openSse(`${base}/api/events`);
+    let callId = "";
+    try {
+      // The turn parks on a question before the call starts, so the call takes
+      // the next spoken request for a new one, not for the answer.
+      expect((await post(`/api/bots/${bot.id}/messages`, { text: "first gated turn" })).status).toBe(202);
+      await expect.poll(async () => (await lines()).some((line) => line.card?.requestId), { timeout: 20_000 }).toBe(true);
+      const { call, session } = await startCall(bot.id);
+      callId = call.callId;
+      await live.waitForAttach(session.id);
+
+      live.emit(session.id, { type: "session.input_transcript.delta", delta: "steer these queued words", start_ms: 100, end_ms: 900 });
+      live.emit(session.id, { type: "session.delegation.created", offset_ms: 950, delegation: { id: "del_queue_steer", target: "client", type: "delegation" } });
+      const waiting = await sse.until(
+        (frame) => frame.kind === "bot.queued" && (frame.queues?.[bot.threadId] ?? []).some((item: { text?: string }) => item.text === "steer these queued words"),
+        20_000,
+      );
+      const { queueId } = (waiting.queues[bot.threadId] as Array<{ queueId: string; text: string }>).find((item) => item.text === "steer these queued words")!;
+      // waiting in the queue, it is not in the transcript yet
+      expect((await lines()).some((line) => line.text === "steer these queued words")).toBe(false);
+
+      rmSync(queueSteerGate, { force: true });
+      const steered = await post(`/api/bots/${bot.id}/queue/${queueId}/steer`, { threadId: bot.threadId });
+      expect(steered).toMatchObject({ status: 200, body: { ok: true, steered: true, queueIds: [queueId] } });
+      const line = { text: "steer these queued words", steered: true, via: "call", callId: call.callId };
+      expect((steered.body as { messages: unknown[] }).messages).toEqual([expect.objectContaining(line)]);
+      expect((await lines()).find((m) => m.text === "steer these queued words")).toMatchObject(line);
+    } finally {
+      await post(`/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId });
+      await expect.poll(() => isBusy(bot.id), { timeout: 20_000 }).toBe(false);
+      if (callId) await post("/api/live/call/end", { callId });
       sse.close();
     }
   }, 60_000);
@@ -368,7 +464,7 @@ posixOnly("Live call e2e", () => {
       live.emit(session.id, { type: "session.input_transcript.delta", delta: "ask me which color", start_ms: 100, end_ms: 900 });
       live.emit(session.id, { type: "session.delegation.created", offset_ms: 950, delegation: { id: "del_question", target: "client" } });
       await live.waitForCommand(session.id, (c) => c.type === "session.instructions.append" && String(c.content).includes("Which color"), 20_000);
-      type Line = { id: string; role: string; replyToId?: string; via?: string; card?: { requestId?: string; answered?: string; answeredText?: string; answeredBy?: unknown } };
+      type Line = { id: string; role: string; replyToId?: string; via?: string; callId?: string; card?: { requestId?: string; answered?: string; answeredText?: string; answeredBy?: unknown } };
       const lines = async (): Promise<Line[]> => ((await (await fetch(`${base}/api/threads/${bot.threadId}/messages`)).json()) as { messages: Line[] }).messages;
       const original = (await lines()).find((m) => m.card?.requestId)!;
       live.emit(session.id, { type: "session.input_transcript.delta", delta: "Purple", start_ms: 5_000, end_ms: 5_300 });
@@ -381,7 +477,7 @@ posixOnly("Live call e2e", () => {
       live.emit(session.id, { type: "session.input_transcript.delta", delta: "Blue", start_ms: 8_000, end_ms: 8_300 });
       live.emit(session.id, { type: "session.delegation.created", offset_ms: 8_400, delegation: { id: "del_retry", target: "client" } });
       await expect.poll(async () => (await lines()).find((m) => m.id === original.id)?.card, { timeout: 10_000 }).toMatchObject({ answered: "answer", answeredText: "Blue", answeredBy: { kind: "loopback", via: "call" } });
-      expect((await lines()).find((m) => m.role === "user" && m.replyToId === original.id)).toMatchObject({ via: "call" });
+      expect((await lines()).find((m) => m.role === "user" && m.replyToId === original.id)).toMatchObject({ via: "call", callId: call.callId });
       expect(serverOutput()).not.toContain("text=Blue");
     } finally {
       await post("/api/bots/" + bot.id + "/interrupt", { threadId: bot.threadId });
@@ -397,7 +493,7 @@ posixOnly("Live call e2e", () => {
       live.emit(session.id, { type: "session.input_transcript.delta", delta: "ask me which color", start_ms: 100, end_ms: 900 });
       live.emit(session.id, { type: "session.delegation.created", offset_ms: 950, delegation: { id: "del_stopped_question", target: "client" } });
       await live.waitForCommand(session.id, (c) => c.type === "session.instructions.append" && String(c.content).includes("Which color"), 20_000);
-      type Line = { id: string; role: string; replyToId?: string; via?: string; card?: { requestId?: string; answered?: string; answeredText?: string; answeredBy?: unknown } };
+      type Line = { id: string; role: string; replyToId?: string; via?: string; callId?: string; card?: { requestId?: string; answered?: string; answeredText?: string; answeredBy?: unknown } };
       const lines = async (): Promise<Line[]> => ((await (await fetch(`${base}/api/threads/${bot.threadId}/messages`)).json()) as { messages: Line[] }).messages;
       const original = (await lines()).find((m) => m.card?.requestId)!;
       expect((await post(`/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId })).status).toBe(200);
@@ -405,7 +501,7 @@ posixOnly("Live call e2e", () => {
       live.emit(session.id, { type: "session.input_transcript.delta", delta: "Green", start_ms: 5_000, end_ms: 5_300 });
       live.emit(session.id, { type: "session.delegation.created", offset_ms: 5_400, delegation: { id: "del_late", target: "client" } });
       await expect.poll(async () => (await lines()).find((m) => m.id === original.id)?.card, { timeout: 5_000 }).toMatchObject({ answered: "answer", answeredText: "Green", answeredBy: { kind: "loopback", via: "call" } });
-      expect((await lines()).find((m) => m.role === "user" && m.replyToId === original.id)).toMatchObject({ via: "call" });
+      expect((await lines()).find((m) => m.role === "user" && m.replyToId === original.id)).toMatchObject({ via: "call", callId: call.callId });
       expect(serverOutput()).not.toContain("text=Green");
     } finally {
       await post(`/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId });

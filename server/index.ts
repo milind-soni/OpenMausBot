@@ -346,6 +346,7 @@ import { createDecider, deciderIncludedHere, deciderReady, deciderSavePatch, des
 import { decideRoomResponder, type RoomRoutingInput } from "./decider/room-routing.ts";
 import { createLiveSession, liveAttachUrl, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError, type LiveSocket } from "./live-call-controller.ts";
+import { spokenLineFields } from "./live-call-record.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { turnStartLogLine } from "./turn-log.ts";
 import { makeCapContinuationSubscriber } from "./turn-continuation.ts";
@@ -5856,8 +5857,10 @@ async function respondToCard(input: {
   requestId: string;
   behavior: "allow" | "deny" | "answer";
   message?: string;
+  /** The Live call a spoken answer was given on: a late answer's line carries it. */
+  callId?: string;
 }): Promise<CardRespondResult> {
-  const { auth, threadId, requestId, behavior, message } = input;
+  const { auth, threadId, requestId, behavior, message, callId } = input;
   // A call outlives the request that started it: the session must still be valid.
   if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
     return { ok: false, status: 401, error: "The session that started this call has ended." };
@@ -5889,7 +5892,7 @@ async function respondToCard(input: {
         result = { ok: false, status: 401, error: "The session that started this call has ended." };
       } else {
         try {
-          await deliverLateQuestionAnswer(auth, threadId, requestId, answer, cardMessage, bot, "call");
+          await deliverLateQuestionAnswer(auth, threadId, requestId, answer, cardMessage, bot, "call", callId);
         } catch (error) {
           result = { ok: false, status: 409, error: error instanceof Error ? error.message : "The late answer could not be queued." };
         }
@@ -8911,7 +8914,7 @@ function drainAsideLane() {
 
 /** Keep a person's words off the transcript until a direct-thread slot is
  * available. Reuse the existing cancellable, idempotent composer queue. */
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call") {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string) {
   const decision = admit("direct", {}, {
     // A room turn holds the bot exactly like the sibling opened-thread queue
     // below: the drain's own block check waits it out, so the words queue
@@ -8930,10 +8933,11 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
       sender,
       trigger,
       via,
+      callId,
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId });
   return { ok: true as const, threadId, message };
 }
 
@@ -8985,13 +8989,15 @@ async function acceptDirectSend(
     sender?: ResolvedSender;
     trigger: UsageTrigger;
     via?: "call";
+    /** The Live call the words were spoken on (Message.callId); only with via. */
+    callId?: string;
     /** A person is proven present (a paired session, or the desktop's owner
      * capability): steering their words in clears the unattended mark. */
     personPresent: boolean;
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, personPresent } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, personPresent } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -9090,14 +9096,14 @@ async function acceptDirectSend(
             sendId,
             steered: true,
             sender,
-            ...(via ? { via } : {}),
+            ...spokenLineFields(via, callId),
           });
           // Offered to the next turn again unless the person stops this one.
           handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via);
+          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId);
         }
         const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
@@ -9106,10 +9112,11 @@ async function acceptDirectSend(
           sender,
           trigger,
           via,
+          callId,
         });
         return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
-      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via);
+      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId);
     },
   );
 }
@@ -9124,6 +9131,8 @@ async function deliverLateQuestionAnswer(
   cardMessage: Message,
   owner: BotRecord,
   via?: "call",
+  /** The Live call a spoken answer was given on (Message.callId); only with via. */
+  callId?: string,
 ): Promise<{ queued: boolean }> {
   const group = store.groupByThread(threadId);
   const roomTarget = group
@@ -9186,7 +9195,7 @@ async function deliverLateQuestionAnswer(
       startGroupTurn(current.id, text, cardMessage, sendId, "chat", undefined, { threadId, sender, trigger });
       return { queued: false };
     }
-    const direct = await startOrQueueDirectMessage(owner.id, threadId, text, cardMessage, sendId, sender, trigger, via);
+    const direct = await startOrQueueDirectMessage(owner.id, threadId, text, cardMessage, sendId, sender, trigger, via, callId);
     return { queued: "queued" in direct && Boolean(direct.queued) };
   });
 
@@ -9470,6 +9479,8 @@ async function startTurn(
     sendId?: string;
     /** The words were spoken in a Live call, not typed. */
     via?: "call";
+    /** The Live call they were spoken on (Message.callId); only with via. */
+    callId?: string;
     /** An external interface relayed the words through the guarded send
      * route (Message.relayed): nobody typed them in a client here. */
     relayed?: boolean;
@@ -9647,7 +9658,7 @@ async function startTurn(
           sendId: opts?.sendId,
           peerAsk: opts?.peerAsk,
           sender: opts?.sender,
-          ...(opts?.via ? { via: opts.via } : {}),
+          ...spokenLineFields(opts?.via, opts?.callId),
           ...(opts?.relayed ? { relayed: true } : {}),
         });
   }
@@ -15747,7 +15758,7 @@ function liveSignedIn(auth: RequestAuth): boolean {
 }
 const liveCalls = new LiveCallController({
   store,
-  send: async ({ auth, botId, threadId, text }) => {
+  send: async ({ auth, botId, threadId, text, callId }) => {
     // the controller ends the call on this error
     if (!liveSignedIn(auth)) throw new LiveCallSignedOutError();
     const receipt = await acceptDirectSend({
@@ -15756,6 +15767,7 @@ const liveCalls = new LiveCallController({
       sender: messageSender(auth),
       trigger: usageTriggerFor(auth),
       via: "call",
+      callId,
       // a person is on the call: these are their words
       personPresent: true,
     });
@@ -22296,7 +22308,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           peerAsk: item.peerAsk,
           steered: true,
           sender: item.sender,
-          ...(item.via ? { via: item.via } : {}),
+          ...spokenLineFields(item.via, item.callId),
         }));
         // Offered to the next turn again unless the person stops this one.
         for (const message of messages) handoffs.steered(bot.threadId, steerTarget, instance?.instanceId, message.id);
@@ -25237,7 +25249,7 @@ for (const row of chatFollowups()) {
     role: "user", kind: "text", text: row.kind === "aside" ? row.payload.prompt ?? row.payload.text : row.payload.text, replyToId: row.payload.replyToId,
     sendId: row.payload.sendId, queueId: row.id, sender: row.payload.sender,
     ...(row.kind === "channel" ? { channelMode: row.payload.mode, via: row.payload.via } : {}),
-    ...(row.kind === "bot" && row.payload.via === "call" ? { via: "call" as const } : {}),
+    ...(row.kind === "bot" ? spokenLineFields(row.payload.via, row.payload.callId) : {}),
     ...(row.kind === "aside" ? {
       aside: true,
       peerAsk: row.payload.aside

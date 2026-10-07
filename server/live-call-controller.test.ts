@@ -470,11 +470,44 @@ describe("LiveCallController relay", () => {
 
   it("sends the words since the last request to the bot, as the call's starter", async () => {
     const t = await live();
+    const callId = t.controller.current()!.callId;
     hear(t, "what is on ", 100);
     hear(t, "my calendar", 200);
     await delegate(t, "del_1", 400);
-    expect(t.deps.send).toHaveBeenCalledWith({ auth: owner, botId: "bot1", threadId: "t1", text: "what is on my calendar" });
+    expect(t.deps.send).toHaveBeenCalledWith({ auth: owner, botId: "bot1", threadId: "t1", text: "what is on my calendar", callId });
     expect(t.socket().appends("thinking").at(-1)).toMatchObject({ delegation_id: "del_1", content: expect.stringContaining("You are working on the request") });
+  });
+
+  it("tags every spoken request with the call's id, however the harness took it", async () => {
+    const t = await live();
+    const callId = t.controller.current()!.callId;
+    vi.mocked(t.deps.send)
+      .mockResolvedValueOnce({ kind: "started", messageId: "m1" })
+      .mockResolvedValueOnce({ kind: "steered", messageId: "m2" })
+      .mockResolvedValueOnce({ kind: "queued", queueId: "q1" });
+    hear(t, "check the build", 100);
+    await delegate(t, "del_1", 300);
+    hear(t, "and the tests", 2_000);
+    await delegate(t, "del_2", 2_300);
+    hear(t, "then deploy", 4_000);
+    await delegate(t, "del_3", 4_300);
+    expect(vi.mocked(t.deps.send).mock.calls.map(([input]) => [input.text, input.callId])).toEqual([
+      ["check the build", callId],
+      ["and the tests", callId],
+      ["then deploy", callId],
+    ]);
+  });
+
+  it("gives the next call an id of its own", async () => {
+    const t = await live();
+    const first = t.controller.current()!.callId;
+    t.socket().drop();
+    await t.start();
+    const second = t.controller.current()!.callId;
+    expect(second).not.toBe(first);
+    hear(t, "hello again", 100);
+    await delegate(t, "del_1", 300);
+    expect(vi.mocked(t.deps.send).mock.calls.at(-1)![0].callId).toBe(second);
   });
 
   it("asks to repeat when nothing was heard", async () => {
@@ -1073,7 +1106,7 @@ describe("LiveCallController relay", () => {
       expect(t.socket().appends("instructions").at(-1)).toMatchObject({ content: expect.stringContaining("Which account?") });
       hear(t, "savings", 5_000);
       await delegate(t, "del_2", 5_100);
-      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings" });
+      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings", callId: t.controller.current()!.callId });
       expect(t.deps.send).not.toHaveBeenCalled();
     });
 
@@ -1085,7 +1118,7 @@ describe("LiveCallController relay", () => {
       hear(t, "which account main or savings ", 4_100, 5_900);
       hear(t, "savings", 7_000);
       await delegate(t, "del_2", 7_100);
-      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings" });
+      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings", callId: t.controller.current()!.callId });
     });
 
     it("keeps an answer said over the voice", async () => {
@@ -1095,7 +1128,7 @@ describe("LiveCallController relay", () => {
       t.socket().receive({ type: "session.output_transcript.delta", delta: "Which account? Main or Savings?", start_ms: 4_000, end_ms: 6_000 });
       hear(t, "savings", 5_000, 5_500);
       await delegate(t, "del_2", 5_600);
-      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings" });
+      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings", callId: t.controller.current()!.callId });
     });
 
     it("announces a second approval after the first one settles", async () => {

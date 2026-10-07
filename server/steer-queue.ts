@@ -282,12 +282,18 @@ export function drainSteeredMessages(
  * part of the identity. A person's texts merge only with that same
  * person's; a bot's own queued work (peerAsk/unattended) never merges with
  * anyone's person texts, and unattributed local sends (the loopback owner)
- * are one identity — the transcript already names them all the same. */
+ * are one identity — the transcript already names them all the same.
+ * A line spoken on a Live call is one more identity: its call's. It never
+ * drains in one turn with a typed line or another call's line, because a
+ * merged turn's request is only its last line, and a call's record is made
+ * of the turns its own lines started. */
 function coalesceIdentity(item: QueueEntry["items"][number]): string {
   if (item.peerAsk) return `peer:${item.peerAsk.botId}:${item.unattended === true ? "unattended" : "attended"}`;
   if (item.unattended === true) return "unattended";
-  if (item.sender) return `person:${item.sender.id ?? item.sender.name}`;
-  return "person:local";
+  const person = item.sender ? `person:${item.sender.id ?? item.sender.name}` : "person:local";
+  // the "call:" prefix cannot begin any other identity; a row from a build
+  // that kept no call id is still a spoken line, in a call of its own
+  return item.via === "call" ? `call:${item.callId ?? ""}|${person}` : person;
 }
 
 /** Find the receipt for a retry whose message is still waiting to drain. */
