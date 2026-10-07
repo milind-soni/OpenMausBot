@@ -435,3 +435,24 @@ writeFileSync(${JSON.stringify(out)}, JSON.stringify({ secrets, env: process.env
     await removeTempDir(dir);
   }
 });
+
+it("captures a child's stdout and stderr when asked, and shares this process's otherwise", async () => {
+  const dir = directory();
+  const script = join(dir, "streams.mjs");
+  writeFileSync(script, `process.stdout.write("stdout marker"); process.stderr.write("stderr marker");`);
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) };
+  const run = async (capture: boolean) => {
+    const child = spawnWithSecrets(process.execPath, [script], env, { OMB_CLOUD_BOOTSTRAP_SECRET: secret }, undefined, capture);
+    let out = "", err = "";
+    child.stdout?.on("data", (chunk) => { out += chunk; });
+    child.stderr?.on("data", (chunk) => { err += chunk; });
+    await new Promise((resolve) => child.once("close", resolve));
+    return { child, out, err };
+  };
+  const captured = await run(true);
+  expect(captured.out).toContain("stdout marker");
+  expect(captured.err).toContain("stderr marker");
+  const shared = await run(false);
+  expect(shared.child.stdout).toBeNull();
+  expect(shared.child.stderr).toBeNull();
+});
