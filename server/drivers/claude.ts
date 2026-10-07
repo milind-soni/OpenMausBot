@@ -16,7 +16,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, dirname, isAbsolute, normalize } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
-import { writeFileAtomic } from "../atomic.ts";
+import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
 import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
@@ -732,6 +732,9 @@ export async function createPermissionBroker(opts: {
   let boundPath = opts.socketPaths[0] ?? "";
   const connectionHandler = (conn: import("node:net").Socket) => {
     conn.on("error", () => {});
+    // An ask carries the whole tool input (a Write's file content), so one
+    // line spans many reads. Decode as a stream so no character is split.
+    conn.setEncoding("utf8");
     let buf = "";
     conn.on("data", (chunk) => {
       buf += chunk;
@@ -1061,8 +1064,10 @@ function recordCostState(sessionId: string, state: ClaudeCostSnapshot): void {
   history[sessionId] = states;
   const ids = Object.keys(history);
   for (const id of ids.slice(0, Math.max(0, ids.length - COST_HISTORY_SESSIONS))) delete history[id];
+  // Written after every turn, so not fsynced: what a power cut could lose is
+  // the same thing a failed write already gives up (below).
   try {
-    writeFileAtomic(COST_HISTORY_FILE, JSON.stringify(history), { mode: 0o600 });
+    writeFileAtomic(COST_HISTORY_FILE, JSON.stringify(history), { mode: 0o600, durable: false });
   } catch {
     // a lost state only means a later resume keeps its whole figure
   }
@@ -1199,6 +1204,24 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           resolve(err ? null : stdout.trim() || null),
         );
       });
+    // The --help read while it runs: snapshots that overlap (the server's
+    // read at start and the app's first one) share it.
+    let helpRead: { version: string; done: Promise<void> } | null = null;
+    const readCliHelp = (version: string, env: NodeJS.ProcessEnv): Promise<void> => {
+      if (helpRead?.version === version) return helpRead.done;
+      const read = {
+        version,
+        done: new Promise<string | null>((resolve) => {
+          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
+        }).then((help) => {
+          cliHasAutocompact = help === null ? null : /^\s*--autocompact\b/m.test(help);
+          cliHelpVersion = version;
+          if (helpRead === read) helpRead = null;
+        }),
+      };
+      helpRead = read;
+      return read.done;
+    };
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
     const active = new Map<string, { stop: () => void; turnId: string; broker?: Awaited<ReturnType<typeof createPermissionBroker>> }>();
@@ -1620,14 +1643,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         ? readClaudeAuthSettings(env, input.environment) : {};
       // Harness hooks (item 0.2): one helper command for the events the
       // harness observes. The helper reads its bearer from a per-thread file
-      // the harness rewrites every turn, so a long-lived CLI process never
+      // the harness refreshes every turn, so a long-lived CLI process never
       // presents a stale token. Registered through the same private
       // --settings file as the auth override; both are 0600 and per launch.
       const hooks = turn.integrations?.hooks;
       const hookTokenPath = hooks ? hookTokenFile(threadId, botId) : null;
       if (hooks && hookTokenPath) {
         mkdirSync(dirname(hookTokenPath), { recursive: true, mode: 0o700 });
-        writeFileAtomic(hookTokenPath, hooks.token, { mode: 0o600 });
+        // The bearer is usually the same as last turn, and it only lives in
+        // this process's memory, so a restart invalidates the file anyway:
+        // skip identical bytes and the fsync. A rotated bearer differs from
+        // what is on disk, so it is always written before the CLI launches.
+        writeFileAtomicIfChanged(hookTokenPath, hooks.token, { mode: 0o600, durable: false });
         env.OMB_HOOK_URL = hooks.url;
         env.OMB_HOOK_TOKEN_FILE = hookTokenPath;
         env.OMB_HOOK_NODE = process.execPath;
@@ -2476,13 +2503,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
       cliVersion = parseClaudeCliVersion(version);
       cliVersionChecked = true;
-      if (version !== cliHelpVersion) {
-        const help = await new Promise<string | null>((resolve) => {
-          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
-        });
-        cliHasAutocompact = help === null ? null : /^\s*--autocompact\b/m.test(help);
-        cliHelpVersion = version;
-      }
+      if (version !== cliHelpVersion) await readCliHelp(version, env);
       const update = claudeCliUpdate(version, config.cli);
       const warning = claudeInheritWarning(env);
       if (config.requireApiKey) {

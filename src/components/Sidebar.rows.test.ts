@@ -28,6 +28,12 @@ vi.mock("./ConfirmDialog", async (importOriginal) => ({
     return null;
   },
 }));
+// Threads are an Advanced-mode surface: Simple mode keeps one conversation
+// per bot (useShowThreads), so these render as Advanced.
+vi.mock("@/lib/interface-mode", async (original) => ({
+  ...await original<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => true,
+}));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "other" }, localComputer: { available: false } }, ready: true }),

@@ -46,33 +46,33 @@ function run(directory: string, event: string, payload: unknown) {
 }
 
 describe("CI path scope", () => {
-  it("skips runtime and mobile only for explicit documentation and metadata", () => {
+  it("skips the runtime suite only for explicit documentation and metadata", () => {
     expect(selectCiScope(["README.md", "AGENTS.md", "docs/guide.md", "docs/nested/guide.md", ".github/FUNDING.yml"]))
-      .toEqual({ runtime: false, mobile: false });
+      .toEqual({ runtime: false });
   });
 
   it("keeps runtime checks for renderer-only changes mixed with docs", () => {
     expect(selectCiScope(["src/App.tsx", "public/icon.svg", "index.html", "docs/guide.md"]))
-      .toEqual({ runtime: true, mobile: false });
+      .toEqual({ runtime: true });
   });
 
   it("keeps filenames containing newlines as one source path", () => {
-    expect(selectCiScope(["src/first.md\nsecond.md"])).toEqual({ runtime: true, mobile: false });
+    expect(selectCiScope(["src/first.md\nsecond.md"])).toEqual({ runtime: true });
   });
 
   it.each([
-    [], [""], ["docs/../server/file.md"], ["ios/Fixtures/chat.json"], ["android/app/build.gradle.kts"],
-    [".github/workflows/ci.yml"], ["scripts/ci-scope.mjs"], [".gitattributes"], ["server/index.ts", "ios/App/App.swift"],
+    [], [""], ["docs/../server/file.md"],
+    [".github/workflows/ci.yml"], ["scripts/ci-scope.mjs"], [".gitattributes"],
   ])("runs everything conservatively for %j", (...files) => {
-    expect(selectCiScope(files)).toEqual({ runtime: true, mobile: true });
+    expect(selectCiScope(files)).toEqual({ runtime: true });
   });
 
   it.each([
     ["server/index.ts"], ["shared/types.ts"], ["electron/main.mjs"], ["companion/src/index.ts"],
     ["package.json"], ["pnpm-lock.yaml"], ["vite.config.ts"], [".github/workflows/release.yml"],
     ["docs/fixture.json"], ["unknown/file"], ["src/App.tsx", "server/index.ts"], ["scripts/capture-companion-fixtures.mjs"],
-  ])("runs the runtime suite without native mobile builds for %j", (...files) => {
-    expect(selectCiScope(files)).toEqual({ runtime: true, mobile: false });
+  ])("runs the runtime suite for %j", (...files) => {
+    expect(selectCiScope(files)).toEqual({ runtime: true });
   });
 });
 
@@ -84,7 +84,7 @@ describe("CI scope CLI", () => {
     const { output, stderr } = run(directory, "pull_request", {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
-    expect(output).toBe(`runtime=false\nmobile=false\nvitest_os=${PR_OS}\n`);
+    expect(output).toBe(`runtime=false\nvitest_os=${PR_OS}\n`);
     expect(stderr).toBe("");
   });
 
@@ -100,7 +100,7 @@ describe("CI scope CLI", () => {
     const { output, stderr } = run(directory, "pull_request", {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
-    expect(output).toBe(`runtime=false\nmobile=false\nvitest_os=${PR_OS}\n`);
+    expect(output).toBe(`runtime=false\nvitest_os=${PR_OS}\n`);
     expect(stderr).toBe("");
   });
 
@@ -113,7 +113,7 @@ describe("CI scope CLI", () => {
     const { output, stderr } = run(directory, "pull_request", {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
-    expect(output).toBe(`runtime=true\nmobile=false\nvitest_os=${PR_OS}\n`);
+    expect(output).toBe(`runtime=true\nvitest_os=${PR_OS}\n`);
     expect(stderr).toBe("");
   });
 
@@ -125,7 +125,7 @@ describe("CI scope CLI", () => {
     const { output } = run(directory, "pull_request", {
       pull_request: { base: { sha: base }, head: { sha: git("rev-parse", "HEAD") } },
     });
-    expect(output).toBe(`runtime=true\nmobile=false\nvitest_os=${PR_OS}\n`);
+    expect(output).toBe(`runtime=true\nvitest_os=${PR_OS}\n`);
   });
 
   it.each(["missing", "invalid", "unavailable", "empty"])("falls back loudly for a %s diff", (kind) => {
@@ -134,12 +134,12 @@ describe("CI scope CLI", () => {
       pull_request: { base: { sha: base }, head: { sha: kind === "invalid" ? "--help" : kind === "unavailable" ? "f".repeat(40) : base } },
     };
     const { output, stderr } = run(directory, "pull_request", payload);
-    expect(output).toBe(`runtime=true\nmobile=true\nvitest_os=${ALL_OS}\n`);
+    expect(output).toBe(`runtime=true\nvitest_os=${ALL_OS}\n`);
     expect(stderr).toContain("using all checks");
   });
 
   it.each(["push", "merge_group", "workflow_dispatch"])("runs everything for %s", (event) => {
     const { directory } = fixture();
-    expect(run(directory, event, {}).output).toBe(`runtime=true\nmobile=true\nvitest_os=${ALL_OS}\n`);
+    expect(run(directory, event, {}).output).toBe(`runtime=true\nvitest_os=${ALL_OS}\n`);
   });
 });

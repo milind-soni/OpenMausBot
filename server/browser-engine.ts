@@ -17,7 +17,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { browserBundlePaths } from "./browser-bundle-release.ts";
-import { browserRuntimeEnv } from "./browser-runtime.ts";
+import { BROWSER_VIEWPORT_ARGS, browserRuntimeEnv, ownsBrowserViewport } from "./browser-runtime.ts";
 import { SIGN_IN_PROMPT } from "./system-prompt.ts";
 import {
   AGENT_BROWSER_VERSION,
@@ -462,6 +462,29 @@ export function agentBrowserIntegration(input: {
     env.AGENT_BROWSER_EXECUTABLE_PATH = bundle.chrome;
   }
   return { command: input.binaryPath, args: ["mcp", "--tools", "core", "--no-webmcp"], env };
+}
+
+/** Give the session's browser the standard page size, launching it with the
+ * session's own launch environment if it is not running yet. Best effort:
+ * false (and the page keeps whatever size it had) on any failure. */
+export function setBrowserViewport(binaryPath: string, env: NodeJS.ProcessEnv, timeoutMs = 30_000): Promise<boolean> {
+  if (!ownsBrowserViewport(env)) return Promise.resolve(true);
+  return new Promise((settle) => {
+    let child: ReturnType<typeof spawn>;
+    try { child = spawn(binaryPath, [...BROWSER_VIEWPORT_ARGS, "--json", "--no-webmcp"], { env: browserRuntimeEnv(env), stdio: ["ignore", "pipe", "ignore"], windowsHide: true }); }
+    catch { settle(false); return; }
+    let output = "";
+    let settled = false;
+    const finish = (ok: boolean) => { if (!settled) { settled = true; clearTimeout(timer); settle(ok); } };
+    const timer = setTimeout(() => { child.kill("SIGKILL"); finish(false); }, timeoutMs);
+    timer.unref?.();
+    child.stdout?.on("data", (chunk: Buffer) => { if (output.length < 65_536) output += String(chunk); });
+    child.on("error", () => finish(false));
+    child.on("close", (code) => {
+      try { finish(code === 0 && JSON.parse(output)?.success === true); }
+      catch { finish(false); }
+    });
+  });
 }
 
 /** How long a settled-frame capture may take before the turn gives up on it.

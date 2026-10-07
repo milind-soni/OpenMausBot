@@ -13,6 +13,7 @@ import {
   liveSessionsUrl,
   MAX_SDP_BYTES,
 } from "./live-call.ts";
+import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
 
 const OFFER = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\n";
 const BOT = { name: "Ada", title: "Tech Lead", description: "Leads the engineering team." };
@@ -123,12 +124,23 @@ describe("live startup context", () => {
   });
 
   // On a Cloud the harness is a server in the cloud: a voice that says it
-  // runs on the person's own computer offers what it cannot reach.
+  // runs on the person's own computer offers what it cannot reach. It names
+  // the place in the bot's own words (cloudHomePrompt), so the two cannot drift.
   it("on a Cloud, says the voice runs on the user's My Cloud, not their own computer", () => {
     const text = liveInstructions({ name: "Rigel", title: "QA" }, { cloudHome: true });
+    expect(text.split("\n")[0]).toBe(`You are Rigel, QA, an AI agent that runs on ${CLOUD_HOME_PLACE}.`);
     expect(text.split("\n")[0]).toBe("You are Rigel, QA, an AI agent that runs on the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer.");
     expect(text).not.toContain("OMB");
     expect(liveInstructions({ name: "Rigel" }, { cloudHome: false }).split("\n")[0]).toBe("You are Rigel, an AI agent that runs in OpenMausBot on the user's own computer.");
+  });
+
+  // The bot's work happens where it runs: on a Cloud that is My Cloud, never
+  // "the computer" just after the voice was told it is not on their computer.
+  it("says the bot changes things where it runs", () => {
+    const backend = (cloudHome: boolean) => liveInstructions({ name: "Rigel" }, { cloudHome }).split("\n").find((line) => line.startsWith("- Rigel:"));
+    expect(backend(true)).toContain("It researches, writes, changes things on My Cloud, and answers questions");
+    expect(backend(false)).toContain("It researches, writes, changes things on the computer, and answers questions");
+    expect(liveInstructions({ name: "Rigel" }, { cloudHome: true })).not.toMatch(/\bthe computer\b/);
   });
 
   it("tells the voice to answer 'is it still working?' from the status notes, not by delegating", () => {

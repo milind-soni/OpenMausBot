@@ -236,6 +236,9 @@ describe("snapshot", () => {
   // Two threads of one bot work in one folder at the same time: thread B's
   // snapshot lands while thread A's turn is still running, and A's digest
   // diffs against A's own pre-turn commit when A ends.
+  // This exercises a full 25-commit GC cycle with real Git subprocesses.
+  // Windows runner process startup can exhaust the suite's 20-second limit;
+  // keep every retention/collection assertion, with a bounded Windows budget.
   it("keeps a pinned pre-turn commit through a sibling turn's snapshot until it is released", async () => {
     const { bot, cwd } = workspace();
     const shadow = shadowOf(bot, cwd);
@@ -260,7 +263,7 @@ describe("snapshot", () => {
     // releasing twice, or a pin never taken, is harmless
     await release(bot, cwd, "dispatch-A");
     await release(bot, cwd, "never-pinned");
-  });
+  }, process.platform === "win32" ? 60_000 : 20_000);
 
   it("sweeps pins a previous process left behind, on first use of the shadow", async () => {
     const { bot, cwd } = workspace();

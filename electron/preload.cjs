@@ -40,11 +40,18 @@ const isLocalPage = !localOrigin || location.origin === localOrigin;
 // its Settings → Backups); its Copy opens this computer's Settings on that
 // server's copy, except on the person's own verified Cloud. cloudLending and
 // cloudPlan: only that verified Cloud (its setup checklist, its plan line).
-// updater: this app's updates, answered on that verified Cloud too, so the
-// person sees "Restart to update" there; a remote page restarts only on a click.
 /** A saved server's id, forwarded only from this computer's own page. */
 const savedServer = id => isLocalPage && typeof id === "string" && /^[\w-]{1,64}$/.test(id) ? [id] : [];
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan", "updater"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan"]);
+// updater: this app's updates, so the person sees "Restart to update" on My
+// Cloud too; a remote page restarts only on a click. Main says, once as the
+// page loads, whether it answers this page: pages built before it answered My
+// Cloud read the bridge alone as "You're up to date", so no other server's
+// page gets it. Main always answers, false on any doubt.
+function updaterOffered() {
+  try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
+}
+const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : [])]);
 
 // Sandboxed preload cannot import TS or sibling modules. Keep this list in
 // parity with shared/workspace-backup-client.ts (covered by the preload test).
@@ -198,6 +205,9 @@ const bridge = {
   /** Copies an engine install command and opens a blank terminal. Resolves
    * false if no terminal could be launched; the clipboard still has it. */
   openInstallTerminal: (command) => ipcRenderer.invoke("engine:open-terminal", command),
+  /** Writes plain text to the system clipboard; the copy button's fallback
+   * when the web Clipboard API is rejected. Resolves false on failure. */
+  copyText: (text) => ipcRenderer.invoke("clipboard:write-text", text),
   /** Open a web link in the default browser. Unlike renderer window.open,
    * this remains reliable after an asynchronous API request. */
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
@@ -263,6 +273,9 @@ const bridge = {
       const message = String(error?.message ?? error);
       throw new Error(message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
     }),
+  /** Point the file manager at a file a bot linked outside its workspace,
+   * without opening it. Resolves "shown", "missing" or "invalid". */
+  revealInFolder: (filePath) => ipcRenderer.invoke("desktop:reveal-file", filePath),
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 
@@ -402,5 +415,5 @@ const bridge = {
 
 contextBridge.exposeInMainWorld(
   "ogb",
-  isLocalPage ? bridge : Object.fromEntries(Object.entries(bridge).filter(([key]) => REMOTE_SAFE.has(key))),
+  isLocalPage ? bridge : Object.fromEntries(Object.entries(bridge).filter(([key]) => remoteKeys.has(key))),
 );

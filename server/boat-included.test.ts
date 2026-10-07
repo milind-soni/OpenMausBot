@@ -177,7 +177,9 @@ describe("waking a sleeping computer", () => {
   it("reports the last server error, not a bare timeout, when the wait runs out on it", async () => {
     state = "archived";
     resumeReplies = [{ status: 503, body: { ok: false, code: "unavailable", message: "Boat is busy" } }];
-    await expect(boat.readyBoat({ box: { token: "box_own" } }, botId, 1)).rejects.toThrow("waking the cloud computer failed: Boat is busy");
+    // One poll fits the budget (each request ends with it, so it must leave
+    // room for one read and one resume); the next would come after it.
+    await expect(boat.readyBoat({ box: { token: "box_own" } }, botId, 2_000)).rejects.toThrow("waking the cloud computer failed: Boat is busy");
   });
 
   it("forgets a server error once a later resume is accepted", async () => {
@@ -187,8 +189,10 @@ describe("waking a sleeping computer", () => {
       { status: 503, body: { ok: false, code: "unavailable", message: "Boat is busy" } },
       { status: 202, body: { ok: true } },
     ];
-    // Two polls fit the budget: 503, then an accepted resume that is still waking.
-    await expect(boat.readyBoat({ box: { token: "box_own" } }, botId, 3_000)).resolves.toBeNull();
+    // Two polls fit the budget: 503, then an accepted resume that is still
+    // waking, with room left for the second poll's requests, which end with
+    // the budget too.
+    await expect(boat.readyBoat({ box: { token: "box_own" } }, botId, 4_000)).resolves.toBeNull();
     expect(requests.filter((request) => request.path.endsWith("/resume"))).toHaveLength(2);
   }, 15_000);
 

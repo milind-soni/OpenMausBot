@@ -188,6 +188,14 @@ export function endNotice(reason: LiveEndReason | undefined): { text: string; dr
   }
 }
 
+/** This window is a web browser, with no desktop app around it: the one
+ * rule for who asks for the microphone and which app holds the call. It reads
+ * the desktop capability contract (src/lib/desktop.ts: a window the app does
+ * not answer for is a browser), never the preload bridge (CONTRIBUTING.md). */
+function inWebBrowser(capabilities: DesktopCapabilities): boolean {
+  return capabilities.dictation.reasonCode === "desktop-app-required";
+}
+
 /** Who blocked the microphone, and the one thing that helps. The desktop app
  * says whether it lets this page use the microphone (`pageMic`): a page it
  * refused can make the call in a web browser. An older app does not say; it
@@ -195,18 +203,17 @@ export function endNotice(reason: LiveEndReason | undefined): { text: string; dr
  * as refused there too. Otherwise the browser (per site) or the computer's
  * privacy settings blocked it: allow it there, then try again. */
 function micBlocked(capabilities: DesktopCapabilities, pageMic: "allowed" | "refused" | undefined): { notice: string; action: LiveCallAction } {
-  const page = capabilities.dictation.reasonCode;
-  if (pageMic === "refused" || (pageMic === undefined && page === "remote-server")) {
+  if (pageMic === "refused" || (pageMic === undefined && capabilities.dictation.reasonCode === "remote-server")) {
     return { notice: t("call.live.micAppRefused"), action: "open-in-browser" };
   }
-  return { notice: t(page === "desktop-app-required" ? "call.live.micBlockedBrowser" : "call.live.micBlocked"), action: "retry" };
+  return { notice: t(inWebBrowser(capabilities) ? "call.live.micBlockedBrowser" : "call.live.micBlocked"), action: "retry" };
 }
 
 /** Which app this window's call says holds the microphone: a web browser,
  * or the desktop app (its own page, or a server's page in it, such as My
  * Cloud). The harness reports it to a busy line elsewhere. */
 function liveClient(capabilities: DesktopCapabilities): "desktop" | "web" {
-  return capabilities.dictation.reasonCode === "desktop-app-required" ? "web" : "desktop";
+  return inWebBrowser(capabilities) ? "web" : "desktop";
 }
 
 export async function startLiveCall(target: { botId: string; threadId: string }): Promise<void> {

@@ -14,6 +14,7 @@ import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 import { toolLabel } from "./ApprovalCard";
+import { outboundSummary } from "@/lib/approval-summary";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
@@ -147,6 +148,8 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   locale?: string;
 }) {
   const heldNote = tFromServer(pending.heldCode, pending.held);
+  // A held outbound action names where it sends and what, not its slug.
+  const outbound = pending.message.card ? outboundSummary(pending.message.card) : undefined;
   return (
     <div
       role="region"
@@ -170,8 +173,10 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
             {t("approval.position", { index: index + 1, count })}
           </span>
         )}
-        <span className="text-[13px] text-ink">{label(pending)}</span>
-        {!pending.message.card?.teamSetupRequest && <span className="font-mono text-[11px] text-ink-secondary">
+        <span className="text-[13px] text-ink">{outbound ? outbound.headline : label(pending)}</span>
+        {outbound ? (
+          outbound.summary && <span className="text-[13px] text-ink-secondary">{outbound.summary}</span>
+        ) : !pending.message.card?.teamSetupRequest && <span className="font-mono text-[11px] text-ink-secondary">
           {isSkillApproval(pending)
             ? pending.message.card?.skillRequest?.action === "update" ? "update_skill" : "stage_skill"
             : isRoutineApproval(pending)

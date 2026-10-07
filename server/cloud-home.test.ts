@@ -5,7 +5,7 @@ import type { IncomingMessage } from "node:http";
 import { afterEach, expect, it } from "vitest";
 import {
   CLOUD_BROWSER_SIGN_IN_MAX_TTL_S, CLOUD_HOME_MARKER, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_MAX_TTL_S, CLOUD_PAIRING_NONCE_MS, CLOUD_PAIRING_SKEW_S, cloudHomeConfiguration, cloudHomeConfigured,
-  boatNotConfiguredMessage, cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
+  cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
 import { cloudHomeChildEnvironments, codeTrustProblem, passwdIds, spawnWithSecrets } from "./cloud-home-start.ts";
@@ -113,12 +113,6 @@ it("refuses the places it never offers with what is true there, not a setup step
     // A failed turn shows the first 160 characters of its error.
     expect(text.length).toBeLessThanOrEqual(160);
   }
-});
-
-it("suggests the browser, not a Local VM, when Cloud has no Boat account on a Cloud home", () => {
-  expect(boatNotConfiguredMessage(true)).toBe("Cloud Boat is not configured — add a Boat API key or choose Browser");
-  // Every other server keeps its words.
-  expect(boatNotConfiguredMessage(false)).toBe("Cloud Boat is not configured — add a Boat API key or choose Local VM");
 });
 
 // ── the Admin's signed pairing request ───────────────────────────────────────
@@ -355,11 +349,15 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(new Set(upstreams)).toEqual(new Set(["127.0.0.1:8799", "127.0.0.1:8800"]));
   // every forwarded request is marked as proxied
   expect(caddy.match(/header_up X-Forwarded-For \{client_ip\}/g)).toHaveLength(upstreams.length);
-  // The root supervisor's code is root's: maus owns only the volume.
-  const image = readFileSync(join(import.meta.dirname, "../deploy/fly/Dockerfile"), "utf8");
-  expect(image).toMatch(/chown -R root:root \/app\b/);
-  expect(image).toMatch(/chmod -R go-w \/app\b/);
-  expect(image.indexOf("chmod -R go-w /app")).toBeLessThan(image.indexOf("CMD ["));
+  // The root supervisor's code is root's: maus owns only the volume. The
+  // image's last step refuses to build if anything there is not.
+  const dockerfile = readFileSync(join(import.meta.dirname, "../Dockerfile"), "utf8");
+  const image = dockerfile.slice(dockerfile.indexOf("FROM runtime AS cloud-home"), dockerfile.indexOf("FROM runtime AS server"));
+  const check = image.indexOf('untrusted="$(find /app /usr/local/bin/caddy \\( ! -user root -o ! -type l -perm /022 \\) -print)"');
+  expect(image.slice(check)).toMatch(/^untrusted=.*\n && if \[ -n "\$untrusted" \]; then .*exit 1; fi \\\n/);
+  expect(check).toBeGreaterThan(image.lastIndexOf("COPY "));
+  expect(check).toBeLessThan(image.indexOf("CMD ["));
+  expect(image).toContain("COPY deploy/fly/Caddyfile /app/cloud/Caddyfile");
   const fly = readFileSync(join(import.meta.dirname, "../deploy/fly/fly.toml"), "utf8");
   expect(fly).toMatch(/internal_port = 8080/);
   expect(fly).toMatch(/destination = "\/data"/);

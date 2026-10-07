@@ -341,6 +341,8 @@ test("a locked keychain never removes the saved company sign-in: it is read agai
   const f = fixture(t, { store, handler: (url, options) => url.endsWith("/api/desktop/session") && options.method !== "DELETE" ? Response.json(session(saved)) : null });
   const first = await f.client.start();
   assert.equal(first.status, "unavailable"); assert.equal(f.policies.length, 0);
+  // It reads again by itself, so the line asks for nothing: no restart, no keychain step.
+  assert.equal(first.message, "The saved company sign-in can't be read right now. OpenMausBot tries again every minute.");
   for (const delay of [15_000, 30_000, 60_000]) {
     const reads = store.reads;
     await f.tick(delay - 1); assert.equal(store.reads, reads, "not read again early");

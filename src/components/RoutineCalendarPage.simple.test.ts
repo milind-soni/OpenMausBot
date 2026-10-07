@@ -264,6 +264,45 @@ describe("routine editor", () => {
     expect(html).not.toMatch(/aria-pressed="true"/);
   });
 
+  // Continuity was only reachable by asking a bot; the editor offers it for
+  // repeating bot routines, right under the instructions.
+  it("offers Remember the last run for a repeating routine, off unless the routine has it", () => {
+    expect(editor(routine)).toMatch(/<input type="checkbox" aria-label="Remember the last run"(?![^>]*checked)[^>]*>/);
+    expect(editor({ ...routine, continuity: true })).toMatch(/<input type="checkbox" aria-label="Remember the last run"[^>]*checked[^>]*>/);
+    expect(editor(routine)).toContain("Each run starts with the previous run&#x27;s report");
+  });
+
+  it("hides Remember the last run for a one-time routine", () => {
+    expect(editor()).not.toContain("Remember the last run");
+  });
+
+  it("saves the switch with the routine, and turning it off saves false", () => {
+    const props = {
+      seed: { kind: "routine" as const, at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [bot.id], routine },
+      bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn(),
+    };
+    fixture.values = [];
+    let tree = capture(() => EventEditor(props));
+    const toggle = () => tree.find((node) => node.type === "input" && node.props["aria-label"] === "Remember the last run")!;
+    (toggle().props.onChange as (event: unknown) => void)({ target: { checked: true } });
+    tree = capture(() => EventEditor(props));
+    expect(toggle().props.checked).toBe(true);
+    click(buttons(tree).get("Save"));
+    const [path, init] = fixture.api.mock.calls.at(-1) as unknown as [string, { method: string; body: string }];
+    expect(path).toBe(`/api/routines/${routine.id}`);
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toMatchObject({ continuity: true });
+
+    fixture.values = [];
+    const on = { ...props, seed: { ...props.seed, routine: { ...routine, continuity: true } } };
+    tree = capture(() => EventEditor(on));
+    (toggle().props.onChange as (event: unknown) => void)({ target: { checked: false } });
+    tree = capture(() => EventEditor(on));
+    click(buttons(tree).get("Save"));
+    const [, off] = fixture.api.mock.calls.at(-1) as unknown as [string, { body: string }];
+    expect(JSON.parse(off.body)).toMatchObject({ continuity: false });
+  });
+
   it("leaves the Advanced editor as it was", () => {
     fixture.advanced = true;
     const html = editor();

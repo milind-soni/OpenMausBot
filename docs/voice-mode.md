@@ -95,9 +95,11 @@ delegate real work to specialists over `ask_bot` — no new machinery required.
 ## Known gaps
 
 - **Take-turns calls are macOS-only**, because dictation is. The voice half
-  works everywhere, and so do Live calls (GPT-Live, `server/live-call.ts`): the
-  desktop app on any computer, a web browser, the phones and a Cloud, with the
-  person's own OpenAI key.
+  works everywhere. Live calls (GPT-Live, `server/live-call.ts`) need no
+  dictation, so they work in the desktop app on any computer and on the
+  phones, with the person's own OpenAI key. A Cloud's page, in a web browser
+  or the desktop app, runs the same code, but no Live call has been made end
+  to end on a real Cloud yet.
 - **Rooms don't speak yet**, though per-bot voices already exist (`bot.voice`).
 - **No spend meter.** ElevenLabs bills per character. Auto-speak is off by
   default partly for that reason, but the app should eventually show usage.

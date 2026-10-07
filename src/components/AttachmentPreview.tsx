@@ -17,6 +17,7 @@ import {
   Download,
   ExternalLink,
   FileText,
+  FolderOpen,
   ImageOff,
   LoaderCircle,
   Maximize2,
@@ -32,6 +33,7 @@ import {
 } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { TableFileButton } from "./TableFilePreview";
 
 export interface PreviewImage {
   src: string;
@@ -221,8 +223,8 @@ export async function requestMessageFile(
     signal,
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(body?.error ?? t("attach.downloadFailed"));
+    const body = await response.json().catch(() => null) as { error?: string; code?: string } | null;
+    throw Object.assign(new Error(body?.error ?? t("attach.downloadFailed")), { code: body?.code });
   }
   return response;
 }
@@ -232,6 +234,9 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
   const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [reason, setReason] = useState("");
   const [savedTo, setSavedTo] = useState("");
+  // The server refused because the file sits outside the conversation's
+  // workspace; the bot link offers Show in folder for that case alone.
+  const [outsideWorkspace, setOutsideWorkspace] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const request = useRef<AbortController | null>(null);
   const saving = useRef(false);
@@ -252,6 +257,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     saving.current = false;
     setReason("");
     setSavedTo("");
+    setOutsideWorkspace(false);
     setState("idle");
   }, [filePath, message?.messageId, message?.threadId]);
 
@@ -268,6 +274,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
       resetTimer.current = null;
     }
     setReason("");
+    setOutsideWorkspace(false);
     setState("saving");
     request.current?.abort();
     const controller = new AbortController();
@@ -308,6 +315,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     } catch (error) {
       if (!mounted.current || controller.signal.aborted) return;
       setReason(error instanceof Error ? error.message : t("attach.saveFailed"));
+      setOutsideWorkspace((error as { code?: unknown } | null)?.code === "outside_workspace");
       setState("failed");
     } finally {
       if (request.current === controller) {
@@ -317,7 +325,55 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     }
   }, [filePath, message?.messageId, message?.threadId, name]);
 
-  return { state, reason, savedTo, save };
+  return { state, reason, savedTo, outsideWorkspace, save };
+}
+
+// A file outside the conversation's workspace is never served, but the local
+// desktop app can ask its own file manager to show where it is. A paired
+// remote client or a browser is not on the computer holding the file, so it
+// shows the path as selectable text instead. UNC and relative paths are not
+// offered for reveal: main refuses them. Shared by the inline bot link and its
+// attachment chip; the caller sets the text size.
+const REVEALABLE_PATH = /^(?:\/(?!\/)|[a-zA-Z]:[\\/])/;
+function revealBridge(): NonNullable<Window["ogb"]>["revealInFolder"] {
+  const ogb = typeof window === "undefined" ? undefined : window.ogb;
+  return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
+}
+
+export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
+  const [problem, setProblem] = useState("");
+  const reveal = revealBridge();
+  if (!reveal || !REVEALABLE_PATH.test(filePath)) {
+    return (
+      <code title={t("attach.outsideWorkspacePath")} className="select-all break-all text-ink">
+        {filePath}
+      </code>
+    );
+  }
+  const show = async () => {
+    setProblem("");
+    try {
+      const result = await reveal(filePath);
+      if (result === "missing") setProblem(t("attach.revealMissing"));
+      else if (result !== "shown") setProblem(t("attach.revealFailed"));
+    } catch {
+      setProblem(t("attach.revealFailed"));
+    }
+  };
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void show()}
+        title={filePath}
+        className="inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"
+      >
+        <FolderOpen size={12} className="shrink-0" aria-hidden="true" />
+        {t("attach.showInFolder")}
+      </button>
+      {problem && <span role="alert" className="text-danger">{problem}</span>}
+    </>
+  );
 }
 
 export function AttachmentPreviewDialog({
@@ -781,29 +837,32 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
       title={save.state === "saved" && save.savedTo ? t("attach.savedTo", { path: save.savedTo }) : file.name}
       className={cn("max-w-[280px] overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 text-[12px] text-ink-secondary", className)}
     >
-      <button
-        type="button"
-        onClick={() => void save.save()}
-        disabled={save.state === "saving"}
-        aria-label={
-          failed
-            ? t("attach.retrySaveAria", { name: file.name })
-            : t("attach.saveAria", { name: file.name })
-        }
-        className="flex min-h-10 w-full items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-raised/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
-      >
-        <FileText size={14} className="shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>
-        {save.state === "saving" ? (
-          <LoaderCircle size={13} className="shrink-0 animate-spin" />
-        ) : save.state === "saved" ? (
-          <Check size={13} className="shrink-0 text-success" />
-        ) : save.state === "failed" ? (
-          <RotateCcw size={13} className="shrink-0 text-danger" />
-        ) : (
-          <Download size={13} className="shrink-0" />
-        )}
-      </button>
+      <div className="flex items-center pe-1">
+        <button
+          type="button"
+          onClick={() => void save.save()}
+          disabled={save.state === "saving"}
+          aria-label={
+            failed
+              ? t("attach.retrySaveAria", { name: file.name })
+              : t("attach.saveAria", { name: file.name })
+          }
+          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-raised/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
+        >
+          <FileText size={14} className="shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>
+          {save.state === "saving" ? (
+            <LoaderCircle size={13} className="shrink-0 animate-spin" />
+          ) : save.state === "saved" ? (
+            <Check size={13} className="shrink-0 text-success" />
+          ) : save.state === "failed" ? (
+            <RotateCcw size={13} className="shrink-0 text-danger" />
+          ) : (
+            <Download size={13} className="shrink-0" />
+          )}
+        </button>
+        <TableFileButton path={file.path} name={file.name} message={message} />
+      </div>
       {save.state !== "idle" && (
         <div
           role={failed ? "alert" : "status"}
@@ -817,6 +876,11 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
             : save.state === "saved"
               ? t("attach.downloaded")
               : save.reason}
+          {failed && save.outsideWorkspace && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-1.5">
+              <OutsideWorkspaceFile filePath={file.path} />
+            </div>
+          )}
         </div>
       )}
     </div>

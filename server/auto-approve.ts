@@ -91,7 +91,7 @@ export function delegatedApprovalMode(input: {
 // the permission path in permission-proxy). Approving it there does not
 // produce an answer: the CLI runs the tool with none and the model is told
 // "The user did not answer the questions." — a question silently lost.
-const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user", "omb-ask"]);
+const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user"]);
 
 // A web search is a low-level read. Approve for me allows these names and
 // nothing wider: a bare search, a page fetch, and every other tool stay a

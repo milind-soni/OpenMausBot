@@ -25,7 +25,7 @@ import { z } from "zod";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
-import { freePortBlock } from "./testing/ports.ts";
+import { freePortBlock, withFreeSignInPort } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
 import { computerPrompt, SIGN_IN_PROMPT } from "./system-prompt.ts";
@@ -454,9 +454,9 @@ beforeAll(async () => {
         // tests exercise the trusted desktop boundary, while an intentionally
         // missing CLI keeps it out of the default available-model selection.
         codex: { driver: "codex", displayName: "Fixture Codex", config: { cli: join(home, "missing-codex") } },
-        // the engine that runs a turn on the bot's cloud computer (the app
-        // registers it by default); it talks only to the Boat stub
-        computer: { driver: "boxAgent", displayName: "Computer" },
+        // A live engine without computer tools (no key, so never available):
+        // places that need a computer refuse it before anything is mounted.
+        plainApi: { driver: "openai-compat", displayName: "Fixture plain model", config: { tools: false } },
       },
     }),
   );
@@ -926,6 +926,23 @@ beforeAll(async () => {
               { name: "gmail_send_email", description: "bad case" },
               { name: "PLATFORM", description: "no service" },
             ],
+          },
+        }));
+      }
+      // Google's answer when the connection lacks a permission the action
+      // needs, as Composio relays it (MOCA-273).
+      const calledTool = body && typeof body === "object" ? ((body as { params?: { name?: unknown } }).params?.name) : undefined;
+      if (calledTool === "GMAIL_CREATE_FILTER") {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          jsonrpc: "2.0",
+          id: requestId,
+          result: {
+            content: [{ type: "text", text: JSON.stringify({
+              successful: false,
+              error: "403 Forbidden: {\"error\":{\"code\":403,\"message\":\"Request had insufficient authentication scopes.\",\"status\":\"PERMISSION_DENIED\",\"details\":[{\"reason\":\"ACCESS_TOKEN_SCOPE_INSUFFICIENT\",\"domain\":\"googleapis.com\"}]}}",
+            }) }],
+            isError: true,
           },
         }));
       }
@@ -1682,17 +1699,37 @@ describe("harness HTTP API", () => {
     const root = await fetch(`${BASE}/`);
     expect(root.status).toBe(200);
     expect(root.headers.get("content-type")).toBe("text/html");
+    expect(root.headers.get("cache-control")).toBe("no-cache");
     expect(await root.text()).toContain("Packaged OpenMausBot");
 
+    const index = await fetch(`${BASE}/index.html`);
+    expect(index.headers.get("cache-control")).toBe("no-cache");
+    await index.arrayBuffer();
+
+    // Content-hashed build output: the browser keeps it instead of
+    // downloading the whole bundle again on every load.
     const asset = await fetch(`${BASE}/assets/smoke.css`);
     expect(asset.status).toBe(200);
     expect(asset.headers.get("content-type")).toBe("text/css");
+    expect(asset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(await asset.text()).toContain("color: white");
+    // That only holds while every file under /assets/ comes from Vite with a
+    // hash in its name; an unhashed public/assets/ file would be pinned too.
+    expect(existsSync(join(ROOT, "public", "assets"))).toBe(false);
 
     const spa = await fetch(`${BASE}/settings/desktop`);
     expect(spa.status).toBe(200);
     expect(spa.headers.get("content-type")).toBe("text/html");
+    expect(spa.headers.get("cache-control")).toBe("no-cache");
     expect(await spa.text()).toContain("Packaged OpenMausBot");
+
+    // A chunk an old page still asks for falls back to the page; that page
+    // must never be cached as if it were the immutable chunk.
+    const missingChunk = await fetch(`${BASE}/assets/missing-abc123.js`);
+    expect(missingChunk.status).toBe(200);
+    expect(missingChunk.headers.get("content-type")).toBe("text/html");
+    expect(missingChunk.headers.get("cache-control")).toBe("no-cache");
+    await missingChunk.arrayBuffer();
 
     const unknownApi = await api("GET", "/api/not-a-real-route");
     expect(unknownApi.status).toBe(404);
@@ -2367,6 +2404,40 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("saves a longer turn limit on one conversation and leaves the others at the group default", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const room = (await api("POST", "/api/groups", { name: "Long runs", memberIds: [bot.id] })).body.group;
+    try {
+      const sibling = await api("POST", `/api/groups/${room.id}/tasks`, { title: "Short" });
+      const longer = await api("PATCH", `/api/groups/${room.id}/tasks/${room.threadId}`, { turnTimeoutMinutes: 30 });
+      expect(longer.status).toBe(200);
+      expect(longer.body.task.turnTimeoutMinutes).toBe(30);
+      const viewed = await api("POST", `/api/groups/${room.id}/tasks/${sibling.body.task.threadId}?messages=0`);
+      const tasks = viewed.body.group.tasks as Array<{ threadId: string; turnTimeoutMinutes?: number }>;
+      expect(tasks.find((task) => task.threadId === room.threadId)?.turnTimeoutMinutes).toBe(30);
+      expect(tasks.find((task) => task.threadId === sibling.body.task.threadId)?.turnTimeoutMinutes).toBeUndefined();
+
+      expect((await api("PATCH", `/api/groups/${room.id}`, { turnTimeoutMinutes: 30 })).status).toBe(400);
+      expect((await api("PATCH", `/api/groups/${room.id}/tasks/${room.threadId}`, { turnTimeoutMinutes: 10.5 })).status).toBe(400);
+      expect((await api("PATCH", `/api/groups/${room.id}/tasks/${room.threadId}`, { turnTimeoutMinutes: 1441 })).status).toBe(400);
+
+      const cleared = await api("PATCH", `/api/groups/${room.id}/tasks/${room.threadId}`, { turnTimeoutMinutes: null });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.task.turnTimeoutMinutes).toBeUndefined();
+
+      const dm = await api("PATCH", "/api/groups/test-dm", { turnTimeoutMinutes: 30 });
+      expect(dm.status).toBe(200);
+      expect(dm.body.group.turnTimeoutMinutes).toBe(30);
+      const reset = await api("PATCH", "/api/groups/test-dm", { turnTimeoutMinutes: null });
+      expect(reset.status).toBe(200);
+      expect(reset.body.group.turnTimeoutMinutes).toBeNull();
+    } finally {
+      await api("PATCH", "/api/groups/test-dm", { turnTimeoutMinutes: null });
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("lets a Chief create operators from its direct and channel tasks but not from channels it cannot access", async () => {
     const chief = (await api("POST", "/api/bots")).body.bot;
     const outsider = (await api("POST", "/api/bots")).body.bot;
@@ -2978,7 +3049,12 @@ describe("harness HTTP API", () => {
     const stream = await openSse(`${BASE}/api/events`);
     try {
       writeFileSync(failureMarker, "fail");
-      expect((await api("POST", "/api/browser-engine/install")).status).toBe(202);
+      for (const headers of [{ "content-type": "application/x-www-form-urlencoded" }, { "content-type": "text/plain" }, { "content-type": "application/jsonp" }, undefined]) {
+        const refused = await fetch(`${BASE}/api/browser-engine/install`, { method: "POST", headers, body: headers ? "x=1" : undefined });
+        expect(refused.status).toBe(415);
+      }
+      expect(stream.frames.some((frame) => frame.kind === "config" && frame.browserEngine?.installing === true)).toBe(false);
+      expect((await api("POST", "/api/browser-engine/install", {})).status).toBe(202);
       const start = await stream.until((frame) => frame.kind === "config" && frame.browserEngine?.installing === true);
       expect(start.browserEngine).toMatchObject({ kind: "engine", installing: true });
       expect(start.browserEngine).not.toHaveProperty("installError");
@@ -2987,7 +3063,7 @@ describe("harness HTTP API", () => {
       expect(failed.browserEngine.installing).not.toBe(true);
       rmSync(failureMarker);
       stream.frames.splice(0);
-      expect((await api("POST", "/api/browser-engine/install")).status).toBe(202);
+      expect((await api("POST", "/api/browser-engine/install", {})).status).toBe(202);
       const retry = await stream.until((frame) => frame.kind === "config" && frame.browserEngine?.installing === true);
       expect(retry.browserEngine).not.toHaveProperty("installError");
       await stream.until((frame) => frame.kind === "config" && frame.browserEngine?.kind === "engine" && !frame.browserEngine.installing && !frame.browserEngine.installError);
@@ -3087,72 +3163,26 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("refuses a Works-on This Computer turn for the box-native engine", async () => {
-    let botId: string | undefined;
-    try {
-      // The Computer engine executes on its cloud machine, so an explicit
-      // host-desktop destination is refused before anything is mounted.
-      const bot = (await api("POST", "/api/bots", {
-        name: "Local refusal",
-        modelSelection: { instanceId: "computer", model: "claude-fable-5" },
-      })).body.bot;
-      botId = bot.id;
-      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" })).status).toBe(200);
-      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "work on this desktop" })).status).toBe(202);
-      await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=20")).body.bots.find(
-        (candidate: { id: string }) => candidate.id === bot.id,
-      )), { timeout: 5_000 }).toMatch(/the Computer engine works on the cloud computer/);
-    } finally {
-      if (botId) await api("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
-      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
-    }
-  });
-
-  it("refuses a room Works-on This Computer turn for the box-native engine", async () => {
-    let roomId: string | undefined;
-    let botId: string | undefined;
-    try {
-      const member = (await api("POST", "/api/bots", {
-        name: "Room local refusal",
-        modelSelection: { instanceId: "computer", model: "claude-fable-5" },
-      })).body.bot;
-      botId = member.id;
-      expect((await api("PATCH", `/api/bots/${member.id}`, { computer: "local" })).status).toBe(200);
-      const room = (await api("POST", "/api/groups", {
-        name: "Boat-native host refusal",
-        memberIds: [member.id],
-        setup: { bulletin: "", defaultResponder: { kind: "member", botId: member.id } },
-      })).body.group;
-      roomId = room.id;
-      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work on this desktop" })).status).toBe(202);
-      await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body),
-        { timeout: 5_000 }).toMatch(/the Computer engine works on the cloud computer/);
-    } finally {
-      if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
-      if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
-      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
-    }
-  });
-
-  it("refuses a room Works-on Local VM turn for the box-native engine", async () => {
+  it("refuses a room Works-on Local VM turn for an engine without computer tools", async () => {
     let roomId: string | undefined;
     let botId: string | undefined;
     try {
       const member = (await api("POST", "/api/bots", {
         name: "Room VM refusal",
-        modelSelection: { instanceId: "computer", model: "claude-fable-5" },
+        modelSelection: { instanceId: "plainApi", model: "fixture-plain-model" },
       })).body.bot;
       botId = member.id;
       expect((await api("PATCH", `/api/bots/${member.id}`, { computer: "vm" })).status).toBe(200);
       const room = (await api("POST", "/api/groups", {
-        name: "Boat-native VM refusal",
+        name: "Plain model VM refusal",
         memberIds: [member.id],
         setup: { bulletin: "", defaultResponder: { kind: "member", botId: member.id } },
       })).body.group;
       roomId = room.id;
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work in the virtual machine" })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body),
-        { timeout: 5_000 }).toMatch(/this model cannot use the Local VM.*Set Works on to Auto in this bot's settings to continue/);
+        { timeout: 5_000 }).toMatch(/fixture-plain-model can't use a Local VM\. Choose a model that can, such as Claude or ChatGPT\. Choose another model in Room VM refusal's settings\./);
+      expect(JSON.stringify((await api("GET", `/api/threads/${room.threadId}/messages`)).body)).not.toContain("Works on to Auto");
     } finally {
       if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
       if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
@@ -3567,7 +3597,6 @@ describe("harness HTTP API", () => {
     writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
       instances: {
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
-        computer: { driver: "boxAgent", displayName: "Computer" },
       },
     }));
     let isolatedStderr = "";
@@ -3810,7 +3839,6 @@ describe("harness HTTP API", () => {
           },
           config: { cli: FAKE_CLAUDE_CLI },
         },
-        computer: { driver: "boxAgent", displayName: "Computer" },
       },
     }));
     let isolatedStderr = "";
@@ -5432,7 +5460,7 @@ describe("harness HTTP API", () => {
       }
 
       const full = trustedBots.find(candidate => candidate.approvalMode === "full")!;
-      const sibling = (await isolatedApi("POST", `/api/bots/${full.id}/tasks`, { title: "Untouched" })).body.task;
+      const sibling = (await isolatedApi("POST", `/api/bots/${full.id}/tasks`, { title: "Follows the bot" })).body.task;
       for (const body of [
         { resetApprovalToAsk: true },
         { modelSelection: targetSelection, resetApprovalToAsk: "yes" },
@@ -5453,8 +5481,10 @@ describe("harness HTTP API", () => {
       expect(switched.status).toBe(200);
       expect(switched.body.bot).toMatchObject({ modelSelection: targetSelection, approvalMode: "ask", autoApprove: false });
       expect(switched.body.task).toMatchObject({ modelSelection: targetSelection, approvalMode: "ask", alwaysAllow: [] });
+      // The sibling follows the bot onto Claude. Its Full access belonged to
+      // Codex, so it goes back to Ask in the same write, never rides along.
       expect(switched.body.bot.tasks.find((task: { threadId: string }) => task.threadId === sibling.threadId))
-        .toMatchObject({ modelSelection: full.modelSelection, approvalMode: "full" });
+        .toMatchObject({ modelSelection: targetSelection, followsBotModel: true, approvalMode: "ask", alwaysAllow: [] });
       const created = await isolatedApi("POST", `/api/bots/${full.id}/tasks`, { title: "New defaults" });
       expect(created.body.task).toMatchObject({ modelSelection: targetSelection, approvalMode: "ask" });
       const refusedCustom = trustedBots.find(candidate => candidate.approvalMode === "custom")!;
@@ -7193,11 +7223,11 @@ describe("harness HTTP API", () => {
 
   it("pins provider approval support at the bot settings gate", async () => {
     const bot = (await api("POST", "/api/bots", {
-      modelSelection: { instanceId: "computer", model: "claude-fable-5" },
+      modelSelection: { instanceId: "ghost", model: "fixture-ghost-model" },
     })).body.bot;
     try {
-      // The Boat-native agent has no Full mapping, so the bot-level PATCH
-      // must refuse Full before the trusted-desktop transition.
+      // An engine without a Full mapping: the bot-level PATCH must refuse
+      // Full before the trusted-desktop transition.
       const refused = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "full" });
       expect(refused.status).toBe(400);
       expect(refused.body.error).toMatch(/does not support the selected approval level, or changing providers requires choosing Ask first/);
@@ -8052,12 +8082,14 @@ describe("harness HTTP API", () => {
     const secret = "corp-app-secret-that-must-never-render";
     const oauth = await startFakeOAuth({ noRegistration: true, preRegistered: { "corp-app": secret } });
     const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    // the app returns to the port derived from this URL: make it a free one
+    const url = await withFreeSignInPort(fake.url);
     const configFile = join(home, ".openmausbot", "config.json");
     try {
-      const created = await api("POST", "/api/mcp/servers", { name: "corp", url: fake.url, oauth: { clientId: "corp-app", clientSecret: secret, scopes: ["mcp", "offline_access"] } });
+      const created = await api("POST", "/api/mcp/servers", { name: "corp", url, oauth: { clientId: "corp-app", clientSecret: secret, scopes: ["mcp", "offline_access"] } });
       expect(created.status).toBe(201);
       expect(created.body.servers).toEqual([{
-        name: "corp", type: "http", url: fake.url, headerKeys: [], enabled: false,
+        name: "corp", type: "http", url, headerKeys: [], enabled: false,
         oauth: { clientId: "corp-app", scopes: ["mcp", "offline_access"], clientSecretConfigured: true, redirectUri: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-oauth\/callback$/) },
       }]);
 
@@ -8077,7 +8109,7 @@ describe("harness HTTP API", () => {
       expect(tested.body.ok).toBe(true);
 
       // an edit that keeps the app keeps the secret and the sign-in
-      const kept = await api("PUT", "/api/mcp/servers/corp", { type: "http", url: fake.url, headers: {}, oauth: { clientId: "corp-app", clientSecret: true, scopes: ["mcp", "offline_access"] } });
+      const kept = await api("PUT", "/api/mcp/servers/corp", { type: "http", url, headers: {}, oauth: { clientId: "corp-app", clientSecret: true, scopes: ["mcp", "offline_access"] } });
       expect(kept.status).toBe(200);
       expect(kept.body.servers[0]).toMatchObject({ auth: "signed-in", oauth: { clientSecretConfigured: true } });
       expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.corp.oauth.clientSecret).toBe(secret);
@@ -8086,9 +8118,9 @@ describe("harness HTTP API", () => {
       expect(readFileSync(join(home, ".openmausbot", "mcp-oauth.json"), "utf8")).not.toContain(secret);
 
       // another app: the old app's tokens and secret go
-      const other = await api("PUT", "/api/mcp/servers/corp", { type: "http", url: fake.url, headers: {}, oauth: { clientId: "other-app", clientSecret: true } });
+      const other = await api("PUT", "/api/mcp/servers/corp", { type: "http", url, headers: {}, oauth: { clientId: "other-app", clientSecret: true } });
       expect(other.status).toBe(400);
-      const moved = await api("PUT", "/api/mcp/servers/corp", { type: "http", url: fake.url, headers: {}, oauth: { clientId: "other-app" } });
+      const moved = await api("PUT", "/api/mcp/servers/corp", { type: "http", url, headers: {}, oauth: { clientId: "other-app" } });
       expect(moved.body.servers[0].auth).toBeUndefined();
       expect(moved.body.servers[0].oauth.clientSecretConfigured).toBe(false);
       expect(readFileSync(configFile, "utf8")).not.toContain(secret);
@@ -8103,6 +8135,8 @@ describe("harness HTTP API", () => {
     const client = { clientId: "headless-corp", clientSecret: "headless-private-secret", scopes: ["mcp", "offline_access"] };
     const oauth = await startFakeOAuth(registered ? { noRegistration: true, preRegistered: { [client.clientId]: client.clientSecret } } : {});
     const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    // a pre-registered app returns to the port derived from this URL: make it a free one
+    const url = await withFreeSignInPort(fake.url);
     const pair = async (scopes: string[]) => {
       const opened = await api("POST", "/api/auth/pairing", { scopes });
       const paired = await api("POST", "/api/auth/pair", { code: opened.body.code });
@@ -8122,7 +8156,7 @@ describe("harness HTTP API", () => {
     };
     const base = "/api/mcp/servers/headless/sign-in";
     try {
-      expect((await api("POST", "/api/mcp/servers", { name: "headless", url: fake.url, ...(registered ? { oauth: client } : {}) })).status).toBe(201);
+      expect((await api("POST", "/api/mcp/servers", { name: "headless", url, ...(registered ? { oauth: client } : {}) })).status).toBe(201);
       expect((await remote(member, "POST", base)).status).toBe(403);
       const unauthenticated = await fetch(`${BASE}${base}`, { method: "POST", headers: { "x-forwarded-for": "192.0.2.11" } });
       expect([401, 403]).toContain(unauthenticated.status);
@@ -9902,7 +9936,8 @@ describe("harness HTTP API", () => {
       });
       expect(unavailableCloud.status).toBe(409);
       expect(await unavailableCloud.json()).toMatchObject({
-        error: expect.stringMatching(/Boat API key|Cloud VM runner/i),
+        // The same words a failed cloud turn's row uses (shared/place-view.ts).
+        error: expect.stringMatching(/^A cloud computer here needs your own Boat key, a paid service\. Add a Boat key in Settings → API keys\./),
       });
 
       const proposed = await fetch(`${BASE}/api/internal/routine-requests`, {
@@ -10025,7 +10060,7 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/bots/${teammate.id}`, {
         modelSelection: { instanceId: "ghost", model: "unavailable-fixture" },
       })).status).toBe(200);
-      expect((await api("POST", `/api/bots/${bot.id}/read`, { threadId: bot.threadId })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${teammate.id}/read`, { threadId: teammate.threadId })).status).toBe(200);
       const crossEvents = await openSse(`${BASE}/api/events`);
       let crossRun;
       try {
@@ -10034,25 +10069,30 @@ describe("harness HTTP API", () => {
           (frame) => frame.kind === "notify" && frame.notification?.kind === "routine-failed",
           5_000,
         );
-        expect(failedNotice.notification).toMatchObject({ botId: bot.id, threadId: bot.threadId });
+        expect(failedNotice.notification).toMatchObject({ botId: teammate.id, threadId: teammate.threadId });
       } finally {
         crossEvents.close();
       }
       expect(crossRun.status).toBe(201);
-      // Execution belongs to the teammate, but the confirmed request's
-      // reporting destination is still the proposer's conversation.
+      // Execution and reporting both belong to the teammate: a routine another
+      // bot asked for reports into the running bot's main thread, not into the
+      // proposer's conversation that held the card.
       await expect.poll(async () => {
-        const source = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body;
-        return source.messages.filter(
+        const destination = (await api("GET", `/api/threads/${teammate.threadId}/messages`)).body;
+        return destination.messages.filter(
           (message: { routineRun?: { runId?: string; status?: string } }) =>
             message.routineRun?.runId === crossRun.body.run.id && message.routineRun?.status === "failed",
         );
       }, { timeout: 5_000 }).toHaveLength(1);
+      expect((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages.some(
+        (message: { routineRun?: { runId?: string } }) => message.routineRun?.runId === crossRun.body.run.id,
+      )).toBe(false);
       const crossStateAfterRun = (await api("GET", "/api/bots?messages=0")).body;
-      expect(crossStateAfterRun.bots.find((candidate: { id: string }) => candidate.id === bot.id)
-        ?.tasks.find((task: { threadId: string }) => task.threadId === bot.threadId)?.unread).toBe(true);
+      expect(crossStateAfterRun.bots.find((candidate: { id: string }) => candidate.id === teammate.id)
+        ?.tasks.find((task: { threadId: string }) => task.threadId === teammate.threadId)?.unread).toBe(true);
 
-      // Moving either bot out of the section revokes that reporting route.
+      // A teammate moved out of the section still never reports into the
+      // proposer's conversation.
       expect((await api("PATCH", `/api/bots/${teammate.id}`, { section: "Private routine work" })).status).toBe(200);
       const movedRun = await api("POST", `/api/routines/${crossRoutine.id}/run`);
       expect(movedRun.status).toBe(201);
@@ -10965,6 +11005,12 @@ describe("harness HTTP API", () => {
       const [work, other, duplicate] = requested.body.messageIds;
       expect(work).toBe(duplicate);
       expect(other).not.toBe(work);
+      // Older phones draw an unknown kind by its text, so each card carries
+      // a plain line naming the app and the account it is waiting on.
+      const stored = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[];
+      const workCard = stored.find((message) => message.id === work);
+      expect(workCard).toMatchObject({ kind: "connector", connector: { alias: "work", status: "required" } });
+      expect(workCard.text).toBe(`Connect ${workCard.connector.label} as “work” to continue.`);
       expect((await create([{ slug: "gmail", alias: "work" }])).body.messageIds).toEqual([work]);
       const card = (id: string, action: string) => `/api/bots/${bot.id}/connector-cards/${id}/${action}`;
       expect((await api("POST", card(work, "authorize"), { threadId: bot.threadId })).body.url).toBe("https://connect.composio.dev/fixture-only");
@@ -11004,6 +11050,9 @@ describe("harness HTTP API", () => {
       });
       expect(response.status).toBe(200);
       const { messageIds } = await response.json() as { messageIds: string[] };
+      const stored = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[];
+      const slackCard = stored.find((message) => message.id === messageIds[0]);
+      expect(slackCard.text).toBe(`Connect ${slackCard.connector.label} to continue.`);
       const card = `/api/bots/${bot.id}/connector-cards/${messageIds[0]}/authorize`;
       const paths = ["/api/connectors/slack/authorize", card, card];
       const before = connectorLinkRequests.length;
@@ -11068,6 +11117,35 @@ describe("harness HTTP API", () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
   };
+
+  it("explains a missing Google permission instead of passing the bare 403 to the bot", async () => {
+    // MOCA-273: GMAIL_CREATE_FILTER needs gmail.settings.basic, which the
+    // default Composio Gmail connection never asks for. Reconnecting cannot
+    // fix it, so the bot must learn what can, and stop retrying.
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { composio: true })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const response = await fetch(`${BASE}/api/internal/connectors/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 21, method: "tools/call", params: { name: "GMAIL_CREATE_FILTER", arguments: {} } }),
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json() as { result: { content: Array<{ text: string }>; isError?: boolean } };
+      const texts = body.result.content.map((item) => item.text);
+      // Google's own error is still there, untouched.
+      expect(texts[0]).toContain("ACCESS_TOKEN_SCOPE_INSUFFICIENT");
+      expect(body.result.isError).toBe(true);
+      const hint = texts.slice(1).join("\n");
+      expect(hint).toContain("https://www.googleapis.com/auth/gmail.settings.basic");
+      expect(hint).toContain("Reconnecting");
+      expect(hint).toContain("Do not retry");
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
 
   it("enforces per-bot connector tool grants on relayed tool calls", async () => {
     // Clear any project key an earlier test left behind, so the relay uses

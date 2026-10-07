@@ -8,6 +8,7 @@ import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
 import type {
   AnyProviderDriver,
+  EngineAccess,
   InstanceConfigMap,
   InstanceId,
   ProviderAuthenticationStart,
@@ -60,6 +61,9 @@ export class ProviderRegistry {
   /** decoded per-instance `cli` overrides, for describe() — drivers spawn
    * from their own config; this map only reports what was configured */
   private cliByInstance = new Map<InstanceId, string>();
+  /** What describe() last read of each live instance. A turn's start checks
+   * a thread's own engine against it without waiting on that engine's CLI. */
+  private lastSnapshots = new Map<InstanceId, ProviderSnapshot>();
   private driversByKind: Map<string, AnyProviderDriver>;
   /** Where Settings-driven npm installs go; the data directory by default. */
   private readonly enginesBaseDir: string | undefined;
@@ -125,6 +129,18 @@ export class ProviderRegistry {
 
   get(instanceId: InstanceId): ProviderInstance | null {
     return this.byId.get(instanceId)?.live ?? null;
+  }
+
+  /** The snapshot describe() last read of this live instance; absent before
+   * the first read, or for an instance that is not live. */
+  lastSnapshot(instanceId: InstanceId): ProviderSnapshot | undefined {
+    return this.byId.get(instanceId)?.live ? this.lastSnapshots.get(instanceId) : undefined;
+  }
+
+  /** How the instance's driver is presented and paid for (EngineAccess). */
+  access(instanceId: InstanceId): EngineAccess | undefined {
+    const entry = this.byId.get(instanceId);
+    return entry ? this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind)?.metadata.access ?? "subscription" : undefined;
   }
 
   /** The configured executable for instance-scoped maintenance actions.
@@ -239,6 +255,9 @@ export class ProviderRegistry {
         } catch (e) {
           snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e) };
         }
+        // Only while this is still the live instance: a reload may have
+        // replaced it during the read.
+        if (this.byId.get(inst.instanceId)?.live === inst) this.lastSnapshots.set(inst.instanceId, snapshot);
         return {
           instanceId: inst.instanceId,
           driverKind: inst.driverKind,
@@ -286,12 +305,14 @@ export class ProviderRegistry {
     await Promise.allSettled(this.instances().map((i) => i.dispose()));
     this.byId.clear();
     this.cliByInstance.clear();
+    this.lastSnapshots.clear();
   }
 
   async dispose(instanceId: InstanceId) {
     const entry = this.byId.get(instanceId);
     this.byId.delete(instanceId);
     this.cliByInstance.delete(instanceId);
+    this.lastSnapshots.delete(instanceId);
     await entry?.live?.dispose();
   }
 }

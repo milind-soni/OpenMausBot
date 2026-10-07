@@ -249,6 +249,10 @@ test("the Cloud's address is remembered through a failed check for the same acco
   known = rememberedCloudHome(known, { status: "reauth-required", account });
   assert.deepEqual(known, { accountId: "a1", origin });
   assert.equal(rememberedCloudHome(known, { status: "connected", account: { id: "a2", email: "other@example.test" } }), null);
+  // A check that names the machine without its address (stopped) keeps it;
+  // one that names no machine for this account forgets it.
+  assert.deepEqual(rememberedCloudHome(known, { status: "connected", account, machine: { status: "stopped" } }), { accountId: "a1", origin });
+  assert.equal(rememberedCloudHome(known, { status: "connected", account }), null);
   assert.equal(rememberedCloudHome(known, { status: "signed-out" }), null);
   assert.equal(isCloudHomeEntry({ origin }, { remembered: known }), true);
   assert.equal(isCloudHomeEntry({ origin }, { homeOrigin: origin }), true);

@@ -11,6 +11,7 @@
 // This file owns the one server-side step: exchanging the renderer's WebRTC
 // offer for an answer. The OpenAI key never leaves the harness; the renderer
 // only ever holds the SDP answer and the media connection it describes.
+import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
 
 export const LIVE_MODEL = "gpt-live-1";
 const OPENAI_BASE = "https://api.openai.com";
@@ -78,15 +79,14 @@ export class LiveSessionError extends Error {
 /** Frontend instructions for the voice. Business rules stay with the bot;
  * this only says who is speaking, where it runs and when to hand work over.
  * Structure follows the GPT-Live prompting guide's template. `cloudHome`:
- * the harness is the person's My Cloud, in the words of the bot's own system
- * prompt (cloudHomePrompt). */
+ * the harness is the person's My Cloud, named as the bot's own system prompt
+ * names it (CLOUD_HOME_PLACE). */
 export function liveInstructions(bot: LiveBot, { cloudHome = false }: { cloudHome?: boolean } = {}): string {
   const name = oneLine(bot.name) || "the agent";
   const title = oneLine(bot.title ?? "");
   const description = oneLine(bot.description ?? "").slice(0, 400);
-  const where = cloudHome
-    ? "runs on the user's My Cloud, their always-on OpenMausBot in the cloud, not on their own computer"
-    : "runs in OpenMausBot on the user's own computer";
+  const where = cloudHome ? `runs on ${CLOUD_HOME_PLACE}` : "runs in OpenMausBot on the user's own computer";
+  const changes = cloudHome ? "My Cloud" : "the computer";
   return [
     `You are ${name}${title ? `, ${title}` : ""}, an AI agent that ${where}.${description ? ` ${description}` : ""}`,
     `To the user you are one assistant, ${name}, and you speak in the first person. Your work — looking things up, using your tools, files and memory, researching, deciding, and answering anything that needs facts this conversation does not hold — happens when you delegate. Delegating is how you think and act; it is not someone else.`,
@@ -98,7 +98,7 @@ export function liveInstructions(bot: LiveBot, { cloudHome = false }: { cloudHom
     "Interruption policy: Stop speaking when the user interrupts. Listen to what they say.",
     "Delegation policy:",
     "Backend tools:",
-    `- ${name}: your own files, tools, memory, settings and this conversation's history. It researches, writes, changes things on the computer, and answers questions, including questions about yourself such as which AI model you run on, your settings, your tools and your memory.`,
+    `- ${name}: your own files, tools, memory, settings and this conversation's history. It researches, writes, changes things on ${changes}, and answers questions, including questions about yourself such as which AI model you run on, your settings, your tools and your memory.`,
     "Delegate to the backend when:",
     "- The user asks a question, asks for work, or gives an instruction.",
     "- The user asks something about you that this conversation does not already answer, for example which AI model you run on.",

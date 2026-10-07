@@ -474,3 +474,79 @@ describe("ApprovalCard expired proposals", () => {
     expect(pendingApprovals([live, expiredMessage()]).map((pending) => pending.requestId)).toEqual(["req-expired"]);
   });
 });
+
+describe("ApprovalCard outbound holds", () => {
+  const subtitle = [
+    "Linear · Create linear comment",
+    '{"issueId":"2f04bc73","body":"In flight"}',
+    "",
+    "Linear · Create linear comment",
+    '{"issueId":"1c2755f","body":"From Discord"}',
+  ].join("\n");
+  const outboundMessage = (answered?: string): Message => ({
+    id: "outbound-card",
+    role: "bot",
+    kind: "options",
+    at: 1,
+    card: {
+      title: "Send on your behalf?",
+      subtitle,
+      options: ["Allow", "Deny"],
+      requestId: "req-outbound",
+      tool: "LINEAR_CREATE_LINEAR_COMMENT",
+      heldCode: "approval.held.outbound",
+      held: "This sends something on your behalf, so it always asks first.",
+      answered,
+      outboundRequest: {
+        tool: "LINEAR_CREATE_LINEAR_COMMENT",
+        app: "Linear",
+        calls: [
+          { app: "Linear", label: "Create linear comment" },
+          { app: "Linear", label: "Create linear comment" },
+        ],
+      },
+    },
+  });
+  const bot = { id: "bot-1", name: "Kiwi" } as never as Bot;
+
+  it("names the app and the actions instead of the tool slug", () => {
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: outboundMessage() }));
+    expect(html).toContain("Send to Linear?");
+    expect(html).toContain("Create linear comment ×2");
+    expect(html).not.toContain("LINEAR CREATE LINEAR COMMENT");
+    expect(html).not.toContain("LINEAR_CREATE_LINEAR_COMMENT");
+    expect(html).toContain("issueId");
+    expect(html).toContain("Waiting for your answer below");
+  });
+
+  it("keeps the settled status line", () => {
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: outboundMessage("allow") }));
+    expect(html).toContain("Send to Linear?");
+    expect(html).toContain("Allowed");
+  });
+
+  it("heads the composer strip the same way", () => {
+    const [pending] = pendingApprovals([outboundMessage()]);
+    const strip = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending: pending!, count: 1, index: 0 }));
+    expect(strip).toContain("Send to Linear?");
+    expect(strip).toContain("Create linear comment ×2");
+    expect(strip).not.toContain("Approval requested");
+    expect(strip).not.toContain("LINEAR_CREATE_LINEAR_COMMENT");
+  });
+
+  it("reads the subtitle back for a card from an older computer", () => {
+    const message = outboundMessage();
+    message.card!.outboundRequest = { tool: "LINEAR_CREATE_LINEAR_COMMENT", app: "Linear" };
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message }));
+    expect(html).toContain("Send to Linear?");
+    expect(html).toContain("Create linear comment ×2");
+  });
+
+  it("phrases a Composio slug on a plain permission card as words", () => {
+    const message = outboundMessage();
+    message.card!.outboundRequest = undefined;
+    message.card!.tool = "mcp__composio__LINEAR_CREATE_LINEAR_COMMENT";
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message }));
+    expect(html).toContain("Kiwi wants to create linear comment");
+  });
+});

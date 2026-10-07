@@ -18,7 +18,7 @@ vi.mock("@/state/store", async (original) => ({
   ...await original<typeof import("@/state/store")>(), api: fixture.api,
   useStore: () => ({ dispatch: fixture.dispatch, refreshInstances: fixture.refreshInstances, refreshModels: fixture.refreshModels }),
 }));
-const { CodexDeviceSignIn } = await import("./CodexDeviceSignIn");
+const { DeviceSignIn } = await import("./DeviceSignIn");
 const { AddChatGptAccount } = await import("./CodexAccountSettings");
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => Promise<void> }>;
@@ -28,7 +28,7 @@ function nodes(tree: ReactNode): Node[] {
 function render() {
   fixture.index = 0;
   fixture.effects = [];
-  return nodes(CodexDeviceSignIn({ instanceId: "chatgpt", browserPkce: true }));
+  return nodes(DeviceSignIn({ instanceId: "chatgpt", browserPkce: true }));
 }
 function click() { render().find((node) => node.type === "button")!.props.onClick!(); }
 const flush = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };

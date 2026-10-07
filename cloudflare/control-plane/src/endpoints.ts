@@ -7,7 +7,7 @@ import {
 } from "./cloudflare-api";
 import type { ControlPlaneConfig } from "./config";
 import { errorResponse, HTTPError, json } from "./http";
-import { requireInstallation } from "./installations";
+import { requireInstallation, requireInstallationAndRead } from "./installations";
 import { idleTunnelReason } from "./tunnel-activity";
 import {
   CAPACITY_RETRY_AFTER_SECONDS,
@@ -60,9 +60,16 @@ const CLEANUP_BACKOFF_3_MS = 60 * 60 * 1_000;
 const CLEANUP_BACKOFF_4_MS = 6 * 60 * 60 * 1_000;
 const CLEANUP_BACKOFF_MAX_MS = 24 * 60 * 60 * 1_000;
 const MANUAL_CLEANUP_THRESHOLD_MS = 24 * 60 * 60 * 1_000;
+/** Cloudflare blocks a rate-limited API token for up to five minutes. */
+const RATE_LIMIT_RETRY_AFTER_DEFAULT_SECONDS = 60;
+const RATE_LIMIT_RETRY_AFTER_MIN_SECONDS = 30;
+const RATE_LIMIT_RETRY_AFTER_MAX_SECONDS = 300;
 
 class EndpointOperationError extends Error {
-  constructor(public readonly code: string) {
+  constructor(
+    public readonly code: string,
+    public readonly retryAfterSeconds: number | null = null,
+  ) {
     super(code);
     this.name = "EndpointOperationError";
   }
@@ -71,6 +78,13 @@ class EndpointOperationError extends Error {
 function errorCode(error: unknown): string {
   if (error instanceof CloudflareAPIError || error instanceof EndpointOperationError) return error.code;
   return "endpoint_internal";
+}
+
+function retryAfterSeconds(error: unknown): number | null {
+  if (error instanceof CloudflareAPIError || error instanceof EndpointOperationError) {
+    return error.retryAfterSeconds;
+  }
+  return null;
 }
 
 function randomHex(byteLength: number): string {
@@ -91,7 +105,7 @@ function endpointJSON(row: EndpointRow) {
   };
 }
 
-async function endpointRow(env: Env, installationId: string): Promise<EndpointRow | null> {
+function endpointRowStatement(env: Env, installationId: string): D1PreparedStatement {
   return env.DB.prepare(
     `SELECT installation_id, hostname, tunnel_name, tunnel_id, dns_record_id,
             status, generation, lease_owner, lease_expires_at,
@@ -100,7 +114,11 @@ async function endpointRow(env: Env, installationId: string): Promise<EndpointRo
             created_at, updated_at
        FROM installation_endpoints
       WHERE installation_id = ?`,
-  ).bind(installationId).first<EndpointRow>();
+  ).bind(installationId);
+}
+
+async function endpointRow(env: Env, installationId: string): Promise<EndpointRow | null> {
+  return endpointRowStatement(env, installationId).first<EndpointRow>();
 }
 
 async function ensureEndpointRow(
@@ -386,6 +404,24 @@ function busyResponse(): Response {
   return new Response(response.body, { status: response.status, headers });
 }
 
+/** Cloudflare's API limit is shared by every request this Worker makes, and
+ * a 429 can block it for minutes. Tell the desktop how long to wait instead
+ * of the generic `endpoint_unavailable`: honor Cloudflare's own Retry-After
+ * when it sent one, bounded so a retry is neither immediate nor indefinite. */
+function rateLimitedResponse(providerRetryAfterSeconds: number | null): Response {
+  const seconds = Math.min(
+    RATE_LIMIT_RETRY_AFTER_MAX_SECONDS,
+    Math.max(
+      RATE_LIMIT_RETRY_AFTER_MIN_SECONDS,
+      providerRetryAfterSeconds ?? RATE_LIMIT_RETRY_AFTER_DEFAULT_SECONDS,
+    ),
+  );
+  const response = errorResponse(503, "endpoint_rate_limited");
+  const headers = new Headers(response.headers);
+  headers.set("retry-after", String(seconds));
+  return new Response(response.body, { status: response.status, headers });
+}
+
 /** The provider's tunnel or DNS record quota is exhausted. This is distinct
  * from `endpoint_unavailable` so the desktop can say so and retry later. */
 function capacityResponse(): Response {
@@ -663,7 +699,7 @@ async function reconcileClaim(
     const row = await finishClaim(env, claim, "ready");
     return { connectorToken, row };
   } catch (error) {
-    let operationCode = errorCode(error);
+    let failure: unknown = error;
 
     try {
       const rolledBack = await rollbackCreatedResources(env, claim, api, {
@@ -678,15 +714,16 @@ async function reconcileClaim(
     } catch (rollbackError) {
       // A stale request must stop immediately: it no longer owns either the
       // D1 generation or the provider resources that a successor may adopt.
-      operationCode = errorCode(rollbackError);
+      failure = rollbackError;
     }
+    const operationCode = errorCode(failure);
     try {
       await updateClaimedResources(env, claim, tunnelId, dnsRecordId);
       await failClaim(env, claim, operationCode, false);
     } catch {
       // The original redacted failure is the useful client-facing result.
     }
-    throw new EndpointOperationError(operationCode);
+    throw new EndpointOperationError(operationCode, retryAfterSeconds(failure));
   }
 }
 
@@ -800,8 +837,11 @@ async function deleteClaim(
 }
 
 export async function getManagedEndpoint(request: Request, env: Env): Promise<Response> {
-  const installation = await requireInstallation(request, env);
-  const row = await endpointRow(env, installation.installation_id);
+  const { row } = await requireInstallationAndRead<EndpointRow>(
+    request,
+    env,
+    (installationId) => endpointRowStatement(env, installationId),
+  );
   if (!row || row.status === "deleted") return json({ endpoint: null });
   return json({ endpoint: endpointJSON(row) });
 }
@@ -846,9 +886,10 @@ export async function provisionManagedEndpoint(
       capacity,
     }));
     if (capacity) {
-      await recordCapacityRejection(env, code).catch(() => undefined);
+      await recordCapacityRejection(env, config, code).catch(() => undefined);
       return capacityResponse();
     }
+    if (code === "cf_rate_limited") return rateLimitedResponse(retryAfterSeconds(error));
     throw new HTTPError(502, "endpoint_unavailable");
   }
 }
@@ -1040,7 +1081,7 @@ export async function sweepManagedEndpointCleanup(
   ));
 
   if (summary.deleted > 0) {
-    await clearCapacityRejection(env).catch(() => undefined);
+    await clearCapacityRejection(env, config).catch(() => undefined);
   }
   if (summary.candidates > 0) {
     console.log(JSON.stringify({

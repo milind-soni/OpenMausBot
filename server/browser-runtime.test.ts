@@ -377,6 +377,29 @@ describe("server-owned browser MCP runtime", () => {
     expect(closeBrowser).not.toHaveBeenCalled();
   });
 
+  it("sizes the browser page once per transport, before the first call that may launch it", async () => {
+    const order: string[] = [];
+    const applyViewport = vi.fn(async () => { order.push("viewport"); return true; });
+    const value = runtime({ applyViewport });
+    await value.agentRpc("s", spec(), "tools/list", {});
+    expect(applyViewport).not.toHaveBeenCalled();
+    const first = await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "first" } }) as { content: Array<{ text: string }> };
+    order.push(first.content[0]!.text);
+    await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "second" } });
+    expect(applyViewport).toHaveBeenCalledOnce();
+    expect(applyViewport).toHaveBeenCalledWith(spec());
+    expect(order[0]).toBe("viewport");
+    expect(order[1]).toContain("first");
+    await value.close("s");
+    await value.agentRpc("s", spec(), "tools/call", { name: "echo" });
+    expect(applyViewport).toHaveBeenCalledTimes(2);
+  });
+
+  it("still runs the bot's call when sizing the page fails", async () => {
+    const value = runtime({ applyViewport: async () => { throw new Error("engine without viewport"); } });
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "works" } })).resolves.toMatchObject({ content: [{ type: "text" }] });
+  });
+
   it("keeps completed MCP refusals distinct from uncertain transport failure", async () => {
     const value = runtime();
     await expect(value.agentRpc("s", spec(), "tools/call", { name: "rpc-error" })).rejects.toThrow("Expected refusal");

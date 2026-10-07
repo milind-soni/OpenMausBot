@@ -1,7 +1,10 @@
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import vm from "node:vm";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin } from "./cloud-home.mjs";
 import { cloudPageSenderAllowed } from "./cloud-move.mjs";
 import environments from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
@@ -37,17 +40,34 @@ function mainRule() {
   expect(end).toBeGreaterThan(start);
   // main registers the updater's channels with exactly this rule.
   expect(source.includes("registerUpdaterIpc({ pageAllowed: updaterPageAllowed });"), "main.mjs wires the updater to updaterPageAllowed").toBe(true);
+  // ...and the Cloud sign-in main keeps (its onState is what tells the updater).
+  const signInStart = source.indexOf("function ensureCloudAccount() {"), signInEnd = source.indexOf("\n}\n", signInStart) + 3;
+  expect(signInStart).toBeGreaterThanOrEqual(0);
   const window = { isDestroyed: () => false, webContents: null };
+  const listeners = new Map();
+  const signIn = { options: null, state: { status: "signed-out", message: "restoring" } };
   const context = vm.createContext({
-    ipcMain: { handle: () => {} },
-    senderIsLocal: localOriginModule.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed,
+    ipcMain: { handle: () => {}, on: (channel, listener) => listeners.set(channel, listener) },
+    senderIsLocal: localOriginModule.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed, myCloudOrigin,
     activeEnvironment: environments.activeEnvironment, rendererOrigin: () => LOCAL, desktopRemoteAccess: false,
     mainWindow: window,
     environmentsState: { environments: [], activeId: environments.LOCAL_ID },
     cloudAccount: { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }) },
-    rememberedHome: null,
+    rememberedHome: null, savedCloudHomeOrigin, cloudSignInRestored: true,
+    // ensureCloudAccount's world: a packaged app, and a sign-in client whose state the test sets.
+    app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin" },
+    path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
+    createCloudAccountStore: () => ({}), rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null,
+    sendUpdaterState: () => {},
+    createCloudAccountClient: (options) => {
+      signIn.options = options;
+      return {
+        homeTarget: () => (signIn.state.status === "connected" ? { origin: signIn.state.machine.origin } : null),
+        state: () => signIn.state,
+      };
+    },
   });
-  vm.runInContext(source.slice(start, end), context);
+  vm.runInContext(`${source.slice(start, end)}\n${source.slice(signInStart, signInEnd)}`, context);
   const show = (shown, activeId = environments.LOCAL_ID) => {
     window.webContents = shown.webContents;
     context.environmentsState = {
@@ -55,7 +75,25 @@ function mainRule() {
       activeId,
     };
   };
-  return { context, window, show, pageAllowed: vm.runInContext("updaterPageAllowed", context) };
+  /** What main answers the preload of the page sending `event`. */
+  const offered = (event) => {
+    const asked = { ...event };
+    listeners.get("update:offered")(asked);
+    return asked.returnValue;
+  };
+  /** The app starts: the saved Cloud sign-in is being restored. */
+  const launching = () => {
+    context.cloudAccount = null;
+    context.cloudSignInRestored = false;
+    vm.runInContext("ensureCloudAccount()", context);
+  };
+  /** The saved sign-in comes back (or changes), as the sign-in client reports it. */
+  const signedIn = (state) => {
+    signIn.state = state;
+    context.cloudSignInRestored = true;
+    signIn.options.onState(state);
+  };
+  return { context, window, show, offered, launching, signedIn, pageAllowed: vm.runInContext("updaterPageAllowed", context) };
 }
 
 /** A fresh updater module with a fake electron-updater behind it. */
@@ -93,10 +131,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** The bridge preload.cjs gives a page at `origin`. */
-function bridgeFor(origin, { clicked = false } = {}) {
+/** The bridge preload.cjs gives a page at `origin`. `rule`: main's, which
+ * answers the preload's one question as that page loads in the window. */
+function bridgeFor(origin, { clicked = false, rule = null } = {}) {
   let bridge;
   const invoked = [];
+  const asked = [];
+  const loading = page(origin);
+  if (rule) rule.window.webContents = loading.webContents;
   vm.runInNewContext(readFileSync(new URL("./preload.cjs", import.meta.url), "utf8"), {
     process: { platform: "darwin", argv: [`--omb-local-origin=${LOCAL}`] },
     location: { origin }, navigator: { userActivation: { isActive: clicked } },
@@ -104,28 +146,135 @@ function bridgeFor(origin, { clicked = false } = {}) {
     require: () => ({
       webUtils: {},
       contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
-      ipcRenderer: { on() {}, removeListener() {}, send() {}, invoke: (...args) => { invoked.push(args); return Promise.resolve({ status: "idle" }); } },
+      ipcRenderer: {
+        on() {}, removeListener() {}, send() {},
+        sendSync: (channel) => { asked.push(channel); return rule ? rule.offered(loading.event) : undefined; },
+        invoke: (...args) => { invoked.push(args); return Promise.resolve({ status: "idle" }); },
+      },
     }),
   });
-  return { bridge, invoked };
+  return { bridge, invoked, asked };
 }
 
-it("a server's page gets the update bridge, and it restarts the app only on the person's click", async () => {
+it("My Cloud's page gets the update bridge, and it restarts the app only on the person's click", async () => {
   const local = bridgeFor(LOCAL);
   expect(Object.keys(local.bridge.updater).sort()).toEqual(["check", "install", "onState"]);
+  expect(local.asked, "this computer's page has the whole bridge without asking").toEqual([]);
   await local.bridge.updater.install();
   expect(local.invoked).toEqual([["update:install"]]);
 
-  // Main answers only the person's own Cloud among servers (above); the bridge is there for it.
-  const cloud = bridgeFor(CLOUD);
+  const rule = mainRule();
+  rule.show(page(CLOUD), "cloud");
+  const cloud = bridgeFor(CLOUD, { rule });
   expect(Object.keys(cloud.bridge.updater).sort()).toEqual(["check", "install", "onState"]);
   await expect(cloud.bridge.updater.install()).rejects.toThrow(/Restart to update/);
   await cloud.bridge.updater.check();
   cloud.bridge.updater.onState(() => {});
   expect(cloud.invoked).toEqual([["update:check"], ["update:get-state"]]);
-  const clicked = bridgeFor(CLOUD, { clicked: true });
+  const clicked = bridgeFor(CLOUD, { clicked: true, rule });
   await clicked.bridge.updater.install();
   expect(clicked.invoked).toEqual([["update:install"]]);
+});
+
+// A page built before main answered My Cloud reads the bridge alone as "You're
+// up to date" (its Settings row and profile menu), so a page main won't answer
+// must never get it.
+it("another server's page never gets the update bridge; My Cloud's does, even while the sign-in restores", () => {
+  const rule = mainRule();
+  const has = (origin, activeId) => {
+    rule.show(page(origin), activeId);
+    return "updater" in bridgeFor(origin, { rule }).bridge;
+  };
+  // Signed in.
+  expect(has(OTHER, "vps")).toBe(false);
+  expect(has(CLOUD, "cloud")).toBe(true);
+  // A frame inside My Cloud's page.
+  rule.show(page(CLOUD), "cloud");
+  expect(rule.offered({ sender: rule.window.webContents, senderFrame: { url: `${CLOUD}/` } })).toBe(false);
+
+  // Launch: the saved sign-in is still being restored. Only the saved "My Cloud" server is.
+  rule.launching();
+  expect(has(CLOUD, "cloud")).toBe(true);
+  expect(has(OTHER, "vps")).toBe(false);
+
+  // Restored, and signed out: the saved "My Cloud" server is no one's Cloud now.
+  rule.signedIn({ status: "signed-out" });
+  expect(has(CLOUD, "cloud")).toBe(false);
+
+  // Connected to this computer's companion server: no Cloud of the person's is open here.
+  rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" } });
+  expect(has(CLOUD, "cloud")).toBe(true);
+  rule.context.desktopRemoteAccess = { endpoint: "https://companion.example.test" };
+  expect(has(CLOUD, "cloud")).toBe(false);
+  rule.context.cloudSignInRestored = false;
+  expect(has(CLOUD, "cloud")).toBe(false);
+
+  // A preload with no answer from main (or a broken one) keeps the bridge back.
+  expect("updater" in bridgeFor(CLOUD).bridge).toBe(false);
+});
+
+it("a downloaded update installs when the app quits, except a system package, which is the person's to install", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const resourcesPath = process.resourcesPath;
+  const appImage = process.env.APPIMAGE;
+  const resources = mkdtempSync(join(tmpdir(), "omb-updater-package-"));
+  try {
+    for (const [os, marker, image, installsOnQuit] of [
+      ["darwin", null, null, true],
+      ["win32", null, null, true],
+      ["linux", null, "/home/a/OpenMausBot.AppImage", true],
+      ["linux", "deb", null, false],
+      ["linux", "rpm", null, false],
+    ]) {
+      Object.defineProperty(process, "platform", { ...platform, value: os });
+      process.resourcesPath = resources;
+      rmSync(join(resources, "package-type"), { force: true });
+      if (marker) writeFileSync(join(resources, "package-type"), marker);
+      if (image) process.env.APPIMAGE = image;
+      else delete process.env.APPIMAGE;
+      const { updater, autoUpdater } = await load(() => false);
+      updater.startUpdater();
+      expect(autoUpdater.autoInstallOnAppQuit, `${os} ${marker ?? image ?? ""}`).toBe(installsOnQuit);
+      // Nothing is installed by itself before then: the coordinator owns the download.
+      expect(autoUpdater.autoDownload).toBe(false);
+    }
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    process.resourcesPath = resourcesPath;
+    if (appImage === undefined) delete process.env.APPIMAGE;
+    else process.env.APPIMAGE = appImage;
+    rmSync(resources, { recursive: true, force: true });
+  }
+});
+
+it("My Cloud's page hears \"Restart to update\" once the sign-in it loaded before is restored", async () => {
+  const rule = mainRule();
+  rule.launching();
+  const { updater, autoUpdater, handlers } = await load(rule.pageAllowed);
+  rule.context.sendUpdaterState = updater.sendUpdaterState;
+  const cloud = page(CLOUD);
+  rule.show(cloud, "cloud");
+  updater.attachUpdaterWindow(rule.window);
+  updater.startUpdater();
+
+  // The update downloads while main cannot yet tell this is the person's Cloud.
+  await vi.advanceTimersByTimeAsync(15_000);
+  await settle();
+  expect(autoUpdater.downloadUpdate).toHaveBeenCalledTimes(1);
+  expect(() => handlers.get("update:get-state")(cloud.event)).toThrow(/only available/);
+  expect(cloud.webContents.send).not.toHaveBeenCalled();
+  // A downloaded update holds the hourly checks: nothing else would tell the page.
+  await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+  expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
+
+  rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" } });
+  expect(cloud.webContents.send).toHaveBeenLastCalledWith("update:state", expect.objectContaining({ status: "downloaded", version: "2.0.0" }));
+
+  // Another server's page hears nothing from a sign-in change.
+  const other = page(OTHER);
+  rule.show(other, "vps");
+  rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" } });
+  expect(other.webContents.send).not.toHaveBeenCalled();
 });
 
 it("downloads an update by itself: the first check after launch starts it, and nothing restarts", async () => {
@@ -163,6 +312,11 @@ it("My Cloud's page reads and drives the update channels, and another server's p
   rule.context.rememberedHome = { accountId: "someone-else", origin: CLOUD };
   expect(() => handlers.get("update:get-state")(cloud.event)).toThrow(/only available/);
   rule.context.cloudAccount = { homeTarget: () => ({ origin: CLOUD }), state: () => ({ status: "connected", account: { id: "a1" } }) };
+
+  // Connected to this computer's companion server, the window shows no Cloud of the person's.
+  rule.context.desktopRemoteAccess = { endpoint: "https://companion.example.test" };
+  for (const channel of handlers.keys()) expect(() => handlers.get(channel)(cloud.event), channel).toThrow(/only available/);
+  rule.context.desktopRemoteAccess = false;
 
   const other = page(OTHER);
   rule.show(other, "vps");

@@ -12,6 +12,7 @@
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
 //   OMB_EXTERNAL_RUNTIME  "1" for a standing process: peer tools and polling only
+//   OMB_CHIEF_OF_STAFF    "1" for a Chief of Staff, the only bot shown the Chief-only tools
 //
 // This file is the stdio front end only. What the tools are and which a turn
 // sees: agents-catalog.ts. What a call does: agents-call.ts. How the harness

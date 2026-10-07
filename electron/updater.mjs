@@ -1,8 +1,9 @@
 // In-app auto-updater (electron-updater). Updates download by themselves as
-// soon as a check finds one; macOS stages the downloaded ZIP immediately, and
-// only the person's "Restart to update" applies it, so nothing restarts in
-// the middle of a call or a turn. One state object is broadcast on every
-// transition, to this computer's page and to the person's own Cloud page.
+// soon as a check finds one (macOS also stages the ZIP at once) and install
+// when the app quits, or at once on the person's "Restart to update". Nothing
+// restarts by itself in the middle of a call or a turn. One state object is
+// broadcast on every transition, to this computer's page and to the person's
+// own Cloud page.
 //
 // Only runs in the packaged, signed+notarized app (mac auto-update requires
 // signing). In dev it's a no-op so the browser/dev shell is unaffected.
@@ -78,6 +79,13 @@ function setState(patch) {
   }
 }
 
+/** Send the current state to the window's page again, if it may read it now:
+ * a page main refused while the Cloud sign-in was being restored hears it
+ * once the sign-in lets it (main.mjs, on every Cloud sign-in change). */
+export function sendUpdaterState() {
+  setState({});
+}
+
 /** The updater changes THIS app: `allowed(event)` says which page may read
  * and drive it (this computer's page, and the person's own Cloud page). */
 export function registerUpdaterIpc({ pageAllowed: allowed }) {
@@ -115,25 +123,28 @@ export function startUpdater() {
   // The coordinator starts the download itself the moment a check finds an
   // update, so it owns that download (macOS staging, quiet failures).
   autoUpdater.autoDownload = false;
-  // Squirrel.Mac has a second, native staging pass after the ZIP download.
-  // Start it immediately so "Restart to update" never has to begin that slow
-  // pass and wait indefinitely. Windows keeps the explicit installer click.
-  autoUpdater.autoInstallOnAppQuit = process.platform === "darwin";
   autoUpdater.logger = updaterLogger();
 
   // Broadcast the install flavour before the first check so the banner never
   // offers a restart it cannot deliver.
   const packageType = linuxPackageType({ readMarker: (file) => (existsSync(file) ? readFileSync(file, "utf8") : null) });
   const handOff = HAND_OFF_TYPES.has(packageType);
+  // A downloaded update installs when the app quits, on every platform:
+  // Windows (per-user, one-click: silent, no admin prompt) and AppImage swap
+  // it in then. On macOS this also starts Squirrel.Mac's native staging pass
+  // at once, so "Restart to update" never has to begin that slow pass and
+  // wait. A system package (.deb, .rpm, pacman) is the person's to install
+  // in a terminal, never ours on quit.
+  autoUpdater.autoInstallOnAppQuit = !handOff;
   setState({ installMode: handOff ? "handoff" : "restart" });
   updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState, {
     handOffInstall: handOff ? handOffDownloadedPackage(packageType) : null,
     nativeStaging: process.platform === "darwin",
   });
 
-  // first check ~15s after launch (let the app settle), then hourly — both
-  // silent on failure, hence the arrow: a bare `check` would receive the
-  // timer's argument as `manual` and start reporting errors again.
+  // first check ~15s after launch (let the app settle), then hourly — never
+  // the person's own check, hence the arrow: a bare `check` would receive the
+  // timer's argument as `manual` and report every passing network failure.
   setTimeout(() => void updaterCoordinator?.check(), 15_000).unref?.();
   setInterval(() => void updaterCoordinator?.check(), 60 * 60 * 1000).unref?.();
 }

@@ -126,14 +126,24 @@ describe("live call media", () => {
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(liveMedia()).toMatchObject({ phase: "failed", busyWith: other });
     expect(track.stopped).toBe(true);
-    // the harness also runs on Ubuntu: "computer", not "Mac"
-    request.mockRejectedValueOnce(new ApiError("A Live call is already running.", 409, { activeCall: { ...other, client: "desktop" } }));
-    await startLiveCall({ botId: "b1", threadId: "t1" });
-    expect(liveMedia().notice).toBe("Another Live call is running on this computer. Hang up there first.");
     // a call from a web browser (a Cloud's page) is not "on this computer"
     request.mockRejectedValueOnce(new ApiError("A Live call is already running.", 409, { activeCall: { ...other, client: "web" } }));
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(liveMedia().notice).toBe("Another Live call is running in a web browser. Hang up there first.");
+  });
+
+  // The desktop app holds a call on This computer, or on My Cloud (its page
+  // in the app). A browser on another machine reaches the same Cloud, so the
+  // busy line names the app, never "this computer", which is not where the
+  // call is. The harness also runs on Linux and Windows: never "Mac".
+  it.each([
+    ["the desktop app's own window", { available: true, engine: "apple-speech", onDevice: true }],
+    ["a web browser on another machine", { reasonCode: "desktop-app-required" }],
+  ] as const)("in %s, says a desktop app's call is running in the desktop app", async (_where, dictation) => {
+    configureLiveMedia({ ...fakes(), capabilities: windowIs(dictation) });
+    request.mockRejectedValueOnce(new ApiError("A Live call is already running.", 409, { activeCall: { ...call, callId: "c0", client: "desktop", status: "live" } }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    expect(liveMedia().notice).toBe("Another Live call is running in the desktop app. Hang up there first.");
   });
 
   it("releases media when the server ends the call", async () => {

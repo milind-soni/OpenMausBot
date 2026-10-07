@@ -38,6 +38,7 @@ import { useSidebarPhoneStatus } from "./SidebarPhoneButton";
 import { useStore, type Action } from "@/state/store";
 import type { CloudAccountBridge, CloudAccountState } from "../../electron/cloud-account.mjs";
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
+import { brand } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
@@ -97,11 +98,12 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
     case "preparing":
       return t("sidebar.update.preparing");
     case "downloaded":
-      // an unknown version leaves a double space behind, in every language
+      // Named: on My Cloud's page it is this app that restarts, not the Cloud.
+      // An unknown version leaves a double space behind, in every language.
       return (
         state?.installMode === "handoff"
-          ? t("sidebar.update.readyInstall", { version: state?.version ?? "" })
-          : t("sidebar.update.ready", { version: state?.version ?? "" })
+          ? t("sidebar.update.readyInstall", { app: brand().name, version: state?.version ?? "" })
+          : t("sidebar.update.ready", { app: brand().name, version: state?.version ?? "" })
       ).replace("  ", " ");
     case "installing":
       return (

@@ -33,11 +33,28 @@ export interface AutoVmClaimSlot {
   label?: string;
   /** This claim mounts a local workspace, not a remote Boat/VPS desktop. */
   localVm?: boolean;
+  /** How long a computer call waits on this claim before it is answered,
+   * when the claim itself is slow: a cloud computer that has to be created
+   * or woken takes up to a minute. A slow claim is waited on by every call
+   * while it runs, not only by the call that fired it. Unset: the gate's
+   * short default, for a desktop that claims at once. */
+  graceMs?: number;
+  /** What the gate answers while this claim is still running, instead of
+   * the contention text a fast claim earns. */
+  pendingReason?: string;
+  /** The Boat a cloud computer's claim created or woke (mountBotBoat):
+   * its tools reach that Boat once the claim has landed. */
+  boxId?: string;
+  /** The claim itself creates or wakes the computer (mountBotBoat), so that
+   * computer is this turn's even before it is up: select_computer counts it
+   * as selected. The other lazy claims only lease a desktop that is up. */
+  startsComputer?: true;
   /** Called once, after the slot is marked failed, when the fired claim
    * rejected (issue #1369): the turn surfaces a terminal error and ends
    * instead of staying busy behind a gate that can only refuse. The
-   * fail-closed refusal below does not depend on it firing. */
-  onRejected?: (failure: string) => void;
+   * fail-closed refusal below does not depend on it firing. `error` is what
+   * the claim threw, so a failure already read as a place keeps its row. */
+  onRejected?: (failure: string, error?: unknown) => void;
 }
 
 export type AutoVmClaimTable = Map<string, AutoVmClaimSlot>;
@@ -59,7 +76,17 @@ export function startAutoVmClaim(table: AutoVmClaimTable, threadId: string, gene
     (error: unknown) => {
       slot.failed = true;
       slot.failure = error instanceof Error ? error.message : String(error);
-      slot.onRejected?.(slot.failure);
+      slot.onRejected?.(slot.failure, error);
     },
   );
+}
+
+/** How long a computer call should wait on its thread's lazy claim, or null
+ * when it should not wait: the first call waits while the claim it fires
+ * lands; a slow claim (graceMs) is waited on by every call until it settles. */
+export function lazyClaimWaitMs(slot: AutoVmClaimSlot | undefined, defaultGraceMs: number): number | null {
+  if (!slot?.lazy) return null;
+  if (!slot.begin) return slot.graceMs ?? defaultGraceMs;
+  if (slot.graceMs !== undefined && !slot.claimed && !slot.failed) return slot.graceMs;
+  return null;
 }

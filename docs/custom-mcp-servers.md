@@ -17,6 +17,26 @@ next task; no app restart is needed.
 
 Tokens for URL servers go in headers, never in the address.
 
+### Whop
+
+In Plugins, find **Whop** alongside Gmail, Slack and the other apps and click **Connect**. The built-in card
+uses Whop's official hosted MCP endpoint and opens Whop's browser sign-in;
+no API key, local CLI or Composio connection is needed. After successful
+sign-in and tool discovery it enables the connection. A cancelled or failed
+first setup remains off and can be retried without adding another server.
+
+Open **Bot access** on the Whop card to reach each bot's existing Access
+settings. Bots set to use every enabled MCP server inherit the connection;
+bots with an explicit selection must include its server name. The next task
+uses the selection. Whop also appears in the **Connected** filter. **Disconnect** disables the connection and signs out;
+the saved entry remains available to reconnect. Existing custom Whop entries
+at the official HTTP endpoint are recognized rather than replaced.
+
+Whop currently requests admin access across businesses your Whop account can
+manage, and its own consequential-action confirmations still apply. See the
+[official Whop MCP documentation](https://github.com/whopio/whop-mcp-server).
+This is an optional connected tool, not a change to OMB's subscription billing.
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser

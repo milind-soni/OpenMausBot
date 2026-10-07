@@ -91,15 +91,28 @@ describe("live frames the store does not keep", () => {
 
   it("clear a computer's setting-up state with the first screen frame", async () => {
     await send({ kind: "computer", botId: "bot", state: "provisioning" });
-    expect(seen.provisioning.bot).toBe(true);
+    expect(seen.computerStarts.bot).toEqual({ state: "provisioning" });
     const mascot = seen.mascotMotion;
     await send({ kind: "screen", botId: "bot", threadId: "thread", png: "BBBB" });
-    expect(seen.provisioning.bot).toBe(false);
+    expect(seen.computerStarts.bot).toBeUndefined();
     expect(seen.mascotMotion).toBe(mascot);
     // and every later frame is news only to the panel
     const before = seen;
     await send({ kind: "screen", botId: "bot", threadId: "thread", png: "CCCC" });
     expect(seen).toBe(before);
+  });
+
+  it("keep a cloud computer's start or wake until its first frame, or until the turn ends", async () => {
+    await send({ kind: "computer", botId: "bot", state: "waking", place: "cloud" });
+    expect(seen.computerStarts.bot).toEqual({ state: "waking", place: "cloud" });
+    await send({ kind: "screen", botId: "bot", threadId: "thread", png: "DDDD" });
+    expect(seen.computerStarts.bot).toBeUndefined();
+    // A start that failed sends no frame: the line goes when the turn ends.
+    await send({ kind: "bot", bot: { ...bot, busy: true } } as ServerFrame);
+    await send({ kind: "computer", botId: "bot", state: "provisioning", place: "cloud" });
+    expect(seen.computerStarts.bot).toEqual({ state: "provisioning", place: "cloud" });
+    await send({ kind: "bot", bot: { ...bot, busy: false } } as ServerFrame);
+    expect(seen.computerStarts.bot).toBeUndefined();
   });
 
   it("hand runtime events to listeners as they arrive", async () => {

@@ -30,14 +30,26 @@ export interface FleetWorkspaceView extends FleetWorkspace {
 
 const MAX_BODY = 256 * 1024;
 
-function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+export function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    let text = "";
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let tooLarge = false;
     req.on("data", (chunk: Buffer) => {
-      text += chunk.toString("utf8");
-      if (text.length > MAX_BODY) reject(Object.assign(new Error("request too large"), { status: 413 }));
+      if (tooLarge) return;
+      bytes += chunk.length;
+      if (bytes > MAX_BODY) {
+        // Keep draining so the 413 can still be sent, but stop holding bytes.
+        tooLarge = true;
+        chunks.length = 0;
+        return reject(Object.assign(new Error("request too large"), { status: 413 }));
+      }
+      chunks.push(chunk);
     });
     req.on("end", () => {
+      if (tooLarge) return;
+      // Decode once: a character split across two chunks stays whole.
+      const text = Buffer.concat(chunks).toString("utf8");
       if (!text.trim()) return resolve({});
       try {
         const value: unknown = JSON.parse(text);

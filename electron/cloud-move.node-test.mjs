@@ -15,7 +15,7 @@ import environments from "./environments.cjs";
 import localOrigin from "./local-origin.cjs";
 import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, moveFit, moveRefusal, moveSenderDestination, olderVersion, parseMoveEstimate } from "./cloud-move.mjs";
 import { cloudPlanSnapshot } from "./cloud-account.mjs";
-import { cloudPlanDisk, isCloudHomeEntry } from "./cloud-home.mjs";
+import { cloudPlanDisk, isCloudHomeEntry, myCloudOrigin } from "./cloud-home.mjs";
 
 const ORIGIN = "https://omb-u-1a2b3c4d5e6f.fly.dev";
 const MAGIC = Buffer.from("OMB-WORKSPACE-1\n");
@@ -674,7 +674,7 @@ function mainIpc(extra = {}) {
   localOrigin.setLocalOrigin(LOCAL);
   const describe = dest => ({ id: dest.id, name: dest.name, origin: dest.origin, kind: dest.kind, grant: typeof dest.grant, grows: typeof dest.grow === "function" });
   const context = vm.createContext({
-    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), on: () => {} },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed, moveSenderDestination,
     activeEnvironment: environments.activeEnvironment, rendererOrigin: () => LOCAL, desktopRemoteAccess: false,
     mainWindow: { isDestroyed: () => false, webContents: localContents },
@@ -854,12 +854,12 @@ test("the Cloud's setup checklist can open the lending switch here, and nothing 
   const cloudFrame = { url: `${ORIGIN}/` }, cloudContents = { mainFrame: cloudFrame };
   localOrigin.setLocalOrigin(LOCAL);
   const context = vm.createContext({
-    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), on: () => {} },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed,
     activeEnvironment: environments.activeEnvironment, rendererOrigin: () => LOCAL, desktopRemoteAccess: false,
     mainWindow: { isDestroyed: () => false, webContents: localContents },
     environmentsState: { environments: [], activeId: "local" },
-    cloudAccount: { homeTarget: () => ({ origin: ORIGIN }) },
+    cloudAccount: { homeTarget: () => ({ origin: ORIGIN }) }, myCloudOrigin, rememberedHome: null,
     openLendingSettings: async (...args) => { opened.push(args); },
   });
   vm.runInContext(source.slice(start, end), context);
@@ -897,13 +897,14 @@ test("Settings on the person's own Cloud shows the plan read only, and can only 
   const account = { status: "connected", account: { id: "a1", email: "person@example.test" }, deviceId: "d1",
     entitlement: { plan: "pro", tier: "max", status: "active", expiresAt: 1, version: 1 }, machine: { status: "ready", origin: ORIGIN } };
   const context = vm.createContext({
-    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), on: () => {} },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed,
     activeEnvironment: environments.activeEnvironment, rendererOrigin: () => LOCAL, desktopRemoteAccess: false,
     mainWindow: { isDestroyed: () => false, webContents: cloudContents },
     environmentsState: { environments: [{ id: "cloud", name: "My Cloud", origin: ORIGIN }], activeId: "cloud" },
-    cloudAccount: { homeTarget: () => ({ origin: ORIGIN }), state: () => account }, cloudPlanSnapshot, LOCAL_ID: environments.LOCAL_ID, rememberedHome: null,
+    cloudAccount: { homeTarget: () => ({ origin: ORIGIN }), state: () => account }, cloudPlanSnapshot, LOCAL_ID: environments.LOCAL_ID, myCloudOrigin, rememberedHome: null,
     ensureCloudAccount: () => ({ openDashboard: async (...args) => { calls.push(["dashboard", ...args]); return account; } }),
+    openLendingSettings: async () => { calls.push(["lending"]); },
     workspaceMenuAction: action => action(), switchEnvironment: id => { calls.push(["switch", id]); },
   });
   vm.runInContext(source.slice(start, end), context);
@@ -926,12 +927,17 @@ test("Settings on the person's own Cloud shows the plan read only, and can only 
   assert.deepEqual(await handlers.get("cloud-plan:state")(event), { status: "checking", tier: "max" });
   await handlers.get("cloud-plan:local")(event);
   assert.deepEqual(calls.at(-1), ["switch", environments.LOCAL_ID]);
-  // Only this account's Cloud, and only on that Cloud's own page; Move and lending are not widened.
+  // Only this account's Cloud, and only on that Cloud's own page.
   context.rememberedHome = { accountId: "someone-else", origin: ORIGIN };
   assert.throws(() => handlers.get("cloud-plan:state")(event), /only available/);
+  assert.throws(() => handlers.get("cloud-lending:open")(event), /only available/);
   context.rememberedHome = { accountId: "a1", origin: ORIGIN };
   assert.throws(() => handlers.get("cloud-plan:state")({ sender: cloudContents, senderFrame: { url: "https://other.example.test/" } }), /only available/);
-  assert.throws(() => handlers.get("cloud-lending:open")(event), /only available/);
+  // One rule for "this page is my Cloud" (cloud-home.mjs myCloudOrigin), as for
+  // its microphone: the checklist's lending switch opens here too. Lending
+  // itself still waits for a verified sign-in (computer-sharing.mjs cloudLendingVerdict).
+  await handlers.get("cloud-lending:open")(event);
+  assert.deepEqual(calls.at(-1), ["lending"]);
   context.cloudAccount = { homeTarget: () => ({ origin: ORIGIN }), state: () => account };
   assert.deepEqual(cloudPlanSnapshot({ status: "reauth-required", message: "expired", lastPlan: { tier: "pro", active: true } }), { status: "signin", tier: "pro" });
   assert.deepEqual(cloudPlanSnapshot({ status: "reauth-required", message: "access-ended", lastPlan: { active: true } }), { status: "signin", tier: "pro" });

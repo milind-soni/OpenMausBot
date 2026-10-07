@@ -8,6 +8,7 @@ import { McpOAuthError, McpOAuthManager, mcpOAuthRedirectUri, type McpSignInStat
 import type { McpOAuthClientConfig } from "./mcp-registry.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth, type FakeOAuth, type FakeOAuthOptions } from "./testing/fake-oauth-server.ts";
+import { withFreeSignInPort } from "./testing/ports.ts";
 
 let dir: string;
 let oauth: FakeOAuth;
@@ -19,6 +20,8 @@ let registered: McpOAuthClientConfig | undefined;
 async function setup(options: FakeOAuthOptions = {}, lifetimeMs?: number) {
   oauth = await startFakeOAuth(options);
   mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+  // a pre-registered app returns to the port derived from the URL: make it a free one
+  if (options.preRegistered) mcp = { ...mcp, url: await withFreeSignInPort(mcp.url) };
   manager = new McpOAuthManager({
     file: join(dir, "mcp-oauth.json"),
     ...(lifetimeMs ? { lifetimeMs } : {}),

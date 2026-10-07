@@ -14,7 +14,7 @@ platform model gateway.
 
 This page is the OpenMausBot half of a contract with three parties:
 
-- **the home machine**: this repository's `deploy/fly/` image;
+- **the home machine**: this repository's `cloud-home` image (`Dockerfile`, `deploy/fly/`);
 - **the Admin** (openmaus-cloud, `docs/consumer-cloud.md` there): provisions
   the app, holds the machine's signing secret, and answers the desktop's Cloud
   session;
@@ -33,12 +33,16 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    the card offers **Open My Cloud**. One click opens the machine in the
    app window, signed in. There is no second confirmation.
 4. The first thing the Cloud shows is its engine sign-in
-   (`src/components/CloudEngineSignIn.tsx`), with three choices:
+   (`src/components/CloudEngineSignIn.tsx`), with these choices:
    - **Sign in to Claude**: the existing paste-code flow (open Anthropic's
      page, paste the code back);
    - **Sign in to ChatGPT (Codex)**: the existing device-code flow;
+   - **Sign in to Grok**: the same device-code flow for Grok Build on a
+     grok.com subscription (`grok login --device-auth`, run on the Cloud
+     computer), offered only when the image carries the Grok CLI;
    - **Use an API key**: the existing model-provider keys in **Settings →
-     API keys** (Anthropic, or an OpenAI-compatible key such as OpenRouter).
+     API keys** (Anthropic, xAI, or an OpenAI-compatible key such as
+     OpenRouter).
 
    It says plainly that the person's AI plan limits apply to bots that work
    around the clock, and that Anthropic's Claude Max plan or an API key works
@@ -46,7 +50,9 @@ Contract version: `1` (`cloudContractVersion` on the wire).
 5. Until one of those engines can run, every bot on the Cloud, including the
    default one, shows this sign-in rather than a chat that fails its first
    turn. Once one can run, the chat takes its place. Sign-ins stay on the
-   machine's volume (`~/.claude`, `~/.codex`, the server's own config).
+   machine's volume (`~/.claude`, `~/.codex`, `~/.grok`, the server's own
+   config). On an older image without the Grok CLI, Grok's setup card says
+   so in one line and offers an xAI key instead.
 
 The Cloud's `GET /api/auth/session` answers `"cloudHome": true` for a paired
 session; that is how the web UI knows to open the engine sign-in instead of
@@ -135,7 +141,8 @@ here, or a backup restored in Settings); a routine made from the owner's bot tem
 or a proposal the owner approved, is recorded as theirs when it is made.
 Every other routine is nobody's: it runs confined, like a guest's, and
 reports into a conversation that is nobody's. An owner's routine reports
-into a conversation that is the owner's.
+into a conversation that is the owner's: the bot's main thread, unless
+someone else opened that one.
 
 A webhook is the owner's: only their own devices can create, edit or rotate
 one, so its runs work at the bot's own level, in its project folder, with its
@@ -262,27 +269,43 @@ the app alike.
 A Cloud is personal, so in the desktop app its own page may use the
 microphone for a Live call, as this computer's own page does. That is the
 microphone only, never the camera or screen capture, and only for the main
-frame of the app's window at the exact origin the verified Cloud sign-in
-reports (`electron/app-permissions.mjs`, `appPermissionHandlers`). Signing out
-of Cloud takes it away at once; every other server's page stays refused. In a
-web browser, the browser asks for the microphone for the Cloud's address.
+frame of the app's window at the exact origin of the person's Cloud
+(`electron/app-permissions.mjs`, `appPermissionHandlers`). One rule says which
+Cloud that is, for the microphone and the Cloud page's Settings → Plan alike
+(`electron/cloud-home.mjs`, `myCloudOrigin`): the machine the Cloud sign-in
+verified or, failing that, the one this same account last verified in this
+app session. That last one counts while a check is pending or has failed, and
+also after the sign-in has ended or expired, when Settings → Plan on the Cloud
+says "sign in again on your computer". A check that names no machine for the
+account ends it (a stopped machine named without its address does not). A
+call placed while a saved sign-in is still restoring, in the first seconds
+after launch, waits for it (at most 5 seconds) rather than being refused.
+Signing out of OpenMausBot Cloud takes it away at once, and so do another
+account, companion client mode and restarting the app before a check succeeds
+(the last verified Cloud is kept in memory only); every other server's page
+stays refused. In a web browser, the browser asks for the microphone for
+the Cloud's address.
 
 - **The key is the person's own.** No Cloud plan includes Live calls: the
   person pastes an OpenAI API key from a project with GPT-Live access. It is
   saved on the Cloud (`PUT /api/config`, as a server page has no credential
   store), and the Live copy says so.
-- **The voice knows where it runs.** Like the bot's own system prompt, it
-  is told it runs on the person's My Cloud, not on their own computer
-  (`liveInstructions` in `server/live-call.ts`).
-- **A busy line names the browser.** A call started from a web browser says
-  so (`client: "web"`). A second call started in another window is told
-  "Another Live call is running in a web browser. Hang up there first."
-  instead of "on this computer", and that window's call bar reads "Ada is on
-  a Live call from a web browser". The phone apps show a client they don't
-  know as "another device".
+- **The voice knows where it runs.** In the bot's own words
+  (`CLOUD_HOME_PLACE` in `server/system-prompt.ts`), it is told it runs on
+  the person's My Cloud, not on their own computer, and that the bot changes
+  things on My Cloud (`liveInstructions` in `server/live-call.ts`).
+- **A busy line names the app, never "this computer".** A Cloud is reachable
+  from any machine, so a call is named by the app that holds it: a web
+  browser (`client: "web"`) or the desktop app (`"desktop"`, on This
+  computer or My Cloud). A second call is told "Another Live call is running
+  in a web browser. Hang up there first." or "…in the desktop app…", and a
+  browser's call shows in other windows' call bars as "Ada is on a Live call
+  from a web browser". The phone apps show a client they don't know as
+  "another device".
 - **Take turns stays on the Mac.** Take-turns calls listen with the Mac app's
   on-device speech recognition, which a Cloud's page can't use. On a Cloud,
-  the call with one bot is a Live call, and a room has no call.
+  the call with one bot is a Live call, and a room has no call
+  (`effectiveCallMode` in `src/lib/call-mode.ts`, `GroupCallButton`).
 
 ### Open in the app: `openmausbot://cloud`
 
@@ -636,19 +659,28 @@ the `list_shared_computers` and `shared_computer` tools.
 
 ## The image
 
-`deploy/fly/Dockerfile` builds on the published server image
-(`ghcr.io/milind-soni/openmausbot`) and adds:
+The `Dockerfile`'s `cloud-home` target shares the server image's runtime
+layers (Node, Chrome's libraries, agent-browser and its Chrome) and adds:
 
-- the engine CLIs from `ENGINES` (default Claude Code and Codex; the base
-  image already carries agent-browser and its Chrome);
-- Caddy, as the only listener the network can reach (`0.0.0.0:8080`);
-- `server/cloud-home-start.ts` (bundled to `dist-server/cloud-home-start.js`)
-  as the entry point.
+- Caddy (`deploy/fly/Caddyfile`), as the only listener the network can reach
+  (`0.0.0.0:8080`);
+- Grok Build (`/usr/local/bin/grok`) from xAI's own installer, pinned by
+  `GROK_VERSION` to the version the Grok driver is verified against. The
+  build fails if the installer cannot be reached, rather than shipping an
+  image whose Grok sign-in cannot run; `--build-arg GROK_VERSION=` leaves it
+  out on purpose;
+- the engine CLIs from `CLOUD_HOME_ENGINES` (default Claude Code and Codex);
+- the app files, root's, with `server/cloud-home-start.ts` (bundled to
+  `dist-server/cloud-home-start.js`) as the entry point. The build fails if
+  any file under `/app`, or Caddy, is not root's or is writable by others.
 
 ```sh
-docker build -t openmausbot .
-docker build -f deploy/fly/Dockerfile --build-arg BASE_IMAGE=openmausbot -t omb-cloud-home .
+docker build --target cloud-home -t omb-cloud-home .
 ```
+
+The app files are the last layers, so an image built from a later commit
+differs from the previous one only in those (a few MB) unless Chrome, an
+engine, Grok's pin, or the Node base image changed in between.
 
 At boot the launcher, running as root, hands the volume's mount point to the
 `maus` user, binds the volume to this machine as `maus`
@@ -683,8 +715,8 @@ refuses to start if Node, itself, the server's entry point, Caddy or its
 config (or any folder above them) is not root's, is writable by others, or
 is on the volume. Only the `/data` volume is `maus`'s.
 
-`HOME=/data`, so `~/.claude`, `~/.codex` and OpenMausBot's own data
-(`/data/.openmausbot`) persist on the volume.
+`HOME=/data`, so `~/.claude`, `~/.codex`, `~/.grok` and OpenMausBot's own
+data (`/data/.openmausbot`) persist on the volume.
 
 ### Why the server stays on loopback
 
@@ -753,7 +785,7 @@ For each service the Admin has configured, it also sets:
 
 | Variable | Fly | Value |
 | --- | --- | --- |
-| `OMB_CLOUD_BOAT_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/boat/api/box/v1`, the Admin's Boat relay. It keeps Boat's own `/api/box/v1` ending, so the Computer engine's model catalog (`<root>/api/provider-models`) resolves through the relay too. |
+| `OMB_CLOUD_BOAT_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/boat/api/box/v1`, the Admin's Boat relay. It keeps Boat's own `/api/box/v1` ending. Bots use it only for cloud computers, as a tool on their own engine; no turn runs on Boat's own agent, so nothing calls its `/prompt`, `/events`, `/prompts/{id}` or `/interrupt` routes. |
 | `OMB_CLOUD_BOAT_TOKEN` | secret | This machine's Boat relay token (`box_omb_…`). It is not a Boat key and works only through the relay. |
 | `OMB_CLOUD_VOICE_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/voice/v1`, the Admin's voice relay. |
 | `OMB_CLOUD_VOICE_TOKEN` | secret | This machine's voice relay token (`omb_voice_…`). |
@@ -946,7 +978,8 @@ shows the plan read only (`cloud-plan:*`: its name and whether it is active,
 **Manage in your browser** and **Switch to this computer**). It is listed only
 on an OMB Cloud home (`config.cloudHome`), never on another server open in the
 window. Main answers it for the Cloud this account verified, or last verified
-while a check is failing or the sign-in has ended, so that page says
+while a check is failing or the sign-in has ended (`myCloudOrigin`, the rule
+the Cloud's microphone uses too), so that page says
 "checking" or "sign in again on your computer" rather than an error; where the
 app cannot vouch for the Cloud it only says the plan is managed in the app on
 the computer.
@@ -1033,7 +1066,7 @@ section is only what the Cloud adds.
 
 Every push to `main` and every release tag publishes the home machine image as
 `ghcr.io/milind-soni/openmausbot-cloud-home`, tagged `latest` (main only), `sha-<commit>` and the release tag.
-It is built from `deploy/fly/Dockerfile` on top of the server image for the same commit, with Claude Code and
+It is the `Dockerfile`'s `cloud-home` target for the same commit, with Grok and the current Claude Code and
 Codex installed. The Docker workflow's summary prints the digest. Set it in the Admin as
 `OMB_CLOUD_HOME_IMAGE=ghcr.io/milind-soni/openmausbot-cloud-home@sha256:…`; changing it rolls the new image
 out to existing machines one at a time, reverting automatically on a failed health check.

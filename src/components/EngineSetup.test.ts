@@ -224,6 +224,14 @@ describe("API-key engine setup", () => {
     expect(html).not.toContain("config.json");
   });
 
+  it("says so when the provider rejected the saved key", () => {
+    const html = render(keyEngine("grok", { state: "available", authenticated: false, reason: "The provider rejected this key." }));
+    expect(html).toContain("data-engine-setup-api-key");
+    expect(html).toContain("The provider rejected the saved key.");
+    expect(html).toContain("Open API keys");
+    expect(render(keyEngine("grok", { state: "unavailable" }))).not.toContain("rejected");
+  });
+
   it("has no button on a remote client, whose settings hide the keys", () => {
     const html = render(keyEngine("openai-compat", { state: "unavailable" }), { platform: "darwin", remoteClient: { active: true } });
     expect(html).toContain("on the computer running OpenMausBot");

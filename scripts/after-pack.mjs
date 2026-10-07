@@ -6,6 +6,7 @@ import {
   verifyCloudflaredExecutable,
 } from "./prepare-cloudflared.mjs";
 import { verifyBrowserBundle } from "./prepare-browser.mjs";
+import { LIPO_ARCH, isMachO, writeThinMachO } from "./mac-thin.mjs";
 
 async function requireRealDirectory(directory, mode = 0o755) {
   const details = await lstat(directory);
@@ -65,6 +66,25 @@ async function validateCloudflared(resources, platform, required) {
   );
 }
 
+// Google ships macOS Platform Tools universal, and the shared top-level
+// extraResources entry copies that tree into both single-arch apps. Keep only
+// this app's slice, before electron-builder signs the nested code.
+async function thinMacPlatformTools(resources, arch) {
+  const root = path.join(resources, "android-platform-tools", "darwin");
+  let entries;
+  try {
+    entries = await readdir(root, { recursive: true, withFileTypes: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  if (!arch) throw new Error("Unsupported macOS package architecture for Android Platform Tools");
+  for (const entry of entries) {
+    const file = path.join(entry.parentPath, entry.name);
+    if (entry.isFile() && await isMachO(file)) await writeThinMachO(file, file, LIPO_ARCH[arch]);
+  }
+}
+
 // electron-builder normalizes copied resource directories to 0775. That is
 // unsafe for a root-owned executable path after DEB/AppImage installation, so
 // repair and revalidate the exact tree after resources are copied and before
@@ -81,13 +101,14 @@ export default async function afterPack(context) {
     if (error?.code === "ENOENT") return false;
     throw error;
   });
+  const arch = { 1: "x64", 3: "arm64" }[context.arch];
   // electron-builder warns and skips missing extraResources. A real package
   // must fail here, before signing, rather than silently ship without Chrome.
   if (hasBrowser || context.packager) {
-    const arch = { 1: "x64", 3: "arm64" }[context.arch];
     if (!arch) throw new Error(`Unsupported desktop browser package architecture: ${context.arch}`);
     await verifyBrowserBundle(browserRoot, `${context.electronPlatformName}-${arch}`);
   }
+  if (context.electronPlatformName === "darwin") await thinMacPlatformTools(resources, arch);
 
   if (context.electronPlatformName !== "linux") return;
 

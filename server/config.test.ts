@@ -21,6 +21,7 @@ import { cacheUntilConfigChanges,
   persistableInstanceConfigs,
   roomHandoffLimits,
   roomTurnTimeoutMinutes,
+  mcpCallTimeoutMinutes,
   maxConcurrentBotThreads,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
@@ -505,6 +506,27 @@ describe("configuration boundaries", () => {
     },
   );
 
+  it("accepts a persisted MCP call timeout and supplies the legacy default", () => {
+    expect(parseStoredConfig({ mcp: { callTimeoutMinutes: 30 } })).toEqual({
+      mcp: { callTimeoutMinutes: 30 },
+    });
+    expect(mcpCallTimeoutMinutes({ mcp: { callTimeoutMinutes: 30 } })).toBe(30);
+    expect(mcpCallTimeoutMinutes({})).toBe(10);
+  });
+
+  it.each([0, 0.5, 61, 1440, "20", null])(
+    "rejects an invalid MCP call timeout: %j",
+    (callTimeoutMinutes) => {
+      expect(() => parseConfigPatch({ mcp: { callTimeoutMinutes } })).toThrow(
+        "mcp.callTimeoutMinutes",
+      );
+    },
+  );
+
+  it("rejects unknown keys under the mcp config section", () => {
+    expect(() => parseConfigPatch({ mcp: { callTimeoutMinutes: 10, surprise: 1 } })).toThrow("mcp");
+  });
+
   it("preserves shared Local VM behavior by default and accepts bounded per-bot mode", () => {
     expect(localVmMode({})).toBe("shared");
     expect(localVmMaxInstances({})).toBe(2);
@@ -951,7 +973,6 @@ describe("Instance CLI override", () => {
       instances: {
         claude: { driver: "claudeAgent" },
         grokApi: { driver: "grok" },
-        computer: { driver: "boxAgent" },
         opencode: { driver: "opencodeGo" },
       },
     };
@@ -968,20 +989,19 @@ describe("Instance CLI override", () => {
 
   it("preserves explicit instance credentials even when workspace injection shadows them", () => {
     const cfg: AppConfig = {
-      box: { token: "fixture-workspace-box" },
       xai: { key: "fixture-shared-xai" },
       instances: {
-        computer: { driver: "boxAgent", environment: { BOX_TOKEN: "fixture-instance-box", MY_FLAG: "1" } },
+        ownKey: { driver: "grok", environment: { XAI_API_KEY: "fixture-instance-xai", MY_FLAG: "1" } },
         sameCredential: { driver: "grok", environment: { XAI_API_KEY: "fixture-shared-xai" } },
-        injectedOnly: { driver: "boxAgent" },
+        injectedOnly: { driver: "grok" },
       },
     };
     const instances = persistableInstanceConfigs(cfg);
-    expect(instances.computer.environment).toEqual({ BOX_TOKEN: "fixture-instance-box", MY_FLAG: "1" });
+    expect(instances.ownKey.environment).toEqual({ XAI_API_KEY: "fixture-instance-xai", MY_FLAG: "1" });
     expect(instances.sameCredential.environment).toEqual({ XAI_API_KEY: "fixture-shared-xai" });
     expect(instances.injectedOnly.environment).toBeUndefined();
-    instances.computer.environment!.MY_FLAG = "changed";
-    expect(cfg.instances!.computer.environment!.MY_FLAG).toBe("1");
+    instances.ownKey.environment!.MY_FLAG = "changed";
+    expect(cfg.instances!.ownKey.environment!.MY_FLAG).toBe("1");
   });
 
   it("saving another engine's CLI does not freeze inherited API endpoint or model settings", () => {
@@ -1123,7 +1143,6 @@ describe("credential env narrowing", () => {
       opencodeGo: { apiKey: "SECRET-OCG" },
       instances: {
         grokApi: { driver: "grok" },
-        computer: { driver: "boxAgent" },
         opencode: { driver: "opencodeGo" },
         claude: { driver: "claudeAgent" },
         codex: { driver: "codex" },
@@ -1131,21 +1150,21 @@ describe("credential env narrowing", () => {
     };
     const instances = instanceConfigs(cfg);
     expect(instances.grokApi.environment).toEqual({ XAI_API_KEY: "SECRET-XAI" });
-    expect(instances.computer.environment).toEqual({ BOX_TOKEN: "SECRET-BOAT" });
     expect(instances.opencode.environment).toEqual({ OPENCODE_API_KEY: "SECRET-OCG" });
+    // The Boat token reaches no engine: only the harness talks to Boat.
+    for (const entry of Object.values(instances)) expect(Object.values(entry.environment ?? {})).not.toContain("SECRET-BOAT");
     // engines that bring their own login receive NO workspace credential
     expect(instances.claude.environment).toEqual({});
     expect(instances.codex.environment).toEqual({});
   });
 
-  it("hands no credential to any default-fleet CLI engine except the Computer", () => {
+  it("hands no credential to any default-fleet CLI engine, and the Boat key to none at all", () => {
     // the default `grok` instance is the CLI-login grokAgent, not the
     // API-key driver: the xAI key reaches only the `xaiApi` instance
     const cfg: AppConfig = { xai: { key: "SECRET-XAI" }, box: { token: "SECRET-BOAT" } };
     const instances = instanceConfigs(cfg);
     for (const [id, entry] of Object.entries(instances)) {
-      if (id === "computer") expect(entry.environment).toEqual({ BOX_TOKEN: "SECRET-BOAT" });
-      else if (id === "xaiApi") expect(entry.environment).toEqual({ XAI_API_KEY: "SECRET-XAI" });
+      if (id === "xaiApi") expect(entry.environment).toEqual({ XAI_API_KEY: "SECRET-XAI" });
       else expect(entry.environment).toEqual({});
     }
   });
@@ -1191,10 +1210,10 @@ describe("credential env narrowing", () => {
 
   it("keeps a per-instance environment while layering the credential on top", () => {
     const cfg: AppConfig = {
-      box: { token: "SECRET-BOAT" },
-      instances: { computer: { driver: "boxAgent", environment: { MY_FLAG: "1" } } },
+      xai: { key: "SECRET-XAI" },
+      instances: { grokApi: { driver: "grok", environment: { MY_FLAG: "1" } } },
     };
-    expect(instanceConfigs(cfg).computer.environment).toEqual({ MY_FLAG: "1", BOX_TOKEN: "SECRET-BOAT" });
+    expect(instanceConfigs(cfg).grokApi.environment).toEqual({ MY_FLAG: "1", XAI_API_KEY: "SECRET-XAI" });
   });
 });
 
@@ -1348,7 +1367,9 @@ describe("credential env preference", () => {
       expect(cfg.box?.token).toBeUndefined();
       expect(cfg.tts?.key).toBeUndefined();
       expect(cfg.decider?.key).toBeUndefined();
-      expect(instanceConfigs(cfg).computer?.environment).toEqual({});
+      for (const entry of Object.values(instanceConfigs(cfg))) {
+        for (const value of Object.values(entry.environment ?? {})) expect(Object.values(included)).not.toContain(value);
+      }
       saveConfig({ tts: { voice: "chosen" }, box: { token: "" }, decider: { enabled: true, jobs: { roomRouting: true } } });
       const disk = readFileSync(join(DATA_DIR, "config.json"), "utf8");
       const runtime = JSON.stringify([loadConfig(), instanceConfigs(loadConfig()), persistableInstanceConfigs(loadConfig())]);
@@ -1360,7 +1381,8 @@ describe("credential env preference", () => {
       process.env.BOX_TOKEN = "box_own";
       process.env.OMB_TTS_KEY = "sk-own";
       expect(loadConfig()).toMatchObject({ box: { token: "box_own" }, tts: { key: "sk-own" } });
-      expect(instanceConfigs(loadConfig()).computer?.environment).toEqual({ BOX_TOKEN: "box_own" });
+      // The person's Boat key stays with the harness; no engine is handed it.
+      expect(JSON.stringify(instanceConfigs(loadConfig()))).not.toContain("box_own");
     } finally {
       vi.unstubAllEnvs();
     }

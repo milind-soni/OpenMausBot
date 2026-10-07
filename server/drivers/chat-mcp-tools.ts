@@ -28,7 +28,9 @@ export interface ChatToolSession {
 
 type Server = { command: string; args: string[]; env: Record<string, string> };
 const STARTUP_MS = 8_000;
-const CALL_MS = 10 * 60_000;
+/** Historic per-call ceiling for a bot's MCP tools; a turn can override it
+ * with SendTurnInput.mcpCallTimeoutMs (server config `mcp.callTimeoutMinutes`). */
+const DEFAULT_CALL_MS = 10 * 60_000;
 const FRAME_BYTES = 2 * 1024 * 1024;
 const OUTPUT_BYTES = 50 * 1024;
 const TOOL_COUNT = 128;
@@ -254,7 +256,7 @@ function omitBlankDefaults(builtInBrowser: boolean, tool: string, args: unknown)
   }
 }
 
-export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope): Promise<ChatToolSession> {
+export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope, callTimeoutMs: number = DEFAULT_CALL_MS): Promise<ChatToolSession> {
   const parsed = parseToolScope(toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
@@ -346,7 +348,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       if (callSignal.aborted) { await close(); throw aborted(); }
       const tool = registered.get(name)!;
       try {
-        const result = await tool.client.call("tools/call", { name: tool.name, arguments: args }, AbortSignal.any([signal, callSignal]), CALL_MS);
+        const result = await tool.client.call("tools/call", { name: tool.name, arguments: args }, AbortSignal.any([signal, callSignal]), callTimeoutMs);
         if (signal.aborted || callSignal.aborted) throw aborted();
         if (!object(result) || !Array.isArray(result.content) || (result.isError !== undefined && typeof result.isError !== "boolean")) throw new Error("MCP tool returned an invalid result; execution outcome may be uncertain");
         const parts: string[] = [];

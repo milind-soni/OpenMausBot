@@ -261,6 +261,50 @@ describe("authenticated browser viewer relay", () => {
     await expect(reconnecting).rejects.toThrow("Reconnect to retry");
     expect(nativeClose).toHaveBeenCalledTimes(2);
   });
+  it("gives a headless browser it shows the standard page size, but never sizes an attached or headed one", async () => {
+    const view = (env: Record<string, string>, status = ready) => {
+      execute.mockReset().mockResolvedValueOnce(output(status)).mockResolvedValue(output({}));
+      const res = new ResponseFixture();
+      return live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true, res: res as unknown as ServerResponse,
+        spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "s", ...env } } });
+    };
+    await view({ AGENT_BROWSER_HEADLESS: "1" }, { ...ready, connected: false });
+    expect(execute.mock.calls.map((call) => call[1])).toEqual([
+      ["stream", "status", "--json", "--no-webmcp"], ["open", "--json", "--no-webmcp"], ["set", "viewport", "1280", "720", "--json", "--no-webmcp"],
+    ]);
+    expect(execute.mock.calls[2]?.[2]).toMatchObject({ timeout: 5_000 });
+    live.closeAll();
+    await view({ AGENT_BROWSER_HEADLESS: "1" });
+    expect(execute.mock.calls.map((call) => call[1].slice(0, 2))).toEqual([["stream", "status"], ["set", "viewport"]]);
+    live.closeAll();
+    await view({ AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_CDP: "http://127.0.0.1:9222" });
+    expect(execute.mock.calls.map((call) => call[1][0])).toEqual(["stream"]);
+    live.closeAll();
+    await view({});
+    expect(execute.mock.calls.map((call) => call[1][0])).toEqual(["stream"]);
+  });
+  it("still opens the view when sizing the page fails or the session is busy again", async () => {
+    execute.mockReset().mockResolvedValueOnce(output(ready))
+      .mockRejectedValueOnce(Object.assign(new Error("Command failed"), { killed: true, signal: "SIGKILL", code: null }));
+    const res = new ResponseFixture();
+    await live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true, res: res as unknown as ServerResponse,
+      spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "s", AGENT_BROWSER_HEADLESS: "1" } } });
+    expect(res.id).toBeTruthy();
+    expect(res.events("waiting")).toHaveLength(0);
+  });
+  it("opens no stream socket when the viewer closes while the page is being sized", async () => {
+    let finish!: (value: ReturnType<typeof output>) => void;
+    execute.mockReset().mockResolvedValueOnce(output(ready)).mockImplementationOnce(() => new Promise((resolve) => finish = resolve));
+    const res = new ResponseFixture();
+    const opening = live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true, res: res as unknown as ServerResponse,
+      spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "s", AGENT_BROWSER_HEADLESS: "1" } } });
+    const rejected = expect(opening).rejects.toThrow();
+    await expect.poll(() => execute.mock.calls.length).toBe(2);
+    live.closeForOwner("a");
+    finish(output({}));
+    await rejected;
+    expect(SocketFixture.instances).toHaveLength(0);
+  });
   it("only acknowledges the exact frame rendered by this bound viewer", async () => {
     const { res, socket, action } = await open();
     socket.receive(frame);
@@ -543,5 +587,85 @@ describe("authenticated browser viewer relay", () => {
     await expect(runtime.withAgentAction("profile-a", async () => true)).rejects.toThrow();
     await a.action({ type: "restart" });
     await expect(runtime.withAgentAction("profile-a", async () => true)).resolves.toBe(true);
+  });
+});
+
+describe("opening a view while the bot holds the browser", () => {
+  const busy = () => Object.assign(new Error("Command failed: agent-browser stream status --json --no-webmcp"), { killed: true, signal: "SIGKILL", code: null });
+  const start = () => {
+    const res = new ResponseFixture();
+    const opening = live.open({ botId: "bot-a", session: "profile-a", owner: "admin-a", isCurrent: () => true, res: res as unknown as ServerResponse,
+      spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "profile-a" } } });
+    return { res, opening };
+  };
+  const types = (res: ResponseFixture) => res.chunks.map((chunk) => chunk.slice("event: ".length, chunk.indexOf("\n")));
+
+  it("waits in an open event stream and connects as soon as the browser answers", async () => {
+    vi.useFakeTimers();
+    execute.mockRejectedValueOnce(busy()).mockRejectedValueOnce(busy()).mockResolvedValue(output(ready));
+    const { res, opening } = start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(res.headers["Content-Type"]).toBe("text/event-stream");
+    expect(res.events("waiting")).toEqual([{ reason: "busy" }]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(res.events("waiting")).toHaveLength(2);
+    expect(res.events("ready")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await opening;
+    expect(res.id).toBeTruthy();
+    // Nothing but waiting reaches the view before it is ready.
+    expect(types(res).slice(0, 3)).toEqual(["waiting", "waiting", "ready"]);
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(execute.mock.calls[0]?.[2]).toMatchObject({ timeout: 10_000, killSignal: "SIGKILL" });
+  });
+
+  it("does not show a peer's control changes before it is ready", async () => {
+    vi.useFakeTimers();
+    const a = await open();
+    execute.mockRejectedValueOnce(busy()).mockResolvedValue(output(ready));
+    const { res, opening } = start();
+    await vi.advanceTimersByTimeAsync(0);
+    await a.action({ type: "take" });
+    expect(res.events("control")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await opening;
+    expect(res.events("control").at(-1)).toMatchObject({ held: true, owned: false });
+  });
+
+  it("stops waiting, and stops asking the browser, when the viewer leaves", async () => {
+    vi.useFakeTimers();
+    execute.mockRejectedValue(busy());
+    const { res, opening } = start();
+    const settled = opening.then(() => "resolved", () => "rejected");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(res.events("waiting")).toHaveLength(1);
+    res.destroy();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settled;
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[2].signal.aborted).toBe(true);
+    expect(SocketFixture.instances).toHaveLength(0);
+  });
+
+  it("gives up after a bounded wait with a reason, not an install hint and no automatic retry", async () => {
+    vi.useFakeTimers();
+    execute.mockRejectedValue(busy());
+    const { res, opening } = start();
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    await opening;
+    expect(res.events("error")).toEqual([{ retryable: false, message: "The bot is still using this browser. Reconnect when it has finished." }]);
+    expect(res.writableEnded).toBe(true);
+    const delays = execute.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(execute).toHaveBeenCalledTimes(delays);
+  });
+
+  it("reports a busy browser to a person's action without blaming the installation", async () => {
+    const a = await open();
+    await a.action({ type: "take" });
+    execute.mockRejectedValueOnce(busy());
+    await expect(a.action({ type: "reload" })).rejects.toThrow(/busy with another action/);
+    execute.mockRejectedValueOnce(Object.assign(new Error("spawn /engine ENOENT"), { code: "ENOENT" }));
+    await expect(a.action({ type: "reload" })).rejects.toThrow(/browser engine is installed/);
   });
 });

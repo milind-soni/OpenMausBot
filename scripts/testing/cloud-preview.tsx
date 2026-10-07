@@ -174,15 +174,6 @@ function Fixture() {
         browserEngine: { kind: "unavailable", installable: true } } });
     }
   }, [state.config, dispatch]);
-  useEffect(() => {
-    const base = state.instances[0];
-    if (base && !state.instances.some((instance) => instance.driverKind === "boxAgent")) {
-      // Registry display only; every cloud operation remains the transport
-      // stub above, never the paid Boat service.
-      dispatch({ type: "instances", instances: [...state.instances,
-        { ...base, instanceId: "fixture-box", driverKind: "boxAgent" }] });
-    }
-  }, [state.instances, dispatch]);
   const fixtureBot: Bot | undefined = bot && (scenario === "default"
     ? { ...bot, busy, tasks: bot.tasks?.map((task) => ({ ...task, busy })) }
     : { ...bot, busy: false, browser: true,

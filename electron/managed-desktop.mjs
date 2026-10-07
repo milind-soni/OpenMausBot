@@ -102,8 +102,8 @@ export function decryptedText(decrypted) {
  * nothing. A locked keychain is never this: that record is read again later. */
 export const unreadableRecord = error => error?.code === "unreadable_record";
 const unreadable = message => Object.assign(new Error(message), { code: "unreadable_record" });
-/** A record that may only be locked is read again after 15 s, 30 s, then every minute. */
-export const restoreRetryDelay = attempt => [15_000, 30_000, 60_000][Math.min(Math.max(attempt, 1), 3) - 1];
+/** The wait before try `attempt` (1, 2, 3...) after a failure: 15 s, 30 s, then every minute. */
+export const retryDelay = attempt => [15_000, 30_000, 60_000][Math.min(attempt, 3) - 1];
 
 export function createManagedDesktopStore({ file, encryption }) {
   let tail = Promise.resolve();
@@ -474,7 +474,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       schedule(poll, attempt.interval);
     }
   }
-  const RESTORE_FAILED = "Company sign-in could not be restored. Unlock your system keychain and restart OpenMausBot.";
+  const RESTORE_FAILED = "The saved company sign-in can't be read right now. OpenMausBot tries again every minute.";
   /** The saved enrollment could not be used. One that never will be is
    * removed, and signing in again is the one next step. One that may only be
    * locked (the keychain) is kept, never removed, and read again shortly. */
@@ -486,7 +486,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     }
     restoreFailures++;
     if (state.message !== RESTORE_FAILED) publish({ status: "unavailable", message: RESTORE_FAILED });
-    schedule(start, restoreRetryDelay(restoreFailures));
+    schedule(start, retryDelay(restoreFailures));
     return snapshot();
   }
   async function start() {

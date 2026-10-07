@@ -46,7 +46,6 @@ jobs:
     timeout-minutes: 15
     outputs:
       runtime: ${{ steps.scope.outputs.runtime }}
-      mobile: ${{ steps.scope.outputs.mobile }}
       vitest_os: ${{ steps.scope.outputs.vitest_os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,9 +93,9 @@ jobs:
         os: ${{ fromJSON(needs.static.outputs.vitest_os) }}
         shard: [1, 2, 3, 4]
     runs-on: ${{ matrix.os }}
-    # vitest splits by file count, not by duration, so the shard holding the
-    # heavy e2e files exceeds 20 minutes on macOS and 25 on Windows with
-    # tests still progressing. The cap catches a hang, not normal suite growth.
+    # scripts/testing/duration-sequencer.ts splits the files by their recorded
+    # CI seconds, not by count, so the heavy e2e files no longer share one
+    # shard. The cap catches a hang, not normal suite growth.
     timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 20 || 35 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -500,129 +499,4 @@ jobs:
             /tmp/omb-linux-smoke-runtime-*
           if-no-files-found: warn
           include-hidden-files: true
-          retention-days: 7
-
-  ios:
-    needs: static
-    if: needs.static.outputs.mobile == 'true'
-    # The simulator UI suite (about 90 minutes of iPhone + iPad runs) lives in
-    # ios-thread-ui.yml: nightly, on main pushes that touch ios/, and by hand.
-    # Here it held three of the account's five macOS runners at a time.
-    name: Swift tests + iOS build
-    runs-on: macos-latest
-    # About five minutes end to end: package tests ~1.5, xcodegen ~1, the
-    # simulator build ~2. The cap is a hang guard, not room for the build
-    # to grow into: the two guard steps below name the slow code instead.
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: No #available branch in a View extension
-        # The way the Oct 2026 build went from 5 to 25+ minutes: a
-        # `@ViewBuilder` View extension branching on `#available` doubles the
-        # caller's view type at every call, and IRGen on the batch holding
-        # both never finishes. The type-check flag below cannot see it and a
-        # build killed at the cap prints nothing, so the shape is refused at
-        # the source: such a shim is a ViewModifier (ios/App/BackDeployCompat.swift).
-        run: bash scripts/check-ios-view-shims.sh
-      - name: Swift package tests
-        run: swift test --package-path ios
-      - name: Generate the Xcode project
-        run: |
-          brew install xcodegen
-          cd ios
-          xcodegen generate
-      - name: Build the simulator app
-        # One slice. The generic simulator destination builds arm64 AND
-        # x86_64 (ONLY_ACTIVE_ARCH is a no-op there), and nothing runs the
-        # x86_64 one: the runner, the UI-test simulators and every current
-        # Mac are arm64. Two slices doubled the compile and ran six
-        # swift-frontends side by side on a 3-core, 7 GB runner. The log is
-        # kept for the type-check step that follows.
-        run: |
-          set -o pipefail
-          cd ios
-          xcodebuild \
-            -project OpenMausCompanion.xcodeproj \
-            -scheme OpenMausCompanion \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            ARCHS=arm64 \
-            CODE_SIGNING_ALLOWED=NO \
-            build | tee "$RUNNER_TEMP/xcodebuild.log"
-      - name: No Swift expression or body over the type-check limit
-        # ios/project.yml (Debug) has the compiler warn when it spends more
-        # than 500 ms type-checking one expression or function body, the
-        # usual way a SwiftUI build turns from minutes into a timeout. Swift
-        # has no diagnostic group for those two warnings, so -Werror cannot
-        # single them out; the log is read instead.
-        #
-        # 500 ms is the bar on a developer Mac, where Xcode shows the
-        # warning at its line. It is not a stable verdict on this runner:
-        # the compiler measures wall-clock time, and the shared 3-core
-        # runner swings about 2x from one run to the next (bodies at 216
-        # and 263 ms on an M5 measured 551 and 600 ms here on a loaded run,
-        # under 420 ms on a quiet one). The step therefore lists every
-        # body over the 500 ms warning limit, and fails only on one over
-        # three times that, which no body in the app comes near and which
-        # a type-check problem on its way to a timeout runs past.
-        run: |
-          fail_over_ms=1500
-          warnings=$(grep -E 'took [0-9]+ms to type-check \(limit: ' "$RUNNER_TEMP/xcodebuild.log" | sed -E 's#^.*/ios/##' | sort -u || true)
-          if [ -n "$warnings" ]; then
-            echo "Over the 500 ms warning limit on this runner (fails at ${fail_over_ms} ms):"
-            printf '%s\n' "$warnings"
-          fi
-          hits=$(printf '%s\n' "$warnings" | awk -v limit="$fail_over_ms" 'match($0, /took [0-9]+ms/) { ms = substr($0, RSTART + 5, RLENGTH - 7) + 0; if (ms > limit) print }')
-          if [ -n "$hits" ]; then
-            printf '%s\n' "$hits"
-            echo "::error::The Swift type checker spent over ${fail_over_ms} ms on the expression(s) above. Split that body into smaller views or functions, and give colours chosen by a ternary an explicit Color type."
-            exit 1
-          fi
-          echo "No expression or function body took the type checker over ${fail_over_ms} ms."
-
-  # Selection includes ios/** as well as android/**: :core's fixtures come
-  # from ios/Tests/CompanionCoreTests/Fixtures.
-  android:
-    needs: static
-    if: needs.static.outputs.mobile == 'true'
-    name: Kotlin tests + Android build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
-        with:
-          distribution: temurin
-          java-version: 17
-          cache: gradle
-          # Robolectric fetches android-all-instrumented from Maven Central at
-          # *test* time into ~/.m2 — 278 MB per clean machine that no Gradle
-          # cache reaches. This replaces the action's default path, so
-          # ~/.gradle/caches has to be named alongside it.
-          cache-path: |
-            ~/.gradle/caches
-            ~/.m2/repository/org/robolectric
-      - name: Kotlin tests and debug / preview APKs
-        run: |
-          cd android
-          ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:assembleDebug :app:assemblePreview
-      - name: Upload the installable Android preview
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: android-threads-preview-${{ github.sha }}-${{ github.run_attempt }}
-          path: android/app/build/outputs/apk/preview/app-preview.apk
-          if-no-files-found: error
-          retention-days: 14
-      - name: Upload the Android test reports on failure
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
-        with:
-          name: android-test-reports
-          path: |
-            android/core/build/reports/tests
-            android/core/build/test-results
-            android/app/build/reports/tests
-            android/app/build/test-results
-          if-no-files-found: warn
           retention-days: 7

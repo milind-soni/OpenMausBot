@@ -325,10 +325,11 @@ describe("message-linked files", () => {
     writeFileSync(secret, "not for this conversation");
     symlinkSync(secret, join(workspace, "escape.md"));
 
-    await expect(openMessageFile("../outside/secret.md", [workspace]))
-      .rejects.toMatchObject({ status: 403 });
-    await expect(openMessageFile("escape.md", [workspace]))
-      .rejects.toMatchObject({ status: 403 });
+    // The code lets the client offer Show in folder for exactly this refusal.
+    const refusal = { status: 403, code: "outside_workspace" };
+    await expect(openMessageFile("../outside/secret.md", [workspace])).rejects.toMatchObject(refusal);
+    await expect(openMessageFile(secret, [workspace])).rejects.toMatchObject(refusal);
+    await expect(openMessageFile("escape.md", [workspace])).rejects.toMatchObject(refusal);
   });
 
   it("accepts only regular files no larger than the phone download ceiling", async () => {

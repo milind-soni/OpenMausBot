@@ -29,7 +29,7 @@ export function json(res: ServerResponse, status: number, body: unknown) {
 
 export function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
   return new Promise((resolve, reject) => {
-    let data = "";
+    const chunks: Buffer[] = [];
     let bytes = 0;
     let done = false;
     const fail = (status: number, msg: string) => {
@@ -47,10 +47,13 @@ export function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> 
         // receiving the useful 413 response.
         return fail(413, "body too large");
       }
-      data += c;
+      chunks.push(typeof c === "string" ? Buffer.from(c) : c);
     });
     req.on("end", () => {
       if (done) return;
+      // Decode once, after the last chunk: a character split across two
+      // chunks turns into U+FFFD when each chunk is decoded on its own.
+      const data = Buffer.concat(chunks).toString("utf8");
       let body: any;
       try {
         body = data ? JSON.parse(data) : {};

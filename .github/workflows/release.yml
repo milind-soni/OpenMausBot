@@ -241,15 +241,19 @@ jobs:
           }
           console.log(`ok: ${Object.keys(SPAWNED_PROXIES).length} proxies resolve in ${server}`);
           EOF
-            for bin in "$res/cua-driver" "$res/OpenMausBot Speech.app/Contents/MacOS/speech-helper"; do
-              lipo -archs "$bin" | grep -q "x86_64" || { echo "::error::$bin lacks x86_64"; exit 1; }
-              lipo -archs "$bin" | grep -q "arm64" || { echo "::error::$bin lacks arm64"; exit 1; }
-            done
-            cloudflared="$res/cloudflared/cloudflared"
+            # the speech helper is a nested signed .app and stays universal
+            speech="$res/OpenMausBot Speech.app/Contents/MacOS/speech-helper"
+            lipo -archs "$speech" | grep -q "x86_64" || { echo "::error::$speech lacks x86_64"; exit 1; }
+            lipo -archs "$speech" | grep -q "arm64" || { echo "::error::$speech lacks arm64"; exit 1; }
+            # every other native payload carries only this app's own CPU slice
             expected_arch=x86_64
             case "$app" in *mac-arm64*) expected_arch=arm64 ;; esac
-            test "$(lipo -archs "$cloudflared")" = "$expected_arch" || {
-              echo "::error::$cloudflared is not the expected $expected_arch executable"; exit 1; }
+            cloudflared="$res/cloudflared/cloudflared"
+            for bin in "$res/cua-driver" "$res/cua-sdk/native/libcua_driver_sdk.dylib" \
+              "$res/cua-sdk/native/cua_driver_node_runtime.node" "$res/android-platform-tools/darwin/adb" "$cloudflared"; do
+              test "$(lipo -archs "$bin")" = "$expected_arch" || {
+                echo "::error::$bin is not the expected $expected_arch executable"; exit 1; }
+            done
             if [ "$(uname -m)" = "$expected_arch" ]; then
               "$cloudflared" version | grep -Fq "cloudflared version 2026.8.2 " || {
                 echo "::error::$cloudflared has the wrong version"; exit 1; }
@@ -340,6 +344,7 @@ jobs:
         run: |
           res=release/win-unpacked/resources
           [ -f "$res/server/index.js" ] || { echo "::error::missing server/index.js"; exit 1; }
+          [ -f "$res/server/desktop-entry.mjs" ] || { echo "::error::missing server/desktop-entry.mjs"; exit 1; }
           [ -f "$res/ui/index.html" ] || { echo "::error::missing ui/index.html"; exit 1; }
           [ -f "$res/cloudflared/cloudflared.exe" ] || { echo "::error::missing cloudflared.exe"; exit 1; }
           [ -f "$res/licenses/cloudflared-LICENSE.txt" ] || { echo "::error::missing cloudflared license"; exit 1; }

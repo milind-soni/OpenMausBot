@@ -8,6 +8,7 @@ import { z } from "zod";
 import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { withoutComputerEngine } from "./computer-engine-removal.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
 import { EFFORT_LEVELS, type EffortLevel, type LiveSettings } from "../shared/wire.ts";
 import { isModelVariant, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
@@ -29,6 +30,13 @@ export type FishTtsModel = (typeof FISH_TTS_MODELS)[number];
 export const DEFAULT_ROOM_TURN_TIMEOUT_MINUTES = 5;
 export const MIN_ROOM_TURN_TIMEOUT_MINUTES = 1;
 export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
+/** Per-call ceiling for a bot's MCP tools (tools/call on the chat MCP
+ * transport). 10 minutes matches the historic constant in
+ * chat-mcp-tools.ts; a single tool call that runs longer is cut at this
+ * deadline because its execution outcome can no longer be trusted. */
+export const DEFAULT_MCP_CALL_TIMEOUT_MINUTES = 10;
+export const MIN_MCP_CALL_TIMEOUT_MINUTES = 1;
+export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
 export const DEFAULT_ROOM_HANDOFF_LIFETIME_MINUTES = 30;
 export const DEFAULT_ROOM_HANDOFF_MIN_RUNWAY_MINUTES = 10;
 export const DEFAULT_ROOM_HANDOFF_HARD_CAP_MINUTES = 240;
@@ -116,6 +124,16 @@ const roomConfigSchema = z.object({
       (rooms.handoffHardCapMinutes ?? DEFAULT_ROOM_HANDOFF_HARD_CAP_MINUTES),
   { message: "rooms handoff bounds must satisfy handoffMinRunwayMinutes <= handoffLifetimeMinutes <= handoffHardCapMinutes" },
 );
+const mcpConfigSchema = z.object({
+  /** Ceiling (minutes) for one bot MCP tool call. Missing values resolve to
+   * 10, preserving the historic chat-mcp-tools constant. */
+  callTimeoutMinutes: z
+    .number()
+    .int()
+    .min(MIN_MCP_CALL_TIMEOUT_MINUTES)
+    .max(MAX_MCP_CALL_TIMEOUT_MINUTES)
+    .optional(),
+}).strict();
 /** Isolation for bot desktops. Migration note (issue #1654): switching
  * modes changes lease keys and vm-home directories, so desktops cold-start
  * under the new mode — a pool seat lives in vm-homes/pool-N — while the old
@@ -534,6 +552,7 @@ const appConfigSchema = z.object({
    * system language. Unknown tags degrade to English in the renderer. */
   language: optionalText,
   rooms: roomConfigSchema.optional(),
+  mcp: mcpConfigSchema.optional(),
   context: z.object({
     rebuildBytes: z.number().int().min(1_024).max(1_000_000).optional(),
     compactAt: z.number().positive().max(10_000_000).optional(),
@@ -623,6 +642,7 @@ export interface AppConfig {
   live?: { key?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number };
   profile?: { name?: string; email?: string; aboutMe?: string };
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
+  mcp?: { callTimeoutMinutes?: number };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
@@ -761,6 +781,10 @@ export function browserEngineAttachCdpUrl(cfg: AppConfig): string | null {
 
 export function roomTurnTimeoutMinutes(cfg: AppConfig): number {
   return cfg.rooms?.turnTimeoutMinutes ?? DEFAULT_ROOM_TURN_TIMEOUT_MINUTES;
+}
+
+export function mcpCallTimeoutMinutes(cfg: AppConfig): number {
+  return cfg.mcp?.callTimeoutMinutes ?? DEFAULT_MCP_CALL_TIMEOUT_MINUTES;
 }
 
 export const LIVE_IDLE_MINUTES_DEFAULT = 5;
@@ -1339,7 +1363,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -1585,10 +1609,10 @@ export function instanceOwnsRouting(
 
 /** The credential env instanceConfigs() injects for one driver at runtime.
  * Each secret goes only to the driver that actually reads it: the API-key
- * Grok driver reads XAI_API_KEY, the Computer driver reads BOX_TOKEN, and
- * OpenCode reads OPENCODE_API_KEY. Every other engine brings its own
- * login, so handing it a key it never uses would only put that key in the
- * environment of an unrelated child process. */
+ * Grok driver reads XAI_API_KEY and OpenCode reads OPENCODE_API_KEY. Every
+ * other engine brings its own login, so handing it a key it never uses would
+ * only put that key in the environment of an unrelated child process. The
+ * Boat token reaches no engine at all: the harness alone talks to Boat. */
 function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string): Map<string, string> {
   const environment = new Map<string, string>();
   if (driver === "mistral" && cfg.mistral?.key) environment.set("MISTRAL_API_KEY", cfg.mistral.key);
@@ -1618,10 +1642,6 @@ function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string)
     if (driver === "openai-compat" && cfg.openaiCompat?.url)
       environment.set("OPENAI_COMPAT_URL", cfg.openaiCompat.url);
   }
-  // driverKind "boxAgent" and env BOX_TOKEN keep their historical names.
-  // Only the person's own token: without one the driver itself falls back
-  // to Cloud Pro's included token, which never enters an environment map.
-  if (driver === "boxAgent" && cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
   if (driver === "opencodeGo") {
     // Keys for OpenCode's other providers, under the names OpenCode reads.
     for (const [name, key] of Object.entries(openCodeProviderKeys(cfg))) environment.set(name, key);
@@ -1683,7 +1703,6 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     chatgpt: { driver: "codex", displayName: "ChatGPT plan", config: { authMode: "chatgpt-plan" } },
     antigravity: { driver: "antigravityAgent" },
     opencodeGo: { driver: "opencodeGo" },
-    computer: { driver: "boxAgent" },
     openaiCompat: { driver: "openai-compat" },
     mistral: { driver: "mistral" },
     cerebras: { driver: "cerebras" },
@@ -1710,7 +1729,8 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     ...CUSTOM_ONLY,
   } as const;
   const configured = cfg.instances && Object.keys(cfg.instances).length ? cfg.instances : null;
-  const map: InstanceConfigMap = configured ? { ...configured } : { ...DEFAULT_FLEET };
+  // A fleet saved before the Computer engine was removed may still name it.
+  const map: InstanceConfigMap = withoutComputerEngine(configured ? { ...configured } : { ...DEFAULT_FLEET });
   // Product fleets pick up newly shipped engines. A one-off test/shadow map
   // (no claude/grok/codex) is left exactly as written.
   if (

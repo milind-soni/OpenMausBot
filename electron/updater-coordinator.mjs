@@ -4,7 +4,7 @@
 // chat app must not run dpkg itself. Everything before the install is shared.
 // It receives the staged paths and resolves with an optional state patch
 // describing what is left to do, which the card renders.
-import { updateErrorMessage } from "./update-errors.mjs";
+import { updateErrorMessage, updateErrorNeedsPerson } from "./update-errors.mjs";
 
 export function createUpdaterCoordinator(updater, setState, { handOffInstall = null, nativeStaging = false } = {}) {
   let checkOperation = null;
@@ -25,7 +25,11 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
 
   const routeError = (manual, error) => {
     if (recoveryRequired) return;
-    actionOwnsState = manual;
+    // Nobody asked, and it may pass by itself (offline, a server hiccup): stay
+    // quiet and let the next check try again. A failure only the person can
+    // fix is shown, and waits for them instead of downloading every hour.
+    const shown = manual || updateErrorNeedsPerson(error);
+    actionOwnsState = shown;
     if (error instanceof Error) routedErrors.add(error);
     if (downloadOperation) {
       downloadOperation.failed = true;
@@ -47,7 +51,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       });
       return;
     }
-    if (!manual) {
+    if (!shown) {
       setState({ status: "idle" });
       return;
     }
@@ -67,14 +71,11 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
     if (checkOwnsState()) setState({ status: "checking" });
   });
   // Updates download by themselves; only the restart waits for the person.
-  // A failure stays quiet unless the person asked for this check, and the
-  // next hourly check tries again.
+  // This is the one place a download starts. Its failure is shown when the
+  // person asked for this check, or when only they can fix it (routeError).
   updater.on("update-available", (info) => {
     if (checkOwnsState()) {
-      void download({
-        manual: Boolean(checkOperation?.manual),
-        starting: { version: info?.version, percent: undefined, message: undefined },
-      });
+      download(Boolean(checkOperation?.manual), { version: info?.version, percent: undefined, message: undefined });
     }
   });
   updater.on("update-not-available", () => {
@@ -148,21 +149,22 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
     return operation.promise;
   }
 
-  // `manual`: the person asked (their check), so a failure is theirs to see.
-  // `starting`: what the check found, shown from the first "downloading".
-  function download({ manual = true, starting = {} } = {}) {
-    if (recoveryRequired || installOperation || nativeStagingStarted) return Promise.resolve();
+  // Only an update a check found starts here (checkOwnsState: nothing else
+  // downloads, installs or awaits recovery). `manual`: the person asked
+  // (their check), so a failure is theirs to see. `starting`: what the check
+  // found, shown from the first "downloading".
+  function download(manual, starting) {
+    if (recoveryRequired || installOperation || nativeStagingStarted) return;
     if (checkOperation) checkOperation.supersededByDownload = true;
-    if (downloadOperation) return downloadOperation.promise;
 
-    const operation = { downloadedInfo: null, failed: false, manual, promise: null, timer: null };
+    const operation = { downloadedInfo: null, failed: false, manual, timer: null };
     downloadOperation = operation;
     // Own the state before the request goes out: the first "download-progress"
     // can be seconds away (connection setup, redirects). No percent yet — the
     // UI reads a missing percent as "starting".
     setState({ status: "downloading", ...starting });
     try {
-      operation.promise = Promise.resolve(updater.downloadUpdate())
+      void Promise.resolve(updater.downloadUpdate())
         .then((result) => {
           if (!operation.failed) {
             downloadedFiles = Array.isArray(result) ? result.filter((file) => typeof file === "string") : null;
@@ -172,7 +174,6 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
             actionOwnsState = true;
             setState({ status: "downloaded", version: operation.downloadedInfo?.version });
           }
-          return result;
         })
         .catch((error) => handleRejectedOperation(operation.manual, error))
         .finally(() => {
@@ -180,11 +181,9 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
           if (downloadOperation === operation) downloadOperation = null;
         });
     } catch (error) {
-      handleRejectedOperation(manual, error);
+      handleRejectedOperation(operation.manual, error);
       downloadOperation = null;
-      operation.promise = Promise.resolve();
     }
-    return operation.promise;
   }
 
   function install() {
@@ -235,5 +234,5 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       });
   }
 
-  return { check, download, install };
+  return { check, install };
 }

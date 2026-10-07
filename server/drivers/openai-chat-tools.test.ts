@@ -858,6 +858,25 @@ describe("structured tool execution boundaries", () => {
     expect(f.recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
   });
 
+  it("resends a refused tool call after a step ran without repeating it, and ends asking only for what's left", async () => {
+    const message = "Tool call validation failed: tool call validation failed: attempted to call tool 'json' which was not in request.tools";
+    const f = await fixture((_body, response, round) => round === 1
+      ? sse(response, [chunk({ tool_calls: [toolCall()] }, "tool_calls")])
+      : sse(response, [{ error: { message, type: "invalid_request_error", code: "tool_use_failed" } }]));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason: "error" });
+    expect(f.effects()).toHaveLength(1);
+    expect(f.requests).toHaveLength(4);
+    expect(f.requests[1].messages.some((entry) => entry.role === "tool" && entry.tool_call_id === "call_write")).toBe(true);
+    expect(f.requests[2]).toEqual(f.requests[1]);
+    expect(f.requests[3]).toEqual(f.requests[1]);
+    expect(f.recorder.events.filter((event) => event.type === "turn.retrying")).toEqual([1, 2].map((attempt) =>
+      expect.objectContaining({ attempt, reason: "tool_use_failed" })));
+    expect(f.recorder.events.filter((event) => event.type === "runtime.error")).toEqual([expect.objectContaining({
+      message: `The model tried to use a tool it was not given ("json"). The steps before it already ran, so ask only for what's left. Provider: ${message}`,
+    })]);
+  });
+
   it("rejects a repeated call ID in a later model round before duplicating its effect", async () => {
     const f = await fixture((_body, response) => sse(response, [chunk({ tool_calls: [toolCall()] }, "tool_calls")]));
     await f.start();

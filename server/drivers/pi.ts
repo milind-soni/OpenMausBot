@@ -69,6 +69,12 @@ const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
 const PI_MODEL_UPDATE_ARGS = ["update", "--models", "--no-approve"];
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+/** omp's RPC transport caps one frame at 1 MiB and only chunks oversized
+ *  frames after the client negotiates protocol 2. Sent before the first
+ *  command on every spawn: stdin order guarantees the declaration lands
+ *  before the response to that command is encoded, and vanilla pi has no
+ *  handshake frame to wait for, so nobody gates on a reply. */
+const PI_NEGOTIATE_FRAME = { id: "negotiate", type: "negotiate_protocol", protocolVersion: 2 };
 /** After this many bare turns on one pi session the full prompt rides
  * again even without a compaction event: any history rewrite the events
  * miss (an older pi, a missed line) still loses at most this many turns
@@ -176,12 +182,25 @@ interface PiModelsResponse {
   data?: { models?: PiModelEntry[] };
 }
 
-/** Pure parser: turn a `get_available_models` stdout blob into a catalog.
- *  Every option is `custom` (pi is BYOK) and id is the `provider/modelId`
- *  composite the picker and `set_model` both use. Exported for the test. */
-export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatalog {
+/** One decoded frame → catalog, or null when it is not a successful
+ *  `get_available_models` response. Every option is `custom` (pi is BYOK)
+ *  and id is the `provider/modelId` composite the picker and `set_model`
+ *  both use. */
+function piCatalogFromFrame(frame: unknown, fallbackDefault: string): ModelCatalog | null {
+  const res = frame as PiModelsResponse;
+  if (res?.type !== "response" || res.command !== "get_available_models" || !res.success) return null;
   const options: Array<{ id: string; label: string; custom: true; provider: string }> = [];
-  let def = fallbackDefault;
+  for (const m of res.data?.models ?? []) {
+    if (!m?.provider || !m?.id) continue;
+    const id = `${m.provider}/${m.id}`;
+    options.push({ id, label: m.name ?? m.id, custom: true, provider: m.provider });
+  }
+  return { default: fallbackDefault || (options[0]?.id ?? ""), options };
+}
+
+/** Pure parser: turn a `get_available_models` stdout blob into a catalog.
+ *  Exported for the test. */
+export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatalog {
   for (const line of stdout.split("\n")) {
     if (!line.trim()) continue;
     let msg: unknown;
@@ -190,17 +209,143 @@ export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatal
     } catch {
       continue;
     }
-    const res = msg as PiModelsResponse;
-    if (res?.type !== "response" || res.command !== "get_available_models" || !res.success) continue;
-    for (const m of res.data?.models ?? []) {
-      if (!m?.provider || !m?.id) continue;
-      const id = `${m.provider}/${m.id}`;
-      options.push({ id, label: m.name ?? m.id, custom: true, provider: m.provider });
-    }
-    break;
+    const catalog = piCatalogFromFrame(msg, fallbackDefault);
+    if (catalog) return catalog;
   }
-  if (!def && options.length) def = options[0]!.id;
-  return { default: def, options };
+  return { default: fallbackDefault, options: [] };
+}
+
+/** omp's RPC v2 splits any frame larger than 1 MiB into base64 `rpc_chunk`
+ *  pieces: one `chunkId`/`count`/`byteLength` for the whole frame, a
+ *  sequential `index`, and `data` carrying one piece. Reassembles one
+ *  logical frame at a time; any inconsistency drops the partial sequence so
+ *  a corrupt stream can never feed a half-built frame to the parser.
+ *  Exported for the test. */
+export class PiRpcChunks {
+  /** omp's advertised cap on one reassembled frame. */
+  static readonly MAX_BYTES = 64 * 1024 * 1024;
+  /** omp's cap on one decoded piece, which also bounds the piece count. */
+  static readonly MAX_PIECE_BYTES = 256 * 1024;
+  static readonly MAX_COUNT = PiRpcChunks.MAX_BYTES / PiRpcChunks.MAX_PIECE_BYTES;
+  private chunkId: string | null = null;
+  private count = 0;
+  private byteLength = 0;
+  private bytes = 0;
+  private parts: Buffer[] = [];
+
+  /** Feed one `rpc_chunk`; returns the reassembled frame when the last
+   *  piece arrives, or null while the sequence is incomplete or broken. */
+  accept(message: Record<string, unknown>): Record<string, unknown> | null {
+    const { chunkId, index, count, byteLength, data } = message;
+    if (
+      typeof chunkId !== "string" || chunkId.length === 0 || typeof data !== "string" ||
+      // Bound the base64 before decoding it, so an oversized piece is
+      // rejected without allocating its bytes.
+      data.length === 0 || data.length > Math.ceil(PiRpcChunks.MAX_PIECE_BYTES / 3) * 4 ||
+      !Number.isInteger(index) || !Number.isInteger(count) || !Number.isInteger(byteLength) ||
+      (index as number) < 0 || (count as number) < 2 || (count as number) > PiRpcChunks.MAX_COUNT ||
+      (index as number) >= (count as number) ||
+      (byteLength as number) < 0 || (byteLength as number) > PiRpcChunks.MAX_BYTES
+    ) {
+      this.reset();
+      return null;
+    }
+    if (chunkId !== this.chunkId) {
+      // A new sequence may only start at index 0; a different chunkId
+      // mid-sequence means the previous one can never complete.
+      if (index !== 0) {
+        this.reset();
+        return null;
+      }
+      this.chunkId = chunkId;
+      this.count = count as number;
+      this.byteLength = byteLength as number;
+      this.parts = [];
+      this.bytes = 0;
+    } else if (count !== this.count || byteLength !== this.byteLength) {
+      this.reset();
+      return null;
+    }
+    const part = Buffer.from(data, "base64");
+    // Every piece must carry bytes: an empty one would let a sequence grow
+    // `parts` without ever approaching `byteLength`.
+    if (
+      index !== this.parts.length || part.length === 0 || part.length > PiRpcChunks.MAX_PIECE_BYTES ||
+      this.bytes + part.length > this.byteLength
+    ) {
+      this.reset();
+      return null;
+    }
+    this.parts.push(part);
+    this.bytes += part.length;
+    if (this.parts.length < this.count) return null;
+    const complete = this.bytes === this.byteLength;
+    const text = Buffer.concat(this.parts).toString("utf8");
+    this.reset();
+    if (!complete) return null;
+    try {
+      const frame = JSON.parse(text) as unknown;
+      return frame && typeof frame === "object" && !Array.isArray(frame)
+        ? frame as Record<string, unknown>
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private reset(): void {
+    this.chunkId = null;
+    this.count = 0;
+    this.byteLength = 0;
+    this.bytes = 0;
+    this.parts = [];
+  }
+}
+
+/** Decode one pi stdout line: a plain JSON frame, or one piece of an
+ *  `rpc_chunk` sequence (omp's protocol v2) with the reassembled frame
+ *  returned once complete. Non-JSON lines, scalars and broken sequences
+ *  resolve null and are skipped. Exported for the test. */
+export function decodePiFrame(line: string, chunks: PiRpcChunks): Record<string, unknown> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const frame = parsed as Record<string, unknown>;
+  return frame.type === "rpc_chunk" ? chunks.accept(frame) : frame;
+}
+
+/** Longest stdout line a reader buffers: omp's cap on one whole frame. */
+const PI_MAX_LINE = PiRpcChunks.MAX_BYTES;
+
+/** Split a pi child's stdout into non-blank lines for `onLine`, which
+ *  returns true to stop reading. A line longer than PI_MAX_LINE is dropped
+ *  through its newline instead of growing the buffer without bound.
+ *  Exported for the test. */
+export function piLineReader(onLine: (line: string) => boolean | void): (chunk: string) => void {
+  let buf = "";
+  let dropping = false;
+  return (chunk) => {
+    buf += chunk;
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (dropping) {
+        dropping = false;
+        continue;
+      }
+      if (line.length > PI_MAX_LINE || !line.trim()) continue;
+      if (onLine(line)) return;
+    }
+    if (buf.length > PI_MAX_LINE) {
+      buf = "";
+      dropping = true;
+    }
+  };
 }
 
 /** Split a picker id into pi's `{provider, modelId}`. Accepts both the
@@ -357,7 +502,6 @@ export async function fetchPiModels(
 ): Promise<ModelCatalog> {
   const child = spawnCli(cli, PI_ARGS, { stdio: ["pipe", "pipe", "pipe"], env });
   return new Promise((resolve) => {
-    let buf = "";
     let done = false;
     const fallbackDefault = readPiDefaultModel(env);
     const finish = (catalog: ModelCatalog) => {
@@ -372,25 +516,19 @@ export async function fetchPiModels(
     };
     const timer = setTimeout(() => finish({ default: "", options: [] }), 15_000);
     timer.unref?.();
+    const chunks = new PiRpcChunks();
     child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      buf += chunk;
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) !== -1) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        if (!line.trim()) continue;
-        const parsed = parsePiCatalog(line + "\n", fallbackDefault);
-        if (parsed.options.length || line.includes('"get_available_models"')) {
-          clearTimeout(timer);
-          finish(parsed);
-          return;
-        }
-      }
-    });
+    child.stdout.on("data", piLineReader((line) => {
+      const frame = decodePiFrame(line, chunks);
+      if (frame?.command !== "get_available_models") return false;
+      clearTimeout(timer);
+      finish(piCatalogFromFrame(frame, fallbackDefault) ?? { default: fallbackDefault, options: [] });
+      return true;
+    }));
     child.on("error", () => finish({ default: "", options: [] }));
     child.on("close", () => finish({ default: "", options: [] }));
     try {
+      child.stdin.write(`${JSON.stringify(PI_NEGOTIATE_FRAME)}\n`);
       child.stdin.write(JSON.stringify({ id: "catalog", type: "get_available_models" }) + "\n");
     } catch {
       finish({ default: "", options: [] });
@@ -633,7 +771,6 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           throw err;
         }
       })();
-      let buf = "";
       let assistantText = "";
       // set when a compaction event arrives this turn; gates the receipt
       // write below so a compacted-around delivery is never claimed
@@ -667,6 +804,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         appendNative(threadId, { dir: "out", source: "pi.rpc", msg: piNativeLogMessage(obj) });
         child.stdin.write(JSON.stringify(obj) + "\n");
       };
+      // Declare protocol 2 on the same stdin before the first command, so an
+      // omp-style runtime chunks any oversized frame it sends back. Vanilla
+      // pi refuses the unknown command; no waiter is keyed for the reply,
+      // so either answer is ignored.
+      send(PI_NEGOTIATE_FRAME);
 
       /** Emit buffered assistant text as its own item, then clear it. */
       const flushAssistantText = () => {
@@ -987,21 +1129,17 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       };
 
+      const chunks = new PiRpcChunks();
       child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        buf += chunk;
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl);
-          buf = buf.slice(nl + 1);
-          if (!line.trim()) continue;
-          try {
-            onEvent(JSON.parse(line) as PiEvent);
-          } catch {
-            /* skip non-JSON line */
-          }
+      child.stdout.on("data", piLineReader((line) => {
+        const frame = decodePiFrame(line, chunks);
+        if (!frame) return;
+        try {
+          onEvent(frame as unknown as PiEvent);
+        } catch {
+          /* skip a frame the event handler can't consume */
         }
-      });
+      }));
       child.on("error", (err) => {
         const fail = describeSpawnFailure(err as NodeJS.ErrnoException, config.cli);
         rejectWaiters(new Error(fail.message));

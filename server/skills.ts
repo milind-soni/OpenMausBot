@@ -47,7 +47,7 @@ import {
 import { dirname, join, relative, resolve } from "node:path";
 import { z } from "zod";
 
-import { writeFileAtomic } from "./atomic.ts";
+import { writeFileAtomic, writeFileAtomicIfChanged } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
@@ -262,9 +262,10 @@ function readManagedLinks(botId: string): string[] {
   }
 }
 
+// Rebuilt on every turn and almost always the same list.
 function writeManagedLinks(botId: string, names: string[]): void {
   mkdirSync(skillStateDir(botId), { recursive: true, mode: 0o700 });
-  writeFileAtomic(managedLinksPath(botId), `${JSON.stringify([...new Set(names)].sort(), null, 2)}\n`, { mode: 0o600 });
+  writeFileAtomicIfChanged(managedLinksPath(botId), `${JSON.stringify([...new Set(names)].sort(), null, 2)}\n`, { mode: 0o600 });
 }
 
 function manifestFromFile(path: string): SkillManifest | null {

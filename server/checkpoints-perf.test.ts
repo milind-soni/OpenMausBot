@@ -1,4 +1,5 @@
-// checkpoints.ts cost contract: the shadow index stays incremental (a
+// checkpoints.ts cost contract: a snapshot is a fixed handful of git calls,
+// the shadow index stays incremental (a
 // case-only rename rebuilds it once, found from folder listings read without
 // blocking the event loop), GC is throttled and runs behind the turn's settled
 // diff (or, when a turn settled without one, ahead of the next snapshot), and
@@ -144,6 +145,25 @@ describe("incremental shadow index", () => {
     // past vitest's 20 s default on CI's Windows runners, so give the
     // fixture room rather than shrink the tree it is about.
   }, 120_000);
+
+  // Every git call is a process start, tens of milliseconds apiece on
+  // Windows, and every turn waits for its snapshot before dispatch.
+  it("takes a turn's snapshot in a handful of git calls, moving HEAD and the turn's pin in one", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    await snapshot(bot, cwd, "first");
+    writeFileSync(join(cwd, "a.txt"), "two");
+    hooks.calls = [];
+    const changed = await snapshot(bot, cwd, "changed", undefined, { pin: "dispatch-1" });
+    expect(changed).toMatch(/^[0-9a-f]{40}$/);
+    expect(subcommands()).toEqual(["ls-files", "log", "ls-files", "ls-files", "add", "write-tree", "commit-tree", "update-ref", "count-objects"]);
+    expect(shadowGit(bot, cwd, "rev-parse", "HEAD").trim()).toBe(changed);
+    expect(shadowGit(bot, cwd, "for-each-ref", "--format=%(objectname)", "refs/omb-live/").trim()).toBe(changed);
+    hooks.calls = [];
+    expect(await snapshot(bot, cwd, "unchanged")).toBe(changed);
+    expect(subcommands()).toEqual(["ls-files", "log", "ls-files", "ls-files", "add", "write-tree"]);
+    await release(bot, cwd, "dispatch-1");
+  });
 
   it("falls back to a full rebuild when the index cannot be listed", async () => {
     const { bot, cwd } = workspace();

@@ -3,7 +3,7 @@ import { ExternalLink, Loader2, LogIn } from "lucide-react";
 import { api } from "@/state/store";
 import { useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { deviceFlowUnavailable, type DeviceSignInStatus } from "./CodexDeviceSignIn";
+import { deviceFlowUnavailable, type DeviceSignInStatus } from "./DeviceSignIn";
 
 const SIGN_IN_HOSTS = ["claude.com", "claude.ai", "console.anthropic.com", "platform.claude.com"];
 

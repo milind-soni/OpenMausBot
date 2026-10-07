@@ -5,13 +5,8 @@ typecheck, lint, Electron checks, the UI build, CI-selection tests and the
 verification-documentation checks. Selection never skips the entire workflow.
 
 - Root Markdown files, Markdown under `docs/`, and `.github/FUNDING.yml` alone
-  do not run the runtime or mobile jobs.
+  do not run the runtime jobs.
 - Any other change runs the runtime suite.
-- The native iOS/Android jobs run only for `ios/`, `android/` (Android's core
-  tests read the iOS fixtures), `.github/workflows/ci.yml`,
-  `scripts/ci-scope.mjs` and `.gitattributes`. The apps read committed server
-  fixtures (refreshed by hand with `scripts/capture-companion-fixtures.mjs`),
-  so a server change cannot move their result.
 - Main pushes, merge groups and manual runs always run all jobs. Empty or
   unreadable PR diffs also fall back to all jobs.
 
@@ -27,6 +22,31 @@ skips fail the gate. Existing advisory jobs remain advisory.
 The separate shared-terminal smoke workflow is manual-only: its tests already
 run in the Windows Vitest/Electron jobs.
 
+## Vitest shards
+
+The suite runs one file at a time, so a shard takes as long as its files added
+up. Vitest's own `--shard` deals out equal numbers of files, and in October
+2026 that put three of the four slowest e2e files in one shard: about 24
+minutes of tests on Windows against 13 to 16 for the others, and every PR
+waited for it. `scripts/testing/duration-sequencer.ts` deals the files out by
+recorded time instead, slowest first, each to the shard with the least time so
+far. The times are `scripts/testing/vitest-shard-weights.json`: each file's
+median seconds on the Windows runners, for every file over five seconds and
+every e2e file. A file not in it counts one second, or the median e2e time if
+it is an e2e file. Every file still runs exactly once, and each shard job logs
+a `duration-sequencer:` line with its share.
+
+Refresh the times from a few recent green runs when shards drift apart:
+
+```sh
+node scripts/testing/update-shard-weights.mjs --run <run id> --run <run id> --run <run id>
+```
+
+Deleting or renaming a test file in the weights fails
+`scripts/testing/duration-sequencer.test.ts` until its entry is removed or
+refreshed. A refresh moves some files to other shards; a failure that appears
+only after one is a real ordering dependency between test files.
+
 ## macOS runners
 
 The account runs at most five macOS jobs at a time, and a PR used to queue
@@ -39,8 +59,6 @@ half hours. Now:
   macOS-only.
 - Every PR's macOS checks are one job: the packaged-server smoke and the
   Electron smokes.
-- The iPhone/iPad simulator UI suite is `ios-thread-ui.yml`: nightly, on main
-  pushes that touch `ios/`, and by hand.
 - `ci-stop-closed.yml` cancels a PR's CI run when the PR is merged or closed. PR runs share a group named by the PR number (`ci-pr-<n>`), never by `github.ref`: a merged PR's closed event reports the base branch as `github.ref`, which made every merge cancel main's CI (fixed Oct 3 2026).
 
 ## Main and releases

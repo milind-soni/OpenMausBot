@@ -20,8 +20,10 @@ function render(state: UpdaterState, window: object = { ogb: { updater: {} } }) 
 
 const LOCAL = "http://127.0.0.1:8799";
 const CLOUD = "https://home-7f3k2.fly.dev";
-/** The window.ogb that electron/preload.cjs gives a server's page. */
-function serverPageBridge(origin: string) {
+const OTHER = "https://bots.example.test";
+/** The window.ogb that electron/preload.cjs gives a server's page; `answered`:
+ * whether main answers that page about updates (My Cloud's, not another's). */
+function serverPageBridge(origin: string, answered: boolean) {
   let bridge: unknown;
   vm.runInNewContext(readFileSync(new URL("../../electron/preload.cjs", import.meta.url), "utf8"), {
     process: { platform: "darwin", argv: [`--omb-local-origin=${LOCAL}`] },
@@ -30,7 +32,10 @@ function serverPageBridge(origin: string) {
     require: () => ({
       webUtils: {},
       contextBridge: { exposeInMainWorld: (_name: string, value: unknown) => { bridge = value; } },
-      ipcRenderer: { on() {}, removeListener() {}, send() {}, invoke: () => Promise.resolve({ status: "idle" }) },
+      ipcRenderer: {
+        on() {}, removeListener() {}, send() {}, invoke: () => Promise.resolve({ status: "idle" }),
+        sendSync: (channel: string) => channel === "update:offered" && answered,
+      },
     }),
   });
   return bridge;
@@ -38,10 +43,16 @@ function serverPageBridge(origin: string) {
 
 describe("UpdateBanner", () => {
   it("shows the ready update and its restart on My Cloud's page", () => {
-    const html = render({ status: "downloaded", version: "0.2.0" }, { location: { origin: CLOUD }, ogb: serverPageBridge(CLOUD) });
+    const html = render({ status: "downloaded", version: "0.2.0" }, { location: { origin: CLOUD }, ogb: serverPageBridge(CLOUD, true) });
     expect(html).toContain("OpenMausBot 0.2.0 is ready");
     expect(html).toContain("Restart to update");
     expect(html).toContain("Later");
+  });
+
+  it("is absent from another server's page, which never gets the updater", () => {
+    const ogb = serverPageBridge(OTHER, false) as { updater?: unknown };
+    expect(ogb.updater).toBeUndefined();
+    expect(render({ status: "downloaded", version: "0.2.0" }, { location: { origin: OTHER }, ogb })).toBe("");
   });
 
   // Updates download by themselves: nothing to do yet, so nothing to show.

@@ -35,6 +35,8 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const [takeStatus, setTakeStatus] = useState<BrowserTakeStatus>("");
   const [fullscreen, setFullscreen] = useState(false);
+  // The server keeps the view open while the bot's own command holds the browser.
+  const [busy, setBusy] = useState(false);
   const viewer = useRef("");
   const generation = useRef(0);
   const pendingOperation = useRef<number | null>(null);
@@ -98,7 +100,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     viewer.current = ""; pendingOperation.current = null; haltMessage.current = "";
     urlEditing.current = false;
-    setFrame(null); setTabs([]); setAddress(""); setConnected(false); setError("");
+    setFrame(null); setTabs([]); setAddress(""); setConnected(false); setError(""); setBusy(false);
     setControl({ held: false, controlling: false, owned: false }); setPending(false);
     controlNow.current = NO_CONTROL; setTakeStatus("");
     const source = new EventSource(`/api/bots/${encodeURIComponent(bot.id)}/browser/live`);
@@ -106,8 +108,10 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
       if (stopped || !ownsConnection()) return;
       try { handler(JSON.parse((event as MessageEvent).data)); } catch { /* Malformed events are not rendered. */ }
     });
+    listen("waiting", () => { if (!viewer.current) setBusy(true); });
     listen("ready", (data) => {
       if (typeof data.viewerId !== "string" || !data.viewerId) return;
+      setBusy(false);
       const expected = data.viewerId;
       viewer.current = expected;
       const queue = createBrowserInputQueue(async (body) => {
@@ -178,7 +182,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
           setAttempt((value) => value + 1);
         }, delay);
       }
-      setError(message); setConnected(false); setFrame(null); setControl({ held: false, controlling: false, owned: false });
+      setError(message); setBusy(false); setConnected(false); setFrame(null); setControl({ held: false, controlling: false, owned: false });
       controlNow.current = NO_CONTROL; setTakeStatus("");
       // Keep this generation alive: a successful restart closes its stream
       // before the action reply arrives, and must still reconnect afterward.
@@ -291,7 +295,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
         onReturnToToolbar={() => addressInput.current?.focus()}
         acknowledge={(seq) => { if (generation.current === frame.generation && viewer.current === frame.viewerId) void action({ type: "ack", seq }, frame.viewerId).catch(() => {}); }}
         onDecodeError={() => { if (generation.current === frame.generation && viewer.current === frame.viewerId) setError("A browser frame could not be decoded. Close and reopen the panel to reconnect."); }} />
-        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && heldElsewhere ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{heldElsewhere ? "Live view paused for human control" : reconnecting ? "Reconnecting…" : error ? "Browser disconnected" : "Opening the live browser…"}</span></div>}
+        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && heldElsewhere ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{heldElsewhere ? "Live view paused for human control" : reconnecting ? "Reconnecting…" : error ? "Browser disconnected" : busy ? t("browser.live.botBusy", { name: bot.name }) : "Opening the live browser…"}</span></div>}
       {/* Status only, never a control: it floats over the top of the page,
           readable at any panel width, and every click passes through it. */}
       <div role="status" className="pointer-events-none absolute inset-x-0 top-2 flex justify-center px-3">

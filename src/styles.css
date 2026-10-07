@@ -74,6 +74,20 @@
    rendered values rather than reading the hex. `scripts/check-skin-contrast.mjs`
    re-runs that check.
    ───────────────────────────────────────────────────────────────────────── */
+.table-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 6px;
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+}
+.table-action:hover, .table-action[aria-pressed="true"] { background: var(--color-raised); color: var(--color-ink); }
+.table-action:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+@media (pointer: coarse) { .table-action { min-width: 40px; min-height: 40px; } }
+
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-workspace-in: workspace-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
@@ -819,10 +833,20 @@ body {
    header float over their scroller, which runs on underneath them. The glass
    is a layer behind the bar's own controls: the tint of the surface the bar
    sits on, so at rest the bar reads as that surface, over a blur of whatever
-   scrolls beneath. Its inner edge fades out across --glass-edge, so content
-   melts into the glass instead of meeting a hard line. The layer is a
-   pseudo-element, so the bar itself never becomes a containing block for
-   the fixed-position menus it opens. */
+   scrolls beneath. A top bar's inner edge fades out across --glass-edge, so
+   content melts into the glass instead of meeting a hard line. A bottom bar
+   can be one short row (Simple mode's profile row), where a fade inside it
+   left a half-sharp strip of text showing above the row: its glass is solid
+   to the bar's edge and reaches --glass-reach past it instead, fading there,
+   and the list gets that much more room at its end so a resting row is never
+   blurred. The layer is a pseudo-element, so the bar itself never becomes a
+   containing block for the fixed-position menus it opens. */
+[data-glass-frame] {
+  --glass-reach: 24px;
+}
+[data-glass-frame]:has(> [data-glass-bar="bottom"]) {
+  --glass-bottom-reach: var(--glass-reach);
+}
 .glass-bar {
   --glass-edge: 20px;
   isolation: isolate;
@@ -841,14 +865,15 @@ body {
   mask-image: linear-gradient(to bottom, black calc(100% - var(--glass-edge)), transparent);
 }
 .glass-bar[data-glass-bar="bottom"]::before {
-  mask-image: linear-gradient(to top, black calc(100% - var(--glass-edge)), transparent);
+  top: calc(-1 * var(--glass-reach, 0px));
+  mask-image: linear-gradient(to top, black calc(100% - var(--glass-reach, 0px)), transparent);
 }
 /* The frame publishes its bars' heights. Rows rest clear of the glass,
    keyboard focus scrolls them clear, and the scrollbar runs only between the
    bars (a bar over it would swallow the drag). */
 .glass-scroller {
   scroll-padding-top: var(--glass-top, 0px);
-  scroll-padding-bottom: var(--glass-bottom, 0px);
+  scroll-padding-bottom: calc(var(--glass-bottom, 0px) + var(--glass-bottom-reach, 0px));
 }
 .glass-scroller::-webkit-scrollbar-track {
   margin-top: var(--glass-top, 0px);
@@ -856,7 +881,7 @@ body {
 }
 .glass-scroller-content {
   padding-top: var(--glass-top, 0px);
-  padding-bottom: var(--glass-bottom, 0px);
+  padding-bottom: calc(var(--glass-bottom, 0px) + var(--glass-bottom-reach, 0px));
 }
 @media (prefers-reduced-transparency: reduce) {
   .glass-bar::before {
@@ -909,17 +934,32 @@ body {
   color: var(--color-ink);
 }
 
+/* Scrollbars: a slim pill in each skin's own --color-scrollbar, never a
+   full-height slab. At rest it is a 2px line, enough to say "this scrolls";
+   with the pointer on it (anywhere across the 8px gutter, since the
+   transparent border is part of the thumb) or while dragged it widens to a
+   6px pill and darkens, as macOS and Windows 11 scrollbars do. The gutter
+   never changes width, so nothing reflows, and the track stays clear, so no
+   gray rail runs down a panel. (Widening on hover of the scrolling area
+   instead, via `*:hover::-webkit-scrollbar-thumb`, does not repaint in
+   Chromium, so it is not used.) */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-scrollbar);
-  border-radius: 4px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: var(--color-scrollbar);
 }
+::-webkit-scrollbar-thumb:vertical { min-height: 40px; }
+::-webkit-scrollbar-thumb:horizontal { min-width: 40px; }
 /* the thumb was inert — it never acknowledged the pointer */
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-raised-hover);
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  border-width: 1px;
+  background-color: color-mix(in srgb, var(--color-scrollbar) 55%, var(--color-ink));
 }
 ::-webkit-scrollbar-track {
   background: transparent;

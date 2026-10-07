@@ -67,6 +67,36 @@ describe("Settings → Engines → Codex", () => {
   });
 });
 
+describe("Settings → Engines → Grok", () => {
+  function renderGrok(authenticated: boolean): string {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.instances = [{
+      instanceId: "grok", driverKind: "grokAgent", displayName: "Grok", cliDefault: "grok",
+      snapshot: { state: "available", authenticated, version: "grok 1.0.41" },
+      models: { default: "grok-4.7", options: [] },
+      authentication: { method: "device-code", signOut: false },
+      install: { command: { linux: "curl -fsSL https://x.ai/cli/install.sh | bash" }, signInCommand: "grok login" },
+    }];
+    fixture.bots = [];
+    return renderToStaticMarkup(createElement(EnginesSettings));
+  }
+
+  it("signs in from Settings with a code, never ChatGPT's card", () => {
+    const html = renderGrok(false);
+    expect(html).toContain('data-device-sign-in="grok"');
+    expect(html).toContain("Sign in to Grok");
+    expect(html).not.toContain("ChatGPT");
+  });
+
+  it("says Grok is connected once it is, in Grok's words", () => {
+    const html = renderGrok(true);
+    expect(html).toContain("Grok connected on this server");
+    expect(html).not.toContain("ChatGPT");
+    expect(html).not.toContain("Sign in to Grok");
+  });
+});
+
 describe("Settings → Engines → setup cards", () => {
   it("shows every Company provider as read-only while preserving personal controls", () => {
     vi.stubGlobal("window", {});
@@ -142,6 +172,42 @@ describe("Settings → Engines → setup cards", () => {
     expect(html).toContain("CLI path and updates");
     fixture.instances[0].access = "custom";
     expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Sign in with Google");
+  });
+
+  // MOCA-292: a key engine has no CLI, so it used to drop off this page the
+  // moment its key was saved, even a mistyped one, with no way back to it.
+  it("keeps an API-key engine listed after its key is saved and links to changing the key", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    const openai = (snapshot: InstanceInfo["snapshot"]): InstanceInfo => ({
+      instanceId: "openai", displayName: "OpenAI", driverKind: "openai-compat", access: "api",
+      snapshot, models: { default: "gpt-5", options: [] },
+    });
+    fixture.instances = [openai({ state: "unavailable", reason: "No API key" })];
+    const before = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(before).toContain("OpenAI needs an API key");
+    expect(before).toContain("Open API keys");
+    expect(before).not.toContain("Change key");
+
+    fixture.instances = [openai({ state: "available", authenticated: true, version: null })];
+    const saved = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(saved).toContain('data-engine-card="openai"');
+    expect(saved).toContain('data-engine-setup-api-key="configured"');
+    expect(saved).toContain("OpenAI uses your API key");
+    expect(saved).toContain("Change key");
+    expect(saved).not.toContain("OpenAI needs an API key");
+
+    // A remote client cannot reach this server's key settings.
+    vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
+    const remote = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(remote).toContain("open Settings → API keys on the computer running OpenMausBot");
+    expect(remote).not.toContain("Change key");
+
+    // A Company-managed key is not the person's to change.
+    vi.stubGlobal("window", {});
+    fixture.instances = [{ ...openai({ state: "available", authenticated: true, version: null }), managed: { organizationId: "org", organizationName: "Acme" } }];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Change key");
   });
 });
 

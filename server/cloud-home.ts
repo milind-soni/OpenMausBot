@@ -121,13 +121,6 @@ export function cloudHomePlaceRefusal(place: Surface): string | undefined {
   return undefined;
 }
 
-/** What a turn is told when Cloud is chosen but no Boat account is set up (no
- * key of the person's and no included Boat). A Cloud home has no Local VM to
- * suggest instead. */
-export function boatNotConfiguredMessage(cloudHome: boolean): string {
-  return `Cloud Boat is not configured — add a Boat API key or choose ${cloudHome ? "Browser" : "Local VM"}`;
-}
-
 /** The Cloud's setup checklist (docs/cloud-pro.md) has a "try something"
  * step that is done once a bot's turn finishes on the machine itself. The
  * server records when, once, in this Cloud's own onboarding record: that

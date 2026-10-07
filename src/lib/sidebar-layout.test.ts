@@ -12,6 +12,7 @@ import {
   partitionSidebarGroups,
   pinnedCircleThreadListVisible,
   placeSection,
+  sidebarConnectorPreview,
   sidebarLayoutInteractive,
   sidebarGoalRunPreview,
   sidebarSectionCollapsed,
@@ -130,6 +131,20 @@ describe("sidebar virtual sections", () => {
       startedAt: 1,
       finishedAt: 2,
     })).toBe("Completed: Drafted and verified.");
+  });
+
+  it("previews a connection card by its app and state, not the phone fallback line", () => {
+    const say = (key: string) => ({
+      "connectors.card.connected": "Connected",
+      "connectors.card.waiting": "Waiting for sign-in…",
+      "connectors.card.connectSecurely": "Connect securely",
+    })[key] ?? key;
+    const card = { label: "GitHub", status: "required" as const };
+    expect(sidebarConnectorPreview(card, say)).toBe("GitHub · Connect securely");
+    expect(sidebarConnectorPreview({ ...card, status: "failed" }, say)).toBe("GitHub · Connect securely");
+    expect(sidebarConnectorPreview({ ...card, status: "authorizing" }, say)).toBe("GitHub · Waiting for sign-in…");
+    expect(sidebarConnectorPreview({ ...card, status: "connected" }, say)).toBe("GitHub · Connected");
+    expect(sidebarConnectorPreview({ ...card, dismissed: true }, say)).toBe("GitHub");
   });
 });
 

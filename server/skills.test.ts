@@ -9,6 +9,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -232,6 +233,23 @@ describe("install → review → enable lifecycle", () => {
     // disable removes it from prompt and links
     setSkillEnabled(bot, "code-review", false);
     expect(skillsSystemPrompt(bot)).toBe("");
+  });
+
+  // Every turn re-syncs the native links; rewriting an unchanged list cost an
+  // fsync on the event loop each time.
+  it("rewrites the managed-link record only when the set of links changes", () => {
+    installSkill(bot, "src", [{ path: "SKILL.md", content: SKILL("steady-links") }]);
+    setSkillEnabled(bot, "steady-links", true);
+    const record = join(DATA_DIR, "skill-state", bot, "managed-links.json");
+    const saved = statSync(record).ino;
+
+    syncSkillLinks(bot);
+    syncSkillLinks(bot);
+    expect(statSync(record).ino).toBe(saved);
+
+    setSkillEnabled(bot, "steady-links", false);
+    expect(statSync(record).ino).not.toBe(saved);
+    expect(JSON.parse(readFileSync(record, "utf8"))).toEqual([]);
   });
 
   it("stores only the reviewed SKILL.md and reports every supporting file", () => {

@@ -107,6 +107,15 @@ test("a failed check keeps the last verified answer (never a malformed one), say
   assert.deepEqual(state.lastPlan, { tier: "max", active: true });
 });
 
+test("a check that fails is asked again after 15 s, 30 s, then each minute", async t => {
+  const f = await fixture(t); await f.connect();
+  f.sessionStatus = 503; await f.client.refresh(); assert.equal(f.delay, 15_000);
+  for (const delay of [30_000, 60_000, 60_000]) { f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); }
+  f.sessionStatus = 200; f.tick(); await until(() => f.timer);
+  f.sessionStatus = 503; f.tick(); await until(() => f.timer);
+  assert.equal(f.delay, 15_000, "an answer starts the count again");
+});
+
 test("a successful re-check never shows anything but the verified plan, and runs well before the answer stops counting", async t => {
   const f = await fixture(t); await f.connect();
   f.entitlement = { plan: "pro", status: "active", expiresAt: f.now + 3 * 3600_000, version: 1 };

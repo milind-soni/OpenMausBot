@@ -21,6 +21,7 @@ import {
   pinnedBinaryPath,
   prepareBrowserSessionState,
   resolveAgentBrowserBinary,
+  setBrowserViewport,
 } from "./browser-engine.ts";
 import { AGENT_BROWSER_VERSION, agentBrowserReleaseUrl, agentBrowserReleaseVersion, resolveAgentBrowserReleaseAsset } from "./browser-engine-release.ts";
 import { browserBundlePaths, browserBundleSpec, SUPPORTED_BROWSER_TARGETS } from "./browser-bundle-release.ts";
@@ -48,6 +49,36 @@ function lifecycleChild(args: readonly string[] = [], options: { code?: number; 
   });
   return child as ReturnType<typeof spawn>;
 }
+
+describe("sizing the page of a launched browser", () => {
+  function viewportChild(output: string, code = 0): ReturnType<typeof spawn> {
+    const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), kill: () => true });
+    queueMicrotask(() => { child.stdout.emit("data", output); child.emit("close", code); });
+    return child as ReturnType<typeof spawn>;
+  }
+  const env = { AGENT_BROWSER_SESSION: "bot-a", AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_RESTORE: "omb-key", PATH: "/bin" };
+
+  it("sets the standard viewport through the session's own launch environment", async () => {
+    vi.mocked(spawn).mockImplementation(() => viewportChild(JSON.stringify({ success: true, data: { width: 1280, height: 720 } })));
+    expect(await setBrowserViewport("/engine", env)).toBe(true);
+    expect(vi.mocked(spawn).mock.calls[0]?.[0]).toBe("/engine");
+    expect(vi.mocked(spawn).mock.calls[0]?.[1]).toEqual(["set", "viewport", "1280", "720", "--json", "--no-webmcp"]);
+    expect(vi.mocked(spawn).mock.calls[0]?.[2]?.env).toMatchObject(env);
+  });
+
+  it("reports failure instead of throwing", async () => {
+    vi.mocked(spawn).mockImplementation(() => viewportChild(JSON.stringify({ success: false, error: "no page" })));
+    expect(await setBrowserViewport("/engine", env)).toBe(false);
+    vi.mocked(spawn).mockImplementation(() => viewportChild("", 1));
+    expect(await setBrowserViewport("/engine", env)).toBe(false);
+  });
+
+  it("leaves an attached or headed browser alone", async () => {
+    expect(await setBrowserViewport("/engine", { ...env, AGENT_BROWSER_CDP: "http://127.0.0.1:9222" })).toBe(true);
+    expect(await setBrowserViewport("/engine", { ...env, AGENT_BROWSER_HEADLESS: undefined })).toBe(true);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
 
 describe("deleting one browser session's saved logins", () => {
   function fixture(closeCode = 0) {

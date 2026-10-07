@@ -35,9 +35,14 @@ export function messageFileRoots(options: {
   ])];
 }
 
-function statusError(status: number, message: string): Error & { status: number } {
-  return Object.assign(new Error(message), { status });
+function statusError(status: number, message: string, code?: string): Error & { status: number; code?: string } {
+  return Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 }
+
+// The client offers "Show in folder" for exactly this refusal, so it carries a
+// stable code instead of being recognised by its English text.
+const outsideWorkspace = () =>
+  statusError(403, "the linked file is outside this conversation's workspace", "outside_workspace");
 
 function decodePathWithSuffixRemoved(href: string): string {
   // Split before decoding so an encoded `?` or `#` remains part of the
@@ -418,7 +423,7 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
       }
 
       const canonicalAfter = await realpath(candidate);
-      if (!containedBy(root, canonicalAfter)) throw statusError(403, "the linked file is outside this conversation's workspace");
+      if (!containedBy(root, canonicalAfter)) throw outsideWorkspace();
       const after = await stat(canonicalAfter);
       if (opened.dev !== after.dev || opened.ino !== after.ino) {
         throw statusError(409, "the linked file changed while it was being opened");
@@ -437,7 +442,7 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
     }
   }
 
-  if (sawOutsideRoot) throw statusError(403, "the linked file is outside this conversation's workspace");
+  if (sawOutsideRoot) throw outsideWorkspace();
   throw statusError(404, "the linked file is unavailable");
 }
 

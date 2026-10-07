@@ -231,3 +231,24 @@ describe("sidebar glass head and foot", () => {
     },
   );
 });
+
+describe("sidebar foot in Simple mode", () => {
+  it.each(["comfortable", "compact"] as const)("keeps only the profile row, with Apps at its end (%s)", (density) => {
+    fixture.advanced = false;
+    fixture.density = density;
+    const html = render();
+    const foot = html.indexOf('data-glass-bar="bottom"');
+    expect(html).not.toContain('data-sidebar-nav="routines"');
+    expect(html).not.toContain('data-sidebar-nav="triggers"');
+    expect(html.match(/data-sidebar-nav="apps"/g)).toHaveLength(1);
+    expect(html.indexOf('data-sidebar-nav="apps"')).toBeGreaterThan(foot);
+  });
+
+  it("keeps Routines and Triggers in Advanced mode, and still one Apps", () => {
+    fixture.advanced = true;
+    const html = render();
+    expect(html).toContain('data-sidebar-nav="routines"');
+    expect(html).toContain('data-sidebar-nav="triggers"');
+    expect(html.match(/data-sidebar-nav="apps"/g)).toHaveLength(1);
+  });
+});
