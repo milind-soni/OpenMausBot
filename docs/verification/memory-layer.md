@@ -11,6 +11,7 @@ is off, and every memory write is a journaled, undoable row. See [the memory gui
 pnpm exec vitest run server/memory-layer.e2e.test.ts
 pnpm exec vitest run server/spend-cap-api.test.ts
 pnpm exec vitest run server/memory-entries.test.ts server/recall.test.ts server/memory-upkeep.test.ts server/workspace.test.ts
+pnpm exec vitest run server/drivers/codex-background-text.test.ts
 pnpm exec vitest run src/components/bot-settings/MemorySection.test.ts src/lib/memory.test.ts server/drivers/agents-catalog-wire.test.ts
 ```
 
@@ -46,6 +47,14 @@ historical files crowding out current topics. A failed topic write leaves its
 notes in the notebook; retrying completes only the remaining moves.
 
 ## Not proven here
+
+The Codex background-text fixture launches the scripted app-server in a
+throwaway home. It verifies an ephemeral read-only helper, disabled ambient
+MCP servers, text-only completion, usage, cancellation and disposal. It also
+runs the real capture pipeline with a synthetic preference and checks the
+resulting MEMORY.md and About me facts. Helper and stale-turn events never
+enter the result or the normal chat event stream. This fixture does not use a
+real ChatGPT login or establish which models an account can access.
 
 The fake engine answers the model steps with scripted JSON, so these tests
 prove the plumbing, not the quality of what a real model captures or judges

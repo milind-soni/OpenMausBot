@@ -110,6 +110,7 @@ let developerInstructions = "";
 let resumedThread: string | null = null;
 let decision: unknown = null;
 let experimentalApi = false;
+let backgroundText = false;
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 let nativeThreadId = "codex-thread-1";
@@ -182,6 +183,9 @@ const writeDumpAtomic = (path: string, contents: string): void => {
   }
 };
 const dump = () => {
+  // Generic text helpers must not replace a foreground fixture's transcript,
+  // launch evidence, or scripted room turn. Dedicated helper tests opt in.
+  if (backgroundText && !mode.startsWith("background-text")) return;
   if (process.env.FAKE_CODEX_DUMP) {
     writeDumpAtomic(
       process.env.FAKE_CODEX_DUMP,
@@ -287,6 +291,7 @@ process.stdin.on("data", (chunk) => {
 
     switch (msg.method) {
       case "initialize":
+        backgroundText = msg.params?.clientInfo?.name === "openmausbot_memory";
         experimentalApi = msg.params?.capabilities?.experimentalApi === true;
         out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
         break;
@@ -440,10 +445,27 @@ process.stdin.on("data", (chunk) => {
         } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
         } else {
-          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } });
+          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" },
+            model: mode.startsWith("background-text") ? process.env.FAKE_CODEX_BACKGROUND_MODEL ?? msg.params?.model : "fake-codex-model",
+            sandbox: resolvedSandbox(msg.params ?? {}) } });
         }
         break;
       case "turn/start": {
+        if (backgroundText || mode.startsWith("background-text")) {
+          dump();
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          if (mode === "background-text-hang") break;
+          notify("item/completed", { item: { type: "agentMessage", text: "FOREIGN" }, threadId: "foreign-thread" });
+          notify("item/completed", { item: { type: "agentMessage", text: "STALE" }, turnId: "stale-turn" });
+          if (mode === "background-text-tool") notify("item/started", { item: { type: "commandExecution" } });
+          else if (mode === "background-text-approval") out({ jsonrpc: "2.0", id: 200, method: "item/commandExecution/requestApproval", params: { threadId: nativeThreadId } });
+          else {
+            notify("thread/tokenUsage/updated", { tokenUsage: { last: { inputTokens: 7, outputTokens: 3, cachedInputTokens: 2 } } });
+            notify("item/completed", { item: { type: "agentMessage", text: process.env.FAKE_CODEX_TEXT_REPLY ?? "background result" } });
+            notify("turn/completed", { turn: { id: nativeTurnId, status: "completed" } });
+          }
+          break;
+        }
         dump();
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;
         // crash script for close-path retry tests: die before

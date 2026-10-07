@@ -1,3 +1,4 @@
+import { createCodexBackgroundText } from './codex-background-text.ts';
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 // Codex driver — upstream CodexDriver skeleton over agentcal's
 // drivers/codex.js runtime: the official `codex` CLI headless over its
@@ -1865,7 +1866,46 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     };
   };
 
+  // Helpers are independently cancellable; removing or signing out this engine
+  // also terminates any pending background inference.
+  const backgroundCalls = new Set<AbortController>();
+  const generateText: NonNullable<ProviderInstance['generateText']> = async (prompt, options = {}) => {
+    if (disposed || planSigningOut) throw new Error('Codex instance is unavailable');
+    if (planUnavailable) throw new Error(planUnavailable);
+    const controller = new AbortController();
+    backgroundCalls.add(controller);
+    const signal = options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal;
+    try {
+      if (signal.aborted) throw new Error('Codex background call aborted');
+      if (!models.default) await refreshModels();
+      if (config.managed && (!input.environment.OPENMAUSBOT_COMPANY_API_KEY || !input.environment.CODEX_HOME)) {
+        throw new Error('Company model credentials unavailable');
+      }
+      const modelId = models.default;
+      const selection = plan ? { model: modelId, modelProvider: 'openai_chatgpt_plan' }
+        : config.managed ? {model: modelId, modelProvider: 'openmaus_company'} : decodeCodexSelection(modelId);
+      const helperModel = selection.model;
+      if (!helperModel) throw new Error('No model available for Codex background learning');
+      const generation = planGeneration;
+      const cwd = join(DATA_DIR, 'background-text');
+      mkdirSync(cwd, {recursive: true});
+      return await createCodexBackgroundText({
+        spawnCli, killCliTree, cli: config.cli, cwd, modelProvider: selection.modelProvider ?? undefined,
+        model: async () => helperModel,
+        environment: async () => {
+          const env = childEnv();
+          if (planAuth) env.OPENMAUSBOT_CHATGPT_TOKEN = await planAuth.accessToken();
+          if (disposed || planSigningOut || generation !== planGeneration) throw new Error('Codex sign-in changed');
+          return env;
+        },
+        providerArgs: env => plan ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed)
+          : codexLocalProviderArgs(env, modelId),
+      })(prompt, {...options, signal});
+    } finally { backgroundCalls.delete(controller); }
+  };
+
   return {
+    generateText,
     instanceId,
     driverKind: DRIVER_KIND,
     displayName: input.displayName,
@@ -1888,10 +1928,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     },
     cancelAuthentication: () => (planAuth ?? authentication).cancel(),
     signOut: async () => {
-      if (!planAuth) return authentication.signOut();
       planSigningOut = true;
       planGeneration++;
+      for (const call of backgroundCalls) call.abort();
       try {
+        if (!planAuth) return await authentication.signOut();
         const stopped = await Promise.all([...active.values()].map(({ stop }) => stop()));
         if (stopped.some(value => !value)) throw new Error("A ChatGPT task could not stop safely. Stop the task before signing out.");
         models = { default: "", options: [] };
@@ -1948,6 +1989,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     },
     dispose: async () => {
       disposed = true;
+      for (const call of backgroundCalls) call.abort();
       planGeneration++;
       await authentication.dispose();
       await planAuth?.dispose();

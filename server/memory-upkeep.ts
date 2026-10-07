@@ -13,7 +13,7 @@
 //     MEMORY.md struck (server/memory-tidy.ts).
 // Every memory write is a journal row with actor "upkeep", so the Memory
 // panel shows it and Undo works. The model steps need a one-shot text call
-// (`generateText`: Claude and the chat-completion engines); on any other
+// (`generateText`: Claude, Codex and the chat-completion engines); on any other
 // engine they are skipped and only the deterministic tidy steps run.
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
