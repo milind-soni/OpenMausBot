@@ -87,6 +87,7 @@ import {
   CHANNELS_SECTION_ID,
   PINNED_SECTION_ID,
   PINNED_THREADS_SECTION_ID,
+  TOOLS_SECTION_ID,
   mergeSectionOrder,
   moveSection,
   orderedSidebarSections,
@@ -2685,7 +2686,11 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
 
       {/* Footer */}
       <div className={cn("pb-3 pt-2", density === "icons" ? "px-2" : "px-3")}>
-        <SidebarFooterNav density={density} />
+        <SidebarFooterNav
+          density={density}
+          collapsed={sectionCollapsed(TOOLS_SECTION_ID)}
+          onToggleCollapsed={layoutInteractive ? () => toggleSection(TOOLS_SECTION_ID) : undefined}
+        />
         {density === "icons" && (
           <SidebarPhoneButton
             density={density}

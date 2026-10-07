@@ -14,6 +14,8 @@ import { isRoutineProblemRun } from "@/lib/routines";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
 
+import { SidebarSectionHeader } from "./SidebarSectionHeader";
+
 
 function NavRow({
   id,
@@ -84,7 +86,15 @@ export function SidebarAppsButton() {
   );
 }
 
-export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
+export function SidebarFooterNav({
+  density,
+  collapsed = false,
+  onToggleCollapsed,
+}: {
+  density: SidebarDensity;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+}) {
   const { state, dispatch } = useStore();
   const advanced = useAdvancedMode();
   const iconsOnly = density === "icons";
@@ -95,9 +105,8 @@ export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
   // the profile row is the foot's first line.
   if (!advanced && !iconsOnly) return null;
 
-  return (
-    // `tools` is the guided tour's anchor for "the places down here".
-    <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">
+  const rows = (
+    <>
       {advanced && <NavRow
         id="routines"
         label={t("sidebar.nav.routines")}
@@ -136,6 +145,25 @@ export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
           onClick={() => dispatch({ type: "showTeamMap" })}
         />
       )}
-    </nav>
+    </>
+  );
+
+  // `tools` is the guided tour's anchor for "the places down here".
+  if (iconsOnly) {
+    return <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">{rows}</nav>;
+  }
+  // The label stays visible when the rows fold away, so the header says what is inside.
+  return (
+    <div data-tour="tools">
+      <SidebarSectionHeader
+        name={t("sidebar.tools")}
+        collapsed={collapsed}
+        alert={collapsed && routinesNeedYou}
+        onToggle={onToggleCollapsed}
+        reorderable={false}
+        dragging={false}
+      />
+      {!collapsed && <nav aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">{rows}</nav>}
+    </div>
   );
 }
