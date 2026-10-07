@@ -20,6 +20,7 @@
 import { newId } from "./contracts.ts";
 import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
 import { drainCoalesceHead } from "./admission.ts";
+import { spokenLineFields } from "./live-call-record.ts";
 import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { BotRecord, Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
@@ -59,6 +60,8 @@ interface QueueEntry {
     /** The words were spoken in a Live call, not typed: the drained line
      * says so, like an immediate send would. */
     via?: "call";
+    /** The Live call they were spoken on (Message.callId); only with via. */
+    callId?: string;
   }>;
 }
 
@@ -80,11 +83,12 @@ export function restoreSteeredMessages(): void {
     if (row.status !== "pending") continue;
     const entry = queues.get(row.threadId) ?? { botId: row.ownerId, items: [] };
     if (entry.botId !== row.ownerId) throw new Error("queued task belongs to another bot");
-    // a 1:1 line is only ever stamped "call"; "api" belongs to channel rows
-    const { via, ...payload } = row.payload;
+    // A 1:1 line is only ever stamped "call" ("api" belongs to channel
+    // rows), and only a spoken line keeps the call's id.
+    const { via, callId, ...payload } = row.payload;
     entry.items.push({
       ...payload,
-      ...(via === "call" ? { via } : {}),
+      ...spokenLineFields(via, callId),
       messageId: row.id,
       prompt: row.payload.prompt ?? row.payload.text,
       // rows queued before timestamps were kept read as queued at restore
@@ -127,7 +131,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; sender?: ResolvedSender; trigger?: UsageTrigger; via?: "call" } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; sender?: ResolvedSender; trigger?: UsageTrigger; via?: "call"; callId?: string } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -146,7 +150,7 @@ export function queueSteeredMessage(
     sender: options.sender,
     trigger: options.trigger,
     queuedAt: Date.now(),
-    via: options.via,
+    ...spokenLineFields(options.via, options.callId),
   };
   saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
   entry.items.push(item);
@@ -244,7 +248,7 @@ export function drainSteeredMessages(
           queueId: item.messageId,
           peerAsk: item.peerAsk,
           sender: item.sender,
-          ...(item.via ? { via: item.via } : {}),
+          ...spokenLineFields(item.via, item.callId),
         }),
       );
     }

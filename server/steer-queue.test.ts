@@ -189,6 +189,43 @@ describe("steer-queue module", () => {
     expect(run.mock.calls[0][3].via).toBe("call");
   });
 
+  it("keeps a call's id on the line it drains, also after a restart", () => {
+    const bot = fakeBot("bot-call-id-drain", "thread-call-id-drain", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "typed while the bot worked");
+    queueSteeredMessage(bot.id, bot.threadId, "what is on my calendar", { via: "call", callId: "call-1" });
+    restoreSteeredMessages(); // a restart reads the id back from the durable row
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    expect(store.messages.map((message) => [message.text, message.via, message.callId])).toEqual([
+      ["typed while the bot worked", undefined, undefined],
+      ["what is on my calendar", "call", "call-1"],
+    ]);
+    expect("callId" in store.messages[0]!).toBe(false);
+    // the line handed to the turn is the stamped one
+    expect(run.mock.calls[0]![3].callId).toBe("call-1");
+  });
+
+  it("never puts a call id on a line that was not spoken", () => {
+    const bot = fakeBot("bot-call-id-stray", "thread-call-id-stray", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "typed with a stray id", { callId: "call-stray" });
+    // a durable row another build wrote: an id without "call"
+    saveChatFollowup({
+      id: "followup-stray-call-id", kind: "bot", ownerId: bot.id, threadId: bot.threadId,
+      payload: { text: "typed by another build", prompt: "typed by another build", callId: "call-stray", queuedAt: Date.now() },
+    });
+    restoreSteeredMessages();
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    expect(store.messages.map((message) => [message.text, message.via, message.callId])).toEqual([
+      ["typed with a stray id", undefined, undefined],
+      ["typed by another build", undefined, undefined],
+    ]);
+  });
+
   it("still loads and drains a durable row written before senders were kept", () => {
     const bot = fakeBot("bot-sender-legacy", "thread-sender-legacy", false);
     const store = fakeStore([bot]);

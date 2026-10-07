@@ -231,6 +231,9 @@ export interface FollowupPayload {
   /** "api": a room line sent through the local API with no session behind
    * it. "call": a person's words relayed from a Live call. */
   via?: "api" | "call";
+  /** The Live call a "call" line was spoken on (Message.callId). Only with
+   * `via: "call"`; restore and crash recovery drop it from any other row. */
+  callId?: string;
   /** Who queued these words. Absent on the owner's own sends and on every
    * row written before this existed; both read as the profile name. */
   sender?: ResolvedSender;
