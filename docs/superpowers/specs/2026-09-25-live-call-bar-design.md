@@ -24,7 +24,7 @@ Success looks like:
 | Decision | Choice |
 |---|---|
 | Platforms | Desktop, iPhone **and** Android |
-| Chat content during a call | Only bot work is persisted: the relayed request (labelled "via call"), activity chips and answers. The voice's own words are live captions in the call bar, never stored. |
+| Chat content during a call | Only bot work is persisted: the relayed request (labelled "via call", and since 2026-10-06 carrying the call's id), activity chips and answers, and, when a call that went live ends, one "call" row that records it (see **The call id and the call row**). The voice's own words are live captions, never stored. |
 | Phone audio path | **Direct**: phone ↔ OpenAI over WebRTC. The computer that runs the harness only creates the session and runs the logic. Both apps gain a WebRTC library. |
 | Phone backgrounding | The call **ends** when the app leaves the foreground or the screen locks. Background calls are a later feature. |
 | Desktop voice picker | Replaced by a **settings gear** in the call bar; voice is one setting under it. |
@@ -179,6 +179,62 @@ render a small "via call" line under such a user message. `WireMessage.relayed`
 marks a user line an external interface sent through the guarded send route
 (no client shows it; a Live call never reads such a line back as typed).
 
+### The call id and the call row
+
+Added 2026-10-06 (the harness half of SupaMaus/mausbot-mobile
+`docs/superpowers/specs/2026-10-06-grok-style-live-calls-design.md`).
+
+- **Call id.** Every user line a call delivers carries `callId`, the call's
+  `LiveCallState.callId`, next to `via: "call"`: a request that starts a
+  turn, one steered into a running turn, one that waits in the queue (the
+  queue, its drain and crash recovery keep it, as they keep `via`), and a
+  spoken answer to a question whose turn had already ended. No other line
+  carries one. A turn's own messages point at their request through
+  `requestMessageId`, as before.
+- **Call row.** When a call that went live (its sideband attached) ends, the
+  harness appends one message at the chat's active leaf:
+  `{ role: "bot", kind: "call", text, call }`.
+  `call` is a `LiveCallRecord`: `callId`, `botId`, `client`, `startedAt`,
+  `endedAt`, `seconds` (whole seconds: OpenAI's usage seconds when it sent
+  them, otherwise wall-clock time, as in the summary line), `endReason`, and
+  an optional `title`. `text` is "Call with <bot> · m:ss" (h:mm:ss from an
+  hour on), so a client that does not know the kind shows a plain line. A call
+  that never went live leaves no row, and neither does a call whose chat was
+  deleted.
+- **Title.** With the gates of Regenerate title (generated thread titles on,
+  `features.llmThreadTitles`; an engine with a one-shot; no hosted or
+  organisation policy against it; the spend cap not reached) and its
+  10-second cap, the bot's own engine names the call from its spoken requests
+  alone, never from the bot's answers or the voice's words. The row is written
+  first and the title arrives as a `message.patch` of it, scrubbed of secrets
+  like other bot-authored text. When no title comes (a gate refuses, the
+  one-shot fails, runs past the cap or answers nothing usable, the harness was
+  shutting down, or nothing was asked on the call) the row keeps its text and
+  clients show "Call with <bot>". Nothing new reaches OpenAI: the call is over,
+  and the bot's own engine already saw those requests.
+- **What a call's record lists.** The messages whose `requestMessageId` points
+  at one of the call's spoken lines: the steps and the approval cards of the
+  turns those requests started. A line steered into a running turn starts no
+  turn of its own, so its work is the work of the turn it was steered into: it
+  counts for this call when that turn began with one of the call's lines (a
+  typed line steered into it included), and not when it began with a typed line
+  or another call's. Only what the server ties to a turn carries
+  `requestMessageId`: provider permission cards do, but cards the server
+  appends itself (skill proposals, team memory, "Send on your behalf?") never
+  do, so a record never lists them, and question cards are left out. A turn
+  still running at hang-up keeps adding steps after the row, and the record
+  keeps listing them.
+- **Never context.** The row is not conversation context for the bot
+  (`isContextMessage` keeps text, digest, compaction and room-result
+  messages, and the row is none of those), and not startup history for the
+  next call (`liveHistoryFrom` keeps kind `"text"` only).
+- **No speech.** The row holds ids, times, a length, the client and end-reason
+  codes and an optional title made from requests the chat already holds. The
+  voice's own words are still never stored.
+- **Wire.** No new SSE frame, route or companion change: the row travels on
+  `message` and `message.patch`, and `live.call` and `LiveCallState` are
+  unchanged.
+
 ## Desktop
 
 - **Start:** the phone icon starts the remembered mode; a chevron next to it
@@ -199,6 +255,13 @@ marks a user line an external interface sent through the guarded send route
 - Escape no longer hangs up a Live call. Take turns is unchanged.
 - A decided approval card reads "Allowed · by voice" / "Denied · by voice"
   when it was decided on the call.
+- **Call record:** a finished call's `call` row draws as a compact centred
+  row: a waveform glyph, the title or "Call with <bot>", the length, and one
+  line per step (by name, never its arguments) and approval (with its outcome,
+  and "by voice" when it was decided on the call) among the work the call's
+  spoken requests started (see **The call id and the call row**). The "via
+  call" lines stay inline. Like a work digest, the row is a receipt: the
+  sidebar preview, Retry, the working line and the mascot's mood read past it.
 - The window checks its own sign-in when its event stream drops during a
   call, and when OpenAI closes the call without an end frame: a `401` hangs
   up at once with the signed-out reason (a revoked browser sign-in has its
@@ -332,7 +395,13 @@ hold and the line they show:
 - **Words:** "computer", not "Mac", in Live call text, except where the text
   is truly Mac-only.
 - **Accepted differences:** caption presentation and what backgrounding does
-  stay per platform.
+  stay per platform. Presentation includes where the call lives on screen:
+  the desktop keeps the call bar above the composer, and the phones may show
+  an app-wide dock that opens into a full-screen call with a live transcript
+  (mausbot-mobile spec 2026-10-06-grok-style-live-calls-design). That
+  transcript is the phone's own data-channel captions, kept in memory for
+  the current call only: the voice's words are still never stored or sent
+  anywhere.
 
 ## End reasons
 

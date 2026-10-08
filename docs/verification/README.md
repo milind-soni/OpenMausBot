@@ -188,6 +188,12 @@ steer messages from external interfaces. It also verifies bounded request
 lineage snapshots, Chief continuations and exact-execution Stop without
 interrupting a newer request.
 
+The [Live calls fixture](live-calls.md) checks the call id on spoken requests,
+the one "call" row a finished call leaves, its generated title and the desktop's
+record row, against the fake GPT-Live in a disposable workspace. `control-omb`
+cannot start a call, so the recipe also calls the harness's own routes. It
+proves no real audio, OpenAI key or phone.
+
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.
 
