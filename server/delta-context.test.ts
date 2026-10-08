@@ -6,6 +6,7 @@ import {
   UNSEEN_MAX_BYTES,
   UNSEEN_MAX_MESSAGES,
   handedStateUsable,
+  isContextMessage,
   recordHanded,
   renderUnseen,
   sessionStart,
@@ -380,4 +381,15 @@ describe("randomized record sequences", () => {
       expect(state).toEqual({ session: "s", through: order.at(-1), ids: [] });
     });
   }
+});
+
+describe("isContextMessage", () => {
+  it("is what a provider reads: text, compaction records and room results, never a Live call's row", () => {
+    expect(isContextMessage({ kind: "text", text: "what is six times seven" })).toBe(true);
+    expect(isContextMessage({ kind: "text", text: "" })).toBe(false);
+    expect(isContextMessage({ kind: "compaction" })).toBe(true);
+    expect(isContextMessage({ kind: "text", roomRequest: { id: "r1", phase: "result" } })).toBe(true);
+    expect(isContextMessage({ kind: "activity", text: "Bash" })).toBe(false);
+    expect(isContextMessage({ kind: "call", text: "Call with Ada · 0:42" })).toBe(false);
+  });
 });

@@ -12,6 +12,7 @@
 // offer for an answer. The OpenAI key never leaves the harness; the renderer
 // only ever holds the SDP answer and the media connection it describes.
 import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
+import type { Message } from "./store.ts";
 
 export const LIVE_MODEL = "gpt-live-1";
 const OPENAI_BASE = "https://api.openai.com";
@@ -66,6 +67,15 @@ export interface LiveBot {
 export interface LiveHistoryMessage {
   role: "user" | "assistant";
   text: string;
+}
+
+/** The chat's text lines, oldest first, as the voice's startup history:
+ * what the person and the bot wrote, kind "text" only. Cards, steps,
+ * digests and a finished call's own row (kind "call") are never history. */
+export function liveHistoryFrom(messages: ReadonlyArray<Pick<Message, "role" | "kind" | "text">>): LiveHistoryMessage[] {
+  return messages
+    .filter((message) => message.kind === "text" && typeof message.text === "string" && (message.role === "user" || message.role === "bot"))
+    .map((message) => ({ role: message.role === "user" ? "user" as const : "assistant" as const, text: message.text ?? "" }));
 }
 
 export class LiveSessionError extends Error {

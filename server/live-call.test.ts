@@ -7,6 +7,7 @@ import {
   liveAttachUrl,
   liveBaseUrl,
   liveErrorMessage,
+  liveHistoryFrom,
   LiveSessionError,
   liveInitialInput,
   liveInstructions,
@@ -115,6 +116,19 @@ describe("live startup context", () => {
     const total = input.reduce((sum, item) => sum + item.content[0].text.length, 0);
     expect(total).toBeLessThanOrEqual(6_000);
     for (const item of input) expect(item.content[0].text.length).toBeLessThanOrEqual(600);
+  });
+
+  it("takes the chat's text lines as history, and never a finished call's row", () => {
+    expect(liveHistoryFrom([
+      { role: "user", kind: "text", text: "what is six times seven" },
+      { role: "bot", kind: "activity" },
+      { role: "bot", kind: "text", text: "Six times seven is 42." },
+      { role: "bot", kind: "call", text: "Call with Ada · 0:42" },
+      { role: "bot", kind: "options", text: "Approve?" },
+    ])).toEqual([
+      { role: "user", text: "what is six times seven" },
+      { role: "assistant", text: "Six times seven is 42." },
+    ]);
   });
 
   it("writes one-line instructions from the bot's own profile", () => {

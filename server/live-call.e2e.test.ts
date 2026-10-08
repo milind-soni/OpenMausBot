@@ -633,6 +633,37 @@ posixOnly("Live call e2e", () => {
     }
   }, 90_000);
 
+  // The row records a call for people. The next call's voice starts from the
+  // chat's text lines (liveHistoryFor), and the row is not one of them.
+  it("keeps a finished call's row out of the next call's voice history", async () => {
+    const bot = await createBot();
+    const first = await startCall(bot.id);
+    try {
+      await live.waitForAttach(first.session.id);
+      live.emit(first.session.id, { type: "session.input_transcript.delta", delta: "what is six times seven", start_ms: 100, end_ms: 900 });
+      live.emit(first.session.id, { type: "session.delegation.created", offset_ms: 950, delegation: { id: "del_history", target: "client", type: "delegation" } });
+      await live.waitForCommand(first.session.id, (c) => c.type === "session.commentary.append" && String(c.content).includes("42"), 20_000);
+      await expect.poll(() => isBusy(bot.id), { timeout: 20_000 }).toBe(false);
+    } finally {
+      // the first call ends here, which writes its row
+      await post("/api/live/call/end", { callId: first.call.callId });
+      await expect.poll(() => isBusy(bot.id), { timeout: 20_000 }).toBe(false);
+    }
+    const lines = async () => ((await (await fetch(`${base}/api/threads/${bot.threadId}/messages`)).json()) as { messages: Array<{ kind: string }> }).messages;
+    await expect.poll(async () => (await lines()).some((message) => message.kind === "call"), { timeout: 10_000 }).toBe(true);
+
+    const second = await startCall(bot.id);
+    try {
+      const history = JSON.stringify((second.session.body.session as { input?: unknown }).input ?? []);
+      // the chat's text is there; the row that records the first call is not
+      expect(history).toContain("what is six times seven");
+      expect(history).not.toContain("Call with");
+    } finally {
+      await post("/api/live/call/end", { callId: second.call.callId });
+      await expect.poll(() => isBusy(bot.id), { timeout: 20_000 }).toBe(false);
+    }
+  }, 60_000);
+
   // The row is for a chat that still exists: a call whose bot is deleted
   // while it runs ends as "deleted", writes nothing, and counts no error.
   it("leaves no row, and no error, for a call whose bot is deleted during it", async () => {
