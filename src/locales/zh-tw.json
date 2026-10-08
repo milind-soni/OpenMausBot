@@ -9,7 +9,7 @@
   "whop.accessHint": "使用所有已啟用 MCP 伺服器的機器人都會使用此連線。開啟機器人的存取權設定即可選擇其伺服器。變更會套用於它的下一個任務。",
   "whop.botSettings": "管理 {name} 的存取權",
   "whop.setupFailed": "無法新增 Whop。請重新整理後再試一次。",
-  "whop.testFailed": "已登入，但無法載入 Whop 的工具。請重新連線以重試。",
+  "whop.testFailed": "已登入，但無法載入 Whop 的工具：{reason} 請重新連線以重試。",
   "table.title": "表格",
   "table.search": "搜尋所有列…",
   "table.wrap": "儲存格文字自動換行",
