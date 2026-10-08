@@ -1244,7 +1244,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             return send({
               jsonrpc: "2.0",
               id: msg.id,
-              error: { code: -32602, message: `ask needs 1 to ${MAX_QUESTIONS} questions with question text` },
+              error: { code: -32602, message: `ask needs 1 to ${MAX_QUESTIONS} distinct questions with question text` },
             });
           }
           current.flushAssistantText();

@@ -14,6 +14,7 @@ import { execCli } from "../../procs.ts";
 import { createAcpDriver, type AcpQuestionRequest, type AcpSupport } from "./core.ts";
 import {
   capAnswerEcho, formatQuestionAnswers, MAX_QUESTIONS, parseChoices, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById,
+  repeatsQuestionText,
 } from "../../../shared/ask-question.ts";
 
 /** Translate an argv `--model` slug into the id this ACP session will accept.
@@ -361,7 +362,9 @@ export const CURSOR_ASK_QUESTION: AcpQuestionRequest = {
       entry && typeof entry === "object"
         ? { id: entry.id, question: entry.prompt, options: entry.options, multiSelect: entry.allowMultiple === true }
         : entry));
-    if (!parsed) return null;
+    // A card reply cannot tell two identical questions apart (their ids
+    // differ, their Q: blocks do not), so such a set is refused whole.
+    if (!parsed || repeatsQuestionText(parsed)) return null;
     const rawOptions = new Map<string, unknown[]>(raw.flatMap((entry) =>
       entry && typeof entry.id === "string" && Array.isArray(entry.options) ? [[entry.id, entry.options]] : []));
     // Card labels are trimmed and capped; map one back to the option that

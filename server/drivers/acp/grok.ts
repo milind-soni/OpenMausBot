@@ -14,7 +14,7 @@ import type { DeviceSignIn } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpQuestionRequest, type AcpSupport } from "./core.ts";
 import { allowsTool, canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { MAX_QUESTIONS, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById } from "../../../shared/ask-question.ts";
+import { MAX_QUESTIONS, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById, repeatsQuestionText } from "../../../shared/ask-question.ts";
 
 export const STATIC_GROK_MODELS: ModelCatalog = {
   default: "grok-4.7",
@@ -367,7 +367,9 @@ export const GROK_ASK_USER_QUESTION: AcpQuestionRequest = {
       entry && typeof entry === "object"
         ? { ...entry, id: String(index), multiSelect: entry.multiSelect === true || entry.multi_select === true }
         : entry));
-    if (!parsed) return null;
+    // Grok keys answers by question text, and a card reply cannot tell two
+    // identical questions apart, so such a set is refused whole.
+    if (!parsed || repeatsQuestionText(parsed)) return null;
     return {
       questions: parsed.map(({ question }) => question),
       answered(message) {

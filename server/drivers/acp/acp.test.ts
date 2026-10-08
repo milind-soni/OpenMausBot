@@ -1211,7 +1211,14 @@ describe("ACP turns (fake CLI)", () => {
       process.env.FAKE_ACP_ASK_PARAMS = JSON.stringify({ ...GROK_ASK, questions: seven });
       const many = await instance.adapter.sendTurn({ threadId: "t-grok-ask-deny", text: "seven" });
       await recorder.until((e) => e.type === "turn.completed" && e.turnId === many.turnId);
-      expect(reply()).toMatchObject({ error: { code: -32602, message: "ask needs 1 to 6 questions with question text" } });
+      expect(reply()).toMatchObject({ error: { code: -32602, message: "ask needs 1 to 6 distinct questions with question text" } });
+      expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
+
+      // Two questions with the same text: Grok keys answers by text, so refused.
+      process.env.FAKE_ACP_ASK_PARAMS = JSON.stringify({ ...GROK_ASK, questions: [GROK_ASK.questions[0], GROK_ASK.questions[0]] });
+      const twins = await instance.adapter.sendTurn({ threadId: "t-grok-ask-deny", text: "twins" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === twins.turnId);
+      expect(reply()).toMatchObject({ error: { code: -32602 } });
       expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
     });
 

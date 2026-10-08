@@ -383,6 +383,12 @@ export function parseProtocolAskQuestions(entries: unknown): ProtocolAskQuestion
   return parsed.length ? parsed : null;
 }
 
+/** True when two questions share their text. A card reply answers by
+ * question text, so it cannot tell such questions apart. */
+export function repeatsQuestionText(questions: readonly ProtocolAskQuestion[]): boolean {
+  return new Set(questions.map(({ question }) => question.question)).size !== questions.length;
+}
+
 /**
  * The id-keyed counterpart of questionAnswersByQuestion, for a protocol
  * that answers by id (codex's requestUserInput) rather than by question

@@ -390,7 +390,15 @@ describe("CursorAgentDriver", () => {
       const seven = Array.from({ length: 7 }, (_, i) => ({ id: `q${i}`, prompt: `Question ${i}?`, options: [{ id: `o${i}`, label: "Yes" }] }));
       await start("t-cursor-ask-many", { FAKE_ACP_ASK_PARAMS: JSON.stringify({ toolCallId: "ask-7", questions: seven }) });
       await recorder.until((e) => e.type === "turn.completed");
-      expect(reply()).toMatchObject({ error: { code: -32602, message: "ask needs 1 to 6 questions with question text" } });
+      expect(reply()).toMatchObject({ error: { code: -32602, message: "ask needs 1 to 6 distinct questions with question text" } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+
+    it("refuses two questions with the same text, whose answers a card could not tell apart", async () => {
+      const twins = [0, 1].map((i) => ({ id: `q${i}`, prompt: "Which color?", options: [{ id: `o${i}`, label: "Blue" }] }));
+      await start("t-cursor-ask-twins", { FAKE_ACP_ASK_PARAMS: JSON.stringify({ toolCallId: "ask-twins", questions: twins }) });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toMatchObject({ error: { code: -32602 } });
       expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
     });
 
