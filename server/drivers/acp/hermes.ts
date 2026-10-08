@@ -435,6 +435,11 @@ const support: AcpSupport = {
     signInCommand: "hermes setup",
   },
   spawnArgs: () => ["acp"],
+  // Hermes registers ACP MCP servers idempotently by name for the whole
+  // process, so a session/load with a new bearer (after Stop, or a changed
+  // grant) keeps the old agents proxy and every OpenMausBot tool answers
+  // "unauthorized". A changed MCP config resumes on a fresh process instead.
+  restartOnMcpChange: true,
   transformEnv: (env) => {
     // A leftover OPENAI_API_KEY makes Hermes auto-resolve to OpenRouter and
     // send no Authorization header. ACP also reloads ~/.hermes/.env, so the
