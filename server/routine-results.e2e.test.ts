@@ -170,14 +170,15 @@ it("reports a routine made in another chat into the bot's main thread, not that 
       { steps: [{ tool: "propose_routine", arguments: {
         name: "Chat report", instructions: "Report the fixture state; no external services.",
         schedule: { type: "cron", expression: "0 9 1 * *", timeZone: "UTC" },
-      } }], reply: "Please review the routine confirmation." },
+      } }], reply: "The routine is scheduled." },
       { steps: [], reply: "Fresh chat report" },
     ] } }));
     await cli("send", "--bot", bot.id, "--task", chat, "--text", "Report the fixture state monthly.");
     await cli("wait", "--bot", bot.id, "--task", chat, "--timeout", "20");
-    const card = (await messages(chat)).findLast((message) => message.card?.routineRequest && !message.card.answered)?.card;
-    expect(card?.requestId).toBeTruthy();
-    const { resultId: routineId } = await api("POST", `/api/bots/${bot.id}/respond`, { threadId: chat, requestId: card.requestId, behavior: "allow" });
+    // The bot's own routine applies at once, as a receipt in that chat.
+    const card = (await messages(chat)).findLast((message) => message.card?.routineRequest)?.card;
+    expect(card).toMatchObject({ answered: "allow", autoApplied: true });
+    const routineId = card.routineRequest.resultId as string;
     const definition = (await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === routineId);
     expect(definition.sourceThreadId).toBe(chat);
 

@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, Check, Copy, Download, Maximize2, Search, WrapText, X } from "lucide-react";
 import { isTableNumber, tableCsv, tableRowOrder, type TableSort } from "@/lib/table-data";
 import { t } from "@/lib/i18n";
+import { copyText } from "@/lib/copy-text";
 
 export interface TableCell { text: string; content?: ReactNode }
 export interface TableColumn extends TableCell { align?: "left" | "center" | "right" }
@@ -48,8 +49,8 @@ export function RichTable({ columns, rows, name = t("table.title"), expanded = f
   }, [copyState]);
   const csv = () => tableCsv(columns.map((column) => column.text), order.map((index) => values[index]!));
   const copy = async () => {
-    try { await navigator.clipboard.writeText(csv()); setCopyState("copied"); }
-    catch { setCopyState("failed"); }
+    const result = await copyText(csv());
+    if (result !== "empty") setCopyState(result);
   };
   const download = () => {
     const url = URL.createObjectURL(new Blob(["\uFEFF", csv()], { type: "text/csv;charset=utf-8" }));

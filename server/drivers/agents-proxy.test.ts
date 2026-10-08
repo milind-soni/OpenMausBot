@@ -489,10 +489,18 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     for (const tool of new Set(proposalCases.map(entry => entry.tool))) {
       const description = list.result.tools.find((entry: { name: string }) => entry.name === tool).description;
-      expect(description).toContain("granted Full Access may apply the change immediately");
+      // Team setup applies only at Full access; a bot's own routines,
+      // skills and profile apply at any level.
+      if (tool === "propose_team_setup" || tool === "propose_bot_deletion") {
+        expect(description).toContain("granted Full Access may apply the change immediately");
+        expect(description).toContain("Never claim success from the permission mode alone");
+      } else {
+        expect(description).toContain("a change to your own routines, skills, profile or model applies immediately");
+        expect(description).toContain("a change for another bot may wait for the person's confirmation");
+        expect(description).toContain("Never claim success without an applied result");
+      }
       expect(description).toContain("If applied, continue the requested work without another confirmation");
       expect(description).toContain("Only a pending result requires ending the turn");
-      expect(description).toContain("Never claim success from the permission mode alone");
       expect(description).toContain("does not elevate another bot's execution permissions");
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");

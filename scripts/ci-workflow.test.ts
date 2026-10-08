@@ -97,6 +97,41 @@ describe("CI concurrency", () => {
     expect(workflow.on).toHaveProperty("workflow_dispatch");
   });
 
+  it("checks out every module the release gate imports", () => {
+    const release = parse(readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"));
+    const checkout = release.jobs.ci.steps.find((step: { uses?: string }) => step.uses?.startsWith("actions/checkout@"));
+    const sparse = (checkout.with["sparse-checkout"] as string).split("\n").map((line) => line.trim()).filter(Boolean);
+    const imports = [...readFileSync(new URL("./release-ci.mjs", import.meta.url), "utf8").matchAll(/^import .* from "\.\/([^"]+)";$/gm)]
+      .map((match) => `scripts/${match[1]}`);
+    expect(imports).toContain("scripts/ci-scope.mjs");
+    expect(sparse.sort()).toEqual(["scripts/release-ci.mjs", ...imports].sort());
+  });
+
+  it("lets push scoping read the previous commit's CI, and nothing more", () => {
+    // ci-scope.mjs runs a push's docs- or version-only diff without the runtime
+    // jobs only when the commit before it has its own green run.
+    expect(workflow.jobs.static.permissions).toEqual({ contents: "read", actions: "read" });
+    const scope = workflow.jobs.static.steps.find((step: { id?: string }) => step.id === "scope");
+    expect(scope.env).toEqual({ GH_TOKEN: "${{ github.token }}" });
+    for (const [name, job] of Object.entries(workflow.jobs) as [string, { permissions?: unknown }][]) {
+      if (name !== "static") expect(job.permissions, name).toBeUndefined();
+    }
+  });
+
+  it("reports every known flaky test that needed a retry in the vitest job summary", () => {
+    const steps = workflow.jobs.vitest.steps as { name?: string; run?: string; if?: string; env?: Record<string, string> }[];
+    const tests = steps.findIndex((step) => step.name === "Run tests");
+    const report = steps.findIndex((step) => step.run === "node scripts/testing/ci-retry-summary.mjs");
+    expect(report).toBe(tests + 1);
+    expect(steps[report]!.if).toBe("${{ !cancelled() }}");
+    // The runner context exists only at step level, never in a job's env.
+    expect(workflow.jobs.vitest.env).toBeUndefined();
+    for (const step of [steps[tests]!, steps[report]!]) {
+      expect(step.env).toEqual({ OMB_VITEST_RETRY_LOG: "${{ runner.temp }}/vitest-retries.jsonl" });
+    }
+    expect(readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8")).toContain('runner: "./scripts/testing/ci-retry-runner.ts"');
+  });
+
   it.each(requiredRuntimeJobs)("fails closed for every required %s outcome", (job) => {
     for (const result of ["success", "failure", "cancelled", "skipped"]) {
       const check = runGate({ ...gateNeeds("true"), [job]: { result } });

@@ -7,8 +7,13 @@ verification-documentation checks. Selection never skips the entire workflow.
 - Root Markdown files, Markdown under `docs/`, and `.github/FUNDING.yml` alone
   do not run the runtime jobs.
 - Any other change runs the runtime suite.
-- Main pushes, merge groups and manual runs always run all jobs. Empty or
-  unreadable PR diffs also fall back to all jobs.
+- A push to main is scoped by its own commits (`before..after`): docs only,
+  or a `package.json` change that only bumps `"version"` (the release bump),
+  skips the runtime jobs. It does so only when the commit before the push has
+  a green CI run of its own. Main's waiting run is replaced by each push, so
+  without that check a replaced run's code would never be tested.
+- Merge groups and manual runs always run all jobs. Empty or unreadable diffs,
+  and a previous commit whose CI cannot be read, also fall back to all jobs.
 
 PR selection uses a local merge-base diff with rename detection disabled, so
 moving a source file into documentation still selects its original runtime
@@ -68,14 +73,65 @@ run, and the running one always finishes, so a burst of merges costs two full
 runs instead of one per merge (fifteen queued behind each other in October
 2026, with the release waiting behind them).
 
-`release.yml` ships only a commit whose own `CI` check passed
-(`scripts/release-ci.mjs`, overlapping the platform builds). If main's run for
-that commit was replaced or never ran, the script starts CI on the commit in
-its own lane: a `release-ci/v<version>` branch that no merge can touch,
-deleted afterwards. A red verdict stops the release; re-run the failed CI jobs
+`release.yml` ships only a commit whose code passed CI
+(`scripts/release-ci.mjs`, overlapping the platform builds). A run counts only
+when its `CI` gate passed and every vitest job actually ran and passed, so a
+scoped run (docs- or version-only, vitest skipped) is never proof. The script
+accepts, in order:
+
+1. a finished run on the release commit itself;
+2. a finished push, merge-queue or manual run on any commit with the same git
+   tree. This is the all-OS manual run `prepare-release.yml` starts on the
+   `release/v<version>` branch, whenever main did not move before the merge;
+3. when the release commit's only change from its parent is `package.json`'s
+   `"version"` (all the bump touches), the parent's proof by 1 or 2. A parent
+   run still going is waited for; a red parent, or one that skipped its
+   tests, never counts.
+
+If none of these exists and main's run for the commit was replaced, never ran
+or skipped the tests, the script starts CI on the commit in its own lane: a
+`release-ci/v<version>` branch that no merge can touch, deleted afterwards. A
+red verdict stops the release; re-run the failed CI jobs
 (`gh run rerun <id> --failed`), and the waiting release picks up the new
-attempt. A manual release can skip the wait with `ship_without_ci`, for
-emergencies only.
+attempt. A red where every failed job never started a step (a macOS runner
+"failed to be acquired") is not a verdict. On the release lane's own run the
+script re-runs the failed jobs once itself
+(`POST /actions/runs/<id>/rerun-failed-jobs`, which the job's
+`actions: write` allows) and keeps waiting. Main's run is never re-run that
+way: a re-run joins main's concurrency group, where it would cancel the
+newest merge's waiting run and re-run main-only deploys from an older tree.
+The script starts CI in the lane instead. A manual release can skip the
+wait with `ship_without_ci`, for emergencies only.
+
+## Flaky tests and Windows timeouts
+
+Known flaky tests are listed in `scripts/testing/ci-retry-list.json`: file,
+full test name (describe blocks and test joined with ` > `), owner, the
+evidence, and the date it was listed. In CI only (`CI=true`), the repo's
+vitest runner (`scripts/testing/ci-retry-runner.ts`) gives each listed test
+two retries; nothing else is retried, and local runs never retry. Retries
+are bounded per file: once a listed test fails all three attempts, that is a
+real failure, and the file's later listed tests get no retry. Otherwise a
+regression that breaks a whole fixture (six listed tests share
+`server/delta-context.e2e.test.ts`) would triple their wall time and push the
+Linux shard past its 20-minute cap, and a timed-out job loses the failing
+tests' annotations and this summary. The cost: a real flake listed after a
+broken test in the same file is not retried in that run. A listed
+test that needed a retry is written to the vitest job's summary and raised as
+a warning annotation (`scripts/testing/ci-retry-summary.mjs`), so a flake
+that passed is still seen. Fix the test, then delete its entry;
+`scripts/testing/ci-retry-list.test.ts` fails on an entry whose test no longer
+exists.
+
+Windows runners run the suite about 1.45x slower than Linux. Every test and
+hook timeout doubles there (`server/testing/host-timeout.ts`): the defaults in
+`vite.config.ts`, and a test's own timeout written as `hostTimeout(ms)`. Linux
+and macOS keep the strict numbers, such as the 120 s budget for the
+3,000-file checkpoints test.
+
+The packaged-server smoke asks the OS for free ports (listen on port 0)
+instead of picking them at random: a random pick inside a range Windows
+reserves failed with `listen EACCES 127.0.0.1:497xx`.
 
 ## Required check
 

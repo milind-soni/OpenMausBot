@@ -48,6 +48,13 @@ recreating a removed fixture directory.
    **Update OpenCode on this server**. Click each and confirm the fixture error
    appears with its button usable again. Terminal commands remain under
    **Prefer a terminal?**. These clicks never perform a real installation.
+7. Expand Claude and use **Add Claude account** inside its card. Enter an
+   account name, collapse/reopen the card, and confirm the draft remains.
+   Cancel, then repeat with **Add ChatGPT account** in the ChatGPT plan card.
+   Submit once to check that the fixture-only error stays inside that card and
+   the form remains editable. Neither action should appear below the engine
+   grid, in unrelated providers, or in read-only managed cards. Provider-icon
+   editing controls should not appear. Repeat at a 390px viewport.
 7. Expand Codex, choose **Google Gemini** under **Provider icon**, and reload.
    The selected icon should persist while sibling instances keep their icons.
    Upload a small PNG, JPEG, or WebP and check that it renders in the card and

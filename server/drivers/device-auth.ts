@@ -79,6 +79,9 @@ export interface DeviceAuthOptions {
   cli: string;
   environment: () => Env;
   onAuthenticated?: () => Promise<void>;
+  /** The provider refused the stored sign-in, though the CLI still reports
+   * it: Connect replaces it instead of keeping it. */
+  signInRejected?: () => boolean;
   startupTimeoutMs?: number;
   lifetimeMs?: number;
   terminateTimeoutMs?: number;
@@ -150,13 +153,14 @@ export class DeviceAuthController {
         this.confirm(flow, env, home, (signedIn) => this.finish(flow, signedIn ? "succeeded" : "failed",
           `${product} finished sign-in but did not confirm a ${account} account. Refresh Settings and try again.`));
       }, true);
-      // Never overwrite a working login just because Connect was clicked twice.
+      // Never overwrite a working login just because Connect was clicked
+      // twice. One the provider refused is not working, whatever status says.
       if (!status) { login(); return; }
       this.run(flow, [...status.args], env, home, (code, output) => {
         const state = status.read(code, output);
-        if (state === "signed-in") this.finish(flow, "succeeded");
+        if (state === "signed-in" && !this.options.signInRejected?.()) this.finish(flow, "succeeded");
+        else if (state === "signed-in" || state === "signed-out") login();
         else if (state === "other") this.finish(flow, "failed", `${product} already has a different sign-in method on this server. Ask the server administrator to review it before changing accounts.`);
-        else if (state === "signed-out") login();
         else this.finish(flow, "failed", `${product} could not confirm the existing sign-in on this server. Update ${product} and check its login status before trying again.`);
       });
     });

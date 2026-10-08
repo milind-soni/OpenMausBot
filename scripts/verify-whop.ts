@@ -74,10 +74,13 @@ try {
   assert.equal(await page.locator('[data-apps-grid] [data-app-tile="whop"]').count(), 1);
   assert.equal(await page.getByText("Set up Whop", { exact: true }).count(), 0);
   const status = async () => (await api("GET", "/api/mcp/servers")).servers;
+  // This browser is not on the server's machine and the fixture has no https
+  // address to come back to, so the paste-back box is shown up front.
+  const pasteBack = () => page.getByText("After you approve, your browser shows a page that can't load. Copy that page's full address and paste it here.", { exact: true });
   const complete = async () => {
-    await page.getByText("Signing in from another computer?", { exact: true }).waitFor();
+    await pasteBack().waitFor();
+    assert.equal(await page.getByText("Signing in from another computer?", { exact: true }).count(), 0);
     const approved = await fetch(authorizationUrl, { redirect: "manual" });
-    await page.getByText("Signing in from another computer?", { exact: true }).click();
     await page.getByRole("textbox", { name: "Redirect URL", exact: true }).fill(approved.headers.get("location")!);
     await page.getByRole("button", { name: "Complete sign-in", exact: true }).click();
   };
@@ -85,7 +88,7 @@ try {
   await page.getByRole("alert").getByText("Synthetic save failure", { exact: true }).waitFor();
   assert.equal((await status()).length, 1);
   await connect();
-  await page.getByText("Signing in from another computer?", { exact: true }).waitFor();
+  await pasteBack().waitFor();
   assert.equal((await status()).find((server: any) => server.name === "whop-2").enabled, false);
   await row.getByRole("button", { name: "Cancel", exact: true }).click();
   await connect();

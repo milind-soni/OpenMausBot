@@ -1215,7 +1215,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         return `- ${row.action} ${row.name}`;
       }).join("\n")
       : "(none)";
-    return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user to confirm):\n${pending}` };
+    return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user's decision):\n${pending}` };
   }
   if (name === "skill_manage") {
     if (args.action !== "create" && args.action !== "update") {

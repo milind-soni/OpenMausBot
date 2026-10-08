@@ -27,6 +27,7 @@ import { serverChildLaunch } from "./server-child-launch.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
+import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 import { createStartupScreen } from "./startup-screen.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
@@ -3049,8 +3050,8 @@ ipcMain.handle("cloud-move:restore-previous", (event, id) => {
   return ensureCloudMove().restorePrevious(dest).then(afterCloudMove(dest));
 });
 /** The person's own Cloud, by the one rule (cloud-home.mjs myCloudOrigin):
- * its page in the main window gets the channels below and the microphone
- * (appPermissionHandlers). While the sign-in is being checked or has ended it
+ * its page in the main window gets the channels below, the microphone and
+ * clipboard writes (appPermissionHandlers). While the sign-in is being checked or has ended it
  * is still the Cloud this account last verified, so its Settings says
  * "checking" or "sign in again on your computer", never an error, and a Live
  * call keeps the microphone. */
@@ -3520,11 +3521,12 @@ app.whenReady().then(async () => {
   // Device permissions (microphone, notifications, clipboard) are for the
   // local UI only; privileged capabilities (camera, geolocation, USB, MIDI,
   // serial) stay off. Client mode's loopback relay is the local UI. The
-  // person's own Cloud, open in this window, also gets the microphone (only
-  // that) for a Live call: it is theirs alone. No other server does. A call
-  // placed while the saved sign-in is still restoring waits for it. The active
-  // paired server, in this window's main frame, may also write the clipboard
-  // (never read it): re-evaluated per request, so a server switch withdraws it.
+  // person's own Cloud, open in this window, also gets the microphone for a
+  // Live call and clipboard writes for its copy buttons (only those): it is
+  // theirs alone. No other server does. A call placed while the saved sign-in
+  // is still restoring waits for it. The active paired server, in this
+  // window's main frame, may also write the clipboard. Neither ever reads it;
+  // both are re-evaluated per request, so a server switch or sign-out withdraws it.
   appPermissions = appPermissionHandlers({
     rendererOrigin,
     mainContents: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null),
@@ -3587,10 +3589,15 @@ app.whenReady().then(async () => {
     if (desktopTray?.show()) return;
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-});
+}).finally(() => allWindowsClosedQuit.settleStartup());
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+// The startup splash is the only window while boot runs; its recovery
+// timers can destroy it mid-boot (issue #2028). An unconditional
+// last-window-closed quit would fire there, killing the app before the
+// server child forks — exactly the exit the recovery was meant to avoid.
+const allWindowsClosedQuit = createAllWindowsClosedQuit({
+  app,
+  allWindows: () => BrowserWindow.getAllWindows(),
 });
 
 // EMBEDDING.md lifecycle rule: defer the first quit until the embedded

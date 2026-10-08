@@ -47,6 +47,7 @@ export interface RawMarkdownViewProps {
 export function RawMarkdownView({ text, className }: RawMarkdownViewProps) {
   return (
     <pre
+      dir="auto"
       data-testid="raw-markdown-view"
       tabIndex={0}
       className={cn(

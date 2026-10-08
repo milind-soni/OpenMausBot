@@ -12,6 +12,14 @@ When an engine supports approvals, OpenMausBot surfaces the request instead of h
 
 <ProductScreenshot name="approval-card" alt="An OpenMausBot approval card shown inside a conversation" caption="Approvals stay in context with the request and the agent's explanation." />
 
+## Changes a bot makes to itself
+
+A bot can change its own routines, skills, profile, and default model without asking, at every approval level, including engines such as Pi that have no Full access. Each change shows in the conversation as one plain line, for example "Scout scheduled a routine: Check before dentist, today 2:30 PM", with **Details** for the full text and **Undo** to put it back. After you undo it, the line ends with "Undone". If the thing changed again since, Undo says so and changes nothing.
+
+A change for another bot, such as a Chief editing a teammate's profile or scheduling a routine for it, still asks unless the conversation has Full access. Creating, deleting, or moving bots and messages between bots keep their usual approvals. A bot that already has 20 routines on asks before it turns on another one, and a bot asks before it moves its own working folder, since that changes which files its tools can read and write without asking. In a conversation a guest drives on My Cloud, every change still asks.
+
+Full access applies every change as it always has, with the same one-line receipt and Undo.
+
 ## Inspector
 
 Use **Inspector** when you need more detail than the conversation provides. It is useful for following tool calls, reconnect attempts, engine output, and long-running work.

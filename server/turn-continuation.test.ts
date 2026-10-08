@@ -59,8 +59,12 @@ describe("classifyContinuable", () => {
   it.each([
     ["budget cap message", "error", "Stopped after 64 steps without a final answer. The steps so far already ran, so ask only for what's left.", "cap"],
     ["legacy limit message", "error", "model-call limit reached before a final response", "cap"],
-    // A provider's limits are not OpenMausBot's step cap: never continued.
-    ["provider rate limit", "error", "upstream HTTP 429: Rate limit reached", null],
+    ["tool-call cap message", "error", "Stopped after 200 tool calls without a final answer. The steps so far already ran, so ask only for what's left.", "cap"],
+    // A provider's error is not a spent budget, whatever its words: a new
+    // thread would only hit the same limit again.
+    ["provider rate limit (429)", "error", "upstream HTTP 429: {\"error\":{\"message\":\"Rate limit reached\"}}", null],
+    ["provider quota", "error", "upstream HTTP 429: {\"error\":{\"message\":\"Monthly usage limit reached\"}}", null],
+    ["provider body quoting the cap", "error", "upstream HTTP 500: Stopped after 3 steps without a final answer", null],
     ["provider usage limit", "error", "You have reached your usage limit reached for today", null],
     // A tool error includes a person's denial: never continued by itself.
     ["tool_error terminal", "tool_error", "One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.", null],

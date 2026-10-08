@@ -15,6 +15,8 @@ import { Type, type TObjectOptions, type TSchema, type TSchemaOptions } from "ty
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { allowsTool, canUseMcpServer, parseToolScope, type ToolIdentity } from "../../shared/tool-scope.ts";
+import { CALL_TOOL, directoryCallTarget, isDirectoryTool } from "../mcp-directory.ts";
+import { REMOTE_MCP_STARTUP_MS } from "../mcp-http.ts";
 
 interface McpServerDef {
   command: string;
@@ -23,6 +25,9 @@ interface McpServerDef {
   /** "local-computer" marks the user's real host desktop: every tool on such
    * a server is gated behind a permission card before it executes. */
   scope?: string;
+  /** A URL server behind the remote proxy's tool directory: a big catalog
+   * arrives as search_tools, describe_tool and call_tool (mcp-directory.ts). */
+  directory?: boolean;
 }
 
 interface McpConfig {
@@ -97,8 +102,13 @@ export class StdioMcp {
   private nextId = 1;
   private disposed = false;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  /** A searched URL server answers over the internet: initialize and its
+   * whole tools/list share one longer budget. Others keep 8 s for each. */
+  private readonly remote: boolean;
+  private listDeadline: number | undefined;
 
   constructor(def: McpServerDef) {
+    this.remote = def.directory === true;
     this.child = spawn(def.command, def.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...def.env },
@@ -232,6 +242,8 @@ export class StdioMcp {
   }
 
   async init(): Promise<void> {
+    const budget = this.remote ? REMOTE_MCP_STARTUP_MS : MCP_STARTUP_TIMEOUT_MS;
+    this.listDeadline = this.remote ? Date.now() + budget : undefined;
     await this.call(
       "initialize",
       {
@@ -239,7 +251,7 @@ export class StdioMcp {
         capabilities: {},
         clientInfo: { name: "openmausbot-pi", version: "1" },
       },
-      MCP_STARTUP_TIMEOUT_MS,
+      budget,
     );
     this.notify("notifications/initialized");
   }
@@ -247,7 +259,7 @@ export class StdioMcp {
   async listTools(): Promise<McpTool[]> {
     const tools: McpTool[] = [];
     const seenCursors = new Set<string>();
-    const deadline = Date.now() + MCP_STARTUP_TIMEOUT_MS;
+    const deadline = this.listDeadline ?? Date.now() + MCP_STARTUP_TIMEOUT_MS;
     let cursor: string | undefined;
     for (let page = 0; page < MCP_MAX_LIST_PAGES; page += 1) {
       const remainingMs = Math.max(1, deadline - Date.now());
@@ -559,12 +571,17 @@ export default async function (pi: PiExtensionApi): Promise<void> {
 
   const used = new Set<string>();
   const identities = new Map<string, ToolIdentity>();
+  /** Registered directory tools and their server. The proxy narrowed their
+   * catalog to the selection; call_tool's target is checked when it runs. */
+  const directoryTools = new Map<string, string>();
   let enforcementFailed = false;
   const clients: StdioMcp[] = [];
   const serverEntries = Object.entries(config.mcpServers ?? {}).filter(([name]) => scope === undefined || canUseMcpServer(scope, name));
 
   if (scope !== undefined) {
-    const allowed = (name: string) => allowsTool(scope, identities.get(name) ?? { kind: "native", name });
+    const allowed = (name: string) => directoryTools.has(name)
+      ? canUseMcpServer(scope, directoryTools.get(name)!)
+      : allowsTool(scope, identities.get(name) ?? { kind: "native", name });
     const intersect = () => {
       if (enforcementFailed) throw new Error("Pi tool selection enforcement is unavailable");
       try {
@@ -646,7 +663,8 @@ export default async function (pi: PiExtensionApi): Promise<void> {
       }
       const toolName = tool.name;
       const identity: ToolIdentity = { kind: "mcp", server: serverName, name: toolName };
-      if (scope !== undefined && !allowsTool(scope, identity)) continue;
+      const directoryTool = def.directory === true && isDirectoryTool(toolName);
+      if (scope !== undefined && !directoryTool && !allowsTool(scope, identity)) continue;
       const name = allocateToolName(serverName, toolName, used);
       try {
         const parameters = toTypebox(tool.inputSchema);
@@ -656,15 +674,23 @@ export default async function (pi: PiExtensionApi): Promise<void> {
           description: typeof tool.description === "string" ? tool.description : `${toolName} (MCP tool from ${serverName})`,
           parameters,
           async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-            if (scope !== undefined && (enforcementFailed || !allowsTool(scope, identity))) throw new Error("Tool selection excludes this tool");
+            // The upstream tool this call runs: call_tool's target on a
+            // searched server, nothing for its catalog reads.
+            const target = directoryTool ? directoryCallTarget(toolName, params) : toolName;
+            if (scope !== undefined && (enforcementFailed
+              || (target !== undefined && !allowsTool(scope, { kind: "mcp", server: serverName, name: target })))) {
+              throw new Error("Tool selection excludes this tool");
+            }
             // Host tools ask first, using pi's native permission card
             // (ctx.ui.confirm → extension_ui_request → Allow/Deny card). This
             // mirrors ACP's session/request_permission and Codex's elicitation.
-            if (gated) {
-              const detail = summarizeParams(params);
+            // Searching a catalog runs no tool, so it asks nothing.
+            if (gated && target !== undefined) {
+              const shown = target;
+              const detail = summarizeParams(directoryTool && toolName === CALL_TOOL ? (params as { arguments?: unknown } | undefined)?.arguments : params);
               const allowed = await ctx.ui.confirm(
-                def.scope === "local-computer" ? `Allow ${toolName} on your computer?` : `Allow ${serverName}:${toolName}?`,
-                detail || `Run ${serverName}:${toolName}`,
+                def.scope === "local-computer" ? `Allow ${shown} on your computer?` : `Allow ${serverName}:${shown}?`,
+                detail || `Run ${serverName}:${shown}`,
               );
               if (!allowed) {
                 return { content: [{ type: "text", text: "Blocked by the user." }], details: {} };
@@ -685,6 +711,7 @@ export default async function (pi: PiExtensionApi): Promise<void> {
         });
         used.add(name);
         identities.set(name, identity);
+        if (directoryTool) directoryTools.set(name, serverName);
         registered += 1;
       } catch (err) {
         // One malformed tool must not dispose the client behind tools that

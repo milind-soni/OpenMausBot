@@ -1,5 +1,6 @@
 import type { Message } from "@/state/store";
 import { splitTranscriptAttachments } from "./composer-attachments";
+import { copyText } from "./copy-text";
 
 export interface ExportTranscriptOptions {
   /** The conversation or room name. */
@@ -188,13 +189,5 @@ export function downloadMarkdownTranscript(filename: string, content: string): v
  * Copy the Markdown transcript to the system clipboard.
  */
 export async function copyTranscriptToClipboard(content: string): Promise<boolean> {
-  try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(content);
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
+  return (await copyText(content)) === "copied";
 }

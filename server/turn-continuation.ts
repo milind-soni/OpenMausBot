@@ -7,7 +7,7 @@ import type { Store } from "./store.ts";
 
 /**
  * Automatic continuity: when a turn ends without a final answer and the work
- * is resumable (budget cap or tool errors), persist a structured handoff and
+ * is resumable (a budget cap), persist a structured handoff and
  * let the harness start a `Continue:` thread on the same bot — transparent to
  * the bot, which just sees a normal new thread seeded with the handoff.
  *
@@ -94,24 +94,22 @@ export function writeTurnHandoff(input: HandoffInput): string | null {
   }
 }
 
-/** Provider config errors are not resumable: looping on them burns budget and
- * masks the real fix (change the model or the tool set). Everything else that
- * stops a turn without a final answer is a candidate for auto-continuation. */
-const NOT_RESUMABLE = /not a multimodal model|unknown model|does not support|tool arguments do not match/i;
+/** The harness's own budget stops, in its own words: the chat driver's
+ * "Stopped after 64 steps without a final answer…" and the older model-call
+ * cap. Matched from the start of the failure, so a provider's error text can
+ * never read as one: "upstream HTTP 429: Rate limit reached" is not a spent
+ * budget. */
+const CAP_STOP = /^(?:stopped after \d+ [a-z ]+ without a final answer|model-call limit reached)/i;
 
 /** Classify a terminal turn as resumable. Returns the reason for the
  * continuation (`cap` = budget exhausted), or null when the turn must not be
- * auto-continued. A tool error is never continued: it includes a person's or
- * the approval policy's denial, and a new unattended thread would retry what
- * was refused. */
+ * auto-continued. Only a cap is continued. A provider error (a rate limit, a
+ * quota, a rejected key, a model that cannot take the request) fails the same
+ * way in a new thread: continuing would go straight back to the provider that
+ * just refused. A tool error includes a person's or the approval policy's
+ * denial, and a new unattended thread would retry what was refused. */
 export function classifyContinuable(_stopReason: string | null | undefined, failure: string | undefined): "cap" | null {
-  if (!failure) return null;
-  if (NOT_RESUMABLE.test(failure)) return null;
-  // Only OpenMausBot's own step cap. A provider's "Rate limit reached" or
-  // "usage limit reached" is not a budget a new thread can continue past:
-  // continuing would go straight back to the provider that said slow down.
-  if (/stopped after \d+ steps without a final answer|model-call limit reached/i.test(failure)) return "cap";
-  return null;
+  return failure && CAP_STOP.test(failure) ? "cap" : null;
 }
 
 export interface CapContinuationDeps {
