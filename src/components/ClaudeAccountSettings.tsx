@@ -87,11 +87,11 @@ export function ClaudeAccountForm({ instance, onSaved, onCancel }: {
 export function AddClaudeAccount() {
   const [open, setOpen] = useState(false);
   return open ? (
-    <div className="rounded-xl border border-hairline/40 p-3">
+    <div className="rounded-xl bg-inset p-4">
       <ClaudeAccountForm onSaved={() => setOpen(false)} onCancel={() => setOpen(false)} />
     </div>
   ) : (
-    <button type="button" onClick={() => setOpen(true)} className="flex w-fit items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink">
+    <button type="button" onClick={() => setOpen(true)} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
       <Plus size={13} />{t("engines.account.add")}
     </button>
   );
@@ -161,20 +161,24 @@ export function ClaudeAccountSettings({ instance }: { instance: InstanceInfo }) 
   };
 
   return (
-    <div className="mt-2 space-y-2 text-[12px]">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className={cn("min-w-0 break-words", authenticated ? "text-success" : "text-ink-secondary")}>
-          {authenticated ? t("engines.account.connected") : instance.snapshot.authenticated === false ? t("model.signInRequired") : t("engines.account.unknown")}
-          {identity && ` · ${identity}`}
-        </span>
-        {account.isDefault && <span className="text-[11px] text-ink-secondary">{t("engines.account.default")}</span>}
-        <button type="button" onClick={() => void refresh()} disabled={busy || signingOut} className="flex items-center gap-1 text-ink-secondary hover:text-ink disabled:opacity-50">
+    <div className="space-y-3 text-[12px]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-44">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={cn("font-medium", authenticated ? "text-success" : "text-ink-secondary")}>
+              {authenticated ? t("engines.account.connected") : instance.snapshot.authenticated === false ? t("model.signInRequired") : t("engines.account.unknown")}
+            </span>
+            {account.isDefault && <span className="rounded bg-control px-1.5 py-0.5 text-[10px] text-ink-secondary">{t("engines.account.default")}</span>}
+          </div>
+          {identity && <p className="mt-1 break-words text-ink-secondary">{identity}</p>}
+        </div>
+        <button type="button" onClick={() => void refresh()} disabled={busy || signingOut} className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50">
           <RefreshCw size={12} className={cn(busy && "animate-spin")} />{t("engines.account.check")}
         </button>
       </div>
-      <details className="rounded-lg border border-hairline/40 px-3 py-2">
-        <summary className="cursor-pointer text-ink-secondary hover:text-ink">{t("engines.account.manage")}</summary>
-        <div className="mt-3 space-y-3">
+      <details>
+        <summary className="cursor-pointer rounded-md py-1 font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{t("engines.account.manage")}</summary>
+        <div className="mt-3 space-y-4 rounded-xl bg-inset p-4">
           <p className="leading-relaxed text-ink-secondary">{t("engines.account.signInHint")}</p>
           {account.signInShell === "powershell" && <p className="text-ink-secondary">{t("engines.account.powershell")}</p>}
           <CommandLine command={account.signInCommand} copyLabel={t("engineSetup.copyCommand")} />

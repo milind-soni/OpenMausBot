@@ -205,7 +205,7 @@ import { sweepThreadEventLogs, type ThreadLogRetentionCandidate } from "./thread
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
-import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, flushUsageLedger, type UsageGroupBy, type UsageRow, type UsageTrigger } from "./usage-ledger.ts";
+import { appendUsage, parseUsageRange, flushUsageLedger, type UsageRow, type UsageTrigger } from "./usage-ledger.ts";
 import { loadPlanUsage, planAccountsFromInstances } from "./plan-usage.ts";
 import { GroupUsageReader } from "./group-thread-usage.ts";
 import { ledgerCost } from "./model-prices.ts";
@@ -639,6 +639,7 @@ import { localDesktopTarget, localVmViewerStatus, viewerTargetId } from "./deskt
 import { createAntigravityLeftoverRoutes } from "./routes/antigravity-leftovers.ts";
 import { findAntigravityLeftovers, removeAntigravityLeftovers } from "./drivers/antigravity-temp.ts";
 import { createLiveRoutes } from "./routes/live.ts";
+import { createUsageRoutes } from "./routes/usage.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
@@ -3759,6 +3760,24 @@ else enginesRead = defaultSelection().then(
   (selection) => { bootSelection = selection; },
   (error) => console.warn(`[engines] reading the engines at start failed: ${error instanceof Error ? error.message : String(error)}`),
 ).finally(() => { enginesRead = null; });
+// Model lists served from the last run refresh behind listen. Each one
+// notifies the picker when it lands, then the new-bot default is read again
+// so a bot created this session sees the discovered model.
+const startupCatalogs = registry.instances().flatMap((instance) =>
+  instance.startupModelRefresh ? [instance.startupModelRefresh] : []);
+for (const pending of startupCatalogs) {
+  void pending.then(() => broadcast({ kind: "config", ...configStatus() }), () => {});
+}
+if (startupCatalogs.length) {
+  void Promise.all(startupCatalogs).then(async () => {
+    if (store.needsSeed()) return;
+    try {
+      bootSelection = await defaultSelection();
+    } catch (error) {
+      console.warn(`[engines] refreshing the new-bot default after model discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+}
 store.seedIfEmpty();
 hostedModels?.reconcile(store);
 // Skills library boot sweep (features.skillsLibrary): migrate per-bot
@@ -15941,6 +15960,13 @@ ROUTES.push(createBotMemoryRoutes({
   },
 }));
 ROUTES.push(createDeciderRoutes({ decider }));
+// The usage ledger (JSON and CSV). Admin scope stays in server/request-auth.ts.
+ROUTES.push(createUsageRoutes({
+  dataDir: DATA_DIR,
+  prices: operatorPrices,
+  budget: () => spendState(cfg, DATA_DIR),
+  currency: () => cfg.billing?.currency ?? "USD",
+}));
 // "Switch them too": a bot's threads on a model of their own follow its model again.
 ROUTES.push(createThreadModelRoutes({
   bot: (id) => store.bot(id),
@@ -23775,40 +23801,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // Read-only like the inspector above: the rows were written at the
     // request.opened fold and in answerRequest; this only reads them back,
     // newest last, same order as thread events.
-    // ── the usage ledger: what this workspace spent over a period ──
-    // Read-only over the month files usage-ledger.ts appends at turn.completed.
-    // Admin scope by default, like every route not opened to clients.
-    if (method === "GET" && (path === "/api/usage" || path === "/api/usage.csv")) {
-      const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
-      if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
-      const rows = readUsage(DATA_DIR, range);
-      // The operator's price list is applied only with the billing entitlement.
-      const prices = operatorPrices();
-      if (path === "/api/usage.csv") {
-        const stamp = (date: Date) => date.toISOString().slice(0, 10);
-        res.writeHead(200, {
-          "content-type": "text/csv; charset=utf-8",
-          "content-disposition": `attachment; filename="usage-${stamp(range.from)}-${stamp(range.to)}.csv"`,
-          "cache-control": "no-store",
-        });
-        res.end(usageCsv(rows, prices));
-        return;
-      }
-      const requested = url.searchParams.get("groupBy") ?? "bot";
-      if (!USAGE_GROUPINGS.includes(requested as UsageGroupBy)) {
-        return json(res, 400, { error: `groupBy must be one of ${USAGE_GROUPINGS.join(", ")}` });
-      }
-      const groupBy = requested as UsageGroupBy;
-      res.setHeader("cache-control", "no-store");
-      return json(res, 200, {
-        from: range.from.toISOString(),
-        to: range.to.toISOString(),
-        groupBy,
-        ...summarizeUsage(rows, groupBy, prices),
-        budget: spendState(cfg, DATA_DIR),
-        billing: prices ? { currency: cfg.billing?.currency ?? "USD" } : null,
-      });
-    }
 
     // Subscription windows (5-hour and weekly), not the token ledger above.
     // Same admin gate as /api/usage: this route is unlisted, so it stays admin.

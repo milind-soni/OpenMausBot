@@ -20,6 +20,7 @@ import { createComputerSharing } from "../electron/computer-sharing.mjs";
 import { cloudPairingSignature } from "./cloud-home.ts";
 import { WATCHER_OPTIONS_CARD_BOT_ID } from "../shared/options-card.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 import { markLeftBehind } from "./testing/cloud-left-behind.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
@@ -123,7 +124,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   base = `http://127.0.0.1:${port}`;
   await boot();
   owner = await adminPairing();
-}, 30_000);
+}, hostTimeout(30_000));
 
 let port = 0;
 /** Start (or restart) the Cloud home on its data directory. */
@@ -410,7 +411,7 @@ it("the person's Mac, lent through the real connector, is usable by the owner's 
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.computers, { timeout: 5000 }).toEqual([]);
   expect((await call("shared_computer", { computer_id: status[0].id, folder_id: folder.id, action: "read_file", path: "plan.md" })).isError).toBe(true);
   rmSync(folderPath, { recursive: true, force: true });
-}, 60_000);
+}, hostTimeout(60_000));
 
 it("on a Cloud home the owner's answer to an options card is recorded as the owner's", async () => {
   // Only the Watcher bot creates options cards (server/options-card.ts), so
@@ -434,4 +435,4 @@ it("on a Cloud home the owner's answer to an options card is recorded as the own
   const answered = await api("PATCH", `/api/bots/${WATCHER_OPTIONS_CARD_BOT_ID}/cards/${messageId}`, { token: owner, body: { answered: "Yes", threadId: made.threadId } });
   expect(answered.status, JSON.stringify(answered.body)).toBe(200);
   expect(answered.body.message.card).toMatchObject({ answered: "Yes", answeredBy: { kind: "session", person: expect.stringMatching(/^p_/) } });
-}, 60_000);
+}, hostTimeout(60_000));

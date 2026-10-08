@@ -4,6 +4,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "../testing/cleanup.ts";
+import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
+import { buildMcpServers } from "./pi.ts";
+import { mcpStdioServer } from "../mcp-gate-config.ts";
 
 import extension, {
   allocateToolName,
@@ -231,6 +235,48 @@ describe("StdioMcp", () => {
   });
 });
 
+describe("Pi MCP startup budgets", () => {
+  /** Lets real I/O run, the faked clock standing still, until `condition`. */
+  async function untilReal(condition: () => boolean): Promise<void> {
+    const started = Date.now();
+    while (!condition() && Date.now() - started < 15_000) await new Promise((resolve) => setImmediate(resolve));
+    expect(condition()).toBe(true);
+  }
+  function watch<T>(pending: Promise<T>) {
+    const state: { done: boolean; value?: T; error?: unknown } = { done: false };
+    void pending.then((value) => { state.done = true; state.value = value; }, (error: unknown) => { state.done = true; state.error = error; });
+    return state;
+  }
+
+  it("gives a searched URL server 30 seconds to start, the same server mounted plainly 8", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300), toolsDelayMs: 20_000 });
+    try {
+      const descriptor = mcpStdioServer({ type: "http", url: remote.url, headers: {} }, { directory: { name: "whop" } })!;
+      const server = { command: descriptor.command, args: descriptor.args, env: descriptor.env };
+      const searched = new StdioMcp({ ...server, directory: true });
+      clients.push(searched);
+      const listing = watch(searched.init().then(() => searched.listTools()));
+      await untilReal(() => remote.delayedToolsLists === 1);
+      await vi.advanceTimersByTimeAsync(20_000);
+      await untilReal(() => listing.done);
+      expect(listing.error).toBeUndefined();
+      expect(listing.value!.map((tool) => tool.name)).toEqual(["search_tools", "describe_tool", "call_tool"]);
+
+      const plain = new StdioMcp(server);
+      clients.push(plain);
+      const failing = watch(plain.init().then(() => plain.listTools()));
+      await untilReal(() => remote.delayedToolsLists === 2);
+      await vi.advanceTimersByTimeAsync(8_000);
+      await untilReal(() => failing.done);
+      expect(String(failing.error)).toMatch(/timed out/);
+    } finally {
+      vi.useRealTimers();
+      await remote.close();
+    }
+  });
+});
+
 describe("Pi MCP extension registration", () => {
   const scopedApi = (initial: string[]) => {
     let active = initial;
@@ -338,6 +384,60 @@ describe("Pi MCP extension registration", () => {
       expect(await f.handlers.get("tool_call")?.({ toolName: "mail_read_notes_2" })).toMatchObject({ block: true });
     } finally { await f.handlers.get("session_shutdown")?.(); }
   });
+  it("registers a big URL server as three tools, asking only about the tool call_tool runs", async () => {
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300) });
+    try {
+      const servers = buildMcpServers({ threadId: "pi-whop", text: "Go", integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } } });
+      scopeConfig(undefined, { mcpServers: servers, approvalMode: "ask" });
+      const tools: RegisteredTool[] = [];
+      const handlers = new Map<string, ShutdownHandler>();
+      await extension({ registerTool(tool) { tools.push(tool); }, on(event, handler) { handlers.set(event, handler); } });
+      try {
+        expect(tools.map((tool) => tool.name)).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+        const asked: string[] = [];
+        const ui = { confirm: async (title: string) => { asked.push(title); return true; } };
+        const search = await tools[0].execute("search", { query: "list payments" }, undefined, undefined, { ui });
+        expect(JSON.parse((search.content[0] as { text: string }).text).matches[0].name).toBe("payments_list");
+        await tools[1].execute("describe", { name: "payments_list" }, undefined, undefined, { ui });
+        expect(asked).toEqual([]);
+        await tools[2].execute("run", { name: "payments_list", arguments: { company_id: "biz_1" } }, undefined, undefined, { ui });
+        expect(asked).toEqual(["Allow whop:payments_list?"]);
+        expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+      } finally { await handlers.get("session_shutdown")?.(); }
+    } finally { await remote.close(); }
+  });
+
+  it("keeps a searched URL server to the bot's selection", async () => {
+    const catalog = whopLikeCatalog(300);
+    const selected = [...catalog.filter((tool) => tool.name.endsWith("_list")).map((tool) => tool.name), "payments_get", "stats_get"];
+    const toolScope = { allow: selected.map((name) => `mcp:whop:${name}`) };
+    const remote = await startFakeHttpMcp({ tools: catalog });
+    try {
+      const servers = buildMcpServers({ threadId: "pi-whop-scoped", text: "Go", toolScope, integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } } });
+      scopeConfig(toolScope, { mcpServers: servers, approvalMode: "ask" });
+      const f = scopedApi(["read", "whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+      await extension(f.api);
+      try {
+        expect(f.tools.map((tool) => tool.name)).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+        await f.handlers.get("session_start")?.({});
+        expect(f.current()).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+        expect(await f.handlers.get("tool_call")?.({ toolName: "whop_call_tool" })).toBeUndefined();
+        const asked: string[] = [];
+        const ui = { confirm: async (title: string) => { asked.push(title); return true; } };
+        // refused here, before any card asks about a tool the bot may not use
+        await expect(f.tools[2].execute("excluded", { name: "payments_create", arguments: {} }, undefined, undefined, { ui })).rejects.toThrow("Tool selection excludes this tool");
+        expect(asked).toEqual([]);
+        expect(remote.calls).toEqual([]);
+        const found = await f.tools[0].execute("search", { query: "create payments", limit: 20 }, undefined, undefined, { ui });
+        const names = JSON.parse((found.content[0] as { text: string }).text).matches.map((match: { name: string }) => match.name);
+        expect(names.every((name: string) => selected.includes(name))).toBe(true);
+        await f.tools[2].execute("selected", { name: "payments_list", arguments: { company_id: "biz_1" } }, undefined, undefined, { ui });
+        expect(asked).toEqual(["Allow whop:payments_list?"]);
+        expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+      } finally { await f.handlers.get("session_shutdown")?.(); }
+    } finally { await remote.close(); }
+  });
+
   it("keeps earlier tools alive when a later registration fails", async () => {
     const script = fakeMcpScript(`
       let buffer = "";

@@ -45,6 +45,7 @@ import { speaker } from "@/lib/tts";
 import { roleProfilePatch, type BotRole } from "@/lib/bot-roles";
 import { t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
+import { useChatErrorClear } from "./chat-error";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
 
@@ -2815,6 +2816,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, rawDispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const clearChatError = useCallback(() => {
+    rawDispatch({ type: "error", message: null });
+  }, []);
+  useChatErrorClear(state.error, clearChatError);
   const botPatchQueue = useMemo(
     () =>
       createBotPatchQueue({
@@ -2829,7 +2834,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         },
         onError: (error) => {
           rawDispatch({ type: "error", message: error.message });
-          setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
         },
       }),
     [],
@@ -2848,7 +2852,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let creatingBot = false;
     const showError = (e: unknown) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
     };
     /** Where a card action's message lives, and the card on it. A card asked
      * inside a room belongs to the room's list, never to one member's. */

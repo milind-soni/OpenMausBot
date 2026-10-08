@@ -67,7 +67,7 @@ describe("RawMarkdownView", () => {
       }),
     );
 
-    expect(markup).toContain("<pre");
+    expect(markup).toContain('<pre dir="auto"');
     expect(markup).toContain("font-mono");
     expect(markup).toContain("whitespace-pre-wrap");
     expect(markup).toContain('tabindex="0"');
