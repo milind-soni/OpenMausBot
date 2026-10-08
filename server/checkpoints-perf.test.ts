@@ -18,6 +18,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 // disposable test home before any test module imports config.ts.
 import { CHECKPOINTS_DIR, diffWorkingTree, release, snapshot } from "./checkpoints.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 
 type Injected = { error: Error; stdout?: string; stderr?: string } | { stdout: string };
 const hooks = vi.hoisted(() => ({
@@ -143,8 +144,9 @@ describe("incremental shadow index", () => {
     // The assertions are about which git subcommands run, not how fast.
     // Writing and first-indexing 3,000 files takes ~2 s on macOS but runs
     // past vitest's 20 s default on CI's Windows runners, so give the
-    // fixture room rather than shrink the tree it is about.
-  }, 120_000);
+    // fixture room rather than shrink the tree it is about. Linux keeps the
+    // strict 120 s; hostTimeout doubles it on Windows only.
+  }, hostTimeout(120_000));
 
   // Every git call is a process start, tens of milliseconds apiece on
   // Windows, and every turn waits for its snapshot before dispatch.

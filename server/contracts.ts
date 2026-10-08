@@ -532,6 +532,9 @@ export interface ProviderInstance {
   readonly models: ModelCatalog;
   /** Refresh a live catalog without recreating the provider instance. */
   readonly refreshModels?: () => Promise<void>;
+  /** Set on a later start while the catalog served from the last run is
+   * still refreshing. A turn awaits it; listen does not. */
+  readonly startupModelRefresh?: Promise<void>;
   /** Optional first-party runtime installation and account setup. */
   readonly installRuntime?: () => Promise<void>;
   readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;

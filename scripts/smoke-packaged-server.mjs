@@ -13,6 +13,7 @@
 import { execFile, spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,9 +37,33 @@ if (browserBundle !== undefined) {
     assert(statSync(paths[component]).isFile(), `Missing bundled ${component}`);
   }
 }
+/** Free loopback ports, asked of the OS (listen on port 0) rather than picked
+ * at random: Windows reserves port ranges (Hyper-V and WinNAT exclusions), and
+ * a random pick in one died with `listen EACCES 127.0.0.1:497xx` on the
+ * Windows runners three times in October 2026. The OS never hands out a
+ * reserved port. Every listener stays open until all are bound, so the ports
+ * differ from each other; each server under test gets its app port and its
+ * webhook port (which otherwise defaults to the app port + 1) this way. */
+async function freePorts(count) {
+  const servers = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      const server = createServer();
+      servers.push(server);
+      await new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", resolve);
+      });
+    }
+    return servers.map((server) => server.address().port);
+  } finally {
+    await Promise.all(servers.map((server) => new Promise((resolve) => server.close(() => resolve()))));
+  }
+}
+
 const staging = mkdtempSync(join(tmpdir(), "omb-smoke-"));
 const home = mkdtempSync(join(tmpdir(), "omb-smoke-home-"));
-const port = 21000 + Math.floor(Math.random() * 9000);
+const [port, webhookPort] = await freePorts(2);
 
 // OMB_SMOKE_DIST lets the release workflow aim this at a packaged app's
 // Resources/server tree instead of the repo build.
@@ -62,6 +87,7 @@ const fixtureEnv = {
   XDG_DATA_HOME: join(home, ".local", "share"),
   OMB_DATA_DIR: join(home, ".openmausbot"),
   OMB_PORT: String(port),
+  OMB_WEBHOOK_PORT: String(webhookPort),
   // Not a genuine key: enough to make the server look for its enterprise
   // layer and say whether it found one (checked below), never enough to
   // unlock anything.
@@ -254,10 +280,10 @@ if (listening) {
 let launcherReport = null;
 if (listening && process.platform !== "win32") {
   const launcherHome = mkdtempSync(join(tmpdir(), "omb-smoke-launcher-"));
-  const launcherPort = 31000 + Math.floor(Math.random() * 9000);
+  const [launcherPort, launcherWebhookPort] = await freePorts(2);
   const launcher = spawn(process.execPath, [join(staging, "server", "server-launcher.js")], {
     cwd: staging,
-    env: { ...fixtureEnv, HOME: launcherHome, USERPROFILE: launcherHome, OMB_DATA_DIR: join(launcherHome, ".openmausbot"), OMB_PORT: String(launcherPort), OMB_WEBHOOK_PORT: String(launcherPort + 1) },
+    env: { ...fixtureEnv, HOME: launcherHome, USERPROFILE: launcherHome, OMB_DATA_DIR: join(launcherHome, ".openmausbot"), OMB_PORT: String(launcherPort), OMB_WEBHOOK_PORT: String(launcherWebhookPort) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let launcherOutput = "";
@@ -307,11 +333,11 @@ if (listening) {
   desktopEntryReport = { starts: [] };
   try {
     for (let round = 0; round < 2; round++) {
-      const entryPort = 41000 + Math.floor(Math.random() * 9000);
+      const [entryPort, entryWebhookPort] = await freePorts(2);
       const entry = spawn(process.execPath, [join(staging, "server", "desktop-entry.mjs")], {
         cwd: staging,
         env: { ...fixtureEnv, HOME: entryHome, USERPROFILE: entryHome, OMB_DATA_DIR: join(entryHome, ".openmausbot"),
-          OMB_PORT: String(entryPort), OMB_WEBHOOK_PORT: String(entryPort + 1), OMB_SERVER_COMPILE_CACHE: cacheDir },
+          OMB_PORT: String(entryPort), OMB_WEBHOOK_PORT: String(entryWebhookPort), OMB_SERVER_COMPILE_CACHE: cacheDir },
         stdio: ["ignore", "pipe", "pipe"],
       });
       let entryOutput = "";

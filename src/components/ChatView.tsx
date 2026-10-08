@@ -120,7 +120,7 @@ import { dayLabel, localDay, transcriptLookups, type TranscriptLookups } from "@
 import { citationPreviewText, splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { useCanWriteIn } from "@/lib/cloud-guest";
-import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
+import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 
@@ -1268,6 +1268,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     return {
       busy: Boolean(bot.busy),
       reply: latestReply(messages, () => bot.name),
+      failure: latestFailure(messages, () => bot.name),
       approval: approval ? { id: approval.requestId, name: bot.name } : undefined,
     };
   }, [messages, bot.busy, bot.name]);

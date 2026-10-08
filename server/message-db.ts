@@ -55,6 +55,10 @@ function open(): DatabaseSync {
       PRIMARY KEY (thread_id, id)
     );
     CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id);
+    -- at is not part of the primary key, so newest-per-thread reads cannot
+    -- walk these rows in time order on messages_thread. Created on every
+    -- open, including a database that already has messages.
+    CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
     CREATE TABLE IF NOT EXISTS thread_state (
       thread_id TEXT PRIMARY KEY,
       active_leaf_id TEXT

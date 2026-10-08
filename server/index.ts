@@ -3759,6 +3759,24 @@ else enginesRead = defaultSelection().then(
   (selection) => { bootSelection = selection; },
   (error) => console.warn(`[engines] reading the engines at start failed: ${error instanceof Error ? error.message : String(error)}`),
 ).finally(() => { enginesRead = null; });
+// Model lists served from the last run refresh behind listen. Each one
+// notifies the picker when it lands, then the new-bot default is read again
+// so a bot created this session sees the discovered model.
+const startupCatalogs = registry.instances().flatMap((instance) =>
+  instance.startupModelRefresh ? [instance.startupModelRefresh] : []);
+for (const pending of startupCatalogs) {
+  void pending.then(() => broadcast({ kind: "config", ...configStatus() }), () => {});
+}
+if (startupCatalogs.length) {
+  void Promise.all(startupCatalogs).then(async () => {
+    if (store.needsSeed()) return;
+    try {
+      bootSelection = await defaultSelection();
+    } catch (error) {
+      console.warn(`[engines] refreshing the new-bot default after model discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+}
 store.seedIfEmpty();
 hostedModels?.reconcile(store);
 // Skills library boot sweep (features.skillsLibrary): migrate per-bot

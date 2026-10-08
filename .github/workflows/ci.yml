@@ -44,6 +44,10 @@ jobs:
     name: typecheck + lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      # ci-scope reads whether the commit before a push got its own green run
+      actions: read
     outputs:
       runtime: ${{ steps.scope.outputs.runtime }}
       vitest_os: ${{ steps.scope.outputs.vitest_os }}
@@ -61,6 +65,8 @@ jobs:
           cache: pnpm
       - name: Select checks for this change
         id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: node scripts/ci-scope.mjs
       - run: pnpm install --frozen-lockfile
       - name: Verify CI selection and documentation references
@@ -114,7 +120,19 @@ jobs:
         # The github-actions reporter turns each failure into an annotation
         # on the PR, so the failing test and its assertion are readable
         # without opening the job log.
+        env:
+          # scripts/testing/ci-retry-runner.ts records each listed flaky test
+          # that needed a retry here (the runner context is step-level only).
+          OMB_VITEST_RETRY_LOG: ${{ runner.temp }}/vitest-retries.jsonl
         run: pnpm exec vitest run --shard=${{ matrix.shard }}/4 --reporter=default --reporter=github-actions
+      - name: Report flaky tests that needed a retry
+        # Known flakes (scripts/testing/ci-retry-list.json) get two retries in
+        # CI. A pass after a retry is still listed in the job summary, so the
+        # flake stays visible until its entry is fixed and removed.
+        if: ${{ !cancelled() }}
+        env:
+          OMB_VITEST_RETRY_LOG: ${{ runner.temp }}/vitest-retries.jsonl
+        run: node scripts/testing/ci-retry-summary.mjs
       - name: Broker and Electron unit tests
         if: matrix.shard == 1
         run: pnpm broker:test && pnpm test:electron

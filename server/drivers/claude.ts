@@ -16,6 +16,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, dirname, isAbsolute, normalize } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
+import { openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
 import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
@@ -1177,8 +1178,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       } catch {
         // Keep the last usable catalog when settings.json is unreadable.
       }
+      try { writeStartupModelCache(instanceId, models); } catch { /* derived cache */ }
     };
-    await refreshModels();
+    // A later start serves the saved list and refreshes behind listen.
+    // The first run still waits so the seeded default model does not change.
+    const startupModelRefresh = config.managed ? null : (await openStartupModelCatalog({
+      instanceId,
+      use: (catalog) => { models = catalog; },
+      current: () => models,
+      refresh: refreshModels,
+    }))?.pending ?? null;
 
     // The installed CLI's version as snapshot() last read it, so a flag the
     // CLI does not know is never passed to it (CLAUDE_FLAG_FLOORS). The
@@ -1378,6 +1387,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const retryState = new Map<string, { attempt: number; cancelled: boolean; rebuilt?: boolean }>();
 
     const sendTurn = async (turn: SendTurnInput, logicalTurnId?: string) => {
+      if (startupModelRefresh) await startupModelRefresh;
       turn = { ...turn, toolScope: assertToolScopeSupported(DRIVER_KIND, turn.toolScope) };
       if (config.managedModels && (!turn.model || !config.managedModels.includes(turn.model))) throw new Error("This model is not assigned to this workspace.");
       if (config.requireApiKey && !input.environment.ANTHROPIC_API_KEY) throw new Error(NO_ANTHROPIC_KEY);
@@ -1577,6 +1587,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // A remote entry ({type, url, headers}) is already in the CLI's own
       // shape and the CLI connects to it itself; header values ride in the
       // 0600 config file like every other credential here.
+      // Claude Code is the one engine that keeps its own connection: every
+      // other engine reaches URL servers through OpenMausBot's remote proxy
+      // (mcp-remote-proxy.ts), whose minimal handshake strict servers
+      // accept. Claude Code 2.1.292 sends only fields the MCP spec defines
+      // (2025-11-25: roots, elicitation.form/url, clientInfo), none of the
+      // rmcp extensions (schemaValidation) Codex and Grok link, and a strict
+      // server that knows the current spec accepts it (captured Oct 8 2026
+      // against testing/fake-http-mcp-server.ts `strictInitialize`). Its
+      // native transport also keeps Claude Code's own MCP tool search,
+      // which defers big catalogs instead of loading them up front.
       // Bot-owned servers, gated below: they are the ones that answer for a
       // machine rather than for a context window.
       const botOwned = new Set<string>();
@@ -2616,6 +2636,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         return models;
       },
       refreshModels,
+      ...(startupModelRefresh ? { startupModelRefresh } : {}),
       snapshot,
       startAuthentication: () => login.start(),
       getAuthentication: (flowId) => login.get(flowId),

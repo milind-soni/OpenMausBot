@@ -197,6 +197,12 @@ describe("parseSkillMd", () => {
     expect("error" in parseSkillMd("---\nname: ok\n---\nbody")).toBe(true);
     expect("error" in parseSkillMd(SKILL("ok", "x".repeat(1025)))).toBe(true);
   });
+
+  it("reads a SKILL.md saved with a byte order mark", () => {
+    const parsed = parseSkillMd(`\uFEFF${SKILL("code-review")}`);
+    expect(parsed).toMatchObject({ name: "code-review", description: expect.stringContaining("Reviews") });
+    if (!("error" in parsed)) expect(parsed.body).toContain("Do the thing.");
+  });
 });
 
 describe("scanSkillText", () => {
