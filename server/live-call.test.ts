@@ -131,6 +131,16 @@ describe("live startup context", () => {
     ]);
   });
 
+  it("skips a text row that carries no text, so the voice is never given an empty line", () => {
+    expect(liveHistoryFrom([
+      { role: "user", kind: "text" },
+      { role: "bot", kind: "text" },
+      { role: "user", kind: "text", text: "and the other one?" },
+    ])).toEqual([
+      { role: "user", text: "and the other one?" },
+    ]);
+  });
+
   it("writes one-line instructions from the bot's own profile", () => {
     const text = liveInstructions({ name: "  Rigel\n", title: "QA", description: "Line one\nline two" });
     expect(text.split("\n")[0]).toBe("You are Rigel, QA, an AI agent that runs in OpenMausBot on the user's own computer. Line one line two");

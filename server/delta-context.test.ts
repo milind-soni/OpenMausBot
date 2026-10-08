@@ -392,4 +392,13 @@ describe("isContextMessage", () => {
     expect(isContextMessage({ kind: "activity", text: "Bash" })).toBe(false);
     expect(isContextMessage({ kind: "call", text: "Call with Ada · 0:42" })).toBe(false);
   });
+
+  it("keeps a digest row, and only one that carries its digest", () => {
+    expect(isContextMessage({
+      kind: "digest",
+      text: "[digest] · tools: Write ×1",
+      digest: { turnId: "t1", botId: "b1", threadId: "th1", at: 1, durationMs: 100, tools: [], memory: [], reply: "Done.", hookCoverage: "none" },
+    })).toBe(true);
+    expect(isContextMessage({ kind: "digest", text: "[digest] · tools: Write ×1" })).toBe(false);
+  });
 });
