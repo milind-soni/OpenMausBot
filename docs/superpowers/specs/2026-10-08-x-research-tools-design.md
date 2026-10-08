@@ -3,18 +3,41 @@
 ## Summary
 
 Grok Bot can search, read, and monitor X. Squad does the same through
-third-party scrapers, so its users never connect an X account. MausBot today
-reaches X only through the built-in browser (slow, token-heavy, needs an X
-login) or the Composio `twitter` toolkit (off on the managed service; needs the
-user's own X Developer app).
+third-party scrapers, routed to the best one per job, so its users never
+connect an X account. MausBot today reaches X only through the built-in browser
+(slow, token-heavy, needs an X login) or the Composio `twitter` toolkit (off on
+the managed service; needs the user's own X Developer app).
 
 Add four read-only X tools to the built-in `agents` tool server, backed by
-twitterapi.io with a key the user pastes into Settings. A bot gets the tools
-only when the key is saved **and** the user has turned X research on for that
-bot. With a routine, the same tools cover monitoring.
+[treg](https://treg.to) ("OpenRouter for agent tools") with a token the user
+pastes into Settings. treg sells per-call access to several X scrapers
+(anyapi, tikhub, justoneapi and others) and routes between them. A bot gets the
+tools only when the token is saved **and** the user has turned X research on
+for that bot. With a routine, the same tools cover monitoring.
 
-This is step 1. Step 2 (later, separate spec) routes the same tools through the
-MausBot managed service so users need no scraper key at all.
+This is step 1. Step 2 (later, separate spec) runs the same tools on
+MausBot's own treg token, tagged per customer with `X-Treg-Meta` and billed
+from `usage/by-tag`, so users need no token at all. treg's licence allows using
+the hosted treg.to API inside our product this way.
+
+## Why treg
+
+Published catalog prices, checked 2026-10-08:
+
+| Job | treg | twitterapi.io | X official API |
+| - | - | - | - |
+| Search, about 20 posts | $0.00075 per call | about $0.003 | about $0.10 |
+| An account's posts | $0.0005 per call | about $0.003 | about $0.10 |
+| Replies to a post | $0.0005 per call | about $0.003 | none |
+| Profile | $0.00022 per call | $0.00018 | $0.01 |
+
+- Calls that fail or come back empty on per-success providers are free.
+- treg falls back across scrapers, which addresses the main risk of a scraper
+  being blocked by X.
+- The same token later opens YouTube, Reddit, LinkedIn and SEO research without
+  more vendor accounts.
+- Risk: treg is young (its repository dates from July 2026). The scraper sits
+  behind one module, so it can be replaced.
 
 ## Goals
 
@@ -23,31 +46,31 @@ MausBot managed service so users need no scraper key at all.
 - A routine can check X on a schedule and report only posts it has not seen.
 - Every engine that mounts the `agents` server gets the tools (Claude, Codex,
   Grok, OpenCode, Pi, the ACP harnesses, the OpenAI-compatible chat engines).
-- The scraper key stays in the server and the encrypted credential store. It
-  never reaches an engine, a prompt, or the renderer.
-- The scraper sits behind one small module, so step 2 or another scraper
-  replaces that module only.
+- The token stays in the server and the encrypted credential store. It never
+  reaches an engine, a prompt, or the renderer.
+- The provider sits behind one module, so step 2 or another provider replaces
+  that module only.
 
 ## Non-goals
 
 - Posting, liking, replying, following, or DMs. The tools only read.
-- The managed (no-key) service. That is step 2.
-- Other scrapers, routing between scrapers, or a shared result cache.
-- A spend cap in MausBot. twitterapi.io is prepaid, so the user's balance is
-  the ceiling.
+- The managed (no-token) service. That is step 2.
+- treg's other catalogs (YouTube, Reddit, SEO). Later, on the same token.
+- A spend cap in MausBot beyond a per-call ceiling. treg is prepaid, so the
+  balance is the ceiling.
 - Phone UI. Phones cannot change bot settings or keys; they show the bot's
   replies and tool activity as they already do.
 - Streaming or webhook monitoring. Monitoring is a routine plus `sinceId`.
 
 ## What the user sees
 
-1. **Settings → API keys** has a new row, **X research (twitterapi.io)**:
+1. **Settings → API keys** has a new row, **treg token (X research)**:
    paste-to-save, Clear, and **Test**. Test reports either
-   "Works · about $4.20 of credit left" or the reason it failed. The row links
-   to twitterapi.io to get a key.
+   "Works. $0.97 left on treg." or the reason it failed. The row links to
+   treg.to.
 2. **Bot settings → Access** has a new **X research** card with one switch,
-   off by default. With no key saved, the switch is disabled and the card says
-   "Add a twitterapi.io key in Settings → API keys" with a link there.
+   off by default. With no token saved, the switch is disabled and the card says
+   "Add a treg token in Settings → API keys" with a link there.
 3. With both set, the user asks the bot "what are people saying about MausBot
    on X this week?" and the bot answers from real posts with links.
 4. The Activity log lists the calls under **X** ("Searched X", "Read X posts",
@@ -60,9 +83,9 @@ off.
 ## The four tools
 
 All four live in `server/drivers/agents-catalog.ts`, gated like
-`send_voice_note`. Descriptions tell the bot that each call spends the user's
-twitterapi.io credit, so it should prefer one well-filtered search over many
-broad ones.
+`send_voice_note`. Descriptions tell the bot that each call spends a fraction
+of a cent of the user's treg balance, so it should prefer one well-filtered
+search over many broad ones.
 
 | Tool | Inputs | Returns |
 | - | - | - |
@@ -71,13 +94,12 @@ broad ones.
 | `x_post` | `post` (required; an `x.com` or `twitter.com` status URL, or a bare id), `replies` (default false: when true, also the first page of up to 20 replies) | one post, optional replies |
 | `x_profile` | `handle` (required) | profile |
 
-Limits are 50, not 100: at 20 posts per scraper page that is at most three
-pages per call, and 50 compact posts stay under the 24,000-character
+At most 50 posts per call keeps the result under the 24,000-character
 `capResult` threshold, so the bot rarely needs `tool_result_read`.
 
 ### Result shape
 
-Results are compact JSON text, never the scraper's raw JSON.
+Results are compact JSON text, never a scraper's raw JSON.
 
 ```json
 {
@@ -99,22 +121,24 @@ Results are compact JSON text, never the scraper's raw JSON.
 }
 ```
 
-- `text` is cut at 1,500 characters and `quoted.text` at 300, each with `…`.
+- `text` is cut at 1,500 characters and `quoted.text` at 300, each with `…`,
+  never inside an emoji.
 - `quoted` appears only for quote posts. Fields the scraper omits are left out,
   not filled with zero.
 - `newestId` is the highest id in the result (absent when there are no posts).
   The `x_search` and `x_user_posts` descriptions tell a routine to keep it and
   pass it back as `sinceId` next run.
-- `more` is true when the scraper has another page.
+- `more` is true when another page exists.
 - A profile is `{ handle, name, bio, location, website, followers, following,
-  posts, verified, createdAt, url }`.
+  posts, verified, createdAt, url }`, each present only when treg returns it.
 
 ### `sinceId`
 
 - `x_search` appends ` since_id:<id>` to the query, and also drops any post
   whose id is not greater than `sinceId` (ids compared as `BigInt`).
-- `x_user_posts` pages newest-first and stops at the first post whose id is not
-  greater than `sinceId`.
+- `x_user_posts` reads newest first and stops at the first post whose id is not
+  greater than `sinceId`, except a pinned post, which is skipped because it can
+  be old and still be listed first.
 - `sinceId` must be all digits; anything else is a 400 with a plain message.
 
 ## Architecture
@@ -123,54 +147,71 @@ Results are compact JSON text, never the scraper's raw JSON.
 bot ──tools/call──▶ agents-proxy (stdio)
                      └─ agents-call.ts handler ──POST /api/internal/x/*──▶ server
                                                    server/routes/x-research.ts
-                                                     ├─ re-checks key + bot switch
-                                                     └─ server/x-research.ts ──HTTPS──▶ api.twitterapi.io
+                                                     ├─ re-checks token + bot switch
+                                                     └─ server/x-research.ts ──HTTPS──▶ treg.to/call/<endpoint>
 ```
 
-### `server/x-research.ts` (new): the scraper client
+### `server/x-research.ts` (new): the provider client
 
-- `createTwitterApiClient({ key, fetcher? })` returns
+- `createTregXClient({ token, fetcher?, baseUrl?, timeoutMs? })` returns
   `{ search, userPosts, post, profile, accountInfo }`. Each method returns the
   compact shapes above or throws an `XResearchError` with a `code`
   (`bad_key`, `no_credit`, `rate_limited`, `not_found`, `unavailable`,
   `bad_input`) and a plain-language `message`.
-- Endpoints: `GET /twitter/tweet/advanced_search` (`query`, `queryType`
-  `Latest`|`Top`, `cursor`), `GET /twitter/user/last_tweets` (`userName`,
-  `includeReplies`, `cursor`), `GET /twitter/tweets` (`tweet_ids`),
-  `GET /twitter/tweet/replies` (`tweetId`), `GET /twitter/user/info`
-  (`userName`), `GET /oapi/my/info` (`recharge_credits`, used by Test).
-- Auth header `X-API-Key`. Base URL `https://api.twitterapi.io`.
-- Each request: `AbortSignal.timeout(15_000)`, `redirect: "error"`, body read
-  with a 2 MiB cap (the `readBounded` pattern from `server/bot-directory.ts`),
-  parsed with lenient zod schemas (unknown fields pass, missing optional
-  fields are fine). The fetcher is injectable for tests.
-- Pure mapping helpers (`toPost`, `toProfile`, `parsePostRef`,
-  `normalizeHandle`) are exported and tested on their own.
+- Each job calls the cheapest scraper treg lists for it with full options
+  (paging, sort, limit). If that call fails with `unavailable`, the client tries
+  treg's routed endpoint once, which waterfalls through the other scrapers
+  (one page, no options):
+
+  | Job | Primary (`POST /call/<id>`) | Fallback |
+  | - | - | - |
+  | search | `anyapi.x.search.posts` `{query, queryType, limit, cursor}` | `treg.x.search.posts` `{q}` |
+  | account posts | `anyapi.x.user.posts` `{handle, limit, cursor}` | `treg.x.user.posts` `{username}` |
+  | one post | `anyapi.twitter.tweet` `{url}` | none |
+  | replies | `anyapi.x.post.comments` `{url, limit}` | `treg.x.post.comments` `{tweet_id}` |
+  | profile | `treg.x.user.profile` `{username}` (routed; normalized output) | (routing is the fallback) |
+  | Test | `GET /auth/me` → `org_id`, then `GET /orgs/{org_id}/balance` → `balance_micro` | none |
+
+- Every request carries `X-Treg-Token`; every `/call/` also carries
+  `X-Treg-Route-Max-Cost: 0.05`, well above any of these prices, so a mispriced
+  route cannot drain the balance. 30 s timeout, `redirect: "error"`, 2 MiB body
+  cap. The fetcher is injectable for tests.
+- Scrapers name the same fields differently (`likeCount`, `likes`,
+  `favorite_count`; `authorUsername`, `authorHandle`, X's own
+  `core.user_results…screen_name`). `toPost` reads each field through a short
+  alias list and drops a row with no usable id. Ids are taken only as digit
+  strings or safe integers.
+- Pure helpers (`toPost`, `parsePostRef`, `normalizeHandle`) are exported and
+  tested on their own.
 
 ### `server/routes/x-research.ts` (new): internal routes
 
-- `createXResearchRoutes(deps)` per `server/routes/README.md`; no new path guard
-  in `server/index.ts` (the route ratchet test stays at its current count).
+- `createXResearchInternalRoutes(deps)` per `server/routes/README.md`. It is
+  called from inside index.ts's `/api/internal/` block after the capability
+  bearer is checked. No new `path ===` guard in `server/index.ts` (the route
+  ratchet test stays at its current count).
 - `POST /api/internal/x/search`, `/user-posts`, `/post`, `/profile`. Bodies are
   validated with zod; bad input is a 400 with the reason.
-- Every call checks, in order: a valid `agents` internal capability (injected
-  from index.ts, like `workspaceBackupRoutes`), a saved key, and
-  `store.bot(capability.botId)?.xResearch === true`. Either missing is a 403
-  with the plain message below, so a stale tool list cannot spend credit.
-- `XResearchError` codes map to HTTP statuses: `bad_input` 400, `not_found`
-  404, every scraper failure 502. The body is `{ error, code }`. 401 is never
-  used: on internal routes it means the turn's capability expired.
+- Every call checks a saved token and `store.bot(capability.botId)?.xResearch
+  === true`. Either missing is a 403 with the plain message below, so a stale
+  tool list cannot spend credit. Both are read per request.
+- Status codes: `bad_input` 400, `not_found` 404, every provider failure 502.
+  The body is `{ error, code }`. 401 is never used: on internal routes it means
+  the turn's capability expired.
+- `createXResearchKeyTestRoute(deps)` serves the Settings Test at
+  `POST /api/x-research/test` (admin-only, like every route not opened to
+  clients). It answers `{ ok: true, dollars }` or `{ ok: false, reason, message }`.
 
 ### `server/drivers/agents-call.ts`: handlers
 
-Four handlers that validate arguments, call the route through
-`client.api(...)`, and return the JSON text. Route errors come back as the
-tool's error text unchanged.
+Four names, one branch: post the arguments to the route through
+`client.apiResponse(...)` and return the JSON text. A route refusal comes back
+as the tool's error text unchanged.
 
 ### Gating in the catalog
 
 - `server/index.ts` `agentsIntegration()` sets
-  `OMB_X_RESEARCH: cfg.twitterapi?.key && store.bot(botId)?.xResearch === true ? "1" : "0"`.
+  `OMB_X_RESEARCH: cfg.treg?.token && store.bot(botId)?.xResearch === true ? "1" : "0"`.
 - `catalogProfileFromEnv` reads it into `profile.xResearch`; `catalogTools()`
   hides `X_TOOL_NAMES` unless it is true, the same way `VOICE_TOOL_NAMES` works.
 - The tools are not in `EXTERNAL_TOOL_NAMES`.
@@ -180,41 +221,39 @@ tool's error text unchanged.
 
 | Case | Message the bot gets |
 | - | - |
-| No key | "X research isn't set up. Add a twitterapi.io key in Settings → API keys." |
+| No token | "X research isn't set up. Add a treg token in Settings → API keys." |
 | Bot switch off | "X research is off for this bot. Turn it on in this bot's settings under Access." |
-| Key rejected | "twitterapi.io rejected the API key. Check it in Settings → API keys." |
-| No credit | "The twitterapi.io balance has run out. Top up at twitterapi.io, then try again." |
-| Rate limited | "twitterapi.io is rate-limiting requests. Wait a minute and try again." |
+| Token rejected (401/403) | "treg rejected the token. Check it in Settings → API keys." |
+| Balance empty (402, not `route_max_cost`) | "The treg balance has run out. Top up at treg.to, then try again." |
+| Rate limited (429) | "treg is rate-limiting requests. Wait a minute and try again." |
+| Malformed request (422) | "treg refused that request. Check the query, handle or post link." |
 | Account not found | "No X account named @<handle>." |
 | Post not found | "That X post was not found. It may be deleted or private." |
-| Timeout, 5xx, bad JSON | "twitterapi.io didn't answer properly. Try again shortly." |
+| Anything else (404, 5xx, 503 capacity, `route_max_cost`, bad JSON, timeout) | "X research couldn't reach a working X source through treg. Try again shortly." |
 
-## Key storage
+## Token storage
 
-The key follows the xAI key everywhere it goes. Config section `twitterapi`,
-field `key`, env `OMB_TWITTERAPI_KEY` (the `OMB_` prefix every non-model key uses), Electron credential name `twitterapiKey`.
+The token follows the xAI key everywhere it goes. Config section `treg`, field
+`token`, env `OMB_TREG_TOKEN` (the `OMB_` prefix every non-model key uses),
+Electron credential name `tregToken`.
 
 - `server/config.ts`: schema, `AppConfig`, env override, `syncCredentialEnv`,
   `WORKSPACE_CREDENTIAL_ENV` (strips it from engine children), `saveConfig`.
-- `electron/workspace-credentials.mjs`, `electron/main.mjs` (`CREDENTIAL_PATCH`),
-  `electron/diagnostics.mjs` (`CREDENTIAL_ENV_NAMES` plus its test),
-  `src/types/ogb.d.ts` (`setCredential` names).
-- `server/index.ts`: `configStatus()` reports `twitterapi: { configured }`
-  (never the value); the external-secret tombstone list. It stays out of the
-  `hostedModels` list.
-- `src/state/store.tsx` `ConfigStatus`.
+- `electron/workspace-credentials.mjs` (boot migration into the encrypted
+  `credentials.bin`), `electron/diagnostics.mjs` (`CREDENTIAL_ENV_NAMES` plus
+  its parity test).
+- `server/index.ts`: `configStatus()` reports `treg: { configured }`, never the
+  value.
+- `src/state/store.tsx` `ConfigStatus` and its live-frame pick list.
 
 ## Settings UI
 
-- `src/components/ApiKeys.tsx`: a `twitterapi` section with label, description,
-  link, and placeholder; it saves through the Electron credential slot in the
-  desktop app. Test calls a check that hits `GET /oapi/my/info` and shows the
-  remaining credit in dollars (`recharge_credits / 100_000`; twitterapi.io
-  prices 15 credits at $0.00015). The check is its own admin-only route,
-  `POST /api/x-research/test`, in the same route module; `/api/keys/test`
-  stays the model-provider check.
-- `src/components/SettingsModal.tsx`: render the row in the connections card
-  and add search keywords ("x", "twitter", "scraper").
+- `src/components/ApiKeys.tsx`: a `treg` section with label, description and
+  link. It saves through `PUT /api/config`, as the xAI key does; the desktop
+  shell moves it into the encrypted store at boot. Test calls
+  `POST /api/x-research/test` and shows the balance in dollars.
+- `src/components/SettingsModal.tsx`: render the row under Integrations, after
+  Box, and add search keywords ("x", "twitter", "treg", "scraper").
 - `src/components/bot-settings/AccessSection.tsx`: the X research card with a
   `Switch` that patches `xResearch`.
 - Bot field `xResearch?: boolean` in `shared/wire.ts` and `src/state/store.tsx`;
@@ -238,42 +277,49 @@ today's behaviour.
 
 `apps/docs/content/docs/connected-apps/index.mdx`, in "Connect X (Twitter)":
 add that bots can search and read X without an X account through X research
-(Settings → API keys, then the bot's Access settings), and that the Composio
-connector is only needed for posting.
+(a treg token in Settings → API keys, then the bot's Access settings), and that
+the Composio connector is only needed for posting.
 
 ## Testing
 
-- `server/x-research.test.ts` with an injected fetcher:
-  - mapping of posts, quoted posts, profiles, and missing fields;
-  - text truncation;
+- `server/x-research.test.ts` with an injected fetcher, using row shapes copied
+  from treg's published examples (anyapi search, user posts, replies and single
+  post) and X's own GraphQL shape (a fallback scraper):
+  - field aliases, missing fields, and quoted posts;
+  - text truncation at a whole character;
   - `parsePostRef` for x.com URLs, twitter.com URLs, and bare ids;
-  - `sinceId` filtering and early stop;
-  - pagination up to `limit`;
-  - each error code from HTTP status and from `status: "error"` bodies;
-  - the timeout and the body cap.
-- `server/routes/x-research.test.ts`: refused with no capability, no key, or the
-  bot switch off; bad input is a 400; success passes the compact result through.
+  - `sinceId` filtering, early stop, and the pinned-post exception;
+  - paging up to `limit`;
+  - the fallback to the routed endpoint on `unavailable` only;
+  - each error status, including `route_max_cost`;
+  - the timeout and the body cap;
+  - Test's two calls.
+- `server/routes/x-research.test.ts`: refused with no token or the bot switch
+  off; the token read per call; bad input is a 400; success passes the compact
+  result through; failures map to 404/502.
 - `server/drivers/agents-call.test.ts`: the four handlers call the right routes
   and surface route errors.
 - `server/drivers/agents-catalog-wire.test.ts`: new `+x` profiles, goldens
   regenerated, `BUDGET_BASELINE` raised by hand for those profiles only; the
   existing profiles stay byte-identical.
 - `server/activity.test.ts`: the four labels.
+- `electron/diagnostics.test.mjs`: the mirror list includes `OMB_TREG_TOKEN`.
+- Config tests: the token is stripped from engine environments and follows a
+  save.
 - Request-auth test: a phone token's `PATCH /api/bots/:id` with `xResearch` is
-  refused; the desktop's patch is accepted.
-- `electron/diagnostics.test.mjs`: the mirror list includes `OMB_TWITTERAPI_KEY`.
-- Config tests: the key is stripped from engine environments and never appears
-  in `configStatus`.
-- Manual: an OMB2 build. Omkar pastes a real twitterapi.io key, Test shows the
+  refused.
+- Manual: an OMB2 build. Omkar pastes a real treg token, Test shows the
   balance, he turns X on for one bot, asks for this week's MausBot mentions,
   then sets an hourly routine and checks that the second run reports only new
   posts.
 
 ## To verify during the build
 
-- That `since_id:` works inside twitterapi.io's advanced search query. If it
-  does not, the client-side filter alone still gives correct results; it just
-  costs one page per run.
-- The real error bodies for a bad key and an empty balance, so the error
-  mapping uses them rather than guesses.
-- The credit-to-dollar rate shown by Test.
+These need a real token:
+
+- That `since_id:` works inside anyapi's search query. If it does not, the
+  client-side filter alone still gives correct results.
+- How a fully missed routed call is answered (a 200 with an empty or null
+  output, or an error status), so the profile not-found path matches it.
+- Whether `/auth/me` and `/orgs/{id}/balance` accept the `X-Treg-Token` header
+  for a token minted by `treg login --token`.
