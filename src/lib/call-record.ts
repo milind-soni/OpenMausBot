@@ -6,12 +6,12 @@
 // a call runs. The whole transcript is read, not only what comes before the
 // row: a turn still running at hang-up keeps adding steps.
 // A line steered into a running turn starts no turn of its own: that turn
-// keeps pointing at the request it began with. So a typed line steered into
-// a call's turn is listed with the call, and a spoken line steered into a
-// typed request's turn (or into another call's) is not listed with its own.
+// keeps pointing at the request it began with. So with a typed line
+// steered into a call's turn, the turn's work is still listed with the
+// call; with a spoken line steered into a typed request's turn (or into
+// another call's), none of that turn's work is listed with its own call.
 import type { Message } from "@/state/store";
-import { isStatusActivity } from "@/lib/activity-runs";
-import { failedTurnCause } from "../../shared/failed-turn";
+import { isToolStep } from "@/lib/activity-runs";
 
 export type CallRecordLine =
   | { kind: "step"; id: string; tool: NonNullable<Message["tool"]> }
@@ -29,10 +29,9 @@ export function callRecordLines(transcript: readonly Message[], callId: string):
   const lines: CallRecordLine[] = [];
   for (const message of transcript) {
     if (!message.requestMessageId || !requests.has(message.requestMessageId)) continue;
-    const { tool, card } = message;
-    if (message.kind === "activity" && tool && !message.comm && !message.threadRef &&
-      !isStatusActivity(message) && failedTurnCause(tool.name) === null) {
-      lines.push({ kind: "step", id: message.id, tool });
+    const { card } = message;
+    if (isToolStep(message)) {
+      lines.push({ kind: "step", id: message.id, tool: message.tool });
     } else if (message.kind === "options" && card?.requestId && card.tool && !card.questionRequest) {
       lines.push({ kind: "approval", id: message.id, card });
     }

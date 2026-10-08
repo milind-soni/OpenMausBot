@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeRun, groupActivityRuns, groupTranscript, isRecoveryActivity, statusActivity } from "./activity-runs";
+import { describeRun, groupActivityRuns, groupTranscript, isRecoveryActivity, isToolStep, statusActivity } from "./activity-runs";
 import type { Message } from "@/state/store";
 
 let seq = 0;
@@ -29,6 +29,13 @@ describe("groupActivityRuns", () => {
     const opened: Message = { ...tool("Opened thread #QA PR 245 on Scout"),
       threadRef: { botId: "scout", threadId: "qa-245", title: "QA PR 245" } };
     const items = groupActivityRuns([tool("Edit"), tool("Edit"), opened, tool("Write"), tool("Write")]);
+    expect(items.map((i) => i.kind)).toEqual(["run", "message", "run"]);
+  });
+
+  it("never folds a bot-to-bot chip into a run — it links to the other conversation", () => {
+    const messaged: Message = { ...tool("Messaged @Ada"),
+      comm: { groupId: "g1", withBotId: "ada", withName: "Ada", withColor: "blue" } };
+    const items = groupActivityRuns([tool("Edit"), tool("Edit"), messaged, tool("Write"), tool("Write")]);
     expect(items.map((i) => i.kind)).toEqual(["run", "message", "run"]);
   });
 
@@ -121,6 +128,38 @@ describe("groupActivityRuns", () => {
         stepAt("Bash", afterMidnight),
       ]).map((item) => item.kind),
     ).toEqual(["run", "run"]);
+  });
+});
+
+describe("isToolStep", () => {
+  const opened: Message = { ...tool("Opened thread #QA PR 245 on Scout"),
+    threadRef: { botId: "scout", threadId: "qa-245", title: "QA PR 245" } };
+  const messaged: Message = { ...tool("Messaged @Ada"),
+    comm: { groupId: "g1", withBotId: "ada", withName: "Ada", withColor: "blue" } };
+
+  it("is true for a tool the bot ran, whether it is running, finished or failed", () => {
+    const steps = [tool("Edit"), running("Bash"), tool("Bash", false)];
+    expect(steps.filter((step) => isToolStep(step))).toEqual(steps);
+    // narrows the message: its tool can be read without another check
+    const step = tool("Edit");
+    expect(isToolStep(step) && step.tool.name).toBe("Edit");
+  });
+
+  it("is false for what is not work: chips that link elsewhere, status rows and a failed turn", () => {
+    const rows = [
+      opened,
+      messaged,
+      tool("notice: the engine runs another model"),
+      tool("recovery: Automatic recovery: trying a backup once."),
+      tool("error: the CLI exited"),
+    ];
+    expect(rows.filter((row) => isToolStep(row))).toEqual([]);
+  });
+
+  it("is false for anything that is not an activity row with a tool", () => {
+    const noTool: Message = { id: "n1", at: 1, role: "bot", kind: "activity" };
+    const notActivity: Message = { ...tool("Edit"), kind: "text" };
+    expect([text("hi"), noTool, notActivity].filter((row) => isToolStep(row))).toEqual([]);
   });
 });
 

@@ -108,14 +108,16 @@ describe("callRecordLines", () => {
     expect(ids(transcript, "c1")).toEqual(["approval:o1"]);
   });
 
-  it("hands over each step's tool and each approval's card as they are", () => {
+  it("hands over each step's tool, a failed one too, and each approval's card as they are", () => {
     const transcript = [
       spoken("m1", "check the build", "c1"),
       step("s1", "m1", "Bash", { spoken: "running a command", summary: "pnpm test" }),
+      step("s2", "m1", "Write", { ok: false }),
       approval("o1", "m1", { answered: "allow" }),
     ];
     expect(callRecordLines(transcript, "c1")).toEqual([
       { kind: "step", id: "s1", tool: { name: "Bash", ok: true, spoken: "running a command", summary: "pnpm test" } },
+      { kind: "step", id: "s2", tool: { name: "Write", ok: false } },
       { kind: "approval", id: "o1", card: expect.objectContaining({ requestId: "req-o1", tool: "Bash", answered: "allow" }) },
     ]);
   });
