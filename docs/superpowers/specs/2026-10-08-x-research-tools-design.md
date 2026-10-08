@@ -172,6 +172,9 @@ bot ──tools/call──▶ agents-proxy (stdio)
   | profile | `treg.x.user.profile` `{username}` (routed; normalized output) | (routing is the fallback) |
   | Test | `GET /auth/me` → `org_id`, then `GET /orgs/{org_id}/balance` → `balance_micro` | none |
 
+- `OMB_TREG_URL` (environment only) points the client at a self-hosted treg
+  registry or a test's loopback stub instead of treg.to. The verification
+  launcher lets it cross into a fixture only as `http://127.0.0.1:<port>`.
 - Every request carries `X-Treg-Token`; every `/call/` also carries
   `X-Treg-Route-Max-Cost: 0.05`, well above any of these prices, so a mispriced
   route cannot drain the balance. 30 s timeout, `redirect: "error"`, 2 MiB body

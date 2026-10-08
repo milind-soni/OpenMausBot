@@ -27,3 +27,13 @@ describe("the fixture's Live call environment", () => {
     expect(childEnv({ OMB_OPENAI_LIVE_KEY: "sk-real" })).not.toHaveProperty("OMB_OPENAI_LIVE_KEY");
   });
 });
+
+describe("the fixture's treg environment", () => {
+  it("passes a loopback treg stub through, and nothing else", () => {
+    expect(childEnv({ OMB_TREG_URL: " http://127.0.0.1:4200 " })).toMatchObject({ OMB_TREG_URL: "http://127.0.0.1:4200" });
+    for (const url of ["https://treg.to", "http://localhost:4200", "http://127.0.0.1:4200/call", "http://192.0.2.1:4200", ""]) {
+      expect(childEnv({ OMB_TREG_URL: url }), url).not.toHaveProperty("OMB_TREG_URL");
+    }
+    expect(childEnv({ OMB_TREG_TOKEN: "real-token" })).not.toHaveProperty("OMB_TREG_TOKEN");
+  });
+});

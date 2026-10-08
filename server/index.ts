@@ -629,6 +629,7 @@ import {
 import { json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
 import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts";
 import { createXResearchInternalRoutes, createXResearchKeyTestRoute } from "./routes/x-research.ts";
+import { createTregXClient } from "./x-research.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
@@ -15973,11 +15974,14 @@ ROUTES.push(desktopViewer.route);
 // X research (server/routes/x-research.ts): Settings' token Test runs from the
 // table; the four tool routes run inside the /api/internal/ block below,
 // after the capability bearer is checked. `cfg` is reassigned on reload, so
-// both read it per request.
-ROUTES.push(createXResearchKeyTestRoute({ token: () => cfg.treg?.token }));
+// both read it per request. OMB_TREG_URL points the client at a self-hosted
+// treg registry (or a test's loopback stub) instead of treg.to.
+const xResearchClient = (token: string) => createTregXClient({ token, baseUrl: process.env.OMB_TREG_URL?.trim() || undefined });
+ROUTES.push(createXResearchKeyTestRoute({ token: () => cfg.treg?.token, client: xResearchClient }));
 const xResearchRoutes = createXResearchInternalRoutes({
   token: () => cfg.treg?.token,
   botEnabled: (botId) => store.bot(botId)?.xResearch === true,
+  client: xResearchClient,
 });
 
 // Live calls (GPT-Live as the voice, the bot as the brain). A client holds
