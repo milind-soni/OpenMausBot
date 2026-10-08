@@ -157,8 +157,9 @@ bot ──tools/call──▶ agents-proxy (stdio)
   from index.ts, like `workspaceBackupRoutes`), a saved key, and
   `store.bot(capability.botId)?.xResearch === true`. Either missing is a 403
   with the plain message below, so a stale tool list cannot spend credit.
-- `XResearchError` codes map to HTTP statuses (400/401/402/404/429/502) and the
-  message is returned as `{ error }`.
+- `XResearchError` codes map to HTTP statuses: `bad_input` 400, `not_found`
+  404, every scraper failure 502. The body is `{ error, code }`. 401 is never
+  used: on internal routes it means the turn's capability expired.
 
 ### `server/drivers/agents-call.ts`: handlers
 
@@ -191,7 +192,7 @@ tool's error text unchanged.
 ## Key storage
 
 The key follows the xAI key everywhere it goes. Config section `twitterapi`,
-field `key`, env `TWITTERAPI_KEY`, Electron credential name `twitterapiKey`.
+field `key`, env `OMB_TWITTERAPI_KEY` (the `OMB_` prefix every non-model key uses), Electron credential name `twitterapiKey`.
 
 - `server/config.ts`: schema, `AppConfig`, env override, `syncCredentialEnv`,
   `WORKSPACE_CREDENTIAL_ENV` (strips it from engine children), `saveConfig`.
@@ -209,8 +210,9 @@ field `key`, env `TWITTERAPI_KEY`, Electron credential name `twitterapiKey`.
   link, and placeholder; it saves through the Electron credential slot in the
   desktop app. Test calls a check that hits `GET /oapi/my/info` and shows the
   remaining credit in dollars (`recharge_credits / 100_000`; twitterapi.io
-  prices 15 credits at $0.00015). The check goes through `POST /api/keys/test`
-  with a new `twitterapi` kind handled outside the model-provider path.
+  prices 15 credits at $0.00015). The check is its own admin-only route,
+  `POST /api/x-research/test`, in the same route module; `/api/keys/test`
+  stays the model-provider check.
 - `src/components/SettingsModal.tsx`: render the row in the connections card
   and add search keywords ("x", "twitter", "scraper").
 - `src/components/bot-settings/AccessSection.tsx`: the X research card with a
@@ -259,7 +261,7 @@ connector is only needed for posting.
 - `server/activity.test.ts`: the four labels.
 - Request-auth test: a phone token's `PATCH /api/bots/:id` with `xResearch` is
   refused; the desktop's patch is accepted.
-- `electron/diagnostics.test.mjs`: the mirror list includes `TWITTERAPI_KEY`.
+- `electron/diagnostics.test.mjs`: the mirror list includes `OMB_TWITTERAPI_KEY`.
 - Config tests: the key is stripped from engine environments and never appears
   in `configStatus`.
 - Manual: an OMB2 build. Omkar pastes a real twitterapi.io key, Test shows the
