@@ -304,6 +304,22 @@ describe("Store", () => {
     for (const field of Object.keys(patch)) expect(wire).not.toHaveProperty(field);
   });
 
+  it("keeps a Live call row's record across a restart and scrubs a secret from its title", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const key = "sk-ant-" + "c".repeat(90);
+    const row = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "call",
+      text: "Call with Ada · 1:42",
+      call: { callId: "call-1", botId: bot.id, client: "ios", startedAt: 1_000, endedAt: 103_000, seconds: 102, endReason: "hung-up", title: `Deploy with ${key}` },
+    });
+    expect(row.call?.title).not.toContain(key);
+    const reloaded = new Store(selection).messagesFor(bot.threadId).find((message) => message.id === row.id);
+    expect(reloaded?.call).toMatchObject({ callId: "call-1", botId: bot.id, client: "ios", seconds: 102, endReason: "hung-up" });
+    expect(JSON.stringify(reloaded)).not.toContain(key);
+  });
+
   it("round-trips audio attachments with their metadata through persistence", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });

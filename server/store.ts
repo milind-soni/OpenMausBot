@@ -170,6 +170,8 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
       detail: out.goalRun.detail ? redactSecretsInText(out.goalRun.detail) : undefined,
     };
   }
+  // A Live call's title is the bot engine's own words about the call.
+  if (out.call?.title) out.call = { ...out.call, title: redactSecretsInText(out.call.title) };
   if (out.card) {
     const card = { ...out.card } as OptionCardData & { summary?: string };
     card.title = redactSecretsInText(card.title);

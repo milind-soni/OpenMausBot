@@ -346,14 +346,14 @@ import { createDecider, deciderIncludedHere, deciderReady, deciderSavePatch, des
 import { decideRoomResponder, type RoomRoutingInput } from "./decider/room-routing.ts";
 import { createLiveSession, liveAttachUrl, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError, type LiveSocket } from "./live-call-controller.ts";
-import { recordLiveCall, spokenLineFields } from "./live-call-record.ts";
+import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { turnStartLogLine } from "./turn-log.ts";
 import { makeCapContinuationSubscriber } from "./turn-continuation.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS, peerMessageText } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
-import { threadTitlePrompt, titleConversationExcerpt, type ThreadTitleSource } from "./thread-title.ts";
+import { callTitleExcerpt, threadTitlePrompt, titleConversationExcerpt, type ThreadTitleSource } from "./thread-title.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import { TurnResources, type TurnOwner } from "./turn-resources.ts";
 import {
@@ -9401,7 +9401,8 @@ async function finalScreenFrame(_botId: string, threadId: string): Promise<Frame
  * path on OpenAI-compatible engines). Null whenever that call cannot run,
  * runs long, or answers with something that is not a plain short title;
  * the caller keeps the snippet it already applied. "conversation" names an
- * existing thread from titleConversationExcerpt (Regenerate title). */
+ * existing thread from titleConversationExcerpt (Regenerate title); "call"
+ * names a finished Live call from callTitleExcerpt. */
 async function generateThreadTitle(
   provider: { generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string> },
   text: string,
@@ -9428,6 +9429,28 @@ async function generateThreadTitle(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Whether a generated title may be asked for on behalf of `bot` now, and from
+ * which engine, or why not. Generated titles are on; a hosted policy allows
+ * the bot's model; that model has a one-shot (generateText); the organisation
+ * does not disallow its engine (it never receives the text, even for a
+ * title); and the spend cap is not reached. Regenerate title answers a
+ * refusal with its reason, a finished Live call's title takes it as "no
+ * title". */
+function threadTitleGate(bot: Pick<BotRecord, "modelSelection">): { ok: true; instance: ProviderInstance } | { ok: false; refusal: string } {
+  if (!llmThreadTitlesEnabled(cfg)) return { ok: false, refusal: "generated thread titles are turned off on this server" };
+  if (hostedModels && !hostedModels.allows(bot.modelSelection)) return { ok: false, refusal: hostedModels.error() };
+  const instance = registry.get(bot.modelSelection.instanceId);
+  if (!instance?.generateText) return { ok: false, refusal: "this bot's model can't generate a title — rename the thread instead" };
+  const refusal = policyModelRefusal(instance);
+  if (refusal) return { ok: false, refusal };
+  try {
+    assertWithinBudget(cfg, DATA_DIR);
+  } catch (error) {
+    return { ok: false, refusal: error instanceof Error ? error.message : String(error) };
+  }
+  return { ok: true, instance };
 }
 
 /** Threads whose Regenerate title one-shot is still running: one at a time. */
@@ -15756,6 +15779,18 @@ function liveHistoryFor(threadId: string): LiveHistoryMessage[] {
 function liveSignedIn(auth: RequestAuth): boolean {
   return auth.kind !== "session" || sessions.isLive(auth.session.id);
 }
+/** A finished Live call's title: the thread-title one-shot (generateThreadTitle,
+ * with its 10-second cap) from the call's spoken requests, on the bot's own
+ * engine, which already saw them, so nothing new reaches OpenAI. Null, with
+ * nothing called, whenever Regenerate title would be refused (threadTitleGate):
+ * generated titles are off, the engine has no one-shot, a hosted or
+ * organisation policy refuses it, or the spend cap is reached. */
+function liveCallTitle(botId: string, threadId: string, excerpt: string): Promise<string | null> | null {
+  const bot = store.projectBotForTask(botId, threadId);
+  if (!bot) return null;
+  const gate = threadTitleGate(bot);
+  return gate.ok ? generateThreadTitle(gate.instance, excerpt, "call") : null;
+}
 const liveCalls = new LiveCallController({
   store,
   send: async ({ auth, botId, threadId, text, callId }) => {
@@ -15799,12 +15834,22 @@ const liveCalls = new LiveCallController({
   attachUrl: (sessionId) => liveAttachUrl(sessionId),
   speakable: (text) => toUtterances(text),
   // A call that went live leaves one "call" row in its chat when it ends:
-  // its id, times and length, never anything said on it.
+  // its id, times and length, never anything said on it. With generated
+  // titles on, a title patches the row a moment later.
   recordCall: (input) => {
-    recordLiveCall({
+    const row = recordLiveCall({
       chatExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
       appendMessage: (threadId, message) => store.appendMessage(threadId, message),
     }, input);
+    if (row) {
+      void titleLiveCall({
+        messagesFor: (threadId) => store.messagesFor(threadId),
+        patchMessage: (threadId, messageId, patch) => store.patchMessage(threadId, messageId, patch),
+        excerpt: callTitleExcerpt,
+        title: liveCallTitle,
+        scrub: redactSecretsInText,
+      }, { threadId: input.threadId, row });
+    }
   },
   log: (line) => console.log(line),
 });
@@ -22995,25 +23040,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!current) return json(res, 404, { error: "no such task" });
       const notYours = cloudThreadRefusal(auth, m[2]);
       if (notYours) return json(res, 403, { error: notYours });
-      if (!llmThreadTitlesEnabled(cfg)) return json(res, 409, { error: "generated thread titles are turned off on this server" });
-      if (hostedModels && !hostedModels.allows(current.modelSelection)) return json(res, 409, { error: hostedModels.error() });
-      const instance = registry.get(current.modelSelection.instanceId);
-      if (!instance?.generateText) return json(res, 409, { error: "this bot's model can't generate a title — rename the thread instead" });
-      // An engine the organisation disallows never receives the text, even for a title.
-      const refusal = policyModelRefusal(instance);
-      if (refusal) return json(res, 409, { error: refusal });
+      const gate = threadTitleGate(current);
+      if (!gate.ok) return json(res, 409, { error: gate.refusal });
       if (titleRegenerations.has(m[2])) return json(res, 409, { error: "a new title is already being generated for this thread" });
       const excerpt = titleConversationExcerpt(store.messagesTail(m[2], 200).messages);
       if (!excerpt) return json(res, 409, { error: "this thread has no messages to take a title from yet" });
-      try {
-        assertWithinBudget(cfg, DATA_DIR);
-      } catch (error) {
-        return json(res, 409, { error: error instanceof Error ? error.message : String(error) });
-      }
       const startedFrom = store.taskByThread(m[1], m[2])!.title;
       titleRegenerations.add(m[2]);
       try {
-        const title = await generateThreadTitle(instance, excerpt, "conversation");
+        const title = await generateThreadTitle(gate.instance, excerpt, "conversation");
         if (!title) return json(res, 502, { error: "couldn't generate a title — try again, or rename the thread" });
         const task = store.retitleTask(m[1], m[2], startedFrom, title) ?? store.taskByThread(m[1], m[2]);
         if (!task) return json(res, 404, { error: "no such task" });

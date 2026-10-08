@@ -42,6 +42,8 @@ posixOnly("Live call e2e", () => {
   let live: FakeOpenAiLive;
   /** while missing, the `steer` engine holds its turn open after its tool result */
   let steerGate = "";
+  /** the fake claude's one-shot replies, by a marker in the prompt */
+  let titleRoutes = "";
   /** while present, the `codexQueue` engine refuses a live steer */
   let queueSteerGate = "";
 
@@ -80,6 +82,15 @@ posixOnly("Live call e2e", () => {
     expect(session).toBeDefined();
     return { started, call, session };
   };
+  /** Generated thread titles (features.llmThreadTitles) on this server, on or off. */
+  const setGeneratedTitles = async (on: boolean) => {
+    const res = await fetch(`${base}/api/config`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ features: { llmThreadTitles: on } }),
+    });
+    expect(res.status).toBe(200);
+  };
 
   beforeAll(async () => {
     chmodSync(FAKE_CLAUDE, 0o755);
@@ -89,6 +100,9 @@ posixOnly("Live call e2e", () => {
     home = mkdtempSync(join(tmpdir(), "omb-live-call-"));
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
     steerGate = join(home, "steer.gate");
+    // the one-shot answers a call-title prompt that holds the spoken request
+    titleRoutes = join(home, "title-routes.json");
+    writeFileSync(titleRoutes, JSON.stringify({ "Requests:\nwhat is six times seven": "Times table question" }));
     queueSteerGate = join(home, "queue-steer.gate");
     writeFileSync(
       join(home, ".openmausbot", "config.json"),
@@ -96,7 +110,7 @@ posixOnly("Live call e2e", () => {
         instances: {
           claude: {
             driver: "claudeAgent",
-            environment: { FAKE_CLAUDE_REPLIES: JSON.stringify(["Six times seven is 42."]) },
+            environment: { FAKE_CLAUDE_REPLIES: JSON.stringify(["Six times seven is 42."]), FAKE_CLAUDE_TEXT_ROUTES: titleRoutes },
             config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" },
           },
           // pauses after its tool result until steerGate exists: a request
@@ -568,6 +582,56 @@ posixOnly("Live call e2e", () => {
       sse.close();
     }
   }, 40_000);
+
+  // Titles follow the setting as a call ends. The first call ends with generated
+  // titles off and keeps "Call with <bot>"; the second, with them on, is named
+  // from what was asked on it. Whether the first stayed untitled is read only
+  // after the second's title has arrived, so the check waits on an event (a
+  // title one-shot that had wrongly been started for the first call would have
+  // finished by then), not on a clock.
+  it("names a call from what was asked on it when generated titles are on, and never one that ended while they were off", async () => {
+    const quiet = await createBot();
+    const named = await createBot();
+    const sse = await openSse(`${base}/api/events`);
+    let callId = "";
+    /** One call on `bot`: asks for six times seven, hears the answer, hangs up. Resolves with the row it left. */
+    const askAndHangUp = async (bot: { id: string; threadId: string }) => {
+      const { call, session } = await startCall(bot.id);
+      callId = call.callId;
+      await live.waitForAttach(session.id);
+      live.emit(session.id, { type: "session.input_transcript.delta", delta: "what is six times seven", start_ms: 100, end_ms: 900 });
+      live.emit(session.id, { type: "session.delegation.created", offset_ms: 950, delegation: { id: `del_${bot.id}`, target: "client", type: "delegation" } });
+      await live.waitForCommand(session.id, (c) => c.type === "session.commentary.append" && String(c.content).includes("42"), 20_000);
+      expect(await post("/api/live/call/end", { callId })).toMatchObject({ status: 200 });
+      return sse.until((frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message?.kind === "call", 10_000);
+    };
+    try {
+      const first = await askAndHangUp(quiet);
+      expect(first.message.call.title).toBeUndefined();
+
+      await setGeneratedTitles(true);
+      const second = await askAndHangUp(named);
+      // written first, untitled; the title arrives as a patch of the same row
+      expect(second.message.call.title).toBeUndefined();
+      const titled = await sse.until(
+        (frame) => frame.kind === "message.patch" && frame.message?.id === second.message.id && typeof frame.message?.call?.title === "string",
+        15_000,
+      );
+      expect(titled.message.call).toMatchObject({ callId: second.message.call.callId, title: "Times table question" });
+      expect(titled.message.text).toBe(second.message.text);
+
+      // the first call ended with titles off: it was never titled or patched
+      const { messages } = (await (await fetch(`${base}/api/threads/${quiet.threadId}/messages`)).json()) as { messages: Array<{ id: string; call?: { title?: string } }> };
+      expect(messages.find((message) => message.id === first.message.id)?.call?.title).toBeUndefined();
+      expect(sse.frames.some((frame) => frame.kind === "message.patch" && frame.message?.id === first.message.id)).toBe(false);
+    } finally {
+      // the rest of this suite runs with generated titles off
+      await setGeneratedTitles(false);
+      if (callId) await post("/api/live/call/end", { callId });
+      for (const bot of [quiet, named]) await expect.poll(() => isBusy(bot.id), { timeout: 20_000 }).toBe(false);
+      sse.close();
+    }
+  }, 90_000);
 
   // The row is for a chat that still exists: a call whose bot is deleted
   // while it runs ends as "deleted", writes nothing, and counts no error.
