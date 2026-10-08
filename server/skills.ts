@@ -1375,6 +1375,38 @@ export function applySkillWriteWithReceipt(
   }
 }
 
+/** Undo for a learned-skill write that applied without a person: a create
+ * is removed; an update gets the SKILL.md it replaced back, as a fresh
+ * revision through the same stage and apply path. Only while the skill is
+ * exactly as that write left it; otherwise `stale`, and nothing changes. */
+export function undoSkillWrite(
+  botId: string,
+  write: { stagedId: string; name: string; action: StagedSkillAction; previous?: { skillMd: string; source: string } },
+): { undone: true } | { stale: true } | { error: string } {
+  const entry = readManifest(botId)[write.name];
+  if (!entry || entry.appliedStageId !== write.stagedId || !installedLearnedSkillMatches(botId, write.name, entry)) {
+    return { stale: true };
+  }
+  if (write.action === "create") {
+    const removed = removeSkill(botId, write.name);
+    return "error" in removed ? removed : { undone: true };
+  }
+  if (!write.previous) return { error: "This change can't be undone here." };
+  const staged = stageSkillWrite(botId, {
+    action: "update",
+    targetName: write.name,
+    files: [{ path: "SKILL.md", content: write.previous.skillMd }],
+    source: write.previous.source,
+  });
+  if ("error" in staged) return staged;
+  const applied = applyStagedSkillWrite(botId, staged.id, { expectedSha256: staged.sha256 });
+  if ("error" in applied) {
+    rejectStagedSkillWrite(botId, staged.id);
+    return applied;
+  }
+  return { undone: true };
+}
+
 /** The skills block appended to a bot's system prompt: enabled skills only,
  * index lines only — the same progressive-disclosure shape the spec asks
  * agents for. Bodies never ride the prompt; the bot reads the file when a

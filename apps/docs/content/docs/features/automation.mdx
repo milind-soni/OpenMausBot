@@ -18,6 +18,8 @@ In a routine's editor, use **Post results to** to choose an existing thread or *
 
 Each run gets its own execution context, while dated reports collect in the chosen thread. Background execution threads stay out of the normal sidebar and mobile thread pickers. Use **Open run** on a report for its conversation and any approvals, then **Back to results** to return. **Run logs** keeps the execution history, including failures and waiting runs.
 
+A bot schedules, changes, pauses, resumes, and deletes its own routines from chat without asking, and each change shows as one line with **Undo** (see [Changes a bot makes to itself](/docs/features/approvals-and-inspector#changes-a-bot-makes-to-itself)). A routine for another bot asks first unless the conversation has Full access.
+
 Routines created in chat keep reporting to that conversation unless you choose a different destination. Changing the destination affects future runs, not the report links for older runs. If you delete a results thread, its hidden execution threads become visible so you can still inspect their work and respond to approvals.
 
 ### Remember the last run

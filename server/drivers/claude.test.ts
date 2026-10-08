@@ -1438,14 +1438,40 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({
       threadId: "t-remote-mcp",
       text: "hi",
-      integrations: { custom: { docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } } } },
+      integrations: { custom: {
+        docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } },
+        legacy: { type: "sse", url: "https://old.example/sse", headers: {} },
+      } },
     });
     await recorder.until((e) => e.type === "turn.completed");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    // the CLI connects itself; there is no process for the gate to stand between
+    // The one engine that connects by itself: its handshake has only
+    // spec-defined fields (claude.ts), so no OpenMausBot connector here,
+    // unlike every other engine.
     expect(seen.mcpConfig.mcpServers.docs).toEqual({ type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } });
+    expect(seen.mcpConfig.mcpServers.legacy).toEqual({ type: "sse", url: "https://old.example/sse", headers: {} });
+    expect(JSON.stringify(seen.mcpConfig)).not.toContain("mcp-remote-proxy");
     expect(JSON.stringify(seen.argv)).not.toContain("tok-docs");
+  });
+
+  it("keeps a selected url server's whole catalog: Claude Code searches tools itself", async () => {
+    await create();
+    const dump = join(scratch, "remote-mcp-scoped.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-remote-mcp-scoped",
+      text: "hi",
+      toolScope: { allow: ["native:*", "mcp:docs:*"] },
+      integrations: { custom: { docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } } } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const docs = JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.docs;
+    expect(docs.args[0]).toContain("mcp-gate");
+    expect(docs.env).not.toHaveProperty("OMB_GATE_DIRECTORY");
+    const upstream = JSON.parse(docs.env.OMB_GATE_UPSTREAM);
+    expect(upstream.args[0]).toContain("mcp-remote-proxy");
+    expect(upstream.env).not.toHaveProperty("OMB_REMOTE_MCP_DIRECTORY");
   });
 
   it("preserves only the selected account's auth settings in a private file", async () => {

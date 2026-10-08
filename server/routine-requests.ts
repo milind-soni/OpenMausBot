@@ -6,6 +6,7 @@ import { z } from "zod";
 import { cronScheduleLabel } from "../shared/cron-label.ts";
 import { normalizeCronSchedule, nextCronRuns } from "../shared/routine-schedule.ts";
 import { newId } from "./contracts.ts";
+import { SELF_ROUTINE_CAP, UNDO_STALE, type DirectApply, type DirectApplyCheck } from "./direct-apply.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import {
@@ -26,6 +27,8 @@ import type {
   RoutineRequestRunOn,
   RoutineRequestSchedule,
   RoutineRequestScheduleChanges,
+  RoutineRequestSnapshot,
+  RoutineRequestUndo,
 } from "../shared/routine-request.ts";
 
 const WEEKDAY_NUMBER = {
@@ -239,6 +242,19 @@ const storedOperationSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("run_now"), ...storedManageBase }).strict(),
   z.object({ action: z.literal("delete"), ...storedManageBase }).strict(),
 ]);
+const storedSnapshotSchema = storedDefinitionSchema.extend({
+  enabled: z.boolean(),
+  target: z.literal("room-goal").optional(),
+  groupId: z.string().min(1).max(128).optional(),
+  resultsThreadId: z.string().min(1).max(128).optional(),
+}).strict();
+const storedUndoSchema = z.object({
+  name: z.string().max(200),
+  schedule: storedScheduleSchema.optional(),
+  appliedUpdatedAt: z.number().int().nonnegative().optional(),
+  before: storedSnapshotSchema.optional(),
+  ownersBefore: z.boolean().optional(),
+}).strict();
 const routineRequestCardDataSchema = z.object({
   version: z.literal(1),
   requestId: z.string().min(1).max(128),
@@ -248,6 +264,7 @@ const routineRequestCardDataSchema = z.object({
   operation: storedOperationSchema,
   appliedAt: z.number().int().nonnegative().optional(),
   resultId: z.string().min(1).max(128).optional(),
+  undo: storedUndoSchema.optional(),
 }).strict();
 
 export type RoutineToolScheduleInput = z.infer<typeof routineToolScheduleSchema>;
@@ -266,6 +283,8 @@ export interface RoutineRequestOptionCard {
   requestId?: string;
   tool?: string;
   held?: string;
+  autoApplied?: boolean;
+  undone?: boolean;
   routineRequest?: RoutineRequestCardData;
 }
 
@@ -298,8 +317,9 @@ export interface RoutineRequestServiceOptions {
   routines: RoutineManager;
   now?: () => number;
   timeZone?: () => string;
-  /** Server-owned effective mode of the source conversation, never request input. */
-  autoApply?: (botId: string, threadId: string) => boolean;
+  /** Whether a submitted change applies without a person, and why
+   * (server/direct-apply.ts). Server-owned, never request input. */
+  autoApply?: DirectApplyCheck;
   /** Harness-owned readiness check for proposals that would execute in cloud. */
   cloudReady?: (botId: string) => Promise<{ ready: boolean; reason?: string }>;
   /** Revalidates conversation ownership and capacity synchronously, directly
@@ -307,6 +327,8 @@ export interface RoutineRequestServiceOptions {
   canPersist?: (
     botId: string,
     threadId: string,
+    /** False for a change that applies directly: it opens no card. */
+    opensCard: boolean,
   ) => { ok: true } | { ok: false; status: number; error: string };
   /** Re-authorizes a cross-bot target (the card can sit open while the target
    * bot is deleted or moved to another section). Returns the sentence to
@@ -358,6 +380,20 @@ export type ResolveRoutineRequestResult =
       resultId: string;
       settlementPending?: true;
       message?: string;
+    };
+
+export type UndoRoutineRequestResult =
+  | { claimed: false }
+  | { claimed: true; state: "already_undone" }
+  | { claimed: true; state: "invalid"; error: string; status: number; stale?: true }
+  | {
+      claimed: true;
+      state: "undone";
+      action: RoutineRequestOperation["action"];
+      routineId: string;
+      /** A deleted routine comes back under a new id. */
+      restoredId?: string;
+      ownersBefore?: boolean;
     };
 
 export class RoutineRequestError extends Error {
@@ -1078,6 +1114,47 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
   }
 }
 
+/** The routine as it stands, kept for Undo. None when it carries what a
+ * card cannot hold exactly: attachments, or credential-shaped text the
+ * transcript scrubs. */
+function routineSnapshot(routine: Routine): RoutineRequestSnapshot | undefined {
+  if (routine.attachments?.length) return undefined;
+  if (redactSecretsInText(routine.name) !== routine.name || redactSecretsInText(routine.prompt) !== routine.prompt) return undefined;
+  const snapshot: RoutineRequestSnapshot = {
+    name: routine.name,
+    instructions: routine.prompt,
+    schedule: structuredClone(routine.schedule),
+    runOn: routine.runOn,
+    durationMinutes: routine.durationMinutes,
+    ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
+    ...(routine.continuity ? { continuity: true } : {}),
+    ...(routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
+    enabled: routine.enabled,
+    ...(routine.target === "room-goal" ? { target: "room-goal" as const } : {}),
+    ...(routine.groupId ? { groupId: routine.groupId } : {}),
+    ...(routine.resultsThreadId ? { resultsThreadId: routine.resultsThreadId } : {}),
+  };
+  return storedSnapshotSchema.safeParse(snapshot).success ? snapshot : undefined;
+}
+
+/** Puts an updated routine's definition back exactly: an interval's
+ * restrictions are cleared explicitly, since an omitted one is kept. */
+function restorePatch(before: RoutineRequestSnapshot, now: number): Partial<RoutineInput> {
+  const schedule = asSchedule(before.schedule, now);
+  return {
+    name: before.name,
+    prompt: before.instructions,
+    runOn: before.runOn,
+    schedule: schedule.type === "interval"
+      ? { ...schedule, weekdays: schedule.weekdays ?? null, window: schedule.window ?? null, endsAt: schedule.endsAt ?? null }
+      : schedule,
+    durationMinutes: before.durationMinutes,
+    timeoutMinutes: before.timeoutMinutes ?? null,
+    continuity: before.continuity === true,
+    overlap: before.overlap ?? "skip",
+  };
+}
+
 export class RoutineRequestService {
   private readonly store: RoutineRequestStore;
   private readonly routines: RoutineManager;
@@ -1110,6 +1187,8 @@ export class RoutineRequestService {
 
   private async prepare(args: ProposeRoutineRequestArgs, submitted = false): Promise<RoutineProposalResult & {
     result?: Extract<ResolveRoutineRequestResult, { state: "applied" }>;
+    /** Why it applied without a person. */
+    appliedBy?: DirectApply;
   }> {
     const botId = text(args.botId, "botId", 128);
     const threadId = text(args.threadId, "threadId", 128);
@@ -1154,18 +1233,27 @@ export class RoutineRequestService {
       },
     };
     if (args.from) messageInput.from = args.from;
+    // Resolve the current source-thread grant after the asynchronous probe.
+    const owner = operation.forBot?.botId ?? botId;
+    const grant = submitted ? this.autoApply?.(botId, threadId, owner) ?? null : null;
+    // A bot applying its own routines keeps at most SELF_ROUTINE_CAP of them
+    // on; a create or resume past that shows the card, as before. Full
+    // access has no cap.
+    const automatic = grant === "full-access" || (grant === "self" && !this.overSelfCap(operation, owner));
     // This check and append are deliberately adjacent and synchronous. JS
     // cannot interleave another completed proposal between the capacity /
     // ownership decision and the durable transcript write.
-    const persistence = this.canPersist?.(botId, threadId);
+    const persistence = this.canPersist?.(botId, threadId, !automatic);
     if (persistence && !persistence.ok) {
       throw new RoutineRequestError(persistence.error, persistence.status);
     }
     if (args.canCommit && !args.canCommit()) {
       throw new RoutineRequestError("The requesting turn ended before this proposal could be saved", 401);
     }
-    // Resolve the current source-thread grant after the asynchronous probe.
-    const automatic = submitted && this.autoApply?.(botId, threadId) === true;
+    // What Undo puts back, taken before the change.
+    const before = automatic && (operation.action === "update" || operation.action === "delete")
+      ? this.snapshotOf(operation.routineId, owner)
+      : undefined;
     if (automatic) {
       messageInput.card.options = [];
       messageInput.card.dismissed = true;
@@ -1189,7 +1277,10 @@ export class RoutineRequestService {
     } catch (error) {
       result = { claimed: true, state: "invalid", error: error instanceof Error ? error.message : String(error), status: error instanceof RoutineRequestError ? error.status : 400 };
     }
-    if (result.state === "applied") return { ...proposal, result };
+    if (result.state === "applied") {
+      this.recordAutoApplied(threadId, message.id, definition, before);
+      return { ...proposal, result, ...(grant ? { appliedBy: grant } : {}) };
+    }
     // The scheduler commit can succeed even if settling its transcript
     // fails. Report that exact result; a retry only finishes the receipt.
     const receipt = this.routines.routineRequestReceipt(requestId);
@@ -1198,9 +1289,142 @@ export class RoutineRequestService {
       return { ...proposal, result: {
         claimed: true, state: "applied", action: receipt.action, resultId: receipt.resultId,
         settlementPending: true, message: "Routine change applied. Recording the operation receipt could not finish; the change will not be applied again.",
-      } };
+      }, ...(grant ? { appliedBy: grant } : {}) };
     }
     throw new RoutineRequestError(result.state === "invalid" ? result.error : "The routine change could not be applied", result.state === "invalid" ? result.status : 409);
+  }
+
+  /** Whether one more enabled routine would take the bot past the cap. */
+  private overSelfCap(operation: RoutineRequestOperation, owner: string): boolean {
+    if (operation.action !== "create" && operation.action !== "resume") return false;
+    const enabled = this.routines.listRoutines().filter((routine) => routine.botId === owner && routine.enabled).length;
+    return enabled + 1 > SELF_ROUTINE_CAP;
+  }
+
+  private snapshotOf(routineId: string, owner: string): RoutineRequestSnapshot | undefined {
+    const routine = ownedRoutine(this.routines, routineId, owner);
+    return routine ? routineSnapshot(routine) : undefined;
+  }
+
+  /** Marks a card whose change applied without a person, with what its
+   * one-line receipt and Undo need. A failure here leaves the change
+   * applied and the card as it was, only without Undo. */
+  private recordAutoApplied(
+    threadId: string,
+    messageId: string,
+    definition: RoutineRequestDefinition | null,
+    before: RoutineRequestSnapshot | undefined,
+  ): void {
+    try {
+      const message = this.store.messagesFor(threadId).find((candidate) => candidate.id === messageId);
+      const card = message?.card;
+      const payload = card?.routineRequest;
+      if (!message || !card || !payload) return;
+      const action = payload.operation.action;
+      const routineId = payload.operation.action === "create" ? payload.resultId : payload.operation.routineId;
+      const after = routineId ? this.routines.listRoutines().find((routine) => routine.id === routineId) : undefined;
+      const undo: RoutineRequestUndo = {
+        name: redactSecretsInText(after?.name ?? definition?.name ?? before?.name ?? "routine"),
+        ...(action === "create" || action === "update" || action === "resume"
+          ? { schedule: structuredClone(after?.schedule ?? definition?.schedule) }
+          : {}),
+        ...(after && (action === "update" || action === "pause" || action === "resume") ? { appliedUpdatedAt: after.updatedAt } : {}),
+        ...(before ? { before } : {}),
+      };
+      if (!storedUndoSchema.safeParse(undo).success) delete undo.schedule;
+      this.store.patchMessage(threadId, messageId, {
+        card: { ...card, autoApplied: true, routineRequest: { ...payload, undo } },
+      });
+    } catch {
+      // The routine change itself is durable; only its Undo is lost.
+    }
+  }
+
+  /** Puts back a change that applied without a person. Authorized by the
+   * caller exactly like answering the card; refuses, applying nothing, once
+   * the routine changed since. A second Undo reports already undone. */
+  undo(args: { botId: string; threadId: string; requestId: string }): UndoRoutineRequestResult {
+    const message = this.store
+      .messagesFor(args.threadId)
+      .find((candidate) => candidate.card?.requestId === args.requestId && candidate.card.routineRequest);
+    const card = message?.card;
+    if (!message || !card) return { claimed: false };
+    if (card.undone) return { claimed: true, state: "already_undone" };
+    const cannot = (error: string, status = 409): UndoRoutineRequestResult => ({ claimed: true, state: "invalid", error, status });
+    if (!card.autoApplied || card.answered !== "allow") return cannot("Only a change that applied on its own can be undone here.");
+    const parsed = routineRequestCardDataSchema.safeParse(card.routineRequest);
+    if (!parsed.success) return cannot("This change can't be undone here.");
+    const payload: RoutineRequestCardData = parsed.data;
+    if (payload.botId !== args.botId || payload.threadId !== args.threadId) {
+      return cannot("This routine change belongs to another conversation", 403);
+    }
+    const operation = payload.operation;
+    const owner = operation.forBot?.botId ?? payload.botId;
+    const undo = payload.undo;
+    const stale: UndoRoutineRequestResult = { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
+    const now = this.now();
+    let routineId: string;
+    let restoredId: string | undefined;
+    try {
+      switch (operation.action) {
+        case "run_now":
+          return cannot("A routine run can't be undone.");
+        case "create": {
+          routineId = payload.resultId ?? "";
+          if (!routineId || !ownedRoutine(this.routines, routineId, owner)) return stale;
+          this.routines.remove(routineId);
+          break;
+        }
+        case "update":
+        case "pause":
+        case "resume": {
+          routineId = operation.routineId;
+          if (undo?.appliedUpdatedAt === undefined || (operation.action === "update" && !undo.before)) {
+            return cannot("This change can't be undone here.");
+          }
+          const current = ownedRoutine(this.routines, routineId, owner);
+          if (!current || current.updatedAt !== undo.appliedUpdatedAt) return stale;
+          const patch = operation.action === "update"
+            ? restorePatch(undo.before!, now)
+            : { enabled: operation.action === "pause" };
+          if (!this.routines.update(routineId, patch)) return stale;
+          break;
+        }
+        case "delete": {
+          routineId = operation.routineId;
+          const before = undo?.before;
+          if (!before) return cannot("This change can't be undone here.");
+          restoredId = this.routines.create({
+            name: before.name,
+            prompt: before.instructions,
+            botId: owner,
+            ...(before.target ? { target: before.target, groupId: before.groupId } : {}),
+            runOn: before.runOn,
+            enabled: before.enabled,
+            schedule: asSchedule(before.schedule, now),
+            durationMinutes: before.durationMinutes,
+            ...(before.timeoutMinutes === undefined ? {} : { timeoutMinutes: before.timeoutMinutes }),
+            ...(before.continuity ? { continuity: true } : {}),
+            ...(before.overlap === "queue" ? { overlap: "queue" as const } : {}),
+            ...(before.resultsThreadId ? { resultsThreadId: before.resultsThreadId } : {}),
+          }).id;
+          break;
+        }
+        default:
+          return cannot("This change can't be undone here.");
+      }
+    } catch (error) {
+      return cannot(redactSecretsInText(error instanceof Error ? error.message : String(error)).slice(0, 500));
+    }
+    this.store.patchMessage(args.threadId, message.id, { card: { ...card, undone: true } });
+    return {
+      claimed: true,
+      state: "undone",
+      action: operation.action,
+      routineId,
+      ...(restoredId ? { restoredId } : {}),
+      ...(undo?.ownersBefore !== undefined ? { ownersBefore: undo.ownersBefore } : {}),
+    };
   }
 
   private async requireCloudReadiness(operation: RoutineRequestOperation, proposerBotId: string): Promise<void> {

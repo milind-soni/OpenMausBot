@@ -81,7 +81,7 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
                 {hit.task ? <span className="truncate">· {hit.task}</span> : null}
                 <span className="ml-auto shrink-0 tabular-nums">{formatTime(hit.at)}</span>
               </span>
-              <span className={cn("mt-0.5 line-clamp-2 text-[12.5px] leading-snug", hit.role === "user" ? "text-ink" : "text-ink-secondary")}>
+              <span dir="auto" className={cn("mt-0.5 line-clamp-2 text-[12.5px] leading-snug", hit.role === "user" ? "text-ink" : "text-ink-secondary")}>
                 {hit.kind === "activity" && <Wrench size={11} className="mr-1 inline text-ink-secondary" />}
                 {before}
                 <mark className="rounded-sm bg-accent/25 px-0.5 text-ink">{match}</mark>

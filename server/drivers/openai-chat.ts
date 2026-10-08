@@ -717,24 +717,32 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                   const answer = await approval.question(ASK_USER_TOOL, askQuestionSummary(questions), questions);
                   abort.signal.throwIfAborted();
                   if (answer === null) {
-                    denials.push(ASK_USER_TOOL);
-                    result = { ok: false, text: "The person did not answer this question. Do not guess an answer; ask again later or proceed without it." };
+                    // An unanswered question is absence, not a "no": the card
+                    // timed out or the person closed it. Keep the turn alive so
+                    // the model's final response stands; it is told not to
+                    // guess and may ask again later. An explicit deny of a
+                    // permission stays terminal.
+                    result = { ok: true, text: "The person did not answer this question. Do not guess an answer; ask again later or proceed without it." };
                   } else {
                     result = { ok: true, text: answer };
                   }
                 }
               } else {
                 tools.validate(call.function.name, args);
+                // A searched server's call_tool is shown as the tool it runs;
+                // its catalog reads ask nothing, as listing tools never did.
+                const shown = tools.view(call.function.name, args as Record<string, unknown>);
+                const shownPreview = shown.input === args ? inputPreview : preview(shown.input);
                 // Full access is the person's explicit grant to answer every
                 // prompt. This runtime has no provider reviewer to hand it to,
                 // so it is honoured here: without it every single tool call on
                 // an OpenAI-compatible engine stops for a card, and a Chief's
                 // delegated Full access cannot help either.
-                const allowed = turn.approvalMode === "full"
-                  || await approval.ask(call.function.name, inputPreview ?? "This tool has no arguments.");
+                const allowed = turn.approvalMode === "full" || !shown.ask
+                  || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.");
                 abort.signal.throwIfAborted();
                 emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
-                  title: call.function.name, ...(inputPreview ? { input: inputPreview } : {}),
+                  title: shown.title, ...(shownPreview ? { input: shownPreview } : {}),
                 });
                 started = true;
                 if (allowed) {
@@ -752,7 +760,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                     }
                   }
                 } else {
-                  denials.push(call.function.name);
+                  denials.push(shown.title);
                   result = { ok: false, text: "Permission denied or expired; the tool was not executed." };
                 }
               }
@@ -792,10 +800,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (failure && (!abort.signal.aborted || cleanupFailed)) {
           emit({ ...base(turn.threadId, turnId), type: "runtime.error", message: failure, terminal: !abort.signal.aborted });
         }
-        // Automatic continuity: a resumable terminal (budget cap or tool
-        // errors) persists a handoff and raises cap.exhausted so the harness
-        // can start a `Continue:` thread. Interruptions and provider config
-        // errors are excluded by classifyContinuable.
+        // Automatic continuity: a resumable terminal (the step or tool-call
+        // cap) persists a handoff and raises cap.exhausted so the harness
+        // can start a `Continue:` thread. Interruptions, tool errors and
+        // provider errors (a rate limit included) are excluded by
+        // classifyContinuable.
         if (!ok && !abort.signal.aborted) {
           const continuable = classifyContinuable(stopReason, failure);
           if (continuable) {

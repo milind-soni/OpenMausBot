@@ -27,4 +27,9 @@ export interface ProfileRequestCardData {
   before: ProfileRequestChanges;
   expectedRevision: string;
   appliedAt?: number;
+  /** Written when the change applied without a person: the profile's
+   * revision right after it, so Undo refuses once anything moved. Absent
+   * when the before values could not be kept exactly (credential-shaped
+   * text is scrubbed from cards), which means no Undo. */
+  undo?: { appliedRevision: string };
 }

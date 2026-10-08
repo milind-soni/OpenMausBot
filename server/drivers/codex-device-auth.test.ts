@@ -241,6 +241,15 @@ describe("Codex server-owned device authentication", () => {
     expect(calls().map((call) => call.args)).toEqual([["login", "status"]]);
   });
 
+  it("replaces a ChatGPT login the provider refused, though status still reports it", async () => {
+    writeFileSync(join(home, "authenticated"), "fake fixture only");
+    const controller = create("success", { signInRejected: () => true });
+    const start = await controller.start();
+    expect(start).toMatchObject({ phase: "waiting", userCode: "0CSG-0IXIM" });
+    await expect.poll(() => controller.get(start.flowId!), { timeout: 5_000 }).toMatchObject({ phase: "succeeded" });
+    expect(calls().map((call) => call.args)).toEqual([["login", "status"], ["login", "--device-auth"], ["login", "status"]]);
+  });
+
   it("does not replace another auth method or expose its secret", async () => {
     await expect(create("api").start()).rejects.toThrow("different sign-in method");
     expect(calls()).toHaveLength(1);

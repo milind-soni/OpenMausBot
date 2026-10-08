@@ -8,7 +8,9 @@
 //                     mcp-elicitation | mcp-app-approval | mcp-form | permissions-approval | question |
 //                     multi-question | mixed-question | empty-question | malformed-question | config-profile |
 //                     config-profile-unsupported | config-read-error | image |
-//                     logged-in-stdout | logged-out | unauthorized | late-request
+//                     logged-in-stdout | logged-out | unauthorized | late-request |
+//                     retry-then-complete | signin-refused | auth-recovery | mcp-401 | legacy-error |
+//                     key-401 | recovered-403 | recovered-401 | recovering-403
 //   FAKE_CODEX_LAUNCH_CRASHES  die at turn/start (before ack) with transient stderr,
 //                               exit 1, for the first N launches (launch count kept in
 //                               FAKE_CODEX_STATE)
@@ -29,6 +31,10 @@
 //   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
 //                     (a Codex that did not take them)
+//   FAKE_CODEX_SHELL_ENVIRONMENT_POLICY  JSON the config/read shell_environment_policy
+//                     reports. Like codex-cli 0.160, every field is present and null
+//                     unless set (an object fills in its fields, `filters` table
+//                     included); a non-object (null, false, []) is reported as-is.
 //   FAKE_CODEX_APPROVAL_REQUEST JSON {method, params} override in approval mode
 //   FAKE_CODEX_ACCOUNT_EMAIL  synthetic ChatGPT identity (default ada@example.test)
 //   FAKE_CODEX_ACCOUNT_MODE   chatgpt (default) | api-key | none | unsupported | error | hang
@@ -46,8 +52,16 @@
 //                         MCP server and replies with its text
 //   FAKE_CODEX_COMPLETE_BEFORE_ACK  with FAKE_CODEX_ROOM_PLAN: stream the whole
 //                         turn, completion included, before acknowledging turn/start
+//   FAKE_CODEX_MCP_START  "1": on thread/start, start every `-c mcp_servers.*` mount
+//                         the way codex-cli 0.160.1 does (a command with only PATH,
+//                         HOME, its env_vars and its env table; a url with its
+//                         bearer/header variables), send Codex's own initialize
+//                         (FAKE_CODEX_MCP_HANDSHAKE JSON overrides it), list the
+//                         tools, and dump each result as mcpStartup[name]:
+//                         {status: "ready", tools} | {status: "failed", error}
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
 
@@ -106,6 +120,22 @@ for (let index = 0; process.env.FAKE_CODEX_MCP_OVERRIDES === "1" && index < proc
   const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.]+)=(.*)$/.exec(process.argv[index]!) : null;
   if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = JSON.parse(match[3]!);
 }
+// codex-cli 0.160 config/read reports every shell_environment_policy field,
+// null when unset, even for an empty config.toml. A `-c
+// shell_environment_policy.exclude=[…]` override replaces the list and, as
+// there (codex-cli 0.160.1), drops the lower layers' `filters` table; their
+// `include_only` list stays.
+const shellExcludeOverride = process.argv.reduce<unknown>((found, arg, index) => {
+  const match = process.argv[index - 1] === "-c" ? /^shell_environment_policy\.exclude=(.*)$/.exec(arg) : null;
+  return match ? JSON.parse(match[1]!) : found;
+}, undefined);
+const shellEnvironmentPolicy = (): unknown => {
+  const unset = { inherit: null, ignore_default_excludes: null, exclude: null, set: null,
+    include_only: null, filters: null, experimental_use_profile: null };
+  const supplied: unknown = process.env.FAKE_CODEX_SHELL_ENVIRONMENT_POLICY ? JSON.parse(process.env.FAKE_CODEX_SHELL_ENVIRONMENT_POLICY) : {};
+  if (!supplied || typeof supplied !== "object" || Array.isArray(supplied)) return supplied;
+  return { ...unset, ...supplied, ...(shellExcludeOverride !== undefined ? { exclude: shellExcludeOverride, filters: null } : {}) };
+};
 let developerInstructions = "";
 let resumedThread: string | null = null;
 let decision: unknown = null;
@@ -137,6 +167,82 @@ const resolvedSandbox = (params: Record<string, unknown>) => {
     excludeTmpdirEnvVar: false, excludeSlashTmp: false,
   };
   return { type: "readOnly" };
+};
+
+// ── FAKE_CODEX_MCP_START: Codex's own MCP client, as far as startup goes ──
+type McpStartup = { status: "ready"; tools: string[] } | { status: "failed"; error: string };
+let mcpStartup: Record<string, McpStartup> | undefined;
+/** codex-cli 0.160.1's initialize for every server it connects (captured Oct 8 2026). */
+const CODEX_MCP_HANDSHAKE = { protocolVersion: "2025-06-18", capabilities: { elicitation: { form: {}, url: {} } }, clientInfo: { name: "codex-mcp-client", title: "Codex", version: "0.160.1" } };
+/** `-c mcp_servers.<name>.<key>=<value>` mounts, values parsed. An inline
+ * table (`{ "K" = "V" }`, JSON-quoted on both sides) becomes an object. */
+const mcpMounts = (): Record<string, Record<string, unknown>> => {
+  const mounts: Record<string, Record<string, unknown>> = {};
+  process.argv.forEach((arg, index) => {
+    const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.=]+)=(.*)$/.exec(arg) : null;
+    if (!match) return;
+    const raw = match[3]!;
+    const value = raw.startsWith("{")
+      ? Object.fromEntries([...raw.matchAll(/("(?:[^"\\]|\\.)*")\s*=\s*("(?:[^"\\]|\\.)*")/g)].map((pair) => [JSON.parse(pair[1]!), JSON.parse(pair[2]!)]))
+      : JSON.parse(raw);
+    (mounts[match[1]!] ??= {})[match[2]!] = value;
+  });
+  return mounts;
+};
+const mcpError = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 500);
+/** initialize, notifications/initialized, tools/list over stdio. */
+const startStdioMcp = (mount: Record<string, unknown>, handshake: unknown): Promise<McpStartup> => new Promise((resolve) => {
+  const env: Record<string, string> = {};
+  for (const name of ["PATH", "HOME"]) if (process.env[name]) env[name] = process.env[name]!;
+  for (const name of (mount.env_vars ?? []) as string[]) if (process.env[name] !== undefined) env[name] = process.env[name]!;
+  Object.assign(env, mount.env ?? {});
+  const child = spawn(mount.command as string, (mount.args ?? []) as string[], { env, stdio: ["pipe", "pipe", "ignore"] });
+  const done = (result: McpStartup) => { clearTimeout(timer); child.kill(); resolve(result); };
+  const timer = setTimeout(() => done({ status: "failed", error: "startup timed out" }), 20_000);
+  child.on("error", (error) => done({ status: "failed", error: mcpError(error) }));
+  const write = (frame: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...frame })}\n`);
+  let pending = "";
+  child.stdout.on("data", (chunk) => {
+    pending += chunk;
+    for (let nl = pending.indexOf("\n"); nl !== -1; nl = pending.indexOf("\n")) {
+      const line = pending.slice(0, nl);
+      pending = pending.slice(nl + 1);
+      let frame: any;
+      try { frame = JSON.parse(line); } catch { continue; }
+      if (frame.error) return done({ status: "failed", error: mcpError(frame.error.message) });
+      if (frame.id === 1) { write({ method: "notifications/initialized" }); write({ id: 2, method: "tools/list", params: {} }); }
+      if (frame.id === 2) return done({ status: "ready", tools: (frame.result?.tools ?? []).map((tool: { name: string }) => tool.name) });
+    }
+  });
+  write({ id: 1, method: "initialize", params: handshake });
+});
+/** The same over streamable HTTP, Codex's own headers included. */
+const startUrlMcp = async (mount: Record<string, unknown>, handshake: unknown): Promise<McpStartup> => {
+  const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+  if (typeof mount.bearer_token_env_var === "string") headers.authorization = `Bearer ${process.env[mount.bearer_token_env_var] ?? ""}`;
+  for (const [header, variable] of Object.entries((mount.env_http_headers ?? {}) as Record<string, string>)) headers[header] = process.env[variable] ?? "";
+  const post = async (frame: object) => {
+    const response = await fetch(mount.url as string, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...frame }), signal: AbortSignal.timeout(20_000) });
+    const session = response.headers.get("mcp-session-id");
+    if (session) headers["mcp-session-id"] = session;
+    const text = await response.text();
+    const body = text.split("\n").find((line) => line.startsWith("data:"))?.slice(5) ?? text;
+    const parsed = body.trim() ? JSON.parse(body) : {};
+    if (!response.ok || parsed.error) throw new Error(`HTTP ${response.status}: ${parsed.error?.message ?? ""}`);
+    return parsed.result;
+  };
+  try {
+    await post({ id: 1, method: "initialize", params: handshake });
+    await post({ method: "notifications/initialized" });
+    const listed = await post({ id: 2, method: "tools/list", params: {} });
+    return { status: "ready", tools: (listed?.tools ?? []).map((tool: { name: string }) => tool.name) };
+  } catch (error) { return { status: "failed", error: mcpError(error) }; }
+};
+const startMcpServers = async (): Promise<Record<string, McpStartup>> => {
+  const handshake = process.env.FAKE_CODEX_MCP_HANDSHAKE ? JSON.parse(process.env.FAKE_CODEX_MCP_HANDSHAKE) : CODEX_MCP_HANDSHAKE;
+  const entries = await Promise.all(Object.entries(mcpMounts()).filter(([, mount]) => mount.enabled !== false).map(async ([name, mount]) =>
+    [name, typeof mount.url === "string" ? await startUrlMcp(mount, handshake) : await startStdioMcp(mount, handshake)] as const));
+  return Object.fromEntries(entries);
 };
 
 const threadReply = (response: unknown) => {
@@ -185,7 +291,7 @@ const dump = () => {
   if (process.env.FAKE_CODEX_DUMP) {
     writeDumpAtomic(
       process.env.FAKE_CODEX_DUMP,
-      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision }, null, 2),
+      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision, ...(mcpStartup ? { mcpStartup } : {}) }, null, 2),
     );
   }
 };
@@ -368,9 +474,7 @@ process.stdin.on("data", (chunk) => {
                   },
                 }),
               developer_instructions: process.env.FAKE_CODEX_INSTRUCTIONS ?? null,
-              ...(process.env.FAKE_CODEX_SHELL_ENVIRONMENT_POLICY ? {
-                shell_environment_policy: JSON.parse(process.env.FAKE_CODEX_SHELL_ENVIRONMENT_POLICY),
-              } : {}),
+              shell_environment_policy: shellEnvironmentPolicy(),
               // `-c features.<name>=<bool>` overrides, as the real config/read reports them.
               features: Object.fromEntries(process.argv.flatMap((arg, index) => {
                 const match = process.argv[index - 1] === "-c" ? /^features\.(\w+)=(true|false)$/.exec(arg) : null;
@@ -439,6 +543,11 @@ process.stdin.on("data", (chunk) => {
           out({ jsonrpc: "2.0", id: msg.id, error: JSON.parse(process.env.FAKE_CODEX_START_ERROR) });
         } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
+        } else if (process.env.FAKE_CODEX_MCP_START === "1") {
+          // Codex starts its MCP servers with the thread; a server that fails
+          // to start leaves the thread running without its tools.
+          const reply = { jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } };
+          void startMcpServers().then((startup) => { mcpStartup = startup; dump(); threadReply(reply); });
         } else {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } });
         }
@@ -509,6 +618,60 @@ process.stdin.on("data", (chunk) => {
         }
         if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
+          break;
+        }
+        // Codex 0.160's ErrorNotification: {error: TurnError, willRetry}.
+        // Its own reconnects come first with willRetry: true; signin-refused
+        // replays an expired ChatGPT login (the 2026-10-07 report),
+        // auth-recovery a provider 401 after Codex tried to recover the
+        // sign-in, mcp-401 a tool's 401 inside an otherwise good turn, and
+        // legacy-error the bare {message} of Codex 0.144. key-401 replays a
+        // refused API key (a custom provider's, or an API-key login), and
+        // recovered-40x a recovery that succeeded before that failure,
+        // recovering-403 a 403 while the recovery is still unfinished.
+        if (mode === "retry-then-complete" || mode === "signin-refused") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          for (let attempt = 1; attempt <= 5; attempt++) {
+            notify("error", { willRetry: true, error: { message: `Reconnecting... ${attempt}/5`, codexErrorInfo: null, additionalDetails: "workspace routing discovery unauthorized (401)" } });
+          }
+          if (mode === "retry-then-complete") { finishTurn(); break; }
+          const error = { message: "workspace routing discovery unauthorized (401)", codexErrorInfo: "unauthorized", additionalDetails: null };
+          notify("error", { willRetry: false, error });
+          notify("turn/completed", { turn: { status: "failed", error } });
+          break;
+        }
+        if (mode === "auth-recovery") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          notify("modelProvider/authRecoveryStarted", { provider: "openai", message: "Refreshing sign-in" });
+          notify("turn/completed", { turn: { status: "failed", error: { message: "unexpected status 401 Unauthorized", codexErrorInfo: null } } });
+          break;
+        }
+        if (mode === "key-401") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          const error = { message: "unexpected status 401 Unauthorized: Incorrect API key provided", codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 401 } }, additionalDetails: null };
+          notify("error", { willRetry: false, error });
+          notify("turn/completed", { turn: { status: "failed", error } });
+          break;
+        }
+        const recovery = /^(recovered|recovering)-(401|403)$/.exec(mode);
+        if (recovery) {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          notify("modelProvider/authRecoveryStarted", { provider: "openai", message: "Refreshing sign-in" });
+          if (recovery[1] === "recovered") notify("modelProvider/authRecoveryCompleted", { provider: "openai", message: "Signed in" });
+          const message = recovery[2] === "403" ? "unexpected status 403 Forbidden: unauthorized client" : "unexpected status 401 Unauthorized";
+          notify("turn/completed", { turn: { status: "failed", error: { message, codexErrorInfo: recovery[2] === "403" ? { responseStreamConnectionFailed: { httpStatusCode: 403 } } : null } } });
+          break;
+        }
+        if (mode === "mcp-401") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          notify("item/completed", { item: { id: "t1", type: "mcpToolCall", tool: "fetch", status: "failed", error: { message: "HTTP 401 Unauthorized: Please sign in again" } } });
+          finishTurn();
+          break;
+        }
+        if (mode === "legacy-error") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          notify("error", { message: "stream disconnected before completion" });
+          notify("turn/completed", { turn: { status: "failed", error: { message: "stream disconnected before completion" } } });
           break;
         }
         if (mode === "unauthorized") {

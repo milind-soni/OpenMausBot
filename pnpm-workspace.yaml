@@ -19,3 +19,6 @@ allowBuilds:
 onlyBuiltDependencies:
   - electron
   - esbuild
+# mermaid 12.1 still allows dompurify 3.4.13. Force the patched release.
+overrides:
+  dompurify: 3.4.16

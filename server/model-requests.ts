@@ -9,6 +9,7 @@ import type { ModelRequestCardData } from "../shared/model-request.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capabilities.ts";
 import { newId } from "./contracts.ts";
+import { UNDO_STALE, type DirectApply, type DirectApplyCheck } from "./direct-apply.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { BotRecord } from "./store.ts";
 
@@ -25,6 +26,8 @@ export interface OptionCardLike {
   requestId?: string;
   tool?: string;
   held?: string;
+  autoApplied?: boolean;
+  undone?: boolean;
   modelRequest?: ModelRequestCardData;
 }
 
@@ -50,9 +53,11 @@ export interface ModelRequestStore {
 export interface ModelRequestServiceOptions {
   store: ModelRequestStore;
   now?: () => number;
-  /** Server-owned effective mode of the source conversation, never request input. */
-  autoApply?: (botId: string, threadId: string) => boolean;
-  canPersist?: (botId: string, threadId: string) => { ok: true } | { ok: false; status: number; error: string };
+  /** Whether a submitted change applies without a person, and why
+   * (server/direct-apply.ts). Server-owned, never request input. */
+  autoApply?: DirectApplyCheck;
+  /** `opensCard` is false for a change that applies directly (no open card). */
+  canPersist?: (botId: string, threadId: string, opensCard: boolean) => { ok: true } | { ok: false; status: number; error: string };
   /** Chief targeting another bot: returns a refusal sentence or null. Checked at propose AND confirm. */
   validateTarget?: (proposerBotId: string, targetBotId: string) => string | null;
   /** Full model validation (structure, catalog, approval compatibility): a refusal sentence or null. Re-run at confirm. */
@@ -77,6 +82,12 @@ export type ResolveModelRequestResult =
   | { claimed: true; state: "already_settled"; behavior: string }
   | { claimed: true; state: "denied" }
   | { claimed: true; state: "applied"; targetBotId: string; settlementPending?: true; message?: string };
+
+export type UndoModelRequestResult =
+  | { claimed: false }
+  | { claimed: true; state: "already_undone" }
+  | { claimed: true; state: "invalid"; error: string; status: number; stale?: true }
+  | { claimed: true; state: "undone"; targetBotId: string };
 
 const sameSelection = (a: ModelSelection, b: ModelSelection) =>
   a.instanceId === b.instanceId && a.model === b.model && a.effort === b.effort && a.variant === b.variant;
@@ -176,6 +187,7 @@ export class ModelRequestService {
   private prepare(args: Parameters<ModelRequestService["propose"]>[0], submitted = false): {
     requestId: string; messageId: string; title: string; summary: string; detail: string;
     result?: Extract<ResolveModelRequestResult, { state: "applied" }>;
+    appliedBy?: DirectApply;
   } {
     const reason = reasonText(args.reason);
     const selection = parseSelection(args.selection);
@@ -213,9 +225,10 @@ export class ModelRequestService {
       before,
     };
     const copy = modelCardCopy({ targetName, crossBot, before, selection, reason, capabilityLines });
-    const persistence = this.canPersist?.(args.botId, args.threadId);
+    const grant = submitted ? this.autoApply?.(args.botId, args.threadId, targetBotId) ?? null : null;
+    const automatic = grant !== null;
+    const persistence = this.canPersist?.(args.botId, args.threadId, !automatic);
     if (persistence && !persistence.ok) throw new ModelRequestError(persistence.error, persistence.status);
-    const automatic = submitted && this.autoApply?.(args.botId, args.threadId) === true;
     const messageInput: Parameters<ModelRequestStore["appendMessage"]>[1] = {
       role: "bot",
       kind: "options",
@@ -234,8 +247,52 @@ export class ModelRequestService {
     const proposal = { requestId, messageId: message.id, title: copy.title, summary: copy.summary, detail: copy.detail };
     if (!automatic) return proposal;
     const result = this.resolve({ botId: args.botId, threadId: args.threadId, requestId, behavior: "allow" });
-    if (result.state === "applied") return { ...proposal, result };
+    if (result.state === "applied") {
+      if (!result.settlementPending) this.recordAutoApplied(args.threadId, message.id);
+      return { ...proposal, result, appliedBy: grant! };
+    }
     throw new ModelRequestError(result.state === "invalid" ? result.error : "The model change could not be applied", result.state === "invalid" ? result.status : 409);
+  }
+
+  /** Marks a card whose change applied without a person. A failure here only
+   * loses the Undo. */
+  private recordAutoApplied(threadId: string, messageId: string): void {
+    try {
+      const card = this.store.messagesFor(threadId).find((candidate) => candidate.id === messageId)?.card;
+      if (card?.modelRequest) this.store.patchMessage(threadId, messageId, { card: { ...card, autoApplied: true } });
+    } catch {
+      // The model change itself is durable; only its Undo is lost.
+    }
+  }
+
+  /** Puts the previous default model back after a change that applied
+   * without a person, through the same checks a switch gets (validateModel:
+   * a pending approval-level change, or permissions the old engine cannot
+   * keep, refuse it). Refuses, applying nothing, once the default moved. */
+  undo(args: { botId: string; threadId: string; requestId: string }): UndoModelRequestResult {
+    const message = this.store
+      .messagesFor(args.threadId)
+      .find((candidate) => candidate.card?.requestId === args.requestId && candidate.card.modelRequest);
+    const card = message?.card;
+    const payload = card?.modelRequest;
+    if (!message || !card || !payload) return { claimed: false };
+    if (card.undone) return { claimed: true, state: "already_undone" };
+    const cannot = (error: string, status = 409): UndoModelRequestResult => ({ claimed: true, state: "invalid", error, status });
+    if (!card.autoApplied || card.answered !== "allow") return cannot("Only a change that applied on its own can be undone here.");
+    if (payload.botId !== args.botId || payload.threadId !== args.threadId) {
+      return cannot("This model change belongs to another conversation", 403);
+    }
+    const target = this.store.bot(payload.targetBotId);
+    if (!target || !sameSelection(target.modelSelection, payload.selection)) {
+      return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
+    }
+    if (this.validateModel) {
+      const refusal = this.validateModel(payload.before, target);
+      if (refusal) return cannot(refusal);
+    }
+    if (!this.store.applyModelDefault(target.id, payload.before)) return cannot(NO_SUCH_BOT, 404);
+    this.store.patchMessage(args.threadId, message.id, { card: { ...card, undone: true } });
+    return { claimed: true, state: "undone", targetBotId: target.id };
   }
 
   /** Claims a model card even after it was settled, so a duplicate click

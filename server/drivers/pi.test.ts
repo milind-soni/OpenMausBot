@@ -203,6 +203,24 @@ describe("buildMcpServers", () => {
     expect(servers?.computer).toEqual({ command: "node", args: ["mcp"], env: { X: "y" } });
   });
 
+  it("searches a URL server's catalog through the remote proxy, behind the gate when selected", () => {
+    const whop = { type: "http" as const, url: "https://mcp.example.test/mcp", headers: { Authorization: "Bearer disposable-pi-token" } };
+    const servers = buildMcpServers({ threadId: "t", text: "hi", integrations: { custom: { whop, notes: { command: "node", args: ["notes"], env: {} } } } });
+    const mounted = servers?.whop as { command: string; args: string[]; env: Record<string, string> };
+    expect(mounted).toMatchObject({ command: process.execPath, scope: "custom", directory: true });
+    expect(mounted.args[0]).toContain("mcp-remote-proxy");
+    expect(JSON.parse(mounted.env.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop" });
+    expect(JSON.stringify(mounted.args)).not.toContain("disposable-pi-token");
+    // a command server has no catalog to search for it
+    expect(servers?.notes).not.toHaveProperty("directory");
+    const toolScope = { allow: ["mcp:whop:*"], deny: ["mcp:whop:payments_create"] };
+    const scoped = buildMcpServers({ threadId: "t", text: "hi", toolScope, integrations: { custom: { whop } } })?.whop as { args: string[]; env: Record<string, string> };
+    expect(scoped).toMatchObject({ directory: true });
+    expect(scoped.args[0]).toContain("mcp-gate");
+    expect(scoped.env.OMB_GATE_DIRECTORY).toBe("1");
+    expect(JSON.parse(JSON.parse(scoped.env.OMB_GATE_UPSTREAM).env.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop", toolScope });
+  });
+
   it("marks a host computer with scope so the extension gates its tools", () => {
     const servers = buildMcpServers({
       threadId: "t",

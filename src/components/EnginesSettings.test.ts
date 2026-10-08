@@ -34,9 +34,8 @@ describe("Settings → Engines → Codex", () => {
   it("makes browser sign-in discoverable in Settings, not only the model picker", () => {
     const html = render(false);
     expect(html).toContain("Connect ChatGPT");
-    expect(html).toContain("Provider icon");
-    expect(html).toContain("Google Gemini");
-    expect(html).toContain("Upload a custom provider icon for Codex");
+    expect(html).not.toContain("Provider icon");
+    expect(html).not.toContain("Upload a custom provider icon");
   });
 
   it("shows a connected account without offering to replace it", () => {
@@ -98,6 +97,40 @@ describe("Settings → Engines → Grok", () => {
 });
 
 describe("Settings → Engines → setup cards", () => {
+  it.each([true, false])("keeps account creation inside its provider card (authenticated: %s)", (authenticated) => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    const claude: InstanceInfo = {
+      instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", cliDefault: "claude",
+      snapshot: { state: "available", authenticated }, models: { default: "sonnet", options: [] },
+    };
+    const chatgpt: InstanceInfo = {
+      instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT", cliDefault: "codex",
+      snapshot: { state: "available", authenticated, chatgptPlan: true }, models: { default: "gpt", options: [] },
+    };
+    for (const [instance, label, other] of [
+      [claude, "Add Claude account", "Add ChatGPT account"],
+      [chatgpt, "Add ChatGPT account", "Add Claude account"],
+    ] as const) {
+      fixture.instances = [instance];
+      const html = renderToStaticMarkup(createElement(EnginesSettings));
+      expect(html).toContain(label);
+      expect(html.indexOf(label)).toBeGreaterThan(html.indexOf(`data-engine-card="${instance.instanceId}"`));
+      expect(html.indexOf(label)).toBeLessThan(html.lastIndexOf("</details>"));
+      expect(html).not.toContain(other);
+      expect(html).not.toContain("Provider icon");
+      fixture.instances = [{ ...instance, readOnly: true }];
+      expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(label);
+    }
+    fixture.instances = [{ ...claude, access: "custom" }, {
+      ...chatgpt, snapshot: { ...chatgpt.snapshot, authenticationUnavailableReason: "Not supported on this server" },
+    }];
+    const unsupported = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(unsupported).not.toContain("Add Claude account");
+    expect(unsupported).not.toContain("Add ChatGPT account");
+  });
+
   it("shows every Company provider as read-only while preserving personal controls", () => {
     vi.stubGlobal("window", {});
     fixture.bots = [];
@@ -110,7 +143,7 @@ describe("Settings → Engines → setup cards", () => {
     const companyOnly = renderToStaticMarkup(createElement(EnginesSettings));
     for (const driver of ["claudeAgent", "codex", "openai-compat"]) expect(companyOnly).toContain(`Company ${driver}`);
     expect(companyOnly).toContain("managed by your organization");
-    for (const control of ["Set CLI", "CLI path and updates", "Sign out of ChatGPT", "Update Claude", "fixture login"]) expect(companyOnly).not.toContain(control);
+    for (const control of ["Set CLI", "CLI path and updates", "Sign out of ChatGPT", "Update Claude", "fixture login", "Add Claude account", "Add ChatGPT account"]) expect(companyOnly).not.toContain(control);
     fixture.instances.push({ instanceId: "personal", displayName: "Personal Claude", driverKind: "claudeAgent", cliDefault: "claude",
       snapshot: { state: "available" }, models: { default: "sonnet", options: [] } });
     const withPersonal = renderToStaticMarkup(createElement(EnginesSettings));

@@ -551,6 +551,12 @@ export interface OptionCardData {
   commandAllowlist?: CommandAllowlistCandidate;
   /** Local actions never share remembered grants with cloud/tool approvals. */
   approvalScope?: "local-computer";
+  /** The bot's change applied without a person (a change to the bot itself,
+   * or Full access): clients show a one-line receipt with Undo instead of
+   * the approval box. */
+  autoApplied?: boolean;
+  /** A person undid that change. */
+  undone?: boolean;
   /** A durable chat-created routine proposal. */
   routineRequest?: RoutineRequestCardData;
   /** A durable profile-change proposal (propose_profile). */

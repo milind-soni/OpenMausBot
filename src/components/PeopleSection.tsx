@@ -8,10 +8,11 @@
 // membership), this list decides nothing, so the section turns read-only:
 // who has signed in, what they spent, and a link to Admin → People.
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, ExternalLink, Link2, Loader2, Plus, RefreshCw } from "lucide-react";
+import { Check, Copy, ExternalLink, Link2, Loader2, Plus, RefreshCw, X } from "lucide-react";
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useCopyFeedback } from "@/lib/copy-text";
 import { formatUsd, hasFiniteCost } from "@/lib/usage";
 import { readMembership, type Membership } from "../lib/membership";
 import { readSessionState, type SessionState } from "../lib/session";
@@ -151,27 +152,16 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly =
 }
 
 export function CopyLink({ link }: { link: string }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 2000);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopied(true);
-    } catch {
-      /* the link stays selectable when clipboard access is blocked */
-    }
-  };
+  // The link stays selectable when clipboard access is blocked.
+  const { state, copy } = useCopyFeedback(link);
   return (
     <div className="mt-3 rounded-lg border border-hairline/40 bg-inset p-3 text-[12.5px]">
       <div className="mb-1 text-ink-secondary">{t("people.link")}</div>
       <div className="flex items-center gap-2">
         <code className="min-w-0 flex-1 select-all break-all text-ink">{link}</code>
-        <button type="button" onClick={() => void copy()} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink">
-          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}{copied ? t("people.copied") : t("people.copy")}
+        <button type="button" onClick={copy} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink">
+          {state === "copied" ? <Check size={13} className="text-success" /> : state === "failed" ? <X size={13} className="text-danger" /> : <Copy size={13} />}
+          {t(state === "copied" ? "people.copied" : state === "failed" ? "common.copyFailed" : "people.copy")}
         </button>
       </div>
       <p className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">{t("people.linkHint")}</p>

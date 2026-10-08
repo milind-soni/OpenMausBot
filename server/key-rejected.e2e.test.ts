@@ -58,6 +58,10 @@ it("a key the provider rejects stops showing Ready until it changes or works aga
     chat = "limit";
     expect((await turn()).status).toBe("failed");
     expect(await snapshot()).toMatchObject({ state: "available", authenticated: true });
+    // Nor is a rate limit a spent budget: no `Continue:` task
+    // starts an unattended turn that hits the limit again.
+    const afterLimit = await control(["messages", "--bot", bot.id, "--limit", "1"]);
+    expect(afterLimit.bot.tasks.map((task: { title: string }) => task.title)).toHaveLength(1);
 
     chat = "auth";
     const seq = sse.frames.at(-1)?.seq ?? 0;

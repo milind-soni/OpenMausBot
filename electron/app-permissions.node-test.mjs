@@ -101,9 +101,10 @@ test("fails closed on unparsable or opaque origins", () => {
 
 // ── The person's own Cloud, open in this app's window ──
 // A Cloud is personal, so its page hearing the microphone for a Live call is
-// the person's own page hearing it. Only that: the microphone, in the main
-// frame of the main window, at the exact origin the verified Cloud sign-in
-// reports. Every other server, and every other capability, stays refused.
+// the person's own page hearing it. Only that and clipboard writes (its copy
+// buttons): in the main frame of the main window, at the exact origin the
+// verified Cloud sign-in reports. Every other server, and every other
+// capability, stays refused.
 const CLOUD = "https://omb-u-0123456789ab.fly.dev";
 function cloudFixture({ home = CLOUD } = {}) {
   const main = { getURL: () => `${CLOUD}/chat?botId=bot-1` };
@@ -129,7 +130,7 @@ test("the verified Cloud open in this window may use the microphone", () => {
   assert.equal(check("media", CLOUD, { requestingUrl: `${CLOUD}/`, isMainFrame: true, mediaType: "audio" }), true);
 });
 
-test("the Cloud never gets the camera, screen capture or any other capability", () => {
+test("the Cloud never gets the camera, screen capture or any other capability but clipboard writes", () => {
   const { ask, check } = cloudFixture();
   for (const mediaTypes of [["video"], ["audio", "video"], [], ["unknown"]]) {
     assert.equal(ask("media", onCloud({ mediaTypes })), false, JSON.stringify(mediaTypes));
@@ -137,7 +138,7 @@ test("the Cloud never gets the camera, screen capture or any other capability", 
   assert.equal(ask("media", onCloud()), false, "media with no type");
   assert.equal(check("media", CLOUD, { isMainFrame: true, mediaType: "video" }), false);
   assert.equal(check("media", CLOUD, { isMainFrame: true, mediaType: "unknown" }), false);
-  for (const permission of ["notifications", "clipboard-read", "clipboard-sanitized-write", "fullscreen", "geolocation", "display-capture", "camera"]) {
+  for (const permission of ["notifications", "clipboard-read", "fullscreen", "geolocation", "display-capture", "camera"]) {
     assert.equal(ask(permission, onCloud()), false, permission);
     assert.equal(check(permission, CLOUD, { isMainFrame: true }), false, permission);
     // Audio details on another permission do not make it the microphone.
@@ -183,6 +184,38 @@ test("signed out of Cloud, or the Cloud not running, its page loses the micropho
   assert.equal(ask("media", onCloud({ mediaTypes: ["audio"] })), false);
   state.home = "not a url";
   assert.equal(ask("media", onCloud({ mediaTypes: ["audio"] })), false);
+});
+
+test("the verified Cloud open in this window may write the clipboard, by the remote server's rule", () => {
+  const write = "clipboard-sanitized-write";
+  const { state, ask, check } = cloudFixture();
+  // The Grok sign-in card's copy button, on My Cloud.
+  assert.equal(ask(write, onCloud()), true);
+  assert.equal(check(write, CLOUD, { requestingUrl: `${CLOUD}/`, isMainFrame: true }), true);
+  // Never reading it.
+  assert.equal(ask("clipboard-read", onCloud()), false);
+  assert.equal(check("clipboard-read", CLOUD, { isMainFrame: true }), false);
+  // Never a subframe, or no frame information.
+  assert.equal(ask(write, onCloud({ isMainFrame: false })), false, "a subframe");
+  assert.equal(check(write, CLOUD, { isMainFrame: false }), false, "a subframe");
+  assert.equal(check(write, CLOUD, {}), false, "no frame information");
+  // Never another origin.
+  for (const other of ["https://my-vps.example.com", "http://omb-u-0123456789ab.fly.dev", "https://omb-u-0123456789ab.fly.dev:8443", "https://evil.fly.dev"]) {
+    assert.equal(ask(write, { requestingUrl: `${other}/chat`, isMainFrame: true }), false, other);
+    assert.equal(check(write, other, { isMainFrame: true }), false, other);
+  }
+  // Never another window, or with no window at all.
+  assert.equal(ask(write, onCloud(), { getURL: () => `${CLOUD}/` }), false, "another window");
+  assert.equal(check(write, CLOUD, { isMainFrame: true }, null), false, "no window");
+  // Signed out of Cloud (no Cloud), or a damaged value: withdrawn at once.
+  for (const home of [null, "not a url", "about:blank"]) {
+    state.home = home;
+    assert.equal(ask(write, onCloud()), false, String(home));
+    assert.equal(check(write, CLOUD, { isMainFrame: true }), false, String(home));
+  }
+  state.home = CLOUD;
+  state.main = null;
+  assert.equal(ask(write, onCloud(), { getURL: () => `${CLOUD}/` }), false, "the main window is gone");
 });
 
 test("this computer's own page keeps its permissions through the same handlers", () => {

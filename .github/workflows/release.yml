@@ -104,9 +104,11 @@ jobs:
           fi
 
   ci:
-    # Ship only a commit whose own `CI` check (ci.yml's gate) passed. The wait
-    # overlaps the platform builds, so a green commit costs no time; a red or
-    # missing verdict stops the release before any draft exists. Main keeps
+    # Ship only a commit whose code passed `CI` (ci.yml's gate, vitest really
+    # run): its own run, a run on a commit with the same tree, or, for a
+    # version-only bump, its parent's (scripts/release-ci.mjs, docs/ci.md).
+    # The wait overlaps the platform builds, so a green commit costs no time;
+    # a red or missing verdict stops the release before any draft exists. Main keeps
     # one CI run going and one waiting, so a burst of merges can replace the
     # release commit's own run: scripts/release-ci.mjs then runs CI on the
     # commit in its own lane (a release-ci/v<version> branch no merge can
@@ -117,7 +119,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
-      # read CI runs and start CI in the release lane
+      # read CI runs, start CI in the release lane, and re-run jobs that
+      # never got a runner
       actions: write
       # create and delete the release-ci/v<version> branch
       contents: write
@@ -125,7 +128,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/release-ci.mjs
+          sparse-checkout: |
+            scripts/release-ci.mjs
+            scripts/ci-scope.mjs
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

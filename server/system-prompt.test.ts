@@ -222,7 +222,8 @@ describe("shared sentences", () => {
   it("configuration prompts follow actual applied or pending results without elevating another bot", () => {
     expect(PROFILE_PROMPT).toContain("propose_profile");
     for (const prompt of [PROFILE_PROMPT, ROUTINE_PROMPT, LEARN_PROMPT]) {
-      expect(prompt).toContain("with granted Full Access it may report applied immediately");
+      expect(prompt).toContain("a change to your own routines, skills, profile or model applies immediately");
+      expect(prompt).toContain("A change for another bot may wait for the person");
       expect(prompt).toContain("continue the requested work without asking for another confirmation");
       expect(prompt).toContain("If it reports a pending review, end the turn and wait");
       expect(prompt).toContain("Never claim success before an applied result");

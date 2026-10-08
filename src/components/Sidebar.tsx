@@ -46,6 +46,7 @@ import { useHeldMenuMotion, useMenuMotion } from "./MenuMotion";
 import { lastNonReceipt } from "@/lib/receipts";
 import { activityPreview, botEngine } from "@/lib/failed-turn";
 import { activeLocale, t } from "@/lib/i18n";
+import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { FullAccessWarning } from "./FullAccessWarning";
@@ -115,7 +116,7 @@ import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { attentionJumpAction, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
@@ -510,7 +511,7 @@ function RoomContextMenu({
       )}
       <button
         onClick={() => {
-          void navigator.clipboard?.writeText(group.threadId);
+          void copyText(group.threadId);
           onClose();
         }}
         className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
@@ -868,7 +869,7 @@ export function BotContextMenu({
           dispatch({ type: "toggleSettings", open: true });
         }),
         item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
-          void navigator.clipboard?.writeText(bot.threadId);
+          void copyText(bot.threadId);
         }),
       ] : [
         item(
@@ -902,7 +903,7 @@ export function BotContextMenu({
         ),
         divider("d2"),
         item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
-          void navigator.clipboard?.writeText(bot.threadId);
+          void copyText(bot.threadId);
         }),
         divider("d3"),
         item(
@@ -2293,14 +2294,17 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         ) : null}
         {density !== "icons" && (
           // Everything between the lights and the buttons; the switcher's
-          // pill reads this slot's width (container `sidebar-top`). Below
-          // 164px, its 140px cap plus a 24px drag gap, the pill drops its name
-          // for icon + chevron rather than fill the slot up to the lights. On
-          // macOS at 320px the slot is 121px in Advanced, 189px in Simple.
+          // pill reads this slot's width (container `sidebar-top`). Once the
+          // slot can hold a truncated name (96px), a 24px drag gap stays and
+          // the name ellipsizes inside the 140px cap. Narrower than that, the
+          // name hides and the spacer may shrink to nothing. On macOS at
+          // 320px the slot is about 121px in Advanced and 189px in Simple.
           <div data-sidebar-top-slot className="@container/sidebar-top flex min-w-0 flex-1 items-center">
             {/* Empty, so it stays a drag region; it takes the slack, which
-                keeps the switcher beside the buttons. */}
-            <div data-sidebar-top-spacer className="min-w-0 flex-1" />
+                keeps the switcher beside the buttons. The 24px floor applies
+                only while the name is showing, so a 240px sidebar can still
+                fit icon and chevron. */}
+            <div data-sidebar-top-spacer className="min-w-0 flex-1 @min-[96px]/sidebar-top:min-w-6" />
             {/* Gives way first when the row is tight; only the switcher's own
                 button opts out of the drag region. */}
             <div data-sidebar-top-switcher className="flex min-w-0 max-w-[140px] items-center">
@@ -2318,7 +2322,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             type="button"
             onClick={toggleCollapsed}
             aria-label={density === "icons" ? t("sidebar.density.expand") : t("sidebar.density.collapseAria")}
-            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             title={density === "icons" ? t("sidebar.density.expand") : t("sidebar.density.collapse")}
           >
             {density === "icons" ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
@@ -2327,13 +2331,16 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             <button
               type="button"
               onClick={() => setAttentionOpen((o) => !o)}
-              aria-label={t("attention.title")}
-              title={t("attention.title")}
-              className="relative flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+              aria-label={attentionTriggerLabel(attention.length)}
+              title={attentionTriggerLabel(attention.length)}
+              className="relative flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               <Activity size={17} strokeWidth={2} />
               {attention.length > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
+              )}
+              {attentionHasRunningWork(attention) && (
+                <span data-header-activity="" className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-success" aria-hidden="true" />
               )}
             </button>
             {attentionMotion.shown && (
@@ -2351,7 +2358,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                       onClick={() => setAttentionPinned(!attentionPinned)}
                       aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
                       title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                     >
                       {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
                     </button>
@@ -2371,7 +2378,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             ref={importReturnRef}
             onClick={() => setPlusOpen((o) => !o)}
             aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
-            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             title={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
           >
             <Plus size={17} strokeWidth={2} />

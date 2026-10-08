@@ -25,7 +25,7 @@ import { z } from "zod";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
-import { freePortBlock } from "./testing/ports.ts";
+import { freePortBlock, withFreeSignInPort } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
 import { computerPrompt, SIGN_IN_PROMPT } from "./system-prompt.ts";
@@ -2776,13 +2776,15 @@ describe("harness HTTP API", () => {
 
   it("keeps Chief room changes behind pending user approvals", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Pending Chief", section: "Pending room" })).body.bot;
+    const peer = (await api("POST", "/api/bots", { name: "Pending peer", section: "Pending room" })).body.bot;
     await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true });
     const room = (await api("POST", "/api/groups", { name: "Pending room", memberIds: [bot.id], section: "Pending room" })).body.group;
     try {
       const roomToken = await mintTestCapability(BASE, bot.id, room.threadId);
+      // A change for a teammate waits for the person (one to itself applies).
       const proposed = await fetch(`${BASE}/api/internal/profile-requests`, {
         method: "POST", headers: { authorization: `Bearer ${roomToken}`, "content-type": "application/json" },
-        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: room.threadId, changes: { description: "Only after approval" }, reason: "Fixture check" }),
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: room.threadId, forBotId: peer.id, changes: { description: "Only after approval" }, reason: "Fixture check" }),
       });
       expect(proposed.status).toBe(201);
       await proposed.json();
@@ -2796,6 +2798,7 @@ describe("harness HTTP API", () => {
     } finally {
       await api("DELETE", `/api/groups/${room.id}`);
       await api("DELETE", `/api/bots/${bot.id}`);
+      await api("DELETE", `/api/bots/${peer.id}`);
     }
   });
 
@@ -8082,12 +8085,14 @@ describe("harness HTTP API", () => {
     const secret = "corp-app-secret-that-must-never-render";
     const oauth = await startFakeOAuth({ noRegistration: true, preRegistered: { "corp-app": secret } });
     const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    // the app returns to the port derived from this URL: make it a free one
+    const url = await withFreeSignInPort(fake.url);
     const configFile = join(home, ".openmausbot", "config.json");
     try {
-      const created = await api("POST", "/api/mcp/servers", { name: "corp", url: fake.url, oauth: { clientId: "corp-app", clientSecret: secret, scopes: ["mcp", "offline_access"] } });
+      const created = await api("POST", "/api/mcp/servers", { name: "corp", url, oauth: { clientId: "corp-app", clientSecret: secret, scopes: ["mcp", "offline_access"] } });
       expect(created.status).toBe(201);
       expect(created.body.servers).toEqual([{
-        name: "corp", type: "http", url: fake.url, headerKeys: [], enabled: false,
+        name: "corp", type: "http", url, headerKeys: [], enabled: false,
         oauth: { clientId: "corp-app", scopes: ["mcp", "offline_access"], clientSecretConfigured: true, redirectUri: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-oauth\/callback$/) },
       }]);
 
@@ -8107,7 +8112,7 @@ describe("harness HTTP API", () => {
       expect(tested.body.ok).toBe(true);
 
       // an edit that keeps the app keeps the secret and the sign-in
-      const kept = await api("PUT", "/api/mcp/servers/corp", { type: "http", url: fake.url, headers: {}, oauth: { clientId: "corp-app", clientSecret: true, scopes: ["mcp", "offline_access"] } });
+      const kept = await api("PUT", "/api/mcp/servers/corp", { type: "http", url, headers: {}, oauth: { clientId: "corp-app", clientSecret: true, scopes: ["mcp", "offline_access"] } });
       expect(kept.status).toBe(200);
       expect(kept.body.servers[0]).toMatchObject({ auth: "signed-in", oauth: { clientSecretConfigured: true } });
       expect(JSON.parse(readFileSync(configFile, "utf8")).mcpServers.corp.oauth.clientSecret).toBe(secret);
@@ -8116,9 +8121,9 @@ describe("harness HTTP API", () => {
       expect(readFileSync(join(home, ".openmausbot", "mcp-oauth.json"), "utf8")).not.toContain(secret);
 
       // another app: the old app's tokens and secret go
-      const other = await api("PUT", "/api/mcp/servers/corp", { type: "http", url: fake.url, headers: {}, oauth: { clientId: "other-app", clientSecret: true } });
+      const other = await api("PUT", "/api/mcp/servers/corp", { type: "http", url, headers: {}, oauth: { clientId: "other-app", clientSecret: true } });
       expect(other.status).toBe(400);
-      const moved = await api("PUT", "/api/mcp/servers/corp", { type: "http", url: fake.url, headers: {}, oauth: { clientId: "other-app" } });
+      const moved = await api("PUT", "/api/mcp/servers/corp", { type: "http", url, headers: {}, oauth: { clientId: "other-app" } });
       expect(moved.body.servers[0].auth).toBeUndefined();
       expect(moved.body.servers[0].oauth.clientSecretConfigured).toBe(false);
       expect(readFileSync(configFile, "utf8")).not.toContain(secret);
@@ -8133,6 +8138,8 @@ describe("harness HTTP API", () => {
     const client = { clientId: "headless-corp", clientSecret: "headless-private-secret", scopes: ["mcp", "offline_access"] };
     const oauth = await startFakeOAuth(registered ? { noRegistration: true, preRegistered: { [client.clientId]: client.clientSecret } } : {});
     const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    // a pre-registered app returns to the port derived from this URL: make it a free one
+    const url = await withFreeSignInPort(fake.url);
     const pair = async (scopes: string[]) => {
       const opened = await api("POST", "/api/auth/pairing", { scopes });
       const paired = await api("POST", "/api/auth/pair", { code: opened.body.code });
@@ -8152,13 +8159,15 @@ describe("harness HTTP API", () => {
     };
     const base = "/api/mcp/servers/headless/sign-in";
     try {
-      expect((await api("POST", "/api/mcp/servers", { name: "headless", url: fake.url, ...(registered ? { oauth: client } : {}) })).status).toBe(201);
+      expect((await api("POST", "/api/mcp/servers", { name: "headless", url, ...(registered ? { oauth: client } : {}) })).status).toBe(201);
       expect((await remote(member, "POST", base)).status).toBe(403);
       const unauthenticated = await fetch(`${BASE}${base}`, { method: "POST", headers: { "x-forwarded-for": "192.0.2.11" } });
       expect([401, 403]).toContain(unauthenticated.status);
       const started = await remote(alice, "POST", base);
       expect(started.status).toBe(200);
       expect(started.cache).toBe("no-store");
+      // no https address to come back to: the person pastes the page it ends on
+      expect(started.body.auth.pasteBack).toBe(true);
       const path = `${base}/${started.body.auth.flowId}`;
       const approval = await fetch(started.body.auth.authorizationUrl, { redirect: "manual" });
       const callbackUrl = approval.headers.get("location")!;
@@ -8191,6 +8200,60 @@ describe("harness HTTP API", () => {
     } finally {
       await api("DELETE", "/api/mcp/servers/headless");
       for (const token of [alice, bob, member]) await remote(token, "POST", "/api/auth/logout");
+      await fake.close();
+      await oauth.close();
+    }
+  });
+
+  it("brings a sign-in started in a browser on another computer back to this server's https address", async () => {
+    const oauth = await startFakeOAuth();
+    const fake = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    const opened = await api("POST", "/api/auth/pairing", { scopes: ["admin", "client"] });
+    const token = (await api("POST", "/api/auth/pair", { code: opened.body.code })).body.token as string;
+    // What the edge proxy in front of My Cloud hands the server (node's
+    // fetch drops a custom Host header, so this goes through http.request).
+    const viaProxy = (method: string, path: string, headers: Record<string, string> = {}, body?: unknown) =>
+      new Promise<{ status: number; text: string; headers: Record<string, unknown> }>((resolve, reject) => {
+        const req = request({
+          hostname: "127.0.0.1", port: PORT, path, method,
+          headers: { host: "cloud.example", "x-forwarded-proto": "https", "x-forwarded-for": "192.0.2.20", ...headers },
+        }, (res) => {
+          let raw = "";
+          res.on("data", (chunk) => (raw += chunk));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, text: raw, headers: res.headers }));
+        });
+        req.on("error", reject);
+        req.end(body === undefined ? undefined : JSON.stringify(body));
+      });
+    const signedIn = { authorization: `Bearer ${token}`, origin: "https://cloud.example", "content-type": "application/json" };
+    const base = "/api/mcp/servers/whop/sign-in";
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "whop", url: fake.url })).status).toBe(201);
+      const started = await viaProxy("POST", base, signedIn);
+      expect(started.status).toBe(200);
+      const auth = JSON.parse(started.text).auth;
+      expect(auth.pasteBack).toBeUndefined();
+      expect(new URL(auth.authorizationUrl).searchParams.get("redirect_uri")).toBe("https://cloud.example/mcp-oauth/callback");
+      const callback = new URL((await fetch(auth.authorizationUrl, { redirect: "manual" })).headers.get("location")!);
+      expect(callback.origin + callback.pathname).toBe("https://cloud.example/mcp-oauth/callback");
+
+      const forged = new URL(callback);
+      forged.searchParams.set("state", "forged");
+      expect((await viaProxy("GET", forged.pathname + forged.search)).status).toBe(400);
+      expect(JSON.parse((await viaProxy("GET", `${base}/${auth.flowId}`, signedIn)).text).auth.phase).toBe("waiting");
+
+      const page = await viaProxy("GET", callback.pathname + callback.search);
+      expect(page.status).toBe(200);
+      expect(page.text).toBe("Signed in. You can close this tab and return to OpenMausBot.");
+      expect(page.headers).toMatchObject({ "cache-control": "no-store", "referrer-policy": "no-referrer", "content-type": "text/plain; charset=utf-8" });
+      expect(page.text).not.toContain(callback.searchParams.get("code"));
+      expect(JSON.parse((await viaProxy("GET", `${base}/${auth.flowId}`, signedIn)).text).auth.phase).toBe("succeeded");
+      expect((await viaProxy("GET", callback.pathname + callback.search)).status).toBe(409);
+      expect(oauth.counts.token).toBe(1);
+      expect((await api("POST", "/api/mcp/servers/whop/test")).body.ok).toBe(true);
+    } finally {
+      await api("DELETE", "/api/mcp/servers/whop").catch(() => undefined);
+      await viaProxy("POST", "/api/auth/logout", signedIn).catch(() => undefined);
       await fake.close();
       await oauth.close();
     }
@@ -9880,7 +9943,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("keeps chat-created routines inert until their durable card is confirmed", async () => {
+  it("applies a bot's own chat-created routine at once and keeps a teammate's behind its card", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     let routineId = "";
     let orphanRoutineId = "";
@@ -9957,33 +10020,27 @@ describe("harness HTTP API", () => {
         }),
       });
       expect(proposed.status).toBe(201);
-      const proposal = z.object({ requestId: z.string() }).passthrough().parse(await proposed.json());
-
-      const stillInert = await api("GET", "/api/routines");
-      expect(stillInert.body.routines.filter((routine: { botId: string }) => routine.botId === bot.id)).toEqual([]);
+      // The bot's own routine applies at its Ask level, as a one-line receipt.
+      const proposal = z.object({ requestId: z.string(), state: z.literal("applied"), appliedBy: z.literal("self"), result: z.object({ resultId: z.string() }).passthrough() })
+        .passthrough().parse(await proposed.json());
+      routineId = proposal.result.resultId;
       const state = (await api("GET", "/api/bots")).body;
       const card = state.bots
         .find((candidate: { id: string }) => candidate.id === bot.id)
         ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposal.requestId);
       expect(card?.card).toMatchObject({
         tool: "schedule_routine",
-        routineRequest: { botId: bot.id, threadId: bot.threadId },
+        answered: "allow",
+        autoApplied: true,
+        routineRequest: { botId: bot.id, threadId: bot.threadId, resultId: routineId, undo: { name: "Weekday brief" } },
       });
-      expect(card?.card.answered).toBeUndefined();
-
-      const confirmed = await api("POST", `/api/threads/${bot.threadId}/respond`, {
-        requestId: proposal.requestId,
-        behavior: "allow",
-      });
-      expect(confirmed).toMatchObject({ status: 200, body: { outcome: "allowed-once", routineAction: "create" } });
-      routineId = confirmed.body.resultId;
       await expect.poll(async () => {
         const decisions = (await api("GET", "/api/decisions")).body.decisions;
         return decisions
           .filter((decision: { requestId?: string }) => decision.requestId === proposal.requestId)
           .map((decision: { decision: string; source: string }) => `${decision.decision}:${decision.source}`)
           .sort();
-      }).toEqual(["card-shown:routine", "user-approved:user"]);
+      }).toEqual(["auto-approved:self"]);
 
       const after = await api("GET", "/api/routines");
       const confirmedRoutine = after.body.routines.find((routine: { id: string }) => routine.id === routineId);
@@ -10227,13 +10284,8 @@ describe("harness HTTP API", () => {
         }),
       });
       expect(orphanProposalResponse.status).toBe(201);
-      const orphanProposal = z.object({ requestId: z.string() }).parse(await orphanProposalResponse.json());
-      const orphanConfirmed = await api("POST", `/api/threads/${orphanThreadId}/respond`, {
-        requestId: orphanProposal.requestId,
-        behavior: "allow",
-      });
-      expect(orphanConfirmed.status).toBe(200);
-      orphanRoutineId = orphanConfirmed.body.resultId;
+      const orphanProposal = z.object({ result: z.object({ resultId: z.string() }).passthrough() }).passthrough().parse(await orphanProposalResponse.json());
+      orphanRoutineId = orphanProposal.result.resultId;
       expect((await api("DELETE", `/api/bots/${bot.id}/tasks/${orphanThreadId}`)).status).toBe(200);
       expect(storedMessageCount(orphanThreadId)).toBe(0);
 
@@ -10436,7 +10488,38 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("keeps a proposed profile change inert until its card is confirmed, then records history", async () => {
+  it("lets a bot change its own routines while 8 cards for a teammate are open", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    const teammate = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const post = (body: Record<string, unknown>) => fetch(`${BASE}/api/internal/routine-requests`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, ...body }),
+      });
+      const routine = (name: string) => ({ name, instructions: `Run ${name}.`, schedule: { type: "weekly", time: "09:00", weekdays: ["monday"] }, runOn: "maus" });
+      for (let index = 0; index < 8; index += 1) {
+        expect((await post({ action: "create", forBotId: teammate.id, routine: routine(`Teammate ${index}`) })).status).toBe(201);
+      }
+      // A ninth card is over the budget...
+      expect((await post({ action: "create", forBotId: teammate.id, routine: routine("Teammate 8") })).status).toBe(429);
+      // ...but the bot's own change opens no card, so the budget does not hold it back.
+      const own = await post({ action: "create", routine: routine("Own brief") });
+      expect(own.status).toBe(201);
+      const applied = z.object({ state: z.literal("applied"), result: z.object({ resultId: z.string() }).passthrough() }).passthrough().parse(await own.json());
+      const paused = await post({ action: "pause", routineId: applied.result.resultId });
+      expect(paused.status).toBe(201);
+      expect(await paused.json()).toMatchObject({ state: "applied", appliedBy: "self" });
+    } finally {
+      const routines = (await api("GET", "/api/routines")).body.routines as Array<{ id: string; botId: string }>;
+      for (const routine of routines.filter((candidate) => candidate.botId === bot.id)) await api("DELETE", `/api/routines/${routine.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("DELETE", `/api/bots/${teammate.id}`);
+    }
+  });
+
+  it("applies a bot's own profile change at once, records history, and undoes it from its receipt", async () => {
     const soulFileOf = (botId: string) => join(home, ".openmausbot", "bots", botId, "SOUL.md");
     const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
     try {
@@ -10456,28 +10539,13 @@ describe("harness HTTP API", () => {
         body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, changes: { name: "Kiwi", soul: "Be brief." }, reason: "you asked" }),
       });
       expect(proposal.status).toBe(201);
-      const proposed = z.object({ requestId: z.string() }).passthrough().parse(await proposal.json());
+      // A bot's change to itself applies at its Ask level, as a receipt.
+      const proposed = z.object({ requestId: z.string(), state: z.literal("applied"), appliedBy: z.literal("self") }).passthrough().parse(await proposal.json());
       const state = (await api("GET", "/api/bots")).body;
       const card = state.bots
         .find((candidate: { id: string }) => candidate.id === bot.id)
         ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposed.requestId);
-      expect(card?.card).toMatchObject({ tool: "update_profile", profileRequest: { botId: bot.id, targetBotId: bot.id } });
-      expect((await api("GET", `/api/bots/${bot.id}/soul`)).body.soul).toBe("");
-
-      // a stale confirm fails closed
-      await api("PATCH", `/api/bots/${bot.id}`, { title: "moved" });
-      const stale = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" });
-      expect(stale.status).toBe(409);
-
-      // propose again and confirm
-      const againResponse = await fetch(`${BASE}/api/internal/profile-requests`, {
-        method: "POST",
-        headers: internalHeaders,
-        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, changes: { name: "Kiwi", soul: "Be brief." }, reason: "you asked" }),
-      });
-      const again = z.object({ requestId: z.string() }).passthrough().parse(await againResponse.json());
-      const ok = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: again.requestId, behavior: "allow" });
-      expect(ok.body).toMatchObject({ ok: true, outcome: "allowed-once", profileFields: ["name", "soul"] });
+      expect(card?.card).toMatchObject({ tool: "update_profile", answered: "allow", autoApplied: true, profileRequest: { botId: bot.id, targetBotId: bot.id, undo: { appliedRevision: expect.any(String) } } });
       const after = (await api("GET", `/api/bots/${bot.id}/soul`)).body;
       expect(after.soul).toBe("Be brief.");
       expect(readFileSync(soulFileOf(bot.id), "utf8")).toBe("Be brief.");
@@ -10486,7 +10554,6 @@ describe("harness HTTP API", () => {
       expect(history.status).toBe(200);
       const fields = history.body.rows.map((r: any) => `${r.field}:${r.actor}:${r.via.split(":")[0]}`);
       expect(fields.slice(0, 2).sort()).toEqual(["name:bot:card", "soul:bot:card"]);
-      expect(fields).toContain("title:user:api");
 
       // the default list never carries a soul row's full text
       const soulRowDefault = history.body.rows.find((r: any) => r.field === "soul");
@@ -10510,11 +10577,28 @@ describe("harness HTTP API", () => {
       const latestHistory = (await api("GET", `/api/bots/${bot.id}/history`)).body;
       expect((await api("POST", `/api/bots/${bot.id}/history/rollback`, { id: "missing", expectedRevision: latestHistory.revision })).status).toBe(400);
 
+      // The rollback moved the profile, so the first change's Undo refuses.
+      const stale = await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: proposed.requestId });
+      expect(stale).toMatchObject({ status: 409, body: { code: "changed-since" } });
+      expect((await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id).name).toBe("Kiwi");
+
+      // A fresh change undoes once, back to exactly what it replaced.
+      const againResponse = await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, changes: { title: "Lead scout" }, reason: "you asked" }),
+      });
+      const again = z.object({ requestId: z.string(), state: z.literal("applied") }).passthrough().parse(await againResponse.json());
+      expect((await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: again.requestId })).body).toEqual({ ok: true, undone: true });
+      expect((await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: again.requestId })).body).toMatchObject({ alreadyUndone: true });
+      expect((await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id).title).toBe("");
+      expect((await api("GET", `/api/bots/${bot.id}/history`)).body.rows[0]).toMatchObject({ field: "title", actor: "user", via: expect.stringMatching(/^undo:/) });
+
       // decisions audit
       await expect.poll(async () => {
         const decisions = (await api("GET", "/api/decisions")).body.decisions;
         return decisions.filter((d: any) => d.requestId === again.requestId).map((d: any) => `${d.decision}:${d.source}`).sort();
-      }).toEqual(["card-shown:profile", "user-approved:user"]);
+      }).toEqual(["auto-approved:self", "user-undone:user"]);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);
@@ -10644,7 +10728,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("only enables the exact learned-skill proposal a current client reviewed", async () => {
+  it("applies a bot's own learned skill at once and undoes it from its receipt", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
@@ -10683,6 +10767,8 @@ describe("harness HTTP API", () => {
           }),
         });
         expect(response.status).toBe(201);
+        // The bot's own skill applies at its Ask level, as a receipt line.
+        expect(await response.json()).toMatchObject({ state: "applied", name, action });
         const state = (await api("GET", "/api/bots")).body;
         const cards = state.bots
           .find((candidate: { id: string }) => candidate.id === bot.id)
@@ -10690,191 +10776,58 @@ describe("harness HTTP API", () => {
             message.card?.skillRequest?.name === name && message.card.skillRequest.action === action,
           );
         const card = cards?.[cards.length - 1]?.card;
-        expect(card?.title).toBe(action === "create" ? `Enable skill "${name}"?` : `Update skill "${name}"?`);
-        expect(card?.options).toEqual([action === "create" ? "Enable" : "Update", "Deny"]);
-        expect(card?.skillRequest?.action).toBe(action);
-        expect(card?.subtitle).toContain("Adds one line to the prompt index; the body is read only when used.");
+        expect(card).toMatchObject({ answered: "allow", autoApplied: true, options: [] });
+        expect(card?.title).toBe(action === "create" ? `Skill "${name}" enabled` : `Skill "${name}" updated`);
         expect(card?.skillRequest?.preview).toContain(`# ${name}`);
-        expect(card?.skillRequest?.sha256).toMatch(/^[a-f0-9]{64}$/);
         expect(createHash("sha256").update(card.skillRequest.preview).digest("hex"))
           .toBe(card.skillRequest.sha256);
         return card as {
           requestId: string;
-          skillRequest: { action: "create" | "update"; preview: string; sha256: string };
+          skillRequest: { action: "create" | "update"; preview: string; sha256: string; previous?: { preview: string } };
         };
       };
+      const undo = (requestId: string, threadId = bot.threadId) => api("POST", `/api/threads/${threadId}/undo`, { requestId });
+      const skillText = async (name: string) => (await api("GET", `/api/bots/${bot.id}/skills/${name}`)).body.text;
 
       const stagedSecret = `Bearer ${"a".repeat(24)}`;
       const first = await stage("reviewed-skill-one", `Use ${stagedSecret} when calling the API.\n`);
       expect(first.skillRequest.preview).not.toContain(stagedSecret);
       expect(first.skillRequest.preview).toContain("redacted");
-      const stagedMessage = (await api("GET", "/api/bots")).body.bots
-        .find((candidate: { id: string }) => candidate.id === bot.id)
-        ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === first.requestId);
-      expect((await api("PATCH", `/api/bots/${bot.id}/cards/${stagedMessage.id}`, {
-        answered: "allow",
-      })).status).toBe(409);
-      const missingHash = await api("POST", `/api/bots/${bot.id}/respond`, {
-        requestId: first.requestId,
-        behavior: "allow",
-      });
-      expect(missingHash.status).toBe(409);
-      expect(missingHash.body.error).toMatch(/reviewedSha256/);
+      expect(await skillText("reviewed-skill-one")).toBe(first.skillRequest.preview);
+      // An applied receipt is not a card anyone can answer again.
+      expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first.requestId, behavior: "deny" })).body)
+        .toMatchObject({ outcome: "allowed-once", alreadySettled: true });
 
-      const wrongHash = await api("POST", `/api/threads/${bot.threadId}/respond`, {
-        requestId: first.requestId,
-        behavior: "allow",
-        reviewedSha256: "0".repeat(64),
-      });
-      expect(wrongHash.status).toBe(409);
-      expect(wrongHash.body.error).toMatch(/reviewedSha256/);
+      const updated = await stage("reviewed-skill-one", "Use only the newly reviewed workflow.\n", "update", "Uses the revised reviewed workflow.");
+      expect(updated.skillRequest.previous?.preview).toBe(first.skillRequest.preview);
+      expect(await skillText("reviewed-skill-one")).toBe(updated.skillRequest.preview);
+      // The create's Undo refuses: the skill changed since.
+      expect(await undo(first.requestId)).toMatchObject({ status: 409, body: { code: "changed-since" } });
+      // The update's Undo puts the reviewed previous version back, once.
+      expect(await undo(updated.requestId)).toMatchObject({ status: 200, body: { ok: true, undone: true } });
+      expect(await skillText("reviewed-skill-one")).toBe(first.skillRequest.preview);
+      expect(await undo(updated.requestId)).toMatchObject({ status: 200, body: { alreadyUndone: true } });
 
-      const approvedByBotRoute = await api("POST", `/api/bots/${bot.id}/respond`, {
-        requestId: first.requestId,
-        behavior: "allow",
-        reviewedSha256: first.skillRequest.sha256,
-      });
-      expect(approvedByBotRoute).toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
+      // A hand edit after the write makes its Undo stale and changes nothing.
+      const edited = await stage("reviewed-skill-one", "This version is edited by hand next.\n", "update", "A version edited by hand.");
+      const skillPath = join(home, ".openmausbot", "workspaces", bot.id, ".agents", "skills", "reviewed-skill-one", "SKILL.md");
+      const handEdit = edited.skillRequest.preview.replace("edited by hand next", "changed by hand");
+      writeFileSync(skillPath, handEdit);
+      expect(await undo(edited.requestId)).toMatchObject({ status: 409, body: { code: "changed-since" } });
+      expect(readFileSync(skillPath, "utf8")).toBe(handEdit);
 
-      const updated = await stage(
-        "reviewed-skill-one",
-        "Use only the newly reviewed workflow.\n",
-        "update",
-        "Uses the revised reviewed workflow.",
-      );
-      const beforeUpdate = await api("GET", `/api/bots/${bot.id}/skills/reviewed-skill-one`);
-      expect(beforeUpdate).toMatchObject({ status: 200, body: { text: first.skillRequest.preview } });
-      expect(beforeUpdate.body.text).not.toBe(updated.skillRequest.preview);
-
-      const stagedListing = await fetch(
-        `${BASE}/api/internal/skills?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
-        { headers: internalHeaders },
-      );
-      expect(stagedListing.status).toBe(200);
-      const stagedInventory = await stagedListing.json() as {
-        staged: Array<{ name: string; action: string }>;
-      };
-      expect(stagedInventory.staged).toMatchObject([{ name: "reviewed-skill-one", action: "update" }]);
-      expect(JSON.stringify(stagedInventory)).not.toContain("baseSha256");
-      expect(JSON.stringify(stagedInventory)).not.toContain("baseAppliedStageId");
-
-      const approvedUpdate = await api("POST", `/api/threads/${bot.threadId}/respond`, {
-        requestId: updated.requestId,
-        behavior: "allow",
-        reviewedSha256: updated.skillRequest.sha256,
-      });
-      expect(approvedUpdate).toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
-      expect(await api("GET", `/api/bots/${bot.id}/skills/reviewed-skill-one`))
-        .toMatchObject({ status: 200, body: { text: updated.skillRequest.preview } });
-
-      const deniedUpdate = await stage(
-        "reviewed-skill-one",
-        "This replacement must never land.\n",
-        "update",
-        "A denied replacement.",
-      );
-      expect(await api("POST", `/api/threads/${bot.threadId}/respond`, {
-        requestId: deniedUpdate.requestId,
-        behavior: "deny",
-      })).toMatchObject({ status: 200, body: { outcome: "rejected" } });
-      expect(await api("GET", `/api/bots/${bot.id}/skills/reviewed-skill-one`))
-        .toMatchObject({ status: 200, body: { text: updated.skillRequest.preview } });
-
-      const staleUpdate = await stage(
-        "reviewed-skill-one",
-        "This proposal will become stale.\n",
-        "update",
-        "A stale replacement.",
-      );
-      const skillPath = join(
-        home,
-        ".openmausbot",
-        "workspaces",
-        bot.id,
-        ".agents",
-        "skills",
-        "reviewed-skill-one",
-        "SKILL.md",
-      );
-      writeFileSync(skillPath, updated.skillRequest.preview.replace("newly reviewed", "changed after staging"));
-      const staleResponse = await api("POST", `/api/threads/${bot.threadId}/respond`, {
-        requestId: staleUpdate.requestId,
-        behavior: "allow",
-        reviewedSha256: staleUpdate.skillRequest.sha256,
-      });
-      expect(staleResponse.status).toBe(422);
-      expect(staleResponse.body.error).toMatch(/changed after this update was proposed/);
-      const staleCard = (await api("GET", "/api/bots")).body.bots
-        .find((candidate: { id: string }) => candidate.id === bot.id)
-        ?.messages.find((message: { card?: { requestId?: string } }) =>
-          message.card?.requestId === staleUpdate.requestId,
-        )?.card;
-      expect(staleCard?.held).toMatch(/changed after this update was proposed/);
-      writeFileSync(skillPath, updated.skillRequest.preview);
-      expect(await api("POST", `/api/threads/${bot.threadId}/respond`, {
-        requestId: staleUpdate.requestId,
-        behavior: "allow",
-        reviewedSha256: staleUpdate.skillRequest.sha256,
-      })).toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
-      const recoveredCard = (await api("GET", "/api/bots")).body.bots
-        .find((candidate: { id: string }) => candidate.id === bot.id)
-        ?.messages.find((message: { card?: { requestId?: string } }) =>
-          message.card?.requestId === staleUpdate.requestId,
-        )?.card;
-      expect(recoveredCard?.answered).toBe("allow");
-      expect(recoveredCard?.held).toBeUndefined();
-
+      // Undoing a create removes the skill it enabled.
       const second = await stage("reviewed-skill-two");
-      const approvedByThreadRoute = await api("POST", `/api/threads/${bot.threadId}/respond`, {
-        requestId: second.requestId,
-        behavior: "allow",
-        reviewedSha256: second.skillRequest.sha256,
-      });
-      expect(approvedByThreadRoute).toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
-
-      const denied = await stage("reviewed-skill-denied");
-      const deniedWithoutHash = await api("POST", `/api/threads/${bot.threadId}/respond`, {
-        requestId: denied.requestId,
-        behavior: "deny",
-      });
-      expect(deniedWithoutHash).toMatchObject({ status: 200, body: { outcome: "rejected" } });
-
-      // Denial is still safe when a crash or later cleanup has already lost
-      // the staged bytes. Settle the durable card instead of trapping the
-      // composer behind a proposal that can no longer be applied.
-      const missingStage = await stage("reviewed-skill-missing-stage");
-      writeFileSync(
-        join(home, ".openmausbot", "skill-state", bot.id, "staged.json"),
-        `${JSON.stringify({ writes: {} }, null, 2)}\n`,
-      );
-      expect(await api("POST", `/api/threads/${bot.threadId}/respond`, {
-        requestId: missingStage.requestId,
-        behavior: "deny",
-      })).toMatchObject({ status: 200, body: { outcome: "rejected" } });
-      const missingStageCard = (await api("GET", "/api/bots")).body.bots
-        .find((candidate: { id: string }) => candidate.id === bot.id)
-        ?.messages.find((message: { card?: { requestId?: string } }) =>
-          message.card?.requestId === missingStage.requestId,
-        )?.card;
-      expect(missingStageCard).toMatchObject({ answered: "deny", dismissed: true });
-
-      // Deleting the only transcript that owns a pending card must also drop
-      // its bot-scoped stage; otherwise the invisible proposal reserves its
-      // name until the 30-day expiry.
-      await stage("deleted-task-skill");
-      expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+      expect(await undo(second.requestId)).toMatchObject({ status: 200, body: { undone: true } });
+      expect((await api("GET", `/api/bots/${bot.id}/skills/reviewed-skill-two`)).status).toBe(404);
       await expect.poll(async () => {
-        const state = (await api("GET", "/api/bots")).body;
-        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
-      }, { timeout: 5_000 }).toBe(false);
-      const nextTask = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "next task" });
-      expect(nextTask).toMatchObject({ status: 201 });
-      const nextThreadId = nextTask.body.task.threadId as string;
-      expect((await api("DELETE", `/api/bots/${bot.id}/tasks/${bot.threadId}`)).status).toBe(200);
+        const decisions = (await api("GET", "/api/decisions")).body.decisions;
+        return decisions.filter((d: any) => d.requestId === second.requestId).map((d: any) => `${d.decision}:${d.source}`).sort();
+      }).toEqual(["auto-approved:self", "user-undone:user"]);
 
-      const nextToken = await mintTestCapability(BASE, bot.id, nextThreadId, { skillAuthoring: true });
+      const nextToken = await mintTestCapability(BASE, bot.id, bot.threadId, { skillAuthoring: true });
       const listing = await fetch(
-        `${BASE}/api/internal/skills?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(nextThreadId)}`,
+        `${BASE}/api/internal/skills?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
         { headers: { authorization: `Bearer ${nextToken}` } },
       );
       expect(listing.status).toBe(200);
@@ -10882,11 +10835,7 @@ describe("harness HTTP API", () => {
         skills: Array<{ name: string; enabled: boolean }>;
         staged: Array<{ name: string }>;
       };
-      expect(inventory.skills).toMatchObject([
-        { name: "reviewed-skill-one", enabled: true },
-        { name: "reviewed-skill-two", enabled: true },
-      ]);
-      expect(inventory.skills.some((skill) => skill.name === "reviewed-skill-denied")).toBe(false);
+      expect(inventory.skills.map((skill) => skill.name)).toEqual(["reviewed-skill-one"]);
       expect(inventory.staged).toEqual([]);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
