@@ -38,6 +38,14 @@ describe("describeTool", () => {
     expect(describeTool("mcp__agents__delegate_bot")).toEqual({ app: "Team", label: "Delegate bot" });
   });
 
+  it("files the X research tools under X, not Team", () => {
+    expect(describeTool("mcp__agents__x_search")).toEqual({ app: "X", label: "Searched X" });
+    expect(describeTool("mcp__agents__x_user_posts")).toEqual({ app: "X", label: "Read X posts" });
+    expect(describeTool("mcp__agents__x_post")).toEqual({ app: "X", label: "Read an X post" });
+    expect(describeTool("mcp__agents__x_profile")).toEqual({ app: "X", label: "Looked up an X profile" });
+    expect(describeTool("mcp__agents__delegate_bot")).toEqual({ app: "Team", label: "Delegate bot" });
+  });
+
   it("falls back to spacing out an unknown name rather than showing it raw", () => {
     expect(describeTool("TaskUpdate")).toEqual({ app: null, label: "Task update" });
     expect(describeTool("replace_file_content")).toEqual({ app: null, label: "Replace file content" });
