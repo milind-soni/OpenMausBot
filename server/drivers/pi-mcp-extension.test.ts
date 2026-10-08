@@ -570,7 +570,8 @@ describe("Pi ask_user tool", () => {
     const { asked, ctx } = dialogs(["Green", "Ship it on Friday"]);
     const result = await tool.execute("call-1", QUESTIONS, undefined, undefined, ctx);
     expect(asked).toEqual([
-      { method: "select", title: "Which color?", options: ["Blue", "Green"] },
+      // the description shows under the question; the labels stay exact
+      { method: "select", title: "Which color?\n\nGreen: the calm one", options: ["Blue", "Green"] },
       { method: "input", title: "Any notes?" },
     ]);
     expect(result.content).toEqual([{ type: "text", text:

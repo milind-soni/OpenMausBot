@@ -8,6 +8,8 @@ import {
   ASK_USER_TOOL_DEFINITION,
   formatQuestionAnswers,
   isPersistentQuestionCard,
+  MAX_ANSWER_ECHO,
+  MAX_CUSTOM_ANSWER,
   MAX_OPTIONS,
   MAX_QUESTION_TEXT,
   MAX_QUESTIONS,
@@ -218,6 +220,17 @@ describe("answerWithoutPreamble", () => {
 describe("capAnswerEcho", () => {
   it("leaves an answer within the limit alone", () => {
     expect(capAnswerEcho("Q: Which?\nA: Opus", 100)).toBe("Q: Which?\nA: Opus");
+  });
+
+  it("never cuts a reply a card can produce", () => {
+    const questions = Array.from({ length: MAX_QUESTIONS }, (_, i) => ({
+      question: `${i}`.padEnd(MAX_QUESTION_TEXT, "q"),
+      options: Array.from({ length: MAX_OPTIONS }, (_, j) => ({ label: `${j}`.padEnd(120, "l") })),
+    }));
+    const answers = questions.map((question) => [...question.options.map((option) => option.label), "c".repeat(MAX_CUSTOM_ANSWER)]);
+    const reply = formatQuestionAnswers(questions, answers);
+    expect(reply.length).toBeLessThanOrEqual(MAX_ANSWER_ECHO);
+    expect(capAnswerEcho(reply)).toBe(reply);
   });
 
   it("cuts an over-limit answer back to the last whole block and says so", () => {

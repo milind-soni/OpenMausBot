@@ -601,10 +601,17 @@ function askUserTool(allowed: () => boolean): PiToolDefinition {
       const answers: string[][] = [];
       for (const question of questions) {
         const labels = question.options.map((option) => option.label);
+        // pi's select carries bare strings, and a card cuts a long label, so
+        // option descriptions go under the question; the labels stay exact
+        // and the pick comes back as one of them.
+        const described = question.options.filter((option) => option.description);
+        const title = described.length
+          ? `${question.question}\n\n${described.map((option) => `${option.label}: ${option.description}`).join("\n")}`
+          : question.question;
         // A dismissed, timed-out or aborted dialog resolves undefined: stop
         // asking rather than leave the model waiting on the rest.
         const answer = labels.length
-          ? await ctx.ui.select?.(question.question, labels, { signal })
+          ? await ctx.ui.select?.(title, labels, { signal })
           : await ctx.ui.input?.(question.question, undefined, { signal });
         if (!answer?.trim()) break;
         answers.push([answer.trim()]);

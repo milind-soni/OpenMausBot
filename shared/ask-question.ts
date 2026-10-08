@@ -275,9 +275,12 @@ export function answerWithoutPreamble(answer: string): string {
 
 /** The longest formatted answer OMB will echo back to an engine in free
  * text (Cursor's skipped-question reason). formatQuestionAnswers itself does
- * not truncate, but six answers at the custom-answer cap is the most a
- * legitimate reply weighs, so that is the ceiling. */
-export const MAX_ANSWER_ECHO = 6 * MAX_CUSTOM_ANSWER;
+ * not truncate. A card reply weighs at most one block per question, each
+ * repeating the question text and holding every option label plus a
+ * custom answer, so a reply typed in a card is never cut. Only a longer
+ * message typed in chat is. */
+export const MAX_ANSWER_ECHO = ANSWER_PREAMBLE.length + MAX_QUESTIONS
+  * ("\n\nQ: \nA: ".length + MAX_QUESTION_TEXT + MAX_OPTIONS * (MAX_LABEL + ", ".length) + MAX_CUSTOM_ANSWER);
 
 /** Cap a formatted answer for echoing back. An over-cap echo is cut back to
  * the last whole block so no partial answer reads as one, and says it was

@@ -14,7 +14,7 @@ import type { DeviceSignIn } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpQuestionRequest, type AcpSupport } from "./core.ts";
 import { allowsTool, canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById } from "../../../shared/ask-question.ts";
+import { MAX_QUESTIONS, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById } from "../../../shared/ask-question.ts";
 
 export const STATIC_GROK_MODELS: ModelCatalog = {
   default: "grok-4.7",
@@ -357,7 +357,9 @@ export const GROK_ASK_USER_QUESTION: AcpQuestionRequest = {
   cancelled: { outcome: "cancelled" },
   parse(params) {
     const raw = (params as { questions?: unknown } | null)?.questions;
-    if (!Array.isArray(raw)) return null;
+    // More questions than a card holds are refused whole: answering only
+    // the first ones would leave the rest unanswered as if accepted.
+    if (!Array.isArray(raw) || raw.length > MAX_QUESTIONS) return null;
     // The entry index is the protocol id, so each card question maps back
     // to the exact text Grok keys its answers by. Grok serializes the flag
     // as `multiSelect`; its model-facing name `multi_select` is read too.

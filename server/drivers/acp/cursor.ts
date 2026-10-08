@@ -13,7 +13,7 @@ import { titleCaseModelId } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
 import { createAcpDriver, type AcpQuestionRequest, type AcpSupport } from "./core.ts";
 import {
-  capAnswerEcho, formatQuestionAnswers, parseChoices, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById,
+  capAnswerEcho, formatQuestionAnswers, MAX_QUESTIONS, parseChoices, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById,
 } from "../../../shared/ask-question.ts";
 
 /** Translate an argv `--model` slug into the id this ACP session will accept.
@@ -355,7 +355,8 @@ export const CURSOR_ASK_QUESTION: AcpQuestionRequest = {
   cancelled: { outcome: { outcome: "cancelled" } },
   parse(params) {
     const raw = (params as { questions?: unknown } | null)?.questions;
-    if (!Array.isArray(raw)) return null;
+    // More questions than a card holds are refused whole, as for Grok.
+    if (!Array.isArray(raw) || raw.length > MAX_QUESTIONS) return null;
     const parsed = parseProtocolAskQuestions(raw.map((entry) =>
       entry && typeof entry === "object"
         ? { id: entry.id, question: entry.prompt, options: entry.options, multiSelect: entry.allowMultiple === true }

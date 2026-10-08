@@ -75,7 +75,7 @@ import { newEventId, newId, TurnNotStartedError } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import {
-  askQuestionSummary, MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion, questionChoices,
+  askQuestionSummary, MAX_QUESTION_TEXT, MAX_QUESTIONS, parseAskQuestions, parseChoices, questionAnswersByQuestion, questionChoices,
   type AskQuestion,
 } from "../../../shared/ask-question.ts";
 
@@ -1244,7 +1244,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             return send({
               jsonrpc: "2.0",
               id: msg.id,
-              error: { code: -32602, message: "ask needs at least one question with question text" },
+              error: { code: -32602, message: `ask needs 1 to ${MAX_QUESTIONS} questions with question text` },
             });
           }
           current.flushAssistantText();

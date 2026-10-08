@@ -386,6 +386,14 @@ describe("CursorAgentDriver", () => {
       expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
     });
 
+    it("refuses more questions than one card holds instead of answering only some", async () => {
+      const seven = Array.from({ length: 7 }, (_, i) => ({ id: `q${i}`, prompt: `Question ${i}?`, options: [{ id: `o${i}`, label: "Yes" }] }));
+      await start("t-cursor-ask-many", { FAKE_ACP_ASK_PARAMS: JSON.stringify({ toolCallId: "ask-7", questions: seven }) });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toMatchObject({ error: { code: -32602, message: "ask needs 1 to 6 questions with question text" } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+
     it("cancels an unanswered card after 15 minutes", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       try {

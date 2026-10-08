@@ -1205,6 +1205,14 @@ describe("ACP turns (fake CLI)", () => {
       await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
       expect(reply()).toMatchObject({ error: { code: -32602 } });
       expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
+
+      // More questions than one card holds: refused whole, not partly answered.
+      const seven = Array.from({ length: 7 }, (_, i) => ({ question: `Question ${i}?`, options: [{ label: "Yes" }, { label: "No" }] }));
+      process.env.FAKE_ACP_ASK_PARAMS = JSON.stringify({ ...GROK_ASK, questions: seven });
+      const many = await instance.adapter.sendTurn({ threadId: "t-grok-ask-deny", text: "seven" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === many.turnId);
+      expect(reply()).toMatchObject({ error: { code: -32602, message: "ask needs 1 to 6 questions with question text" } });
+      expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
     });
 
     it("cancels a question that arrives between turns", async () => {
