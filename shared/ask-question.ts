@@ -322,25 +322,38 @@ export function questionAnswersByQuestion(
  *
  * The card writes a single-choice answer as one label or the typed reply,
  * and a multi-select answer as the picked labels joined by ", " with a typed
- * reply last. A label is matched whole, the longest first, so a label that
- * contains ", " is still read as one pick. Anything left over is the
- * person's own words, never a guessed option.
+ * reply last. A label may itself contain ", ", so a multi-select answer can
+ * read more than one way. Every reading is tried: one that is labels from
+ * end to end wins over one that leaves words over. When the best readings
+ * disagree, the whole answer is the person's own words, never a guessed
+ * option.
  */
 export function pickedOptionLabels(answer: string, question: AskQuestion): { labels: string[]; other?: string } {
   const text = answer.trim();
   const labels = question.options.map((option) => option.label);
-  if (labels.includes(text)) return { labels: [text] };
-  if (!question.multiSelect) return text ? { labels: [], other: text } : { labels: [] };
-  const picked: string[] = [];
-  let rest = text;
-  const longestFirst = [...labels].sort((a, b) => b.length - a.length);
-  for (;;) {
-    const label = longestFirst.find((candidate) => !picked.includes(candidate) && (rest === candidate || rest.startsWith(`${candidate}, `)));
-    if (!label) break;
-    picked.push(label);
-    rest = rest.slice(label.length + 2);
+  if (!question.multiSelect) {
+    if (labels.includes(text)) return { labels: [text] };
+    return text ? { labels: [], other: text } : { labels: [] };
   }
-  return rest ? { labels: picked, other: rest } : { labels: picked };
+  const whole: string[][] = [];
+  const partial: Array<{ labels: string[]; other: string }> = [];
+  const read = (rest: string, picked: string[]): void => {
+    const next = labels.filter((label) => !picked.includes(label) && (rest === label || rest.startsWith(`${label}, `)));
+    if (!next.length) {
+      if (rest) partial.push({ labels: picked, other: rest });
+      else whole.push(picked);
+      return;
+    }
+    for (const label of next) read(rest.slice(label.length + 2), [...picked, label]);
+  };
+  read(text, []);
+  const key = (reading: { labels: string[]; other?: string }) => JSON.stringify([[...reading.labels].sort(), reading.other ?? null]);
+  // read() always records at least one reading; an empty answer is one
+  // reading with no labels.
+  const readings = whole.length ? whole.map((picked) => ({ labels: picked })) : partial;
+  const first = readings[0]!;
+  const agree = readings.every((reading) => key(reading) === key(first));
+  return agree ? first : { labels: [], other: text };
 }
 
 /** Longest protocol id accepted. Ids are harness-internal keys, never shown

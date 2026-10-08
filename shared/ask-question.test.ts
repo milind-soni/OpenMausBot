@@ -385,11 +385,22 @@ describe("pickedOptionLabels", () => {
     expect(pickedOptionLabels("Blue, Green", single)).toEqual({ labels: [], other: "Blue, Green" });
   });
 
-  it("splits a multi-select answer into whole labels, longest first, with typed words last", () => {
+  it("splits a multi-select answer into whole labels, with typed words last", () => {
     expect(pickedOptionLabels("Small, fitted, Large", multi)).toEqual({ labels: ["Small, fitted", "Large"] });
     expect(pickedOptionLabels("Large, Small", multi)).toEqual({ labels: ["Large", "Small"] });
     expect(pickedOptionLabels("Small, and an XXL", multi)).toEqual({ labels: ["Small"], other: "and an XXL" });
     expect(pickedOptionLabels("Only XXL", multi)).toEqual({ labels: [], other: "Only XXL" });
+  });
+
+  it("reads an answer that splits into labels more than one way as the person's own words", () => {
+    const overlapping = { question: "Which?", multiSelect: true, options: [{ label: "A" }, { label: "B, C" }, { label: "A, B" }, { label: "C" }] };
+    // "A" + "B, C" and "A, B" + "C" both fit: no option is guessed.
+    expect(pickedOptionLabels("A, B, C", overlapping)).toEqual({ labels: [], other: "A, B, C" });
+    // Only the label "A, B" reads it to the end; "A" would leave "B" over.
+    expect(pickedOptionLabels("A, B", overlapping)).toEqual({ labels: ["A, B"] });
+    const twoWays = { question: "Which?", multiSelect: true, options: [{ label: "A" }, { label: "B" }, { label: "A, B" }] };
+    expect(pickedOptionLabels("A, B", twoWays)).toEqual({ labels: [], other: "A, B" });
+    expect(pickedOptionLabels("C, D", overlapping)).toEqual({ labels: ["C"], other: "D" });
   });
 });
 
