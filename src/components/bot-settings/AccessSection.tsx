@@ -507,6 +507,48 @@ function ConnectorToolsGrants({
   );
 }
 
+/** X research: four read-only X tools paid from the workspace's own treg
+ * token. Off unless the person turns it on for this bot; a bot already on can
+ * always be switched off, even after the token is cleared. */
+function XResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: boolean }) => void }) {
+  const { state, dispatch } = useStore();
+  const tokenSaved = state.config?.treg?.configured === true;
+  const on = bot.xResearch === true;
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4" data-testid="access-x-research">
+      <div>
+        <div className="text-[15px] font-medium text-ink">X research</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">
+          {!tokenSaved ? (
+            <>
+              Add a treg token in{" "}
+              <button
+                type="button"
+                className="underline"
+                onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
+              >
+                Settings → API keys
+              </button>{" "}
+              to let bots search and read X.
+            </>
+          ) : on ? (
+            "This bot can search and read X. Each search spends a fraction of a cent of your treg balance."
+          ) : (
+            "Let this bot search and read X without an X account. It only reads, never posts."
+          )}
+        </div>
+      </div>
+      <Switch
+        checked={on}
+        aria-label="Let this bot search and read X"
+        disabled={!tokenSaved && !on}
+        onClick={() => patch({ xResearch: !on })}
+        className="disabled:cursor-not-allowed"
+      />
+    </div>
+  );
+}
+
 export function AccessSection({
   bot,
   derived,
@@ -696,6 +738,8 @@ export function AccessSection({
           className="disabled:cursor-not-allowed"
         />
       </div>
+
+      <XResearchCard bot={bot} patch={patch} />
 
       {!draft && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Webhooks</div>

@@ -9,9 +9,10 @@ import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras";
-/** Sections whose key can be tried against the provider from the server. */
-export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "treg";
+/** Sections whose key can be tried from the server. treg is tried by its own
+ * route, which also reports the balance left. */
+export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "treg";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -46,6 +47,7 @@ const SECTIONS: Record<
   mistral: { body: (v) => ({ mistral: { key: v } }), flag: (c) => c.mistral?.configured ?? false },
   cerebras: { body: (v) => ({ cerebras: { key: v } }), flag: (c) => c.cerebras?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
+  treg: { body: (v) => ({ treg: { token: v } }), flag: (c) => c.treg?.configured ?? false },
 };
 
 // Provider keys have no desktop-shell slot yet and go through the server's
@@ -154,6 +156,13 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.xai.desc",
     href: "https://console.x.ai",
     linkLabelKey: "keys.xai.link",
+    optional: true,
+  },
+  treg: {
+    labelKey: "keys.treg.label",
+    descriptionKey: "keys.treg.desc",
+    href: "https://treg.to",
+    linkLabelKey: "keys.treg.link",
     optional: true,
   },
 };
@@ -278,6 +287,17 @@ export function ApiKeyRow({
     setVerdict(null);
     const generation = ++testGeneration.current;
     try {
+      if (testProvider === "treg") {
+        const result = await api("/api/x-research/test", { method: "POST", body: "{}" });
+        if (generation !== testGeneration.current) return;
+        const outcome = result.ok
+          ? t("keys.treg.testOk", { dollars: Number(result.dollars ?? 0).toFixed(2) })
+          : result.reason === "rejected" ? t("keys.testRejected")
+            : result.reason === "unreachable" ? t("keys.testUnreachable")
+              : String(result.message ?? t("keys.testUnexpected", { status: "?" }));
+        setVerdict(`${t("keys.testSaved")} ${outcome}`);
+        return;
+      }
       const result = await api("/api/keys/test", { method: "POST", body: JSON.stringify({ provider: testProvider }) });
       if (generation !== testGeneration.current) return;
       const outcome = result.ok

@@ -139,3 +139,20 @@ describe("provider key rows", () => {
     expect(html).toContain("localhost:11434/v1");
   });
 });
+
+describe("X research token row", () => {
+  it("renders write-only with treg linked and a Test button once saved", () => {
+    vi.spyOn(store, "useStore").mockReturnValue({
+      state: { ...store.initialState, config: { ...store.initialState.config, treg: { configured: true } } as store.ConfigStatus },
+      dispatch: vi.fn(),
+      flushBotPatches: vi.fn(),
+      refreshInstances: vi.fn(),
+      refreshModels: vi.fn(),
+    });
+    const html = render(createElement(ApiKeyRow, { section: "treg", testProvider: "treg" }));
+    expect(html).toContain("treg token (X research)");
+    expect(html).toContain('type="password"');
+    expect(html).toContain("Configured");
+    expect(html).toContain(">Test<");
+  });
+});
