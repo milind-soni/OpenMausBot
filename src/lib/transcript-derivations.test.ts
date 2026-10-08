@@ -72,6 +72,24 @@ describe("transcriptLookups", () => {
     expect(transcriptLookups([], []).retryableId).toBeUndefined();
     expect(transcriptLookups([digest], [digest]).retryableId).toBeUndefined();
   });
+
+  it("keeps Retry on the last conversational row when a live call's record follows it", () => {
+    // hanging up appends the call's record after whatever the chat ended on:
+    // a failed turn must still be the row Retry belongs to
+    const record = msg("call", {
+      kind: "call",
+      text: "Call with Ada · 1:42",
+      at: 37,
+      parentId: "k",
+      call: { callId: "c1", botId: "ada", client: "ios", startedAt: 0, endedAt: 37, seconds: 102, endReason: "hung-up" },
+    });
+    expect(transcriptLookups([...all, record], [...branch, record]).retryableId).toBe("o");
+    // also when the record sits among the turn's receipts, in either order
+    expect(transcriptLookups([root, record, digest], [root, record, digest]).retryableId).toBe("root");
+    expect(transcriptLookups([root, digest, record], [root, digest, record]).retryableId).toBe("root");
+    // a chat that is only a call has nothing to retry
+    expect(transcriptLookups([record], [record]).retryableId).toBeUndefined();
+  });
 });
 
 describe("formatTime", () => {

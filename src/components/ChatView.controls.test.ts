@@ -254,6 +254,21 @@ describe("thread control placement", () => {
     messages.push({ id: "next", role: "user", kind: "text", at: 4, text: "A different request" });
     expect(render()).not.toContain("Retry</button>");
   });
+  it("keeps Retry on a failed turn after hanging up, when the call's record is the last row", () => {
+    const messages: Bot["messages"] = [
+      { id: "ask", role: "user", kind: "text", at: 1, text: "Try the new model", via: "call", callId: "c1" },
+      { id: "error", role: "bot", kind: "activity", at: 2, tool: { name: "error: outdated engine", ok: false } },
+      {
+        id: "record", role: "bot", kind: "call", at: 3, text: "Call with Pepper · 0:42",
+        call: { callId: "c1", botId: "bot", client: "ios", startedAt: 0, endedAt: 3, seconds: 42, endReason: "hung-up" },
+      },
+    ];
+    const render = () => renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false, messages } }));
+    expect(render()).toContain("Retry</button>");
+    expect(render()).toContain('data-testid="call-record"');
+    messages.push({ id: "next", role: "user", kind: "text", at: 4, text: "A different request" });
+    expect(render()).not.toContain("Retry</button>");
+  });
   it.each([false, true])("keeps recovery visible and outside tool folds when tool calls are %s", (showToolCalls) => {
     fixture.showToolCalls = showToolCalls;
     const explanation = "Automatic recovery: Qwen could not start. Trying Backup · fixture-model once in this thread.";

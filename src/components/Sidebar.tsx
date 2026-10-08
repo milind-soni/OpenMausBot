@@ -1387,7 +1387,9 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const avatarSize = iconOnly ? 44 : density === "compact" ? (showThreads ? 26 : 40) : (showThreads ? 32 : 56);
   // the visible branch, so a version switch changes the row with the chat
   const visible = useVisibleMessages(bot);
-  const last = visible.at(-1);
+  // the last real message, as the preview and the chat pane read it: receipts
+  // and a finished call's record trail the turn they belong to
+  const last = lastNonReceipt(visible);
   // the role from Bot Settings → Title. A badge or tooltip beside the name
   // (#866, #871) always traded the name's width against the title's; its own
   // line above the name lets both truncate independently instead.

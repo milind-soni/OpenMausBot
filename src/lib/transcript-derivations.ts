@@ -5,6 +5,7 @@
 // between days, from one formatter instead of a new one per row.
 import type { Message } from "@/state/store";
 import { activeLocale, t } from "@/lib/i18n";
+import { lastNonReceipt } from "@/lib/receipts";
 
 export interface TranscriptLookups {
   /** Every version of an edited question (itself and the forks that
@@ -13,7 +14,8 @@ export interface TranscriptLookups {
   /** The message a reply quotes, on any branch. */
   replyTarget(message: Message): Message | undefined;
   /** The last conversational row of the branch. Settlement can append
-   * bookkeeping after a failure; Retry still belongs to this row. */
+   * bookkeeping after a failure (receipts, a finished call's record); Retry
+   * still belongs to this row. */
   retryableId: string | undefined;
 }
 
@@ -33,14 +35,7 @@ export function transcriptLookups(all: readonly Message[], branch: readonly Mess
     else forks.set(parent, [message]);
   }
   for (const siblings of forks.values()) siblings.sort((a, b) => a.at - b.at);
-  let retryableId: string | undefined;
-  for (let i = branch.length - 1; i >= 0; i--) {
-    const message = branch[i]!;
-    if (message.kind !== "digest" && message.kind !== "compaction") {
-      retryableId = message.id;
-      break;
-    }
-  }
+  const retryableId = lastNonReceipt(branch)?.id;
   return {
     editVersions(message) {
       if (message.role !== "user" || message.kind !== "text") return undefined;
