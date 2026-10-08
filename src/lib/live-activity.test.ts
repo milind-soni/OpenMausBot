@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { liveActivityLabel } from "./live-activity";
+import { activityStepLabel, liveActivityLabel } from "./live-activity";
 import type { Message } from "@/state/store";
 
 const activity = (name: string, extra: Partial<NonNullable<Message["tool"]>> = {}): Message => ({
@@ -40,5 +40,31 @@ describe("liveActivityLabel", () => {
         comm: { groupId: "room", withBotId: "bot", withName: "Peer", withColor: "blue" },
       }),
     ).toBe("Thinking");
+  });
+});
+
+describe("activityStepLabel", () => {
+  it("names a step the way the working line does: the server's narration first", () => {
+    expect(activityStepLabel({ name: "Edit", spoken: "editing a file" })).toBe("Editing a file");
+    expect(activityStepLabel({ name: "mcp__computer__click" })).toBe("Using the computer");
+  });
+
+  it("never shows a step's arguments", () => {
+    expect(activityStepLabel({ name: "Bash: rm -rf ~/private" })).toBe("Running a command");
+    expect(activityStepLabel({ name: "make_invoice" })).toBe("Working");
+  });
+
+  it("names a step by its tool alone, whatever its arguments say", () => {
+    expect(activityStepLabel({ name: "make_invoice: read the file" })).toBe("Working");
+  });
+
+  // "Edit" and "editing a file" give the same words, so the first test cannot
+  // tell narration from a label made of the name. These two can.
+  it("prefers the narration to the label the tool's name would give", () => {
+    expect(activityStepLabel({ name: "Bash", spoken: "checking the build." })).toBe("Checking the build");
+  });
+
+  it("falls back to the tool's name when the narration is blank", () => {
+    expect(activityStepLabel({ name: "Bash", spoken: "   " })).toBe("Running a command");
   });
 });

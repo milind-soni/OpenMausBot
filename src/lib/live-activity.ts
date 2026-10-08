@@ -43,10 +43,16 @@ export function liveActivityLabel(message?: Message): string {
   ) {
     return t("chat.activity.thinking");
   }
+  return activityStepLabel(message.tool);
+}
 
-  if (message.tool.spoken?.trim()) return sentenceCase(message.tool.spoken);
+/** A step's name as people read it, running or finished: the server's
+ * narration when it has one, else a plain label for the kind of tool. Never
+ * the tool's arguments ("Bash: pnpm test" reads "Running a command"). */
+export function activityStepLabel(tool: { name: string; spoken?: string }): string {
+  if (tool.spoken?.trim()) return sentenceCase(tool.spoken);
 
-  const toolName = message.tool.name.replace(/^mcp__[^_]+__/, "").split(":", 1)[0] ?? "";
+  const toolName = tool.name.replace(/^mcp__[^_]+__/, "").split(":", 1)[0] ?? "";
   for (const [pattern, key] of FALLBACK_LABELS) {
     if (pattern.test(toolName)) return t(key);
   }
