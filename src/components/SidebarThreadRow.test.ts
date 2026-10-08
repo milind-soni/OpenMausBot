@@ -320,6 +320,34 @@ describe("threadUpdatedLabel", () => {
   });
 });
 
+describe("thread title direction", () => {
+  const now = Date.UTC(2026, 8, 25, 12, 0, 0);
+  const row = (title: string, openedBy?: { botId: string; name: string; at: number }) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+    task: { threadId: "t", title, updatedAt: now - 2 * 3_600_000, ...(openedBy ? { openedBy } : {}) },
+    ownerId: "b", current: false, now, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
+  }));
+  const titleSpan = (markup: string, title: string) => {
+    const match = markup.match(new RegExp(`<span dir="auto" class="([^"]*)">${title}</span>`));
+    expect(match).not.toBeNull();
+    return match?.[1] ?? "";
+  };
+
+  it("renders the title with dir=auto and leaves the time a fixed column", () => {
+    const arabic = "انسخ محتوى الذكاء الاصطناعي وصمم منشورات";
+    const arabicClass = titleSpan(row(arabic), arabic);
+    const englishClass = titleSpan(row("New thread"), "New thread");
+    const withByline = titleSpan(row("QA PR 245", { botId: "scout", name: "Scout", at: 1 }), "QA PR 245");
+    for (const classes of [arabicClass, englishClass, withByline]) {
+      expect(classes).toContain("min-w-0");
+      expect(classes).toContain("flex-1");
+      expect(classes).toContain("max-w-max");
+      expect(classes).toContain("truncate");
+    }
+    expect(row("New thread")).toMatch(/<time [^>]*class="[^"]*\bshrink-0\b[^"]*"/);
+    expect(row(arabic)).not.toContain("<button dir=");
+  });
+});
+
 describe("orderedThreadList", () => {
   const task = (threadId: string, over: Record<string, unknown> = {}) => ({
     threadId,

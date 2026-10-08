@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mentionChoicesForQuery, mentionRanges } from "./mentions";
+import { mentionChoicesForQuery, mentionRanges, mentionRowDescription } from "./mentions";
 
 const peers = [{ name: "Atlas" }, { name: "New Bot" }, { name: "New Bot 2" }, { name: "調査担当" }, { name: "Hidden", hidden: true }];
 const matches = (text: string, everyone = false) => mentionRanges(text, peers, everyone).map(({ start, end }) => text.slice(start, end));
@@ -47,5 +47,23 @@ describe("mention picker choices", () => {
   it("filters before display and closes after a completed exact tag", () => {
     expect(mentionChoicesForQuery(choices, "si").map((choice) => choice.name)).toEqual(["Six"]);
     expect(mentionChoicesForQuery(choices, "Six ")).toEqual([]);
+  });
+
+  it("filters by name only, so a title never opens a row the insert would not match", () => {
+    const titled = [{ name: "Atlas", title: "Research lead" }];
+    expect(mentionChoicesForQuery(titled, "research")).toEqual([]);
+    expect(mentionChoicesForQuery(titled, "atl")).toEqual(titled);
+  });
+});
+
+describe("mention row description", () => {
+  it("uses a bot title and omits a blank one", () => {
+    expect(mentionRowDescription({ kind: "bot", title: "  Research lead  " })).toBe("Research lead");
+    expect(mentionRowDescription({ kind: "bot", title: "  " })).toBe("");
+  });
+
+  it("counts the bots @everyone reaches", () => {
+    expect(mentionRowDescription({ kind: "everyone", count: 1 })).toBe("1 bot in this chat");
+    expect(mentionRowDescription({ kind: "everyone", count: 6 })).toBe("6 bots in this chat");
   });
 });

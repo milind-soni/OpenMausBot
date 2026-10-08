@@ -21,6 +21,7 @@ import { cacheUntilConfigChanges,
   persistableInstanceConfigs,
   roomHandoffLimits,
   roomTurnTimeoutMinutes,
+  mcpCallTimeoutMinutes,
   maxConcurrentBotThreads,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
@@ -505,6 +506,27 @@ describe("configuration boundaries", () => {
     },
   );
 
+  it("accepts a persisted MCP call timeout and supplies the legacy default", () => {
+    expect(parseStoredConfig({ mcp: { callTimeoutMinutes: 30 } })).toEqual({
+      mcp: { callTimeoutMinutes: 30 },
+    });
+    expect(mcpCallTimeoutMinutes({ mcp: { callTimeoutMinutes: 30 } })).toBe(30);
+    expect(mcpCallTimeoutMinutes({})).toBe(10);
+  });
+
+  it.each([0, 0.5, 61, 1440, "20", null])(
+    "rejects an invalid MCP call timeout: %j",
+    (callTimeoutMinutes) => {
+      expect(() => parseConfigPatch({ mcp: { callTimeoutMinutes } })).toThrow(
+        "mcp.callTimeoutMinutes",
+      );
+    },
+  );
+
+  it("rejects unknown keys under the mcp config section", () => {
+    expect(() => parseConfigPatch({ mcp: { callTimeoutMinutes: 10, surprise: 1 } })).toThrow("mcp");
+  });
+
   it("preserves shared Local VM behavior by default and accepts bounded per-bot mode", () => {
     expect(localVmMode({})).toBe("shared");
     expect(localVmMaxInstances({})).toBe(2);
@@ -627,6 +649,46 @@ describe("configuration boundaries", () => {
 
   it.each(["one-per-bot", "windows", 1, null])("rejects an invalid Local VM mode: %j", (mode) => {
     expect(() => parseConfigPatch({ localVm: { mode } })).toThrow("localVm.mode");
+  });
+});
+
+describe("a config.json saved with a byte order mark", () => {
+  // Windows PowerShell's Set-Content -Encoding UTF8 and Notepad's "UTF-8 with
+  // BOM" put U+FEFF before the first brace, which JSON.parse refuses.
+  const bom = "\uFEFF";
+
+  it("loads instead of being ignored", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, bom + JSON.stringify({ budgets: { monthlyUsd: 25, warnAtPercent: 70 } }, null, 2));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(loadConfig().budgets).toEqual({ monthlyUsd: 25, warnAtPercent: 70 });
+      expect(warn.mock.calls.some(([line]) => String(line).includes("ignoring"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("keeps every other key when a setting is saved", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, bom + JSON.stringify({
+      xai: { key: "xai-fixture" },
+      mcpServers: { notes: { command: "npx", args: ["notes-mcp"] } },
+    }, null, 2));
+    try {
+      saveConfig({ budgets: { monthlyUsd: 25, warnAtPercent: 70 } });
+      const disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk).toMatchObject({
+        xai: { key: "xai-fixture" },
+        mcpServers: { notes: { command: "npx", args: ["notes-mcp"] } },
+        budgets: { monthlyUsd: 25, warnAtPercent: 70 },
+      });
+    } finally {
+      rmSync(path, { force: true });
+    }
   });
 });
 

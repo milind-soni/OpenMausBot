@@ -1491,8 +1491,9 @@ export function EventDetails({
   const primary = invited[0];
   const executionOwner = isRoomGoal ? goalGroup : primary;
   const canOpenExecution = Boolean(executionThreadId && (executionOwner?.threadId === executionThreadId || executionOwner?.tasks?.some((task) => task.threadId === executionThreadId)));
-  const report = run ?? routine;
-  const resultsThreadId = report?.resultsThreadId ?? report?.sourceThreadId;
+  // A run snapshots where it reported (older runs: the chat that made the
+  // routine). A routine without a chosen thread reports to the main thread.
+  const resultsThreadId = run ? run.resultsThreadId ?? run.sourceThreadId : routine?.resultsThreadId;
   const canOpenResults = resultsThreadId && [...state.bots, ...state.groups].some((owner) => owner.threadId === resultsThreadId || owner.tasks?.some((task) => task.threadId === resultsThreadId));
   const title = call?.name ?? run?.routineName ?? routine?.name ?? "Routine";
   const description = call?.description ?? run?.prompt ?? routine?.prompt ?? "";
@@ -1588,7 +1589,7 @@ export function EventDetails({
     ? [...state.bots, ...state.groups].find((owner) => owner.threadId === resultsThreadId || owner.tasks?.some((task) => task.threadId === resultsThreadId))
     : undefined;
   const resultsTitle = !resultsThreadId
-    ? t("routines.results.dedicated")
+    ? t("routines.results.main")
     : resultsOwner?.tasks?.find((task) => task.threadId === resultsThreadId)?.title ?? resultsOwner?.name ?? t("routines.results.missing");
 
   return (

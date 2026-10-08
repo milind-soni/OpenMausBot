@@ -550,3 +550,96 @@ describe("ApprovalCard outbound holds", () => {
     expect(html).toContain("Kiwi wants to create linear comment");
   });
 });
+
+describe("ApprovalCard for a change that applied on its own", () => {
+  const applied = (card: Partial<NonNullable<Message["card"]>>): Message => ({
+    id: "applied-card",
+    role: "bot",
+    kind: "options",
+    at: 1,
+    card: {
+      title: "Schedule “Check before dentist”?",
+      subtitle: "Action: Create routine\nSchedule: Cron 30 14 * * 3",
+      options: [],
+      answered: "allow",
+      dismissed: true,
+      autoApplied: true,
+      requestId: "routine-request",
+      tool: "schedule_routine",
+      ...card,
+    },
+  });
+  const routineCard = (operation: NonNullable<NonNullable<Message["card"]>["routineRequest"]>["operation"], undo?: object) => applied({
+    routineRequest: { ...routineRequest, operation, resultId: "routine-1", ...(undo ? { undo } : {}) } as NonNullable<Message["card"]>["routineRequest"],
+  });
+  const render = (message: Message) => renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Scout" }, message, threadId: "thread-1" }));
+
+  it("reads as one plain line with Undo instead of the approval box", () => {
+    const at = new Date();
+    at.setHours(14, 30, 0, 0);
+    const markup = render(routineCard(createRoutineOperation, { name: "Check before dentist", schedule: { type: "once", at: at.getTime() } }));
+    expect(markup).toMatch(/Scout scheduled a routine: Check before dentist, today 2:30/);
+    expect(markup).toContain(">Undo<");
+    expect(markup).toContain(">Details<");
+    // The cron expression and the approval box stay out of the line.
+    expect(markup).not.toContain("30 14 * * 3");
+    expect(markup).not.toContain("Waiting for your confirmation");
+    expect(markup).not.toContain("schedule_routine");
+  });
+
+  it("never shows a cron expression that has no plain name", () => {
+    const markup = render(routineCard(
+      { ...createRoutineOperation, routine: { ...createRoutineOperation.routine, schedule: { type: "cron", expression: "*/7 3-5 * * 1", timeZone: "UTC" } } },
+      { name: "Odd hours", schedule: { type: "cron", expression: "*/7 3-5 * * 1", timeZone: "UTC" } },
+    ));
+    expect(markup).toContain("Scout scheduled a routine: Odd hours");
+    expect(markup).not.toContain("*/7");
+  });
+
+  it("says Undone after Undo, and offers no Undo for a run", () => {
+    const undone = { ...routineCard(createRoutineOperation, { name: "Backlog review" }) };
+    undone.card = { ...undone.card!, undone: true };
+    const markup = render(undone);
+    expect(markup).toContain("Scout scheduled a routine: Backlog review");
+    expect(markup).toContain(" · Undone");
+    expect(markup).not.toContain(">Undo<");
+    const run = render(routineCard({ action: "run_now", routineId: "routine-1", expectedUpdatedAt: 1 }, { name: "Backlog review" }));
+    expect(run).toContain("Scout started a routine: Backlog review");
+    expect(run).not.toContain(">Undo<");
+  });
+
+  it("names profile fields, the model, and the skill in plain words", () => {
+    const profile = render(applied({
+      tool: "update_profile",
+      profileRequest: {
+        version: 1, requestId: "p", botId: "bot-1", threadId: "thread-1", targetBotId: "bot-1", targetName: "Scout",
+        createdAt: 1, reason: "asked", changes: { title: "Researcher", soul: "Be brief." }, before: { title: "", soul: "" },
+        expectedRevision: "r", undo: { appliedRevision: "r2" },
+      },
+    }));
+    expect(profile).toContain("Scout updated its profile: title, standing instructions");
+    expect(profile).toContain(">Undo<");
+    const model = render(applied({
+      tool: "update_model",
+      modelRequest: {
+        version: 1, requestId: "m", botId: "bot-1", threadId: "thread-1", targetBotId: "bot-1", targetName: "Scout",
+        createdAt: 1, reason: "asked", selection: { instanceId: "codex", model: "gpt-fixture" }, before: { instanceId: "claude", model: "sonnet" },
+      },
+    }));
+    expect(model).toContain("Scout changed its default model: gpt-fixture");
+    const skill = render(applied({
+      tool: "stage_skill",
+      skillRequest: {
+        version: 1, requestId: "s", botId: "bot-1", threadId: "thread-1", stagedId: "staged", action: "create",
+        name: "file-expense", gist: "Files an expense.", warnings: [], createdAt: 1,
+      },
+    }));
+    expect(skill).toContain("Scout added a skill: file-expense");
+  });
+
+  it("keeps the approval box for a card a person confirmed", () => {
+    const confirmed = routineCard(createRoutineOperation, { name: "Backlog review" });
+    confirmed.card = { ...confirmed.card!, autoApplied: undefined, options: ["Confirm", "Cancel"] };
+    expect(render(confirmed)).toContain("Routine scheduled");
+  });
+});

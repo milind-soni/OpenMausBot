@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.1.97",
+  "version": "0.1.101",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
@@ -90,7 +90,7 @@
     "@novnc/novnc": "1.7.0",
     "@tanstack/react-virtual": "^3.14.13",
     "@trycua/cua-driver": "0.28.2",
-    "ajv": "8.17.1",
+    "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "clsx": "^2.1.1",
     "croner": "10.0.1",
@@ -98,7 +98,7 @@
     "katex": "^0.16.47",
     "lucide-react": "^0.539.0",
     "mdast-util-from-markdown": "^2.0.3",
-    "mermaid": "^12.0.0",
+    "mermaid": "^12.1.0",
     "papaparse": "^5.7.0",
     "posthog-js": "^1.415.6",
     "qrcode-terminal": "0.12.0",
@@ -125,7 +125,7 @@
     "@types/react-dom": "^19.1.7",
     "@types/ws": "8.18.2",
     "@vitejs/plugin-react": "^4.7.0",
-    "electron": "^43.4.0",
+    "electron": "^43.5.0",
     "electron-builder": "^26.15.3",
     "electron-updater": "^6.8.9",
     "esbuild": "^0.28.2",
@@ -135,7 +135,7 @@
     "typebox": "1.3.7",
     "typescript": "^5.8.3",
     "vite": "^7.1.0",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "wrangler": "4.123.0",
     "ws": "8.22.0"
   }

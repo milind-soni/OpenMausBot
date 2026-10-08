@@ -59,6 +59,13 @@ describe("classifyContinuable", () => {
   it.each([
     ["budget cap message", "error", "Stopped after 64 steps without a final answer. The steps so far already ran, so ask only for what's left.", "cap"],
     ["legacy limit message", "error", "model-call limit reached before a final response", "cap"],
+    ["tool-call cap message", "error", "Stopped after 200 tool calls without a final answer. The steps so far already ran, so ask only for what's left.", "cap"],
+    // A provider's error is not a spent budget, whatever its words: a new
+    // thread would only hit the same limit again.
+    ["provider rate limit (429)", "error", "upstream HTTP 429: {\"error\":{\"message\":\"Rate limit reached\"}}", null],
+    ["provider quota", "error", "upstream HTTP 429: {\"error\":{\"message\":\"Monthly usage limit reached\"}}", null],
+    ["provider body quoting the cap", "error", "upstream HTTP 500: Stopped after 3 steps without a final answer", null],
+    ["provider usage limit", "error", "You have reached your usage limit reached for today", null],
     // A tool error includes a person's denial: never continued by itself.
     ["tool_error terminal", "tool_error", "One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.", null],
     ["provider config 400 (non-multimodal)", "error", "upstream HTTP 400: {\"error\":{\"message\":\"deepseek-ai/DeepSeek-V4-Flash-0731 is not a multimodal model\"}}", null],
@@ -116,7 +123,8 @@ describe("makeCapContinuationSubscriber", () => {
     h.sub(capEvent());
     await vi.waitFor(() => expect(h.calls.createTask.length).toBe(1));
     expect(h.calls.createTask[0][1]).toBe("Continue: Build the thing");
-    expect(h.calls.createTask[0][2]).toBe(true);
+    // The continuation never takes over the person's open thread.
+    expect(h.calls.createTask[0][2]).toBe(false);
     await vi.waitFor(() => expect(h.calls.startTurn.length).toBe(1));
     expect(h.calls.startTurn[0][1]).toContain("/tmp/handoff.md");
     expect(h.calls.startTurn[0][2]).toEqual({ threadId: "thread-cont", unattended: true });

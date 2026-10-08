@@ -31,6 +31,7 @@ import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
+import { openStartupModelCatalog, writeStartupModelCache } from "../../startup-model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
@@ -85,7 +86,7 @@ import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
 import { canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { gateServer } from "../../mcp-gate-config.ts";
+import { gateServer, mcpStdioServer } from "../../mcp-gate-config.ts";
 
 /** Failures the person fixes on their provider account, not by retrying:
  * the process that reported one is healthy and stays pooled. */
@@ -705,8 +706,23 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         } catch {
           // Keep the last usable catalog when an optional discovery source is down.
         }
+        try { writeStartupModelCache(instanceId, models); } catch { /* derived cache */ }
       };
-      if (support.resolveModelsOnCreate !== false) await refreshModels();
+      // A later start serves the saved list and refreshes behind listen.
+      // The first run still waits so the seeded default model does not change.
+      // Engines with no resolver (Gemini, custom ACP) and Antigravity
+      // (resolveModelsOnCreate: false) stay on the instant path.
+      let startupModelRefresh: Promise<void> | null = null;
+      if (support.resolveModels && support.resolveModelsOnCreate !== false) {
+        startupModelRefresh = (await openStartupModelCatalog({
+          instanceId,
+          use: (catalog) => { models = catalog; },
+          current: () => models,
+          refresh: refreshModels,
+        }))?.pending ?? null;
+      } else if (support.resolveModelsOnCreate !== false) {
+        await refreshModels();
+      }
       const deviceSignIn = support.deviceSignIn
         ? new DeviceAuthController(support.deviceSignIn, { cli: config.cli, environment: () => childEnv(), onAuthenticated: refreshModels })
         : null;
@@ -831,12 +847,18 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // ACP session mcpServers: stdio is the baseline every ACP agent
       // supports (mcpCapabilities.http/.sse only add EXTRA transports), so
       // an injected stdio proxy — e.g. the peer-agent comms tool — attaches
-      // fine here. A url server is listed in ACP's http/sse shape and kept
-      // for the session only when the agent advertised that transport.
-      // env and headers are the ACP {name,value}[] shape.
-      type AcpMcpServer =
-        | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
-        | { type: "http" | "sse"; name: string; url: string; headers: Array<{ name: string; value: string }> };
+      // fine here. env is the ACP {name,value}[] shape.
+      //
+      // A URL server is always mounted as OpenMausBot's remote proxy, even
+      // for an agent that advertises http/sse: the proxy opens the
+      // connection with the same minimal handshake as Settings → Test
+      // (mcp-http.ts), where an agent's own MCP client adds capability
+      // fields a strict server refuses (grok 1.0.25 sends
+      // capabilities.extensions; rmcp 3.2, which it links, can add
+      // elicitation.form.schemaValidation, the field a Voluum
+      // server named before every tool came back "Tool not found"). The
+      // catalog passes through whole: the agent searches tools itself.
+      type AcpMcpServer = { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> };
       const acpMcpServers = (turn: SendTurnInput) => {
         const servers: AcpMcpServer[] = [];
         const acpEnv = (env: Record<string, string>) =>
@@ -875,17 +897,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // config boundary; this is defense in depth).
         for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
           if (servers.some((existing) => existing.name === name)) continue;
-          if ("url" in server) {
-            servers.push({ type: server.type, name, url: server.url, headers: acpEnv(server.headers) });
-            continue;
-          }
-          servers.push({ name, command: server.command, args: server.args, env: acpEnv(server.env) });
+          const stdio = "url" in server ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } }) : server;
+          if (!stdio) continue;
+          servers.push({ name, command: stdio.command, args: stdio.args ?? [], env: acpEnv(stdio.env ?? {}) });
         }
         if (turn.toolScope === undefined) return servers;
         return servers.filter((server) => canUseMcpServer(turn.toolScope, server.name)).map((server) => {
-          const original = "url" in server
-            ? { type: server.type, url: server.url, headers: Object.fromEntries(server.headers.map(({ name, value }) => [name, value])) }
-            : { command: server.command, args: server.args, env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])) };
+          const original = { command: server.command, args: server.args, env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])) };
           const gated = gateServer({ name: server.name, server: original, threadId: turn.threadId, budget: 0,
             toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } });
           if (!gated) throw new Error("Tool selection requires an MCP gate.");
@@ -1538,6 +1556,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
 
       const sendTurn = async (turn: SendTurnInput) => {
+        if (startupModelRefresh) await startupModelRefresh;
         const parsedScope = parseToolScope(turn.toolScope);
         if (!parsedScope.ok) throw new Error(parsedScope.error);
         turn = { ...turn, toolScope: parsedScope.scope };
@@ -1862,19 +1881,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 // no fresh session bookkeeping
                 break;
               }
-              // stdio is every agent's baseline; a url server rides only with
-              // an agent that advertised its transport, so an agent without
-              // http/sse never sees an entry it would refuse the session over
-              const sessionServers = mcpServers.filter((server) =>
-                !("type" in server) || init?.agentCapabilities?.mcpCapabilities?.[server.type] === true);
               const selectionParams = narrowsNativeTools(turn.toolScope)
-                ? support.toolScopeSessionParams!(turn, init, sessionServers.length > 0, { config: turnConfig, env, cwd }) : {};
+                ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
               let loaded = false;
               if (cursor) {
                 try {
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                    { sessionId: cursor, cwd, mcpServers: sessionServers, ...selectionParams },
+                    { sessionId: cursor, cwd, mcpServers, ...selectionParams },
                     LOAD_SESSION_TIMEOUT,
                     (result) => {
                       if (result) {
@@ -1930,7 +1944,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              sessionResult = await request("session/new", { cwd, mcpServers: sessionServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
+              sessionResult = await request("session/new", { cwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result);
@@ -2279,6 +2293,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return models;
         },
         refreshModels: support.resolveModels ? refreshModels : undefined,
+        ...(startupModelRefresh ? { startupModelRefresh } : {}),
         ...(deviceSignIn ? {
           startAuthentication: () => deviceSignIn.start(),
           getAuthentication: (flowId: string) => deviceSignIn.get(flowId),

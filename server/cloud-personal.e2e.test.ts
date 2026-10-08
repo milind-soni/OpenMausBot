@@ -12,7 +12,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -195,7 +195,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     await idle(before.bot, before.device);
   }
   before.full = (await api("POST", "/api/bots", { token: before.device, body: { name: "Full bot", modelSelection: { instanceId: "held", model: "claude-sonnet-5" } } })).body.bot;
-  // A routine the bot proposed in the owner's conversation, which the owner allowed on its card.
+  // A routine the bot made for itself in the owner's conversation (it applies
+  // at once; answering its receipt again changes nothing).
   const asking = (await api("POST", `/api/bots/${before.bot.id}/tasks`, { token: before.device, body: { title: "Schedule it" } })).body.task.threadId;
   await turn(() => api("POST", `/api/bots/${before.bot.id}/messages`, { token: before.device, body: { text: "Check the site monthly.", threadId: asking } }));
   const tools = await agentTools();
@@ -203,9 +204,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const proposed = await tools("propose_routine", { name, instructions, schedule: { type: "cron", expression: "0 9 1 * *", timeZone: "America/New_York" } });
     expect(JSON.stringify(proposed), JSON.stringify(proposed)).not.toContain("isError\":true");
     const card = ((await api("GET", `/api/threads/${asking}/messages`, { token: before.device })).body.messages as any[]).findLast((message) => message.card?.routineRequest)?.card;
+    expect(card).toMatchObject({ answered: "allow", autoApplied: true });
     const approved = await api("POST", `/api/bots/${before.bot.id}/respond`, { token: before.device, body: { threadId: asking, requestId: card.requestId, behavior: "allow" } });
     expect(approved.body.outcome, JSON.stringify(approved.body)).toBe("allowed-once");
-    return approved.body.resultId as string;
+    return card.routineRequest.resultId as string;
   };
   before.approved = await allow("Monthly check", "Check the site.");
   // Another, which someone then moved to another bot (unrecorded, as on v0.1.91).
@@ -463,7 +465,7 @@ it("routines fail closed: one from before with no proof runs confined; one the o
   expect(toggled).toMatchObject({ mode: "auto", restricted: false });
   for (const active of (await api("GET", "/api/routines", { token: owner })).body.runs ?? []) await api("POST", `/api/routine-runs/${active.id}/cancel`, { token: owner });
   await idle(templated, owner);
-  // A bot's proposal the owner allows on its card here: theirs.
+  // A routine a bot makes for itself in the owner's own conversation: theirs.
   const asking = (await api("POST", `/api/bots/${before.bot.id}/tasks`, { token: owner, body: { title: "Schedule another" } })).body.task.threadId;
   await turn(async () => expect((await api("POST", `/api/bots/${before.bot.id}/messages`, { token: owner, body: { text: "Check the docs monthly.", threadId: asking } })).status).toBe(202));
   const call = await agentTools();
@@ -473,22 +475,25 @@ it("routines fail closed: one from before with no proof runs confined; one the o
     expect(JSON.stringify(proposed)).not.toContain("isError\":true");
     cards.push(((await api("GET", `/api/threads/${asking}/messages`, { token: owner })).body.messages as any[]).findLast((message) => message.card?.routineRequest)?.card);
   }
-  // Allowed from the bot's card, and from the conversation's.
+  // Applied at once; answering the receipts again from the bot's route and
+  // the conversation's changes nothing.
+  expect(cards.every((card) => card?.autoApplied === true && card.answered === "allow")).toBe(true);
   const approved = await api("POST", `/api/bots/${before.bot.id}/respond`, { token: owner, body: { threadId: asking, requestId: cards[0].requestId, behavior: "allow" } });
-  expect(approved.body.outcome, JSON.stringify(approved.body)).toBe("allowed-once");
+  expect(approved.body, JSON.stringify(approved.body)).toMatchObject({ outcome: "allowed-once", alreadySettled: true });
   const alsoApproved = await api("POST", `/api/threads/${asking}/respond`, { token: owner, body: { requestId: cards[1].requestId, behavior: "allow" } });
-  expect(alsoApproved.body.outcome, JSON.stringify(alsoApproved.body)).toBe("allowed-once");
+  expect(alsoApproved.body, JSON.stringify(alsoApproved.body)).toMatchObject({ outcome: "allowed-once", alreadySettled: true });
+  const [docsCheck, linksCheck] = cards.map((card) => card.routineRequest.resultId as string);
   expect((await api("POST", `/api/bots/${before.bot.id}/interrupt`, { token: owner, body: { threadId: asking } })).status).toBe(200);
   await idle(before.bot, owner);
   // Recorded as the owner's as it stands: their key, their fingerprint (so its
   // reports never count as someone else's words, and it may use the Mac).
   const ownerKey = `p_${createHash("sha256").update("cloud-owner:3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93").digest("base64url").slice(0, 22)}`;
   const authors = JSON.parse(readFileSync(join(dataDir, "lending-routines.json"), "utf8"));
-  for (const id of [approved.body.resultId, alsoApproved.body.resultId]) {
+  for (const id of [docsCheck, linksCheck]) {
     expect(authors.writers[id]).toBe(ownerKey);
     expect(authors.routines[id]).toMatch(/^[a-f0-9]{64}$/);
   }
-  expect((await routineRun(approved.body.resultId)).run).toMatchObject({ mode: "auto", restricted: false });
+  expect((await routineRun(docsCheck!)).run).toMatchObject({ mode: "auto", restricted: false });
 }, 150_000);
 
 it("a routine a Full-access bot applies at once in the owner's own conversation is the owner's", async () => {
@@ -550,7 +555,7 @@ it("approving a change never makes someone else's routine the owner's; a run of 
   const authors = () => JSON.parse(readFileSync(join(dataDir, "lending-routines.json"), "utf8"));
   // A card the owner allowed from before counts only for exactly what it showed: not once the routine moved bots.
   expect(authors().writers[before.moved]).not.toBe(ownerKey);
-  // The owner allows a harmless pause card on a nobody's routine, then resumes it: still not theirs.
+  // The bot pauses a nobody's routine of its own in the owner's conversation (at once), then the owner resumes it: still not theirs.
   expect(authors().writers[before.routine]).not.toBe(ownerKey);
   const asking = (await api("POST", `/api/bots/${before.bot.id}/tasks`, { token: owner, body: { title: "Pause it" } })).body.task.threadId;
   await turn(async () => expect((await api("POST", `/api/bots/${before.bot.id}/messages`, { token: owner, body: { text: "Pause the old routine.", threadId: asking } })).status).toBe(202));
@@ -657,3 +662,179 @@ it("a follow-up from the same conversation continues the teammate's thread inste
   expect(await writerTasks()).toHaveLength(opened + 1);
   await settleAll(owner);
 }, 60_000);
+
+it("a turn in a conversation that is not the owner's keeps a card for the bot's own changes; in the owner's own they apply", async () => {
+  const owner = await adminPairing();
+  await settleAll(owner);
+  const bot = () => api("GET", "/api/bots", { token: owner }).then(({ body }) => (body.bots as any[]).find((candidate) => candidate.id === before.roomBot.id));
+  const skills = async () => ((await api("GET", `/api/bots/${before.roomBot.id}/skills`, { token: owner })).body.skills as any[]).map((skill) => skill.name);
+  const skillMd = (name: string) => `---\nname: ${name}\ndescription: Checks the site for broken links.\n---\n\n# ${name}\n\nOpen the site and list broken links.\n`;
+  const schedule = { type: "cron", expression: "0 9 1 * *", timeZone: "America/New_York" };
+  // What the chat-only device opened is not the owner's: its turn is a guest's.
+  await turn(async () => expect((await api("POST", `/api/bots/${before.roomBot.id}/messages`, { token: owner, body: { text: "Tidy yourself up.", threadId: before.theirs } })).status).toBe(202));
+  const guestTools = await agentTools();
+  for (const [name, args] of [
+    ["propose_routine", { name: "Guest's check", instructions: "Check the site.", schedule }],
+    ["skill_manage", { action: "create", skill_md: skillMd("guest-links"), source: "conversation" }],
+    ["propose_profile", { title: "Guest's title", reason: "asked" }],
+  ] as const) {
+    const result = JSON.stringify(await guestTools(name, args));
+    expect(result, name).not.toContain("isError\":true");
+  }
+  const guestCards = ((await api("GET", `/api/threads/${before.theirs}/messages`, { token: owner })).body.messages as any[])
+    .map((message) => message.card).filter((card) => card?.routineRequest || card?.skillRequest || card?.profileRequest);
+  expect(guestCards).toHaveLength(3);
+  for (const card of guestCards) {
+    expect(card.answered).toBeUndefined();
+    expect(card.autoApplied).toBeUndefined();
+    expect(card.options.length).toBeGreaterThan(0);
+  }
+  expect(((await api("GET", "/api/routines", { token: owner })).body.routines as any[]).some((routine) => routine.name === "Guest's check")).toBe(false);
+  expect(await skills()).not.toContain("guest-links");
+  expect((await bot()).title).not.toBe("Guest's title");
+  expect((await api("POST", `/api/bots/${before.roomBot.id}/interrupt`, { token: owner, body: { threadId: before.theirs } })).status).toBe(200);
+  await idle(before.roomBot, owner);
+  // The same changes in the owner's own conversation apply as the bot's own.
+  const mine = (await api("POST", `/api/bots/${before.roomBot.id}/tasks`, { token: owner, body: { title: "Mine" } })).body.task.threadId;
+  await turn(async () => expect((await api("POST", `/api/bots/${before.roomBot.id}/messages`, { token: owner, body: { text: "Tidy yourself up.", threadId: mine } })).status).toBe(202));
+  const ownerTools = await agentTools();
+  for (const [name, args] of [
+    ["propose_routine", { name: "Owner's check", instructions: "Check the site.", schedule }],
+    ["skill_manage", { action: "create", skill_md: skillMd("owner-links"), source: "conversation" }],
+    ["propose_profile", { title: "Owner's title", reason: "asked" }],
+  ] as const) {
+    const result = JSON.stringify(await ownerTools(name, args));
+    expect(result, name).not.toContain("isError\":true");
+  }
+  const ownerCards = ((await api("GET", `/api/threads/${mine}/messages`, { token: owner })).body.messages as any[])
+    .map((message) => message.card).filter((card) => card?.routineRequest || card?.skillRequest || card?.profileRequest);
+  expect(ownerCards.map((card) => [card.answered, card.autoApplied])).toEqual([["allow", true], ["allow", true], ["allow", true]]);
+  expect(await skills()).toContain("owner-links");
+  expect((await bot()).title).toBe("Owner's title");
+  expect((await api("POST", `/api/bots/${before.roomBot.id}/interrupt`, { token: owner, body: { threadId: mine } })).status).toBe(200);
+  await idle(before.roomBot, owner);
+}, 90_000);
+
+it("a guest's skill card enables only the exact text the owner reviewed, holds a stale update, and leaves nothing behind", async () => {
+  const owner = await adminPairing();
+  await settleAll(owner);
+  const botId = before.roomBot.id;
+  const skillMd = (name: string, body: string) => `---\nname: ${name}\ndescription: Checks the site for broken links.\n---\n\n# ${name}\n\n${body}\n`;
+  const cards = async () => ((await api("GET", `/api/threads/${before.theirs}/messages`, { token: owner })).body.messages as any[])
+    .map((message) => message.card).filter((card) => card?.skillRequest);
+  const respond = (route: "bot" | "thread", body: Record<string, unknown>) => route === "bot"
+    ? api("POST", `/api/bots/${botId}/respond`, { token: owner, body: { threadId: before.theirs, ...body } })
+    : api("POST", `/api/threads/${before.theirs}/respond`, { token: owner, body });
+  const skillText = async (name: string) => (await api("GET", `/api/bots/${botId}/skills/${name}`, { token: owner })).body.text as string | undefined;
+  await turn(async () => expect((await api("POST", `/api/bots/${botId}/messages`, { token: owner, body: { text: "Learn the link check.", threadId: before.theirs } })).status).toBe(202));
+  const tools = await agentTools();
+  const stage = async (name: string, body: string, action: "create" | "update" = "create") => {
+    const result = JSON.stringify(await tools("skill_manage", { action, ...(action === "update" ? { skill_name: name } : {}), skill_md: skillMd(name, body), source: "conversation" }));
+    expect(result).not.toContain("isError\":true");
+    const card = (await cards()).findLast((candidate) => candidate.skillRequest.name === name && candidate.skillRequest.action === action);
+    expect(card).toMatchObject({ options: [action === "create" ? "Enable" : "Update", "Deny"] });
+    expect(createHash("sha256").update(card.skillRequest.preview).digest("hex")).toBe(card.skillRequest.sha256);
+    return card;
+  };
+
+  // Only the reviewed bytes, on either route.
+  const first = await stage("reviewed-links", "Open the site and list broken links.");
+  expect(await respond("bot", { requestId: first.requestId, behavior: "allow" })).toMatchObject({ status: 409, body: { error: expect.stringMatching(/reviewedSha256/) } });
+  expect(await respond("thread", { requestId: first.requestId, behavior: "allow", reviewedSha256: "0".repeat(64) }))
+    .toMatchObject({ status: 409, body: { error: expect.stringMatching(/reviewedSha256/) } });
+  expect(await respond("bot", { requestId: first.requestId, behavior: "allow", reviewedSha256: first.skillRequest.sha256 }))
+    .toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
+  expect(await skillText("reviewed-links")).toBe(first.skillRequest.preview);
+
+  // An update the skill moved under is held, then applies once it is back.
+  const updated = await stage("reviewed-links", "List broken links and their pages.", "update");
+  const skillPath = (readdirSync(dataDir, { recursive: true }) as string[])
+    .map((path) => join(dataDir, path)).find((path) => path.endsWith(join("skills", "reviewed-links", "SKILL.md")))!;
+  writeFileSync(skillPath, first.skillRequest.preview.replace("broken links", "changed after staging"));
+  const stale = await respond("thread", { requestId: updated.requestId, behavior: "allow", reviewedSha256: updated.skillRequest.sha256 });
+  expect(stale).toMatchObject({ status: 422, body: { error: expect.stringMatching(/changed after this update was proposed/) } });
+  expect((await cards()).find((card) => card.requestId === updated.requestId).held).toMatch(/changed after this update was proposed/);
+  writeFileSync(skillPath, first.skillRequest.preview);
+  expect(await respond("thread", { requestId: updated.requestId, behavior: "allow", reviewedSha256: updated.skillRequest.sha256 }))
+    .toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
+  expect((await cards()).find((card) => card.requestId === updated.requestId)).toMatchObject({ answered: "allow" });
+  expect((await cards()).find((card) => card.requestId === updated.requestId).held).toBeUndefined();
+  expect(await skillText("reviewed-links")).toBe(updated.skillRequest.preview);
+
+  // Deny needs no hash, and still settles once the staged bytes are lost.
+  const denied = await stage("denied-links", "Never lands.");
+  expect(await respond("thread", { requestId: denied.requestId, behavior: "deny" })).toMatchObject({ status: 200, body: { outcome: "rejected" } });
+  expect(await skillText("denied-links")).toBeUndefined();
+  const lost = await stage("lost-links", "Its stage goes missing.");
+  const stagedFile = join(dataDir, "skill-state", botId, "staged.json");
+  writeFileSync(stagedFile, `${JSON.stringify({ writes: {} }, null, 2)}\n`);
+  expect(await respond("thread", { requestId: lost.requestId, behavior: "deny" })).toMatchObject({ status: 200, body: { outcome: "rejected" } });
+  expect((await cards()).find((card) => card.requestId === lost.requestId)).toMatchObject({ answered: "deny", dismissed: true });
+
+  // Deleting the only conversation that holds a pending card drops its stage.
+  await stage("deleted-links", "Its conversation is deleted.");
+  expect(JSON.stringify(JSON.parse(readFileSync(stagedFile, "utf8")))).toContain("deleted-links");
+  expect((await api("POST", `/api/bots/${botId}/interrupt`, { token: owner, body: { threadId: before.theirs } })).status).toBe(200);
+  await idle(before.roomBot, owner);
+  expect((await api("POST", `/api/bots/${botId}/tasks`, { token: owner, body: { title: "Next" } })).status).toBe(201);
+  expect((await api("DELETE", `/api/bots/${botId}/tasks/${before.theirs}`, { token: owner })).status).toBe(200);
+  expect(JSON.stringify(JSON.parse(readFileSync(stagedFile, "utf8")))).not.toContain("deleted-links");
+}, 120_000);
+
+it("Undo on a Cloud home keeps who a routine is: back to the owner's only if it was theirs before the change", async () => {
+  const owner = await adminPairing();
+  await settleAll(owner);
+  const ownerKey = `p_${createHash("sha256").update("cloud-owner:3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93").digest("base64url").slice(0, 22)}`;
+  const authors = () => JSON.parse(readFileSync(join(dataDir, "lending-routines.json"), "utf8"));
+  const schedule = { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 };
+  const lastCard = async (threadId: string) => ((await api("GET", `/api/threads/${threadId}/messages`, { token: owner })).body.messages as any[])
+    .findLast((message) => message.card?.routineRequest)!.card;
+  const undo = async (threadId: string, card: any) => {
+    const undone = await api("POST", `/api/threads/${threadId}/undo`, { token: owner, body: { requestId: card.requestId } });
+    expect(undone, JSON.stringify(undone.body)).toMatchObject({ status: 200, body: { ok: true, undone: true } });
+  };
+  const ownersRoutine = (await api("POST", "/api/routines", { token: owner, body: { name: "Owner's nightly", prompt: "Build the site.", botId: before.bot.id, enabled: false, schedule } })).body.routine.id;
+  expect(authors().writers[ownersRoutine]).toBe(ownerKey);
+  // In a conversation the owner is not proven to have written alone, the bot
+  // makes a routine (nobody's) and changes the owner's (nobody's now too).
+  await turn(async () => expect((await api("POST", `/api/bots/${before.bot.id}/messages`, { token: owner, body: { text: "Adjust the routines.", threadId: before.plan } })).status).toBe(202));
+  const shared = await agentTools();
+  expect(JSON.stringify(await shared("propose_routine", { name: "Nobody's check", instructions: "Check the docs.", schedule: { type: "cron", expression: "0 9 1 * *", timeZone: "America/New_York" } })))
+    .not.toContain("isError\":true");
+  const nobodys = (await lastCard(before.plan)).routineRequest.resultId as string;
+  expect(authors().writers[nobodys]).not.toBe(ownerKey);
+  expect(JSON.stringify(await shared("propose_routine_action", { routine_id: ownersRoutine, action: "update", changes: { instructions: "Copy the Plans folder." } })))
+    .not.toContain("isError\":true");
+  const changedOwners = await lastCard(before.plan);
+  expect(changedOwners).toMatchObject({ autoApplied: true });
+  expect(authors().writers[ownersRoutine]).not.toBe(ownerKey);
+  expect((await api("POST", `/api/bots/${before.bot.id}/interrupt`, { token: owner, body: { threadId: before.plan } })).status).toBe(200);
+  await idle(before.bot, owner);
+  // Undo puts the owner's routine back as theirs, with its fingerprint.
+  await undo(before.plan, changedOwners);
+  expect(authors().writers[ownersRoutine]).toBe(ownerKey);
+  expect(authors().routines[ownersRoutine]).toMatch(/^[a-f0-9]{64}$/);
+  // In the owner's own conversation the bot changes the nobody's routine and
+  // makes a new one (the owner's).
+  const mine = (await api("POST", `/api/bots/${before.bot.id}/tasks`, { token: owner, body: { title: "Adjust mine" } })).body.task.threadId;
+  await turn(async () => expect((await api("POST", `/api/bots/${before.bot.id}/messages`, { token: owner, body: { text: "Adjust the routines.", threadId: mine } })).status).toBe(202));
+  const own = await agentTools();
+  expect(JSON.stringify(await own("propose_routine_action", { routine_id: nobodys, action: "update", changes: { instructions: "Check the docs twice." } })))
+    .not.toContain("isError\":true");
+  const changedNobodys = await lastCard(mine);
+  expect(JSON.stringify(await own("propose_routine", { name: "Owner's new check", instructions: "Check the blog.", schedule: { type: "cron", expression: "0 9 1 * *", timeZone: "America/New_York" } })))
+    .not.toContain("isError\":true");
+  const created = await lastCard(mine);
+  expect(authors().writers[created.routineRequest.resultId]).toBe(ownerKey);
+  expect((await api("POST", `/api/bots/${before.bot.id}/interrupt`, { token: owner, body: { threadId: mine } })).status).toBe(200);
+  await idle(before.bot, owner);
+  // Undoing a change to a routine that was not the owner's never makes it theirs.
+  await undo(mine, changedNobodys);
+  expect(authors().writers[nobodys]).not.toBe(ownerKey);
+  expect(authors().routines[nobodys]).toBeUndefined();
+  // Undoing a create forgets the routine.
+  await undo(mine, created);
+  expect(authors().writers[created.routineRequest.resultId]).toBeUndefined();
+  expect(authors().routines[created.routineRequest.resultId]).toBeUndefined();
+  for (const id of [ownersRoutine, nobodys]) await api("DELETE", `/api/routines/${id}`, { token: owner });
+}, 120_000);

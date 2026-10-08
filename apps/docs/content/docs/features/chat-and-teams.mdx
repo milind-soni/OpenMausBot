@@ -6,7 +6,7 @@ icon: MessagesSquare
 
 ## Bots and threads
 
-A bot is a durable agent identity. A thread is one conversation with that bot and has its own transcript, model, provider session, approvals, costs, and running state. Optional folders organize related threads without duplicating the bot's memory or skills.
+A bot is a durable agent identity. A thread is one conversation with that bot and has its own transcript, provider session, approvals, costs, and running state. It runs on the bot's model unless you pick another model in that thread. Optional folders organize related threads without duplicating the bot's memory or skills.
 
 Use separate threads when you want fresh context or independent work without duplicating the bot. Messages sent to a busy thread are queued, and supported providers can be steered while they work. Other threads can continue independently. See [Bots, folders, and threads](/docs/features/bots-and-tasks) for limits and shared-resource behavior.
 
@@ -56,7 +56,7 @@ Bots can hand work to other bots. Delegated runs carry explicit status back into
 
 A Chief of Staff can create a specialist in its own team with `create_bot`. Ask for a particular engine, model and reasoning effort if you want to choose them. The Chief can look up exact available choices with `list_team_setup` and pass `modelSelection` with `instanceId`, `model`, and optionally `effort` or a supported `variant` (not both).
 
-When no model selection is supplied, the new bot uses the workspace's default model selection, including its reasoning effort; it does not copy the Chief's model. An invalid explicit choice is rejected rather than silently replaced. The new bot starts with connected apps and automatic approvals disabled, and existing bots and threads keep their own models. Combined team changes still use the reviewed team-setup flow.
+When no model selection is supplied, the new bot uses the workspace's default model selection, including its reasoning effort; it does not copy the Chief's model. An invalid explicit choice is rejected rather than silently replaced. The new bot starts with connected apps and automatic approvals disabled, and existing bots keep their models. Combined team changes still use the reviewed team-setup flow.
 
 ## Rewind and branches
 

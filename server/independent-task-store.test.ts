@@ -48,16 +48,18 @@ describe("independent bot task state", () => {
     // The opening thread inherits until it has its own copy. A later thread,
     // and any thread whose level was chosen in the composer, keeps that copy.
     store.patchTask(bot.id, first, { approvalMode: "ask", autoApprove: false, alwaysAllow: ["Read"] });
-    const model = store.taskByThread(bot.id, first)?.modelSelection;
+    const model = store.projectBotForTask(bot.id, first)?.modelSelection;
     store.appendMessage(first, { role: "user", kind: "text", text: "Keep this conversation" });
     const history = store.messagesFor(first);
     const sibling = store.createTask(bot.id, "Sibling", false)!;
     store.patchBot(bot.id, { approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"] });
-    expect(store.taskByThread(bot.id, first)).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: ["Read"], modelSelection: model });
+    expect(store.taskByThread(bot.id, first)).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: ["Read"] });
+    expect(store.projectBotForTask(bot.id, first)?.modelSelection).toEqual(model);
     expect(store.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "ask", alwaysAllow: [] });
 
     const refreshed = store.refreshTaskPermissions(bot.id, first);
-    expect(refreshed).toMatchObject({ approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"], modelSelection: model });
+    expect(refreshed).toMatchObject({ approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"] });
+    expect(store.projectBotForTask(bot.id, first)?.modelSelection).toEqual(model);
     expect(store.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: [] });
     expect(store.bot(bot.id)).toMatchObject({ approvalMode: "auto", autoApprove: true, alwaysAllow: ["Read", "Bash"] });
     expect(store.messagesFor(first)).toEqual(history);
@@ -198,7 +200,7 @@ describe("independent bot task state", () => {
     for (const folder of [first, second, chosen]) expect(readFileSync(join(folder, "result.txt"), "utf8")).toBe("Keep my project");
   });
 
-  it("keeps model, approvals, cursor, rewind and pin snapshots across navigation, deletion and reload", () => {
+  it("keeps own models, approvals, cursor, rewind and pin snapshots across navigation, deletion and reload; other threads follow the bot's model", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });
     const first = bot.threadId;
@@ -219,11 +221,12 @@ describe("independent bot task state", () => {
     });
     const second = store.createTask(bot.id)!;
     expect(second).toMatchObject({
-      modelSelection: { instanceId: "claude", model: "second-default" },
       approvalMode: "ask",
       alwaysAllow: ["Read"],
       resumeCursors: {},
     });
+    expect(second.modelSelection).toBeUndefined();
+    expect(store.projectBotForTask(bot.id, second.threadId)?.modelSelection).toEqual({ instanceId: "claude", model: "second-default" });
     expect(bot.rewound).toBeUndefined();
     expect(bot.pinnedMessageId).toBeUndefined();
     store.setResumeCursor(bot.id, "claude", "second-session");
@@ -244,8 +247,9 @@ describe("independent bot task state", () => {
       approvalMode: "auto",
       alwaysAllow: ["Bash:git"],
     });
+    // No model of its own: it moved with the bot's.
     expect(store.projectBotForTask(bot.id, second.threadId)).toMatchObject({
-      modelSelection: { instanceId: "claude", model: "second-default" },
+      modelSelection: selection(),
       alwaysAllow: ["Read"],
     });
     store.deleteTask(bot.id, detached.threadId);
@@ -254,7 +258,7 @@ describe("independent bot task state", () => {
     expect(bot.rewound).toBeUndefined();
     const reloaded = new Store(selection);
     expect(reloaded.projectBotForTask(bot.id, second.threadId)).toMatchObject({
-      modelSelection: { instanceId: "claude", model: "second-default" },
+      modelSelection: selection(),
       approvalMode: "ask",
       alwaysAllow: ["Read"],
       resumeCursors: { claude: "second-session" },
@@ -411,11 +415,13 @@ describe("independent bot task state", () => {
       pinnedMessageId: "legacy-pin",
       unread: true,
     });
-    expect(migrated.taskByThread(bot.id, second.threadId)).toMatchObject({ modelSelection: raw.modelSelection, activity: "idle", busy: false });
+    // A thread without a model of its own follows the bot; none is filled in.
+    expect(migrated.taskByThread(bot.id, second.threadId)).toMatchObject({ activity: "idle", busy: false });
+    expect(migrated.projectBotForTask(bot.id, second.threadId)?.modelSelection).toEqual(raw.modelSelection);
     expect(migrated.messagesFor(first).at(-1)?.text).toBe("Original conversation");
     expect(migrated.messagesFor(second.threadId).at(-1)?.text).toBe("Second conversation");
     expect(savedBots()[0]!.tasks).toHaveLength(2);
-    expect(savedBots()[0]!.tasks!.every((task) => task.modelSelection?.model === "legacy-model")).toBe(true);
+    expect(savedBots()[0]!.tasks!.every((task) => task.modelSelection === undefined)).toBe(true);
   });
 
   it("revokes elevated task snapshots along with a stale bot elevation grant", () => {
@@ -433,7 +439,7 @@ describe("independent bot task state", () => {
     expect(approvalModeFor(reloaded.projectBotForTask(bot.id, task.threadId)!)).toBe("ask");
   });
 
-  it("groups threads in folders without changing model snapshots or running state", () => {
+  it("groups threads in folders without changing models or running state", () => {
     const store = new Store(selection);
     const bot = store.createBot();
     const legacyThread = bot.threadId;
@@ -441,7 +447,8 @@ describe("independent bot task state", () => {
     const project = store.createProject(bot.id, "  Website  ")!;
     const other = store.createProject(bot.id, "Research")!;
     const task = store.createTask(bot.id, "Landing page", true, project.id)!;
-    expect(task).toMatchObject({ projectId: project.id, modelSelection: selection() });
+    expect(task).toMatchObject({ projectId: project.id });
+    expect(store.projectBotForTask(bot.id, task.threadId)?.modelSelection).toEqual(selection());
     store.patchTask(bot.id, task.threadId, { modelSelection: { instanceId: "codex", model: "thread-specific" } });
     store.setResumeCursor(bot.id, "codex", "project-session", task.threadId);
     store.appendMessage(task.threadId, { role: "user", kind: "text", text: "Keep this conversation" });
@@ -452,7 +459,7 @@ describe("independent bot task state", () => {
     store.patchTask(bot.id, task.threadId, { projectId: other.id });
     expect(task).toMatchObject({ projectId: other.id, modelSelection: running.modelSelection, busy: true, resumeCursors: { codex: "project-session" }, cwd: null });
     const next = store.createTask(bot.id, "Next project thread", false, project.id)!;
-    expect(next.modelSelection).toEqual(selection());
+    expect(next.modelSelection).toBeUndefined();
     expect(store.activeTask(bot.id)?.threadId).toBe(task.threadId);
     store.deleteProject(bot.id, other.id);
     expect(task.projectId).toBeUndefined();
@@ -534,7 +541,8 @@ describe("independent bot task state", () => {
     const sibling = store.createBot();
     const project = store.createProject(bot.id, "General", "⭐")!;
     store.patchTask(bot.id, bot.threadId, { modelSelection: { instanceId: "codex", model: "existing-thread" } });
-    expect(store.createTask(bot.id, undefined, false, project.id)?.modelSelection).toEqual(selection());
+    // A thread a folder holds follows the bot's model.
+    expect(store.createTask(bot.id, undefined, false, project.id)?.modelSelection).toBeUndefined();
     expect(store.createTask(sibling.id, undefined, false, project.id)).toBeNull();
     expect(store.patchTask(sibling.id, sibling.threadId, { projectId: project.id })).toBeNull();
     expect(store.deleteProject(sibling.id, project.id)).toBeNull();
@@ -545,7 +553,7 @@ describe("independent bot task state", () => {
     const reloaded = new Store(selection);
     expect(reloaded.project(bot.id, project.id)).toEqual({ id: project.id, name: "General", emoji: "⭐" });
     expect(reloaded.taskByThread(bot.id, bot.threadId)?.modelSelection).toEqual({ instanceId: "codex", model: "existing-thread" });
-    expect(reloaded.createTask(bot.id, undefined, false, project.id)?.modelSelection).toEqual(selection());
+    expect(reloaded.createTask(bot.id, undefined, false, project.id)?.modelSelection).toBeUndefined();
   });
 
   it("pins a thread without storing false, and advances updatedAt from a message without rewriting bots.json", () => {

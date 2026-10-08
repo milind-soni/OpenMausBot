@@ -11,6 +11,7 @@ import { PROFILE_REQUEST_FIELDS, type ProfileRequestCardData, type ProfileReques
 import { parseBotProfilePatch, type BotProfilePatchInput } from "./bot-profile.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { newId } from "./contracts.ts";
+import { UNDO_STALE, type DirectApply, type DirectApplyCheck } from "./direct-apply.ts";
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
 import { recordProfileChange } from "./profile-versions.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -43,6 +44,8 @@ export interface OptionCardLike {
   requestId?: string;
   tool?: string;
   held?: string;
+  autoApplied?: boolean;
+  undone?: boolean;
   profileRequest?: ProfileRequestCardData;
 }
 
@@ -66,9 +69,11 @@ export interface ProfileRequestStore {
 export interface ProfileRequestServiceOptions {
   store: ProfileRequestStore;
   now?: () => number;
-  /** Server-owned effective mode of the source conversation, never request input. */
-  autoApply?: (botId: string, threadId: string) => boolean;
-  canPersist?: (botId: string, threadId: string) => { ok: true } | { ok: false; status: number; error: string };
+  /** Whether a submitted change applies without a person, and why
+   * (server/direct-apply.ts). Server-owned, never request input. */
+  autoApply?: DirectApplyCheck;
+  /** `opensCard` is false for a change that applies directly (no open card). */
+  canPersist?: (botId: string, threadId: string, opensCard: boolean) => { ok: true } | { ok: false; status: number; error: string };
   /** Chief targeting another bot: returns a refusal sentence or null. Checked at propose AND confirm. */
   validateTarget?: (proposerBotId: string, targetBotId: string) => string | null;
 }
@@ -94,6 +99,12 @@ export type ResolveProfileRequestResult =
   | { claimed: true; state: "already_settled"; behavior: string }
   | { claimed: true; state: "denied" }
   | { claimed: true; state: "applied"; targetBotId: string; fields: string[]; settlementPending?: true; message?: string };
+
+export type UndoProfileRequestResult =
+  | { claimed: false }
+  | { claimed: true; state: "already_undone" }
+  | { claimed: true; state: "invalid"; error: string; status: number; stale?: true }
+  | { claimed: true; state: "undone"; targetBotId: string };
 
 interface ProfileCardCopy {
   title: string;
@@ -260,6 +271,7 @@ export class ProfileRequestService {
   private prepare(args: Parameters<ProfileRequestService["propose"]>[0], submitted = false): {
     requestId: string; messageId: string; title: string; summary: string; detail: string;
     result?: Extract<ResolveProfileRequestResult, { state: "applied" }>;
+    appliedBy?: DirectApply;
   } {
     const reason = reasonText(args.reason);
     const changes = parseChanges(args.changes);
@@ -276,6 +288,9 @@ export class ProfileRequestService {
     const snapshot = profileSnapshot(target);
     const before: ProfileRequestChanges = {};
     const finalChanges: ProfileRequestChanges = {};
+    // Undo restores `before`, so it is offered only when the card holds the
+    // old values exactly (credential-shaped text is scrubbed from cards).
+    let exactBefore = true;
     for (const field of PROFILE_REQUEST_FIELDS) {
       if (field === "notifications" || field === "speakReplies") {
         const value = changes[field];
@@ -286,6 +301,7 @@ export class ProfileRequestService {
         const value = changes[field];
         if (value === undefined || value === snapshot[field]) continue;
         before[field] = redactSecretsInText(snapshot[field]);
+        if (before[field] !== snapshot[field]) exactBefore = false;
         finalChanges[field] = value;
       }
     }
@@ -310,11 +326,14 @@ export class ProfileRequestService {
     };
 
     const copy = profileCardCopy({ name: targetName, crossBot }, snapshot, before, finalChanges, reason);
-    const persistence = this.canPersist?.(args.botId, args.threadId);
+    const grant = submitted ? this.autoApply?.(args.botId, args.threadId, targetBotId) ?? null : null;
+    // A new working folder widens what the bot's tools read and write
+    // without asking, so below Full access it keeps today's card.
+    const automatic = grant === "full-access" || (grant === "self" && finalChanges.cwd === undefined);
+    const persistence = this.canPersist?.(args.botId, args.threadId, !automatic);
     if (persistence && !persistence.ok) {
       throw new ProfileRequestError(persistence.error, persistence.status);
     }
-    const automatic = submitted && this.autoApply?.(args.botId, args.threadId) === true;
     const messageInput: Parameters<ProfileRequestStore["appendMessage"]>[1] = {
       role: "bot",
       kind: "options",
@@ -335,8 +354,68 @@ export class ProfileRequestService {
     // The hidden receipt is persisted before the profile changes. The same
     // validation and durable commit marker serve both automatic and human decisions.
     const result = this.resolve({ botId: args.botId, threadId: args.threadId, requestId, behavior: "allow" });
-    if (result.state === "applied") return { ...proposal, result };
+    if (result.state === "applied") {
+      if (!result.settlementPending) this.recordAutoApplied(args.threadId, message.id, targetBotId, exactBefore);
+      return { ...proposal, result, appliedBy: grant! };
+    }
     throw new ProfileRequestError(result.state === "invalid" ? result.error : "The profile change could not be applied", result.state === "invalid" ? result.status : 409);
+  }
+
+  /** Marks a card whose change applied without a person, with the revision
+   * its Undo checks. A failure here only loses the Undo. */
+  private recordAutoApplied(threadId: string, messageId: string, targetBotId: string, exactBefore: boolean): void {
+    try {
+      const card = this.store.messagesFor(threadId).find((candidate) => candidate.id === messageId)?.card;
+      const target = this.store.bot(targetBotId);
+      if (!card?.profileRequest || !target) return;
+      this.store.patchMessage(threadId, messageId, {
+        card: {
+          ...card,
+          autoApplied: true,
+          profileRequest: { ...card.profileRequest, ...(exactBefore ? { undo: { appliedRevision: profileRevision(target) } } : {}) },
+        },
+      });
+    } catch {
+      // The profile change itself is durable; only its Undo is lost.
+    }
+  }
+
+  /** Puts back the fields a change that applied without a person changed.
+   * Authorized by the caller exactly like answering the card; refuses,
+   * applying nothing, once the profile changed since. */
+  undo(args: { botId: string; threadId: string; requestId: string }): UndoProfileRequestResult {
+    const message = this.store
+      .messagesFor(args.threadId)
+      .find((candidate) => candidate.card?.requestId === args.requestId && candidate.card.profileRequest);
+    const card = message?.card;
+    const payload = card?.profileRequest;
+    if (!message || !card || !payload) return { claimed: false };
+    if (card.undone) return { claimed: true, state: "already_undone" };
+    const cannot = (error: string, status = 409): UndoProfileRequestResult => ({ claimed: true, state: "invalid", error, status });
+    if (!card.autoApplied || card.answered !== "allow") return cannot("Only a change that applied on its own can be undone here.");
+    if (payload.botId !== args.botId || payload.threadId !== args.threadId) {
+      return cannot("This profile change belongs to another conversation", 403);
+    }
+    if (!payload.undo) return cannot("This change can't be undone here.");
+    const target = this.store.bot(payload.targetBotId);
+    if (!target || profileRevision(target) !== payload.undo.appliedRevision) {
+      return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
+    }
+    const { cwd, ...rest } = payload.before;
+    const patch: Parameters<ProfileRequestStore["patchBotProfile"]>[1] = {};
+    for (const field of PROFILE_REQUEST_FIELDS) {
+      if (field === "cwd" || payload.changes[field] === undefined) continue;
+      (patch as Record<string, unknown>)[field] = rest[field];
+    }
+    if (payload.changes.cwd !== undefined) {
+      const checked = validateBotCwd(cwd || null);
+      if (!checked.ok) return cannot(checked.error);
+      patch.cwd = checked.cwd ?? undefined;
+    }
+    if (!this.store.patchBotProfile(target.id, patch)) return cannot(NO_SUCH_BOT, 404);
+    recordProfileChange(target.id, "user", `undo:${message.id}`, payload.changes, payload.before);
+    this.store.patchMessage(args.threadId, message.id, { card: { ...card, undone: true } });
+    return { claimed: true, state: "undone", targetBotId: target.id };
   }
 
   /** Claims a profile card even after it was settled, so a duplicate click

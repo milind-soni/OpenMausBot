@@ -256,11 +256,14 @@ function gitFailure(command: string, err: Error & { killed?: boolean }, stderr: 
 
 /** Run one git command against the shadow repo. cwd is the WORK TREE — the
  * "." pathspec in add resolves relative to it. Every call carries the
- * GIT_TIMEOUT_MS hard timeout. */
-function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<string> {
+ * GIT_TIMEOUT_MS hard timeout. `input` is written to git's stdin.
+ * Each call is a process start, which costs tens of milliseconds on Windows,
+ * and the turn waits for its snapshot — so a snapshot keeps its calls few
+ * (see commitAll). */
+function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal, input?: string): Promise<string> {
   return new Promise((resolvePromise, rejectPromise) => {
     signal?.throwIfAborted();
-    execFile(
+    const child = execFile(
       "git",
       args,
       { cwd, env, signal, windowsHide: true, encoding: "utf8", timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
@@ -269,26 +272,12 @@ function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, signal?: Ab
         else resolvePromise(stdout);
       },
     );
-  });
-}
-
-/** `git diff --cached --quiet`: is there anything staged beyond HEAD? Used
- * instead of `status --porcelain` emptiness on purpose — a nested repo with
- * a dirty work tree shows up in status forever while staging nothing, which
- * would either commit empty churn every turn or fail the commit outright. */
-function hasStagedChanges(cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<boolean> {
-  return new Promise((resolvePromise, rejectPromise) => {
-    signal?.throwIfAborted();
-    execFile(
-      "git",
-      ["diff", "--cached", "--quiet", "--ignore-submodules=dirty"],
-      { cwd, env, signal, windowsHide: true, encoding: "utf8", timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 },
-      (err, _stdout, stderr) => {
-        if (err === null) resolvePromise(false);
-        else if (err.code === 1) resolvePromise(true);
-        else rejectPromise(gitFailure("diff", err, stderr, signal));
-      },
-    );
+    if (input !== undefined) {
+      // A git that exits before reading reports through its exit status; a
+      // broken pipe here must not become an unhandled stream error.
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(input);
+    }
   });
 }
 
@@ -335,11 +324,29 @@ async function sweepLiveRefs(cwd: string, env: NodeJS.ProcessEnv, shadow: string
   sweptShadows.add(shadow);
 }
 
+/** HEAD's commit and tree, and the empty base marker HEAD was made on: HEAD
+ * itself when it is that marker, its parent when it is one snapshot on it.
+ * `base` is null for longer, legacy history, which the next snapshot
+ * compacts. */
+type Head = { hash: string; tree: string; base: string | null };
+
+/** One git call, however long the history: HEAD and at most its parent. */
+async function readHead(cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<Head> {
+  const out = await runGit(["log", "-2", "--format=%H %T %P", "HEAD"], cwd, env, signal);
+  const [head, parent] = out.split("\n").filter(Boolean).map((line) => line.trim().split(" "));
+  const [hash, tree, ...parents] = head ?? [];
+  if (!hash || !tree) throw new Error(`git log: unexpected output ${JSON.stringify(out.slice(0, 200))}`);
+  let base: string | null = null;
+  if (parents.length === 0) base = hash;
+  else if (parents.length === 1 && parent?.length === 2) base = parents[0]!;
+  return { hash, tree, base };
+}
+
 /** Create the shadow repo on first use; self-heal its config files on every
  * use (they are tiny, and rewriting them lets exclude-list updates reach
  * shadows that already exist). The base commit is an EMPTY marker so HEAD
  * always resolves; every snapshot parents only it. */
-async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string, signal?: AbortSignal): Promise<void> {
+async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string, signal?: AbortSignal): Promise<Head> {
   signal?.throwIfAborted();
   mkdirSync(shadow, { recursive: true, mode: 0o700 });
   writeFileSync(join(shadow, "gitconfig"), GITCONFIG, { mode: 0o600 });
@@ -368,13 +375,16 @@ async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string,
     }
   }
   writeFileSync(join(shadow, ".git", "info", "exclude"), EXCLUDES + [...cachePatterns].join("\n") + "\n");
+  let head: Head;
   try {
-    await runGit(["rev-parse", "--verify", "HEAD"], cwd, env, signal);
+    head = await readHead(cwd, env, signal);
   } catch {
     // brand-new repo (or a crash between init and first commit)
     await runGit(["commit", "--no-verify", "--allow-empty", "-m", "checkpoint base"], cwd, env, signal);
+    head = await readHead(cwd, env, signal);
   }
   await sweepLiveRefs(cwd, env, shadow, signal);
+  return head;
 }
 
 type FolderNames = { exact: Set<string>; folded: Set<string> };
@@ -481,9 +491,11 @@ type CommitResult = { hash: string; advanced: boolean; compacted: boolean };
 
 /** Capture fully before advancing HEAD: null when the add was partial, so a
  * partial capture never replaces the last usable checkpoint or authorizes
- * removal of its objects. */
-async function commitAll(cwd: string, env: NodeJS.ProcessEnv, label: string, signal?: AbortSignal): Promise<CommitResult | null> {
-  const previous = (await runGit(["rev-parse", "HEAD"], cwd, env, signal)).trim();
+ * removal of its objects. With `pin`, the turn's pin lands on the returned
+ * commit in the same ref transaction that moves HEAD.
+ * A changed folder costs the shadow `write-tree`, `commit-tree` and one
+ * `update-ref` past staging; an unchanged one, `write-tree` alone. */
+async function commitAll(cwd: string, env: NodeJS.ProcessEnv, head: Head, label: string, pin?: string, signal?: AbortSignal): Promise<CommitResult | null> {
   try {
     await stageWorkTree(cwd, env, signal);
   } catch (e) {
@@ -491,17 +503,24 @@ async function commitAll(cwd: string, env: NodeJS.ProcessEnv, label: string, sig
     if (e instanceof GitTimeoutError) throw e;
     return null;
   }
-  const changed = await hasStagedChanges(cwd, env, signal);
-  const base = (await runGit(["rev-list", "--max-parents=0", "HEAD"], cwd, env, signal)).trim();
-  const count = (await runGit(["rev-list", "--count", "HEAD"], cwd, env, signal)).trim();
-  if (!changed && Number(count) <= 2) return { hash: previous, advanced: false, compacted: false };
+  // Is anything staged beyond HEAD? The staged tree is HEAD's tree exactly
+  // when nothing is. Only what is staged counts, never work-tree status: a
+  // nested repo with a dirty work tree stages nothing (its gitlink is
+  // unchanged), so it neither commits empty churn every turn nor fails.
   const tree = (await runGit(["write-tree"], cwd, env, signal)).trim();
-  const message = changed ? label : (await runGit(["show", "-s", "--format=%B", "HEAD"], cwd, env, signal)).trim();
-  // Parent only the empty marker, never the previous snapshot: keeping the
-  // previous commit as an ancestor would retain every old tree indefinitely.
-  const hash = (await runGit(["commit-tree", tree, "-p", base, "-m", message], cwd, env, signal)).trim();
-  await runGit(["update-ref", "HEAD", hash, previous], cwd, env, signal);
-  return { hash, advanced: true, compacted: Number(count) > 2 };
+  const changed = tree !== head.tree;
+  let hash = head.hash;
+  if (changed || head.base === null) {
+    const base = head.base ?? (await runGit(["rev-list", "--max-parents=0", "HEAD"], cwd, env, signal)).trim();
+    const message = changed ? label : (await runGit(["show", "-s", "--format=%B", "HEAD"], cwd, env, signal)).trim();
+    // Parent only the empty marker, never the previous snapshot: keeping the
+    // previous commit as an ancestor would retain every old tree indefinitely.
+    hash = (await runGit(["commit-tree", tree, "-p", base, "-m", message], cwd, env, signal)).trim();
+  }
+  const advanced = hash !== head.hash;
+  const updates = [advanced ? `update HEAD ${hash} ${head.hash}\n` : "", pin ? `update ${liveRef(pin)} ${hash}\n` : ""].join("");
+  if (updates !== "") await runGit(["update-ref", "--stdin"], cwd, env, signal, updates);
+  return { hash, advanced, compacted: advanced && head.base === null };
 }
 
 /** HEAD-advancing snapshots per shadow since this process last collected. */
@@ -589,10 +608,9 @@ export async function snapshot(botId: string, cwd: string, label: string, signal
     releaseCollection(shadow);
     return await serialize(shadow, async () => {
       const env = gitEnv(shadow, worktree);
-      await ensureShadow(worktree, env, shadow, signal);
-      const result = await commitAll(worktree, env, label, signal);
+      const head = await ensureShadow(worktree, env, shadow, signal);
+      const result = await commitAll(worktree, env, head, label, opts?.pin, signal);
       if (!result) return null;
-      if (opts?.pin) await runGit(["update-ref", liveRef(opts.pin), result.hash], worktree, env, signal);
       // Never awaited by the turn waiting on this snapshot, and held for that
       // turn's settled diff: diffWorkingTree queues it behind itself, so GC
       // never eats into the digest's capture window.

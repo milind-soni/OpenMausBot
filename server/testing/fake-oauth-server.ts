@@ -14,6 +14,8 @@ export interface FakeOAuthOptions {
   beforeToken?: () => Promise<void>;
   /** omit registration_endpoint from the metadata */
   noRegistration?: boolean;
+  /** refuse to register a client for a redirect URI this matches */
+  refuseRedirect?: (redirectUri: string) => boolean;
   /** answer every refresh with invalid_grant */
   rejectRefresh?: boolean;
   /** /authorize answers ?error=access_denied instead of a code */
@@ -130,6 +132,7 @@ export async function startFakeOAuth(options: FakeOAuthOptions = {}): Promise<Fa
         counts.register += 1;
         await options.beforeRegister?.();
         const body = JSON.parse(await readBody(req)) as { redirect_uris?: string[] };
+        if (body.redirect_uris?.some((uri) => options.refuseRedirect?.(uri))) return json(res, 400, { error: "invalid_redirect_uri" });
         const clientId = `client_${counts.register}`;
         clients.add(clientId);
         return json(res, 201, { client_id: clientId, redirect_uris: body.redirect_uris });

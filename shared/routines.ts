@@ -163,6 +163,6 @@ export interface RoutineInput {
   /** Each run starts with the previous run's report. */
   continuity?: boolean;
   attachments?: RoutineContextAttachment[];
-  /** Omission preserves routing; null creates a new dedicated results task. */
+  /** Omission preserves routing; null resets it to the bot's main thread. */
   resultsThreadId?: string | null;
 }

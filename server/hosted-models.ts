@@ -129,11 +129,13 @@ export function hostedModelPolicy(dataDirectory: string, env: NodeJS.ProcessEnv 
         const previousDefault = bot.modelSelection;
         const nextDefault = select(previousDefault);
         for (const task of store.tasks(bot.id)) {
+          // A thread without a model of its own follows the bot onto its
+          // assigned model; a thread's own model is moved onto one itself.
           const current = task.modelSelection ?? previousDefault;
           const next = select(current);
           const changed = JSON.stringify(next) !== JSON.stringify(current);
           if (changed || changedRoute) store.patchTask(bot.id, task.threadId, {
-            modelSelection: next, resumeCursors: {}, lastInstanceId: undefined, rewound: true,
+            ...(task.modelSelection ? { modelSelection: next } : {}), resumeCursors: {}, lastInstanceId: undefined, rewound: true,
             lastContextModel: undefined, appliedCompactionId: undefined,
           });
         }

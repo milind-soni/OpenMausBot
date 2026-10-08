@@ -7,7 +7,7 @@ import type { ValidateFunction } from "ajv";
 import { isolatedRemoteCommand, runCommand, screenshotBoat } from "./boat.ts";
 import type { AppConfig } from "./config.ts";
 import { CONTROL_REFUSAL_PLAIN } from "./control-client.ts";
-import { compileToolSchema } from "./drivers/chat-mcp-tools.ts";
+import { compileToolSchema } from "./mcp-schema-validator.ts";
 
 const coordinate = { type: "integer", minimum: 0, maximum: 32767 };
 const tool = (name: string, description: string, properties: Record<string, unknown> = {}, required: string[] = []) =>

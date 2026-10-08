@@ -142,7 +142,7 @@ describe("sidebar top row", () => {
     // switcher reads. Its spacer is empty (so it stays a drag region) and
     // takes the slack.
     expect(classesOf(row, "data-sidebar-top-slot")).toEqual(expect.arrayContaining(["@container/sidebar-top", "min-w-0", "flex-1"]));
-    expect(row).toContain('<div data-sidebar-top-spacer="true" class="min-w-0 flex-1"></div>');
+    expect(row).toContain('<div data-sidebar-top-spacer="true" class="min-w-0 flex-1 @min-[96px]/sidebar-top:min-w-6"></div>');
     // The switcher is capped and gives way first; the buttons never shrink.
     const switcherClasses = classesOf(row, "data-sidebar-top-switcher");
     expect(switcherClasses).toEqual(expect.arrayContaining(["min-w-0", "max-w-[140px]"]));
@@ -152,10 +152,20 @@ describe("sidebar top row", () => {
     // rather than spilling onto the buttons in the narrowest rows, and its
     // title and label keep the whole name.
     expect(row).toMatch(/aria-label="Switch server: Servers"[^>]*title="Servers"[^>]*class="[^"]*\bh-7\b[^"]*\boverflow-hidden\b[^"]*\btext-\[12\.5px\][^"]*" style="-webkit-app-region:no-drag"/);
-    // A slot narrower than 164px, the 140px cap plus a 24px drag gap (macOS
-    // Advanced at 320px leaves 121px), shows icon + chevron only, so the
-    // switcher never fills the slot up to the lights.
-    expect(row).toContain('<span class="min-w-0 truncate @max-[164px]/sidebar-top:hidden">Servers</span>');
+    // A slot narrower than 96px cannot hold icon, a truncated name, and the
+    // chevron, so the name hides. Default macOS Advanced leaves about 121px,
+    // which still shows the name and keeps a 24px drag gap.
+    expect(row).toContain('<span class="min-w-0 truncate @max-[96px]/sidebar-top:hidden">Servers</span>');
+    expect(row).toContain("focus-visible:outline-2");
+    expect(html).toContain('title="New or share"');
+    if (advanced) {
+      expect(row).toContain('title="Collapse to avatars"');
+      expect(row).toContain('aria-label="Collapse sidebar to avatars"');
+      expect(row).toContain('title="Active Threads"');
+    } else {
+      expect(html).not.toContain('title="Collapse to avatars"');
+      expect(html).not.toContain('title="Active Threads"');
+    }
     // No second, full-width switcher row beneath the header.
     expect(html.match(/Switch server:/g)).toHaveLength(1);
   });

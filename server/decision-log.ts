@@ -45,11 +45,13 @@ export type DecisionKind =
   | "card-shown"
   | "user-approved"
   | "user-denied"
+  | "user-undone"
   | "review-would-approve"
   | "review-would-deny";
 
 /** Who or what produced the decision. The AutoVerdictSource values carry
- * straight through from auto-approve.ts; `question` marks cards a rule may
+ * straight through from auto-approve.ts; `self` a bot's change to itself
+ * that applied at its level (server/direct-apply.ts); `question` marks cards a rule may
  * never answer, `auto-fallback` a card shown after delivery failed, `routine`
  * a durable chat scheduling proposal, `skill` a staged learned-skill card,
  * `profile` a bot proposed a profile change, `model` a bot proposed a default-model
@@ -59,6 +61,7 @@ export type DecisionKind =
  * by editing a bot's connectorTools, so the call itself needed no card. */
 export type DecisionSource =
   | AutoVerdictSource
+  | "self"
   | "question"
   | "auto-fallback"
   | "routine"

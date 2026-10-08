@@ -17,6 +17,7 @@ import { collectMessageFiles, splitMessageAttachments } from "../AttachmentGalle
 import { BotAvatar } from "../Avatar";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
 import { ModelPicker } from "../ModelPicker";
+import { ThreadModelsLine } from "../ThreadModelsLine";
 import { Switch } from "../SettingsPrimitives";
 import { SoulField } from "../SoulField";
 import { SkillReviewDialog, useManagedSkills } from "./SkillsSection";
@@ -192,16 +193,18 @@ export function SimpleBotPanel({
               }}
             />
 
-            {/* The bot's default model, in the same plain-words picker as the
-                chat header, shown in place (a floating popover would be
-                clipped by this scrolling panel). A pick is the bot's default:
-                groups and new threads start on it, like the full Model section. */}
+            {/* The bot's model, in the same plain-words picker as the chat
+                header, shown in place (a floating popover would be clipped by
+                this scrolling panel). A pick is the bot's model: groups and
+                every thread without its own model move with it, like the full
+                Model section, and the line below counts the threads that don't. */}
             <div data-simple-default-model>
               <ModelPicker
                 bot={bot}
                 contained
                 label={<span className="text-[12px] text-ink-secondary">{t("botSettings.simple.defaultModel")}</span>}
               />
+              <ThreadModelsLine bot={bot} className="mt-2" />
             </div>
 
             <div>

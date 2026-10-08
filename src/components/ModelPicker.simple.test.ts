@@ -19,6 +19,7 @@ const fixture = vi.hoisted(() => {
     index: 0,
     own: 0,
     instances: [] as InstanceInfo[],
+    bots: [] as Bot[],
     dispatch: (() => {}) as (...args: unknown[]) => void,
     refreshModels: (() => Promise.resolve()) as (instanceId: string) => Promise<void>,
     refreshInstances: (() => Promise.resolve()) as () => Promise<void>,
@@ -41,14 +42,14 @@ vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.owne
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
-    state: { instances: fixture.instances, bots: [], modelVariantSessions: {}, config: { cloudHome: fixture.cloudHome } },
+    state: { instances: fixture.instances, bots: fixture.bots, modelVariantSessions: {}, config: { cloudHome: fixture.cloudHome } },
     dispatch: fixture.dispatch,
     refreshInstances: fixture.refreshInstances,
     refreshModels: fixture.refreshModels,
   }),
 }));
 
-const { ClaudeAccountSelect, ModelEngineRail, ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
+const { ClaudeAccountSelect, FollowBotModelRow, ModelEngineRail, ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
 const { SimpleModelPane } = await import("./SimpleModelPane");
 const { EngineSetup } = await import("./EngineSetup");
 const { InstanceProviderMark } = await import("./ProviderIcons");
@@ -150,6 +151,7 @@ beforeEach(() => {
   fixture.index = 0;
   fixture.own = 0;
   fixture.instances = [claude()];
+  fixture.bots = [];
   fixture.dispatch = vi.fn();
   fixture.refreshModels = vi.fn(() => Promise.resolve());
   fixture.refreshInstances = vi.fn(() => Promise.resolve());
@@ -770,5 +772,70 @@ describe("the model picker in Simple mode", () => {
     const opened = open(bot());
     expect(pane(opened)).toBeUndefined();
     expect(opened.nodes.some((node) => node.type === ModelEngineRail)).toBe(true);
+  });
+});
+
+describe("a thread's picker and its bot's model", () => {
+  const opus = { instanceId: "claude", model: "claude-opus-5-5" };
+  const haiku = { instanceId: "claude", model: "claude-haiku-4-5-20251001" };
+  /** The bot as the store holds it (its model is Opus), and the thread's view of it. */
+  function scout(threadModel: typeof opus | null, others: Array<{ threadId: string; model: typeof opus | null }> = []) {
+    const profile: Bot = { ...bot(), tasks: [
+      { threadId: "thread-scout", title: "This one", createdAt: 1, modelSelection: threadModel ?? opus, followsBotModel: threadModel === null },
+      ...others.map(({ threadId, model }) => ({ threadId, title: threadId, createdAt: 1, modelSelection: model ?? opus, followsBotModel: model === null })),
+    ] };
+    fixture.bots = [profile];
+    return { ...profile, modelSelection: threadModel ?? opus };
+  }
+  const followRow = (rendered: ReturnType<typeof render>) => rendered.nodes.find((node) => node.type === FollowBotModelRow);
+  const pickFollow = (rendered: ReturnType<typeof render>) => (followRow(rendered)!.props.onPick as () => void)();
+
+  it("offers the bot's model to a thread on its own, and picking it is a thread-only pick of the bot's model", () => {
+    const opened = open(scout(haiku));
+    expect(followRow(opened)!.props.follows).toBe(false);
+    expect(menu(opened.html)).toContain("Use Scout&#x27;s model");
+    expect(menu(opened.html)).toContain("Claude · Opus 5.5");
+    expect(menu(opened.html)).toContain('data-follow-bot-model="true" aria-pressed="false"');
+    expect(inside(opened).some((node) => node.props["data-bot-model"] !== undefined)).toBe(true);
+    pickFollow(opened);
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: false, selection: opus,
+    });
+  });
+
+  it("shows a thread that follows its bot as following, with the bot's model marked", () => {
+    const opened = open(scout(null));
+    expect(followRow(opened)!.props.follows).toBe(true);
+    expect(pane(opened)!.props.botModelId).toBe("claude-opus-5-5");
+    expect(region(menu(opened.html), "data-simple-models")).toContain("(bot&#x27;s model)");
+    expect(render(scout(null)).nodes.find((node) => node.props["data-tour"] === "model")!.props.title).toContain("Uses Scout's model");
+    pickFollow(opened);
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("offers nothing a server too old to say whether a thread follows its bot could not do", () => {
+    fixture.bots = [];
+    const opened = open(bot());
+    expect(followRow(opened)).toBeUndefined();
+    expect(menu(opened.html)).not.toContain("(bot&#x27;s model)");
+  });
+
+  it("right after a pick changes the bot's model, says how many threads keep their own, until it opens again", () => {
+    const forBot = scout(null, [{ threadId: "kept", model: haiku }, { threadId: "follows", model: null }]);
+    const opened = open(forBot);
+    pane(opened)!.props.onPick("claude-sonnet-5-5");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", updateBotDefault: true }));
+    const closed = render(forBot);
+    expect(closed.html).toContain("data-thread-models-notice");
+    expect(closed.html).toContain("1 thread uses its own model.");
+    expect(closed.html).toContain("Switch it too");
+    open(forBot);
+    expect(render(forBot).html).not.toContain("data-thread-models-notice");
+  });
+
+  it("says nothing after a bot model change when every thread follows the bot", () => {
+    const forBot = scout(null, [{ threadId: "follows", model: null }]);
+    pane(open(forBot))!.props.onPick("claude-sonnet-5-5");
+    expect(render(forBot).html).not.toContain("data-thread-models-notice");
   });
 });

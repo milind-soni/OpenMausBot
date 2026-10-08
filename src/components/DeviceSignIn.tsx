@@ -4,10 +4,11 @@
 // ChatGPT plan (a browser page, no code). The same card on the desktop, a
 // self-hosted server and My Cloud.
 import { useEffect, useState } from "react";
-import { Check, Copy, ExternalLink, Loader2, LogIn } from "lucide-react";
+import { Check, Copy, ExternalLink, Loader2, LogIn, X } from "lucide-react";
 import { api, ApiError, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { openExternalLink } from "@/lib/app-links";
+import { useCopyFeedback } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { deviceSignInLink, isDeviceSignInCode, type DeviceSignInProvider } from "../../shared/device-sign-in";
 import { CodexMark } from "./ProviderIcons";
@@ -78,21 +79,11 @@ export function chatgptPlanLink(value: string | null): string | null {
 const chatgptButton = "flex w-full items-center justify-center gap-2 rounded-lg border border-black/20 bg-white px-3 py-2 text-[12.5px] font-semibold text-black hover:opacity-85 disabled:opacity-50";
 
 export function DeviceSignInProgress({ auth, browserPkce = false, provider = "codex" }: { auth: DeviceSignInStatus; browserPkce?: boolean; provider?: DeviceSignInProvider }) {
-  const [copied, setCopied] = useState(false);
+  // The code stays select-all, so one click selects it for Cmd/Ctrl+C when copying is blocked.
+  const { state: codeCopy, copy: copyCode } = useCopyFeedback(auth.userCode ?? "");
   const copy = DEVICE_SIGN_IN_COPY[provider];
   const link = browserPkce ? chatgptPlanLink(auth.authorizationUrl) : deviceSignInLink(provider, auth.authorizationUrl, auth.userCode);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), 2000);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-
-  const copyCode = async () => {
-    try {
-      await navigator.clipboard.writeText(auth.userCode!);
-      setCopied(true);
-    } catch { /* The code remains selectable if clipboard access is blocked. */ }
-  };
+  const copyLabel = t(codeCopy === "failed" ? "common.copyFailed" : "engineSetup.device.copyCode");
 
   if (auth.phase !== "waiting") {
     const label = auth.phase === "succeeded" ? t(copy.connected)
@@ -113,11 +104,12 @@ export function DeviceSignInProgress({ auth, browserPkce = false, provider = "co
         <code className="select-all font-mono text-lg font-semibold tracking-widest text-ink">{auth.userCode}</code>
         <button
           type="button"
-          aria-label={t("engineSetup.device.copyCode")}
-          onClick={() => void copyCode()}
+          aria-label={copyLabel}
+          title={copyLabel}
+          onClick={copyCode}
           className="rounded-md p-2 text-ink-secondary hover:bg-control hover:text-ink"
         >
-          {copied ? <Check size={15} className="text-success" /> : <Copy size={15} />}
+          {codeCopy === "copied" ? <Check size={15} className="text-success" /> : codeCopy === "failed" ? <X size={15} className="text-danger" /> : <Copy size={15} />}
         </button>
       </div></>}
       <a href={link} target="_blank" rel="noopener noreferrer" onClick={(event) => {

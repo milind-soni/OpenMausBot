@@ -2,10 +2,11 @@
 // errors. The command has one inline copy action and one primary next step;
 // unusable model lists stay out of the way until the engine is ready.
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Copy, Download, ExternalLink, KeyRound, Loader2, LogIn, TerminalSquare } from "lucide-react";
+import { AlertTriangle, Check, Copy, Download, ExternalLink, KeyRound, Loader2, LogIn, TerminalSquare, X } from "lucide-react";
 import { api, type EngineInstall, type InstanceInfo, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { copyText } from "@/lib/copy-text";
 import { DEVICE_SIGN_IN_COPY, DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ClaudeSignIn } from "./ClaudeSignIn";
 
@@ -70,22 +71,21 @@ export function CommandRow({
   actionLabel: string;
   compact?: boolean;
 }) {
-  const [status, setStatus] = useState<"copied" | "opened" | null>(null);
+  const [status, setStatus] = useState<"copied" | "failed" | "opened" | null>(null);
   const canOpen = typeof window !== "undefined" && Boolean(window.ogb?.openInstallTerminal);
 
-  const settle = (next: "copied" | "opened") => {
+  const settle = (next: "copied" | "failed" | "opened") => {
     setStatus(next);
     window.setTimeout(() => setStatus(null), 2200);
   };
 
+  // The command remains selectable when clipboard access is blocked.
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      settle("copied");
-    } catch {
-      // The command remains selectable when clipboard access is blocked.
-    }
+    const result = await copyText(command);
+    if (result !== "empty") settle(result);
   };
+  const copyIcon = (size: number) => status === "copied" ? <Check size={size} className="text-success" />
+    : status === "failed" ? <X size={size} className="text-danger" /> : <Copy size={size} />;
 
   const openTerminal = async () => {
     const opened = await window.ogb!.openInstallTerminal!(command);
@@ -105,8 +105,8 @@ export function CommandRow({
           title={t("engineSetup.copyCommand")}
           className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-ink-secondary hover:bg-control hover:text-ink"
         >
-          {status === "copied" ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-          {status === "copied" ? t("engineSetup.copied") : t("engineSetup.copy")}
+          {copyIcon(12)}
+          {t(status === "copied" ? "engineSetup.copied" : status === "failed" ? "common.copyFailed" : "engineSetup.copy")}
         </button>
         {canOpen && (
           <button
@@ -141,8 +141,8 @@ export function CommandRow({
             title={t("engineSetup.copyCommand")}
             className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-ink-secondary hover:bg-control hover:text-ink"
           >
-            {status === "copied" ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-            {status === "copied" ? t("engineSetup.copied") : t("engineSetup.copy")}
+            {copyIcon(12)}
+            {t(status === "copied" ? "engineSetup.copied" : status === "failed" ? "common.copyFailed" : "engineSetup.copy")}
           </button>
         )}
       </div>
@@ -167,8 +167,8 @@ export function CommandRow({
           onClick={() => void copy()}
           className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[12.5px] font-semibold text-ink hover:bg-raised-hover"
         >
-          {status === "copied" ? <Check size={14} className="text-success" /> : <Copy size={14} />}
-          {status === "copied" ? t("engineSetup.commandCopied") : t("engineSetup.copyCommand")}
+          {copyIcon(14)}
+          {t(status === "copied" ? "engineSetup.commandCopied" : status === "failed" ? "common.copyFailed" : "engineSetup.copyCommand")}
         </button>
       )}
     </div>
@@ -417,6 +417,12 @@ export function isApiKeyEngine(instance: InstanceInfo | undefined): boolean {
   return instance.driverKind !== "claudeAgent" || Boolean(instance.snapshot.version);
 }
 
+/** A key engine whose key is saved. A mistyped key counts too: it is only
+ * found wrong when used or tested. */
+export function hasSavedApiKey(instance: InstanceInfo): boolean {
+  return isApiKeyEngine(instance) && instance.snapshot.authenticated === true;
+}
+
 /** Its setup is a key in Settings → API keys, and that is not done yet. */
 function apiKeySetup(instance: InstanceInfo): boolean {
   return (isApiKeyEngine(instance) || instance.install?.settings === "connections") && !instance.snapshot.authenticationUnavailableReason
@@ -449,22 +455,29 @@ function GrokKeyInstead({ className, unframed }: { className?: string; unframed:
   );
 }
 
-function ApiKeyEngineSetup({ instance, className, unframed }: { instance: InstanceInfo; className?: string; unframed: boolean }) {
+/** `configured`: the key is saved, so the card offers to change it instead.
+ * A typo'd key still counts as saved, and this is the way back to fix it. */
+function ApiKeyEngineSetup({ instance, className, unframed, configured = false }: { instance: InstanceInfo; className?: string; unframed: boolean; configured?: boolean }) {
   const { dispatch } = useStore();
   const remote = window.ogb?.remoteClient?.active === true;
+  const copy = configured
+    ? { title: "engineSetup.apiKey.configuredTitle", description: remote ? "engineSetup.apiKey.configuredRemote" : "engineSetup.apiKey.configuredDescription", action: "engineSetup.apiKey.change" } as const
+    : { title: "engineSetup.apiKey.title", description: remote ? "engineSetup.apiKey.remote" : "engineSetup.apiKey.description", action: "engineSetup.apiKey.open" } as const;
   return (
-    <div data-engine-setup-api-key className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
+    <div data-engine-setup-api-key={configured ? "configured" : ""} className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-inset text-ink-secondary">
           <KeyRound size={14} />
         </span>
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold text-ink">{t("engineSetup.apiKey.title", { name: instance.displayName })}</div>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {remote ? t("engineSetup.apiKey.remote") : t("engineSetup.apiKey.description")}
-          </p>
+          <div className="text-[13px] font-semibold text-ink">{t(copy.title, { name: instance.displayName })}</div>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t(copy.description)}</p>
         </div>
       </div>
+      {/* a saved key the provider refused reads as installed but signed out */}
+      {needsSignIn(instance) && (
+        <p role="alert" className="mt-2 text-[12px] leading-relaxed text-danger">{t("engineSetup.apiKey.rejected")}</p>
+      )}
       {!remote && (
         <button
           type="button"
@@ -472,11 +485,19 @@ function ApiKeyEngineSetup({ instance, className, unframed }: { instance: Instan
           className="mt-3 flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-raised-hover"
         >
           <KeyRound size={13} aria-hidden="true" />
-          {t("engineSetup.apiKey.open")}
+          {t(copy.action)}
         </button>
       )}
     </div>
   );
+}
+
+/** A ready engine that runs on a pasted key: name the key and link to where it
+ * is replaced or cleared. Without this, saving any key (even a wrong one)
+ * left Model providers with no way back to it. */
+export function ApiKeyEngineManage({ instance, className }: { instance: InstanceInfo; className?: string }) {
+  if (!hasSavedApiKey(instance)) return null;
+  return <ApiKeyEngineSetup instance={instance} className={className} unframed={false} configured />;
 }
 
 export function EngineSetup({

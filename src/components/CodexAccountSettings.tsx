@@ -26,10 +26,10 @@ export function AddChatGptAccount() {
     finally { setSaving(false); }
   };
 
-  if (!open) return <button type="button" onClick={() => setOpen(true)} className="flex w-fit items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink">
+  if (!open) return <button type="button" onClick={() => setOpen(true)} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
     <Plus size={13} />{t("engineSetup.chatgpt.addAccount")}
   </button>;
-  return <form className="min-w-0 space-y-3 rounded-xl border border-hairline/40 p-3" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+  return <form className="min-w-0 space-y-3 rounded-xl bg-inset p-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
     <label className="flex flex-col gap-1 text-[12px] text-ink-secondary">
       {t("engines.account.name")}
       <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder={t("engines.account.namePlaceholder")} maxLength={80} required disabled={saving} className="rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent disabled:opacity-50" />
@@ -85,22 +85,24 @@ export function CodexAccountSettings({ instance }: { instance: InstanceInfo }) {
   };
 
   return (
-    <div className="mt-2 space-y-2 text-[12px]">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="flex min-w-0 items-center gap-1.5 break-words text-success">
-          <Check size={13} className="shrink-0" />
-          {t(plan ? "engineSetup.chatgpt.connectedAccount" : "engineSetup.device.connectedAccount")}
-          {email && <span className="text-ink-secondary">· {email}</span>}
-        </span>
-        <button type="button" onClick={() => void check()} disabled={busy !== null} className="flex items-center gap-1 text-ink-secondary hover:text-ink disabled:opacity-50">
+    <div className="space-y-3 text-[12px]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-44">
+          <span className="flex items-center gap-1.5 font-medium text-success">
+            <Check size={13} className="shrink-0" />
+            {t(plan ? "engineSetup.chatgpt.connectedAccount" : "engineSetup.device.connectedAccount")}
+          </span>
+          {email && <p className="mt-1 break-words text-ink-secondary">{email}</p>}
+        </div>
+        <button type="button" onClick={() => void check()} disabled={busy !== null} className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50">
           <RefreshCw size={12} className={cn(busy === "check" && "animate-spin")} />{t("engines.account.check")}
         </button>
       </div>
       {plan && <ChatGptPlanStatus key={instance.instanceId} instanceId={instance.instanceId} />}
       {canSignOut && (
-        <details className="rounded-lg border border-hairline/40 px-3 py-2">
-          <summary className="cursor-pointer text-ink-secondary hover:text-ink">{t("engines.account.manage")}</summary>
-          <div className="mt-3 space-y-2">
+        <details>
+          <summary className="cursor-pointer rounded-md py-1 font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{t("engines.account.manage")}</summary>
+          <div className="mt-3 space-y-2 rounded-xl bg-inset p-4">
             <p className="leading-relaxed text-ink-secondary">{signOutHint}</p>
             {assigned > 0 && <p className="leading-relaxed text-warning">{t(plan ? "engineSetup.chatgpt.signOutAssigned" : "engineSetup.device.signOutAssigned", { count: String(assigned) })}</p>}
             <button type="button" onClick={() => setConfirm(true)} disabled={busy !== null} className="text-danger hover:underline disabled:no-underline disabled:opacity-50">

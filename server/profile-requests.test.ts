@@ -14,6 +14,7 @@ import {
   type ProfileRequestStore,
 } from "./profile-requests.ts";
 import type { BotRecord } from "./store.ts";
+import { directApply, type DirectApplyCheck } from "./direct-apply.ts";
 
 interface StoredMessage {
   id: string;
@@ -110,7 +111,7 @@ describe("ProfileRequestService", () => {
   it("applies Full Access from the source thread without exposing an unanswered card and claims replays", () => {
     const { store, bot } = harness({ name: "Scout" });
     bot.approvalMode = "full";
-    const autoApply = vi.fn((_botId: string, threadId: string) => threadId === "full-thread");
+    const autoApply = vi.fn((_botId: string, threadId: string, _target: string) => (threadId === "full-thread" ? "full-access" as const : null));
     const service = new ProfileRequestService({ store, autoApply });
     const appended: OptionCardLike[] = [];
     const append = store.appendMessage.bind(store);
@@ -127,7 +128,7 @@ describe("ProfileRequestService", () => {
     const full = service.submit({ botId: bot.id, threadId: "full-thread", changes: { name: "Kiwi" }, reason: "requested" });
     expect(full).toMatchObject({ state: "applied", result: { state: "applied", targetBotId: bot.id, fields: ["name"] } });
     expect(bot.name).toBe("Kiwi");
-    expect(autoApply).toHaveBeenLastCalledWith(bot.id, "full-thread");
+    expect(autoApply).toHaveBeenLastCalledWith(bot.id, "full-thread", bot.id);
     expect(appended[1]).toMatchObject({ options: [], dismissed: true });
     expect(store.messagesFor("full-thread")[0]?.card).toMatchObject({ answered: "allow", dismissed: true });
     expect(service.resolve({ botId: bot.id, threadId: "full-thread", requestId: full.requestId, behavior: "allow" }))
@@ -138,7 +139,7 @@ describe("ProfileRequestService", () => {
   it("retains Full Access validation and reports application failures without a pending approval", () => {
     const { store, bot, addBot } = harness({ name: "Chief" });
     const peer = addBot({ name: "Peer" });
-    const service = new ProfileRequestService({ store, autoApply: () => true, validateTarget: () => "Outside your team" });
+    const service = new ProfileRequestService({ store, autoApply: () => "full-access", validateTarget: () => "Outside your team" });
     expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, changes: { name: "Changed" }, reason: "requested" }))
       .toThrow("Outside your team");
     expect(store.messagesFor(bot.threadId)).toHaveLength(0);
@@ -155,7 +156,7 @@ describe("ProfileRequestService", () => {
 
   it("reports a committed Full Access profile accurately when its receipt cannot settle", () => {
     const { store, bot } = harness({ name: "Scout" });
-    const service = new ProfileRequestService({ store, autoApply: () => true });
+    const service = new ProfileRequestService({ store, autoApply: () => "full-access" });
     const patch = vi.spyOn(store, "patchBotProfile");
     const settle = vi.spyOn(store, "patchMessage").mockImplementation(() => { throw new Error("receipt write failed"); });
     const result = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { name: "Kiwi" }, reason: "requested" });
@@ -530,5 +531,88 @@ describe("propose_profile working folder (cwd)", () => {
     store.patchBot(bot.id, { cwd: tmpdir() });
     const result = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId, behavior: "allow" });
     expect(result).toMatchObject({ claimed: true, state: "invalid", status: 409 });
+  });
+});
+
+describe("a bot's own profile changes", () => {
+  // The server's rule (server/direct-apply.ts) at Ask: only a change to the
+  // proposing bot itself applies without a person.
+  const rule: DirectApplyCheck = (botId, _threadId, targetBotId) => directApply({ fullAccess: false, botId, targetBotId, blocked: false });
+
+  it("applies its own change at Ask and keeps the card for a peer's", () => {
+    const { store, bot, addBot } = harness({ name: "Scout" });
+    const peer = addBot({ name: "Peer" });
+    const service = new ProfileRequestService({ store, autoApply: rule });
+    const own = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { title: "Researcher" }, reason: "asked" });
+    expect(own).toMatchObject({ state: "applied", appliedBy: "self" });
+    expect(bot.title).toBe("Researcher");
+    expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ autoApplied: true, answered: "allow", options: [] });
+    const other = service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, changes: { title: "Changed" }, reason: "asked" });
+    expect(other.state).toBe("pending");
+    expect(peer.title).toBe("");
+    expect(store.messagesFor(bot.threadId)[1]?.card).toMatchObject({ options: ["Confirm", "Cancel"] });
+  });
+
+  it("keeps the card for its own working folder below Full access, and applies it at Full", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    const fullAccess = (threadId: string) => threadId === "full-thread";
+    const service = new ProfileRequestService({ store, autoApply: (botId, threadId, targetBotId) =>
+      directApply({ fullAccess: fullAccess(threadId), botId, targetBotId, blocked: false }) });
+    const dir = mkdtempSync(join(tmpdir(), "omb-cwd-"));
+    try {
+      // A new folder widens what its tools touch without asking.
+      const asked = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { cwd: dir, title: "Builder" }, reason: "asked" });
+      expect(asked.state).toBe("pending");
+      expect(store.bot(bot.id)!.cwd).toBeUndefined();
+      expect(store.bot(bot.id)!.title).toBe("");
+      expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ options: ["Confirm", "Cancel"] });
+      const full = service.submit({ botId: bot.id, threadId: "full-thread", changes: { cwd: dir }, reason: "asked" });
+      expect(full).toMatchObject({ state: "applied", appliedBy: "full-access" });
+      expect(store.bot(bot.id)!.cwd).toBe(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("is not held back by the open-card budget, which still holds a card", () => {
+    const { store, bot, addBot } = harness({ name: "Scout" });
+    const peer = addBot({ name: "Peer" });
+    const canPersist = vi.fn((_botId: string, _threadId: string, opensCard: boolean) =>
+      opensCard ? { ok: false as const, status: 429, error: "confirm or cancel an existing proposal first" } : { ok: true as const });
+    const service = new ProfileRequestService({ store, autoApply: rule, canPersist });
+    expect(service.submit({ botId: bot.id, threadId: bot.threadId, changes: { title: "Researcher" }, reason: "asked" }).state).toBe("applied");
+    expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, changes: { title: "Changed" }, reason: "asked" }))
+      .toThrow("confirm or cancel an existing proposal first");
+    expect(canPersist.mock.calls.map((call) => call[2])).toEqual([false, true]);
+  });
+
+  it("undoes only the fields it changed, once, and not after the profile moved", async () => {
+    const { store, bot } = harness({ name: "Scout" });
+    const service = new ProfileRequestService({ store, autoApply: rule });
+    store.patchBot(bot.id, { description: "Keeps this" });
+    const applied = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { name: "Kiwi", soul: "Be brief." }, reason: "asked" });
+    const undo = () => service.undo({ botId: bot.id, threadId: bot.threadId, requestId: applied.requestId });
+    expect(undo()).toMatchObject({ state: "undone", targetBotId: bot.id });
+    expect(bot).toMatchObject({ name: "Scout", soul: "", description: "Keeps this" });
+    expect(undo()).toMatchObject({ state: "already_undone" });
+    expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ undone: true });
+    await flushProfileHistory(bot.id);
+    expect(readHistory(bot.id).some((row) => row.field === "name" && row.summary.includes("Kiwi"))).toBe(true);
+
+    const stale = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { title: "Bot's title" }, reason: "asked" });
+    store.patchBot(bot.id, { title: "Person's title" });
+    expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: stale.requestId }))
+      .toMatchObject({ state: "invalid", stale: true, error: "Changed since, so it can't be undone here." });
+    expect(bot.title).toBe("Person's title");
+  });
+
+  it("offers no Undo when the old value could not be kept exactly", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    store.patchBot(bot.id, { soul: "Use sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH for the API." });
+    const service = new ProfileRequestService({ store, autoApply: rule });
+    const applied = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { soul: "Be brief." }, reason: "asked" });
+    expect(applied.state).toBe("applied");
+    expect(store.messagesFor(bot.threadId)[0]?.card?.profileRequest?.undo).toBeUndefined();
+    expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: applied.requestId })).toMatchObject({ state: "invalid", status: 409 });
   });
 });

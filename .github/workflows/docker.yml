@@ -146,8 +146,8 @@ jobs:
           grep -q '"baseUrl":"https://localhost"' <<<"$(body -b "$jar" $H/api/webhooks)"   # OMB_WEBHOOK_PUBLIC_URL is advertised
           test "$(code $H/api/bots)" = 403                                        # and without the cookie it is still closed
           docker compose -f deploy/docker-compose.yml down -v
-      - name: Cloud Pro home image (deploy/fly) boots, stays private and pairs on a signed request
-        # The Fly home machine built on the image above, with the environment
+      - name: Cloud Pro home image (--target cloud-home) boots, stays private and pairs on a signed request
+        # The Fly home machine, built from the same runtime as the image above, with the environment
         # openmaus-cloud's provisioner writes (docs/cloud-pro.md): Caddy on
         # :8080 is the only listener, a forwarded request is never the
         # loopback owner, a bad boot contract never serves, the launcher stays
@@ -159,7 +159,7 @@ jobs:
         # included models, and tells the paired app to open its engine sign-in.
         run: |
           set -euo pipefail
-          docker build -f deploy/fly/Dockerfile --build-arg BASE_IMAGE=openmausbot:ci --build-arg ENGINES= -t omb-cloud-home:ci .
+          docker build --target cloud-home --build-arg CLOUD_HOME_ENGINES= -t omb-cloud-home:ci .
           rand43() { openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'; }
           b64url() { base64 | tr '+/' '-_' | tr -d '=\n'; }
           secret=$(rand43)
@@ -247,6 +247,45 @@ jobs:
           test "$(pair "$body" "$secret" "$(date +%s)" "$(rand43)")" = 200
           docker rm -f home >/dev/null
           docker volume rm omb-home-ci >/dev/null
+      - name: Prove each image ships its files once, no build cache, and a Caddy without capabilities
+        # A pull downloads every layer, so a file written twice or a cache left
+        # in a layer costs every machine that pulls the image. The Cloud home's
+        # Caddy must not carry the privileged-port capability (it runs as maus
+        # on :8080), which Docker's default capabilities would hide at runtime.
+        # Its Grok is one root-owned binary, with nothing from the installer's
+        # throwaway home left in the image.
+        run: |
+          set -euo pipefail
+          docker save openmausbot:ci -o "$RUNNER_TEMP/server.tar"
+          docker save omb-cloud-home:ci -o "$RUNNER_TEMP/home.tar"
+          python3 - "$RUNNER_TEMP/server.tar" "$RUNNER_TEMP/home.tar" <<'PY'
+          import json, re, sys, tarfile
+          cache = re.compile(r"^(root/\.npm|tmp/(npm-cache|omb-build-home|node-compile-cache|grok-install))/")
+          for path in sys.argv[1:]:
+              files = {}
+              with tarfile.open(path) as image:
+                  for layer in json.load(image.extractfile("manifest.json"))[0]["Layers"]:
+                      with tarfile.open(fileobj=image.extractfile(layer), mode="r|*") as entries:
+                          for entry in entries:
+                              name = entry.name[2:] if entry.name.startswith("./") else entry.name
+                              if not entry.isdir():
+                                  files.setdefault(name, []).append(entry)
+              left = sorted(name for name in files if cache.match(name))
+              assert not left, f"{path}: build caches in a layer: {left[:5]}"
+              assert len(files["app/dist-server/index.js"]) == 1, f"{path}: the app is written more than once"
+              native = [name for name in files if re.match(r"usr/local/lib/node_modules/agent-browser/bin/agent-browser-", name)]
+              assert len(native) == 1, f"{path}: agent-browser ships {native}"
+              if path.endswith("home.tar"):
+                  caddy = files["usr/local/bin/caddy"]
+                  assert len(caddy) == 1, f"Caddy is written {len(caddy)} times"
+                  assert caddy[0].uid == 0, f"Caddy belongs to uid {caddy[0].uid}"
+                  assert not any(key.startswith("SCHILY.xattr.security.") for key in caddy[0].pax_headers), "Caddy keeps a file capability"
+                  grok = files["usr/local/bin/grok"]
+                  assert len(grok) == 1 and grok[0].uid == 0 and grok[0].mode & 0o7777 == 0o755, "Grok is not one root-owned 0755 binary"
+                  installer = sorted(name for name in files if re.match(r"(data|root)/\.grok/|usr/local/bin/agent$", name))
+                  assert not installer, f"Grok's installer left files behind: {installer[:5]}"
+              print(f"{path}: {len(files)} files, each once; no build cache; {native[0]}")
+          PY
 
   publish:
     name: publish to GHCR
@@ -274,16 +313,39 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=long
             type=ref,event=tag
+      - id: keys
+        # What the two slow layers install: `agent-browser install` fetches
+        # Chrome for Testing's last-known-good Stable, and the Cloud home takes
+        # each engine's npm latest. Keyed on those versions, the layers (and
+        # their digests) carry over from the last publish until a release; a
+        # code-only push re-pulls only the app layers. A lookup that fails keys
+        # on today's date instead, so neither is ever frozen at an old release.
+        env:
+          CLOUD_HOME_ENGINES: "@anthropic-ai/claude-code @openai/codex"
+        run: |
+          today="date-$(date -u +%F)"
+          chrome=$(curl -fsSL --max-time 30 https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json | jq -er .channels.Stable.version) || chrome=""
+          [[ "$chrome" =~ ^[0-9]+(\.[0-9]+)+$ ]] || chrome=$today
+          engines="" engines_tag=""
+          for package in $CLOUD_HOME_ENGINES; do
+            version=$(npm view "$package@latest" version 2>/dev/null) || version=""
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9][0-9A-Za-z.+-]*$ ]]; then engines=$CLOUD_HOME_ENGINES engines_tag=$today; break; fi
+            engines="$engines $package@$version"
+          done
+          { echo "chrome=$chrome"; echo "engines=${engines# }"; echo "engines_tag=$engines_tag"; } | tee -a "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            CHROME_CACHE_TAG=${{ steps.keys.outputs.chrome }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # The Cloud Pro home machine (deploy/fly/Dockerfile) on top of the server image just
-      # pushed, with Claude Code, Codex and Grok baked in. The Admin pins it by digest
+      # The Cloud Pro home machine (the Dockerfile's cloud-home target), on the
+      # same runtime layers as the server image just pushed, with Claude Code,
+      # Codex and Grok baked in. The Admin pins it by digest
       # (OMB_CLOUD_HOME_IMAGE=ghcr.io/milind-soni/openmausbot-cloud-home@sha256:...).
       - id: repo
         # Image references must be lowercase; the repository name is not.
@@ -300,11 +362,20 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
-          file: deploy/fly/Dockerfile
-          build-args: BASE_IMAGE=ghcr.io/${{ steps.repo.outputs.name }}:sha-${{ github.sha }}
+          target: cloud-home
+          build-args: |
+            CHROME_CACHE_TAG=${{ steps.keys.outputs.chrome }}
+            CLOUD_HOME_ENGINES=${{ steps.keys.outputs.engines }}
+            ENGINES_CACHE_TAG=${{ steps.keys.outputs.engines_tag }}
           push: true
           tags: ${{ steps.home-meta.outputs.tags }}
           labels: ${{ steps.home-meta.outputs.labels }}
+          # The build and runtime layers come from the server's cache; the
+          # engine and edge layers from this image's own.
+          cache-from: |
+            type=gha
+            type=gha,scope=cloud-home
+          cache-to: type=gha,scope=cloud-home,mode=max
       - name: Cloud home image digest
         env:
           DIGEST: ${{ steps.home.outputs.digest }}

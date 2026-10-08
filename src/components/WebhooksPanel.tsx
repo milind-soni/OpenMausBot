@@ -30,6 +30,8 @@ import {
 } from "@/lib/webhook-credentials";
 import { WEBHOOK_DEFAULT_MAX_PENDING_RUNS, WEBHOOK_MAX_PENDING_RUNS_LIMIT, webhookActivationDefaults, webhookMaxPendingRunsInput, type WebhookAttempt, type WebhookCredential, type WebhookTrigger, type WebhookTriggerInput } from "@/lib/webhooks";
 import { api, useStore, type Bot } from "@/state/store";
+import { copyText } from "@/lib/copy-text";
+import { t } from "@/lib/i18n";
 
 export function relativeTime(at?: number) {
   if (!at) return "Never";
@@ -267,7 +269,7 @@ export function useWebhookActions() {
         saveWebhookCredential(webhookCredentialStore(), webhook.id, credential!);
       }
       if (!credential) throw new Error("Could not create a terminal command");
-      await navigator.clipboard.writeText(copy === "link" ? credential.url : terminalCommand(credential));
+      if (await copyText(copy === "link" ? credential.url : terminalCommand(credential)) !== "copied") throw new Error(t("common.copyFailed"));
       setCopiedId(webhook.id);
       setCopiedKind(copy);
       setTimeout(() => setCopiedId((current) => current === webhook.id ? null : current), 1_800);

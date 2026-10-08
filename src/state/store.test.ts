@@ -892,6 +892,7 @@ describe("config status frames", () => {
         box: { configured: false },
         vps: { configured: true, sshAlias: "homelab" },
         rooms: { turnTimeoutMinutes: 20 },
+        mcp: { callTimeoutMinutes: 30 },
         threads: { maxConcurrentPerBot: 10 },
         localVm: { mode: "per-bot", maxInstances: 3 },
         opencodeGo: { configured: true },
@@ -905,6 +906,7 @@ describe("config status frames", () => {
       box: { configured: false },
       vps: { configured: true, sshAlias: "homelab" },
       rooms: { turnTimeoutMinutes: 20 },
+      mcp: { callTimeoutMinutes: 30 },
       threads: { maxConcurrentPerBot: 10 },
       localVm: { mode: "per-bot", maxInstances: 3 },
       opencodeGo: { configured: true },
@@ -972,6 +974,7 @@ describe("config status", () => {
     box: { configured: false },
     vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 5 },
+    mcp: { callTimeoutMinutes: 10 },
     localVm: { mode: "shared", maxInstances: 2 },
     features: { skillAuthoring: true },
   });
@@ -2200,6 +2203,7 @@ describe("live config frames", () => {
     box: { configured: false },
     vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 10 },
+    mcp: { callTimeoutMinutes: 10 },
     localVm: { mode: "shared", maxInstances: 1 },
   };
 

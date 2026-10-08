@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
 import { t } from "@/lib/i18n";
+import { copyText, type CopyFeedback } from "@/lib/copy-text";
 import { api } from "@/state/store";
 import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/session";
 import { readMembership } from "../lib/membership";
@@ -83,7 +84,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   const [devices, setDevices] = useState<PairedDevice[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<CopyFeedback>("idle");
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const root = useRef<HTMLDivElement>(null);
@@ -138,7 +139,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   async function create() {
     setBusy(true);
     setError(null);
-    setCopied(false);
+    setCopied("idle");
     try {
       const body: PairingOffer = await api("/api/auth/pairing", { method: "POST", body: JSON.stringify({ scopes: scope === "admin" || cloudHome ? ["admin", "client"] : ["client"] }) });
       setOffer(body);
@@ -162,12 +163,8 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
 
   async function copyLink() {
     if (!offer?.url) return;
-    try {
-      await navigator.clipboard.writeText(offer.url);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
+    const result = await copyText(offer.url);
+    if (result !== "empty") setCopied(result);
   }
 
   return (
@@ -207,7 +204,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <code className="break-all text-[12px] text-ink-secondary">{offer.url}</code>
                     <button type="button" onClick={() => void copyLink()} className={quiet}>
-                      {copied ? t("remote.serverPairing.copied") : t("remote.serverPairing.copyLink")}
+                      {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
                     </button>
                   </div>
                 ) : (

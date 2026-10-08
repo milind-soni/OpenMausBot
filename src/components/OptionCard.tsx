@@ -115,6 +115,7 @@ export function OptionCard({
           allow/deny, so typing here used to fail silently */}
       {!card.answered && !card.tool && (
         <input
+          dir="auto"
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && answer(custom)}

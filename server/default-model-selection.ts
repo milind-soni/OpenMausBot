@@ -1,6 +1,6 @@
 import type { EffortLevel, EngineAccess, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 
-interface SelectableInstance {
+export interface SelectableInstance {
   instanceId: string;
   driverKind: string;
   snapshot: ProviderSnapshot;
@@ -21,12 +21,16 @@ export interface DefaultSelectionContext {
 const claudeFirst = (instances: readonly SelectableInstance[]) =>
   instances.find((instance) => instance.driverKind === "claudeAgent") ?? instances[0];
 
+/** Installed and waiting on a sign-in. A custom endpoint brings its own
+ * credential, so its sign-in state does not count. */
+export function signedOut(instance: SelectableInstance): boolean {
+  return instance.snapshot.state === "available" && instance.access !== "custom" && instance.snapshot.authenticated === false;
+}
+
 /** The ready rule: an engine can run a turn now when it is available, the
- * organisation allows it, and it is not signed out. A custom endpoint brings
- * its own credential, so its sign-in state does not count. */
+ * organisation allows it, and it is not signed out (signedOut). */
 export function readyToRun(instance: SelectableInstance, context: DefaultSelectionContext = {}): boolean {
-  return instance.snapshot.state === "available" && context.refusal?.(instance) === undefined &&
-    (instance.access === "custom" || instance.snapshot.authenticated !== false);
+  return instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && !signedOut(instance);
 }
 
 /** The engine a new bot gets, and the one a bot moved off a removed engine
