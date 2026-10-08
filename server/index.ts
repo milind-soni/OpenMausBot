@@ -21518,6 +21518,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (typeof body.voiceNotes !== "boolean") return json(res, 400, { error: "voiceNotes must be true or false" });
         patch.voiceNotes = body.voiceNotes;
       }
+      // per-bot gate on the X research tools: they spend the workspace's
+      // treg balance, so like voiceNotes this is an admin decision, never
+      // part of the client-writable profile surface.
+      if (body.xResearch !== undefined) {
+        if (typeof body.xResearch !== "boolean") return json(res, 400, { error: "xResearch must be true or false" });
+        patch.xResearch = body.xResearch;
+      }
       if (body.memoryEnabled !== undefined) {
         if (typeof body.memoryEnabled !== "boolean") return json(res, 400, { error: "memoryEnabled must be true or false" });
         if (existingBot && (existingBot.busy || activeGroupTurnForBot(existingBot.id)) &&

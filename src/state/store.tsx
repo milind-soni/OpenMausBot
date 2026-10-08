@@ -456,6 +456,8 @@ export interface Bot {
   voice?: string;
   /** whether this bot may send voice notes (on unless switched off) */
   voiceNotes?: boolean;
+  /** whether this bot may search and read X (off unless switched on) */
+  xResearch?: boolean;
   /** whether this bot uses native memory (on unless switched off) */
   memoryEnabled?: boolean;
   pinned?: boolean;
