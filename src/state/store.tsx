@@ -40,6 +40,7 @@ import { botShowsUnread } from "@/lib/bot-unread";
 import type { ComputerStart } from "@/lib/computer-start";
 import { answerResponse, dismissResponse } from "@/lib/card-answer";
 import { currentCall } from "@/lib/call";
+import { readLastConversation, rememberConversation } from "@/lib/last-conversation";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { roleProfilePatch, type BotRole } from "@/lib/bot-roles";
@@ -1121,6 +1122,8 @@ export type Action =
       sections?: string[];
       computerControl: Record<string, { held: boolean; helpReason: string | null }>;
       botQueuedMessages?: AppState["pendingQueued"];
+      /** the conversation open on this device last launch, for the first hydrate */
+      resumeId?: string;
     }
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
   | { type: "sections"; sections: string[] }
@@ -1495,8 +1498,12 @@ export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate": {
       const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
-      const selectedId =
-        state.selectedId && known(state.selectedId) ? state.selectedId : (action.bots[0]?.id ?? "");
+      const resume = action.resumeId;
+      // A remembered conversation only counts while it still resolves to a
+      // visible bot or a room; a deleted or hidden one falls back as before.
+      const resumed =
+        resume && (action.bots.some((b) => b.id === resume && !b.hidden) || action.groups.some((g) => g.id === resume)) ? resume : "";
+      const selectedId = state.selectedId && known(state.selectedId) ? state.selectedId : resumed || (action.bots[0]?.id ?? "");
       const hydrated = {
         ...state,
         bots: action.bots.map((bot) => {
@@ -2820,6 +2827,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     rawDispatch({ type: "error", message: null });
   }, []);
   useChatErrorClear(state.error, clearChatError);
+  // Every selection path lands on state.selectedId, so one effect is the
+  // whole remember; an empty selection must never overwrite it.
+  useEffect(() => {
+    if (state.selectedId) rememberConversation(state.selectedId);
+  }, [state.selectedId]);
   const botPatchQueue = useMemo(
     () =>
       createBotPatchQueue({
@@ -3798,6 +3810,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             sections: sections ?? [],
             computerControl: computerControl ?? {},
             botQueuedMessages,
+            resumeId: readLastConversation() ?? undefined,
           });
         });
       const peripherals = peripheralParts.map((part) => ({

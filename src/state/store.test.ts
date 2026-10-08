@@ -1,3 +1,7 @@
+// @vitest-environment happy-dom
+import { createElement } from "react";
+import { flushSync } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -17,6 +21,8 @@ import {
   reducer,
   requestConfirmedBotDeletion,
   runtimeFrameAction,
+  StoreProvider,
+  useStore,
   visibleMessages,
   visibleNotificationThread,
   type AppState,
@@ -27,6 +33,7 @@ import {
   type Message,
   type Action,
 } from "./store";
+import { LAST_CONVERSATION_KEY } from "@/lib/last-conversation";
 import { transcriptLookups } from "@/lib/transcript-derivations";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
@@ -2425,5 +2432,160 @@ describe("live call state", () => {
     expect(liveCallFromFrame({ kind: "live.call", botId: "b1", threadId: "t1" })).toBeNull();
     expect(liveCallFromFrame({ kind: "live.call", call: "c1" })).toBeNull();
     expect(liveCallFromFrame({ kind: "live.call", call: { status: "live" } })).toBeNull();
+  });
+});
+
+describe("restoring the open conversation", () => {
+  const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
+    id,
+    threadId: `${id}-thread`,
+    name: id,
+    title: "",
+    description: "",
+    notifications: false,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "acp", model: "fake" },
+    messages: [],
+    ...extra,
+  });
+  const first = bot("bot-1");
+  const second = bot("bot-2");
+  const room: Group = {
+    id: "room-1", name: "Room", threadId: "room-thread", memberIds: [], createdAt: 1,
+    defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, messages: [],
+  };
+  const hydrating = (state: AppState, resumeId?: string, bots: Bot[] = [first, second], groups: Group[] = [room]) =>
+    reducer(state, { type: "hydrate", bots, groups, computerControl: {}, resumeId });
+
+  it("hydrate keeps a known live selection", () => {
+    // A snapshot arriving while the app is open never moves the person off
+    // what is on screen - not even for the conversation remembered for the
+    // next launch.
+    expect(hydrating({ ...initialState, selectedId: "bot-2" }, "room-1").selectedId).toBe("bot-2");
+    expect(hydrating({ ...initialState, selectedId: "room-1" }).selectedId).toBe("room-1");
+  });
+
+  it("hydrate resumes the remembered bot", () => {
+    expect(hydrating(initialState, "bot-2").selectedId).toBe("bot-2");
+  });
+
+  it("hydrate resumes the remembered room", () => {
+    expect(hydrating(initialState, "room-1").selectedId).toBe("room-1");
+  });
+
+  it("hydrate falls back to the first bot when the resume id is unknown", () => {
+    expect(hydrating(initialState, "deleted-bot").selectedId).toBe("bot-1");
+  });
+
+  it("hydrate falls back to the first bot when the resumed bot is hidden", () => {
+    expect(hydrating(initialState, "bot-9", [first, bot("bot-9", { hidden: true })], []).selectedId).toBe("bot-1");
+  });
+
+  it("hydrate without a resume id behaves as today", () => {
+    expect(hydrating(initialState).selectedId).toBe("bot-1");
+    expect(hydrating({ ...initialState, selectedId: "deleted" }).selectedId).toBe("bot-1");
+  });
+
+  describe("the provider's own effect", () => {
+    // The provider opens the app's one stream and pulls the snapshot itself,
+    // so the fixture answers both the way a server would.
+    class FixtureEventSource {
+      static opened: FixtureEventSource[] = [];
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onmessage: ((event: { data: string; lastEventId?: string }) => void) | null = null;
+      constructor(readonly url: string) {
+        FixtureEventSource.opened.push(this);
+      }
+      close() {}
+      send(frame: object, id?: string) {
+        this.onmessage?.({ data: JSON.stringify(frame), lastEventId: id });
+      }
+    }
+
+    const settle = async () => {
+      for (let round = 0; round < 10; round++) await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    let seen!: AppState;
+    let dispatch!: (action: Action) => void;
+    function Probe() {
+      const store = useStore();
+      seen = store.state;
+      dispatch = store.dispatch;
+      return null;
+    }
+    let root: Root | undefined;
+    let container: HTMLDivElement | undefined;
+
+    afterEach(() => {
+      root?.unmount();
+      container?.remove();
+      root = undefined;
+      container = undefined;
+      vi.unstubAllGlobals();
+      FixtureEventSource.opened.length = 0;
+    });
+
+    /** Mount a provider whose storage starts at `seed` and wait for its
+     * initial load effect to open the app's stream. */
+    const boot = async (seed: Record<string, string> = {}) => {
+      const stored = new Map<string, string>(Object.entries(seed));
+      const json = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body)));
+      const answers: Record<string, unknown> = {
+        "/api/instances": { instances: [] },
+        "/api/config": {},
+        "/api/routines": { routines: [], runs: [] },
+        "/api/webhooks": { webhooks: [], attempts: [], ingress: null },
+      };
+      vi.stubGlobal("localStorage", {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => void stored.set(key, value),
+      });
+      vi.stubGlobal("EventSource", FixtureEventSource);
+      vi.stubGlobal("fetch", (path: string) =>
+        path.startsWith("/api/bots?") ? json({ bots: [first, second], groups: [room] }) : json(answers[path] ?? {}),
+      );
+
+      container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      flushSync(() => root!.render(createElement(StoreProvider, null, createElement(Probe))));
+      await settle();
+      const [stream] = FixtureEventSource.opened;
+      // the provider mounted: its effects ran, with nothing selected yet
+      expect(FixtureEventSource.opened).toHaveLength(1);
+      expect(seen.selectedId).toBe("");
+      return { stored, stream };
+    };
+    const hello = () => ({ kind: "hello", resumed: false, cursor: "run:0" });
+
+    it("the provider remembers each non-empty selection and never an empty one", async () => {
+      const { stored, stream } = await boot();
+
+      // the empty selection at mount must not overwrite what the next launch
+      // is meant to restore
+      expect(stored.has(LAST_CONVERSATION_KEY)).toBe(false);
+
+      // the first snapshot lands the first bot, which is what gets remembered
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("bot-1");
+      expect(stored.get(LAST_CONVERSATION_KEY)).toBe("bot-1");
+
+      // every selection after it replaces the remembered conversation
+      flushSync(() => dispatch({ type: "select", id: "bot-2" }));
+      await settle();
+      expect(seen.selectedId).toBe("bot-2");
+      expect(stored.get(LAST_CONVERSATION_KEY)).toBe("bot-2");
+    });
+
+    it("the provider restores the conversation remembered on this device", async () => {
+      const { stored, stream } = await boot({ [LAST_CONVERSATION_KEY]: "room-1" });
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("room-1");
+      expect(stored.get(LAST_CONVERSATION_KEY)).toBe("room-1");
+    });
   });
 });
