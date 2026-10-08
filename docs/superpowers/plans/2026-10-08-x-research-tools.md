@@ -227,7 +227,8 @@ describe("toPost", () => {
   it("drops a row with no usable id, including one JSON already rounded", () => {
     expect(toPost({ text: "no id" })).toBeNull();
     expect(toPost({ id: "not-a-number", text: "x" })).toBeNull();
-    expect(toPost({ id: 2107987482155561188, text: "x" })).toBeNull();
+    // An id above 2^53 arrives already rounded when a scraper sends a number.
+    expect(toPost({ id: Number("2107987482155561188"), text: "x" })).toBeNull();
     expect(toPost({ id: 42, text: "x" })?.id).toBe("42");
     expect(toPost("junk")).toBeNull();
   });
