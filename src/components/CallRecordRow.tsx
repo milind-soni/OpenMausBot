@@ -22,6 +22,15 @@ function lineState(line: CallRecordLine): "done" | "stopped" | "open" {
   return line.card.answered === "allow" ? "done" : "stopped";
 }
 
+/** What a step's glyph shows, in words for a reader who cannot see it. An
+ * approval says its outcome in its own text ("Allowed: run a command"), so
+ * only a step needs this. */
+const STEP_STATUS = {
+  done: "chat.callRecord.stepDone",
+  stopped: "chat.callRecord.stepFailed",
+  open: "chat.callRecord.stepRunning",
+} as const;
+
 function lineText(line: CallRecordLine): string {
   if (line.kind === "step") return activityStepLabel(line.tool);
   const text = t("chat.callRecord.approval", {
@@ -68,7 +77,10 @@ export function CallRecordRow({ message, transcript, botName }: {
                 <span className="shrink-0" aria-hidden="true">
                   {state === "open" ? <WorkingDots size={3} /> : state === "done" ? <Check size={12} className="text-success" /> : <X size={12} className="text-danger" />}
                 </span>
-                <span className="min-w-0 truncate">{lineText(line)}</span>
+                <span className="min-w-0 truncate">
+                  {lineText(line)}
+                  {line.kind === "step" && <span className="sr-only">{` (${t(STEP_STATUS[state])})`}</span>}
+                </span>
               </li>
             );
           })}

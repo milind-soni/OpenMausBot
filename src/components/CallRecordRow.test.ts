@@ -26,6 +26,8 @@ const transcript: Message[] = [
 ];
 const draw = (message: Message, messages: Message[] = transcript) =>
   renderToStaticMarkup(createElement(CallRecordRow, { message, transcript: [...messages, message], botName: "Pepper" }));
+/** What each line reads as: its markup's text. The glyphs carry none. */
+const lineTexts = (markup: string) => [...markup.matchAll(/<li\b[^>]*>(.*?)<\/li>/g)].map(([, inner]) => inner!.replace(/<[^>]+>/g, ""));
 
 describe("CallRecordRow", () => {
   it("names the call, its length and what the bot did on it", () => {
@@ -53,6 +55,26 @@ describe("CallRecordRow", () => {
     expect(markup).toContain("Call with Pepper");
     expect(markup).toContain("1:42");
     expect(markup).not.toContain("<li");
+  });
+
+  it("tells a screen reader how each step went, which its glyph only shows", () => {
+    const work: Message[] = [
+      msg("m1", { role: "user", text: "check the build", via: "call", callId: "c1" }),
+      msg("a1", { kind: "activity", requestMessageId: "m1", tool: { name: "WebSearch", spoken: "searching the web", ok: true } }),
+      msg("a2", { kind: "activity", requestMessageId: "m1", tool: { name: "Bash", spoken: "running the tests", ok: false } }),
+      msg("a3", { kind: "activity", requestMessageId: "m1", tool: { name: "Read", spoken: "reading a file" } }),
+      msg("o1", { kind: "options", requestMessageId: "m1", card: { title: "Approval needed", subtitle: "rm -rf build", options: ["Allow", "Deny"], requestId: "r1", tool: "Bash", answered: "deny" } }),
+    ];
+    const markup = draw(row(), work);
+    expect(lineTexts(markup)).toEqual([
+      "Searching the web (Done)",
+      "Running the tests (Failed)",
+      "Reading a file (Running)",
+      // an approval already says its outcome in words
+      "Denied: run a command",
+    ]);
+    // read out, not drawn: the glyph stays the visible cue
+    expect(markup).toContain('<span class="sr-only"> (Failed)</span>');
   });
 
   it("draws nothing for a row without its record", () => {
