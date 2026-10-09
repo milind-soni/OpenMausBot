@@ -71,11 +71,17 @@ export function duckdbDirectory(env: NodeJS.ProcessEnv = process.env): string | 
   return null;
 }
 
+/** A require that resolves the Data engine's native modules (DuckDB, and
+ * resvg for chart images) from the staged tree, or from the server's own
+ * node_modules when there is none. createRequire resolves from the given
+ * file's folder upwards, so an anchor inside <dir>/node_modules finds
+ * <dir>/node_modules/@duckdb and @resvg first. */
+export function nativeRequire(directory: string | null = duckdbDirectory()): NodeJS.Require {
+  return createRequire(directory ? join(directory, "node_modules", "openmausbot-duckdb-anchor.js") : import.meta.url);
+}
+
 function loadBinding(directory: string | null): Binding {
-  // createRequire resolves from the given file's folder upwards, so an anchor
-  // inside <dir>/node_modules finds <dir>/node_modules/@duckdb first.
-  const require = createRequire(directory ? join(directory, "node_modules", "openmausbot-duckdb-anchor.js") : import.meta.url);
-  return require("@duckdb/node-api") as Binding;
+  return nativeRequire(directory)("@duckdb/node-api") as Binding;
 }
 
 /** DuckDB's defaults assume it owns the machine (80 % of RAM, every core).

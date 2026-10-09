@@ -4,13 +4,23 @@
 // node-canvas: Vega estimates text widths without one, which can leave a
 // label a few pixels off its true extent; acceptable for v1, and the panel
 // (a real browser) measures exactly.
-import { Resvg } from "@resvg/resvg-js";
+import type { Resvg as ResvgClass } from "@resvg/resvg-js";
 import { None, logger, parse, View } from "vega";
 import { compile, type Config, type TopLevelSpec } from "vega-lite";
 
 import { vegaConfig, vegaSurface, type VegaTheme } from "../../shared/vega-config.ts";
 import { columnClass } from "./chart-compiler.ts";
+import { nativeRequire } from "./engine.ts";
 import type { ChartRenderer, DataColumn, RunResult } from "./types.ts";
+
+/** resvg is a native module. The packaged server has no node_modules, so it
+ * is required at first use from the same staged tree as DuckDB (a static
+ * import would make esbuild bundle its .node file, which it cannot). */
+let resvgModule: { Resvg: typeof ResvgClass } | null = null;
+function loadResvg(): typeof ResvgClass {
+  resvgModule ??= nativeRequire()("@resvg/resvg-js") as { Resvg: typeof ResvgClass };
+  return resvgModule.Resvg;
+}
 
 /** A card's width on a laptop; phones ask for their own. */
 export const DEFAULT_WIDTH = 720;
@@ -83,6 +93,7 @@ async function png(
   const markup = await svg(vegaLite, rows, columns, { theme: options.theme, width });
   // The SVG is transparent for the panel; a PNG lands in an email or a Slack
   // message that paints no ground of its own, so it gets the theme's surface.
+  const Resvg = loadResvg();
   const image = new Resvg(markup, {
     fitTo: { mode: "width", value: Math.round(width * (options.scale ?? 1)) },
     background: vegaSurface(options.theme),
