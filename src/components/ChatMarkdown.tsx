@@ -17,7 +17,6 @@ import type { HighlighterCore } from "shiki/core";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
 import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-from-markdown";
 import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
 import { useCopyFeedback } from "@/lib/copy-text";
@@ -35,7 +34,7 @@ import { repairMarkdownTables } from "../lib/markdown-tables";
 import { TRANSCRIPT_WINDOW_SIZE } from "../lib/transcript-window";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
 import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
-import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, saveFailureText, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
 import { MarkdownTable } from "./MarkdownTable";
 import { TableFileButton } from "./TableFilePreview";
@@ -208,6 +207,11 @@ async function highlightFence(code: string, lang: string): Promise<string> {
   });
 }
 const highlightKey = (lang: string, code: string) => `${lang}:${hash(code)}`;
+// Past this size a block stays plain text. Shiki tokenizes on the renderer's
+// main thread: 100 KB of TypeScript took 1.1 s, 200 KB 2.3 s and 1 MB 12 s,
+// and HTML that big is never cached (HIGHLIGHT_CACHE_MAX_CHARS), so every
+// remount froze the window again. Chat snippets sit far below the bound.
+export const HIGHLIGHT_MAX_CHARS = 100_000;
 const mermaidKey = (scheme: "dark" | "light", code: string) => `${scheme}:${hash(code)}`;
 
 // A markdown link whose target is a file on this machine: bots hand over
@@ -368,7 +372,8 @@ export interface CodeBlockProps {
 export function CodeBlock({ code, lang }: CodeBlockProps) {
   // a block highlighted before (revisiting a thread) paints highlighted in
   // its first frame instead of plain first and highlighted after the effect
-  const [html, setHtml] = useState<string | null>(() => highlightCache.get(highlightKey(lang, code)) ?? null);
+  const highlightable = code.length <= HIGHLIGHT_MAX_CHARS;
+  const [html, setHtml] = useState<string | null>(() => highlightable ? highlightCache.get(highlightKey(lang, code)) ?? null : null);
   // React compares dangerouslySetInnerHTML by identity: a fresh object each
   // render would rebuild the highlighted DOM on every re-render
   const markup = useMemo(() => (html ? { __html: html } : null), [html]);
@@ -376,6 +381,8 @@ export function CodeBlock({ code, lang }: CodeBlockProps) {
   const [wrapLines, setWrapLines] = useState(false);
 
   useEffect(() => {
+    // a block too big to highlight keeps the plain <pre>
+    if (!highlightable) return setHtml(null);
     const key = highlightKey(lang, code);
     const cached = highlightCache.get(key);
     if (cached) return setHtml(cached);
@@ -392,7 +399,7 @@ export function CodeBlock({ code, lang }: CodeBlockProps) {
     return () => {
       alive = false;
     };
-  }, [code, lang]);
+  }, [code, lang, highlightable]);
 
   const download = () => {
     const filename = getSnippetFileName(lang);
@@ -695,7 +702,7 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
         ) : save.state === "saved" ? (
           <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
         ) : save.state === "failed" ? (
-          <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
+          !save.outsideWorkspace && <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
         ) : (
           <Download size={12} className="shrink-0" aria-hidden="true" />
         )}
@@ -706,7 +713,7 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
           title={save.state === "saved" ? save.savedTo : undefined}
           className={`text-[12px] ${save.state === "saved" ? "text-success" : save.state === "failed" ? "text-danger" : "text-ink-secondary"}`}
         >
-          {save.state === "failed" ? save.reason : label}
+          {save.state === "failed" ? saveFailureText(save) : label}
         </span>
       )}
       {save.state === "failed" && save.outsideWorkspace && (
@@ -913,6 +920,57 @@ function normalizeMessageMarkdown(text: string) {
   return normalized;
 }
 
+type KatexPlugin = (typeof import("rehype-katex"))["default"];
+
+// KaTeX is a large parse of the main bundle. It loads the first time a
+// message actually contains math, the same way Mermaid waits for a diagram
+// fence. The stylesheet travels with that chunk, not with the first paint.
+let katexPlugin: KatexPlugin | null = null;
+let katexLoad: Promise<void> | null = null;
+
+/** Load rehype-katex and, in the browser, its stylesheet. Static markup
+ * tests call this first: renderToStaticMarkup does not run the effect that
+ * loads it for a real message. */
+export function ensureChatKatex(): Promise<void> {
+  if (katexPlugin) return Promise.resolve();
+  katexLoad ??= import("rehype-katex").then(async (mod) => {
+    if (typeof document !== "undefined") await import("katex/dist/katex.min.css");
+    katexPlugin = mod.default;
+  }).catch(error => {
+    katexLoad = null;
+    throw error;
+  });
+  return katexLoad;
+}
+
+/** True when normalized markdown still has a `$` or `$$` span. Currency was
+ * escaped to `\$` and code fences were restored unchanged, so a price line
+ * does not match. A dollar that survived inside code may match; loading
+ * KaTeX for that is cheaper than missing a real formula. */
+function normalizedSourceHasMath(source: string): boolean {
+  for (let i = 0; i < source.length; i++) {
+    if (source.charCodeAt(i) === 92) {
+      i += 1;
+      continue;
+    }
+    if (source[i] !== "$") continue;
+    const next = source[i + 1];
+    if (next === undefined) return false;
+    if (next === "$") {
+      if (source.indexOf("$$", i + 2) !== -1) return true;
+      i += 1;
+      continue;
+    }
+    return source.indexOf("$", i + 1) !== -1;
+  }
+  return false;
+}
+
+/** Whether this message should pull in KaTeX. */
+export function messageNeedsKatex(text: string): boolean {
+  return normalizedSourceHasMath(normalizeMessageMarkdown(text).source);
+}
+
 /** What a message's element renderers need from that message. The renderers
  * are defined once, below: react-markdown makes each one an element type,
  * and a fresh function per render would hand React a new type for every
@@ -1082,12 +1140,32 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   // a bot or changing the selection leaves every other bubble alone.
   const { threads, currentBotId } = MAY_LINK_THREAD.test(text) ? use(ThreadRefsContext) : NO_THREAD_REFS;
   const { source, imageOffsets } = normalizeMessageMarkdown(text);
+  const needsMath = normalizedSourceHasMath(source);
+  const [katexReady, setKatexReady] = useState(() => katexPlugin !== null);
+  useEffect(() => {
+    if (!needsMath) return;
+    if (katexPlugin) {
+      setKatexReady(true);
+      return;
+    }
+    let alive = true;
+    void ensureChatKatex().then(() => {
+      if (alive) setKatexReady(true);
+    }, () => {
+      // Keep the formula readable as source. A later math message can retry
+      // a failed download instead of inheriting a permanently rejected load.
+    });
+    return () => {
+      alive = false;
+    };
+  }, [needsMath]);
+  const mathPlugin = needsMath && katexReady ? katexPlugin : null;
   return (
     <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId }}>
       <div className="chat-md min-w-0 [&>*+*]:mt-2">
         <Markdown
           remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
-          rehypePlugins={[rehypeKatex]}
+          rehypePlugins={mathPlugin ? [mathPlugin] : []}
           urlTransform={chatUrlTransform}
           components={MARKDOWN_COMPONENTS}
         >

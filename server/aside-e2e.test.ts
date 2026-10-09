@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { withoutTurnClock } from "./testing/turn-clock-text.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
@@ -191,7 +192,7 @@ posixOnly("peer aside lane e2e", () => {
       await waitUntil(async () => (await getBot(helper.id))?.busy === false, 20_000, "helper turn never settled");
       const settled = await getBot(helper.id);
       const finalReply = settled.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
-      expect(finalReply.text).toContain(`reply to: first + steered: ${ENVELOPE_OPEN}`);
+      expect(withoutTurnClock(finalReply.text)).toContain(`reply to: first + steered: ${ENVELOPE_OPEN}`);
       expect(finalReply.text).toContain(ASIDE_TEXT);
       // one injection, no replay: the settle boundary retired the row, it
       // did not fold the same words a second time

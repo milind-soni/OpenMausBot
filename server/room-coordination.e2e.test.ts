@@ -44,6 +44,13 @@ async function addSupervisingChief(f: any, section = "") {
   return chief;
 }
 
+// A result is withheld when the server revalidates the running child, not
+// when access changes, so keep the child held until that has failed it.
+async function releaseAfterWithhold(f: any, gateFile: string) {
+  await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 30_000 }).toBe("failed");
+  writeFileSync(gateFile, "release");
+}
+
 it.each(["", "Leadership"])("lists and coordinates with a supervising Chief and same-section peer in the same room (Chief section %j)", section => withRooms(async f => {
   const chief = await addSupervisingChief(f, section);
   f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id, f.target.id], message: "Review the work here" } }];
@@ -167,23 +174,26 @@ it("does not let a Chief's grant expose a foreign room transcript to its special
 it("withholds a cross-team result if the owner revokes access while it runs", () => withRooms(async f => {
   await f.api(`/api/bots/${f.target.id}`, { section: "Engineering" }, "PATCH");
   await f.api(`/api/bots/${f.sender.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true }, "PATCH");
-  f.plan[f.target.id] = { delayMs: 3000, reply: "PRIVATE_RESULT_AFTER_REVOCATION" };
+  const gateFile = join(f.session.info.dataDir, "cross-team-revocation.gate");
+  f.plan[f.target.id] = { gateFile, reply: "PRIVATE_RESULT_AFTER_REVOCATION" };
   await f.start();
-  await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 30_000 }).toBe("running");
   await f.api(`/api/bots/${f.sender.id}`, { managedSections: [] }, "PATCH");
+  await releaseAfterWithhold(f, gateFile);
   expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().find((n: any) => n.parentId).status).toBe("failed");
   const messages = await f.messages(f.source.activeTaskId);
   expect(JSON.stringify(messages)).not.toContain("PRIVATE_RESULT_AFTER_REVOCATION");
   expect(messages.some((m: any) => m.tool?.name.includes("Result withheld"))).toBe(true);
-}), 45_000);
+}), 60_000);
 
 it.each(["rename", "delete"])("withholds an in-flight result after team %s and recreation", mode => withRooms(async f => {
   await f.api(`/api/bots/${f.target.id}`, { section: "Engineering" }, "PATCH");
   await f.api(`/api/bots/${f.sender.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true }, "PATCH");
-  f.plan[f.target.id] = { delayMs: 5000, reply: "PRIVATE_RESULT_AFTER_TEAM_RECREATION" };
+  const gateFile = join(f.session.info.dataDir, "team-recreation.gate");
+  f.plan[f.target.id] = { gateFile, reply: "PRIVATE_RESULT_AFTER_TEAM_RECREATION" };
   await f.start();
-  await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 30_000 }).toBe("running");
   // The owner empties the team while this particular task is in flight,
   // removes its old identity, then puts the same bot under the reused name.
   const move = (section: string) => request(`/api/bots/${f.target.id}`, { method: "PATCH", headers: { Origin: f.session.info.url },
@@ -194,12 +204,13 @@ it.each(["rename", "delete"])("withholds an in-flight result after team %s and r
   await move("Engineering");
   const chief = (await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.sender.id);
   expect(chief.managedSections).toEqual([]);
+  await releaseAfterWithhold(f, gateFile);
   expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().find((n: any) => n.parentId).status).toBe("failed");
   const messages = await f.messages(f.source.activeTaskId);
   expect(JSON.stringify(messages)).not.toContain("PRIVATE_RESULT_AFTER_TEAM_RECREATION");
   expect(messages.some((m: any) => m.tool?.name.includes("Result withheld"))).toBe(true);
-}), 45_000);
+}), 60_000);
 
 it.each(["recipient", "source-reader", "destination-reader"])("refuses cross-section work involving a %s without leaking room history", role => withRooms(async f => {
   if (role === "recipient") await f.api(`/api/bots/${f.target.id}`, { section: "Other company" }, "PATCH");

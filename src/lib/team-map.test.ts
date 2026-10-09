@@ -40,7 +40,18 @@ describe("team map projection", () => {
       running: [{ sourceBotId: "chief", targetBotId: "maker", threadId: "task" }],
     };
     expect(buildTeamMapEdges(bots, snapshot)).toEqual([
-      { sourceBotId: "chief", targetBotId: "maker", state: "running", groupId: undefined },
+      { sourceBotId: "chief", targetBotId: "maker", state: "running", groupId: undefined, threadId: "task" },
+    ]);
+  });
+
+  it("keeps the work thread of a queued handoff so the row can open it", () => {
+    const snapshot: TeamMapSnapshot = {
+      collaborations: [],
+      queued: [{ sourceBotId: "chief", targetBotId: "home", threadId: "home-task" }],
+      running: [],
+    };
+    expect(buildTeamMapEdges(bots, snapshot)).toEqual([
+      { sourceBotId: "chief", targetBotId: "home", state: "queued", threadId: "home-task" },
     ]);
   });
 

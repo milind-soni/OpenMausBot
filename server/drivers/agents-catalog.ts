@@ -441,7 +441,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "create_bot",
     description:
-      "Create a specialist bot in your section. Chief of Staff only. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps and automatic approvals start disabled. Assign work through delegate_bot. Maximum four new bots per turn.",
+      "Create a specialist bot in your section. Chief of Staff only. Below Full Access the user approves a card first. instructions become its soul. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps and automatic approvals start disabled. Assign work through delegate_bot. Maximum four new bots per turn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -457,6 +457,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
           maxLength: 1024,
           description: "Absolute path of the folder this specialist's tools read and write in (for example /Users/me/Projects/site). It must already exist. Leave it out for the specialist's private workspace.",
         },
+        suggestion: { type: "boolean", description: "True if the user did not ask for this bot." },
       },
       required: ["name", "role", "instructions"],
     },

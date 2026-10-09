@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { withoutTurnClock } from "./testing/turn-clock-text.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
@@ -188,7 +189,7 @@ posixOnly("mid-turn steering e2e", () => {
 
       await waitFor(async () => (await getBot(created.id)).busy === false, "the turn to settle");
       const bot = await getBot(created.id);
-      const texts = bot.messages.filter((m: any) => m.kind === "text").map((m: any) => `${m.role}:${m.text}`);
+      const texts = bot.messages.filter((m: any) => m.kind === "text").map((m: any) => `${m.role}:${m.role === "bot" ? withoutTurnClock(m.text) : m.text}`);
       // order: greeting, first, the fake's opening line, the steered message
       // (appended when it was sent — mid-turn), then ONE reply carrying it
       expect(texts.slice(1)).toEqual([
@@ -255,7 +256,7 @@ posixOnly("mid-turn steering e2e", () => {
     // and the pass dies with the turn, once the turn is really over
     expect(await internalTools()).toBe(401);
     const bot = await getBot(created.id);
-    const texts = bot.messages.filter((m: any) => m.kind === "text").map((m: any) => `${m.role}:${m.text}`);
+    const texts = bot.messages.filter((m: any) => m.kind === "text").map((m: any) => `${m.role}:${m.role === "bot" ? withoutTurnClock(m.text) : m.text}`);
     expect(texts.slice(1)).toEqual([
       "user:first",
       "bot:hello from fake claude",
@@ -342,7 +343,7 @@ posixOnly("mid-turn steering e2e", () => {
     const followUp = nativeRows
       .filter((row) => row.dir === "out" && row.source === "claude.sdk.message")
       .at(-1)?.msg;
-    expect(followUp.message.content).toEqual([
+    expect(followUp.message.content.map((block: any) => block.type === "text" ? { ...block, text: withoutTurnClock(block.text) } : block)).toEqual([
       {
         type: "image",
         source: { type: "base64", media_type: "image/png", data: "[image data: 12 base64 chars]" },

@@ -28,10 +28,10 @@
     "OMB_TUNNEL_RECLAIM": "on",
     // Days a tunnel must have been offline (and its installation quiet)
     // before reclaim. Never-connected tunnels use a fixed seven days.
-    "OMB_TUNNEL_OFFLINE_RECLAIM_DAYS": "14",
+    "OMB_TUNNEL_OFFLINE_RECLAIM_DAYS": "7",
     // Cleanup rows per five-minute cron run. 20 needs Workers Paid; use 4 on
     // Workers Free (50 subrequests per invocation).
-    "OMB_CLEANUP_SWEEP_LIMIT": "4"
+    "OMB_CLEANUP_SWEEP_LIMIT": "20"
   },
   "secrets": {
     "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN"]

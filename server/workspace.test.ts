@@ -68,6 +68,13 @@ describe("workspace", () => {
     expect(workspaceLocationsPrompt(BOT, undefined)).toContain("inspect the working directory");
   });
 
+  it("tells a bot with attach_file to deliver a file saved outside its folders, and no one else", () => {
+    const thread = ensureTaskWorkspace(BOT, "thread-first");
+    expect(workspaceLocationsPrompt(BOT, thread, undefined, { attachFile: true }))
+      .toContain("also attach it with attach_file in the same turn");
+    expect(workspaceLocationsPrompt(BOT, thread)).not.toContain("attach_file");
+  });
+
   it("creates distinct private task desks outside shared memory and refuses path traversal", () => {
     const shared = ensureWorkspace(BOT);
     const first = ensureTaskWorkspace(BOT, "thread-first");

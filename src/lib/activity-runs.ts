@@ -9,6 +9,7 @@ import type { Message } from "@/state/store";
 import { formatElapsed } from "@/lib/working-time";
 import { t } from "@/lib/i18n";
 import { failedTurnCause } from "../../shared/failed-turn";
+import { isStoppedTurnName } from "../../shared/client-cancel";
 import { localDay } from "@/lib/transcript-derivations";
 
 export type ActivityTranscriptItem =
@@ -21,11 +22,13 @@ export type TranscriptItem =
 
 /** A status row rather than a tool step: `recovery:` when automatic recovery
  * changes this conversation's engine, `notice:` when the engine runs another
- * model than the saved one. Both must remain visible and are never folded. */
-export function statusActivity(message: Message): { kind: "recovery" | "notice"; text: string } | null {
+ * model than the saved one, `stopped:` when the person or the client stopped
+ * the turn. All three must remain visible and are never folded. */
+export function statusActivity(message: Message): { kind: "recovery" | "notice" | "stopped"; text: string } | null {
   const name = message.kind === "activity" ? message.tool?.name : undefined;
   if (name?.startsWith("recovery:")) return { kind: "recovery", text: name.slice("recovery:".length).trim() };
   if (name?.startsWith("notice:")) return { kind: "notice", text: name.slice("notice:".length).trim() };
+  if (name && isStoppedTurnName(name)) return { kind: "stopped", text: name.slice("stopped:".length).trim() };
   return null;
 }
 

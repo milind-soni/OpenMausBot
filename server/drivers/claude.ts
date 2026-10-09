@@ -1683,6 +1683,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = "1";
       }
       const settings: Record<string, unknown> = { ...authSettings };
+      // Project-only settings still discover the personal memory through ancestor
+      // directories when the bot workspace lives below HOME. Keep project memory.
+      if (isolated) settings.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
       if (hooks) settings.hooks = claudeHookSettings(HOOK_HELPER_PATH);
       if (turn.guestConfined) settings.permissions = GUEST_CLAUDE_PERMISSIONS;
       const authSettingsPath = mcpConfigPath && Object.keys(settings).length

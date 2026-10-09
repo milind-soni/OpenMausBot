@@ -231,9 +231,10 @@ const configOptions = () => {
 // cursor-shaped surface: the session advertises `models.availableModels` with
 // parameterised ids (`default[]`) that differ from the argv `--model` slugs
 // (`auto`). Off unless FAKE_ACP_SESSION_MODELS is set, so every existing mode
-// stays byte-identical. Format: "id|Name,id|Name" — the name is optional.
+// stays byte-identical. Format: "id|Name,id|Name" — the name is optional, and
+// commas inside an id's `[...]` parameters do not split it.
 const acpModels = (process.env.FAKE_ACP_SESSION_MODELS ?? "")
-  .split(",")
+  .split(/,(?![^[]*\])/)
   .filter(Boolean)
   .map((entry) => {
     const [modelId, name] = entry.split("|");
@@ -514,7 +515,7 @@ function failRpc(msg: { method: string; id: unknown }): boolean {
 
 /** Minimal one-shot MCP stdio client: initialize, call each tool in
  * sequence, return the text of the last result. Dependency-free. */
-function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: string) => object }>, strict = false): Promise<string> {
+function driveMcp(entry: McpEntry, calls: Array<{ name: string | (() => string); args: (prev: string) => object }>, strict = false): Promise<string> {
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
     for (const { name, value } of entry.env ?? []) env[name] = value;
@@ -532,7 +533,8 @@ function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: str
         return resolve(last);
       }
       const call = calls[step];
-      write({ jsonrpc: "2.0", id: step + 2, method: "tools/call", params: { name: call.name, arguments: call.args(last) } });
+      const args = call.args(last);
+      write({ jsonrpc: "2.0", id: step + 2, method: "tools/call", params: { name: typeof call.name === "function" ? call.name() : call.name, arguments: args } });
     };
     let buf = "";
     child.stdout.on("data", (c) => {
@@ -726,7 +728,7 @@ function handle(msg: any) {
       const cachedLiveLoad = process.env.FAKE_ACP_CACHED_LIVE_LOAD === "1" && liveSession === msg.params?.sessionId;
       // like a real agent that reconnects its MCP servers on load, so a
       // later turn on this process carries that turn's own token
-      if ((mode === "safe-agent-reads" || mode === "chief-delegate") && !cachedLiveLoad) {
+      if ((mode === "safe-agent-reads" || mode === "chief-delegate" || mode === "create-peer") && !cachedLiveLoad) {
         agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
       }
       if (process.env.FAKE_ACP_DUMP) {
@@ -767,7 +769,8 @@ function handle(msg: any) {
         // an older agent that predates these methods
         return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
       }
-      if (mode === "set-model-invalid-params" && msg.method === "session/set_model") {
+      if (msg.method === "session/set_model" && (mode === "set-model-invalid-params" ||
+          (mode === "set-model-invalid-after-first" && configCalls.some((call) => call.method === "session/set_model")))) {
         // an agent whose ACP model namespace does not contain the id it was
         // sent — Cursor's answer when handed an argv slug like `auto`.
         return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params" } });
@@ -1080,22 +1083,31 @@ function handle(msg: any) {
         return;
       }
       if (mode === "create-peer" && agentsMcp) {
+        // Below Full access create_bot only shows the team setup card. Once
+        // the person applies it the Chief resumes, finds Pixel and delegates.
+        let listed = "";
         void driveMcp(agentsMcp, [
+          { name: "list_bots", args: () => ({}) },
           {
             name: "create_bot",
-            args: () => ({
-              name: "Pixel",
-              role: "Product designer",
-              instructions: "Design and review the user experience.",
-            }),
+            args: (bots) => {
+              listed = bots;
+              return {
+                name: "Pixel",
+                role: "Product designer",
+                instructions: "Design and review the user experience.",
+              };
+            },
           },
           {
-            name: "delegate_bot",
-            args: (created) => ({
-              bot_id: /id: ([\w-]+)/.exec(created)?.[1] ?? "",
-              message: "Review the new onboarding flow.",
-              reason: "design review",
-            }),
+            // The routine turn has delegate_bot. The resumed turn after the
+            // card is a person's turn, which coordinates instead.
+            name: () => (listed.includes("coordinate_bots") ? "coordinate_bots" : "delegate_bot"),
+            args: (created) => {
+              const id = /id: ([\w-]+)/.exec(created)?.[1] ?? /^- Pixel\b.*?\[id: ([\w-]+)/m.exec(listed)?.[1] ?? "";
+              const message = "Review the new onboarding flow.";
+              return listed.includes("coordinate_bots") ? { bot_ids: [id], message } : { bot_id: id, message, reason: "design review" };
+            },
           },
         ])
           .then((reply) => {

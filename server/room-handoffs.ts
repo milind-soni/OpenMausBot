@@ -45,6 +45,14 @@ export class RoomHandoffs {
   private readonly limits: typeof ROOM_HANDOFF_LIMITS;
   /** Per-root pause accounting for the tree lifetime clock. */
   private readonly pauses = new Map<string, { accumulatedMs: number; since?: number }>();
+  /** Tick-local status updates. One fsync at the end, not one per node. */
+  private batch: { dirty: boolean; groups: Set<string>; threads: Set<string> } | null = null;
+  /** Settlements that resolve in the same turn share one fsync. */
+  private settleDirty = false;
+  private settleScheduled = false;
+  private deferSettle = false;
+  private readonly settleGroups = new Set<string>();
+  private readonly settleThreads = new Set<string>();
 
   constructor(file: string, hooks: RoomHandoffHooks, now: () => number = Date.now,
     limits: Partial<typeof ROOM_HANDOFF_LIMITS> = {}) {
@@ -66,10 +74,92 @@ export class RoomHandoffs {
   }
 
   private save() { writeFileAtomic(this.file, JSON.stringify([...this.nodes.values()]), { mode: 0o600 }); }
-  private publish(...nodes: RoomHandoff[]) {
+  private remember(nodes: readonly RoomHandoff[], groups: Set<string>, threads: Set<string>) {
+    for (const node of nodes) {
+      if (node.groupId) groups.add(node.groupId);
+      else threads.add(node.threadId);
+    }
+  }
+  private emit(groups: ReadonlySet<string>, threads: ReadonlySet<string>) {
+    if (groups.size === 0 && threads.size === 0) return;
+    this.hooks.changed(groups, threads);
+  }
+  /** Acceptance and caller-visible stops. The write finishes before return,
+   * so a failed disk rolls the accept back and a crash keeps the accept. */
+  private commit(...nodes: RoomHandoff[]) {
     this.save();
-    this.hooks.changed(new Set(nodes.flatMap(node => node.groupId ? [node.groupId] : [])),
-      new Set(nodes.filter(node => !node.groupId).map(node => node.threadId)));
+    if (this.batch) this.batch.dirty = false;
+    this.settleDirty = false;
+    const groups = new Set(this.settleGroups);
+    const threads = new Set(this.settleThreads);
+    this.settleGroups.clear();
+    this.settleThreads.clear();
+    this.remember(nodes, groups, threads);
+    this.emit(groups, threads);
+  }
+  private publish(...nodes: RoomHandoff[]) {
+    if (this.batch) {
+      this.batch.dirty = true;
+      this.remember(nodes, this.batch.groups, this.batch.threads);
+      return;
+    }
+    if (this.deferSettle) {
+      this.settleDirty = true;
+      this.remember(nodes, this.settleGroups, this.settleThreads);
+      this.scheduleSettleFlush();
+      return;
+    }
+    this.commit(...nodes);
+  }
+  private scheduleSettleFlush() {
+    if (this.settleScheduled) return;
+    if (!this.settleDirty && this.settleGroups.size === 0 && this.settleThreads.size === 0) return;
+    this.settleScheduled = true;
+    queueMicrotask(() => {
+      this.settleScheduled = false;
+      if (this.settleDirty) {
+        try {
+          this.save();
+          this.settleDirty = false;
+        } catch (error) {
+          // The next tick writes the same map. A throw here would be uncaught.
+          console.error("room handoffs:", error);
+          return;
+        }
+      }
+      const groups = new Set(this.settleGroups);
+      const threads = new Set(this.settleThreads);
+      this.settleGroups.clear();
+      this.settleThreads.clear();
+      this.emit(groups, threads);
+    });
+  }
+  /** Write what the open tick changed so far, now. Change notices still go
+   * out once, at the end of the tick. */
+  private saveBatch() {
+    if (!this.batch || (!this.batch.dirty && !this.settleDirty)) return;
+    this.save();
+    this.batch.dirty = false;
+    this.settleDirty = false;
+  }
+  private flushBatch() {
+    const batch = this.batch;
+    this.batch = null;
+    if (!batch) return;
+    // Keep failed tick writes in the same retry ledger as settlements. Do not
+    // leave a batch open: user accepts/stops must still save immediately.
+    for (const id of batch.groups) this.settleGroups.add(id);
+    for (const id of batch.threads) this.settleThreads.add(id);
+    this.settleDirty ||= batch.dirty;
+    if (this.settleDirty) {
+      this.save();
+      this.settleDirty = false;
+    }
+    const groups = new Set(this.settleGroups);
+    const threads = new Set(this.settleThreads);
+    this.settleGroups.clear();
+    this.settleThreads.clear();
+    this.emit(groups, threads);
   }
   children(id: string) { return [...this.nodes.values()].filter(n => n.parentId === id); }
   root(n: RoomHandoff) { return this.nodes.get(n.rootId)!; }
@@ -268,7 +358,7 @@ export class RoomHandoffs {
     if (problem) throw new Error(problem);
     if (fresh) this.nodes.set(parent.id, parent);
     this.nodes.set(node.id, node);
-    try { this.publish(node, parent); } catch (e) { this.nodes.delete(node.id); if (fresh) this.nodes.delete(parent.id); throw e; }
+    try { this.commit(node, parent); } catch (e) { this.nodes.delete(node.id); if (fresh) this.nodes.delete(parent.id); throw e; }
     return { node, duplicate: false };
   }
 
@@ -335,6 +425,21 @@ export class RoomHandoffs {
       return Boolean(parent && !parent.groupId && parent.threadId === threadId);
     });
   }
+  /** Teammate work that has not settled yet, as ids only: who asked, who is
+   * working on it, and where. The request and result text stay out, so the
+   * Team map can show the link without reading anyone's conversation. */
+  liveEdges(): Array<{ sourceBotId: string; targetBotId: string; state: "queued" | "running"; threadId: string; groupId?: string }> {
+    return [...this.nodes.values()].flatMap(node => {
+      if (terminal(node) || !node.parentId) return [];
+      const parent = this.nodes.get(node.parentId);
+      if (!parent || parent.botId === node.botId) return [];
+      return [{
+        sourceBotId: parent.botId, targetBotId: node.botId,
+        state: node.status === "queued" ? "queued" as const : "running" as const,
+        threadId: node.threadId, ...(node.groupId ? { groupId: node.groupId } : {}),
+      }];
+    });
+  }
   /** Stop this conversation without reaching into a teammate that is already
    * working. Its provider process is left alone: it finishes and its result
    * is still reported here. Work that never started is cancelled, because
@@ -359,6 +464,15 @@ export class RoomHandoffs {
 
   tick() {
     if (this.loadError) return;
+    this.batch = { dirty: false, groups: new Set(), threads: new Set() };
+    try {
+      this.tickBody();
+    } finally {
+      this.flushBatch();
+    }
+  }
+
+  private tickBody() {
     this.trackExecutionPauses();
     // Validate and expire deepest nodes first so each one is failed with its
     // own status; an ancestor's cancellation then only sweeps what is left.
@@ -377,6 +491,7 @@ export class RoomHandoffs {
     for (const n of this.nodes.values()) {
       const parent = n.parentId ? this.nodes.get(n.parentId) : undefined;
       if (terminal(n) && parent && !n.reported) {
+        this.saveBatch();
         this.hooks.report(n, parent); n.reported = true; this.publish(n, parent);
       }
       if (n.status === "waiting") {
@@ -397,6 +512,8 @@ export class RoomHandoffs {
       if (root.executions + executionCost > this.limits.executions) { this.cancelTree(n, "Room execution budget exhausted", "failed"); continue; }
       const resumed = n.status === "resume";
       const childCount = this.children(n.id).length;
+      const before = { status: n.status, startedAt: n.startedAt, lastProgressAt: root.lastProgressAt,
+        pause: this.pauses.get(root.id), since: this.pauses.get(root.id)?.since };
       root.executions += executionCost; n.status = "running"; n.startedAt = this.now();
       this.stampProgress(root);
       // Open the pause at the moment execution starts, not at the next tick:
@@ -405,27 +522,53 @@ export class RoomHandoffs {
       pause.since ??= this.now();
       this.pauses.set(root.id, pause);
       this.publish(n, root);
+      // The file must say running before the child starts. Everything this
+      // tick changed so far shares this one write. If it fails, the node is
+      // put back as it was and nothing starts; the next tick tries again.
+      try {
+        this.saveBatch();
+      } catch (error) {
+        root.executions -= executionCost;
+        n.status = before.status;
+        if (before.startedAt === undefined) delete n.startedAt; else n.startedAt = before.startedAt;
+        if (before.lastProgressAt === undefined) delete root.lastProgressAt; else root.lastProgressAt = before.lastProgressAt;
+        if (!before.pause) this.pauses.delete(root.id);
+        else before.pause.since = before.since;
+        throw error;
+      }
       const controller = new AbortController();
       this.controllers.set(n.id, controller);
       void this.hooks.run(n, resumed, controller.signal).then(result => {
-        if (terminal(n)) return;
-        n.result = result.text.slice(0, 12_000);
-        if (this.children(n.id).length > childCount) n.status = "waiting";
-        else if (!result.ok) this.cancelTree(n, n.result || "Room agent failed", "failed");
-        else { n.status = "completed"; this.stampProgress(root); }
-        // Close the paused span with the settlement itself: work enqueued
-        // before the next periodic tick must be admitted against the aged
-        // budget, not the still-open pause's overstated runway.
-        this.trackExecutionPauses();
-        this.publish(n);
-      }).catch(e => {
-        if (terminal(n)) return;
-        n.result = String(e).slice(0, 1000);
-        if (this.children(n.id).length > childCount) {
-          n.status = "waiting";
+        this.deferSettle = true;
+        try {
+          if (terminal(n)) return;
+          n.result = result.text.slice(0, 12_000);
+          if (this.children(n.id).length > childCount) n.status = "waiting";
+          else if (!result.ok) this.cancelTree(n, n.result || "Room agent failed", "failed");
+          else { n.status = "completed"; this.stampProgress(root); }
+          // Close the paused span with the settlement itself: work enqueued
+          // before the next periodic tick must be admitted against the aged
+          // budget, not the still-open pause's overstated runway.
           this.trackExecutionPauses();
           this.publish(n);
-        } else this.cancelTree(n, n.result, "failed");
+        } finally {
+          this.deferSettle = false;
+          this.scheduleSettleFlush();
+        }
+      }).catch(e => {
+        this.deferSettle = true;
+        try {
+          if (terminal(n)) return;
+          n.result = String(e).slice(0, 1000);
+          if (this.children(n.id).length > childCount) {
+            n.status = "waiting";
+            this.trackExecutionPauses();
+            this.publish(n);
+          } else this.cancelTree(n, n.result, "failed");
+        } finally {
+          this.deferSettle = false;
+          this.scheduleSettleFlush();
+        }
       })
         .finally(() => this.controllers.delete(n.id));
     }

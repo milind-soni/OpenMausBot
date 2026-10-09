@@ -10,9 +10,10 @@
 // this module exists to prevent. The parse is the client twin of
 // server/peer-provenance.ts: the field wins; rows stored before it existed
 // still open with the note, so the note is read as the fallback.
-import type { Message } from "@/state/store";
+// The wire shape, so server code and tests can read peer lines too.
+import type { WireMessage as Message } from "../../shared/wire.ts";
 
-export type PeerDelivery = "ask_bot" | "delegate_bot" | "start_thread";
+export type PeerDelivery = "ask_bot" | "delegate_bot" | "start_thread" | "coordinate_bots";
 
 export interface PeerLine {
   /** The bot that wrote it; absent on rows older than Message.peerAsk. */
@@ -49,4 +50,18 @@ export function peerLine(message: Pick<Message, "role" | "text" | "peerAsk">): P
     body: note ? text.slice(note[0].length) : text,
     ...(message.peerAsk?.unattended ? { unattended: true } : {}),
   };
+}
+
+/** A coordinate_bots request another bot sent into this bot's own thread.
+ * The server stores it bot-role with the sender on Message.from, so without
+ * this it reads as the bot talking to itself. Null for anything else,
+ * including a bot's own line. */
+export function peerRequest(
+  message: Pick<Message, "role" | "text" | "from" | "roomRequest">,
+  threadBotId: string,
+): PeerLine | null {
+  if (message.role !== "bot" || message.roomRequest?.phase !== "request") return null;
+  const from = message.from;
+  if (!from?.name || from.botId === threadBotId) return null;
+  return { botId: from.botId, name: from.name, delivery: "coordinate_bots", body: message.text ?? "" };
 }

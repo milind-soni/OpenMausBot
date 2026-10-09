@@ -505,21 +505,38 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
 
       const send = await startRoutine(chief.id, "Create the specialist team and start the design review.");
       expect(send.status).toBe(201);
+      // Below Full access create_bot shows the team setup card and creates
+      // nothing. Applying it resumes the Chief, which then delegates.
+      const threadId = send.body.run.threadId;
+      let card: any;
+      await waitUntil(async () => {
+        const messages = (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.messages ?? [];
+        card = messages.find((message: any) => message.card?.requestId && message.card?.title?.includes("Apply setup"))?.card;
+        return Boolean(card);
+      }, 30_000, "create_bot never showed the team setup card");
+      expect((await api("GET", "/api/bots")).body.bots.some((bot: any) => bot.name === "Pixel")).toBe(false);
+      await waitUntil(async () => (await api("GET", "/api/bots")).body.bots.every((bot: any) => !bot.busy), 15_000, "bots never went idle");
+      // The person applies it from the local app, which sends its own origin.
+      const applied = await fetch(`${BASE}/api/threads/${threadId}/respond`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE },
+        body: JSON.stringify({ requestId: card.requestId, behavior: "allow" }),
+      });
+      expect(applied.status, await applied.clone().text()).toBe(200);
 
-      const deadline = Date.now() + 30_000;
+      // The resumed Chief hands Pixel the review in its own work thread.
       let operator: any;
-      for (;;) {
-        const state = (await api("GET", "/api/bots")).body;
-        operator = state.bots.find((bot: any) => bot.name === "Pixel" && bot.section === "Launch");
-        const replied = operator?.messages.some(
-          (message: any) => message.role === "bot" && message.text?.includes("hello from fake acp"),
-        );
-        if (operator && replied && !operator.busy) break;
-        if (Date.now() > deadline) {
-          throw new Error(`Chief never created and delegated to Pixel. stderr: ${stderr.slice(-2000)}`);
+      let work: any[] = [];
+      await waitUntil(async () => {
+        const sent = (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.messages ?? [];
+        if (!sent.some((message: any) => message.kind === "activity" && message.tool?.name === "Sent to Pixel")) return false;
+        operator = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.name === "Pixel" && bot.section === "Launch");
+        work = [];
+        for (const task of operator?.tasks ?? []) {
+          work.push(...((await api("GET", `/api/threads/${task.threadId}/messages?limit=50`)).body.messages ?? []));
         }
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
+        return work.some((message: any) => message.text?.includes("Review the new onboarding flow."));
+      }, 30_000, "Chief never created and delegated to Pixel");
 
       expect(operator).toMatchObject({
         title: "Product designer",
@@ -531,9 +548,9 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
         modelSelection: defaultSelection,
       });
       expect(operator.chiefOfStaff).toBeFalsy();
-      expect(operator.messages.some((message: any) => message.text?.includes("Review the new onboarding flow."))).toBe(true);
+      expect(work.some((message: any) => message.text?.includes("Review the new onboarding flow."))).toBe(true);
     },
-    45_000,
+    60_000,
   );
 
   // ── async peer handoff (delegate_bot) ───────────────────────────────

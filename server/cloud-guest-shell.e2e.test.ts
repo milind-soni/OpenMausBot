@@ -85,7 +85,8 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-guest-shell-"));
   const dataDir = join(home, ".openmausbot");
   mkdirSync(dataDir, { recursive: true });
-  const codex = probing("codex", "fake-codex-app-server.ts", `process.env.FAKE_CODEX_DUMP = ${JSON.stringify(join(home, "codex.json"))};`);
+  const codex = probing("codex", "fake-codex-app-server.ts", `process.env.FAKE_CODEX_DUMP = ${JSON.stringify(join(home, "codex.json"))};
+process.env.FAKE_CODEX_DUMP_TURNS_ONLY = "1";`);
   // A Claude whose turns hold until the test writes the release file; each
   // engine dumps its latest start to <name>.json.
   const held = (name: string) => probing(name, "fake-claude-cli.ts", `if (process.argv[2] === "auth") { console.log(JSON.stringify({ loggedIn: true, email: "person@example.test" })); process.exit(0); }

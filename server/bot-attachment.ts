@@ -12,7 +12,7 @@ import {
   saveFile,
   saveImage,
 } from "./attachments.ts";
-import { mimeFor, openMessageFile } from "./message-file.ts";
+import { mimeFor, openFileSavedSince, openMessageFile, type OpenedMessageFile } from "./message-file.ts";
 import type { Message } from "./store.ts";
 
 export type BotAttachment = NonNullable<Message["attachments"]>[number];
@@ -62,6 +62,22 @@ export interface SaveBotAttachmentInput {
   roots: readonly string[];
   /** The bot's mounted Local VM, if any. */
   guest?: { root: string; host: string };
+  /** A host engine's turn may also deliver a file it saved this turn outside
+   * the roots, at a place the person named: one copied file, never a folder
+   * or a link grant (openFileSavedSince). Absent: roots only, as before. */
+  savedThisTurn?: { since: number; refuse: readonly string[] };
+}
+
+/** The roots first. Only their outside_workspace refusal falls through to a
+ * file this turn saved elsewhere, so a missing or oversized file in the
+ * working folder still says exactly that. */
+async function openSource(path: string, roots: readonly string[], savedThisTurn: SaveBotAttachmentInput["savedThisTurn"]): Promise<OpenedMessageFile> {
+  try {
+    return await openMessageFile(path, roots);
+  } catch (error) {
+    if (!savedThisTurn || (error as { code?: unknown } | null)?.code !== "outside_workspace") throw error;
+    return openFileSavedSince(path, savedThisTurn);
+  }
 }
 
 export interface SavedBotAttachment {
@@ -75,7 +91,8 @@ export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<
   const guestHost = input.guest ? guestWorkspaceToHost(requested, input.guest.root, input.guest.host) : null;
   // A bot with a VM works in it: a relative path means its VM workspace first.
   const roots = input.guest ? [input.guest.host, ...input.roots] : input.roots;
-  const file = await openMessageFile(guestHost ?? requested, roots);
+  // A VM turn's tools never wrote to the host, so it gets roots only.
+  const file = await openSource(guestHost ?? requested, roots, input.guest ? undefined : input.savedThisTurn);
   try {
     const mime = mimeFor(file.name);
     const name = displayNameFor(input.name, file.name);
