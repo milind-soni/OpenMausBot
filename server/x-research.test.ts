@@ -140,7 +140,7 @@ describe("toPost", () => {
   it("reads anyapi's search row", () => {
     expect(toPost(searchRow("7"))).toEqual({
       id: "7",
-      url: "https://x.com/i/web/status/7",
+      url: "https://x.com/maus/status/7",
       author: "@maus",
       authorName: "Maus",
       createdAt: "2026-10-08T00:12:34.000Z",
@@ -188,6 +188,12 @@ describe("toPost", () => {
     expect(toPost("junk")).toBeNull();
   });
 
+  it("links to the author's own post page whenever the author is known, so a bot never needs its browser to find it", () => {
+    expect(toPost({ id: "21", authorUsername: "maus", url: "https://x.com/i/web/status/21", text: "t" })?.url).toBe("https://x.com/maus/status/21");
+    expect(toPost(timelineRow("22"), "maus")?.url).toBe("https://x.com/maus/status/22");
+    expect(toPost({ id: "23", url: "https://x.com/i/web/status/23", text: "t" })?.url).toBe("https://x.com/i/web/status/23");
+  });
+
   it("builds a link and a placeholder author when the scraper leaves them out", () => {
     const post = toPost({ id: "8", text: "hi" });
     expect(JSON.parse(JSON.stringify(post))).toEqual({ id: "8", url: "https://x.com/i/status/8", author: "@unknown", text: "hi" });
@@ -200,7 +206,7 @@ describe("toPost", () => {
 
   it("summarizes a quoted post in at most 300 characters", () => {
     const post = toPost(searchRow("11", { quotedTweet: searchRow("12", { authorUsername: "grok", text: "q".repeat(400) }) }));
-    expect(post?.quoted).toEqual({ url: "https://x.com/i/web/status/12", author: "@grok", text: `${"q".repeat(300)}…` });
+    expect(post?.quoted).toEqual({ url: "https://x.com/grok/status/12", author: "@grok", text: `${"q".repeat(300)}…` });
   });
 });
 

@@ -206,8 +206,11 @@ function timeOf(value: unknown): string | undefined {
   return when && !Number.isNaN(when.getTime()) ? when.toISOString() : undefined;
 }
 
+/** The author's own post page whenever the author is known: scrapers often
+ * give x.com/i/web/status/<id>, and a link without the handle sends a bot to
+ * its browser to find out whose post it is, which defeats paying for treg. */
 function postUrl(id: string, handle: string | undefined, given: string | undefined): string {
-  return given ?? (handle ? `https://x.com/${handle}/status/${id}` : `https://x.com/i/status/${id}`);
+  return handle ? `https://x.com/${handle}/status/${id}` : given ?? `https://x.com/i/status/${id}`;
 }
 
 /** One post from any scraper's row, or null when it has no usable id.
