@@ -2949,7 +2949,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               threadId, modelSelection: patch.modelSelection, updateBotDefault: Boolean(patch.updateBotDefault),
             });
           }
-          return persistTaskApproval(botId, threadId, patch, window.ogb?.approvals);
+          const remote = window.ogb?.remoteApprovals;
+          const bridge = window.ogb?.approvals ?? (patch.approvalMode === "full" && remote ? {
+            setMode: (id: string, mode: ApprovalMode) => {
+              if (mode !== "full") throw new Error("Remote desktop authority only supports Full access for one conversation");
+              return remote.setFull(id, threadId);
+            },
+          } : undefined);
+          return persistTaskApproval(botId, threadId, patch, bridge);
         });
       // Later edits still get saved after an earlier failure, but a send
       // awaiting this batch must observe every rejected setting in it. A

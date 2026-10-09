@@ -1,3 +1,4 @@
+import { createRemoteDesktopApproval } from "./remote-desktop-approval.ts";
 // OpenMausBot server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
@@ -1987,6 +1988,7 @@ type DesktopPrivateMessage = BrowserCleanupWireRequest | {
   error?: string;
 };
 function postDesktopPrivateMessage(message: DesktopPrivateMessage): boolean {
+  remoteDesktopApproval?.observeResult(message);
   if (!utilityParentPort) return false;
   try {
     utilityParentPort.postMessage(message);
@@ -2049,11 +2051,14 @@ const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator(
     return true;
   },
 });
+let remoteDesktopApproval: ReturnType<typeof createRemoteDesktopApproval> | undefined;
 const phoneSecrets = new PhoneSecretBridge(postDesktopPrivateMessage);
 utilityParentPort?.on("message", (event) => {
   const message = event?.data;
   try {
     if (applyDesktopMutationTokenMessage(message)) return;
+    if (remoteDesktopApproval?.receive(message)) return;
+    if (remoteDesktopApproval?.guard(message)) return;
     if (handleDesktopTrustedApprovalMessage(message)) return;
     if (browserCleanup.receive(message)) return;
     if (phoneSecrets.receive(message)) return;
@@ -3764,6 +3769,21 @@ const store = new Store(
   (selection) => withNewBotEffort(selection, cfg.newBots?.effort, registry.get(selection.instanceId)?.adapter.capabilities.effortLevels),
   (instanceId) => registry.cliTarget(instanceId)?.driverKind,
 );
+remoteDesktopApproval = createRemoteDesktopApproval({
+  workspace: ENVIRONMENT_ID,
+  file: join(DATA_DIR, "remote-approval-recovery.json"),
+  isFull: ({ botId, threadId }) => store.taskByThread(botId, threadId)?.approvalMode === "full",
+  available: () => Boolean(utilityParentPort && DESKTOP_MANAGED),
+  liveAdmin: (id) => sessions.isLive(id) && Boolean(sessions.list().find(row => row.id === id)?.scopes.includes("admin")),
+  post: (message) => utilityParentPort?.postMessage(message),
+  revoke: ({ botId, threadId }) => {
+    if (!store.taskByThread(botId, threadId)) return;
+    store.patchTask(botId, threadId, { approvalMode: "ask", autoApprove: false, alwaysAllow: [] });
+    if (threadBusy(botId, threadId)) void interruptDirectThread(botId, threadId).catch(error => console.error("[remote-approval] could not interrupt expired grant", error));
+    if (store.bot(botId)?.approvalGrant?.threadId === threadId) store.patchBot(botId, { approvalGrant: undefined });
+  },
+});
+ROUTES.push(remoteDesktopApproval.route);
 const teamComputers = new TeamComputers(join(DATA_DIR, "team-computers.json"), ENVIRONMENT_ID);
 let followupsReady = false;
 const sendSequencer = new SendSequencer();

@@ -94,6 +94,7 @@ export function ApprovalModeSelector({
   disabled = false,
   trustedModesAvailable = true,
   trustedModesNotice,
+  remoteFullAvailable = false,
   onManageCommandAllowlist,
 }: {
   approvalMode?: ApprovalMode;
@@ -107,6 +108,7 @@ export function ApprovalModeSelector({
   disabled?: boolean;
   trustedModesAvailable?: boolean;
   trustedModesNotice?: string;
+  remoteFullAvailable?: boolean;
   onManageCommandAllowlist?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -121,7 +123,8 @@ export function ApprovalModeSelector({
   const current = approvalModeOptionsFor(driverKind).find((option) => option.mode === mode)
     ?? allOptions.find((option) => option.mode === mode)
     ?? allOptions[0];
-  const visibleOptions = approvalModeOptionsFor(driverKind, trustedModesAvailable);
+  const visibleOptions = approvalModeOptionsFor(driverKind, trustedModesAvailable || remoteFullAvailable)
+    .filter(option => trustedModesAvailable || option.mode !== "custom");
   const requiresLocalDesktop = approvalModeSelectionRequiresLocalDesktop(
     mode,
     trustedModesAvailable,

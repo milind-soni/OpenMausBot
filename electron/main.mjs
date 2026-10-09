@@ -1,3 +1,5 @@
+import { createRemoteApprovalAuthority } from "./remote-approval-authority.mjs";
+import { createRemoteApprovalClient } from "./remote-approval-client.mjs";
 import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
 import { createRequire } from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -1358,6 +1360,7 @@ async function startServerOn(port) {
   proc.on("message", (message) => {
     if (!serverSupervisor.isCurrent(proc)) return;
     try {
+      if (receiveRemoteApproval(proc, message)) return;
       if (trustedApprovalMode.receive(proc, message)) return;
       if (managedDesktopRelay.receive(proc, message)) return;
       if (orgLibrary?.receive(message)) return;
@@ -3214,11 +3217,15 @@ ipcMain.handle("workspaces:menu", workspaceOnly(async () => {
   if (workspaceMenuOpen) return;
   workspaceMenuOpen = true;
   try {
-    const menu = Menu.buildFromTemplate(workspaceMenuTemplate(environmentsState, {
+    const template = workspaceMenuTemplate(environmentsState, {
       onSwitch: (id) => void workspaceMenuAction(() => switchEnvironment(id)),
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
-    }));
+    });
+    if (app.isPackaged) template.push({ type: "separator" }, activeEnvironment(environmentsState)
+      ? { label: "Authorize this laptop for Full access…", click: () => void workspaceMenuAction(() => remoteApprovalClient.enroll()) }
+      : { label: "Desktop approval devices…", click: () => void workspaceMenuAction(manageDesktopApprovalDevices) });
+    const menu = Menu.buildFromTemplate(template);
     await new Promise((resolve) => menu.popup({ window: mainWindow, callback: resolve }));
   } finally {
     workspaceMenuOpen = false;
@@ -3293,6 +3300,99 @@ async function saveWorkspaceCredential(name, value) {
 ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, value) =>
   saveWorkspaceCredential(name, value),
 ));
+
+// Dedicated authority: remote pages can ask for the native dialog but cannot
+// access the local approval bridge, key material, enrollment or signing.
+const remoteApprovalCoordinators = new Map();
+const remoteApprovalValidations = new Map();
+async function updateDesktopAuthority(derive) {
+  if (!app.isPackaged || !(await safeStorage.isAsyncEncryptionAvailable()) ||
+      (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text")) {
+    throw new Error("Desktop authority requires the packaged app and encrypted native storage");
+  }
+  return updateSecureCredentialDocument(derive);
+}
+const remoteApprovalAuthority = createRemoteApprovalAuthority({
+  validate: context => new Promise((resolve, reject) => {
+    if (!serverProc) return reject(new Error("Packaged host unavailable"));
+    const id = randomUUID();
+    const timer = setTimeout(() => { remoteApprovalValidations.delete(id); reject(new Error("Pairing check timed out")); }, 5_000);
+    remoteApprovalValidations.set(id, { proc: serverProc, resolve, reject, timer });
+    serverProc.postMessage({ type: "remote-approval-validate", id, context });
+  }),
+  read: () => secureCredentialState?.read() ?? {},
+  update: updateDesktopAuthority,
+  execute: async (context, claim, mode) => {
+    const proc = serverProc;
+    if (!app.isPackaged || !proc) throw new Error("Packaged host unavailable");
+    const ids = [];
+    const coordinator = createTrustedApprovalModeCoordinator({ randomId: () => {
+      const id = randomUUID(); ids.push(id);
+      remoteApprovalCoordinators.set(id, { coordinator, wrapper, proc });
+      return id;
+    } });
+    const wrapper = { postMessage(message) {
+      if (proc !== serverProc) throw new Error("Host restarted");
+      proc.postMessage({ ...message, ...(message.mode === "full" ? { remoteRequestId: context.requestId } : { remoteRecoveryGrantId: claim.grantId }) });
+    } };
+    try { return await coordinator.request(wrapper, claim.botId, mode, { threadId: claim.threadId, threadOnly: true }); }
+    finally { for (const id of ids) remoteApprovalCoordinators.delete(id); }
+  },
+});
+function receiveRemoteApproval(proc, raw) {
+  const message = raw?.data ?? raw;
+  if (message?.type === "remote-approval-validated") {
+    const check = remoteApprovalValidations.get(message.id);
+    if (check?.proc === proc) {
+      clearTimeout(check.timer); remoteApprovalValidations.delete(message.id);
+      if (message.ok) check.resolve(); else check.reject(new Error("Pairing revoked or host restarted"));
+    }
+    return true;
+  }
+  const pending = remoteApprovalCoordinators.get(message?.requestId);
+  if (pending?.proc === proc) return pending.coordinator.receive(pending.wrapper, raw);
+  if (message?.type !== "remote-approval-request") return false;
+  if (!app.isPackaged || proc !== serverProc) return true;
+  void remoteApprovalAuthority.handle(message.packet, message.context).then(
+    result => proc.postMessage({ type: "remote-approval-result", id: message.id, ok: true, result }),
+    () => proc.postMessage({ type: "remote-approval-result", id: message.id, ok: false }),
+  ).catch(() => {});
+  return true;
+}
+const remoteApprovalClient = createRemoteApprovalClient({
+  read: () => secureCredentialState?.read() ?? {},
+  update: updateDesktopAuthority,
+  current: () => app.isPackaged ? activeEnvironment(environmentsState) : null,
+  fetch: (url, options) => mainWindow.webContents.session.fetch(url, options),
+  dialog: options => dialog.showMessageBox(mainWindow, options),
+});
+ipcMain.handle("remote-approvals:status", workspaceOnly(() => remoteApprovalClient.status()));
+ipcMain.handle("remote-approvals:full", workspaceOnly((_event, botId, threadId) => remoteApprovalClient.setFull(botId, threadId)));
+async function manageDesktopApprovalDevices() {
+  if (!app.isPackaged || activeEnvironment(environmentsState)) throw new Error("Select This computer in the packaged host app first");
+  const pending = remoteApprovalAuthority.pending();
+  const bindings = remoteApprovalAuthority.bindings();
+  const choices = [...pending.map(row => ({ ...row, pending: true })), ...bindings.map(row => ({ ...row, pending: false }))];
+  if (!choices.length) {
+    await dialog.showMessageBox(mainWindow, { message: "No desktop approval devices", detail: "On the paired laptop, select the saved server and choose Server → Authorize this laptop for Full access. Then compare its fingerprint here.", buttons: ["OK"] });
+    return;
+  }
+  const choice = await dialog.showMessageBox(mainWindow, { message: "Desktop approval devices", buttons: ["Cancel", ...choices.map(row => `${row.pending ? "Review" : "Revoke"} ${(row.claim ?? row).device}`)], defaultId: 0, cancelId: 0 });
+  const row = choices[choice.response - 1];
+  if (!row) return;
+  const info = row.claim ?? row;
+  const fingerprint = row.fingerprint ?? (await import("./remote-approval-authority.mjs")).fingerprint(info.publicKey);
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: "warning", message: row.pending ? "Authorize this owner's laptop?" : "Revoke this laptop's approval authority?",
+    detail: `${info.origin}\nWorkspace: ${info.workspace}\nDevice: ${info.device}\n\nFingerprint:\n${fingerprint}\n\n${row.pending ? "Compare every group with the fingerprint displayed in the intended owner's native laptop app. Only continue if they match. This permits that laptop to confirm Full access for individual conversations." : "Active remote grants will return to Ask. Ordinary pairing is unchanged."}`,
+    buttons: ["Cancel", row.pending ? "Fingerprints match — authorize owner laptop" : "Revoke"], defaultId: 0, cancelId: 0,
+  });
+  if (confirmation.response === 1) {
+    if (activeEnvironment(environmentsState)) throw new Error("Workspace changed during confirmation");
+    if (row.pending) await remoteApprovalAuthority.authorize(row.id);
+    else await remoteApprovalAuthority.revoke(row.id);
+  }
+}
 
 ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mode", (_event, botId, mode, options) => {
   // Development uses a separately launched server, which is intentionally

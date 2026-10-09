@@ -15,10 +15,16 @@ Access, OMB also applies its own configuration tools without another approval.
 | **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native permission prompts are answered for you. OMB profile changes, routine actions, team setup, bot deletion, and enabled skill authoring apply without a second approval. Peer-review prompts are skipped within the bot's authorized scope. Delegation uses the receiving bot's setting, never the sender's — except from a Chief of Staff, whose level flows down (below). Actual questions and missing credentials still need your input. |
 | **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
 
-Full access is an elevated-risk standing approval. Full and Custom can only be
-enabled from a packaged local desktop app, where the choice crosses a private
-process channel rather than the bot-accessible HTTP API. They are hidden in
-development, standalone web, and remote pages. Full access does not bypass operating
+Full access is an elevated-risk standing approval. Full and Custom are enabled through the packaged host desktop app, where
+the choice crosses a private process channel rather than the bot-accessible
+HTTP API. An owner can also enable Full for one conversation from an enrolled
+packaged laptop viewing a saved remote server. This requires one-time native
+owner authorization on the host and a native warning on the laptop; ordinary
+pairing alone grants no elevation authority. The laptop must remain connected:
+connection loss returns that conversation to Ask within twenty seconds plus
+the cleanup tick. See [setup and verification](verification/remote-desktop-approval.md).
+Custom remains local-only. Neither mode is available in development or a
+standalone web page. Full access does not bypass operating
 system privacy controls, authentication, CAPTCHA or MFA, service permissions,
 or workspace/team ownership and computer-sharing grants. Full Access controls
 approval prompts; it does not sign in for you, enable a feature you disabled,
@@ -96,7 +102,8 @@ automatic reviewer. The composer chip reads **Auto**. This uses the existing
 Full access grant and confirmation, not a separate permission setting, and
 applies to every model in that Antigravity instance, including Gemini.
 
-Choose Auto explicitly in the local packaged desktop app. Old Antigravity
+Choose Auto explicitly in the local packaged desktop app, or use the
+owner-enrolled remote desktop flow above for a single conversation. Old Antigravity
 `auto` / `autoApprove` settings still behave as Ask and are displayed as Ask;
 they never become unrestricted access on upgrade. Switching back to Ask
 restores prompts on the next turn. Questions and missing-credential forms
