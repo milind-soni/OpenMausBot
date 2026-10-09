@@ -24,7 +24,7 @@ Success looks like:
 | Decision | Choice |
 |---|---|
 | Platforms | Desktop, iPhone **and** Android |
-| Chat content during a call | Only bot work is persisted: the relayed request (labelled "via call"), activity chips and answers. The voice's own words are live captions in the call bar, never stored. |
+| Chat content during a call | Only bot work is persisted: the relayed request (labelled "via call", and since 2026-10-06 carrying the call's id), activity chips and answers, and, when a call that went live ends, one "call" row that records it (see **The call id and the call row**). The voice's own words are live captions, never stored. |
 | Phone audio path | **Direct**: phone ↔ OpenAI over WebRTC. The computer that runs the harness only creates the session and runs the logic. Both apps gain a WebRTC library. |
 | Phone backgrounding | The call **ends** when the app leaves the foreground or the screen locks. Background calls are a later feature. |
 | Desktop voice picker | Replaced by a **settings gear** in the call bar; voice is one setting under it. |
@@ -152,7 +152,7 @@ One active call per harness. Responsibilities, moved from today's renderer
 
 | Route | Body | Result |
 |---|---|---|
-| `POST /api/live/session` | `{ botId, threadId?, sdp, client: "desktop" \| "ios" \| "android" }` | `201 { call: LiveCallState, transport: { type: "webrtc", sdp } }` · `409 { error, needsKey: true }` without a key · `409 { error, activeCall }` when a call is running · `404` unknown bot/thread · OpenAI refusals as today (`liveErrorMessage`) |
+| `POST /api/live/session` | `{ botId, threadId?, sdp, client: "desktop" \| "ios" \| "android" }` | `201 { call: LiveCallState, transport: { type: "webrtc", sdp } }` · `402 { error, needsPro: true }` without a Pro plan (see **Live calls need Pro**) · `409 { error, needsKey: true }` without a key · `409 { error, activeCall }` when a call is running · `404` unknown bot/thread · OpenAI refusals as today (`liveErrorMessage`) |
 | `POST /api/live/call/end` | `{ callId }` | `200 { call }` after `session.closed` or 5 s |
 | `GET /api/live/call` | — | `200 { call: LiveCallState \| null }` |
 | `PATCH /api/live/settings` | `{ voice?, readTypedReplies?, idleMinutes? }` | `200 { live: LiveSettings }` — non-secret settings only; the key is never writable from a phone |
@@ -172,12 +172,104 @@ Config (`config.live`): `key` (secret, desktop credential store, unchanged),
 `voice`, `readTypedReplies` (boolean, default true), `idleMinutes` (1–60,
 default 5).
 
+### Live calls need Pro
+
+Starting a Live call needs an active OMB Cloud plan of any tier (Personal, Pro
+or Max): `entitlement.plan === "pro"` and `status === "active"`. One pure
+function decides, `liveCallsAllowed` in `electron/pro-plan.mjs`, with a table
+test of every plan state. A payment received and still being linked counts.
+Signed out, free, or a plan that is not active does not. While the plan cannot
+be checked (not read yet, signing in, OMB Cloud unreachable, or this computer's
+sign-in ended), the plan last verified decides: the account's `lastPlan`, else
+the last answer this side had. A Cloud home is the plan's own machine and
+always counts.
+
+Only the desktop app's Cloud sign-in knows the plan. Main applies the rule and
+hands its server the answer alone, never the account: `OMB_PRO_PLAN` ("1" or
+"0") when it spawns the server, then `{ type: "openmausbot:pro-plan", pro }`
+over the utility process's private parent port on every sign-in change and
+whenever a server it started is ready (`server/pro-plan.ts` holds it). A
+server the desktop app did not start (dev, tests, headless or Docker) says Pro
+with `OMB_PRO_PLAN=1`.
+
+`POST /api/live/session` without Pro answers
+`402 { "error": "Live calls need a Pro plan.", "needsPro": true }`, checked in
+`LiveCallController.start` before the key, so a person without Pro is never
+asked for one. It covers every client (the companion passes the body through
+to the phones unchanged). The plan is asked when a call starts and never
+during one: a running call is not cut off by a plan change. The desktop shows
+the Pro card under the call button where the key form would be: an offer only
+where `buyOfferAllowed` allows it (signed out, signing in first; or free), and
+otherwise the plan and the way to OMB Cloud settings, never an offer. No Try
+again.
+
 ### Message label
 
 `WireMessage.via` gains `"call"` (today `"api"`). Desktop, iOS and Android
 render a small "via call" line under such a user message. `WireMessage.relayed`
 marks a user line an external interface sent through the guarded send route
 (no client shows it; a Live call never reads such a line back as typed).
+
+### The call id and the call row
+
+Added 2026-10-06 (the harness half of SupaMaus/mausbot-mobile
+`docs/superpowers/specs/2026-10-06-grok-style-live-calls-design.md`).
+
+- **Call id.** Every user line a call delivers carries `callId`, the call's
+  `LiveCallState.callId`, next to `via: "call"`: a request that starts a
+  turn, one steered into a running turn, one that waits in the queue (the
+  queue, its drain and crash recovery keep it, as they keep `via`), and a
+  spoken answer to a question whose turn had already ended. No other line
+  carries one. A turn's own messages point at their request through
+  `requestMessageId`, as before.
+- **Call row.** When a call that went live (its sideband attached) ends, the
+  harness appends one message at the chat's active leaf:
+  `{ role: "bot", kind: "call", text, call }`.
+  `call` is a `LiveCallRecord`: `callId`, `botId`, `client`, `startedAt`,
+  `endedAt`, `seconds` (whole seconds: OpenAI's usage seconds when it sent
+  them, otherwise wall-clock time, as in the summary line), `endReason`, and
+  an optional `title`. `text` is "Call with <bot> · m:ss" (h:mm:ss from an
+  hour on), so a client that does not know the kind shows a plain line. A call
+  that never went live leaves no row, and neither does a call whose chat was
+  deleted.
+- **Title.** With the gates of Regenerate title (generated thread titles on,
+  `features.llmThreadTitles`; an engine with a one-shot; no hosted or
+  organisation policy against it; the spend cap not reached) and its
+  10-second cap, the bot's own engine names the call from its spoken requests
+  alone, never from the bot's answers or the voice's words. The row is written
+  first and the title arrives as a `message.patch` of it, scrubbed of secrets
+  like other bot-authored text. When no title comes (a gate refuses, the
+  one-shot fails, runs past the cap or answers nothing usable, the harness was
+  shutting down, or nothing was asked on the call) the row keeps its text and
+  clients show "Call with <bot>". Nothing new reaches OpenAI: the call is over,
+  and the bot's own engine already saw those requests.
+- **What a call's record lists.** The messages whose `requestMessageId` points
+  at one of the call's spoken lines: the steps and the approval cards of the
+  turns those requests started. A step is a tool the provider ran, a chip with
+  a provider item id (`tool.itemId`). The harness's own chips inside a turn
+  (the receipt of an automatic approval, a notice, a rejected action, a retry)
+  have none, so they are never steps, and an auto-approved action is listed
+  once. A line steered into a running turn starts no turn of its own, so its
+  work is the work of the turn it was steered into: it counts for this call
+  when that turn began with one of the call's lines (a typed line steered into
+  it included), and not when it began with a typed line or another call's.
+  Only what the server ties to a turn carries `requestMessageId`: provider
+  permission cards do, but cards the server appends itself never do (skill
+  proposals, team memory, "Send on your behalf?", and the receipt with Undo of
+  a change a bot made to its own profile, model, routines or skills without a
+  card), so a record never lists them, and question cards are left out. A turn
+  still running at hang-up keeps adding steps after the row, and the record
+  keeps listing them.
+- **Never context.** The row is not conversation context for the bot
+  (`isContextMessage` keeps text, digest, compaction and room-result
+  messages, and the row is none of those), and not startup history for the
+  next call (`liveHistoryFrom` keeps kind `"text"` only).
+- **No speech.** The row holds ids, times, a length, the client and end-reason
+  codes and an optional title made from requests the chat already holds. The
+  voice's own words are still never stored.
+- **Wire.** No new SSE frame, route or companion change: the row travels on
+  `message` and `message.patch`, and `live.call` and `LiveCallState` are
+  unchanged.
 
 ## Desktop
 
@@ -199,6 +291,18 @@ marks a user line an external interface sent through the guarded send route
 - Escape no longer hangs up a Live call. Take turns is unchanged.
 - A decided approval card reads "Allowed · by voice" / "Denied · by voice"
   when it was decided on the call.
+- **Call record:** a finished call's `call` row draws as a compact centred
+  row: a waveform glyph, the title or "Call with <bot>", the length, and one
+  line per step (by name, never its arguments) and approval (with its outcome,
+  and "by voice" when it was decided on the call) among the work the call's
+  spoken requests started (see **The call id and the call row**). A step
+  that never reports how it went (its turn was stopped or lost) shows the
+  working dots only while the chat is working, and a neutral dash once it
+  is not. The record reads what is loaded: while older messages remain on the
+  server and the oldest one loaded is later than the call's start, it adds
+  that some of the call may be in earlier messages. The "via call" lines
+  stay inline. Like a work digest, the row is a receipt: the sidebar
+  preview, Retry, the working line and the mascot's mood read past it.
 - The window checks its own sign-in when its event stream drops during a
   call, and when OpenAI closes the call without an end frame: a `401` hangs
   up at once with the signed-out reason (a revoked browser sign-in has its
@@ -332,7 +436,13 @@ hold and the line they show:
 - **Words:** "computer", not "Mac", in Live call text, except where the text
   is truly Mac-only.
 - **Accepted differences:** caption presentation and what backgrounding does
-  stay per platform.
+  stay per platform. Presentation includes where the call lives on screen:
+  the desktop keeps the call bar above the composer, and the phones may show
+  an app-wide dock that opens into a full-screen call with a live transcript
+  (mausbot-mobile spec 2026-10-06-grok-style-live-calls-design). That
+  transcript is the phone's own data-channel captions, kept in memory for
+  the current call only: the voice's words are still never stored or sent
+  anywhere.
 
 ## End reasons
 
@@ -407,6 +517,7 @@ spoken line is answered aloud). The docs page says so.
 
 | Situation | Behaviour |
 |---|---|
+| No Pro plan | 402 `needsPro`, before the key. Desktop: the Pro card under the call button. Phones: their own Pro prompt (SupaMaus/mausbot-mobile); no Try again |
 | No key on the computer | Desktop: key popover. Phones: "Set up Live calls on your computer first.", no Try again |
 | Another call running | 409 with the active call; the client says who is on the line, no Try again. Every client hides its Live call button while another device holds the line, so this is only a race |
 | Phone cannot reach the computer | Call button explains; no call starts |

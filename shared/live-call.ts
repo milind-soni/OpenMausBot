@@ -182,3 +182,20 @@ export const LIVE_VOICE_OPTIONS: ReadonlyArray<{ id: string; label: string }> = 
   { id: "bossa", label: "Bossa — Brazilian Portuguese, feminine" },
   { id: "tempo", label: "Tempo — Brazilian Portuguese, masculine" },
 ];
+
+/** A call's length as a clock: m:ss under an hour ("0:07", "1:42"),
+ * h:mm:ss from an hour on ("1:02:05"). Whole seconds; a value that is not a
+ * length reads as 0:00. */
+export function formatCallDuration(seconds: number): string {
+  const total = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const hours = Math.floor(total / 3_600);
+  const minutes = Math.floor((total % 3_600) / 60);
+  const rest = String(total % 60).padStart(2, "0");
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
+}
+
+/** A Live call row's text: what a client that does not know kind "call"
+ * shows as a plain line ("Call with Ada · 1:42"). */
+export function liveCallRowText(botName: string, seconds: number): string {
+  return `Call with ${botName} · ${formatCallDuration(seconds)}`;
+}

@@ -27,7 +27,8 @@ exception: `OMB_OPENAI_LIVE_URL` crosses when it is a loopback
 `http://127.0.0.1:PORT` (the fake GPT-Live that
 `node --experimental-strip-types server/testing/fake-openai-live.ts` prints),
 and `OMB_OPENAI_LIVE_KEY` crosses only with it, so that key can only ever
-reach the fake.
+reach the fake. `OMB_PRO_PLAN` crosses only as `1`: Live calls need a Pro plan,
+and that is how a server the desktop app did not start says so.
 
 Pass the printed URL explicitly from a second terminal:
 
@@ -191,6 +192,12 @@ branch and approval preconditions, retry receipts, and refusal to queue or
 steer messages from external interfaces. It also verifies bounded request
 lineage snapshots, Chief continuations and exact-execution Stop without
 interrupting a newer request.
+
+The [Live calls fixture](live-calls.md) checks the call id on spoken requests,
+the one "call" row a finished call leaves, its generated title and the desktop's
+record row, against the fake GPT-Live in a disposable workspace. `control-omb`
+cannot start a call, so the recipe also calls the harness's own routes. It
+proves no real audio, OpenAI key or phone.
 
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.

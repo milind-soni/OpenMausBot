@@ -1,10 +1,13 @@
 // The harness's receipts about a turn (Phase 0): the work digest written
-// after every settled turn, and a compaction record. They are the last rows
-// of an idle chat, so anything that reads "the last message" as the reply a
-// person sees — the sidebar preview, the mascot's mood — must look past
-// them. Kept as one predicate so the two agree.
+// after every settled turn, and a compaction record. A finished Live call's
+// record row is one too: it is appended when the call ends, wherever the
+// chat is then, often right after a turn that failed or is still working.
+// They are the last rows of an idle chat, so anything that reads "the last
+// message" as the reply a person sees — the sidebar preview, the mascot's
+// mood, the row Retry belongs to, the working line — must look past them.
+// Kept as one predicate so they agree.
 export function isReceipt(message: { kind: string }): boolean {
-  return message.kind === "digest" || message.kind === "compaction";
+  return message.kind === "digest" || message.kind === "compaction" || message.kind === "call";
 }
 
 /** The newest message that is not a receipt, or undefined. */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Message } from "./store.ts";
-import { threadTitlePrompt, titleConversationExcerpt, TITLE_INPUT_MAX_CHARS } from "./thread-title.ts";
+import { callTitleExcerpt, threadTitlePrompt, titleConversationExcerpt, TITLE_INPUT_MAX_CHARS } from "./thread-title.ts";
 
 let next = 0;
 const message = (role: Message["role"], text: string, extra: Partial<Message> = {}): Message => ({
@@ -60,5 +60,45 @@ describe("threadTitlePrompt", () => {
     expect(prompt).toContain("what it is about now");
     expect(prompt).toContain("Conversation:\nUser: fix the login");
     expect(prompt.length).toBeLessThan(TITLE_INPUT_MAX_CHARS + 300);
+  });
+});
+
+describe("a Live call's title", () => {
+  it("asks for it from the call's requests", () => {
+    const prompt = threadTitlePrompt("what is the weather in Pune\nand tomorrow?", "call");
+    expect(prompt.split("\n").slice(0, 3)).toEqual([
+      "Name the voice call below by what was asked on it.",
+      "Reply with only a short title: 3 to 6 words, plain text, no quotes, no trailing period.",
+      "Requests:",
+    ]);
+    expect(prompt.endsWith("Requests:\nwhat is the weather in Pune\nand tomorrow?")).toBe(true);
+  });
+
+  it("takes only this call's spoken requests, oldest first", () => {
+    const excerpt = callTitleExcerpt([
+      message("user", "words from an earlier call", { via: "call", callId: "call-0" }),
+      message("user", "what is the weather in Pune", { via: "call", callId: "call-1" }),
+      message("bot", "Sunny, 31 degrees.", { requestMessageId: "m1" }),
+      message("user", "typed during the call"),
+      message("user", "and tomorrow?", { via: "call", callId: "call-1" }),
+    ], "call-1");
+    expect(excerpt).toBe("what is the weather in Pune\nand tomorrow?");
+  });
+
+  it("scrubs secrets and attachment markup, and stays under the input cap", () => {
+    const key = "sk-ant-" + "d".repeat(90);
+    const long = (n: number) => `${n} ${"word ".repeat(200)}`;
+    const excerpt = callTitleExcerpt([
+      message("user", `use ${key} <attached-image path="/tmp/a.png" />`, { via: "call", callId: "c" }),
+      ...Array.from({ length: 10 }, (_, i) => message("user", long(i), { via: "call", callId: "c" })),
+    ], "c");
+    expect(excerpt.startsWith("use ")).toBe(true);
+    expect(excerpt).not.toContain(key);
+    expect(excerpt).not.toContain("attached-image");
+    expect(excerpt.length).toBeLessThanOrEqual(TITLE_INPUT_MAX_CHARS);
+  });
+
+  it("is empty when nothing was asked on the call", () => {
+    expect(callTitleExcerpt([message("user", "typed")], "c")).toBe("");
   });
 });

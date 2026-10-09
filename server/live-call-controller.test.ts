@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveCallState } from "../shared/wire.ts";
 import {
   ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
-  LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
+  LiveCallBusyError, LiveCallController, LiveCallNeedsProError, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
 } from "./live-call-controller.ts";
 import { LIVE_COPY } from "../shared/live-approval.ts";
 import { LiveSessionError } from "./live-call.ts";
@@ -48,6 +48,7 @@ function setup(overrides: Partial<LiveCallDeps> = {}) {
     queued: vi.fn((_botId: string, _threadId: string, queueId: string) => queue.has(queueId)),
     activity: () => activity,
     broadcast: (frame) => frames.push(frame.call),
+    pro: () => true,
     settings: () => settings,
     createSession: vi.fn(async () => ({ sessionId: "sess_1", sdp: "answer-sdp" })),
     openSocket: (url, key) => { const socket = new FakeSocket(url, key); sockets.push(socket); return socket; },
@@ -100,6 +101,50 @@ describe("LiveCallController lifecycle", () => {
     t.settings.key = " ";
     await expect(t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" })).rejects.toMatchObject({ status: 409 });
     expect(t.deps.createSession).not.toHaveBeenCalled();
+  });
+
+  // Live calls need an active Pro plan (electron/pro-plan.mjs). The plan is
+  // asked when a call starts and never after, so a running call is never cut
+  // off by a plan change.
+  it("refuses a start without Pro, before the key and before OpenAI", async () => {
+    const t = setup({ pro: () => false });
+    t.settings.key = "";
+    const refused = t.controller.start({ auth: owner, ...BOT, client: "ios", sdp: "a" });
+    await expect(refused).rejects.toBeInstanceOf(LiveCallNeedsProError);
+    await expect(refused).rejects.toMatchObject({ status: 402, message: "Live calls need a Pro plan." });
+    expect(t.deps.createSession).not.toHaveBeenCalled();
+    expect(t.controller.current()).toBeNull();
+    expect(t.frames).toEqual([]);
+    // the one slot is still free: once the plan allows it, a call starts
+    t.settings.key = "sk-test";
+    t.deps.pro = () => true;
+    await expect(t.controller.start({ auth: owner, ...BOT, client: "ios", sdp: "a" })).resolves.toMatchObject({ sdp: "answer-sdp" });
+  });
+
+  it("asks for the key only once the plan allows the call", async () => {
+    const t = setup({ pro: () => true });
+    t.settings.key = " ";
+    const refused = t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });
+    await expect(refused).rejects.toMatchObject({ status: 409, message: "Add an OpenAI API key to use Live calls." });
+    await expect(refused).rejects.not.toBeInstanceOf(LiveCallNeedsProError);
+  });
+
+  it("never ends a running call when the plan changes; the next start is refused", async () => {
+    let pro = true;
+    const asked = vi.fn(() => pro);
+    const t = setup({ pro: asked });
+    const { call } = await t.start();
+    pro = false;
+    await vi.advanceTimersByTimeAsync(IDLE_CHECK_MS * 4);
+    expect(t.controller.current()).toMatchObject({ callId: call.callId, status: "live" });
+    expect(t.frames.map((f) => f?.status)).toEqual(["connecting", "live"]);
+    // asked once, when the call started
+    expect(asked).toHaveBeenCalledTimes(1);
+    const ending = t.controller.end(call.callId);
+    t.socket().receive({ type: "session.closed", reason: "close_requested" });
+    await expect(ending).resolves.toMatchObject({ status: "ended", endReason: "hung-up" });
+    await expect(t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "b" })).rejects.toBeInstanceOf(LiveCallNeedsProError);
+    expect(t.deps.createSession).toHaveBeenCalledTimes(1);
   });
 
   it("frees the slot when OpenAI refuses the session", async () => {
@@ -470,11 +515,44 @@ describe("LiveCallController relay", () => {
 
   it("sends the words since the last request to the bot, as the call's starter", async () => {
     const t = await live();
+    const callId = t.controller.current()!.callId;
     hear(t, "what is on ", 100);
     hear(t, "my calendar", 200);
     await delegate(t, "del_1", 400);
-    expect(t.deps.send).toHaveBeenCalledWith({ auth: owner, botId: "bot1", threadId: "t1", text: "what is on my calendar" });
+    expect(t.deps.send).toHaveBeenCalledWith({ auth: owner, botId: "bot1", threadId: "t1", text: "what is on my calendar", callId });
     expect(t.socket().appends("thinking").at(-1)).toMatchObject({ delegation_id: "del_1", content: expect.stringContaining("You are working on the request") });
+  });
+
+  it("tags every spoken request with the call's id, however the harness took it", async () => {
+    const t = await live();
+    const callId = t.controller.current()!.callId;
+    vi.mocked(t.deps.send)
+      .mockResolvedValueOnce({ kind: "started", messageId: "m1" })
+      .mockResolvedValueOnce({ kind: "steered", messageId: "m2" })
+      .mockResolvedValueOnce({ kind: "queued", queueId: "q1" });
+    hear(t, "check the build", 100);
+    await delegate(t, "del_1", 300);
+    hear(t, "and the tests", 2_000);
+    await delegate(t, "del_2", 2_300);
+    hear(t, "then deploy", 4_000);
+    await delegate(t, "del_3", 4_300);
+    expect(vi.mocked(t.deps.send).mock.calls.map(([input]) => [input.text, input.callId])).toEqual([
+      ["check the build", callId],
+      ["and the tests", callId],
+      ["then deploy", callId],
+    ]);
+  });
+
+  it("gives the next call an id of its own", async () => {
+    const t = await live();
+    const first = t.controller.current()!.callId;
+    t.socket().drop();
+    await t.start();
+    const second = t.controller.current()!.callId;
+    expect(second).not.toBe(first);
+    hear(t, "hello again", 100);
+    await delegate(t, "del_1", 300);
+    expect(vi.mocked(t.deps.send).mock.calls.at(-1)![0].callId).toBe(second);
   });
 
   it("asks to repeat when nothing was heard", async () => {
@@ -1073,7 +1151,7 @@ describe("LiveCallController relay", () => {
       expect(t.socket().appends("instructions").at(-1)).toMatchObject({ content: expect.stringContaining("Which account?") });
       hear(t, "savings", 5_000);
       await delegate(t, "del_2", 5_100);
-      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings" });
+      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings", callId: t.controller.current()!.callId });
       expect(t.deps.send).not.toHaveBeenCalled();
     });
 
@@ -1085,7 +1163,7 @@ describe("LiveCallController relay", () => {
       hear(t, "which account main or savings ", 4_100, 5_900);
       hear(t, "savings", 7_000);
       await delegate(t, "del_2", 7_100);
-      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings" });
+      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings", callId: t.controller.current()!.callId });
     });
 
     it("keeps an answer said over the voice", async () => {
@@ -1095,7 +1173,7 @@ describe("LiveCallController relay", () => {
       t.socket().receive({ type: "session.output_transcript.delta", delta: "Which account? Main or Savings?", start_ms: 4_000, end_ms: 6_000 });
       hear(t, "savings", 5_000, 5_500);
       await delegate(t, "del_2", 5_600);
-      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings" });
+      expect(t.deps.respond).toHaveBeenCalledWith({ auth: owner, threadId: "t1", requestId: "r7", behavior: "answer", message: "savings", callId: t.controller.current()!.callId });
     });
 
     it("announces a second approval after the first one settles", async () => {
@@ -1110,5 +1188,60 @@ describe("LiveCallController relay", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(t.socket().appends("instructions").at(-1)).toMatchObject({ content: expect.stringContaining("ls") });
     });
+  });
+});
+
+describe("LiveCallController record", () => {
+  const recorded = (t: ReturnType<typeof setup>) => vi.mocked(t.deps.recordCall!).mock.calls.map(([input]) => input);
+
+  it("records a call that went live once, with OpenAI's usage seconds and nothing said on it", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    const { call } = await t.start();
+    t.socket().receive({ type: "session.input_transcript.delta", delta: "what is on my calendar", start_ms: 100, end_ms: 900 });
+    const ending = t.controller.end(call.callId);
+    t.socket().receive({ type: "session.closed", reason: "close_requested", usage: { seconds: 61.4 } });
+    await ending;
+    await t.controller.shutdown(); // already over: nothing more is written
+    expect(recorded(t)).toEqual([{
+      threadId: "t1",
+      botName: "Ada",
+      record: { callId: call.callId, botId: "bot1", client: "desktop", startedAt: call.startedAt, endedAt: expect.any(Number), seconds: 61, endReason: "hung-up" },
+    }]);
+    expect(recorded(t)[0]!.record.endedAt).toBeGreaterThanOrEqual(call.startedAt);
+    expect(JSON.stringify(recorded(t))).not.toContain("calendar");
+  });
+
+  it("counts wall-clock seconds when OpenAI sent none", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    await t.start();
+    await vi.advanceTimersByTimeAsync(95_400);
+    t.socket().drop();
+    expect(recorded(t)).toEqual([expect.objectContaining({ record: expect.objectContaining({ seconds: 95, endReason: "sideband-lost" }) })]);
+  });
+
+  it("records nothing for a call that never went live", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    await t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });
+    t.socket().refuse();
+    expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "sideband-lost" });
+    expect(t.deps.recordCall).not.toHaveBeenCalled();
+  });
+
+  it("records a call the harness shut down", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    await t.start();
+    await t.controller.shutdown();
+    expect(recorded(t)).toEqual([expect.objectContaining({ record: expect.objectContaining({ endReason: "shutdown" }) })]);
+  });
+
+  it("ends the call cleanly, and counts it, when writing the record fails", async () => {
+    const t = setup({ recordCall: vi.fn(() => { throw new Error("disk full"); }) });
+    await t.start();
+    t.socket().drop();
+    expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "sideband-lost" });
+    expect(t.controller.current()).toBeNull();
+    expect(t.logs.at(-1)).toContain("errors=record");
+    // the line is free for the next call
+    await expect(t.start()).resolves.toBeTruthy();
   });
 });

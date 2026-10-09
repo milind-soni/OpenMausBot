@@ -167,7 +167,7 @@ export interface SecretRequestCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest" | "compaction";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest" | "compaction" | "call";
   text?: string;
   /** digest messages: what the turn did, rendered in `text` and structured here. */
   digest?: TurnDigest;
@@ -182,6 +182,9 @@ export interface Message {
   routineRun?: RoutineRunCardData;
   /** Durable lifecycle receipt for a goal-driven channel run. */
   goalRun?: GroupGoalRunCardData;
+  /** call rows: one finished Live call (its id, times and length, and a
+   * title when the bot's engine named it). Never anything said on it. */
+  call?: import("../../shared/wire").LiveCallRecord;
   /** How a channel user message should be handled. Absent means ordinary chat. */
   channelMode?: "chat" | "goal";
   /** activity messages: tool name + outcome. `spoken` is the server's
@@ -194,6 +197,11 @@ export interface Message {
   /** a user message that did not come from typing here: through the
    * server's API, or spoken during a Live call. */
   via?: "api" | "call";
+  /** user lines spoken on a Live call: which call (only with via "call"). */
+  callId?: string;
+  /** The user line whose turn produced this message (activity, cards and
+   * answers), when the server could prove it. */
+  requestMessageId?: string;
   /** Provider turn that produced this message. */
   turnId?: string;
   /** Last assistant text item from a settled provider turn. */

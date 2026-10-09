@@ -84,6 +84,7 @@ import { createComputerSharing, validateSharedFolders } from "./computer-sharing
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
 import { cloudPlanSnapshot, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
+import { createProPlanRelay } from "./pro-plan.mjs";
 import { cloudHomeConnectUrl, cloudPlanDisk, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, withCloudHome } from "./cloud-home.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, moveFit, moveRefusal, moveSenderDestination, parseCloudMoveStatus } from "./cloud-move.mjs";
@@ -318,6 +319,10 @@ let companyBackupClientStateRequest = null;
 let companyRestoreCommitting = false;
 let companyBackupConfigurationRevision = 0;
 const managedDesktopRelay = createManagedDesktopRelay();
+// Whether the person counts as Pro, which starting a Live call needs
+// (pro-plan.mjs): kept here, where the Cloud sign-in lives, and handed to the
+// local server as the answer alone (syncProPlan).
+const proPlanRelay = createProPlanRelay();
 const utilityServerExits = new WeakMap();
 const UTILITY_SERVER_STOP_TIMEOUT_MS = 6_500;
 const trustedApprovalMode = createTrustedApprovalModeCoordinator({ randomId: randomUUID });
@@ -334,6 +339,8 @@ const serverSupervisor = createServerSupervisor({
     // Re-read the latest account credentials; registration may have completed
     // while the replacement child's health probe was pending.
     syncManagedComposioCredentials();
+    // The Pro answer too: the Cloud sign-in may have changed since the spawn.
+    syncProPlan();
     // A restarted runtime has no library catalog until main sends it again.
     orgLibrary?.runtimeReady();
     if (managedDesktop) void managedDesktop.refresh().catch(() => {});
@@ -1033,6 +1040,8 @@ function ensureCloudAccount() {
       // Signing out, another account or another machine ends lending at once;
       // a renewed sign-in resumes it (computer-sharing.mjs cloudLendingVerdict).
       computerSharing?.cloudChanged();
+      // The local server's Pro answer, for the next Live call it starts.
+      syncProPlan(state);
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.mainFrame.url.startsWith(`${rendererOrigin()}/`) &&
         !activeEnvironment(environmentsState) && !desktopRemoteAccess) mainWindow.webContents.send("cloud-account:state-changed", state);
     },
@@ -1337,6 +1346,10 @@ async function startServerOn(port) {
     // the server prefers these over config.json, whose plaintext fields
     // the boot migration has deleted
     ...workspaceCredentialEnv(secureCredentials),
+    // OMB_PRO_PLAN, set here and never inherited from the launching shell:
+    // the server starts with the answer the Cloud sign-in gives now ("0"
+    // until it is read), and syncProPlan keeps it current after.
+    ...proPlanRelay.environment(),
   });
   delete childEnv.OMB_BROWSER_CONNECTION;
   // Set here or not at all, never inherited from the launching shell. The
@@ -1439,6 +1452,19 @@ async function startServerPackaged() {
   }
   serverStartConflictOnly = everyPortForeignOwned;
   return false;
+}
+
+/** Update the Pro answer from the Cloud sign-in (its current state, or the
+ * one just published) and hand it to the running server over its private
+ * port. A server that is not running yet starts with it (OMB_PRO_PLAN). */
+function syncProPlan(state = cloudAccount?.state()) {
+  proPlanRelay.update(state);
+  if (!serverProc) return;
+  try {
+    serverProc.postMessage(proPlanRelay.message());
+  } catch (error) {
+    slog(`Pro plan sync failed: ${error?.message ?? error}`);
+  }
 }
 
 function syncManagedComposioCredentials() {

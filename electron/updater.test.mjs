@@ -59,6 +59,8 @@ function mainRule() {
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
     createCloudAccountStore: () => ({}), rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null,
     sendUpdaterState: () => {},
+    // the local server's Pro answer (pro-plan.node-test.mjs runs this onState for it)
+    syncProPlan: () => {},
     createCloudAccountClient: (options) => {
       signIn.options = options;
       return {

@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { initialState, type Bot } from "@/state/store";
+import { formatTime, initialState, type Bot } from "@/state/store";
 
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
@@ -85,6 +85,61 @@ describe("BotListItem", () => {
     }));
     expect(markup).toContain("Created notes.txt with three lines.");
     expect(markup).not.toContain("[digest]");
+  });
+
+  // Hanging up appends the call's record as the chat's last row. Like the
+  // digest receipt, it is not what the row says about the chat.
+  describe("the record of a live call that ended last", () => {
+    const at = (minute: number) => new Date(2026, 9, 6, 10, minute).getTime();
+    const record = {
+      id: "r1", role: "bot", kind: "call", at: at(2), text: "Call with Atlas · 1:42",
+      call: { callId: "c1", botId: "atlas", client: "ios", startedAt: at(0), endedAt: at(2), seconds: 102, endReason: "hung-up" },
+    };
+    const spoken = { id: "u1", role: "user", kind: "text", text: "what is the weather", at: at(0), via: "call", callId: "c1" };
+    const draw = (candidate: Bot, { selected = false, query = "" } = {}) => renderToStaticMarkup(createElement(BotListItem, botRowProps(
+      selected ? { ...initialState, activeView: "chat", selectedId: candidate.id } : initialState,
+      vi.fn(), candidate, { density: "comfortable", quiet: false, query, onMenu: vi.fn() },
+    )));
+
+    it("previews the last reply, not the record that follows it", () => {
+      const markup = draw(bot({
+        messages: [spoken, { id: "b1", role: "bot", kind: "text", text: "Sunny in Pune.", at: at(1) }, record] as Bot["messages"],
+      }));
+      expect(markup).toContain("Sunny in Pune.");
+      expect(markup).not.toContain("Call with Atlas");
+    });
+
+    it("previews a failed turn's row when the record follows it", () => {
+      const markup = draw(bot({
+        messages: [spoken, { id: "e1", role: "bot", kind: "activity", at: at(1), tool: { name: "error: This computer isn't a place on your OMB Cloud: its bots run in the cloud.", ok: false } }, record] as Bot["messages"],
+      }));
+      expect(markup).toContain("This computer isn&#x27;t a place on your OMB Cloud: its bots run in the cloud.");
+      expect(markup).not.toContain("Call with Atlas");
+    });
+
+    it("times the open row by the last reply, not by the hang-up", () => {
+      const markup = draw(bot({
+        messages: [spoken, { id: "b1", role: "bot", kind: "text", text: "Sunny in Pune.", at: at(1) }, record] as Bot["messages"],
+      }), { selected: true });
+      expect(markup).toContain(formatTime(at(1)));
+      expect(markup).not.toContain(formatTime(at(2)));
+    });
+
+    it("names the step the bot is on while it works, when the call ended under it", () => {
+      // hung up mid-turn: the record landed after the step that is still running
+      const markup = draw(bot({
+        busy: true,
+        tasks: [{ threadId: "thread-atlas", title: "Current", createdAt: 2, busy: true, activity: "working" }, { threadId: "thread-earlier", title: "Earlier", createdAt: 1 }],
+        messages: [
+          { ...spoken, text: "run the tests" },
+          { id: "a1", role: "bot", kind: "activity", at: at(1), requestMessageId: "u1", tool: { name: "Bash", spoken: "running the tests" } },
+          record,
+        ] as Bot["messages"],
+        // a search opens the thread list only when it matches a thread
+        // (MOCA-293), which puts the open thread's row, and its step, on screen
+      }), { query: "current" });
+      expect(markup).toContain("Running the tests");
+    });
   });
 
   // A failed turn's row is stored as "error: …"; the preview reads like the

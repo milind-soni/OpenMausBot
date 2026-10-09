@@ -3,7 +3,7 @@ import { hangUpRemoteCall, liveCallBarView, liveLineHeldElsewhere } from "./Live
 import type { LiveMediaState } from "@/lib/live-call-media";
 
 const bot = { id: "b1", threadId: "t1", name: "Ada" };
-const idle: LiveMediaState = { phase: "idle", callId: null, botId: null, threadId: null, startedAt: null, muted: false, caption: "", heard: "", notice: null, needsKey: false, busyWith: null, action: null, hangingUp: false };
+const idle: LiveMediaState = { phase: "idle", callId: null, botId: null, threadId: null, startedAt: null, muted: false, caption: "", heard: "", notice: null, needsKey: false, needsPro: false, busyWith: null, action: null, hangingUp: false };
 
 describe("liveCallBarView", () => {
   it("shows nothing without a call on this chat", () => {

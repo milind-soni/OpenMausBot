@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampAppend, commentaryChunks, FULL_ANSWER_IN_CHAT, joinFragments, LiveTranscript } from "./live-call.ts";
+import { clampAppend, commentaryChunks, formatCallDuration, FULL_ANSWER_IN_CHAT, joinFragments, LiveTranscript, liveCallRowText } from "./live-call.ts";
 
 describe("LiveTranscript", () => {
   it("rebuilds each delegated request from the words spoken since the previous one", () => {
@@ -109,5 +109,28 @@ describe("clampAppend", () => {
     expect(new TextEncoder().encode(clamped).length).toBeLessThanOrEqual(500);
     expect(clamped).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
     expect(clamped.endsWith("…")).toBe(true);
+  });
+});
+
+describe("a call's length", () => {
+  it("reads m:ss under an hour and h:mm:ss from an hour on", () => {
+    expect(formatCallDuration(0)).toBe("0:00");
+    expect(formatCallDuration(7)).toBe("0:07");
+    expect(formatCallDuration(102)).toBe("1:42");
+    expect(formatCallDuration(3_599)).toBe("59:59");
+    expect(formatCallDuration(3_600)).toBe("1:00:00");
+    expect(formatCallDuration(3_725)).toBe("1:02:05");
+  });
+
+  it("reads anything that is not a length as 0:00, and drops part-seconds", () => {
+    expect(formatCallDuration(-5)).toBe("0:00");
+    expect(formatCallDuration(Number.NaN)).toBe("0:00");
+    expect(formatCallDuration(Number.POSITIVE_INFINITY)).toBe("0:00");
+    expect(formatCallDuration(61.9)).toBe("1:01");
+  });
+
+  it("writes the call row's line for clients that do not know the row", () => {
+    expect(liveCallRowText("Ada", 102)).toBe("Call with Ada · 1:42");
+    expect(liveCallRowText("Ada", 3_725)).toBe("Call with Ada · 1:02:05");
   });
 });
