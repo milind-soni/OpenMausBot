@@ -738,7 +738,7 @@ class Engine implements DataEngine {
     const folder = this.folder(botId);
     for (const name of [DATA_DB_FILE, `${DATA_DB_FILE}.wal`, DATA_TMP_DIR]) {
       // Windows keeps a just-closed file busy for a moment; rm retries EBUSY/EPERM.
-      await rm(join(folder, name), { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
+      await rm(join(folder, name), { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   }
 

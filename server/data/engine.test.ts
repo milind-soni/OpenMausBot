@@ -1,7 +1,8 @@
 // The DuckDB engine against the real binding, loaded the way the packaged
 // app loads it: from a tree outside node_modules named by OMB_DUCKDB_DIR.
 // Every database lives in a throwaway folder; nothing touches DATA_DIR.
-import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { cpus, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
@@ -50,9 +51,10 @@ const panel = { connection: "panel" as const };
 afterAll(async () => {
   await Promise.all(engines.map((e) => e.closeAll()));
   // Windows keeps a just-closed database busy for a while (EPERM on rm); a
-  // temp directory left on a runner is not a test failure there.
+  // temp directory left on a runner is not a test failure there. rm's retry
+  // delay grows linearly, so 10 × 100 ms stays well inside the hook timeout.
   try {
-    rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   } catch (error) {
     if (process.platform !== "win32") throw error;
     console.warn(`engine.test: left ${root} behind: ${(error as Error).message}`);
