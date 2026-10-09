@@ -74,6 +74,10 @@ export interface LiveCallDeps {
   personKey?(auth: RequestAuth): string | undefined;
   activity(botId: string, threadId: string): LiveActivity;
   broadcast(frame: { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }): void;
+  /** Whether the person's plan allows a Live call now (server/pro-plan.ts).
+   * Asked when a call starts and never during one: a plan change never cuts
+   * off a running call. */
+  pro(): boolean;
   settings(): { key: string; voice: string; readTypedReplies: boolean; idleMinutes: number };
   createSession(input: { key: string; sdp: string; botId: string; threadId: string; voice: string }): Promise<{ sessionId: string; sdp: string }>;
   openSocket(url: string, key: string): LiveSocket;
@@ -100,6 +104,14 @@ export class LiveCallBusyError extends Error {
 export class LiveCallSignedOutError extends LiveSessionError {
   constructor() {
     super("The sign-in that started this call has ended.", 401);
+  }
+}
+
+/** Live calls need an active Pro plan (electron/pro-plan.mjs). Refused before
+ * the key is asked for: there is no point asking for a key a call cannot use. */
+export class LiveCallNeedsProError extends LiveSessionError {
+  constructor() {
+    super("Live calls need a Pro plan.", 402);
   }
 }
 
@@ -194,6 +206,7 @@ export class LiveCallController {
   async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp: string }): Promise<{ call: LiveCallState; sdp: string }> {
     if (this.call && this.call.state.status !== "ended") throw new LiveCallBusyError({ ...this.call.state });
     if (input.device && this.revokedDevices.has(input.device)) throw new LiveCallSignedOutError();
+    if (!this.deps.pro()) throw new LiveCallNeedsProError();
     const settings = this.deps.settings();
     const key = settings.key.trim();
     if (!key) throw new LiveSessionError("Add an OpenAI API key to use Live calls.", 409);

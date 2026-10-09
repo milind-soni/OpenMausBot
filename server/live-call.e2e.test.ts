@@ -148,6 +148,8 @@ posixOnly("Live call e2e", () => {
         OMB_WEBHOOK_PORT: String(port + 1),
         OMB_OPENAI_LIVE_URL: live.url,
         OMB_OPENAI_LIVE_KEY: LIVE_KEY,
+        // Live calls need Pro: how a server the desktop app did not start says so
+        OMB_PRO_PLAN: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -754,6 +756,8 @@ posixOnly("Live call on the person's Cloud", () => {
         OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${HOST}`,
         // no OMB_OPENAI_LIVE_KEY: no plan includes one
         OMB_OPENAI_LIVE_URL: live.url,
+        // and no OMB_PRO_PLAN: a Cloud home is the plan's own machine, so Live
+        // calls need only the key below
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -827,5 +831,131 @@ posixOnly("Live call on the person's Cloud", () => {
     expect(ended).toMatchObject({ status: 200, body: { call: { status: "ended" } } });
     expect(JSON.stringify(started.body)).not.toContain(OWNER_KEY);
     expect(output).not.toContain(OWNER_KEY);
+  }, 40_000);
+});
+
+// Live calls need Pro, and only the desktop app knows the plan: it applies
+// electron/pro-plan.mjs's rule to its Cloud sign-in and hands its server the
+// answer alone, OMB_PRO_PLAN at spawn ("0" at first boot, when the sign-in is
+// read after the server starts), then each change over Electron's private
+// parent port. A prelude stands in for that port, fed over Node's IPC channel;
+// it acknowledges a message once the server's own listeners have run it.
+posixOnly("Live calls need Pro: the desktop app's answer reaches its server", () => {
+  let child: ChildProcess;
+  let home = "";
+  let base = "";
+  let output = "";
+  let live: FakeOpenAiLive;
+
+  const request = async (method: string, path: string, body?: unknown) => {
+    const res = await fetch(`${base}${path}`, {
+      method,
+      headers: body === undefined ? {} : { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    // SAFETY: test-only JSON bodies, checked field by field below.
+    return { status: res.status, body: await res.json().catch(() => null) as any };
+  };
+  /** Electron's private message, settled once the server has handled it. */
+  const tellServer = (message: object) => new Promise<void>((resolve) => {
+    child.once("message", () => resolve());
+    child.send(message);
+  });
+
+  beforeAll(async () => {
+    chmodSync(FAKE_CLAUDE, 0o755);
+    live = await startFakeOpenAiLive();
+    home = mkdtempSync(join(tmpdir(), "omb-live-pro-"));
+    const dataDir = join(home, ".openmausbot");
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({
+      instances: {
+        // Pin the fleet's other defaults so this never probes an installed CLI.
+        ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+        claude: { driver: "claudeAgent", config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
+      },
+    }));
+    const port = await freePortBlock([0, 1]);
+    base = `http://127.0.0.1:${port}`;
+    const parentPort = `data:text/javascript,${encodeURIComponent(`
+      const listeners = [];
+      Object.defineProperty(process, "parentPort", { value: {
+        on(event, listener) { if (event === "message") listeners.push(listener); },
+        postMessage() {},
+      } });
+      process.on("message", (data) => {
+        for (const listener of listeners) listener({ data });
+        process.send({ handled: true });
+      });
+      process.channel?.unref();
+    `)}`;
+    child = spawn(process.execPath, ["--import", parentPort, join(SERVER_DIR, "index.ts")], {
+      cwd: join(SERVER_DIR, ".."),
+      env: {
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir,
+        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
+        OMB_OPENAI_LIVE_URL: live.url,
+        OMB_OPENAI_LIVE_KEY: LIVE_KEY,
+        // as the desktop app starts its server, before its Cloud sign-in is read
+        OMB_PRO_PLAN: "0",
+      },
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+    });
+    child.stdout!.on("data", (chunk) => (output += chunk));
+    child.stderr!.on("data", (chunk) => (output += chunk));
+    const deadline = Date.now() + 90_000;
+    for (;;) {
+      if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. output:\n${output}`);
+      try {
+        const health = (await (await fetch(`${base}/api/health`)).json()) as { pid?: number };
+        if (health.pid === child.pid) break;
+      } catch {
+        /* not up yet */
+      }
+      if (Date.now() > deadline) throw new Error(`server never came up. output:\n${output}`);
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }, 120_000);
+
+  afterAll(async () => {
+    if (child) await waitForExit(child, { signal: "SIGTERM" });
+    await live?.stop();
+    if (home) await removeTempDir(home);
+  });
+
+  it("refuses a start until the desktop app says Pro, and a plan change never ends a running call", async () => {
+    const created = await request("POST", "/api/bots", { name: "Ada", modelSelection: { instanceId: "claude", model: "claude-fake" } });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const botId = created.body.bot.id as string;
+    const start = (client: LiveCallState["client"]) => request("POST", "/api/live/session", { botId, sdp: SDP, client });
+
+    // Not Pro: refused before the key (this server has one) and before OpenAI.
+    expect(await start("desktop")).toEqual({ status: 402, body: { error: "Live calls need a Pro plan.", needsPro: true } });
+    expect(live.sessions).toHaveLength(0);
+
+    // The Cloud sign-in is read: Pro. A malformed message after it is refused and changes nothing.
+    await tellServer({ type: "openmausbot:pro-plan", pro: true });
+    await tellServer({ type: "openmausbot:pro-plan", pro: "yes" });
+    const started = await start("ios");
+    expect(started.status, JSON.stringify(started.body)).toBe(201);
+    const callId = started.body.call.callId as string;
+    await live.waitForAttach(live.sessions[0]!.id);
+    const liveBy = Date.now() + 10_000;
+    while ((await request("GET", "/api/live/call")).body.call?.status !== "live") {
+      if (Date.now() > liveBy) throw new Error(`the call never went live. output:\n${output}`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    // The plan lapses mid-call: the call goes on until it is hung up...
+    await tellServer({ type: "openmausbot:pro-plan", pro: false });
+    expect((await request("GET", "/api/live/call")).body).toMatchObject({ call: { callId, status: "live" } });
+    expect(await request("POST", "/api/live/call/end", { callId })).toMatchObject({ status: 200, body: { call: { status: "ended", endReason: "hung-up" } } });
+    // ...and the next one is refused.
+    expect(await start("desktop")).toMatchObject({ status: 402, body: { needsPro: true } });
+    expect(live.sessions).toHaveLength(1);
+    expect(output).toContain("[pro-plan] the desktop app says Pro");
+    expect(output).toContain("[pro-plan] the desktop app says not Pro");
+    expect(output).toContain("rejected private parent message: invalid Pro plan message");
   }, 40_000);
 });

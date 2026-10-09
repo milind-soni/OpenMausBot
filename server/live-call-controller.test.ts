@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LiveCallState } from "../shared/wire.ts";
 import {
   ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
-  LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
+  LiveCallBusyError, LiveCallController, LiveCallNeedsProError, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
 } from "./live-call-controller.ts";
 import { LIVE_COPY } from "../shared/live-approval.ts";
 import { LiveSessionError } from "./live-call.ts";
@@ -48,6 +48,7 @@ function setup(overrides: Partial<LiveCallDeps> = {}) {
     queued: vi.fn((_botId: string, _threadId: string, queueId: string) => queue.has(queueId)),
     activity: () => activity,
     broadcast: (frame) => frames.push(frame.call),
+    pro: () => true,
     settings: () => settings,
     createSession: vi.fn(async () => ({ sessionId: "sess_1", sdp: "answer-sdp" })),
     openSocket: (url, key) => { const socket = new FakeSocket(url, key); sockets.push(socket); return socket; },
@@ -100,6 +101,50 @@ describe("LiveCallController lifecycle", () => {
     t.settings.key = " ";
     await expect(t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" })).rejects.toMatchObject({ status: 409 });
     expect(t.deps.createSession).not.toHaveBeenCalled();
+  });
+
+  // Live calls need an active Pro plan (electron/pro-plan.mjs). The plan is
+  // asked when a call starts and never after, so a running call is never cut
+  // off by a plan change.
+  it("refuses a start without Pro, before the key and before OpenAI", async () => {
+    const t = setup({ pro: () => false });
+    t.settings.key = "";
+    const refused = t.controller.start({ auth: owner, ...BOT, client: "ios", sdp: "a" });
+    await expect(refused).rejects.toBeInstanceOf(LiveCallNeedsProError);
+    await expect(refused).rejects.toMatchObject({ status: 402, message: "Live calls need a Pro plan." });
+    expect(t.deps.createSession).not.toHaveBeenCalled();
+    expect(t.controller.current()).toBeNull();
+    expect(t.frames).toEqual([]);
+    // the one slot is still free: once the plan allows it, a call starts
+    t.settings.key = "sk-test";
+    t.deps.pro = () => true;
+    await expect(t.controller.start({ auth: owner, ...BOT, client: "ios", sdp: "a" })).resolves.toMatchObject({ sdp: "answer-sdp" });
+  });
+
+  it("asks for the key only once the plan allows the call", async () => {
+    const t = setup({ pro: () => true });
+    t.settings.key = " ";
+    const refused = t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });
+    await expect(refused).rejects.toMatchObject({ status: 409, message: "Add an OpenAI API key to use Live calls." });
+    await expect(refused).rejects.not.toBeInstanceOf(LiveCallNeedsProError);
+  });
+
+  it("never ends a running call when the plan changes; the next start is refused", async () => {
+    let pro = true;
+    const asked = vi.fn(() => pro);
+    const t = setup({ pro: asked });
+    const { call } = await t.start();
+    pro = false;
+    await vi.advanceTimersByTimeAsync(IDLE_CHECK_MS * 4);
+    expect(t.controller.current()).toMatchObject({ callId: call.callId, status: "live" });
+    expect(t.frames.map((f) => f?.status)).toEqual(["connecting", "live"]);
+    // asked once, when the call started
+    expect(asked).toHaveBeenCalledTimes(1);
+    const ending = t.controller.end(call.callId);
+    t.socket().receive({ type: "session.closed", reason: "close_requested" });
+    await expect(ending).resolves.toMatchObject({ status: "ended", endReason: "hung-up" });
+    await expect(t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "b" })).rejects.toBeInstanceOf(LiveCallNeedsProError);
+    expect(t.deps.createSession).toHaveBeenCalledTimes(1);
   });
 
   it("frees the slot when OpenAI refuses the session", async () => {

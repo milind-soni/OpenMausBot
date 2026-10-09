@@ -5,11 +5,13 @@
 // companion allows the first four for the phone apps (companion/src/routes.ts).
 // The fifth, device-revoked, is the companion's own notice that it unpaired a
 // phone; a phone can never send it (companion/src/routes.ts COMPANION_NOTICES).
+// Starting a call needs an active Pro plan (402 `needsPro`, before the key's
+// 409 `needsKey`), for every client: the phones' starts come through here too.
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import type { LiveSettings } from "../../shared/wire.ts";
 import { LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
-import { LiveCallBusyError, type LiveCallController } from "../live-call-controller.ts";
+import { LiveCallBusyError, LiveCallNeedsProError, type LiveCallController } from "../live-call-controller.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 export interface LiveRouteDeps {
@@ -74,6 +76,8 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
         return json(res, 201, { call, transport: { type: "webrtc", sdp } });
       } catch (error) {
         if (error instanceof LiveCallBusyError) return json(res, 409, { error: error.message, activeCall: error.call });
+        // a client shows its Pro prompt, never the key form
+        if (error instanceof LiveCallNeedsProError) return json(res, 402, { error: error.message, needsPro: true });
         if (error instanceof LiveSessionError) {
           // The one 409 a session refuses with is a missing key.
           return json(res, error.status, error.status === 409 ? { error: error.message, needsKey: true } : { error: error.message });
