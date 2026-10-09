@@ -263,9 +263,12 @@ Added 2026-10-06 (the harness half of SupaMaus/mausbot-mobile
   row: a waveform glyph, the title or "Call with <bot>", the length, and one
   line per step (by name, never its arguments) and approval (with its outcome,
   and "by voice" when it was decided on the call) among the work the call's
-  spoken requests started (see **The call id and the call row**). The "via
-  call" lines stay inline. Like a work digest, the row is a receipt: the
-  sidebar preview, Retry, the working line and the mascot's mood read past it.
+  spoken requests started (see **The call id and the call row**). A step
+  that never reports how it went (its turn was stopped or lost) shows the
+  working dots only while the chat is working, and a neutral dash once it
+  is not. The "via call" lines stay inline. Like a work digest, the row is a
+  receipt: the sidebar preview, Retry, the working line and the mascot's mood
+  read past it.
 - The window checks its own sign-in when its event stream drops during a
   call, and when OpenAI closes the call without an end frame: a `401` hangs
   up at once with the signed-out reason (a revoked browser sign-in has its

@@ -879,7 +879,7 @@ const MessagesList = memo(function MessagesList({
   onRegenerate: () => void;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, focus, showToolCalls, locale } = useChatRows();
+  const { botId, threadId, botName, busy, focus, showToolCalls, locale } = useChatRows();
   // Finished tool chips become compact runs; settled assistant narration
   // becomes one reversible turn row while the terminal answer stays visible.
   // The locale refreshes the turn labels when the language changes.
@@ -972,7 +972,7 @@ const MessagesList = memo(function MessagesList({
               return <RoutineRunRow message={m} botId={botId} />;
             case "call":
               // a finished Live call's record; its spoken lines stay inline
-              return m.call ? <CallRecordRow message={m} transcript={transcript} botName={botName} /> : null;
+              return m.call ? <CallRecordRow message={m} transcript={transcript} botName={botName} busy={busy} /> : null;
             case "activity": {
               if (isStatusActivity(m)) return <StatusActivityRow message={m} />;
               // a failed turn is an error, not a tool run — render it as one.

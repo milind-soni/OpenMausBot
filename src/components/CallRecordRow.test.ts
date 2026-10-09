@@ -27,8 +27,8 @@ const transcript: Message[] = [
   msg("m2", { role: "user", text: "thanks" }),
   step("a2", "m2", { name: "Read", spoken: "reading a file", ok: true }),
 ];
-const draw = (message: Message, messages: Message[] = transcript) =>
-  renderToStaticMarkup(createElement(CallRecordRow, { message, transcript: [...messages, message], botName: "Pepper" }));
+const draw = (message: Message, messages: Message[] = transcript, busy = false) =>
+  renderToStaticMarkup(createElement(CallRecordRow, { message, transcript: [...messages, message], botName: "Pepper", busy }));
 /** What each line reads as: its markup's text. The glyphs carry none. */
 const lineTexts = (markup: string) => [...markup.matchAll(/<li\b[^>]*>(.*?)<\/li>/g)].map(([, inner]) => inner!.replace(/<[^>]+>/g, ""));
 
@@ -68,7 +68,7 @@ describe("CallRecordRow", () => {
       step("a3", "m1", { name: "Read", spoken: "reading a file" }),
       msg("o1", { kind: "options", requestMessageId: "m1", card: { title: "Approval needed", subtitle: "rm -rf build", options: ["Allow", "Deny"], requestId: "r1", tool: "Bash", answered: "deny" } }),
     ];
-    const markup = draw(row(), work);
+    const markup = draw(row(), work, true);
     expect(lineTexts(markup)).toEqual([
       "Searching the web (Done)",
       "Running the tests (Failed)",
@@ -78,6 +78,39 @@ describe("CallRecordRow", () => {
     ]);
     // read out, not drawn: the glyph stays the visible cue
     expect(markup).toContain('<span class="sr-only"> (Failed)</span>');
+  });
+
+  describe("a step that never reported how it went", () => {
+    // a turn that was stopped, killed or lost leaves its running step like this
+    const work: Message[] = [
+      msg("m1", { role: "user", text: "read the log", via: "call", callId: "c1" }),
+      step("a1", "m1", { name: "Read", spoken: "reading a file" }),
+    ];
+
+    it("reads as running, with the working dots, while its chat is busy", () => {
+      const markup = draw(row(), work, true);
+      expect(lineTexts(markup)).toEqual(["Reading a file (Running)"]);
+      expect(markup).toContain("animate-status-pulse");
+    });
+
+    it("is neutral once its chat is not: no dots and no announcement of running, a dash instead", () => {
+      const markup = draw(row(), work, false);
+      expect(lineTexts(markup)).toEqual(["Reading a file"]);
+      expect(markup).not.toContain("animate-status-pulse");
+      expect(markup).not.toContain("Running");
+      expect(markup).toContain("lucide-minus");
+    });
+
+    it("leaves a step that did report alone, busy or not", () => {
+      const settled: Message[] = [
+        msg("m1", { role: "user", text: "check the build", via: "call", callId: "c1" }),
+        step("a1", "m1", { name: "WebSearch", spoken: "searching the web", ok: true }),
+        step("a2", "m1", { name: "Bash", spoken: "running the tests", ok: false }),
+      ];
+      for (const busy of [true, false]) {
+        expect(lineTexts(draw(row(), settled, busy))).toEqual(["Searching the web (Done)", "Running the tests (Failed)"]);
+      }
+    });
   });
 
   it("draws nothing for a row without its record", () => {

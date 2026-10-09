@@ -4,7 +4,7 @@
 // with their outcomes. The call's spoken requests and the bot's answers stay
 // inline where they were; this row only sums the call up.
 import { useMemo } from "react";
-import { AudioLines, Check, X } from "lucide-react";
+import { AudioLines, Check, Minus, X } from "lucide-react";
 
 import { formatCallDuration } from "../../shared/live-call";
 import { callRecordLines, type CallRecordLine } from "@/lib/call-record";
@@ -14,17 +14,25 @@ import type { Message } from "@/state/store";
 import { approvalCardOutcome, toolLabel } from "./ApprovalCard";
 import { WorkingDots } from "./WorkingIndicator";
 
-/** Done, refused or failed, or still waiting: the glyph before a line. */
-function lineState(line: CallRecordLine): "done" | "stopped" | "open" {
-  if (line.kind === "step") return line.tool.ok === undefined ? "open" : line.tool.ok ? "done" : "stopped";
+type LineState = "done" | "stopped" | "open" | "neutral";
+
+/** Done, refused or failed, still waiting, or unknown: the glyph before a
+ * line. A step with no outcome is running only while its chat works. The
+ * harness never settles one whose turn was stopped, killed or lost, so in a
+ * chat that has stopped it says nothing, rather than spin for good. */
+function lineState(line: CallRecordLine, busy: boolean): LineState {
+  if (line.kind === "step") {
+    if (line.tool.ok === undefined) return busy ? "open" : "neutral";
+    return line.tool.ok ? "done" : "stopped";
+  }
   if (line.card.expired) return "stopped";
   if (!line.card.answered) return "open";
   return line.card.answered === "allow" ? "done" : "stopped";
 }
 
-/** What a step's glyph shows, in words for a reader who cannot see it. An
- * approval says its outcome in its own text ("Allowed: run a command"), so
- * only a step needs this. */
+/** What a step's glyph shows, in words for a reader who cannot see it. A step
+ * nobody knows the outcome of says nothing. An approval says its outcome in
+ * its own text ("Allowed: run a command"), so only a step needs this. */
 const STEP_STATUS = {
   done: "chat.callRecord.stepDone",
   stopped: "chat.callRecord.stepFailed",
@@ -40,12 +48,15 @@ function lineText(line: CallRecordLine): string {
   return line.card.answeredBy?.via === "call" ? `${text} · ${t("approval.status.byVoice")}` : text;
 }
 
-export function CallRecordRow({ message, transcript, botName }: {
+export function CallRecordRow({ message, transcript, botName, busy }: {
   message: Message;
   /** The chat's active branch. The call's lines come from all of it, also
    * from steps that landed after this row (a turn still running at hang-up). */
   transcript: readonly Message[];
   botName: string;
+  /** The chat is working on something now: only then does a step that never
+   * reported how it went read as running. */
+  busy: boolean;
 }) {
   const call = message.call;
   const callId = call?.callId;
@@ -71,15 +82,23 @@ export function CallRecordRow({ message, transcript, botName }: {
       {lines.length > 0 && (
         <ul className="flex flex-col gap-0.5 text-[12.5px]">
           {lines.map((line) => {
-            const state = lineState(line);
+            const state = lineState(line, busy);
             return (
               <li key={line.id} className="flex items-center gap-1.5">
                 <span className="shrink-0" aria-hidden="true">
-                  {state === "open" ? <WorkingDots size={3} /> : state === "done" ? <Check size={12} className="text-success" /> : <X size={12} className="text-danger" />}
+                  {state === "open" ? (
+                    <WorkingDots size={3} />
+                  ) : state === "done" ? (
+                    <Check size={12} className="text-success" />
+                  ) : state === "stopped" ? (
+                    <X size={12} className="text-danger" />
+                  ) : (
+                    <Minus size={12} className="text-ink-tertiary" />
+                  )}
                 </span>
                 <span className="min-w-0 truncate">
                   {lineText(line)}
-                  {line.kind === "step" && <span className="sr-only">{` (${t(STEP_STATUS[state])})`}</span>}
+                  {line.kind === "step" && state !== "neutral" && <span className="sr-only">{` (${t(STEP_STATUS[state])})`}</span>}
                 </span>
               </li>
             );

@@ -111,6 +111,22 @@ describe("a call's record at the end of a chat that is still working", () => {
     expect(markup).not.toContain("thinking-shimmer");
   });
 
+  // A step the harness never settles (Stop in the middle of a tool, a killed
+  // turn, a restart) has no outcome for good. The record shows it as running
+  // only while the chat works, and as nothing in particular once it stops.
+  it("draws a step with no outcome as running while the chat works, and not once it stops", () => {
+    const work = [
+      spoken,
+      message("a1", "", { role: "bot", kind: "activity", requestMessageId: "m1", tool: { name: "Read", spoken: "reading a file", itemId: "item-a1" } }),
+      record,
+    ];
+    expect(drawWorking(work)).toContain('<span class="sr-only"> (Running)</span>');
+    const stopped = renderToStaticMarkup(createElement(ChatView, { bot: bot(work) }));
+    expect(stopped).toContain('data-testid="call-record"');
+    expect(stopped).toContain("Reading a file");
+    expect(stopped).not.toContain("(Running)");
+  });
+
   it("still shows the working line for a request nobody has answered yet", () => {
     const markup = drawWorking([spoken, record]);
     expect(markup).toContain("thinking-shimmer");
