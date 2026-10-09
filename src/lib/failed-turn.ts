@@ -35,9 +35,11 @@ export function botEngine(bot: Bot | undefined, instances: InstanceInfo[]): Inst
   return bot && instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
 }
 
-/** One line for a list preview: what a failed turn's row says, minus the
- * "below" a list has no room for; any other activity row its name. */
-export function activityPreview(tool: ActivityTool, engine: InstanceInfo | undefined): string {
+/** One line for a list preview: a Data receipt its result's title, a
+ * failed turn what its row says, minus the "below" a list has no room for;
+ * any other activity row its name. */
+export function activityPreview(tool: ActivityTool, engine: InstanceInfo | undefined, dataResult?: Message["dataResult"]): string {
+  if (dataResult) return dataResult.title;
   if (isStoppedTurnName(tool.name)) return t("chat.turnStopped");
   const cause = failedTurnCause(tool.name);
   if (cause !== null && isClientCancellation(cause)) return t("chat.turnStopped");

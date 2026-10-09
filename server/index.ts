@@ -17071,8 +17071,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           exportRoots: () => dataExportRoots(internalSender),
           signal: abort.signal, assertActive: requireActiveInternalCapability,
           onShow: (card) => {
+            // The receipt names the tool that ran; the card's title lives in
+            // dataResult, where no consumer mistakes it for a status or error.
             store.appendMessage(internalCapability.threadId, {
-              role: "bot", kind: "activity", tool: { name: card.title, ok: true },
+              role: "bot", kind: "activity", tool: { name: "data_show", ok: true },
               dataResult: { botId: internalSender.id, cardId: card.id, title: card.title, kind: card.kind, sql: card.sql },
               ...(store.groupByThread(internalCapability.threadId)
                 ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}),

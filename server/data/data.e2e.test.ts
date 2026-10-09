@@ -100,6 +100,12 @@ it("loads, queries, shows, pages, renders and exports through the real server", 
     const chartCard = await call("data_show", { kind: "chart", title: "By region", table: "sales", chart: { type: "bar", x: "region", y: "amount", agg: "sum" } });
     expect(chartCard.isError, chartCard.text).toBe(false);
     expect(chartCard.data.sheet).toHaveLength(2);
+    // The chat receipt names the tool that ran; the card's title is the result's, so a
+    // title like "notice: …" can never be read as a status row or a failed turn.
+    const receipts = ((await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as Array<Record<string, any>>)
+      .filter((message) => message.dataResult);
+    expect(receipts.map((message) => [message.tool.name, message.dataResult.title, message.dataResult.cardId]))
+      .toEqual([["data_show", "Totals", tableCard.data.id], ["data_show", "By region", chartCard.data.id]]);
 
     // The panel: the sheet, a page of the table card, the chart as SVG.
     const read = await api("GET", DATA_ROUTES.sheet(bot.id)) as { sheet: DataSheet; tables: Array<{ name: string }> };
