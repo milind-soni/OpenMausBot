@@ -96,6 +96,11 @@ describe("parsePostRef", () => {
     expect(parsePostRef("https://mobile.twitter.com/i/web/status/43")).toEqual({ id: "43" });
   });
 
+  it("accepts a status link typed without https://", () => {
+    expect(parsePostRef("x.com/maus/status/123")).toEqual({ id: "123", handle: "maus" });
+    expect(parsePostRef("mobile.twitter.com/maus/status/124")).toEqual({ id: "124", handle: "maus" });
+  });
+
   it("refuses anything that is not an X post", () => {
     expect(parsePostRef("https://example.com/maus/status/42")).toBeNull();
     expect(parsePostRef("https://x.com/maus")).toBeNull();
@@ -109,6 +114,18 @@ describe("normalizeHandle", () => {
     expect(normalizeHandle("  maus ")).toBe("maus");
     expect(normalizeHandle("https://x.com/maus")).toBe("maus");
     expect(normalizeHandle("https://twitter.com/maus/status/1")).toBe("maus");
+  });
+
+  it("accepts links typed without https://", () => {
+    expect(normalizeHandle("x.com/maus")).toBe("maus");
+    expect(normalizeHandle("www.x.com/maus")).toBe("maus");
+    expect(normalizeHandle("twitter.com/maus/status/1")).toBe("maus");
+  });
+
+  it("refuses X's own pages, which are not accounts", () => {
+    for (const raw of ["https://x.com/home", "https://x.com/i/lists/1", "https://x.com/search?q=maus", "x.com/explore", "https://x.com/settings", "i", "home"]) {
+      expect(normalizeHandle(raw), raw).toBeNull();
+    }
   });
 
   it("refuses non-X links and names X does not allow", () => {

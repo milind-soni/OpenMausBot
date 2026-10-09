@@ -114,6 +114,19 @@ type Row = Record<string, unknown>;
 const POST_ID = /^\d{1,25}$/;
 const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
 const X_HOSTS = new Set(["x.com", "www.x.com", "mobile.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"]);
+/** First path parts that are X's own pages, never an account. */
+const RESERVED = new Set(["i", "home", "search", "explore", "settings", "notifications", "messages", "hashtag", "intent", "share", "compose", "login", "signup", "tos", "privacy"]);
+
+/** An X link, with or without https:// typed in front; null for anything
+ * else (a bare handle, or a link to another site). */
+function xUrl(value: string): URL | null {
+  const withScheme = /^(?:www\.|mobile\.)?(?:x|twitter)\.com\//i.test(value) ? `https://${value}` : value;
+  try {
+    return new URL(withScheme);
+  } catch {
+    return null;
+  }
+}
 
 function isRow(value: unknown): value is Row {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -152,18 +165,17 @@ function idOf(...values: unknown[]): string | undefined {
   return undefined;
 }
 
-/** "@maus", "maus" or an x.com profile link → "maus"; anything else → null. */
+/** "@maus", "maus" or an x.com profile link (https:// optional) → "maus";
+ * anything else, X's own pages included, → null. */
 export function normalizeHandle(raw: string): string | null {
   let value = raw.trim();
-  try {
-    const url = new URL(value);
+  const url = xUrl(value);
+  if (url) {
     if (!X_HOSTS.has(url.hostname)) return null;
     value = url.pathname.split("/").filter(Boolean)[0] ?? "";
-  } catch {
-    // Not a link: a handle.
   }
   value = value.replace(/^@/, "");
-  return HANDLE.test(value) ? value : null;
+  return HANDLE.test(value) && !RESERVED.has(value.toLowerCase()) ? value : null;
 }
 
 /** A post id, and the author's handle when the link names one, from a bare id
@@ -171,18 +183,13 @@ export function normalizeHandle(raw: string): string | null {
 export function parsePostRef(raw: string): XPostRef | null {
   const value = raw.trim();
   if (POST_ID.test(value)) return { id: value };
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return null;
-  }
-  if (!X_HOSTS.has(url.hostname)) return null;
+  const url = xUrl(value);
+  if (!url || !X_HOSTS.has(url.hostname)) return null;
   const parts = url.pathname.split("/").filter(Boolean);
   const status = parts.indexOf("status");
   const id = status >= 0 ? parts[status + 1] : undefined;
   if (!id || !POST_ID.test(id)) return null;
-  const handle = status === 1 && parts[0] !== "i" && HANDLE.test(parts[0]!) ? parts[0] : undefined;
+  const handle = status === 1 && HANDLE.test(parts[0]!) && !RESERVED.has(parts[0]!.toLowerCase()) ? parts[0] : undefined;
   return handle ? { id, handle } : { id };
 }
 
