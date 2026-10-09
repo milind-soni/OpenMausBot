@@ -45,6 +45,7 @@ import { speaker } from "@/lib/tts";
 import { roleProfilePatch, type BotRole } from "@/lib/bot-roles";
 import { t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
+import { useChatErrorClear } from "./chat-error";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
 
@@ -217,6 +218,9 @@ export interface Message {
    * (ask_bot, delegate_bot, start_thread): the words are that bot's, not
    * the person's. Rendered as the peer speaking — see lib/peer-message. */
   peerAsk?: { botId: string; name: string; unattended?: boolean };
+  /** coordinate_bots delivery identity, as stored: the request a teammate
+   * sent into this thread, or the result it reported back. */
+  roomRequest?: { id: string; phase: "request" | "result" };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" linking to the bot⇄bot channel. */
@@ -2835,6 +2839,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, rawDispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const clearChatError = useCallback(() => {
+    rawDispatch({ type: "error", message: null });
+  }, []);
+  useChatErrorClear(state.error, clearChatError);
   const botPatchQueue = useMemo(
     () =>
       createBotPatchQueue({
@@ -2849,7 +2857,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         },
         onError: (error) => {
           rawDispatch({ type: "error", message: error.message });
-          setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
         },
       }),
     [],
@@ -2868,7 +2875,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let creatingBot = false;
     const showError = (e: unknown) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
     };
     /** Where a card action's message lives, and the card on it. A card asked
      * inside a room belongs to the room's list, never to one member's. */

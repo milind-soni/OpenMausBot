@@ -11,6 +11,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { soulFile, soulHash } from "./bot-folder.ts";
 import { flushProfileHistory, readHistory, recordProfileChange } from "./profile-versions.ts";
 import { DATA_DIR } from "./config.ts";
+import {
+  beginMemoryTurn,
+  endMemoryTurn,
+  flushMemoryJournal,
+  journalFile,
+  journalMemoryWrite,
+  resetMemoryJournalState,
+} from "./memory-journal.ts";
 import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
@@ -2410,6 +2418,7 @@ describe("soul", () => {
       ] };
     store.applyTeamSetup(request);
     expect(new Store(selection).bot("created-by-chief")?.visibility).toEqual({ people: ["hr@example.test"] });
+    expect(new Store(selection).bot("created-by-chief")).toMatchObject({ composio: false, connectorTools: {}, approvePeerComms: false });
     const open = new Store(selection);
     const everyoneChief = open.createBot({ name: "Ops", section: "Ops" });
     open.patchBot(everyoneChief.id, { chiefOfStaff: true });
@@ -2425,6 +2434,48 @@ describe("soul", () => {
     expect(existsSync(soulFile(bot.id))).toBe(true);
     store.deleteBot(bot.id);
     expect(existsSync(join(DATA_DIR, "bots", bot.id))).toBe(false);
+  });
+
+  it("deleteBot removes the memory journal, the memory index, and the in-memory baseline", async () => {
+    resetMemoryJournalState();
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const other = store.createBot();
+    journalMemoryWrite(bot.id, "memory/notes.md", "vendor list\n", { actor: "person", via: "ui" });
+    journalMemoryWrite(other.id, "memory/notes.md", "other notes\n", { actor: "person", via: "ui" });
+    await flushMemoryJournal(bot.id);
+    await flushMemoryJournal(other.id);
+    mdb.indexMemoryFile(bot.id, "memory/notes.md", "vendor list\n", { mtimeMs: 1, bytes: 12 });
+    mdb.indexMemoryFile(other.id, "memory/notes.md", "other notes\n", { mtimeMs: 2, bytes: 12 });
+    beginMemoryTurn(bot.id, bot.threadId);
+    expect(endMemoryTurn(bot.threadId)).toEqual([]);
+    expect(existsSync(journalFile(bot.id))).toBe(true);
+    expect(mdb.indexedMemoryFiles(bot.id).map((file) => file.path)).toContain("memory/notes.md");
+
+    expect(store.deleteBot(bot.id)).toBe(true);
+
+    expect(existsSync(journalFile(bot.id))).toBe(false);
+    expect(mdb.indexedMemoryFiles(bot.id)).toEqual([]);
+    expect(mdb.recallMemory("vendor", bot.id)).toEqual([]);
+    expect(existsSync(journalFile(other.id))).toBe(true);
+    expect(mdb.indexedMemoryFiles(other.id).map((file) => file.path)).toEqual(["memory/notes.md"]);
+    expect(mdb.recallMemory("notes", other.id).map((hit) => hit.file)).toEqual(["memory/notes.md"]);
+    // a baseline left behind would journal the deleted files the next time a turn looked
+    beginMemoryTurn(bot.id, "after-delete");
+    expect(endMemoryTurn("after-delete")).toEqual([]);
+    expect(existsSync(journalFile(bot.id))).toBe(false);
+
+    mdb.closeMessageDb();
+    const raw = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    try {
+      expect(() => raw.exec("INSERT INTO memory_fts(memory_fts) VALUES('integrity-check')")).not.toThrow();
+      const gone = raw.prepare("SELECT COUNT(*) AS n FROM memory_files WHERE bot_id = ?").get(bot.id) as { n: number };
+      const kept = raw.prepare("SELECT COUNT(*) AS n FROM memory_files WHERE bot_id = ?").get(other.id) as { n: number };
+      expect(gone.n).toBe(0);
+      expect(kept.n).toBe(1);
+    } finally {
+      raw.close();
+    }
   });
 
   it("reviewed setup freezes legacy thread settings and persists valid team grants and its receipt on reload", () => {

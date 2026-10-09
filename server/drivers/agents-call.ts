@@ -807,8 +807,18 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         instructions,
         ...(args.modelSelection !== undefined ? { modelSelection: args.modelSelection } : {}),
         ...(typeof args.cwd === "string" ? { cwd: args.cwd.trim() } : {}),
+        ...(args.suggestion === true ? { suggestion: true } : {}),
       }),
     });
+    // Below Full Access the server shows the person one review card and
+    // creates nothing yet; Full Access applies it in this turn.
+    if (r.state === "pending" && args.suggestion === true) {
+      return { text: `Your suggestion is on one card for the user: ${String(r.title)}. @${botName} has not been created. End this turn; their answer resumes you once. If they choose Not now, do not suggest another specialist in this conversation unless they ask.` };
+    }
+    if (r.state === "pending") {
+      return { text: `One review card is visible: ${String(r.title)}. @${botName} has not been created yet. End this turn; the decision and structured result resume you automatically once. Do not ask again, poll, or repeat this request.` };
+    }
+    if (!r.id) return completedProposalResult(r, `creating @${botName}`) ?? { text: `@${botName} was not created.`, isError: true };
     return {
       text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with ${COORDINATING ? "coordinate_bots" : "delegate_bot"}.`,
     };

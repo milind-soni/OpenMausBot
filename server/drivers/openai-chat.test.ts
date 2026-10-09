@@ -327,6 +327,59 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       await instance.dispose();
     }
   }, 20_000);
+
+  it("completes the turn when a question goes unanswered, without tainting the final answer", async () => {
+    // An unanswered question is absence, not a "no": the card times out or the
+    // person closes it, the model is told not to guess, and the turn ends with
+    // its final answer intact — unlike a denied tool op, it must not end the
+    // turn as tool_error.
+    const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
+      + JSON.stringify(JSON.stringify({ questions: [{ question: "Ship the fixture?", options: [{ label: "Yes" }, { label: "No" }] }] }))
+      + '}}]}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const finalBody = 'data: {"choices":[{"index":0,"delta":{"content":"Proceeded without the answer."}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(bodies.length === 1 ? askBody : finalBody, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat-noreply", displayName: "Compat NoReply", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    try {
+      await instance.adapter.sendTurn({ threadId: "noreply", text: "hi", approvalMode: "full" });
+      const opened = await vi.waitFor(() => {
+        const found = events.find((event) => event.type === "request.opened");
+        if (!found) throw new Error("waiting for the question card");
+        return found;
+      }, { timeout: 10_000 });
+      expect(opened).toMatchObject({ requestType: "question", tool: "ask_user" });
+      // Close the card without answering: the same null the 15-minute timeout
+      // produces.
+      expect(await instance.adapter.respondToRequest("noreply", opened.requestId!, { behavior: "deny" })).toBe("rejected");
+      await vi.waitFor(() => {
+        if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+      }, { timeout: 10_000 });
+      const completed = events.find((event) => event.type === "turn.completed") as any;
+      expect(completed.ok).toBe(true);
+      expect(completed.stopReason).not.toBe("tool_error");
+      expect(completed.denials).toBeUndefined();
+      expect(events.some((event) => event.type === "runtime.error")).toBe(false);
+      const toolMessage = (bodies[1].messages as any[]).at(-1);
+      expect(JSON.parse(toolMessage.content)).toEqual({
+        ok: true,
+        result: "The person did not answer this question. Do not guess an answer; ask again later or proceed without it.",
+      });
+    } finally {
+      await instance.dispose();
+    }
+  }, 20_000);
 });
 
 describe("createOpenAIChatRuntime mid-turn steer", () => {

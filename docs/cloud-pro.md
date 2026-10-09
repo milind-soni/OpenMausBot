@@ -34,14 +34,34 @@ Contract version: `1` (`cloudContractVersion` on the wire).
 3. When it is ready, the machine appears under **Servers** as **My Cloud**, and
    the card offers **Open My Cloud**. One click opens the machine in the
    app window, signed in. There is no second confirmation.
-4. The first thing the Cloud shows is its engine sign-in
-   (`src/components/CloudEngineSignIn.tsx`), with these choices:
-   - **Sign in to Claude**: the existing paste-code flow (open Anthropic's
+4. The first thing the Cloud asks is **What should your Cloud do while you're
+   away?** (`src/components/CloudIntent.tsx`, `src/lib/cloud-intent.ts`): a box
+   drawn like the composer, with `/setup` fixed in front of the text, four
+   ideas that fill it in (a news digest, watching a page, a research roundup,
+   a daily plan); hovering one previews its full text in the box. It is never a
+   gate: **Skip for now** sits in plain view under the ideas, Escape skips while
+   the box is empty, and picking another bot in the sidebar goes to that bot,
+   leaving the question to the setup card's **Give it a job**. The answer is sent as `/setup <job>`
+   (server/setup-mode.ts), so the bot asks at most four questions and sets
+   itself up for the job in the chat. With an engine already able to run, it
+   is sent at once; the box becomes the composer on the way (a named View
+   Transition) and the request is the chat's first message. Otherwise the job
+   waits on this device (`omb.cloudIntent.pending` in browser storage) and
+   the engine sign-in shows it at the top, with **Edit**. The Cloud keeps
+   that the question was answered (`cloud-intent-asked`) and that a job was
+   given (`cloud-intent-given`) in its onboarding record, so no device asks
+   again; a Cloud where a bot has already finished a turn is never asked.
+   The question is asked only of the owner's own session on a Cloud home.
+5. Then, with no engine signed in, the engine sign-in
+   (`src/components/CloudEngineSignIn.tsx`): provider tiles side by side (two,
+   or three where the image carries the Grok CLI), where the picked one opens
+   its sign-in in a panel underneath, and an API key below them:
+   - **Claude**: the existing paste-code flow (open Anthropic's
      page, paste the code back);
-   - **Sign in to ChatGPT (Codex)**: the existing device-code flow;
-   - **Sign in to Grok**: the same device-code flow for Grok Build on a
-     grok.com subscription (`grok login --device-auth`, run on the Cloud
-     computer), offered only when the image carries the Grok CLI;
+   - **ChatGPT**: the existing Codex device-code flow;
+   - **Grok**: the same device-code flow for Grok Build on a grok.com
+     subscription (`grok login --device-auth`, run on the Cloud computer),
+     offered only when the image carries the Grok CLI;
    - **Use an API key**: the existing model-provider keys in **Settings →
      API keys** (Anthropic, xAI, or an OpenAI-compatible key such as
      OpenRouter).
@@ -49,7 +69,10 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    It says plainly that the person's AI plan limits apply to bots that work
    around the clock, and that Anthropic's Claude Max plan or an API key works
    best for heavy use.
-5. Until one of those engines can run, every bot on the Cloud, including the
+   When a waiting job's engine can run, the screen says **Connected. Starting
+   your job…** for a moment, the choices step back, and the job goes to the
+   chat as above.
+6. Until one of those engines can run, every bot on the Cloud, including the
    default one, shows this sign-in rather than a chat that fails its first
    turn. Once one can run, the chat takes its place. Sign-ins stay on the
    machine's volume (`~/.claude`, `~/.codex`, `~/.grok`, the server's own
@@ -204,36 +227,56 @@ On a Cloud home a small card, **Set up My Cloud**, sits at the bottom left
 until its steps are done or the person hides it (`src/components/CloudSetup.tsx`,
 `src/lib/cloud-setup.ts`). Only the owner's own devices (an admin session on a
 Cloud home) see it; desktop and self-hosted installs never do and keep their
-welcome flow. Each step's state comes from the Cloud or the app, never from a
-box the person ticks:
+welcome flow. The step to do now leads the card, with its explanation and
+action, under a segment per step that fills as each finishes. Every other step
+sits below it on one line; one not done becomes the lead with a click. The
+chevron minimizes the card to its segments on this device only
+(`omb.cloudSetup.collapsed` in browser storage), which is not hiding it. When
+the last required step finishes in the session that is open,
+the card gives way once to **Your Cloud is ready**, with the guide mascot;
+a Cloud that opens already done shows nothing. Each step's state comes from
+the Cloud or the app, never from a box the person ticks:
 
-1. **Sign in to Claude or ChatGPT**, the one required step: done when any
-   engine on the Cloud can run. From another view, its **Sign in** returns to
-   the engine sign-in above.
-2. **Bring your bots from your computer**: only in the desktop app, while the
+1. **Create your Cloud**: done from the start; the Cloud exists.
+2. **Give it a first job**: done once a job is given to the first question
+   (`cloud-intent-given`), or once a bot's turn has finished on the Cloud: the
+   server records `onboarding.firstTurnAt` once, on a Cloud home only, for a
+   turn that finished (not a failed or stopped one) in a bot's conversation or
+   a room. The onboarding record never travels with a copy, so copied-in chats
+   do not count. **Give it a job** asks the question again.
+3. **Connect your AI**, the one required step: done when any engine on the
+   Cloud can run. From another view, its **Connect** returns to the engine
+   sign-in above.
+4. **Approve its plan**: listed once a first job is given. The bot asks its
+   questions in the chat and proposes a routine; done once that routine
+   exists, the job's bot's and made after the job was sent (this device
+   remembers which bot got it, `omb.cloudIntent.sent`; another device counts
+   any routine). **Open the chat** goes to that bot.
+5. **Bring your bots from your computer**: only in the desktop app, while the
    Copy this computer here card would be offered (an empty Cloud, a computer
    with work to bring; docs/copy-workspace.md). **Copy to My Cloud** opens that
    offer in place (the size, what stays, **Copy** and **Not now**). Done after
    a copy; skipped after **Not now**,
    which the Cloud keeps (`cloud-setup-move-skipped` in its onboarding record)
    and which also hides the one-time card.
-3. **Try something that runs while you're away**: one example, a daily
-   routine. **Try it** puts it in the chat's composer, unsent. Done when a bot's
-   turn first finishes on the Cloud: the server records `onboarding.firstTurnAt`
-   once, on a Cloud home only, for a turn that finished (not a failed or
-   stopped one) in a bot's conversation or a room. The onboarding record never
-   travels with a copy, so copied-in chats do not count.
-4. **Optional: Let your Cloud use this Mac**: only in the desktop app on
-   macOS. **Choose what to lend** opens Settings → OpenMausBot Cloud on this Mac,
-   leaving the Cloud's page as the menu-bar item's **Lending settings…** does
-   (`cloudLending.open()`: no arguments, answered only for the verified Cloud
-   page or the app's own window). Done when `GET /api/shared-computers` lists
-   a computer.
+
+A job counts as given the moment it is sent, before the Cloud's record
+answers, so no step flickers back. When the main pane already shows the step that leads (the question, or the
+sign-in in the chat view), the card says **You're on this step** instead of
+repeating it. With every listed step done but no turn finished yet, the card says the bot
+is setting itself up in the chat. Lending this Mac to the Cloud is not a step;
+it stays in Settings → OpenMausBot Cloud and the menu-bar item's **Lending
+settings…**.
 
 **Hide setup** is the only dismiss. The Cloud keeps it (`cloud-setup-hidden`
 in its onboarding record), so it holds on every device and after browser
 storage is cleared, and it is the move's **Not now** too. The card also goes
-away by itself once steps 1 and 3 are done. Nothing asks for confirmation.
+away by itself once an engine can run and the Cloud has done something: with
+a first job given, its routine exists (the bot's first turn only asks its
+questions, so a finished turn is not enough); without one, a bot has finished
+a turn there. With a routine, **Your Cloud is ready** names it and its next
+run, and **Run it now** starts it at once so the first result need not wait
+for the schedule. Nothing asks for confirmation.
 After the card, the one-time Copy this computer here card behaves as on any
 other server.
 

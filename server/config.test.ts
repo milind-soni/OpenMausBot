@@ -652,6 +652,46 @@ describe("configuration boundaries", () => {
   });
 });
 
+describe("a config.json saved with a byte order mark", () => {
+  // Windows PowerShell's Set-Content -Encoding UTF8 and Notepad's "UTF-8 with
+  // BOM" put U+FEFF before the first brace, which JSON.parse refuses.
+  const bom = "\uFEFF";
+
+  it("loads instead of being ignored", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, bom + JSON.stringify({ budgets: { monthlyUsd: 25, warnAtPercent: 70 } }, null, 2));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(loadConfig().budgets).toEqual({ monthlyUsd: 25, warnAtPercent: 70 });
+      expect(warn.mock.calls.some(([line]) => String(line).includes("ignoring"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("keeps every other key when a setting is saved", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, bom + JSON.stringify({
+      xai: { key: "xai-fixture" },
+      mcpServers: { notes: { command: "npx", args: ["notes-mcp"] } },
+    }, null, 2));
+    try {
+      saveConfig({ budgets: { monthlyUsd: 25, warnAtPercent: 70 } });
+      const disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk).toMatchObject({
+        xai: { key: "xai-fixture" },
+        mcpServers: { notes: { command: "npx", args: ["notes-mcp"] } },
+        budgets: { monthlyUsd: 25, warnAtPercent: 70 },
+      });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+});
+
 describe("saving the newer sections", () => {
   it("persists the Anthropic key, the spend limit and the price list, section by section", () => {
     const path = join(DATA_DIR, "config.json");

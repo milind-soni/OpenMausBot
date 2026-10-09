@@ -15,6 +15,7 @@ import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
+import { forgetBotMemoryJournal, journalFile } from "./memory-journal.ts";
 import { runCommand, type Command } from "./commands.ts";
 import { workspaceDir } from "./workspace.ts";
 import type { Destination } from "./surface.ts";
@@ -1868,6 +1869,9 @@ export class Store {
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
           resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
           approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
+          // No connector tools until someone grants them. An absent record
+          // would mean every tool once connected apps are turned on.
+          connectorTools: {},
           // A Chief's new teammate is seen by exactly the Chief's audience:
           // a restricted Chief never creates a bot everyone sees.
           ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
@@ -1992,6 +1996,14 @@ export class Store {
     try {
       rmSync(workspaceDir(id), { recursive: true, force: true });
     } catch {}
+    // The journal lives outside the workspace, so removing the workspace
+    // does not take it. It is this bot's record of what its memory used to
+    // say, and it goes with the bot — the same rule as a thread's event log.
+    try {
+      rmSync(journalFile(id), { force: true });
+    } catch {}
+    mdb.deleteBotMemoryFiles(id);
+    forgetBotMemoryJournal(id);
     // Generated task-workspaces are project files, not bot memory. Keep
     // them (and user-selected cwd folders) when deleting conversations.
     // Approval state deliberately lives outside the bot-writable workspace.

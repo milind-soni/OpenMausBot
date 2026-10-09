@@ -33,7 +33,8 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   pinOn,
   transcriptShown = true,
 }: {
-  /** The bot or room; opening another one re-arms bottom-follow. */
+  /** The bot or room. Opening another conversation — another owner, or
+   * another thread of this owner — re-arms bottom-follow. */
   ownerId: string;
   threadId: string;
   /** The full transcript. Only a window of it mounts. */
@@ -108,7 +109,9 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   }, []);
   useBottomFollowResize(scrollRef, transcriptRef, followRef, transcriptShown ? transcriptKey : null);
 
-  useEffect(() => setBottomFollow(true), [ownerId, setBottomFollow]);
+  // A thread switch keeps the same owner, so the key is the transcript.
+  // The search-focus effect below still turns follow off for a jump.
+  useEffect(() => setBottomFollow(true), [transcriptKey, setBottomFollow]);
 
   // A search result may be hundreds of rows before the mounted tail. Open a
   // bounded window around it first; useFocusMessage then scrolls and flashes
@@ -137,7 +140,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     el.scrollTo({ top: el.scrollHeight });
     previousScrollTop.current = el.scrollTop;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pinOn is the caller's dependency list
-  }, [ownerId, messages.length, ...pinOn]);
+  }, [transcriptKey, messages.length, ...pinOn]);
 
   // Rows prepended at the front — Show earlier widening the local window, or
   // an older page arriving from the server — would push the row under the

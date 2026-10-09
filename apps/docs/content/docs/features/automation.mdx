@@ -40,8 +40,10 @@ Bearer authentication is preferred because it keeps the secret out of URLs and m
 
 ## Reaching a local webhook
 
-To accept events from the public internet, proxy only the webhook receiver through a narrowly configured relay or tunnel. Do not expose the main harness port.
+On My Cloud there is nothing to set up: webhooks use the workspace's own address. The Webhooks panel shows `https://` plus the workspace's hostname followed by `/hooks/` and the endpoint, and only those hook paths are passed to the receiver. The same is true of a hosted workspace.
+
+On the desktop app the receiver listens only on this computer. To accept events from the public internet, proxy only the webhook receiver through a narrowly configured relay or tunnel. Do not expose the main harness port.
 
 <Callout type="warn" title="OpenMausBot must remain running">
-  Local routines and webhook deliveries are not hosted jobs. Closing the desktop app stops the local executor and receiver.
+  Local routines and webhook deliveries are not hosted jobs. Closing the desktop app stops the local executor and receiver. My Cloud keeps running them while your computer is off.
 </Callout>

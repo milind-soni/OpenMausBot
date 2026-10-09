@@ -27,6 +27,8 @@ import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/component
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { NoEngines } from "@/components/NoEngines";
 import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
+import { CloudIntent } from "@/components/CloudIntent";
+import { cloudIntentDue, cloudIntentShown, useCloudIntent } from "@/lib/cloud-intent";
 import { CloudSetup } from "@/components/CloudSetup";
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -129,6 +131,14 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   // An OMB Cloud home with none of the person's own engines signed in yet:
   // its first run, and every bot until then, is the engine sign-in.
   const cloudSignIn = cloudSignInDue(viewer, state, engineReady);
+  // Before that, its first question: what should it do while you're away. A
+  // job given before any AI waits on the sign-in until an engine can run it.
+  const cloudIntent = useCloudIntent();
+  const cloudAsk = cloudIntentShown(cloudIntentDue({
+    viewer, connected: state.connected, enginesKnown: state.instances.length > 0,
+    onboarding: state.config?.onboarding, reopened: false,
+  }), cloudIntent);
+  const cloudJobWaiting = Boolean(viewer?.cloudHome && viewer.canSave && cloudIntent.pending);
 
   // App-wide shortcuts: ⌘N new bot · ⌘1–9 jump to bot · ⌘⇧[ / ⌘⇧] prev/next · ⌘/ or ? shortcuts cheat sheet.
   // Kept deliberately small; every panel already closes on Esc.
@@ -328,7 +338,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           onClose={() => setLocalVmWorkspaceBotId(null)}
           onOpenComputer={openComputerFromWorkspace}
         />
-      ) : cloudSignIn ? (
+      ) : cloudAsk ? (
+        <CloudIntent />
+      ) : cloudSignIn || cloudJobWaiting ? (
         <CloudEngineSignIn />
       ) : noEngines ? (
         <NoEngines />

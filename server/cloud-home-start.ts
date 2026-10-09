@@ -104,10 +104,13 @@ export function codeTrustProblem(files: readonly string[], home: string, stat: (
 
 /** Start the server with its secrets on an inherited pipe (never its
  * environment), as `ids` when given. The pipe is written and closed at once;
- * nothing else is ever sent on it. */
+ * nothing else is ever sent on it. With `capture`, its stdout and stderr are
+ * pipes the caller reads instead of this process's inherited descriptors. */
 export function spawnWithSecrets(command: string, args: string[], env: NodeJS.ProcessEnv, secrets: Record<string, string>,
-  ids?: { uid: number; gid: number } | null): ChildProcess {
-  const child = spawn(command, args, { env, stdio: ["inherit", "inherit", "inherit", "pipe"], ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) });
+  ids?: { uid: number; gid: number } | null, capture = false): ChildProcess {
+  const child = spawn(command, args, { env,
+    stdio: capture ? ["inherit", "pipe", "pipe", "pipe"] : ["inherit", "inherit", "inherit", "pipe"],
+    ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) });
   const pipe = child.stdio[SECRETS_FD] as NodeJS.WritableStream | null;
   pipe?.on("error", () => { /* the child is gone; its exit is handled by the caller */ });
   pipe?.end(JSON.stringify(secrets));

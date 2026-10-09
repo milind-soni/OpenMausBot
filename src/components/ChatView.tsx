@@ -63,7 +63,7 @@ import { BotAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { normalizeState, stateForBot } from "@/lib/mascot";
-import { peerLine, type PeerLine } from "@/lib/peer-message";
+import { peerLine, peerRequest, type PeerLine } from "@/lib/peer-message";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -79,6 +79,7 @@ import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { QuestionCard } from "./QuestionCard";
 import { Composer } from "./Composer";
+import { ChatErrorBanner } from "./ChatErrorBanner";
 import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
@@ -122,7 +123,7 @@ import { dayLabel, localDay, transcriptLookups, type TranscriptLookups } from "@
 import { citationPreviewText, splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { useCanWriteIn } from "@/lib/cloud-guest";
-import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
+import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 
@@ -191,8 +192,9 @@ function DaySeparator({ at, today }: { at: number; today: number }) {
   );
 }
 
-/** Hover/focus-revealed copy control shared by user + bot bubbles. */
-function CopyButton({ text, className }: { text: string; className?: string }) {
+/** Hover/focus-revealed copy control shared by user + bot bubbles. Rooms use
+ * the same button beside a message. */
+export function CopyButton({ text, className }: { text: string; className?: string }) {
   const { state, copy } = useCopyFeedback(text);
   const label = t(state === "copied" ? "chat.copyMessageDone" : state === "failed" ? "chat.copyMessageFailed" : "chat.copyMessage");
   return (
@@ -370,8 +372,8 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId }: {
 }
 
 /** One bad markdown node must not white-screen the app — the transcript
- * degrades to a plain-text bubble instead. */
-class MessageBoundary extends Component<{ children: ReactNode; fallbackText: string }, { failed: boolean }> {
+ * degrades to a plain-text bubble instead. Rooms use the same boundary. */
+export class MessageBoundary extends Component<{ children: ReactNode; fallbackText: string }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
@@ -414,6 +416,7 @@ function BubbleEditor({
     <div className="w-full max-w-[min(42rem,78%)] rounded-2xl border border-hairline/40 bg-bubble-user px-4 py-3">
       <textarea
         ref={ref}
+        dir="auto"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
@@ -484,8 +487,9 @@ const Bubble = memo(function Bubble({
   // A user-role line another bot delivered (ask_bot, delegate_bot,
   // start_thread) is that bot speaking, not the person: it takes the
   // bot side of the chat under the peer's name, with the model-facing
-  // provenance note stripped from what the reader sees.
-  const peer = peerLine(message);
+  // provenance note stripped from what the reader sees. A coordinate_bots
+  // request is stored bot-role and gets the same label.
+  const peer = peerLine(message) ?? peerRequest(message, botId);
   const user = message.role === "user" && !peer;
   const [expanded, setExpanded] = useState(false);
   const focusedSearch = focus?.messageId === message.id && Boolean(focus.matchText);
@@ -760,7 +764,9 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
       ? t("chat.peer.delegated")
       : peer.delivery === "start_thread"
         ? t("chat.peer.openedThread")
-        : t("chat.peer.asked");
+        : peer.delivery === "coordinate_bots"
+          ? t("chat.peer.requested")
+          : t("chat.peer.asked");
   return (
     <div className="mb-1 flex items-center gap-1.5 pl-0.5" data-testid="peer-label">
       <BotAvatar
@@ -1078,7 +1084,7 @@ function PinnedBanner({
           title={t("chat.pinnedJump")}
         >
           <span className="shrink-0 text-[11.5px] font-medium text-accent">{sender}</span>
-          <span className="truncate text-[12.5px] text-ink-secondary">{text}</span>
+          <span dir="auto" className="truncate text-[12.5px] text-ink-secondary">{text}</span>
         </button>
         {onUnpin && <button
           onClick={onUnpin}
@@ -1285,6 +1291,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     return {
       busy: Boolean(bot.busy),
       reply: latestReply(messages, () => bot.name),
+      failure: latestFailure(messages, () => bot.name),
       approval: approval ? { id: approval.requestId, name: bot.name } : undefined,
     };
   }, [messages, bot.busy, bot.name]);
@@ -1460,14 +1467,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       </div>}
       {findOpen && <ChatFindBar threadId={bot.threadId} onClose={() => setFindOpen(false)} />}
 
-      {/* Error banner */}
-      {state.error && (
-        <div className="w-full px-5">
-          <div className="mb-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-danger">
-            {state.error}
-          </div>
-        </div>
-      )}
+      <ChatErrorBanner message={state.error} onDismiss={() => dispatch({ type: "error", message: null })} />
       {state.notice && (
         <div className="w-full px-5">
           <div role="status" className="mb-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink-secondary">

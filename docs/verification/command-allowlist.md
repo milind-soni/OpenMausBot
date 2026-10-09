@@ -35,14 +35,14 @@ API. Start from a fresh launch with no saved rules. It proves:
 
 - The composer's approval menu opens **Command allowlist**, whose working
   folder defaults to the server's current thread context.
-- The dialog initially focuses Close, wraps Shift+Tab/Tab, closes on Escape
-  and returns focus to the approval button.
+- The dialog initially focuses Close, wraps Shift+Tab/Tab, closes from the
+  Close button and from Escape, and returns focus to the approval button.
 - Adding `git status --short` saves the exact command, current provider and
   working folder. Closing and reopening still shows the saved rule.
 - Removing that rule clears it from the real API and displays the empty state.
 - The bot's **Permissions → Manage command allowlist** opens the same view.
-  Escape closes this nested dialog while keeping bot settings open and returns
-  focus to its management link.
+  Escape and the Close button each dismiss this nested dialog while keeping
+  bot settings open, and return focus to its management link.
 - An unsupported-provider response hides the add form, and a failed load
   exposes Retry. The subsequent successful retry reads from the real server.
 

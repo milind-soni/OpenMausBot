@@ -123,8 +123,9 @@ export function cloudHomePlaceRefusal(place: Surface): string | undefined {
   return undefined;
 }
 
-/** The Cloud's setup checklist (docs/cloud-pro.md) has a "try something"
- * step that is done once a bot's turn finishes on the machine itself. The
+/** The Cloud's setup checklist (docs/cloud-pro.md) counts a first job as given,
+ * and a Cloud set up without one as done, once a bot's turn finishes on the
+ * machine itself. The
  * server records when, once, in this Cloud's own onboarding record: that
  * section never travels with Move to Cloud (workspace-backup-policy.ts), so a
  * moved-in history of turns does not count. Null when there is nothing to

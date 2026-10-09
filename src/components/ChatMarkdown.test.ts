@@ -647,7 +647,7 @@ describe("ChatMarkdown attachments", () => {
 
   describe("a file link outside the conversation's workspace", () => {
     const filePath = "C:\\Users\\Maus\\_draft\\ollama-gen.js";
-    const render = (outsideWorkspace: boolean) => {
+    const render = (outsideWorkspace: boolean, href = filePath) => {
       const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
         state: "failed",
         reason: "the linked file is outside this conversation's workspace",
@@ -658,7 +658,7 @@ describe("ChatMarkdown attachments", () => {
       });
       try {
         return renderToStaticMarkup(createElement(ChatMarkdown, {
-          text: `[ollama-gen.js](${filePath})`, message: { threadId: "thread-1", messageId: "message-1" },
+          text: `[ollama-gen.js](${href})`, message: { threadId: "thread-1", messageId: "message-1" },
         }));
       } finally {
         save.mockRestore();
@@ -670,7 +670,8 @@ describe("ChatMarkdown attachments", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
       try {
         const html = render(true);
-        expect(html).toContain("the linked file is outside this conversation&#x27;s workspace");
+        expect(html).toContain("This file is outside this chat&#x27;s working folder, so it can&#x27;t be saved from here");
+        expect(html).not.toContain("the linked file is outside");
         expect(html).toContain("Show in folder");
         expect(html).not.toContain("<code");
       } finally {
@@ -689,6 +690,13 @@ describe("ChatMarkdown attachments", () => {
       }
     });
 
+    it("does not offer a retry for a refusal that happens on every try", () => {
+      // The arrow read as a retry or a loading state, for files and folders alike.
+      expect(render(true)).not.toContain("lucide-rotate-ccw");
+      expect(render(true, "file:///Users/maus/Desktop/designs/Posts/2026-10-08_News")).not.toContain("lucide-rotate-ccw");
+      expect(render(false)).toContain("lucide-rotate-ccw");
+    });
+
     it("shows the path in a browser, which has no desktop bridge", () => {
       expect(render(true)).toContain(`>${filePath}</code>`);
     });
@@ -697,6 +705,7 @@ describe("ChatMarkdown attachments", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
       try {
         const html = render(false);
+        expect(html).toContain("the linked file is outside this conversation&#x27;s workspace");
         expect(html).not.toContain("Show in folder");
         expect(html).not.toContain(filePath);
       } finally {

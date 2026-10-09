@@ -35,7 +35,7 @@ import { repairMarkdownTables } from "../lib/markdown-tables";
 import { TRANSCRIPT_WINDOW_SIZE } from "../lib/transcript-window";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
 import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
-import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, saveFailureText, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
 import { MarkdownTable } from "./MarkdownTable";
 import { TableFileButton } from "./TableFilePreview";
@@ -695,7 +695,7 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
         ) : save.state === "saved" ? (
           <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
         ) : save.state === "failed" ? (
-          <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
+          !save.outsideWorkspace && <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
         ) : (
           <Download size={12} className="shrink-0" aria-hidden="true" />
         )}
@@ -706,7 +706,7 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
           title={save.state === "saved" ? save.savedTo : undefined}
           className={`text-[12px] ${save.state === "saved" ? "text-success" : save.state === "failed" ? "text-danger" : "text-ink-secondary"}`}
         >
-          {save.state === "failed" ? save.reason : label}
+          {save.state === "failed" ? saveFailureText(save) : label}
         </span>
       )}
       {save.state === "failed" && save.outsideWorkspace && (

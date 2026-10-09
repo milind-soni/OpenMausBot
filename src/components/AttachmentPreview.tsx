@@ -349,6 +349,13 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
   return { state, reason, savedTo, outsideWorkspace, folder, save };
 }
 
+/** What a failed save says. A file outside the conversation's working folder
+ * is refused on every try, so it is explained in the person's language rather
+ * than with the server's English, and is not offered as a retry. */
+export function saveFailureText(save: { reason: string; outsideWorkspace: boolean }): string {
+  return save.outsideWorkspace ? t("attach.outsideWorkspace") : save.reason;
+}
+
 function folderFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
@@ -903,6 +910,7 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
 }) {
   const save = useLocalFileSave(file.path, file.name, message);
   const failed = save.state === "failed";
+  const retryable = failed && !save.outsideWorkspace;
   if (!message || (!file.private && !linked)) {
     return (
       <div title={t("attach.legacyFile", { name: file.name })} className={cn("flex max-w-[280px] items-center gap-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 px-2.5 py-2 text-[12px] text-ink-secondary", className)}>
@@ -923,7 +931,7 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
           onClick={() => void save.save()}
           disabled={save.state === "saving"}
           aria-label={
-            failed
+            retryable
               ? t("attach.retrySaveAria", { name: file.name })
               : t("attach.saveAria", { name: file.name })
           }
@@ -935,8 +943,8 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
             <LoaderCircle size={13} className="shrink-0 animate-spin" />
           ) : save.state === "saved" ? (
             <Check size={13} className="shrink-0 text-success" />
-          ) : save.state === "failed" ? (
-            <RotateCcw size={13} className="shrink-0 text-danger" />
+          ) : failed ? (
+            retryable && <RotateCcw size={13} className="shrink-0 text-danger" />
           ) : (
             <Download size={13} className="shrink-0" />
           )}
@@ -955,7 +963,7 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
             ? t("attach.downloading")
             : save.state === "saved"
               ? t("attach.downloaded")
-              : save.reason}
+              : saveFailureText(save)}
           {failed && save.outsideWorkspace && (
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5">
               <OutsideWorkspaceFile filePath={file.path} />
