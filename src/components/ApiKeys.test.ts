@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StoreProvider } from "@/state/store";
 import * as store from "@/state/store";
-import { AnthropicEveryClaudeBot, ApiKeyRow, looksLikeKey, OpenAiCompatUrl, OpenCodeProviderKeys } from "./ApiKeys";
+import { AnthropicEveryClaudeBot, ApiKeyRow, desktopCredentialSlot, looksLikeKey, OpenAiCompatUrl, OpenCodeProviderKeys } from "./ApiKeys";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -137,5 +137,30 @@ describe("provider key rows", () => {
     expect(html).toContain("OpenAI-compatible base URL");
     expect(html).toContain('placeholder="https://api.groq.com/openai/v1"');
     expect(html).toContain("localhost:11434/v1");
+  });
+});
+
+describe("X research token row", () => {
+  it("renders write-only with treg linked and a Test button once saved", () => {
+    vi.spyOn(store, "useStore").mockReturnValue({
+      state: { ...store.initialState, config: { ...store.initialState.config, treg: { configured: true } } as store.ConfigStatus },
+      dispatch: vi.fn(),
+      flushBotPatches: vi.fn(),
+      refreshInstances: vi.fn(),
+      refreshModels: vi.fn(),
+    });
+    const html = render(createElement(ApiKeyRow, { section: "treg", testProvider: "treg" }));
+    expect(html).toContain("treg token (X research)");
+    expect(html).toContain('type="password"');
+    expect(html).toContain("Configured");
+    expect(html).toContain(">Test<");
+  });
+});
+
+describe("desktop credential slots", () => {
+  it("saves the treg token in the encrypted store, so Clear removes it there too", () => {
+    expect(desktopCredentialSlot("treg")).toBe("tregToken");
+    expect(desktopCredentialSlot("box")).toBe("boxToken");
+    expect(desktopCredentialSlot("openai")).toBeUndefined();
   });
 });

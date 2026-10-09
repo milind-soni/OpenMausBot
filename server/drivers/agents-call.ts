@@ -246,6 +246,16 @@ function normalizeScheduleInput(args: Json): NormalizedSchedule {
 
 type RoutineAction = "update" | "pause" | "resume" | "run_now" | "delete";
 
+/** The x_* tools and their internal routes (server/routes/x-research.ts),
+ * which validate the arguments, re-check the token and the bot's switch, and
+ * answer in compact JSON the bot reads as is. */
+const X_TOOL_ROUTES: Record<string, string> = {
+  x_search: "search",
+  x_user_posts: "user-posts",
+  x_post: "post",
+  x_profile: "profile",
+};
+
 /** Keeps a large result within what a model should be handed, saving the
  * rest in the harness for tool_result_read. */
 export const capResult = (text: string, context: ToolCallContext) => boundedAgentResult(text, (retained, truncated) => {
@@ -910,6 +920,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       // the harness's setup guidance straight to the model.
       return { text: `Voice note not sent: ${error instanceof Error ? error.message : String(error)}`, isError: true };
     }
+  }
+  const xRoute = Object.hasOwn(X_TOOL_ROUTES, name) ? X_TOOL_ROUTES[name] : undefined;
+  if (xRoute) {
+    const { ok, body } = await apiResponse(`/api/internal/x/${xRoute}`, { method: "POST", body: JSON.stringify(args) });
+    if (!ok) return { text: String(body.error ?? "X research failed. Try again shortly."), isError: true };
+    return { text: JSON.stringify(body) };
   }
   if (name === "list_routines") {
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });

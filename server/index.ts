@@ -627,7 +627,9 @@ import {
 // Keep these two last: a route module may import any server module, and
 // loading the table after everything above leaves module start-up order as is.
 import { json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
-import { ROUTES, dispatchRoutes } from "./routes/table.ts";
+import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts";
+import { createXResearchInternalRoutes, createXResearchKeyTestRoute } from "./routes/x-research.ts";
+import { createTregXClient } from "./x-research.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
@@ -2505,6 +2507,10 @@ function agentsIntegration(
         const speaking = botForThread(botId, threadId) ?? store.bot(botId);
         return tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false ? "1" : "0";
       })(),
+      // X research spends the person's own treg balance, so the tools are
+      // shown only to a bot they switched on, and only with a token saved;
+      // the routes (server/routes/x-research.ts) re-check both on every call.
+      OMB_X_RESEARCH: cfg.treg?.token && store.bot(botId)?.xResearch === true ? "1" : "0",
       // And for a role: team setup, bot creation and deletion, rooms and
       // retries are shown only to a Chief of Staff, whom their routes require.
       OMB_CHIEF_OF_STAFF: store.bot(botId)?.chiefOfStaff === true ? "1" : "0",
@@ -15455,6 +15461,8 @@ function configStatus() {
     xai: { configured: Boolean(cfg.xai?.key) },
     mistral: { configured: Boolean(cfg.mistral?.key) },
     cerebras: { configured: Boolean(cfg.cerebras?.key) },
+    // configured flag only: the token itself never leaves the server
+    treg: { configured: Boolean(cfg.treg?.token) },
     anthropic: { configured: Boolean(cfg.anthropic?.key), everyClaudeBot: cfg.anthropic?.everyClaudeBot !== false },
     openai: { configured: Boolean(cfg.openai?.key) },
     openrouter: { configured: Boolean(cfg.openrouter?.key) },
@@ -16005,6 +16013,18 @@ ROUTES.push(createAntigravityAccountRoutes({
 }));
 
 ROUTES.push(desktopViewer.route);
+// X research (server/routes/x-research.ts): Settings' token Test runs from the
+// table; the four tool routes run inside the /api/internal/ block below,
+// after the capability bearer is checked. `cfg` is reassigned on reload, so
+// both read it per request. OMB_TREG_URL points the client at a self-hosted
+// treg registry (or a test's loopback stub) instead of treg.to.
+const xResearchClient = (token: string) => createTregXClient({ token, baseUrl: process.env.OMB_TREG_URL?.trim() || undefined });
+ROUTES.push(createXResearchKeyTestRoute({ token: () => cfg.treg?.token, client: xResearchClient }));
+const xResearchRoutes = createXResearchInternalRoutes({
+  token: () => cfg.treg?.token,
+  botEnabled: (botId) => store.bot(botId)?.xResearch === true,
+  client: xResearchClient,
+});
 
 // Live calls (GPT-Live as the voice, the bot as the brain). A client holds
 // the WebRTC audio; the harness creates the session with the key (which
@@ -16676,6 +16696,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
+      if (await xResearchRoutes({ method, path, res, json, botId: internalSender.id, readBody: readInternalBody }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);
       };
@@ -21558,6 +21579,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (typeof body.voiceNotes !== "boolean") return json(res, 400, { error: "voiceNotes must be true or false" });
         patch.voiceNotes = body.voiceNotes;
       }
+      // per-bot gate on the X research tools: they spend the workspace's
+      // treg balance, so like voiceNotes this is an admin decision, never
+      // part of the client-writable profile surface.
+      if (body.xResearch !== undefined) {
+        if (typeof body.xResearch !== "boolean") return json(res, 400, { error: "xResearch must be true or false" });
+        patch.xResearch = body.xResearch;
+      }
       if (body.memoryEnabled !== undefined) {
         if (typeof body.memoryEnabled !== "boolean") return json(res, 400, { error: "memoryEnabled must be true or false" });
         if (existingBot && (existingBot.busy || activeGroupTurnForBot(existingBot.id)) &&
@@ -24868,6 +24896,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           if (persisted.live?.key !== undefined) persisted.live.key = "";
+          if (persisted.treg?.token !== undefined) persisted.treg.token = "";
           saveConfig(persisted);
           configWriteCommitted = true;
           syncCredentialEnv(patch);

@@ -202,3 +202,29 @@ describe("AccessSection Works on", () => {
     expect(render(makeBot({ computer: "cloud" }))).not.toContain("Boat");
   });
 });
+
+describe("X research card", () => {
+  it("is off by default and points to API keys when no token is saved", () => {
+    fixture.config = { treg: { configured: false } } as Partial<ConfigStatus>;
+    const html = render(makeBot());
+    expect(html).toContain("X research");
+    expect(html).toContain("Settings → API keys");
+    expect(html).toMatch(/aria-label="Let this bot search and read X"[^>]*disabled/);
+  });
+
+  it("is not offered while a new bot or the New bot defaults are being drafted", async () => {
+    fixture.config = { treg: { configured: true } } as Partial<ConfigStatus>;
+    const { BotEditorContext } = await import("./BotEditorContext");
+    const { api } = await import("@/state/store");
+    const html = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(AccessSection, { bot: makeBot(), derived: makeDerived() }))));
+    expect(html).not.toContain("Let this bot search and read X");
+  });
+
+  it("shows the switch on for a bot switched on, with a token saved", () => {
+    fixture.config = { treg: { configured: true } } as Partial<ConfigStatus>;
+    const html = render(makeBot({ xResearch: true }));
+    expect(html).toMatch(/aria-label="Let this bot search and read X"[^>]*aria-checked="true"/);
+    expect(html).toContain("treg balance");
+  });
+});

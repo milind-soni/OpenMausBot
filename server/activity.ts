@@ -72,6 +72,14 @@ function toolkitName(slug: string): string {
 /** Composio names its tools TOOLKIT_ACTION_WORDS, all upper case. */
 const COMPOSIO_TOOL = /^([A-Z][A-Z0-9]+)_([A-Z0-9_]+)$/;
 
+/** The agents server's X research tools read as their own app. */
+const X_TOOL_LABELS: Record<string, string> = {
+  x_search: "Searched X",
+  x_user_posts: "Read X posts",
+  x_post: "Read an X post",
+  x_profile: "Looked up an X profile",
+};
+
 /** Turn a raw tool name into the app it touched and the action, in words. */
 export function describeTool(name: string): { app: string | null; label: string } {
   const builtin = BUILTIN_LABELS[name];
@@ -82,7 +90,10 @@ export function describeTool(name: string): { app: string | null; label: string 
     const action = rest.join("__");
     if (server === "composio") return describeTool(action);
     if (server === "computer") return { app: "Computer", label: humanize(action) };
-    if (server === "agents") return { app: "Team", label: humanize(action) };
+    if (server === "agents") {
+      const x = Object.hasOwn(X_TOOL_LABELS, action) ? X_TOOL_LABELS[action] : undefined;
+      return x ? { app: "X", label: x } : { app: "Team", label: humanize(action) };
+    }
     if (server.startsWith("claude_ai_")) {
       return { app: server.slice("claude_ai_".length).replace(/_/g, " "), label: humanize(action) };
     }
