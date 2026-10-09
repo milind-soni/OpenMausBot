@@ -43,7 +43,7 @@ COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs
 RUN pnpm install --frozen-lockfile
 COPY . .
 # The Cloud home runs these as root, so nobody else may write them.
-RUN pnpm build:server && pnpm exec vite build && chmod -R go-w dist dist-server
+RUN pnpm build:server && pnpm exec vite build && node scripts/prepare-duckdb.mjs && chmod -R go-w dist dist-server dist-native/duckdb
 
 FROM node:24-bookworm-slim AS runtime
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
@@ -83,7 +83,9 @@ RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Chrome for Testing ${CHROME_CA
 # which may be an existing mounted volume. Session state still lives in HOME,
 # which each image sets after its last build step, so no build step writes
 # into what a fresh volume starts with.
+#  OMB_DUCKDB_DIR: the DuckDB binding tree the server requires (no node_modules here).
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/openmausbot-browser/chrome \
+    OMB_DUCKDB_DIR=/app/duckdb \
     OMB_DATA_DIR=/data/.openmausbot \
     OMB_STATIC_DIR=/app/dist \
     OMB_PORT=8799 \
@@ -129,6 +131,7 @@ COPY deploy/fly/Caddyfile /app/cloud/Caddyfile
 # start otherwise (codeTrustProblem), and this check refuses to build.
 COPY --from=build /src/dist-server ./dist-server
 COPY --from=build /src/dist ./dist
+COPY --from=build /src/dist-native/duckdb/linux-x64 ./duckdb
 RUN export HOME=/tmp/omb-build-home \
  && chmod go-w /app/cloud /app/cloud/Caddyfile \
  && caddy version \
@@ -157,6 +160,7 @@ ARG ENGINES=""
 RUN if [ -n "$ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $ENGINES && rm -rf /tmp/omb-build-home /tmp/node-compile-cache; fi
 COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
 COPY --from=build --chown=maus:maus /src/dist ./dist
+COPY --from=build --chown=maus:maus /src/dist-native/duckdb/linux-x64 ./duckdb
 ENV HOME=/data
 VOLUME ["/data"]
 USER maus

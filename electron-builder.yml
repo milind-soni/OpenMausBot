@@ -115,6 +115,10 @@ mac:
       to: cloudflared/cloudflared
     - from: dist-native/browser/darwin-${arch}
       to: browser-engine
+    # The DuckDB binding (server/data/engine.ts) as a node_modules tree the
+    # server requires at runtime; prepare-duckdb stages this arch's slice.
+    - from: dist-native/duckdb/darwin-${arch}
+      to: duckdb
   extendInfo:
     NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
     NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
@@ -143,6 +147,8 @@ win:
       to: cloudflared/cloudflared.exe
     - from: dist-native/browser/win32-x64
       to: browser-engine
+    - from: dist-native/duckdb/win32-x64
+      to: duckdb
     # CUA driver and SDK for Windows — must live outside ASAR for native modules
     - from: dist-native/cua-win32-x64/cua-driver.exe
       to: cua-driver.exe
@@ -194,6 +200,8 @@ linux:
       to: cloudflared/cloudflared
     - from: dist-native/browser/linux-x64
       to: browser-engine
+    - from: dist-native/duckdb/linux-x64
+      to: duckdb
     - from: build/linux-openmausbot-browser.apparmor
       to: openmausbot-browser.apparmor
   desktop:

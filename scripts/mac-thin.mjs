@@ -24,7 +24,7 @@ export async function isMachO(file) {
   }
 }
 
-async function machOArchs(file) {
+export async function machOArchs(file) {
   const { stdout } = await run(LIPO, ["-archs", file]);
   return stdout.trim().split(/\s+/);
 }

@@ -5,8 +5,12 @@ import {
   executableTarget,
   verifyCloudflaredExecutable,
 } from "./prepare-cloudflared.mjs";
+import { fileURLToPath } from "node:url";
 import { verifyBrowserBundle } from "./prepare-browser.mjs";
+import { pinnedDuckdbVersion, verifyDuckdbTree } from "./prepare-duckdb.mjs";
 import { LIPO_ARCH, isMachO, writeThinMachO } from "./mac-thin.mjs";
+
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 async function requireRealDirectory(directory, mode = 0o755) {
   const details = await lstat(directory);
@@ -66,6 +70,23 @@ async function validateCloudflared(resources, platform, required) {
   );
 }
 
+// The DuckDB binding the server requires at runtime (server/data/engine.ts):
+// the pinned packages, the native binding beside its library, and on macOS
+// only this app's slice, so an Intel Mac never gets an arm64-only dylib.
+async function validateDuckdb(resources, platform, arch, required) {
+  const duckdb = path.join(resources, "duckdb");
+  const present = await lstat(duckdb).then(() => true, (error) => {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  });
+  // Unit fixtures carry only the resources they test; a real build fails
+  // closed because electron-builder only warns about a missing `from`.
+  if (!present && !required) return;
+  if (!arch) throw new Error(`Unsupported DuckDB package architecture: ${arch}`);
+  await requireRealDirectory(duckdb, platform === "win32" ? undefined : 0o755);
+  await verifyDuckdbTree(duckdb, platform, arch, pinnedDuckdbVersion(root));
+}
+
 // Google ships macOS Platform Tools universal, and the shared top-level
 // extraResources entry copies that tree into both single-arch apps. Keep only
 // this app's slice, before electron-builder signs the nested code.
@@ -108,6 +129,7 @@ export default async function afterPack(context) {
     if (!arch) throw new Error(`Unsupported desktop browser package architecture: ${context.arch}`);
     await verifyBrowserBundle(browserRoot, `${context.electronPlatformName}-${arch}`);
   }
+  await validateDuckdb(resources, context.electronPlatformName, arch, Boolean(context.packager));
   if (context.electronPlatformName === "darwin") await thinMacPlatformTools(resources, arch);
 
   if (context.electronPlatformName !== "linux") return;
