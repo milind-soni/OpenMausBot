@@ -9,6 +9,7 @@ import {
   BellDot,
   Bot as BotIcon,
   Check,
+  CheckCheck,
   ChevronRight,
   ClipboardCopy,
   Copy,
@@ -62,7 +63,7 @@ import { RenameTitle } from "./RenameTitle";
 import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
-import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
+import { botUnreadThreadIds, folderUnreadThreadIds, markBotRead, markFolderRead } from "@/lib/folder-read";
 import { orderedThreadList, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
@@ -772,6 +773,28 @@ export function BotContextMenu({
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
   const menuRef = useRef<HTMLDivElement>(null);
+  const latestMenu = useRef(menu);
+  latestMenu.current = menu;
+  const readInFlight = useRef(false);
+  const [readingBotId, setReadingBotId] = useState<string | null>(null);
+  const [readError, setReadError] = useState<{ botId: string; message: string } | null>(null);
+  useEffect(() => { setReadError(null); }, [menu?.botId]);
+  const readAll = async (owner: Bot) => {
+    if (readInFlight.current) return;
+    readInFlight.current = true;
+    setReadingBotId(owner.id);
+    setReadError(null);
+    const openedMenu = menu;
+    try {
+      await markBotRead(owner, api, (updated) => dispatch({ type: "botPatched", bot: updated }));
+      if (latestMenu.current === openedMenu) onClose();
+    } catch {
+      setReadError({ botId: owner.id, message: t("sidebar.bot.markAllReadFailed") });
+    } finally {
+      readInFlight.current = false;
+      setReadingBotId(null);
+    }
+  };
   useLayoutEffect(() => {
     const element = menuRef.current;
     if (!element || !shown) return;
@@ -826,7 +849,7 @@ export function BotContextMenu({
     icon: React.ReactNode,
     label: string,
     onClick?: () => void,
-    opts?: { danger?: boolean; disabled?: boolean; hint?: string },
+    opts?: { danger?: boolean; disabled?: boolean; hint?: string; keepOpen?: boolean },
   ) => (
     <button
       key={label}
@@ -835,7 +858,7 @@ export function BotContextMenu({
       disabled={opts?.disabled}
       onClick={() => {
         onClick?.();
-        onClose();
+        if (!opts?.keepOpen) onClose();
       }}
       title={opts?.hint}
       className={cn(
@@ -900,6 +923,12 @@ export function BotContextMenu({
         item(<BellDot size={16} className="text-ink-secondary" />, t("sidebar.bot.markUnread"), () =>
           dispatch({ type: "markUnread", botId: bot.id }),
         ),
+        item(
+          readingBotId === bot.id ? <Loader2 size={16} className="animate-spin text-ink-secondary" /> : <CheckCheck size={16} className="text-ink-secondary" />,
+          readingBotId === bot.id ? t("sidebar.bot.markingAllRead") : t("sidebar.bot.markAllRead"),
+          () => { void readAll(bot); },
+          { disabled: readingBotId !== null || botUnreadThreadIds(bot).length === 0, keepOpen: true },
+        ),
         divider("d1"),
         item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.editProfile"), () => {
           dispatch({ type: "select", id: bot.id });
@@ -931,6 +960,7 @@ export function BotContextMenu({
           }}
         />,
       ]}
+      {readError?.botId === bot.id && <p role="alert" className="px-3.5 py-2 text-[12px] text-danger">{readError.message}</p>}
     </div>,
     document.body,
   );

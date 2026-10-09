@@ -24,6 +24,39 @@ This fixture covers the sidebar confirmation and bot-row result only; it does
 not exercise Settings > Computers deletion or provider completion polling.
 Those paths are covered by the computer-section and server Boat inventory tests.
 
+## Mark all of a bot's conversations as read
+
+Run `node --experimental-strip-types scripts/verify-sidebar.ts --unread`.
+This opt-in fixture seeds Sidebar Atlas with twelve unread webhook-like
+conversations across a folder and unfiled history, plus a running fake-provider
+turn and a sibling report queued behind its capacity limit. The data directory contains `bulk-read-before.json`.
+Open only the printed `previewUrl`:
+
+1. Open **Actions for Sidebar Atlas → Mark all conversations as read**.
+   While requests are pending the action shows progress and cannot be repeated.
+2. All existing unread conversations for Atlas become read. Its working and
+   queued indicators remain. No conversation is selected, deleted or archived.
+3. Reload and inspect the same fixture's `/api/bots` response: unread flags
+   remain cleared, transcripts and the queued report remain intact, and
+   the fake turn is still running. Other bots retain their state.
+4. With no unread conversation, the menu action is disabled. In the real
+   app it also remains available with **Show threads** off; thread-pinned
+   remote clients do not receive an action that targets their siblings.
+
+`src/lib/bot-read.test.ts` covers legacy state, all folders/unfiled/archived
+threads, work and approval preservation, ordered requests for 250 threads,
+partial failure/retry and new-thread arrivals. `SidebarBotRead.test.ts` mounts
+the actual menu to check progress, duplicate-click protection, error recovery,
+Portuguese copy, hidden thread trees and a menu reopened during a read.
+Folder reads use the same request helper and retain their existing tests.
+
+Verified on 2026-10-09 in the isolated renderer: 14 unread threads became
+read; all 15 conversations, transcripts, settings and the other bots were
+unchanged. One fake-provider turn kept running and one sibling message stayed
+queued. The cleared flags persisted after reload, and the empty action was
+disabled. Progress was visible during the requests. Native desktop clients
+were not exercised by this browser check.
+
 ## Section deletion
 
 Run `OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/team-lifecycle-ui.e2e.test.ts --maxWorkers=1`.
