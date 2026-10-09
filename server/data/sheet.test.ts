@@ -1,7 +1,7 @@
 // The sheet store: ids that never repeat, update in place, pruning that
 // drops result tables, a restart that fails a running card, a corrupt file
 // that starts empty, and one broadcast per change.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -120,5 +120,11 @@ describe("DataSheetStore", () => {
     expect(dropped).toEqual(["b1:c_1"]);
     registry.forget("b1");
     expect(registry.for("b1").cards()).toEqual([]);
+    // deleting a bot removes its sheet file as well as the store
+    await registry.for("b2").addCard({ kind: "text", title: "note", text: "x", by: "person", status: "ready" });
+    expect(existsSync(join(dir, "b2", SHEET_FILE))).toBe(true);
+    registry.delete("b2");
+    expect(existsSync(join(dir, "b2", SHEET_FILE))).toBe(false);
+    expect(registry.for("b2").cards()).toEqual([]);
   });
 });

@@ -23,7 +23,7 @@ beforeAll(async () => {
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });
 afterAll(async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); });
-const connection = (kind: "browser" | "computer" = "browser") => ({ url, token: "scoped-capability", kind });
+const connection = (kind: "browser" | "computer" | "data" = "browser") => ({ url, token: "scoped-capability", kind });
 const frame = (method: string, params: unknown = {}) => ({ jsonrpc: "2.0", id: 1, method, params });
 
 describe("harness MCP capability proxy", () => {
@@ -57,6 +57,24 @@ describe("harness MCP capability proxy", () => {
     expect(refused.result.content[0].text).toContain("expired");
     expect(refused.result.content[0].text).toContain("cloud computer");
     expect(refused.result.content[0].text).not.toContain("select_computer");
+  });
+
+  it("sends the Data tools' calls to their own harness route, with the dialect instructions at initialize", async () => {
+    status = 200;
+    payload = { result: { tools: [{ name: "data_sql" }], instructions: "DuckDB" } };
+    const initialized = await harnessMcpRequest(frame("initialize"), connection("data")) as { result: { serverInfo: { name: string }; instructions?: string } };
+    expect(initialized.result.serverInfo.name).toBe("openmausbot-data");
+    expect(initialized.result.instructions).toContain("GROUP BY ALL");
+    // the browser and the computer carry no instructions
+    expect(((await harnessMcpRequest(frame("initialize"), connection("browser"))) as { result: Record<string, unknown> }).result.instructions).toBeUndefined();
+    await expect(harnessMcpRequest(frame("tools/list"), connection("data"))).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [{ name: "data_sql" }], instructions: "DuckDB" } });
+    expect(requests.at(-1)).toEqual({ path: "/api/internal/data/mcp", auth: "Bearer scoped-capability", body: { method: "tools/list", params: {} } });
+    status = 503;
+    payload = { error: "Data tools are unavailable: the DuckDB binding did not load" };
+    const refused = await harnessMcpRequest(frame("tools/call", { name: "data_sql", arguments: { sql: "SELECT 1" } }), connection("data")) as any;
+    expect(refused.result.isError).toBe(true);
+    expect(refused.result.content[0].text).toContain("DuckDB binding");
+    expect(refused.result.content[0].text).toContain("data_describe");
   });
 
   it("fails closed with an MCP tool refusal, but tools/list uses an RPC error", async () => {
