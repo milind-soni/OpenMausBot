@@ -4,12 +4,36 @@ import type { WorkspaceBackupSummary } from "../../shared/workspace-backup";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { applyWorkspaceClientState, collectWorkspaceClientState, WORKSPACE_RESTORE_MARKER } from "@/lib/workspace-backup-client";
+import { CloudMoveImport } from "./CloudMove";
 import { Card } from "./SettingsPrimitives";
 
 type BackupStatus = { busy: boolean; pendingRestore?: boolean; lastRestoreId?: string };
 const inputClass = "w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[14px] text-ink disabled:opacity-50";
 const buttonClass = "inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-40";
 const validPassword = (value: string) => value.length >= 12 && value.length <= 1024;
+
+/** A renderer reload cannot apply a restore; the owning server must restart. */
+export function WorkspaceBackupRestartNotice({ onRetry }: { onRetry?: () => void } = {}) {
+  const [restarting, setRestarting] = useState(false);
+  const [error, setError] = useState(false);
+  const lock = useRef(false);
+  const relaunch = typeof window !== "undefined" && !window.ogb?.remoteClient?.active ? window.ogb?.relaunch : undefined;
+  const restart = async () => {
+    if (!relaunch || lock.current || restarting) return;
+    lock.current = true; setRestarting(true); setError(false);
+    try {
+      if (!await relaunch()) throw new Error("Restart unavailable");
+    } catch {
+      lock.current = false; setRestarting(false); setError(true);
+    }
+  };
+  return <div role="status" className="flex max-w-lg flex-col gap-4 text-[14px]">
+    <p>{t(relaunch ? "backup.restartDesktop" : "backup.restart")}</p>
+    {relaunch && <button type="button" className={`${buttonClass} self-start`} disabled={restarting} onClick={() => void restart()}>{restarting ? t("settings.updates.restartingShort") : t("backup.restartAction")}</button>}
+    {!relaunch && onRetry && <button type="button" className={`${buttonClass} self-start`} onClick={onRetry}>{t("connectors.action.retry")}</button>}
+    {error && <p role="alert" className="text-[13px] text-danger">{t("backup.restartFailed")}</p>}
+  </div>;
+}
 
 export function WorkspaceBackupSummaryView({ summary }: { summary: WorkspaceBackupSummary }) {
   return <div className="rounded-lg border border-hairline/50 bg-inset p-3">
@@ -132,7 +156,7 @@ export function WorkspaceBackupSettings() {
     <p className="text-[13px] leading-relaxed text-ink-secondary">{t("backup.excluded")}</p>
     <p className="text-[13px] leading-relaxed text-ink-secondary">{t("backup.privacy")}</p>
     {error && <p role="alert" className="break-words text-[13px] text-danger">{error}</p>}
-    {status?.pendingRestore ? <div role="status" className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-[13px] text-ink">{t("backup.restart")}</div> : <>
+    {status?.pendingRestore ? <div className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-ink"><WorkspaceBackupRestartNotice /></div> : <>
       {(!status || status.busy) && <div role="status" className="flex items-center gap-3 text-[13px] text-ink-secondary"><span>{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}</span><button type="button" onClick={() => void refresh()} className="underline">{t("connectors.action.retry")}</button></div>}
       <Card title={t("backup.export")} subtitle={t("backup.passwordHint")}>
         <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void exportBackup(); }}>
@@ -142,6 +166,8 @@ export function WorkspaceBackupSettings() {
           {download && <a href={download.url} download={download.filename} className="break-all text-[13px] text-accent-text underline">{t("backup.downloadAgain", { filename: download.filename })}</a>}
         </form>
       </Card>
+      {/* On a server open in the desktop app: the same copy as its Copy this computer here offer. */}
+      <CloudMoveImport />
       <Card title={t("backup.import")} subtitle={t("backup.importHint")}>
         <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void previewBackup(); }}>
           <label className="text-[13px] text-ink">{t("backup.file")}<input type="file" accept=".ombbackup" disabled={disabled} onChange={(event) => { setFile(event.target.files?.[0] ?? null); setUploadedId(null); setPreview(null); setConfirmation(""); setImportPassword(""); setError(null); }} className="mt-1 block w-full min-w-0 rounded-lg border border-hairline/50 bg-inset p-2 text-[13px] text-ink file:mr-3 file:rounded file:border-0 file:bg-control file:px-2 file:py-1 file:text-ink disabled:opacity-50" /></label>
@@ -200,9 +226,9 @@ export function WorkspaceBackupRecovery({ children }: { children: ReactNode }) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   };
   return <main className="flex h-dvh flex-col items-center justify-center gap-4 bg-app p-6 text-ink">
-    <p className="max-w-lg text-[14px]">{restartRequired ? t("backup.restart") : t("backup.recovering")}</p>
+    {restartRequired ? <WorkspaceBackupRestartNotice onRetry={() => { setRestartRequired(false); setAttempt((value) => value + 1); }} /> : <p className="max-w-lg text-[14px]">{t("backup.recovering")}</p>}
     {error && <p role="alert" className="max-w-lg break-words text-[13px] text-danger">{error}</p>}
-    {(error || restartRequired) && <button type="button" className={buttonClass} onClick={() => { setRestartRequired(false); setAttempt((value) => value + 1); }}>{t("connectors.action.retry")}</button>}
+    {error && <button type="button" className={buttonClass} onClick={() => { setRestartRequired(false); setAttempt((value) => value + 1); }}>{t("connectors.action.retry")}</button>}
     {error && <>
       <p className="max-w-lg text-[13px] text-ink-secondary">{t("backup.skipDraftsHint")}</p>
       <button type="button" className="rounded-lg border border-hairline/50 bg-control px-3 py-2 text-[13px] font-medium text-ink" onClick={continueWithoutDrafts}>{t("backup.skipDrafts")}</button>

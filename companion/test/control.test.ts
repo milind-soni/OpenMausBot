@@ -15,6 +15,7 @@ let port = 0;
 let devices: DeviceRegistry;
 let connectedDeviceIds: string[] = [];
 let disconnectedDeviceIds: string[] = [];
+let revokedDeviceIds: string[] = [];
 let tailscaleRefreshes = 0;
 let completedTailscaleRefreshes = 0;
 
@@ -49,6 +50,9 @@ beforeAll(async () => {
     disconnectDevice: (deviceId) => {
       disconnectedDeviceIds.push(deviceId);
       connectedDeviceIds = connectedDeviceIds.filter((connectedId) => connectedId !== deviceId);
+    },
+    revoked: (deviceId) => {
+      revokedDeviceIds.push(deviceId);
     },
     refreshTailscale: async () => {
       tailscaleRefreshes += 1;
@@ -248,6 +252,24 @@ describe("hostCandidates", () => {
     expect(revoked.status).toBe(200);
     expect(disconnectedDeviceIds).toEqual([paired.device.id]);
     expect(revoked.body.connectedDeviceIds).toEqual([]);
+  });
+
+  // A phone's requests reach the harness as this computer's own, so the
+  // harness cannot tell by itself that a phone lost its access. The revoke
+  // tells it, so a Live call that phone holds ends too.
+  it("tells the harness about a revoked device, and only about a revoke", async () => {
+    const { code } = devices.openPairing();
+    const paired = devices.redeem(code, "Lost phone");
+    if ("error" in paired) throw new Error(paired.error);
+    revokedDeviceIds = [];
+
+    expect((await ask("DELETE", "/devices/missing-device")).status).toBe(404);
+    expect((await ask("POST", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
+    expect((await ask("DELETE", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
+    expect(revokedDeviceIds).toEqual([]);
+
+    expect((await ask("DELETE", `/devices/${paired.device.id}`)).status).toBe(200);
+    expect(revokedDeviceIds).toEqual([paired.device.id]);
   });
 });
 

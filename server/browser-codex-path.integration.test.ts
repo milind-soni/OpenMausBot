@@ -115,8 +115,8 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
     // Browser work now passes through the turn-scoped hold gate. The Codex
     // process receives no shared profile key or direct browser command.
     expect(dump.argv).toContain(`mcp_servers.browser.command=${JSON.stringify(process.execPath)}`);
-    expect(dump.argv.some((arg: string) => arg.startsWith("mcp_servers.browser.args=") && arg.includes("browser-proxy.ts"))).toBe(true);
-    expect(dump.env.OMB_BROWSER_TOKEN).toBeTruthy();
+    expect(dump.argv.some((arg: string) => arg.startsWith("mcp_servers.browser.args=") && arg.includes("harness-mcp-proxy.ts") && arg.includes('"browser"'))).toBe(true);
+    expect(dump.env.OMB_MCP_TOKEN).toBeTruthy();
     expect(dump.env.AGENT_BROWSER_SESSION).toBeUndefined();
     expect(dump.env.AGENT_BROWSER_ENCRYPTION_KEY).toBeUndefined();
     expect(dump.calls.some((call: any) => call.method === "turn/start")).toBe(true);

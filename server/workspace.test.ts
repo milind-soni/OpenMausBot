@@ -1,7 +1,7 @@
 // Workspace + file memory contract: the workspace is created idempotently,
 // MEMORY.md loads under a hard budget, and the system-prompt block always
 // teaches the mechanism even before the bot has written anything.
-import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -32,8 +32,8 @@ import {
   memoryEntry,
   memoryLineCount,
   memorySourceLabel,
-  MEMORY_CONSOLIDATE_HINT,
-  MEMORY_REFUSAL_RECENT_ENTRIES,
+  MEMORY_ENTRY_MAX_CHARS,
+  MEMORY_ENTRY_MAX_LINES,
   MEMORY_MAX_BYTES,
   MEMORY_MAX_LINES,
   WORKSPACES_DIR,
@@ -66,6 +66,13 @@ describe("workspace", () => {
     expect(readFileSync(join(shared, "old.txt"), "utf8")).toBe("existing private file contents");
     expect(existsSync(join(thread, "old.txt"))).toBe(false);
     expect(workspaceLocationsPrompt(BOT, undefined)).toContain("inspect the working directory");
+  });
+
+  it("tells a bot with attach_file to deliver a file saved outside its folders, and no one else", () => {
+    const thread = ensureTaskWorkspace(BOT, "thread-first");
+    expect(workspaceLocationsPrompt(BOT, thread, undefined, { attachFile: true }))
+      .toContain("also attach it with attach_file in the same turn");
+    expect(workspaceLocationsPrompt(BOT, thread)).not.toContain("attach_file");
   });
 
   it("creates distinct private task desks outside shared memory and refuses path traversal", () => {
@@ -187,9 +194,10 @@ describe("workspace", () => {
     // Human editor writes remain the canonical file the next tool update reads,
     // and a file left without a final newline gets exactly one before the entry.
     writeMemoryFile(BOT, "- Edited by the user");
-    expect(updateMemory(BOT, { action: "append", text: "Another thread's fact" }, opts)).toMatchObject({
-      ok: true, text: '- Edited by the user\n- 2026-09-10 · from chat "Setup" · Another thread\'s fact\n', truncated: false,
+    expect(updateMemory(BOT, { action: "append", text: "Another thread's fact" }, opts)).toEqual({
+      ok: true, truncated: false, entry: '- 2026-09-10 · from chat "Setup" · Another thread\'s fact', moved: [],
     });
+    expect(readMemoryFile(BOT).text).toBe('- Edited by the user\n- 2026-09-10 · from chat "Setup" · Another thread\'s fact\n');
   });
 
   it("formats an entry as one dated, sourced line and keeps fenced blocks whole", () => {
@@ -200,8 +208,9 @@ describe("workspace", () => {
     expect(memoryEntry("Deploys on Fridays", { now })).toBe("- 2026-09-10 · Deploys on Fridays");
     // a multi-line note folds onto one line; a title with the separator in it is scrubbed
     expect(memoryEntry("first line\n   second line", { source: 'chat "A · B"', now })).toBe('- 2026-09-10 · from chat "A - B" · first line second line');
+    // a code block keeps its lines, indented under the entry so they belong to it
     const fenced = memoryEntry("Deploy command:\n```sh\nrailway up\n```", { now });
-    expect(fenced).toBe("- 2026-09-10 · Deploy command:\n```sh\nrailway up\n```");
+    expect(fenced).toBe("- 2026-09-10 · Deploy command:\n  ```sh\n  railway up\n  ```");
   });
 
   it("names an entry's source by room, then thread title, then thread id", () => {
@@ -262,7 +271,7 @@ describe("workspace", () => {
     expect(updateMemory(BOT, { action: "supersede", oldText: "Office: Lisbon" }, later)).toMatchObject({ ok: false, code: "invalid" });
   });
 
-  it("rejects ambiguous, invalid and over-budget memory changes without changing saved notes", () => {
+  it("rejects ambiguous, invalid and over-long memory changes without changing saved notes", () => {
     writeMemoryFile(BOT, "repeated repeated");
     for (const action of ["replace", "remove"] as const) {
       expect(updateMemory(BOT, { action, oldText: "repeated", ...(action === "replace" ? { text: "new" } : {}) }))
@@ -271,52 +280,187 @@ describe("workspace", () => {
     expect(updateMemory(BOT, { action: "append", text: " " })).toMatchObject({ ok: false, code: "invalid" });
     expect(updateMemory(BOT, { action: "replace", oldText: "", text: "replacement" })).toMatchObject({ ok: false, code: "invalid" });
     expect(updateMemory(BOT, { action: "remove", oldText: "repeated", text: "unexpected" })).toMatchObject({ ok: false, code: "invalid" });
-    expect(updateMemory(BOT, { action: "append", text: "é".repeat(MEMORY_MAX_BYTES) })).toMatchObject({ ok: false, code: "over-budget" });
+    // one fact per call: a huge note would push every older entry out
+    const long = updateMemory(BOT, { action: "append", text: "x".repeat(MEMORY_ENTRY_MAX_CHARS + 1) });
+    expect(long).toMatchObject({ ok: false, code: "invalid" });
+    expect(long.ok ? "" : long.error).toContain("1001 characters");
+    expect(updateMemory(BOT, { action: "replace", oldText: "repeated repeated", text: "y".repeat(MEMORY_ENTRY_MAX_CHARS + 1) })).toMatchObject({ ok: false, code: "invalid" });
+    // lines too: a short code block can still fill what loads by itself
+    const tall = updateMemory(BOT, { action: "append", text: `Snippet\n\`\`\`\n${"x\n".repeat(MEMORY_ENTRY_MAX_LINES - 2)}\`\`\`` });
+    expect(tall).toMatchObject({ ok: false, code: "invalid" });
+    expect(tall.ok ? "" : tall.error).toContain(`${MEMORY_ENTRY_MAX_LINES + 1} lines`);
     expect(readMemoryFile(BOT).text).toBe("repeated repeated");
+    expect(updateMemory(BOT, { action: "append", text: "x".repeat(MEMORY_ENTRY_MAX_CHARS) })).toMatchObject({ ok: true });
   });
 
-  it("refuses a write that would leave the file over the load budget, with the counts and the newest entries", () => {
-    const now = new Date(2026, 8, 10, 12);
-    const entries = Array.from({ length: MEMORY_MAX_LINES }, (_, i) => `- fact ${i}`);
-    writeMemoryFile(BOT, `${entries.join("\n")}\n`);
+  const archive = () => readMemoryTopic(BOT, "archive.md") ?? "";
+  const withinBudget = (text: string) => memoryLineCount(text) <= MEMORY_MAX_LINES && Buffer.byteLength(text, "utf8") <= MEMORY_MAX_BYTES;
+
+  it("never refuses for size: a write to a full file moves the oldest entry to the archive, where search finds it", () => {
+    const now = new Date(2026, 9, 3, 12);
+    const entries = [
+      "- 2026-09-01 · The staging host is kestrel",
+      ...Array.from({ length: MEMORY_MAX_LINES - 2 }, (_, i) => `- 2026-09-02 · fact ${i}`),
+    ];
+    writeMemoryFile(BOT, `# Memory\n${entries.join("\n")}\n`);
     expect(memoryLineCount(readMemoryFile(BOT).text)).toBe(MEMORY_MAX_LINES);
-    expect(readMemoryFile(BOT).truncated).toBe(false);
-    const refused = updateMemory(BOT, { action: "append", text: "one fact too many" }, { source: 'chat "Full"', now });
-    expect(refused).toMatchObject({
-      ok: false, code: "over-budget", lines: MEMORY_MAX_LINES + 1, budget: { lines: MEMORY_MAX_LINES, bytes: MEMORY_MAX_BYTES },
-      recent: entries.slice(-MEMORY_REFUSAL_RECENT_ENTRIES),
-    });
-    expect(refused.ok ? "" : refused.error).toContain(`would be ${MEMORY_MAX_LINES + 1} lines`);
-    expect(refused.ok ? "" : refused.error).toContain(MEMORY_CONSOLIDATE_HINT);
-    expect(refused.ok ? "" : refused.error).toContain("do not retry the same append");
-    // nothing landed
-    expect(memoryLineCount(readMemoryFile(BOT).text)).toBe(MEMORY_MAX_LINES);
-    // bytes are refused the same way, on a file with few lines
-    writeMemoryFile(BOT, `- ${"x".repeat(MEMORY_MAX_BYTES - 100)}\n`);
-    const bytes = updateMemory(BOT, { action: "append", text: "y".repeat(200) }, { now });
-    expect(bytes).toMatchObject({ ok: false, code: "over-budget", lines: 2 });
-    expect(!bytes.ok && bytes.code === "over-budget" ? bytes.bytes : 0).toBeGreaterThan(MEMORY_MAX_BYTES);
-    // an over-budget file the person grew by hand can still be consolidated:
-    // a change that makes it smaller goes through, one that grows it does not
-    writeMemoryFile(BOT, `${entries.join("\n")}\n- fact ${MEMORY_MAX_LINES}\n- fact ${MEMORY_MAX_LINES + 1}\n`);
-    expect(readMemoryFile(BOT).truncated).toBe(true);
-    expect(updateMemory(BOT, { action: "replace", oldText: "- fact 0", text: "- facts 0 and 1 merged, longer than before" }, { now })).toMatchObject({ ok: false, code: "over-budget" });
-    expect(updateMemory(BOT, { action: "remove", oldText: `- fact ${MEMORY_MAX_LINES + 1}` }, { now })).toMatchObject({ ok: true });
-    expect(updateMemory(BOT, { action: "replace", oldText: "- fact 0", text: "- f0" }, { now })).toMatchObject({ ok: true });
-    expect(memoryLineCount(readMemoryFile(BOT).text)).toBe(MEMORY_MAX_LINES + 1);
+    const saved = updateMemory(BOT, { action: "append", text: "one fact too many" }, { source: 'chat "Full"', now });
+    expect(saved).toMatchObject({ ok: true, truncated: false, moved: ["- 2026-09-01 · The staging host is kestrel"] });
+    const text = readMemoryFile(BOT).text;
+    expect(withinBudget(text)).toBe(true);
+    expect(text.startsWith("# Memory\n- 2026-09-02 · fact 0\n")).toBe(true);
+    expect(text).toContain('- 2026-10-03 · from chat "Full" · one fact too many\n');
+    // no header: the topic index labels the archive
+    expect(archive()).toBe("- 2026-09-01 · The staging host is kestrel · moved 2026-10-03\n");
+    expect(archive()).toContain("- 2026-09-01 · The staging host is kestrel · moved 2026-10-03\n");
+    expect(searchMemoryFiles(BOT, "kestrel")).toEqual([expect.objectContaining({ file: "memory/archive.md" })]);
+    // what loads is what is stored
+    expect(loadMemory(BOT, { now })).toMatchObject({ truncated: false, lines: MEMORY_MAX_LINES });
+    // bytes count the same way, on a file with few lines that a person grew past the budget
+    const big = Array.from({ length: 21 }, (_, i) => `- 2026-09-0${1 + (i % 9)} · big ${i} ${"x".repeat(1_150)}`);
+    writeMemoryFile(BOT, `${big.join("\n")}\n`);
+    expect(withinBudget(readMemoryFile(BOT).text)).toBe(false);
+    const bytes = updateMemory(BOT, { action: "append", text: "small fact" }, { now });
+    expect(bytes.ok && bytes.moved.length).toBeGreaterThan(0);
+    expect(withinBudget(readMemoryFile(BOT).text)).toBe(true);
+    for (const line of big) expect(readMemoryFile(BOT).text.includes(line) !== archive().includes(`${line} · moved`)).toBe(true);
   });
 
-  it("tells the bot how far over budget a hand-grown file is, and how to fix it, when the prompt cuts it", () => {
+  it("moves struck lines first, then expired ones, then the oldest live ones, never a health fact or a hand-written line", () => {
+    const now = new Date(2026, 9, 3, 12);
+    const fillers = Array.from({ length: MEMORY_MAX_LINES - 5 }, (_, i) => `- 2026-09-25 · filler ${i}`);
+    writeMemoryFile(BOT, [
+      "# Memory",
+      "- 2026-08-01 · The person is vegetarian",
+      "- 2026-08-02 · old live fact",
+      "- 2026-09-22 · exam on Friday · until 2026-09-26",
+      "- 2026-09-24 · Office: Berlin",
+      ...fillers,
+    ].join("\n") + "\n");
+    const moved = (result: ReturnType<typeof updateMemory>) => (result.ok ? result.moved : ["refused"]);
+    // a supersede on a full file archives the old fact
+    expect(moved(updateMemory(BOT, { action: "supersede", oldText: "Office: Berlin", text: "Office: Rome" }, { now })))
+      .toEqual(["- 2026-09-24 · ~~Office: Berlin~~ · superseded 2026-10-03"]);
+    expect(moved(updateMemory(BOT, { action: "append", text: "fact a" }, { now }))).toEqual(["- 2026-09-22 · exam on Friday · until 2026-09-26"]);
+    expect(moved(updateMemory(BOT, { action: "append", text: "fact b" }, { now }))).toEqual(["- 2026-08-02 · old live fact"]);
+    expect(moved(updateMemory(BOT, { action: "append", text: "fact c" }, { now }))).toEqual(["- 2026-09-25 · filler 0"]);
+    const text = readMemoryFile(BOT).text;
+    expect(text.startsWith("# Memory\n- 2026-08-01 · The person is vegetarian\n")).toBe(true);
+    expect(text).toContain("- 2026-10-03 · Office: Rome\n");
+    expect(withinBudget(text)).toBe(true);
+    expect(archive().split("\n").filter((line) => line.endsWith(" · moved 2026-10-03"))).toHaveLength(4);
+  });
+
+  it("moves an entry with a code block whole, never leaving its fence behind", () => {
+    const now = new Date(2026, 9, 3, 12);
+    const old = { now: new Date(2026, 0, 1, 12) };
+    const filler = (count: number) => Array.from({ length: count }, (_, i) => `- 2026-09-02 · fact ${i}`);
+    // written by memory_update: the block is indented under its entry
+    expect(updateMemory(BOT, { action: "append", text: "Deploy command:\n```\npnpm deploy --prod\n```" }, old)).toMatchObject({ ok: true });
+    writeMemoryFile(BOT, `${readMemoryFile(BOT).text}${filler(MEMORY_MAX_LINES - 4).join("\n")}\n`);
+    const saved = updateMemory(BOT, { action: "append", text: "one more" }, { now });
+    expect(saved).toMatchObject({ ok: true, truncated: false, moved: ["- 2026-01-01 · Deploy command:\n  ```\n  pnpm deploy --prod\n  ```"] });
+    expect(readMemoryFile(BOT).text.startsWith("- 2026-09-02 · fact 0\n")).toBe(true);
+    expect(archive()).toBe("- 2026-01-01 · Deploy command: · moved 2026-10-03\n  ```\n  pnpm deploy --prod\n  ```\n");
+    expect(searchMemoryFiles(BOT, "pnpm deploy")).toEqual([expect.objectContaining({ file: "memory/archive.md" })]);
+    // written before that, with the block unindented, it moves whole too
+    for (const legacy of [["- 2026-01-01 · Deploy command:", "```sh", "railway up", "```"], ["- 2026-01-01 · Snippet ```", "railway up", "```"]]) {
+      writeMemoryFile(BOT, `${[...legacy, ...filler(MEMORY_MAX_LINES - legacy.length)].join("\n")}\n`);
+      expect(updateMemory(BOT, { action: "append", text: "one more" }, { now })).toMatchObject({ ok: true, truncated: false, moved: [legacy.join("\n")] });
+      expect(readMemoryFile(BOT).text).not.toContain("railway up");
+      expect(withinBudget(readMemoryFile(BOT).text)).toBe(true);
+    }
+    // entries with code blocks never pile up into lines that cannot move: a later fact still loads
+    rmSync(join(ensureWorkspace(BOT), "MEMORY.md"));
+    for (let i = 0; i < 20; i += 1) {
+      const block = `Snippet ${i}\n\`\`\`\n${"x\n".repeat(MEMORY_ENTRY_MAX_LINES - 3)}\`\`\``;
+      expect(updateMemory(BOT, { action: "append", text: block }, { now })).toMatchObject({ ok: true, truncated: false });
+    }
+    expect(updateMemory(BOT, { action: "append", text: "the important later fact" }, { now })).toMatchObject({ ok: true, truncated: false });
+    expect(loadMemory(BOT, { now })?.text).toContain("the important later fact");
+    expect(withinBudget(readMemoryFile(BOT).text)).toBe(true);
+  });
+
+  it("saves the entry even when hand-written lines alone fill what loads, and says so", () => {
+    const now = new Date(2026, 9, 3, 12);
+    const hand = Array.from({ length: MEMORY_MAX_LINES }, (_, i) => `- note ${i}`);
+    writeMemoryFile(BOT, `${hand.join("\n")}\n`);
+    expect(updateMemory(BOT, { action: "append", text: "still saved" }, { now })).toMatchObject({ ok: true, truncated: true, moved: [] });
+    expect(readMemoryFile(BOT).text).toBe(`${hand.join("\n")}\n- 2026-10-03 · still saved\n`);
+    expect(archive()).toBe("");
+    // dated entries above them keep loading: moving them out would hide them and make no room
+    const dated = ["- 2026-09-01 · The staging host is kestrel", "- 2026-09-02 · Deploys go out on Tuesdays"];
+    writeMemoryFile(BOT, `${[...dated, ...hand].join("\n")}\n`);
+    expect(updateMemory(BOT, { action: "append", text: "also saved" }, { now })).toMatchObject({ ok: true, truncated: true, moved: [] });
+    expect(readMemoryFile(BOT).text.startsWith(`${dated.join("\n")}\n`)).toBe(true);
+    expect(archive()).toBe("");
+  });
+
+  // Permissions do not stop root or Windows from reading the file.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("fails the write, changing nothing, when the archive exists but cannot be read", () => {
+    const full = Array.from({ length: MEMORY_MAX_LINES }, (_, i) => `- 2026-09-01 · old ${i}\n`).join("");
+    writeMemoryFile(BOT, full);
+    writeMemoryTopic(BOT, "archive.md", "---\ntitle: Archive\n---\n- 2026-01-01 · kept for the record\n");
+    const path = join(ensureWorkspace(BOT), "memory", "archive.md");
+    chmodSync(path, 0o000);
+    try {
+      // an archive that cannot be read is never replaced by a fresh one
+      expect(() => updateMemory(BOT, { action: "append", text: "one more" })).toThrow();
+    } finally {
+      chmodSync(path, 0o600);
+    }
+    expect(readMemoryFile(BOT).text).toBe(full);
+    expect(archive()).toBe("---\ntitle: Archive\n---\n- 2026-01-01 · kept for the record\n");
+  });
+
+  it("brings a file grown past the budget back within it on the next write, losing no line", () => {
+    const now = new Date(2026, 9, 3, 12);
+    const lines = Array.from({ length: MEMORY_MAX_LINES + 50 }, (_, i) => `- 2026-09-01 · fact ${i}`);
+    writeMemoryFile(BOT, `${lines.join("\n")}\n`);
+    const result = updateMemory(BOT, { action: "remove", oldText: "- 2026-09-01 · fact 7\n" }, { now });
+    expect(result.ok && result.moved.length).toBe(49);
+    const text = readMemoryFile(BOT).text;
+    expect(memoryLineCount(text)).toBe(MEMORY_MAX_LINES);
+    for (const line of lines.filter((line) => line !== "- 2026-09-01 · fact 7")) {
+      expect(text.includes(`${line}\n`) !== archive().includes(`${line} · moved`), line).toBe(true);
+    }
+  });
+
+  it("keeps every note when many threads write at once: none lost, none duplicated", async () => {
+    const now = new Date(2026, 9, 3, 12);
+    // a full file, so every write below has to make room
+    writeMemoryFile(BOT, Array.from({ length: MEMORY_MAX_LINES }, (_, i) => `- 2026-09-01 · old ${i}\n`).join(""));
+    const write = async (thread: string, i: number) => {
+      await Promise.resolve();
+      return updateMemory(BOT, { action: "append", text: `note ${thread}-${i}` }, { source: `thread ${thread}`, now });
+    };
+    const results = await Promise.all(Array.from({ length: 40 }, (_, i) => [write("a", i), write("b", i)]).flat());
+    expect(results.every((result) => result.ok && result.moved.length === 1)).toBe(true);
+    const text = readMemoryFile(BOT).text;
+    expect(withinBudget(text)).toBe(true);
+    for (const thread of ["a", "b"]) {
+      for (let i = 0; i < 40; i += 1) {
+        const line = `- 2026-10-03 · from thread ${thread} · note ${thread}-${i}`;
+        expect([text.includes(`${line}\n`), archive().includes(`${line} · moved`)].filter(Boolean), line).toHaveLength(1);
+      }
+    }
+  });
+
+  it("states the load cut plainly for a hand-grown file, and tells a managed bot the file never fills up", () => {
     const dir = ensureWorkspace(BOT);
     const lines = Array.from({ length: MEMORY_MAX_LINES + 50 }, (_, i) => `- fact ${i}`);
     writeFileSync(join(dir, "MEMORY.md"), `${lines.join("\n")}\n`);
     const memory = loadMemory(BOT);
     expect(memory).toMatchObject({ truncated: true, lines: MEMORY_MAX_LINES + 50 });
     const managed = memorySystemPrompt(BOT, { managedWrites: true });
-    expect(managed).toContain(`[MEMORY.md is ${MEMORY_MAX_LINES + 50} lines and ${memory!.bytes} bytes; only the first ${MEMORY_MAX_LINES} lines / ${MEMORY_MAX_BYTES} bytes are shown above`);
-    expect(managed).toContain("Consolidate it now with memory_update");
-    expect(managed).not.toContain("was cut off here — trim it");
-    expect(memorySystemPrompt(BOT)).toContain("Trim it with your file tools");
+    expect(managed).toContain(`[MEMORY.md is ${MEMORY_MAX_LINES + 50} lines and ${memory!.bytes} bytes; only the first ${MEMORY_MAX_LINES} lines / ${MEMORY_MAX_BYTES} bytes are shown above.]`);
+    expect(managed).toContain(`It is shown to you at the start of every session, up to ${MEMORY_MAX_LINES} lines / 24 KB.`);
+    // how memory_update makes room is said once, in its own description
+    expect(managed).not.toContain("archive");
+    expect(managed).not.toContain("Consolidate");
+    expect(managed).not.toContain("short and curated");
+    // a bot that edits the file with its own tools still keeps it short itself
+    expect(memorySystemPrompt(BOT)).toContain("Keep MEMORY.md short and curated.");
     // a file of exactly the budget with a final newline is not over it
     writeFileSync(join(dir, "MEMORY.md"), `${lines.slice(0, MEMORY_MAX_LINES).join("\n")}\n`);
     expect(loadMemory(BOT)?.truncated).toBe(false);
@@ -503,7 +647,7 @@ describe("workspace", () => {
 
   it("API drivers retain supplied memory without inventing filesystem tools", () => {
     writeMemoryFile(BOT, "# Memory\n- The user prefers CSV exports.\n");
-    for (const driver of ["grok", "openai-compat", "minimax", "boxAgent"]) {
+    for (const driver of ["grok", "openai-compat", "minimax"]) {
       expect(supportsWorkspaceFiles(driver)).toBe(false);
       const prompt = memorySystemPrompt(BOT, { fileTools: supportsWorkspaceFiles(driver) });
       expect(prompt).toContain("The user prefers CSV exports.");
@@ -518,18 +662,15 @@ describe("workspace", () => {
     writeMemoryFile(BOT, "# Memory\n- The user prefers CSV exports.\n");
     const prompt = memorySystemPrompt(BOT, { managedWrites: true, fileTools: false });
     expect(prompt).toContain("The user prefers CSV exports.");
-    expect(prompt).toContain("Use memory_update");
-    expect(prompt).toContain("use session_search to find the current passage");
-    expect(prompt).not.toContain("read the current file");
+    expect(prompt).toContain("Change MEMORY.md only with memory_update; on a conflict, find the current passage with session_search.");
     expect(prompt).not.toContain("update it with your file tools");
   });
 
   it("opts concurrent agents into targeted memory updates while retaining legacy guidance", () => {
+    // the rest (shared across threads, append/replace/remove, conflicts) is
+    // memory_update's own description, not repeated here
     const managed = memorySystemPrompt(BOT, { managedWrites: true });
-    expect(managed).toContain("shared across your independent threads");
-    expect(managed).toContain("Use memory_update");
-    expect(managed).toContain("never direct file tools or whole-file overwrites");
-    expect(managed).toContain("read the current file and retry only your intended change");
+    expect(managed).toContain("Change MEMORY.md only with memory_update.");
     expect(managed).not.toContain("update it with your file tools");
     expect(memorySystemPrompt(BOT)).toContain("update it with your file tools");
   });

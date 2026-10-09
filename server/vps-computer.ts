@@ -518,7 +518,7 @@ function statusProblem(status: VpsComputerStatus): string | null {
   if (!status.managed) return "The VPS container name is occupied by a container OpenMausBot did not create";
   if (status.network === "unsafe") return "The VPS container uses an unapproved network or publishes ports; refusing to use it";
   if (status.mounts === "unsafe") return "The VPS container has host mounts; refusing to use it";
-  if (status.security === "unsafe") return "The VPS container is missing OpenMausBot safety limits";
+  if (status.security === "unsafe") return "The VPS container has unsupported privilege, isolation, or automatic-removal settings";
   if (status.container === "stopped") return "The OpenMausBot VPS container is stopped";
   if (status.desktop_error) return `The VPS Cua desktop failed to start: ${status.desktop_error}`;
   if (!status.desktopReady) return "The VPS container started, but Cua Driver is not ready yet";
@@ -623,7 +623,7 @@ async function computeVpsComputerStatus(
       (environmentLabel === undefined || environmentLabel === vpsEnvironmentId());
     status.network = hasNoPublishedPorts(detail?.HostConfig, detail?.NetworkSettings?.Networks) ? "private" : "unsafe";
     status.mounts = hasNoHostMounts(detail ?? {}) ? "none" : "unsafe";
-    status.security = dockerSecurityIsHardened(detail?.HostConfig, { restartPolicy: "unless-stopped" })
+    status.security = dockerSecurityIsHardened(detail?.HostConfig, { restartPolicy: "any" })
       ? "hardened"
       : "unsafe";
 
@@ -960,9 +960,8 @@ export function vpsContainerRunArgs(
     // A VPS reboots with nobody watching; without a restart policy the
     // container stays down afterwards and every turn silently degrades until
     // someone opens the panel. unless-stopped survives reboots while still
-    // honoring an explicit Stop. The shared hardening check accepts exactly
-    // this policy for the VPS caller (and only "no"/unset for the Local VM,
-    // whose starts are controlled by OMB's turn lifecycle).
+    // honoring an explicit Stop. This is a creation default; existing
+    // containers keep the operator's restart policy.
     "--restart",
     "unless-stopped",
     "-e",
@@ -1382,16 +1381,6 @@ export function vpsComputerMcp(cfg: AppConfig, botId: string, containerRef?: str
     args: [SPAWNED_PROXIES.vpsContainerMcp, alias, containerRef ?? vpsContainerName(botId)],
     env: { ELECTRON_RUN_AS_NODE: "1" },
   };
-}
-
-export function vpsDriverError(driverKind: string, computerMcp: boolean): string | null {
-  if (driverKind === "boxAgent") {
-    return "The Computer engine runs its agent on Boat and cannot use a self-hosted VPS — choose Claude or an ACP engine";
-  }
-  if (!computerMcp) {
-    return "This model cannot mount a self-hosted VPS computer — choose Claude or an ACP model provider";
-  }
-  return null;
 }
 
 export async function vpsComputerScreenshot(

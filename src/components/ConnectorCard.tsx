@@ -4,26 +4,33 @@ import { Check, Loader2, PlugZap, RefreshCw, X } from "lucide-react";
 import { api, type Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-
-async function openConnectionPage(url: string) {
-  if (window.ogb?.openExternal) {
-    await window.ogb.openExternal(url);
-    return true;
-  }
-  const opened = window.open("", "_blank");
-  if (!opened) return false;
-  opened.opener = null;
-  opened.location.replace(url);
-  return true;
-}
+import { reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
+import { mcpSignInLink } from "@/lib/mcp-sign-in";
 
 export function ConnectorCard({ botId, threadId, message }: { botId: string; threadId: string; message: Message }) {
   const connector = message.connector!;
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | { key: LocaleKey } | null>(null);
+  const [authorization, setAuthorization] = useState<(PendingAuthorization & { target: string }) | null>(null);
   const polling = useRef(false);
+  const opening = useRef<ReturnType<typeof reserveConnectionPage> | null>(null);
 
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/connector-cards/${encodeURIComponent(message.id)}`;
+  const target = `${endpoint}?threadId=${encodeURIComponent(threadId)}`;
+  const currentTarget = useRef(target);
+  currentTarget.current = target;
+  const pendingAuthorization = authorization?.target === target && connector.status !== "failed" && connector.status !== "connected" && !connector.dismissed
+    ? authorization : null;
+  const authorizationUrl = reusableConnectionUrl(pendingAuthorization);
+  useEffect(() => {
+    setBusy(false);
+    setLocalError(null);
+    setAuthorization(null);
+    return () => {
+      opening.current?.cancel();
+      opening.current = null;
+    };
+  }, [target, connector.dismissed]);
   const checkStatus = useCallback(async () => {
     const result = await api(`${endpoint}/status?threadId=${encodeURIComponent(threadId)}`);
     return Boolean(result.connected);
@@ -57,20 +64,34 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
   if (connector.dismissed) return null;
 
   const connect = async () => {
+    if (busy || opening.current) return;
+    const launch = reserveConnectionPage();
+    opening.current = launch;
+    const isCurrent = () => opening.current === launch && currentTarget.current === target;
     setBusy(true);
     setLocalError(null);
     try {
-      const result = await api(`${endpoint}/authorize`, {
-        method: "POST",
-        body: JSON.stringify({ threadId }),
-      });
-      if (!await openConnectionPage(String(result.url))) {
+      const reusableUrl = reusableConnectionUrl(pendingAuthorization);
+      const createdAt = reusableUrl ? pendingAuthorization!.createdAt : Date.now();
+      const result = reusableUrl ? { url: reusableUrl } : await api(`${endpoint}/authorize`, {
+          method: "POST",
+          body: JSON.stringify({ threadId }),
+        });
+      if (!isCurrent()) return;
+      const url = mcpSignInLink(typeof result.url === "string" ? result.url : null);
+      if (!url) throw new Error(t("connectors.invalidAuthorizationUrl"));
+      setAuthorization({ target, url, createdAt });
+      if (!await launch.open(url) && isCurrent()) {
         setLocalError({ key: "connectors.card.popupBlocked" });
       }
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : String(error));
+      if (isCurrent()) setLocalError(error instanceof Error ? error.message : String(error));
     } finally {
-      setBusy(false);
+      launch.cancel();
+      if (isCurrent()) {
+        opening.current = null;
+        setBusy(false);
+      }
     }
   };
 
@@ -87,6 +108,10 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
   };
 
   const dismiss = () => {
+    opening.current?.cancel();
+    opening.current = null;
+    setBusy(false);
+    setAuthorization(null);
     void api(`${endpoint}/dismiss`, { method: "POST", body: JSON.stringify({ threadId }) }).catch(() => {});
   };
 
@@ -123,6 +148,16 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
               </p>
             )}
             {error && <p className="mt-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</p>}
+            {!connected && authorizationUrl && (
+              <a href={authorizationUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => {
+                if (!reusableConnectionUrl(pendingAuthorization)) {
+                  event.preventDefault();
+                  void connect();
+                }
+              }} className="mt-2 inline-block text-[12px] text-accent-text underline underline-offset-2">
+                {t("connectors.openAuthorizationPage")}
+              </a>
+            )}
           </div>
           {!connected && (
             <button onClick={dismiss} aria-label={t("connectors.card.notNow")} title={t("connectors.card.notNow")} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink">

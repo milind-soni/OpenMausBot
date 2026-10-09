@@ -1,10 +1,11 @@
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "./schema.ts";
 
-import { customMcpServers,
+import { cacheUntilConfigChanges,
+  customMcpServers,
   DATA_DIR,
   ensureDirs,
   instanceConfigs,
@@ -20,6 +21,7 @@ import { customMcpServers,
   persistableInstanceConfigs,
   roomHandoffLimits,
   roomTurnTimeoutMinutes,
+  mcpCallTimeoutMinutes,
   maxConcurrentBotThreads,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
@@ -40,6 +42,11 @@ import { customMcpServers,
   browserEngineAttachCdpUrl,
   withInstanceCli,
   WORKSPACE_CREDENTIAL_ENV,
+  liveSettingsFor,
+  LIVE_IDLE_MINUTES_DEFAULT,
+  mergeOpenCodeProviderKeys,
+  openCodeProviderKeys,
+  OPENCODE_PROVIDER_KEY_LIMIT,
   type AppConfig,
 } from "./config.ts";
 
@@ -163,6 +170,16 @@ describe("configuration boundaries", () => {
       profile: { name: "Ada", email: "ada@example.com" },
       instances: { claude: { driver: "claudeAgent", config: { cli: "/opt/claude" } } },
     });
+  });
+
+  it("loads a config that still has the removed cloud-overflow and idle-release keys, and drops them", () => {
+    const stored = {
+      language: "en",
+      features: { browser: true, computerClaimIdleRelease: true, cloudOverflow: true },
+      cloudOverflow: { perSecondCostUsd: 0.0004, idleStopMs: 300_000, allowlistedThreads: ["t1"] },
+    };
+    expect(parseStoredConfig(stored)).toEqual({ language: "en", features: { browser: true } });
+    expect(parseConfigPatch(stored)).toEqual({ language: "en", features: { browser: true } });
   });
 
   it("rejects malformed stored instances and API patches", () => {
@@ -489,6 +506,27 @@ describe("configuration boundaries", () => {
     },
   );
 
+  it("accepts a persisted MCP call timeout and supplies the legacy default", () => {
+    expect(parseStoredConfig({ mcp: { callTimeoutMinutes: 30 } })).toEqual({
+      mcp: { callTimeoutMinutes: 30 },
+    });
+    expect(mcpCallTimeoutMinutes({ mcp: { callTimeoutMinutes: 30 } })).toBe(30);
+    expect(mcpCallTimeoutMinutes({})).toBe(10);
+  });
+
+  it.each([0, 0.5, 61, 1440, "20", null])(
+    "rejects an invalid MCP call timeout: %j",
+    (callTimeoutMinutes) => {
+      expect(() => parseConfigPatch({ mcp: { callTimeoutMinutes } })).toThrow(
+        "mcp.callTimeoutMinutes",
+      );
+    },
+  );
+
+  it("rejects unknown keys under the mcp config section", () => {
+    expect(() => parseConfigPatch({ mcp: { callTimeoutMinutes: 10, surprise: 1 } })).toThrow("mcp");
+  });
+
   it("preserves shared Local VM behavior by default and accepts bounded per-bot mode", () => {
     expect(localVmMode({})).toBe("shared");
     expect(localVmMaxInstances({})).toBe(2);
@@ -525,21 +563,17 @@ describe("configuration boundaries", () => {
     // the pre-rename flag is dropped as a no-op rather than rejected, so a
     // stale client's PATCH cannot fail the request or re-enable anything
     expect(parseConfigPatch({ features: { skillRecorder: true } })).toEqual({ features: {} });
-    // the built-in browser is an independent explicit opt-in
-    expect(builtInBrowserEnabled({})).toBe(false);
-    expect(builtInBrowserEnabled({ features: { skillAuthoring: true } })).toBe(false);
+    // the built-in browser is on unless the person switched it off
+    expect(builtInBrowserEnabled({})).toBe(true);
+    expect(builtInBrowserEnabled({ features: { skillAuthoring: true } })).toBe(true);
     expect(parseConfigPatch({ features: { browser: false } })).toEqual({ features: { browser: false } });
     expect(builtInBrowserEnabled({ features: { browser: false } })).toBe(false);
     expect(builtInBrowserEnabled({ features: { browser: true } })).toBe(true);
-    // An OMB Cloud home skips the welcome that turns it on, so there it is on
-    // until the person turns it off; any other server is unchanged.
+    // same everywhere: an OMB Cloud home and a self-hosted server alike
     const cloudHome = { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93" };
-    expect(builtInBrowserEnabled({}, {})).toBe(false);
-    expect(builtInBrowserEnabled({}, { OMB_PUBLIC_URL: "https://selfhosted.example.test" })).toBe(false);
+    expect(builtInBrowserEnabled({}, { OMB_PUBLIC_URL: "https://selfhosted.example.test" })).toBe(true);
     expect(builtInBrowserEnabled({}, cloudHome)).toBe(true);
-    expect(builtInBrowserEnabled({ features: { skillAuthoring: true } }, cloudHome)).toBe(true);
     expect(builtInBrowserEnabled({ features: { browser: false } }, cloudHome)).toBe(false);
-    expect(builtInBrowserEnabled({ features: { browser: true } }, cloudHome)).toBe(true);
     // named browser profiles: the list is the unit, ids are partition-safe
     expect(parseConfigPatch({ browserProfiles: [{ id: "work", name: " Work " }] })).toEqual({
       browserProfiles: [{ id: "work", name: "Work" }],
@@ -615,6 +649,46 @@ describe("configuration boundaries", () => {
 
   it.each(["one-per-bot", "windows", 1, null])("rejects an invalid Local VM mode: %j", (mode) => {
     expect(() => parseConfigPatch({ localVm: { mode } })).toThrow("localVm.mode");
+  });
+});
+
+describe("a config.json saved with a byte order mark", () => {
+  // Windows PowerShell's Set-Content -Encoding UTF8 and Notepad's "UTF-8 with
+  // BOM" put U+FEFF before the first brace, which JSON.parse refuses.
+  const bom = "\uFEFF";
+
+  it("loads instead of being ignored", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, bom + JSON.stringify({ budgets: { monthlyUsd: 25, warnAtPercent: 70 } }, null, 2));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(loadConfig().budgets).toEqual({ monthlyUsd: 25, warnAtPercent: 70 });
+      expect(warn.mock.calls.some(([line]) => String(line).includes("ignoring"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("keeps every other key when a setting is saved", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, bom + JSON.stringify({
+      xai: { key: "xai-fixture" },
+      mcpServers: { notes: { command: "npx", args: ["notes-mcp"] } },
+    }, null, 2));
+    try {
+      saveConfig({ budgets: { monthlyUsd: 25, warnAtPercent: 70 } });
+      const disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk).toMatchObject({
+        xai: { key: "xai-fixture" },
+        mcpServers: { notes: { command: "npx", args: ["notes-mcp"] } },
+        budgets: { monthlyUsd: 25, warnAtPercent: 70 },
+      });
+    } finally {
+      rmSync(path, { force: true });
+    }
   });
 });
 
@@ -939,7 +1013,6 @@ describe("Instance CLI override", () => {
       instances: {
         claude: { driver: "claudeAgent" },
         grokApi: { driver: "grok" },
-        computer: { driver: "boxAgent" },
         opencode: { driver: "opencodeGo" },
       },
     };
@@ -956,20 +1029,19 @@ describe("Instance CLI override", () => {
 
   it("preserves explicit instance credentials even when workspace injection shadows them", () => {
     const cfg: AppConfig = {
-      box: { token: "fixture-workspace-box" },
       xai: { key: "fixture-shared-xai" },
       instances: {
-        computer: { driver: "boxAgent", environment: { BOX_TOKEN: "fixture-instance-box", MY_FLAG: "1" } },
+        ownKey: { driver: "grok", environment: { XAI_API_KEY: "fixture-instance-xai", MY_FLAG: "1" } },
         sameCredential: { driver: "grok", environment: { XAI_API_KEY: "fixture-shared-xai" } },
-        injectedOnly: { driver: "boxAgent" },
+        injectedOnly: { driver: "grok" },
       },
     };
     const instances = persistableInstanceConfigs(cfg);
-    expect(instances.computer.environment).toEqual({ BOX_TOKEN: "fixture-instance-box", MY_FLAG: "1" });
+    expect(instances.ownKey.environment).toEqual({ XAI_API_KEY: "fixture-instance-xai", MY_FLAG: "1" });
     expect(instances.sameCredential.environment).toEqual({ XAI_API_KEY: "fixture-shared-xai" });
     expect(instances.injectedOnly.environment).toBeUndefined();
-    instances.computer.environment!.MY_FLAG = "changed";
-    expect(cfg.instances!.computer.environment!.MY_FLAG).toBe("1");
+    instances.ownKey.environment!.MY_FLAG = "changed";
+    expect(cfg.instances!.ownKey.environment!.MY_FLAG).toBe("1");
   });
 
   it("saving another engine's CLI does not freeze inherited API endpoint or model settings", () => {
@@ -1008,6 +1080,99 @@ describe("OpenCode Go configuration", () => {
     expect(instances.opencode.environment).toEqual({ OPENCODE_API_KEY: "secret-value" });
     expect(instances.grok.environment).toEqual({});
   });
+
+  // Keys for OpenCode's other providers (Venice, Groq…), saved in Settings
+  // under the name OpenCode reads. A Cloud has no terminal to export them in.
+  it("hands the saved provider keys to OpenCode instances only, under their own names", () => {
+    const cfg: AppConfig = {
+      opencodeGo: { apiKey: "ocg", providerKeys: { VENICE_API_KEY: "venice-secret", ANTHROPIC_API_KEY: "own-anthropic" } },
+      instances: {
+        opencode: { driver: "opencodeGo", environment: { VENICE_API_KEY: "instance-venice" } },
+        grok: { driver: "grokAgent" },
+        codex: { driver: "codex" },
+        compat: { driver: "openai-compat" },
+      },
+    };
+    const instances = instanceConfigs(cfg);
+    expect(instances.opencode.environment).toEqual({
+      OPENCODE_API_KEY: "ocg", VENICE_API_KEY: "venice-secret", ANTHROPIC_API_KEY: "own-anthropic",
+    });
+    for (const id of ["grok", "codex", "compat"]) {
+      expect(JSON.stringify(instances[id].environment ?? {})).not.toMatch(/venice-secret|own-anthropic/);
+    }
+    // Saved keys never become part of a persisted instance.
+    expect(persistableInstanceConfigs(cfg).opencode.environment).toEqual({ VENICE_API_KEY: "instance-venice" });
+  });
+
+  it("skips a hand-edited provider key OpenCode could not be given, without dropping the file", () => {
+    const stored = parseStoredConfig({
+      profile: { name: "Ada" },
+      opencodeGo: { providerKeys: {
+        VENICE_API_KEY: "venice-secret", venice_api_key: "lower", OPENCODE_API_KEY: "shadow", OMB_CLOUD_BOAT_TOKEN: "relay",
+        BOX_TOKEN: "boat", NODE_OPTIONS: "--require x", GROQ_API_KEY: "has space",
+        DEEPSEEK_API_KEY: 42, TOGETHER_API_KEY: null, FIREWORKS_API_KEY: { key: "nested" },
+      } },
+    });
+    expect(stored.profile?.name).toBe("Ada");
+    expect(openCodeProviderKeys(stored)).toEqual({ VENICE_API_KEY: "venice-secret" });
+    expect(instanceConfigs({ ...stored, instances: { opencode: { driver: "opencodeGo" } } }).opencode.environment)
+      .toEqual({ VENICE_API_KEY: "venice-secret" });
+    // Not a map at all: the saved keys are skipped, the OpenCode key and the rest stay.
+    const notAMap = parseStoredConfig({ profile: { name: "Ada" }, opencodeGo: { apiKey: "ocg", providerKeys: "VENICE_API_KEY=x" } });
+    expect(notAMap.profile?.name).toBe("Ada");
+    expect(notAMap.opencodeGo).toEqual({ apiKey: "ocg", providerKeys: {} });
+  });
+});
+
+describe("saving OpenCode provider keys", () => {
+  const saved: AppConfig = { opencodeGo: { providerKeys: { VENICE_API_KEY: "old-venice", GROQ_API_KEY: "groq" } } };
+
+  it("saves, replaces and removes one name at a time, keeping the rest", () => {
+    expect(mergeOpenCodeProviderKeys(saved, { VENICE_API_KEY: "  new-venice ", DEEPSEEK_API_KEY: "deep" }))
+      .toEqual({ ok: true, keys: { DEEPSEEK_API_KEY: "deep", GROQ_API_KEY: "groq", VENICE_API_KEY: "new-venice" } });
+    expect(mergeOpenCodeProviderKeys(saved, { GROQ_API_KEY: "" })).toEqual({ ok: true, keys: { VENICE_API_KEY: "old-venice" } });
+    // Removing a name that was never saved changes nothing.
+    expect(mergeOpenCodeProviderKeys(saved, { NOPE_KEY: "" })).toEqual({ ok: true, keys: saved.opencodeGo!.providerKeys });
+    // A provider OpenCode also reads from a terminal may be saved here too.
+    expect(mergeOpenCodeProviderKeys({}, { ANTHROPIC_API_KEY: "sk-ant" })).toEqual({ ok: true, keys: { ANTHROPIC_API_KEY: "sk-ant" } });
+  });
+
+  it("refuses names OpenCode does not read or that OpenMaus keeps, with the fix", () => {
+    const refused = (name: string) => {
+      const result = mergeOpenCodeProviderKeys(saved, { [name]: "a-key" });
+      expect(result.ok, name).toBe(false);
+      return result.ok ? "" : result.error;
+    };
+    for (const name of ["venice_api_key", "VENICE", "NODE_OPTIONS", "PATH", "LD_PRELOAD", "1_API_KEY", "__proto__", `${"A".repeat(70)}_KEY`]) {
+      expect(refused(name)).toContain("such as VENICE_API_KEY");
+    }
+    expect(refused("OPENCODE_API_KEY")).toContain("OpenCode API key box");
+    // Names this server keeps for itself or another engine would never reach OpenCode.
+    for (const name of ["OPENCODE_SERVER_KEY", "OMB_CLOUD_BOAT_TOKEN", "OMB_LICENSE_KEY", "BOX_TOKEN", "COMPOSIO_API_KEY",
+      "OPENAI_COMPAT_API_KEY", "XAI_API_KEY", "MISTRAL_API_KEY", "CURSOR_API_KEY", "FACTORY_API_KEY"]) {
+      expect(refused(name)).toBe(`OpenMaus keeps ${name} for itself, so OpenCode can't be given it here. Put this key in opencode.json instead.`);
+    }
+  });
+
+  it("refuses a value that is not a key, and more than the limit", () => {
+    for (const value of ["two words", "line\nbreak", "x".repeat(4097)]) {
+      const result = mergeOpenCodeProviderKeys(saved, { VENICE_API_KEY: value });
+      expect(result).toEqual({ ok: false, error: "That doesn't look like a key. Paste only the key, with no spaces." });
+    }
+    const full: AppConfig = { opencodeGo: { providerKeys: Object.fromEntries(
+      Array.from({ length: OPENCODE_PROVIDER_KEY_LIMIT }, (_, index) => [`P${index}_API_KEY`, `key-${index}`])) } };
+    expect(mergeOpenCodeProviderKeys(full, { P0_API_KEY: "replaced" }).ok).toBe(true);
+    expect(mergeOpenCodeProviderKeys(full, { EXTRA_API_KEY: "one-too-many" })).toEqual({
+      ok: false, error: `OpenCode can hold up to ${OPENCODE_PROVIDER_KEY_LIMIT} provider keys. Remove one you no longer use, then add this one.`,
+    });
+  });
+
+  it("is a patch the config route accepts, and changing it reloads the engines", () => {
+    expect(parseConfigPatch({ opencodeGo: { providerKeys: { VENICE_API_KEY: "v", GROQ_API_KEY: "" } } }))
+      .toEqual({ opencodeGo: { providerKeys: { VENICE_API_KEY: "v", GROQ_API_KEY: "" } } });
+    expect(() => parseConfigPatch({ opencodeGo: { providerKeys: { VENICE_API_KEY: 42 } } })).toThrow("opencodeGo.providerKeys");
+    expect(providerReloadKeys({ opencodeGo: { providerKeys: {} } })).toEqual(["opencodeGo"]);
+  });
 });
 
 describe("credential env narrowing", () => {
@@ -1018,7 +1183,6 @@ describe("credential env narrowing", () => {
       opencodeGo: { apiKey: "SECRET-OCG" },
       instances: {
         grokApi: { driver: "grok" },
-        computer: { driver: "boxAgent" },
         opencode: { driver: "opencodeGo" },
         claude: { driver: "claudeAgent" },
         codex: { driver: "codex" },
@@ -1026,21 +1190,21 @@ describe("credential env narrowing", () => {
     };
     const instances = instanceConfigs(cfg);
     expect(instances.grokApi.environment).toEqual({ XAI_API_KEY: "SECRET-XAI" });
-    expect(instances.computer.environment).toEqual({ BOX_TOKEN: "SECRET-BOAT" });
     expect(instances.opencode.environment).toEqual({ OPENCODE_API_KEY: "SECRET-OCG" });
+    // The Boat token reaches no engine: only the harness talks to Boat.
+    for (const entry of Object.values(instances)) expect(Object.values(entry.environment ?? {})).not.toContain("SECRET-BOAT");
     // engines that bring their own login receive NO workspace credential
     expect(instances.claude.environment).toEqual({});
     expect(instances.codex.environment).toEqual({});
   });
 
-  it("hands no credential to any default-fleet CLI engine except the Computer", () => {
+  it("hands no credential to any default-fleet CLI engine, and the Boat key to none at all", () => {
     // the default `grok` instance is the CLI-login grokAgent, not the
     // API-key driver: the xAI key reaches only the `xaiApi` instance
     const cfg: AppConfig = { xai: { key: "SECRET-XAI" }, box: { token: "SECRET-BOAT" } };
     const instances = instanceConfigs(cfg);
     for (const [id, entry] of Object.entries(instances)) {
-      if (id === "computer") expect(entry.environment).toEqual({ BOX_TOKEN: "SECRET-BOAT" });
-      else if (id === "xaiApi") expect(entry.environment).toEqual({ XAI_API_KEY: "SECRET-XAI" });
+      if (id === "xaiApi") expect(entry.environment).toEqual({ XAI_API_KEY: "SECRET-XAI" });
       else expect(entry.environment).toEqual({});
     }
   });
@@ -1086,10 +1250,10 @@ describe("credential env narrowing", () => {
 
   it("keeps a per-instance environment while layering the credential on top", () => {
     const cfg: AppConfig = {
-      box: { token: "SECRET-BOAT" },
-      instances: { computer: { driver: "boxAgent", environment: { MY_FLAG: "1" } } },
+      xai: { key: "SECRET-XAI" },
+      instances: { grokApi: { driver: "grok", environment: { MY_FLAG: "1" } } },
     };
-    expect(instanceConfigs(cfg).computer.environment).toEqual({ MY_FLAG: "1", BOX_TOKEN: "SECRET-BOAT" });
+    expect(instanceConfigs(cfg).grokApi.environment).toEqual({ MY_FLAG: "1", XAI_API_KEY: "SECRET-XAI" });
   });
 });
 
@@ -1243,7 +1407,9 @@ describe("credential env preference", () => {
       expect(cfg.box?.token).toBeUndefined();
       expect(cfg.tts?.key).toBeUndefined();
       expect(cfg.decider?.key).toBeUndefined();
-      expect(instanceConfigs(cfg).computer?.environment).toEqual({});
+      for (const entry of Object.values(instanceConfigs(cfg))) {
+        for (const value of Object.values(entry.environment ?? {})) expect(Object.values(included)).not.toContain(value);
+      }
       saveConfig({ tts: { voice: "chosen" }, box: { token: "" }, decider: { enabled: true, jobs: { roomRouting: true } } });
       const disk = readFileSync(join(DATA_DIR, "config.json"), "utf8");
       const runtime = JSON.stringify([loadConfig(), instanceConfigs(loadConfig()), persistableInstanceConfigs(loadConfig())]);
@@ -1255,7 +1421,8 @@ describe("credential env preference", () => {
       process.env.BOX_TOKEN = "box_own";
       process.env.OMB_TTS_KEY = "sk-own";
       expect(loadConfig()).toMatchObject({ box: { token: "box_own" }, tts: { key: "sk-own" } });
-      expect(instanceConfigs(loadConfig()).computer?.environment).toEqual({ BOX_TOKEN: "box_own" });
+      // The person's Boat key stays with the harness; no engine is handed it.
+      expect(JSON.stringify(instanceConfigs(loadConfig()))).not.toContain("box_own");
     } finally {
       vi.unstubAllEnvs();
     }
@@ -1712,6 +1879,58 @@ describe("customMcpServers with url entries", () => {
   });
 });
 
+describe("live settings", () => {
+  it("defaults to a 5 minute idle hang-up and reading typed replies", () => {
+    expect(LIVE_IDLE_MINUTES_DEFAULT).toBe(5);
+    expect(liveSettingsFor({} as AppConfig)).toEqual({ configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 });
+  });
+  it("reports saved values and never the key", () => {
+    const settings = liveSettingsFor({ live: { key: "sk-test", voice: "sol", readTypedReplies: false, idleMinutes: 12 } } as AppConfig);
+    expect(settings).toEqual({ configured: true, voice: "sol", readTypedReplies: false, idleMinutes: 12 });
+    expect(JSON.stringify(settings)).not.toContain("sk-test");
+  });
+  it("accepts idle minutes from 1 to 60 only", () => {
+    expect(() => parseConfigPatch({ live: { idleMinutes: 0 } })).toThrow();
+    expect(() => parseConfigPatch({ live: { idleMinutes: 61 } })).toThrow();
+    expect(() => parseConfigPatch({ live: { idleMinutes: 2.5 } })).toThrow();
+    expect(parseConfigPatch({ live: { idleMinutes: 60, readTypedReplies: false } })).toMatchObject({ live: { idleMinutes: 60, readTypedReplies: false } });
+  });
+  it("does not reload providers for live changes", () => {
+    expect(providerReloadKeys({ live: { idleMinutes: 3 } } as never)).toEqual([]);
+  });
+
+  describe("saving settings from PATCH /api/live/settings", () => {
+    const path = join(DATA_DIR, "config.json");
+    let envKey: string | undefined;
+    beforeEach(() => {
+      envKey = process.env.OMB_OPENAI_LIVE_KEY;
+      delete process.env.OMB_OPENAI_LIVE_KEY;
+      mkdirSync(DATA_DIR, { recursive: true });
+      rmSync(path, { force: true });
+    });
+    afterEach(() => {
+      if (envKey === undefined) delete process.env.OMB_OPENAI_LIVE_KEY;
+      else process.env.OMB_OPENAI_LIVE_KEY = envKey;
+      rmSync(path, { force: true });
+    });
+
+    it("keeps the Live key when only settings change", () => {
+      saveConfig({ live: { key: "sk-keep" } });
+      saveConfig({ live: { idleMinutes: 9 } });
+      expect(loadConfig().live).toMatchObject({ key: "sk-keep", idleMinutes: 9 });
+    });
+
+    it("keeps a key from the desktop credential store, which reaches the harness as env", () => {
+      // the desktop leaves an empty tombstone in the file and hands the key over as env
+      saveConfig({ live: { key: "" } });
+      process.env.OMB_OPENAI_LIVE_KEY = "sk-from-keychain";
+      saveConfig({ live: { readTypedReplies: false, voice: "cedar" } });
+      expect(loadConfig().live).toEqual({ key: "sk-from-keychain", readTypedReplies: false, voice: "cedar" });
+      expect(JSON.parse(readFileSync(path, "utf8")).live).toEqual({ key: "", readTypedReplies: false, voice: "cedar" });
+    });
+  });
+});
+
 describe("loadConfig with an unusable config.json", () => {
   const path = join(DATA_DIR, "config.json");
   let warn: ReturnType<typeof vi.spyOn>;
@@ -1777,4 +1996,116 @@ describe("loadConfig with an unusable config.json", () => {
       warn.mockClear();
     }
   });
+});
+
+describe("a value derived from config.json", () => {
+  const path = join(DATA_DIR, "config.json");
+  const members = (config: AppConfig) => config.signIn?.members ?? [];
+  /** Written a minute ago: a running server's file, not one mid-save. */
+  const writeSettled = (signIn: AppConfig["signIn"], minutesAgo = 1) => {
+    writeFileSync(path, JSON.stringify({ signIn }));
+    const when = new Date(Date.now() - minutesAgo * 60_000);
+    utimesSync(path, when, when);
+  };
+  beforeEach(() => { mkdirSync(DATA_DIR, { recursive: true }); rmSync(path, { force: true }); });
+  afterEach(() => { rmSync(path, { force: true }); });
+
+  it("reads config.json once while the file is unchanged", () => {
+    writeSettled({ members: ["one@example.test"] });
+    const derive = vi.fn(members);
+    const read = cacheUntilConfigChanges(derive);
+    for (let i = 0; i < 5; i++) expect(read()).toEqual(["one@example.test"]);
+    expect(derive).toHaveBeenCalledTimes(1);
+  });
+
+  it("sees an outside edit on the next call, in place or renamed over the file", () => {
+    writeSettled({ members: ["one@example.test", "two@example.test"] });
+    const read = cacheUntilConfigChanges(members);
+    expect(read()).toEqual(["one@example.test", "two@example.test"]);
+    // In place, as a hand edit does: the size and the time change.
+    writeSettled({ members: ["one@example.test"] }, 2);
+    expect(read()).toEqual(["one@example.test"]);
+    // Renamed over the file, as the CLI and the fleet agent write it: same
+    // size and same time, so only the new file identity tells them apart.
+    const before = statSync(path);
+    writeFileSync(`${path}.next`, JSON.stringify({ signIn: { members: ["two@example.test"] } }));
+    utimesSync(`${path}.next`, before.atime, before.mtime);
+    renameSync(`${path}.next`, path);
+    expect(statSync(path).size).toBe(before.size);
+    expect(read()).toEqual(["two@example.test"]);
+  });
+
+  it("sees this process's own save at once", () => {
+    writeSettled({ members: ["one@example.test"] });
+    const read = cacheUntilConfigChanges(members);
+    expect(read()).toEqual(["one@example.test"]);
+    saveConfig({ signIn: { members: [] } });
+    expect(read()).toEqual([]);
+  });
+
+  it("reads a file saved in the last moments every time, so a second save in the same clock tick is not missed", () => {
+    const tick = new Date();
+    writeFileSync(path, JSON.stringify({ signIn: { members: ["one@example.test"] } }));
+    utimesSync(path, tick, tick);
+    const read = cacheUntilConfigChanges(members);
+    expect(read()).toEqual(["one@example.test"]);
+    // Same size, same file, same modification time: nothing in stat changed.
+    writeFileSync(path, JSON.stringify({ signIn: { members: ["two@example.test"] } }));
+    utimesSync(path, tick, tick);
+    expect(read()).toEqual(["two@example.test"]);
+  });
+
+  it("never keeps the old value once the file is gone", () => {
+    writeSettled({ members: ["one@example.test"] });
+    const read = cacheUntilConfigChanges(members);
+    expect(read()).toEqual(["one@example.test"]);
+    rmSync(path);
+    expect(read()).toEqual([]);
+  });
+
+  it("reads a file loadConfig() could not use on every call, never keeping its defaults", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      writeFileSync(path, "{ not json");
+      const when = new Date(Date.now() - 60_000);
+      utimesSync(path, when, when);
+      const derive = vi.fn(members);
+      const read = cacheUntilConfigChanges(derive);
+      expect(read()).toEqual([]);
+      expect(read()).toEqual([]);
+      expect(derive).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("sees a change of permissions or owner on the next call", () => {
+    writeSettled({ members: ["one@example.test"] });
+    const derive = vi.fn(members);
+    const read = cacheUntilConfigChanges(derive);
+    read();
+    // chmod and chown leave the size, the time and the file the same.
+    chmodSync(path, 0o600);
+    read();
+    expect(derive).toHaveBeenCalledTimes(2);
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "uses the list again once a file the server could not read is readable",
+    () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        writeSettled({ members: ["one@example.test"] });
+        chmodSync(path, 0o000);
+        const read = cacheUntilConfigChanges(members);
+        expect(read()).toEqual([]);
+        expect(read()).toEqual([]);
+        chmodSync(path, 0o600);
+        expect(read()).toEqual(["one@example.test"]);
+      } finally {
+        chmodSync(path, 0o600);
+        warn.mockRestore();
+      }
+    },
+  );
 });

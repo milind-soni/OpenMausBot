@@ -1,6 +1,8 @@
 # server/routes
 
 New HTTP routes go here as modules. Do not add route `if` blocks to `server/index.ts`.
+`scripts/testing/index-route-ratchet.test.ts` fails when `index.ts` gains a path guard. When you move a route out,
+lower its number in that test.
 
 - A route module exports a factory with explicit dependencies, `createXRoutes(deps): RouteHandler`
   (same shape as `server/workspace-backup-http.ts`). It never imports `server/index.ts`.

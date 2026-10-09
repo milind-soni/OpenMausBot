@@ -66,6 +66,10 @@ test("a staged path that is gone is not used", () => {
 test("a missing download is reported instead of building a broken command", () => {
   assert.throws(() => packageInstallCommand("deb", undefined), /no longer available/);
   assert.throws(() => packageInstallCommand("deb", ""), /no longer available/);
+  // Updates download by themselves; the card's one action is Try again, and
+  // there is no Download button left to point at.
+  assert.throws(() => packageInstallCommand("deb", undefined), (error) =>
+    error.message.endsWith("Try the update again.") && !/download it/i.test(error.message));
 });
 
 // These two proofs use a POSIX shell as the referee: only the shell itself

@@ -32,6 +32,9 @@ describe("Cerebras provider", () => {
     const instance = await CerebrasDriver.create({ instanceId: "empty", displayName: "Cerebras", enabled: true,
       config: CerebrasDriver.defaultConfig(), environment: {} });
     expect(await instance.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringContaining("Cerebras API key") });
+    // The settings section is called "API keys" in the app.
+    expect((await instance.snapshot()).reason).toContain("Settings → API keys");
+    expect(CerebrasDriver.install?.signInCommand).toContain("Settings → API keys");
     expect(fetcher).not.toHaveBeenCalled();
     await instance.dispose();
   });

@@ -10,13 +10,14 @@ import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 //
 // resumeCursor is the codex thread id; a later turn tries thread/resume
 // and preserves that history or reports a failed resume.
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { codexConfigMcpServerNames, mountedMcpServerName } from "./codex-mcp-names.ts";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
+import { laterStartup, openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { hostedWorkspaceConfigured } from "../enterprise.ts";
 import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
@@ -33,10 +34,11 @@ import type {
   RuntimeEvent,
   RuntimeEventListener,
   SendTurnInput,
+  StdioMcpSpec,
   SteerOutcome,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
-import { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
+import { decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 import { codexLocalProviderArgs } from "./local-inject.ts";
 import { augmentedPath, splitCliString } from "../env-path.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
@@ -47,14 +49,16 @@ import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instr
 import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
-import { codexAccountEmail } from "./codex-identity.ts";
+import { codexAccountEmail, codexHome } from "./codex-identity.ts";
+import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts";
 import { parseProtocolAskQuestions, questionAnswersById, questionChoices } from "../../shared/ask-question.ts";
 import { codexVersionBehind, readLatestCodexRelease } from "./codex-release.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
-import { gateServer } from "../mcp-gate-config.ts";
+import { gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
+import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -70,6 +74,31 @@ export function codexUserError(value: string, chatgptPlan: boolean): string {
       : "provider_not_configured: This Codex account cannot use the selected route. For the new ChatGPT plan models, choose ChatGPT plan in Settings → Engines and Continue with ChatGPT, then select a model from that account.";
   }
   return value.slice(0, 400);
+}
+
+// Codex's own words when OpenAI refuses its stored ChatGPT login (codex-cli
+// 0.160 login/src/auth: workspace routing, token refresh, auth storage).
+const CODEX_SIGN_IN_REFUSED = /workspace routing discovery unauthorized|access token could not be refreshed|authentication session could not be refreshed|ChatGPT login is required|auth data is not available|please (?:log out and )?sign in again/i;
+
+/** A turn error (TurnError: message, codexErrorInfo) that says Codex's own
+ * sign-in was refused: `unauthorized`, a 401 from the model backend, or one
+ * of Codex's sign-in messages. A 401 from an MCP server or a tool reaches the
+ * model as a tool result, never as a turn error, so it cannot land here. */
+export function codexSignInRefused(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const { message, codexErrorInfo: info } = error as { message?: unknown; codexErrorInfo?: unknown };
+  if (info === "unauthorized") return true;
+  if (info && typeof info === "object" &&
+    Object.values(info).some((variant) => (variant as { httpStatusCode?: unknown } | null)?.httpStatusCode === 401)) return true;
+  return typeof message === "string" && CODEX_SIGN_IN_REFUSED.test(message);
+}
+
+export const CODEX_SIGN_IN_EXPIRED = "Codex's ChatGPT sign-in has expired. Sign in again in Settings → Model providers → Codex.";
+
+/** The plain sentence first, so a peer bot's one-line report keeps it;
+ * Codex's own words follow as the detail. */
+export function codexSignInExpired(raw: string): string {
+  return `${CODEX_SIGN_IN_EXPIRED} Codex said: ${raw.slice(0, 300)}`;
 }
 
 class CodexRpcError extends Error {
@@ -138,6 +167,10 @@ function decodeConfig(raw: unknown): CodexConfig {
   };
 }
 
+/** The documented token-sharing Responses bridge carries no hosted
+ * tool_search (#2035 verified Codex 0.159.0 sends none), so a plan turn's
+ * MCP tools are all loaded up front. Its URL servers go through the remote
+ * proxy's tool directory instead (mcp-directory.ts). */
 export function chatgptPlanCodexArgs(): string[] {
   return [
     "-c", 'model_provider="openai_chatgpt_plan"',
@@ -150,7 +183,9 @@ export function chatgptPlanCodexArgs(): string[] {
     "-c", 'cli_auth_credentials_store="ephemeral"',
     "-c", "features.tool_search=false",
     "-c", "shell_environment_policy.ignore_default_excludes=false",
-    "-c", 'shell_environment_policy.exclude=["OPENMAUSBOT_CHATGPT_TOKEN"]',
+    // OPENMAUSBOT_CHATGPT_TOKEN is excluded on the thread, in the policy's
+    // own representation (extendShellExclusions): a `-c exclude` here would
+    // replace the lower layers' list and drop their filters.
   ];
 }
 
@@ -182,22 +217,24 @@ export function managedCodexArgs(config: NonNullable<CodexConfig["managed"]>): s
   ];
 }
 
+/** Names of variable families mounts write, excluded by one pattern each:
+ * gate and remote-proxy private records (a URL server's address and header
+ * values live in the latter). */
+const PRIVATE_ENV_FAMILIES = ["OMB_GATE_CONFIG_", "OMB_REMOTE_MCP_CONFIG_"];
+/** The remote proxy's settings that are not secret (mcp-gate-config.ts). */
+const PROXY_LITERAL_ENV = ["NODE_USE_ENV_PROXY", "NO_PROXY", "no_proxy"];
+/** Variables a shell cannot work without: never excluded, whoever set them. */
+const SHELL_ESSENTIALS = new Set(["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG", "TZ"]);
+
 const DENY_TIMEOUT_NOTE =
   "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
 
-const skippedSseServers = new Set<string>();
 const renamedMcpServers = new Set<string>();
 /** Logged once per name: the rename is deliberate, not a lost server. */
 function noteRenamedMcpServer(name: string, mountName: string): void {
   if (renamedMcpServers.has(name)) return;
   renamedMcpServers.add(name);
   console.error(`codex: MCP server ${JSON.stringify(name)} is also declared in Codex's own config.toml — mounted as ${JSON.stringify(mountName)} for this bot so the two do not merge`);
-}
-
-function noteSkippedSseServer(name: string): void {
-  if (skippedSseServers.has(name)) return;
-  skippedSseServers.add(name);
-  console.error(`codex: MCP server ${JSON.stringify(name)} uses the SSE transport, which codex does not speak — it is available to Claude bots only`);
 }
 
 /** A TOML inline table for a `-c key=value` override; JSON string quoting
@@ -329,6 +366,34 @@ export const GUEST_CONFINED_CODEX_ARGS = [
 export function codexShellDisabled(config: unknown): boolean {
   const features = plainRecord(plainRecord(config)?.features);
   return features?.shell_tool === false && features?.unified_exec === false && features?.view_image === false;
+}
+
+/** Thread-config overrides that add `patterns` to the person's shell
+ * exclusions, given the effective shell_environment_policy (config/read).
+ * Codex keeps two representations: the legacy `exclude`/`include_only`
+ * lists and the keyed `filters` table (pattern → "exclude" | "include").
+ * A higher layer that writes one drops the other from the layers below
+ * (codex-cli 0.160), so the person's rules are extended in the
+ * representation they use. codex-cli 0.160 also reports every unset field
+ * as null: null means absent. Anything else unexpected refuses the turn. */
+function extendShellExclusions(policy: Record<string, unknown>, patterns: readonly string[]): Record<string, unknown> {
+  const unconfirmed = () => new Error("Codex could not confirm its shell environment exclusions. No prompt was sent.");
+  const exclude = policy.exclude ?? undefined;
+  const filters = policy.filters ?? undefined;
+  if (exclude !== undefined && (!Array.isArray(exclude) || exclude.some(name => typeof name !== "string"))) throw unconfirmed();
+  if (filters === undefined) {
+    return { "shell_environment_policy.exclude": [...new Set([...(exclude ?? []) as string[], ...patterns])] };
+  }
+  const table = plainRecord(filters);
+  if (!table || Object.values(table).some(action => action !== "exclude" && action !== "include")) throw unconfirmed();
+  // One Codex layer cannot mix the two; writing filters would drop the lists.
+  if (exclude !== undefined || (policy.include_only ?? undefined) !== undefined) throw unconfirmed();
+  // Patterns match, merge across layers, and must be unique ignoring case.
+  const ours = new Set(patterns.map(pattern => pattern.toLowerCase()));
+  return { "shell_environment_policy.filters": Object.fromEntries([
+    ...Object.entries(table).filter(([pattern]) => !ours.has(pattern.toLowerCase())),
+    ...patterns.map(pattern => [pattern, "exclude"]),
+  ]) };
 }
 
 /** Codex persists these values on its native thread. Keep them explicit on
@@ -543,48 +608,31 @@ export function codexNativeIncomingLogMessage(
   return message;
 }
 
+/** Every mount is a command Codex starts: URL servers arrive here already
+ * behind OpenMausBot's remote proxy (see scopedServer in sendTurn). */
 function mountMcpServer(
   appServerArgs: string[],
   env: Record<string, string | undefined>,
   name: string,
-  server: McpServerSpec,
+  server: StdioMcpSpec,
   preApproved = true,
+  /** Settings that are not secret, written into the mount's own `env`
+   * table: its process gets them, the shell Codex runs commands in does not. */
+  literalEnv: Record<string, string> = {},
+  /** Collects every variable name this mount writes into `env`. */
+  written: Set<string> = new Set(),
 ): void {
   const prefix = `mcp_servers.${name}`;
-  if ("url" in server) {
-    // A remote server: codex connects itself. Header values are credentials
-    // (Authorization: Bearer …) and travel like env values — the child env
-    // holds them under harness-generated names, argv names only the variables.
-    // A bearer token goes through codex's own bearer setting, the path its
-    // remote servers are documented and exercised with; any other header
-    // rides env_http_headers.
-    appServerArgs.push("-c", `${prefix}.url=${JSON.stringify(server.url)}`);
-    const stem = `OMB_MCP_HEADER_${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
-    const variables: Record<string, string> = {};
-    Object.entries(server.headers).forEach(([header, value], index) => {
-      const bearer = header.toLowerCase() === "authorization" ? /^Bearer\s+(\S+)$/i.exec(value) : null;
-      if (bearer) {
-        env[`${stem}_BEARER`] = bearer[1];
-        appServerArgs.push("-c", `${prefix}.bearer_token_env_var=${JSON.stringify(`${stem}_BEARER`)}`);
-        return;
-      }
-      const variable = `${stem}_${index}`;
-      env[variable] = value;
-      variables[header] = variable;
-    });
-    if (Object.keys(variables).length) {
-      appServerArgs.push("-c", `${prefix}.env_http_headers=${tomlInlineTable(variables)}`);
-    }
-  } else {
-    Object.assign(env, server.env);
-    appServerArgs.push(
-      "-c", `${prefix}.command=${JSON.stringify(server.command)}`,
-      "-c", `${prefix}.args=${JSON.stringify(server.args)}`,
-      // Values stay in the child environment; argv contains names only so
-      // credentials never appear in process listings or diagnostics.
-      "-c", `${prefix}.env_vars=${JSON.stringify(Object.keys(server.env))}`,
-    );
-  }
+  Object.assign(env, server.env);
+  for (const name of Object.keys(server.env)) written.add(name);
+  appServerArgs.push(
+    "-c", `${prefix}.command=${JSON.stringify(server.command)}`,
+    "-c", `${prefix}.args=${JSON.stringify(server.args)}`,
+    // Values stay in the child environment; argv contains names only so
+    // credentials never appear in process listings or diagnostics.
+    "-c", `${prefix}.env_vars=${JSON.stringify(Object.keys(server.env))}`,
+  );
+  if (Object.keys(literalEnv).length) appServerArgs.push("-c", `${prefix}.env=${tomlInlineTable(literalEnv)}`);
   // Harness-owned servers are pre-quieted; a user-configured server keeps
   // codex's on-request policy so its tool calls become approval cards.
   if (preApproved) {
@@ -641,32 +689,79 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     let disposed = false;
     let planWarning: string | undefined;
     let models = plan ? { default: "", options: [] } : config.managed ? { default: config.managed.models[0], options: config.managed.models.map(id => ({ id, label: id })) } : STATIC_CODEX_MODELS;
-    const refreshModels = async () => {
+    const refreshModels = async (preserveExisting = false) => {
       if (config.managed) return;
       if (planAuth) {
         const generation = planGeneration;
-        models = { default: "", options: [] };
-        if (!planUnavailable && !planSigningOut && !disposed) {
-          const catalog = await planAuth.models();
-          if (generation === planGeneration && !planSigningOut && !disposed) models = catalog;
+        const kept = preserveExisting && models.options.length > 0 ? models : null;
+        if (!kept) models = { default: "", options: [] };
+        try {
+          if (!planUnavailable && !planSigningOut && !disposed) {
+            const catalog = await planAuth.models();
+            if (generation === planGeneration && !planSigningOut && !disposed && (!kept || catalog.options.length)) models = catalog;
+          }
+        } catch (error) {
+          // A deferred refresh keeps the list already being served. An
+          // explicit refresh still clears first and reports the error.
+          if (!kept) throw error;
         }
-        return;
+      } else {
+        try {
+          const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
+          if (resolved.options.length) models = resolved;
+        } catch {
+          // Keep the last usable catalog when a local provider is down.
+        }
       }
-      try {
-        const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
-        if (resolved.options.length) models = resolved;
-      } catch {
-        // Keep the last usable catalog when a local provider is down.
-      }
+      try { writeStartupModelCache(instanceId, models); } catch { /* derived cache */ }
     };
     // A revoked grant or a temporary catalog outage must leave the account
     // reachable in Settings for reconnect; it must not become a shadow.
-    if (planAuth) { try { await refreshModels(); } catch { /* Explicit refresh reports the error. */ } }
-    else await refreshModels();
+    // A later start serves the saved list and refreshes behind listen.
+    let startupModelRefresh: Promise<void> | null = null;
+    if (config.managed) {
+      await refreshModels();
+    } else {
+      startupModelRefresh = (await openStartupModelCatalog({
+        instanceId,
+        use: (catalog) => { models = catalog; },
+        current: () => models,
+        refresh: async () => {
+          if (planAuth) {
+            try { await refreshModels(laterStartup()); } catch { /* Explicit refresh reports the error. */ }
+          } else await refreshModels();
+        },
+      }))?.pending ?? null;
+    }
+    // Codex's own ChatGPT login (not ChatGPT plan, whose tokens OpenMausBot
+    // holds, nor Company routing) can be refused by OpenAI while `codex login
+    // status` still reports it. A refusal marks it the way a rejected API key
+    // is marked (key-rejections.ts): its credential home, plus the stored
+    // auth file, so a sign-in made anywhere else starts over. A later turn
+    // that succeeds, a new sign-in and sign-out clear it. Only a stored
+    // ChatGPT login is marked: an API-key login (`codex login --with-api-key`)
+    // cannot be fixed by the ChatGPT sign-in Settings offers.
+    const ownLogin = !plan && !config.managed;
+    const loginMark = (): [string, string] | null => {
+      const home = ownLogin ? codexHome(childEnv()) : null;
+      if (!home) return null;
+      let stored = "";
+      try { stored = readFileSync(join(home, "auth.json"), "utf8"); } catch { return null; /* keyring, or none */ }
+      try {
+        const auth = JSON.parse(stored) as { auth_mode?: unknown; tokens?: unknown };
+        const chatgpt = typeof auth.auth_mode === "string" ? /chatgpt/i.test(auth.auth_mode) : Boolean(auth.tokens);
+        if (!chatgpt) return null;
+      } catch { return null; }
+      return [`codex-login:${home}`, stored];
+    };
+    const loginRefused = () => { const mark = loginMark(); if (mark) noteKeyRejected(...mark); };
+    const loginAccepted = (mark = loginMark()) => { if (mark) noteKeyAccepted(...mark); };
+    const loginRejected = () => { const mark = loginMark(); return mark !== null && keyRejected(...mark); };
     const authentication = new CodexDeviceAuthController({
       cli: config.cli,
       environment: childEnv,
-      onAuthenticated: refreshModels,
+      signInRejected: loginRejected,
+      onAuthenticated: async () => { loginAccepted(); await refreshModels(); },
     });
     const listeners = new Set<RuntimeEventListener>();
     interface Turn {
@@ -693,6 +788,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     });
 
     const sendTurn = async (turn: SendTurnInput) => {
+      if (startupModelRefresh) await startupModelRefresh;
       turn = { ...turn, toolScope: assertToolScopeSupported(DRIVER_KIND, turn.toolScope) };
       const generation = planGeneration;
       const assertPlanCurrent = () => {
@@ -754,6 +850,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // tests so a fake's transient failures don't stall real seconds
       const retryScale = Number(process.env.FAKE_CODEX_RETRY_SCALE ?? "1");
 
+      // Only a turn on the official provider says anything about Codex's
+      // ChatGPT login: a custom provider's 401 is its own key's, and its
+      // success proves nothing about ChatGPT. No model means the catalog's
+      // default, which is provider-qualified when config.toml picks another.
+      const chatgptTurn = ownLogin &&
+        decodeCodexSelection(turn.model || models.default).modelProvider === OFFICIAL_CODEX_PROVIDER;
       const launchAttempt = async (attempt: number): Promise<void> => {
         const env = childEnv();
         if (planToken) env.OPENMAUSBOT_CHATGPT_TOKEN = planToken;
@@ -765,19 +867,60 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           // no file reads, whatever the person's own config says (-c wins
           // over config files). The turn also starts with no environment.
           ...(turn.guestConfined ? GUEST_CONFINED_CODEX_ARGS : [])];
-        const selectedMcp = new Map<string, McpServerSpec>();
+        // What the environment holds before any MCP mount writes to it, and
+        // every name the mounts write.
+        const baseEnv = new Map(Object.entries(env).filter(([, value]) => value !== undefined));
+        const mountedNames = new Set<string>();
+        const selectedMcp = new Map<string, StdioMcpSpec>();
         const selectedApprovals = new Map<string, boolean>();
-        const scopedServer = (name: string, mountName: string, server: McpServerSpec) => {
+        /** Mounts whose big catalog is searched (plan turns' URL servers). */
+        const directoryMounts = new Set<string>();
+        /** Each mount's settings that are not secret (mountMcpServer's literalEnv). */
+        const literalEnvs = new Map<string, Record<string, string>>();
+        const scopedServer = (name: string, mountName: string, server: McpServerSpec): StdioMcpSpec | null => {
           if (!canUseMcpServer(turn.toolScope, name)) return null;
-          return turn.toolScope === undefined ? server : gateServer({ name, server, threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" },
-            configEnvName: `OMB_GATE_CONFIG_${createHash("sha256").update(mountName).digest("hex")}` });
+          // Every URL server is reached through OpenMausBot's remote proxy,
+          // on every Codex login, never by Codex's own MCP client: the proxy
+          // opens the connection with the same minimal handshake as Settings
+          // → Test (mcp-http.ts). Codex's own client adds capability fields
+          // (codex-cli 0.160.1 sends elicitation.form/url; rmcp 3.2's form
+          // capability can carry schemaValidation) that a strict server
+          // refuses: a Voluum server answered "Unrecognized field
+          // 'schemaValidation'", Codex started the thread without its tools,
+          // and every call came back "Tool not found" while Settings → Test
+          // listed 100+ tools. The proxy also speaks SSE, which Codex does not.
+          // A plan turn has no tool_search (chatgptPlanCodexArgs): its URL
+          // servers are also searched through the proxy's tool directory.
+          // Own-login and Company turns keep Codex's hosted tool_search, so
+          // their catalog passes through whole.
+          const directory = plan && "url" in server;
+          if (turn.toolScope === undefined && !("url" in server)) return server;
+          const hash = createHash("sha256").update(mountName).digest("hex");
+          // A proxy's network settings come from the environment Codex runs
+          // with: Codex itself starts MCP children with only a few names.
+          const proxy = turn.toolScope === undefined
+            ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(directory ? { directory: { name } } : {}), configEnvName: `OMB_REMOTE_MCP_CONFIG_${hash}`, sourceEnv: env })
+            : gateServer({ name, server, threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" },
+              configEnvName: `OMB_GATE_CONFIG_${hash}`, directory, sourceEnv: env });
+          if (proxy && directory) directoryMounts.add(mountName);
+          if (!proxy) return null;
+          // The proxy's own network switches go in its env table, so the
+          // shell keeps the person's NO_PROXY and never gets the switch. A
+          // gate already carries them inside its private record.
+          const shared = { ...proxy.env };
+          if (turn.toolScope === undefined) {
+            const literal = Object.fromEntries(Object.entries(shared).filter(([key]) => PROXY_LITERAL_ENV.includes(key)));
+            for (const key of PROXY_LITERAL_ENV) delete shared[key];
+            if (Object.keys(literal).length) literalEnvs.set(mountName, literal);
+          }
+          return { command: proxy.command, args: proxy.args ?? [], env: shared };
         };
         const mountSelected = (name: string, mountName: string, server: McpServerSpec, preApproved = true) => {
           const selected = scopedServer(name, mountName, server);
           if (selected) {
             selectedMcp.set(mountName, selected);
             selectedApprovals.set(mountName, preApproved);
-            mountMcpServer(appServerArgs, env, mountName, selected, preApproved);
+            mountMcpServer(appServerArgs, env, mountName, selected, preApproved, literalEnvs.get(mountName), mountedNames);
             if (turn.toolScope !== undefined && !preApproved) appServerArgs.push("-c", `mcp_servers.${mountName}.default_tools_approval_mode="prompt"`);
           }
         };
@@ -804,13 +947,6 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           for (const name of declaredInCodexConfig) appServerArgs.push("-c", `mcp_servers.${name}.enabled=false`);
         }
         for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
-          // codex speaks streamable HTTP to a remote server, not the older
-          // SSE transport: such an entry still reaches Claude bots, and is
-          // left out here rather than mounted as something it is not
-          if (turn.toolScope === undefined && "url" in server && server.type === "sse") {
-            noteSkippedSseServer(name);
-            continue;
-          }
           const mountName = mountedMcpServerName(name, declaredInCodexConfig);
           if (mountName !== name) noteRenamedMcpServer(name, mountName);
           mountSelected(name, mountName, server, false);
@@ -821,6 +957,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           } else {
           const bridge = turn.integrations.phone;
           Object.assign(env, bridge.env);
+          for (const name of Object.keys(bridge.env)) mountedNames.add(name);
           const prefix = "mcp_servers.openmausbot_phone";
           appServerArgs.push(
             "-c", `${prefix}.command=${JSON.stringify(bridge.command)}`,
@@ -831,10 +968,35 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
         }
 
+        // Codex hands its MCP children their variables from the one
+        // environment it also runs shell commands in. Every variable a mount
+        // writes there (a command server's token, a harness mount's
+        // capability, a gate's or remote proxy's private record, which holds
+        // a URL server's header values) is excluded from that shell below,
+        // and shell snapshots, which can restore what the policy removed,
+        // are off.
+        // Not excluded: a value the environment already held that a mount
+        // passes along unchanged (the person's proxy settings), and the few
+        // variables no shell works without. ELECTRON_RUN_AS_NODE is never the
+        // person's setting, so it is excluded wherever a mount sets it.
+        const mountedEnv = [...mountedNames].filter((name) => env[name] !== undefined && !SHELL_ESSENTIALS.has(name) && !name.startsWith("LC_")
+          && (name === "ELECTRON_RUN_AS_NODE" || baseEnv.get(name) !== env[name]));
+        const privateEnv = [...new Set([
+          ...(turn.toolScope !== undefined ? ["OMB_GATE_CONFIG_*"] : []),
+          ...PRIVATE_ENV_FAMILIES.filter((family) => mountedEnv.some((name) => name.startsWith(family))).map((family) => `${family}*`),
+          ...mountedEnv.filter((name) => !PRIVATE_ENV_FAMILIES.some((family) => name.startsWith(family))).sort(),
+        ])];
+        // Records this turn writes for a tool selection or a searched server
+        // never run without proof that snapshots are off. The rest was there
+        // before that guarantee, so a Codex that cannot say keeps working,
+        // only with the exclusions.
+        const provenPrivateEnv = turn.toolScope !== undefined || directoryMounts.size > 0;
+        if (privateEnv.length && turn.toolScope === undefined) appServerArgs.push("-c", "features.shell_snapshot=false");
+
         const selectionConfig: { config?: Record<string, unknown> } = turn.toolScope === undefined ? {} : { config: { mcp_servers: Object.fromEntries(
-          [...selectedMcp].map(([name, server]) => [name, "command" in server ? {
+          [...selectedMcp].map(([name, server]) => [name, {
             command: server.command, args: server.args, env_vars: Object.keys(server.env), env: {}, default_tools_approval_mode: selectedApprovals.get(name) ? "auto" : "prompt",
-          } : {}]),
+          }]),
         ) } };
 
         const commandCwd = permissionLaunchCwd(turn.cwd ?? homedir());
@@ -852,6 +1014,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const state = {
         settled: false,
         lastError: "",
+        // whether lastError went out marked setup (a sign-in to fix)
+        lastErrorSetup: false,
+        // an error Codex said it would retry itself (willRetry), kept only
+        // to explain a turn that then fails without words of its own
+        retryError: "",
+        // Codex started recovering its model provider's sign-in this turn
+        authRecovery: false,
         lastText: "",
         sawStreamDelta: false,
         // codex reports token usage as a running total for this app-server
@@ -1063,14 +1232,27 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           });
           return;
         }
-        const mcpTool = isLegacyMcpPermission
-          ? String(params.message ?? "").match(/tool "([^"]+)"/)?.[1]
-          : undefined;
+        // Codex asks 'Allow the <server> MCP server to run tool "<tool>"?'.
+        // The tool is everything from the first quote to the closing `"?`,
+        // so a tool named `web_search" …` cannot pass for web_search.
+        const mcpMessage = typeof params.message === "string" ? params.message : "";
+        const mcpTool = isLegacyMcpPermission ? / to run tool "(.*)"\?$/.exec(mcpMessage)?.[1] : undefined;
+        // A searched server (mcp-directory.ts): its catalog reads run no
+        // tool and pass without a card, as the tools/list they replace did,
+        // but only when Codex asks about exactly them; call_tool is shown as
+        // the tool it runs.
+        const searchedServer = isLegacyMcpPermission && typeof params.serverName === "string" && directoryMounts.has(params.serverName);
+        const asksAbout = (tool: string) => mcpMessage === `Allow the ${params.serverName} MCP server to run tool "${tool}"?`;
+        if (searchedServer && (asksAbout(SEARCH_TOOL) || asksAbout(DESCRIBE_TOOL))) {
+          send({ jsonrpc: "2.0", id: msg.id, result: { action: "accept", content: {} } });
+          return;
+        }
+        const runs = searchedServer && asksAbout(CALL_TOOL) ? directoryCallTarget(CALL_TOOL, params._meta?.tool_params) : undefined;
         const tool =
           mcpAppApproval
             ? mcpAppApproval.tool
             : isLegacyMcpPermission
-            ? (mcpTool ?? "mcp")
+            ? (runs ?? mcpTool ?? "mcp")
             : isAdditionalPermission
               ? "permissions"
             : method === "item/fileChange/requestApproval" || method === "applyPatchApproval"
@@ -1098,7 +1280,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           isAdditionalPermission
             ? additionalPermissionSummary(params.permissions, params.reason)
             : isMcpPermission
-            ? (mcpAppApproval?.summary ?? (typeof params.message === "string" ? params.message : "MCP access requested"))
+            ? (mcpAppApproval?.summary ?? (runs ? `Allow the ${params.serverName} MCP server to run tool ${JSON.stringify(runs)}?`
+              : typeof params.message === "string" ? params.message : "MCP access requested"))
             : typeof params.command === "string"
             ? params.command
             : protocolQuestions
@@ -1190,6 +1373,23 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           message: `Codex automatic review ${outcome}${target}. Action did not run. Retry stays ${retryMode}. Select Ask for human approval in approval settings.`,
         });
       };
+      // The turn's failure, said once. An error notification and the
+      // turn/completed after it usually carry the same words; the second
+      // only speaks again to deliver a sign-in flag the first lacked.
+      // Codex's own refused sign-in reads as one plain sentence and marks
+      // the login, so Settings asks for a new sign-in too.
+      const turnError = (error: { message?: unknown; codexErrorInfo?: unknown }) => {
+        const raw = String(error.message);
+        const refused = chatgptTurn && loginMark() !== null && (codexSignInRefused(error) ||
+          (state.authRecovery && !/\b403\b|forbidden/i.test(raw) && /\b401\b|unauthorized/i.test(raw)));
+        if (refused) loginRefused();
+        const message = refused ? codexSignInExpired(raw) : codexUserError(raw, plan);
+        const setup = refused || classifyError({ text: message }).reason === "auth";
+        if (message === state.lastError && (state.lastErrorSetup || !setup)) return;
+        state.lastError = message;
+        state.lastErrorSetup ||= setup;
+        emit({ ...base(threadId, turnId), type: "runtime.error", message, ...(setup ? { setup: true } : {}) });
+      };
       const handleNotification = (msg: any) => {
         const p = msg.params ?? {};
         // An app-server also emits notifications for native helper threads.
@@ -1264,13 +1464,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           case "item/started": {
             const item = p.item ?? {};
+            // call_tool on a searched server reads as the tool it runs.
+            const runs = item.type === "mcpToolCall" && item.tool === CALL_TOOL && typeof item.server === "string" && directoryMounts.has(item.server)
+              ? directoryCallTarget(CALL_TOOL, item.arguments) : undefined;
             const title =
               item.type === "commandExecution"
                 ? String(item.command ?? "shell")
                 : item.type === "fileChange"
                   ? "edit"
                   : item.type === "mcpToolCall"
-                    ? (item.tool ?? item.name ?? "mcp")
+                    ? (runs ?? item.tool ?? item.name ?? "mcp")
                     : item.type === "webSearch"
                       ? "web_search"
                       : null;
@@ -1282,7 +1485,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                 itemId: item.id,
                 title,
                 summary: item.type === "commandExecution" ? commandSummary({ command: item.command }) : undefined,
-                input: toolDetailPreview(item.type === "commandExecution" ? { command: item.command, cwd: item.cwd } : item.type === "mcpToolCall" ? item.arguments : item.type === "fileChange" ? item.changes : item.query),
+                input: toolDetailPreview(item.type === "commandExecution" ? { command: item.command, cwd: item.cwd } : item.type === "mcpToolCall" ? (runs ? item.arguments?.arguments ?? {} : item.arguments) : item.type === "fileChange" ? item.changes : item.query),
               });
             }
             break;
@@ -1378,27 +1581,39 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           case "turn/completed": {
             if (reviewWarning && !timedOutReview) reviewNotice("warning");
             const t = p.turn ?? {};
-            const message = typeof t.error?.message === "string" ? codexUserError(t.error.message, plan) : "";
-            if (t.status !== "completed" && message && message !== state.lastError) {
-              state.lastError = message;
-              emit({ ...base(threadId, turnId), type: "runtime.error", message,
-                ...(classifyError({ text: message }).reason === "auth" ? { setup: true } : {}),
-              });
+            if (t.status === "completed") {
+              if (chatgptTurn) loginAccepted();
+            } else if (typeof t.error?.message === "string") {
+              turnError(t.error);
+            } else if (t.status === "failed" && !state.lastError && state.retryError) {
+              // Codex gave up retrying without a final word: its last one
+              turnError({ message: state.retryError });
             }
             void settle(t.status === "completed", t.status === "completed" ? null :
-              (classifyError({ text: message || state.lastError }).reason === "provider_safety" ? "provider_safety" : (message || t.status || "failed")));
+              (classifyError({ text: state.lastError }).reason === "provider_safety" ? "provider_safety" : (state.lastError || t.status || "failed")));
             break;
           }
-          case "error":
-            // shape drift: 0.144 sends {message}, 0.139 nests it under
-            // {error:{message}} — surface either (agentcal armor)
-            {
-              const message = p.message ?? p.error?.message;
-              if (message) {
-                state.lastError = codexUserError(String(message), plan);
-                emit({ ...base(threadId, turnId), type: "runtime.error", message: state.lastError });
-              }
+          case "error": {
+            // shape drift: 0.144 sends {message}, 0.139 and 0.160 nest it
+            // under {error:{message, codexErrorInfo}} — surface either
+            // (agentcal armor)
+            const error = p.error && typeof p.error === "object" ? p.error : { message: p.message };
+            if (!error.message) break;
+            // 0.160 reports each of its own reconnects ("Reconnecting...
+            // 1/5") with willRetry: true. Those are not the turn's failure;
+            // the final error, or turn/completed, says how it ended.
+            if (p.willRetry === true) {
+              state.retryError = String(error.message);
+              break;
             }
+            turnError(error);
+            break;
+          }
+          case "modelProvider/authRecoveryStarted":
+            state.authRecovery = true;
+            break;
+          case "modelProvider/authRecoveryCompleted":
+            state.authRecovery = false;
             break;
         }
       };
@@ -1577,30 +1792,32 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               : "Could not read Codex configuration; cannot safely update bot instructions. Retry after checking Codex.",
           );
         }
-        if (turn.toolScope !== undefined) {
-          if ((effectiveConfig as { features?: { shell_snapshot?: unknown } } | null)?.features?.shell_snapshot !== false) {
+        if (privateEnv.length) {
+          const snapshot = (effectiveConfig as { features?: { shell_snapshot?: unknown } } | null)?.features?.shell_snapshot;
+          if (provenPrivateEnv ? snapshot !== false : snapshot === true) {
             throw new Error("Codex could not disable inherited shell snapshots. No prompt was sent.");
           }
-          // Gate descriptors belong to MCP children, never native shell tools.
-          // Extend the effective policy for both new and resumed threads so
-          // local, Company and ChatGPT turns retain the person's exclusions.
+        }
+        if (privateEnv.length || plan) {
+          // Extend the effective policy, never replace it, for both new and
+          // resumed threads, so local, Company and ChatGPT turns keep the
+          // person's own exclusions, and a plan turn adds its token's to
+          // them on every turn, mounts or none.
           const rawPolicy = (effectiveConfig as { shell_environment_policy?: unknown } | null)?.shell_environment_policy;
           if (rawPolicy !== undefined && (!rawPolicy || typeof rawPolicy !== "object" || Array.isArray(rawPolicy))) {
             throw new Error("Codex could not confirm its shell environment policy. No prompt was sent.");
           }
-          const policy = (rawPolicy ?? {}) as Record<string, unknown>;
-          const excluded = policy.exclude === undefined ? [] : policy.exclude;
-          if (!Array.isArray(excluded) || excluded.some(name => typeof name !== "string")) {
-            throw new Error("Codex could not confirm its shell environment exclusions. No prompt was sent.");
-          }
-          selectionConfig.config!["shell_environment_policy.exclude"] = [...new Set([...excluded, "OMB_GATE_CONFIG_*"])];
+          selectionConfig.config = { ...selectionConfig.config,
+            ...extendShellExclusions((rawPolicy ?? {}) as Record<string, unknown>, [...(plan ? ["OPENMAUSBOT_CHATGPT_TOKEN"] : []), ...privateEnv]) };
+        }
+        if (turn.toolScope !== undefined) {
           const catalog = (effectiveConfig as { mcp_servers?: unknown } | null)?.mcp_servers;
           if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) throw new Error("Codex could not confirm its selected MCP configuration. No prompt was sent.");
           for (const [name, entry] of Object.entries(catalog)) {
             if (entry && typeof entry === "object" && (entry as { enabled?: unknown }).enabled === false) continue;
             const expected = selectedMcp.get(name);
             const actual = entry as { command?: unknown; args?: unknown; env_vars?: unknown; env?: unknown; default_tools_approval_mode?: unknown; tools?: unknown } | null;
-            if (!expected || !("command" in expected) || actual?.command !== expected.command
+            if (!expected || actual?.command !== expected.command
               || JSON.stringify(actual?.args ?? []) !== JSON.stringify(expected.args ?? [])
               || !Array.isArray(actual?.env_vars) || JSON.stringify([...actual.env_vars].sort()) !== JSON.stringify(Object.keys(expected.env).sort())
               || actual.default_tools_approval_mode !== (selectedApprovals.get(name) ? "auto" : "prompt")
@@ -1618,10 +1835,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // Only the stable half of the prompt belongs in the developer slot:
         // it is the part that must survive compaction unchanged, and any
         // change to it invalidates the provider's cached prefix. The volatile
-        // half (memory, mentions, outstanding teammate work) is delivered
-        // inside the turn that changed it, after the cached prefix, the same
-        // contract SendTurnInput.systemStable documents. Without the split
-        // the driver keeps the previous single-block behaviour.
+        // half (the sections in VOLATILE_SECTIONS, system-prompt.ts) is
+        // delivered inside the turn that changed it, after the cached
+        // prefix, the same contract SendTurnInput.systemStable documents.
+        // Without the split the driver keeps the previous single-block
+        // behaviour.
         const stableInstructions = typeof turn.systemStable === "string" && typeof turn.systemVolatile === "string"
           ? turn.systemStable
           : null;
@@ -1767,8 +1985,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             // back. The app-server offers no way to clear a level either:
             // "" is rejected outright and thread/start takes no effort at
             // all. So a thread keeps the last level it was sent until it is
-            // sent another, and choosing Default lands on the bot's next new
-            // thread rather than the current one.
+            // sent another; back on Default, the harness gives a thread that
+            // holds a level a new thread instead of resuming it (server/index.ts).
             ...(turn.effort ? { effort: turn.effort } : {}),
           });
         };
@@ -1784,8 +2002,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (commitVolatile) commitVolatile();
       } catch (e) {
         const failure = e instanceof Error ? e : { text: String(e) };
-        const message = codexUserError(e instanceof Error ? e.message : String(e), plan);
-        const needsAuth = /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(message);
+        const raw = e instanceof Error ? e.message : String(e);
+        const refused = chatgptTurn && loginMark() !== null && codexSignInRefused({ message: raw });
+        const message = refused ? codexSignInExpired(raw) : codexUserError(raw, plan);
+        const needsAuth = refused || /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(message);
         const verdict = classifyError(failure);
         // Three guards hold here: main's abandoned attempt never retries,
         // neither does a Company session already recovered once from canonical
@@ -1818,6 +2038,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // abandoned marks an attempt retired by a retry; its late rpc
         // timeouts must neither report a spurious error nor relaunch again
         if (!state.settled && !abandoned) {
+          if (refused) loginRefused();
           emit({
             ...base(threadId, turnId),
             type: "runtime.error",
@@ -1850,6 +2071,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         resolve(!err && /^logged in\b/im.test(`${stdout}\n${stderr ?? ""}`)),
       );
     });
+    // Signed in as far as the CLI knows, but OpenAI refused it on a real turn.
+    if (authenticated && loginRejected()) {
+      return { state: "available", version, authenticated: false, reason: CODEX_SIGN_IN_EXPIRED,
+        update: await codexReleaseUpdate(version, config.cli), billing: "subscription" };
+    }
     // Display identity only, so Settings can say whose ChatGPT account the
     // bots run on; the status command above stays the authority on sign-in.
     const email = authenticated ? await codexAccountEmail(config.cli, env) : null;
@@ -1873,6 +2099,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       return models;
     },
     refreshModels,
+    ...(startupModelRefresh ? { startupModelRefresh } : {}),
     ...(plan ? { authenticationMethod: "browser-pkce" as const } : {}),
     startAuthentication: async () => {
       if (planUnavailable) throw new Error(planUnavailable);
@@ -1887,7 +2114,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     },
     cancelAuthentication: () => (planAuth ?? authentication).cancel(),
     signOut: async () => {
-      if (!planAuth) return authentication.signOut();
+      if (!planAuth) {
+        const mark = loginMark();
+        await authentication.signOut();
+        loginAccepted(mark);
+        return;
+      }
       planSigningOut = true;
       planGeneration++;
       try {

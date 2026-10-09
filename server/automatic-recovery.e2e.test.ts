@@ -70,6 +70,7 @@ async function withRecoveryFixture(
         ...(options.gated ? { FAKE_ACP_RPC_FAILURE_GATE: gateFile } : {}),
       },
     };
+    config.instances.secondary = { ...config.instances.opencodeGo, displayName: "Second startup fixture" };
     config.instances.claude.environment = {
       ...config.instances.claude.environment,
       FAKE_CLAUDE_PROMPTS: backupFile, FAKE_CLAUDE_TOOL_CALLS: "[]",
@@ -213,6 +214,30 @@ it("recovers a coordinated specialist and returns its result to the Chief exactl
   });
 }, 90_000);
 
+it("uses the ordered bot list only for proven pre-prompt failures and leaves defaults and siblings unchanged", async () => {
+  await withRecoveryFixture({}, async ({ api, control, calls, backupPrompts, evidence }) => {
+    const { bot } = await control("new-bot", "--name", "Ordered startup fallback");
+    const threadId = bot.activeTaskId;
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: primary, updateBotDefault: true });
+    const { task: sibling } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Unchanged sibling" });
+    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "secondary", model: primary.model }, backup] });
+    const text = "ORDERED_STARTUP_ONLY_3F";
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", text);
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+    expect(calls().filter(call => call.method === "initialize.error")).toHaveLength(2);
+    expect(calls().filter(call => call.method === "session/prompt")).toHaveLength(0);
+    expect(backupPrompts()).toHaveLength(1);
+    const after = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id);
+    expect(after.modelSelection).toEqual(primary);
+    expect(after.tasks.find((task: any) => task.threadId === sibling.threadId).modelSelection).toEqual(primary);
+    expect(after.tasks.find((task: any) => task.threadId === threadId)).toMatchObject({ modelSelection: backup, busy: false });
+    const { messages } = await control("messages", "--bot", bot.id, "--task", threadId, "--limit", "30");
+    expect(messages.filter((message: any) => message.role === "user" && message.text === text)).toHaveLength(1);
+    expect(messages.filter((message: any) => message.tool?.name?.startsWith("recovery:"))).toHaveLength(2);
+    evidence.push({ after, messages });
+  });
+}, 90_000);
+
 it.each([
   { name: "disabled", enabled: false },
   { name: "prompt already accepted", method: "session/prompt" },
@@ -223,6 +248,7 @@ it.each([
     const { bot } = await control("new-bot", "--name", "No replay");
     const threadId = bot.activeTaskId;
     await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: primary, updateBotDefault: true });
+    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "secondary", model: primary.model }, backup] });
     await control("send", "--bot", bot.id, "--task", threadId, "--text", "DO_NOT_REPLAY_THIS_9S");
     // The control surface calls a partial-output failure settled; the
     // transcript's terminal error is the failure evidence in that case.
@@ -269,6 +295,10 @@ it("stops after one failed backup instead of looping between engines", async () 
     expect(calls().filter((call) => call.method === "initialize.error")).toHaveLength(1);
     const { messages } = await control("messages", "--bot", bot.id, "--task", threadId, "--limit", "20");
     expect(messages.filter((message: any) => message.role === "user" && message.text === "ONLY_ONE_BACKUP_4T")).toHaveLength(1);
+    // the backup's sign-in failure is the one failed-turn row every client
+    // reads (shared/failed-turn.ts): whole, with the flag its sign-in needs
+    expect(messages.map((message: any) => message.tool).filter((tool: any) => tool?.ok === false))
+      .toEqual([{ name: "error: Not logged in · Please run /login", ok: false, setup: true }]);
   });
 }, 90_000);
 

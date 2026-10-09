@@ -60,6 +60,40 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
 const specialist = (key: string, section: string, modelSelection = { instanceId: "claude", model: "sonnet" }) => ({ action: "create", key,
   fields: { name: key, title: "Specialist", soul: "Finish the assigned work.", section, modelSelection } });
 
+describe("a specialist the Chief suggests", () => {
+  const suggest = (h: ReturnType<typeof harness>, name: string) => h.service.suggest({ botId: h.chief.id, threadId: h.chief.threadId, suggestion: true,
+    plan: { reason: "The work needs a checker", operations: [specialist(name, "Work")] } });
+
+  it("always waits on a card with Add bot and Not now, even at Full Access", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    const card = suggest(h, "Theo");
+    expect(card).toMatchObject({ state: "pending", applied: false, title: "Add @Theo to the team?" });
+    expect(card.detail).toContain("@Clive is suggesting this. You did not ask for it.");
+    expect(h.messages.at(-1)?.card).toMatchObject({ options: ["Add bot", "Not now"], teamSetupRequest: { suggestion: true } });
+    expect(h.apply).not.toHaveBeenCalled();
+    expect((await h.resolve(card.requestId))?.result.state).toBe("applied");
+    expect(h.store.bot(h.apply.mock.calls[0]![0].operations[0]!.botId)).toMatchObject({ name: "Theo" });
+  });
+
+  it("keeps one suggestion open per conversation and remembers Not now", async () => {
+    const h = harness();
+    const first = suggest(h, "Theo");
+    expect(() => suggest(h, "Una")).toThrow(/already waiting/);
+    // A plain create the user asked for is not a suggestion and still works.
+    expect((await h.submit([specialist("Asked", "Work")])).state).toBe("pending");
+    expect((await h.resolve(first.requestId, "deny"))?.result.state).toBe("denied");
+    expect(() => suggest(h, "Una")).toThrow(/not now/);
+    expect(h.apply).not.toHaveBeenCalled();
+  });
+
+  it("lets a new suggestion follow one the user applied", async () => {
+    const h = harness();
+    const first = suggest(h, "Theo");
+    await h.resolve(first.requestId);
+    expect(suggest(h, "Una").title).toBe("Add @Una to the team?");
+  });
+});
+
 describe("reviewed Chief team setup", () => {
   it("reviews promotion in an authorized team without changing anything on denial", async () => {
     const h = harness(); h.peer.section = "Engineering";

@@ -1,11 +1,20 @@
 // Scripted provider fixture that exercises the REAL injected agents MCP proxy.
 // The plan and evidence are confined to the isolated launcher's temporary home.
 import { spawn } from "node:child_process";
-import { appendFileSync, readFileSync, existsSync } from "node:fs";
+import { appendFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { waitForExit } from "./cleanup.ts";
 
 type AgentsIntegration = { command: string; args: string[]; env: Record<string, string> };
+
+// Claude reads its MCP config and system prompt files once, at launch. The
+// harness removes both when the first turn settles, so a process kept warm
+// for later turns must not read them again.
+const launchFiles = new Map<string, string>();
+const readAtLaunch = (path: string) => {
+  if (!launchFiles.has(path)) launchFiles.set(path, readFileSync(path, "utf8"));
+  return launchFiles.get(path)!;
+};
 
 /** `launch` replaces Claude's argv files for another fake engine: the agents
  * server it mounted, its instructions, and extra evidence fields. `progress`
@@ -15,7 +24,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   launch?: { integration: AgentsIntegration; system: string; evidence?: Record<string, unknown> },
   progress?: (text: string) => void): Promise<string> {
   const arg = (flag: string) => argv[argv.indexOf(flag) + 1];
-  const integration = launch?.integration ?? Object.values(JSON.parse(readFileSync(arg("--mcp-config"), "utf8")).mcpServers as Record<string, AgentsIntegration>)
+  const integration = launch?.integration ?? Object.values(JSON.parse(readAtLaunch(arg("--mcp-config"))).mcpServers as Record<string, AgentsIntegration>)
     .find(s => s.env?.OMB_BOT_ID);
   // A depth-capped delegated turn mounts no agents server: answer from the prompt alone.
   if (!integration) {
@@ -40,7 +49,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
     return `Handled without teammate tools: ${taskText}`;
   }
   const botId = integration.env.OMB_BOT_ID;
-  const system = launch?.system ?? readFileSync(arg("--append-system-prompt-file"), "utf8");
+  const system = launch?.system ?? readAtLaunch(arg("--append-system-prompt-file"));
   // Claude snapshots the launch-time system prompt for a session. A retained
   // process or --resume launch receives changed turn-scoped instructions in
   // the user message, so inspect both surfaces just as the model does.
@@ -100,6 +109,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
         if (Boolean(response.error || response.result?.isError) !== Boolean(step.expectError)) throw new Error(`Unexpected tool outcome: ${JSON.stringify(response)}`);
       }
       if (typeof plan.progress === "string") progress?.(plan.progress);
+      if (plan.readyFile) writeFileSync(plan.readyFile, "ready");
       // All MCP calls have completed. An explicit test gate is owned by the
       // parent test's timeout, not the transport deadline: long conversation
       // fixtures may deliberately keep a teammate waiting across many turns.

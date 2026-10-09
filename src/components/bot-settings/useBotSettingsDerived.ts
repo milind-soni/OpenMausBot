@@ -4,10 +4,8 @@
 // stay pure prop-takers. This hook is the one place in the bot settings
 // dialog that still reaches into useStore.
 import { useDesktopCapabilities } from "../DesktopCapabilities";
-import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
-import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
+import { browserAvailable, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { stateForBot } from "@/lib/mascot";
-import { placeOffered } from "@/lib/place";
 import { useStore, type Bot } from "@/state/store";
 import { approvalModeFor } from "../../../shared/approval-mode";
 import { connectorGrantsState, type ConnectorGrantsState } from "@/lib/connector-grants";
@@ -33,6 +31,8 @@ export type BotPatch = Partial<
     | "alwaysAllow"
     | "autoApprove"
     | "approvalMode"
+    | "outbound"
+    | "fallback"
     | "speakReplies"
     | "memoryEnabled"
     | "voice"
@@ -49,6 +49,7 @@ export type BotPatch = Partial<
   /** null drops the explicit record and returns the bot to the legacy
    * all-tools boolean. */
   connectorTools?: Bot["connectorTools"] | null;
+  connectorScopes?: Bot["connectorScopes"] | null;
   acknowledgeLocalAuto?: boolean;
   confirmFullAccess?: boolean;
   acknowledgePeerScope?: boolean;
@@ -57,10 +58,6 @@ export type BotPatch = Partial<
 export function useBotSettingsDerived(bot: Bot) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
-  const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
-  // An OMB Cloud home never offers this computer (shared/cloud-home.ts).
-  const localSelectable = placeOffered("local", state.config) && localComputerSelectable({ capabilities, providerSupportsLocal });
-  const localDisabledReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
   const patch = (p: BotPatch) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
   const activeState = stateForBot(bot);
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
@@ -73,7 +70,6 @@ export function useBotSettingsDerived(bot: Bot) {
   const trustedModesAvailable = Boolean(window.ogb?.approvals && capabilities.host.packaged);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
   const canUseConnectedApps = engine?.capabilities?.composioMcp === true;
-  const canUseVps = engine?.capabilities?.computerMcp === true && engine.driverKind !== "boxAgent";
   const connectedAppsConfigured = state.config?.composio?.configured === true;
   const connectedAppsEnabled = bot.composio !== false;
   const connectorGrantState: ConnectorGrantsState = connectorGrantsState(bot);
@@ -83,14 +79,6 @@ export function useBotSettingsDerived(bot: Bot) {
   const browserFeature = builtInBrowserEnabled(state.config);
   const browserAllowed = bot.browser !== false;
   const browserEnabled = browserFeature && browserAllowed;
-  // "Works on: Browser" needs everything the switch needs except the switch
-  // itself; the boat-native Computer engine has no browser-only mode.
-  const browserSelectable = desktopBrowser && browserFeature && canUseBrowser && engine?.driverKind !== "boxAgent";
-  const browserDisabledReason = !desktopBrowser
-    ? browserUnavailableReason(state.config)
-    : !browserFeature
-      ? "The built-in browser is switched off under App Settings → Experimental"
-      : "This model cannot use the built-in browser";
   const sectionName = bot.section?.trim() || "General";
   const currentChief = state.bots.find(
     (candidate) =>
@@ -107,7 +95,6 @@ export function useBotSettingsDerived(bot: Bot) {
     trustedModesAvailable,
     canCoordinate,
     canUseConnectedApps,
-    canUseVps,
     connectedAppsConfigured,
     connectedAppsEnabled,
     connectorGrantState,
@@ -117,14 +104,10 @@ export function useBotSettingsDerived(bot: Bot) {
     browserFeature,
     browserAllowed,
     browserEnabled,
-    browserSelectable,
-    browserDisabledReason,
     sectionName,
     currentChief,
     botRoutines,
     activeBotRoutines,
-    localSelectable,
-    localDisabledReason,
     activeState,
     mascotMotion,
   };

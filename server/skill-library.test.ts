@@ -3,7 +3,10 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadBundledSkills, loadUserSkills, mergeSkills, parseSkillManifest, selectBundledSkills, skillInstructionsFor, type BundledSkill } from "./skill-library.ts";
+import { loadBundledSkills, loadUserSkills, mergeSkills, parseSkillManifest, renderSkillInstructions, selectBundledSkills, type BundledSkill } from "./skill-library.ts";
+
+const instructionsFor = (text: string, capabilities: string[], skills: BundledSkill[], options?: { includeRoot?: boolean }) =>
+  renderSkillInstructions(selectBundledSkills(text, capabilities, skills), options);
 
 const phone: BundledSkill = {
   directory: "/skills/phone-harness",
@@ -21,13 +24,13 @@ const phone: BundledSkill = {
 
 describe("bundled skill library", () => {
   it("selects a skill only when both its trigger and capability are present", () => {
-    const rendered = skillInstructionsFor("Open Uber on my Android", ["phoneMcp"], [phone]);
+    const rendered = instructionsFor("Open Uber on my Android", ["phoneMcp"], [phone]);
     expect(rendered).toContain("Use phone tools");
     expect(rendered).not.toContain('root="/skills/phone-harness"');
-    expect(skillInstructionsFor("Open Uber on my Android", ["phoneMcp"], [phone], { includeRoot: true }))
+    expect(instructionsFor("Open Uber on my Android", ["phoneMcp"], [phone], { includeRoot: true }))
       .toContain('root="/skills/phone-harness"');
-    expect(skillInstructionsFor("Open Uber on my Android", [], [phone])).toBe("");
-    expect(skillInstructionsFor("Write a poem", ["phoneMcp"], [phone])).toBe("");
+    expect(instructionsFor("Open Uber on my Android", [], [phone])).toBe("");
+    expect(instructionsFor("Write a poem", ["phoneMcp"], [phone])).toBe("");
   });
 
   it("requires the manifest id to match its isolated folder", () => {

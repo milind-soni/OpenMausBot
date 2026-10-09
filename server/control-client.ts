@@ -113,18 +113,10 @@ export function createControlClient(options?: {
   };
 }
 
-/** The one sentence every refused action gets. Deliberately does not vary
- * per tool: the model needs the same three facts every time — nothing
- * happened, don't retry blindly, and how to wait properly. */
-export const CONTROL_REFUSAL =
-  "A person has taken control of this computer, so this call was NOT performed. " +
-  "Do not retry it — the screen is changing under their hands. " +
-  "Call computer_request_help (no reason needed) to wait for them to finish, " +
-  "then take a fresh screenshot before your next action.";
-
-/** The bridge-gated computers (Local VM, VPS) speak Cua Driver's own tool
- * surface, which has no wait tool to point at — so the guidance is to
- * pause, not to call anything. */
+/** The one sentence every refused computer action gets, on every computer.
+ * Deliberately does not vary per tool: the model needs the same three facts
+ * every time — nothing happened, don't retry blindly, and wait for the
+ * person. */
 export const CONTROL_REFUSAL_PLAIN =
   "A person has taken control of this computer, so this call was NOT performed. " +
   "Do not retry it — the screen is changing under their hands. " +

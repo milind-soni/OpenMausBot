@@ -68,6 +68,12 @@ export async function loadDesktopCapabilities(): Promise<DesktopCapabilities> {
   return cached;
 }
 
+/** What this window knows now, without waiting: the loaded capabilities, or
+ * the first guess while they load. */
+export function desktopCapabilitiesNow(): DesktopCapabilities {
+  return cached ?? initialDesktopCapabilities();
+}
+
 export function cacheDesktopCapabilities(capabilities: DesktopCapabilities): DesktopCapabilities {
   cacheRevision += 1;
   cached = capabilities;

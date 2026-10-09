@@ -8,7 +8,7 @@ import type { ModelPicker } from "./ModelPicker";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -26,6 +26,20 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: fixture.platform }, localComputer: { available: false, reasonCode: fixture.localReasonCode, message: fixture.localMessage } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/thread-preferences")>(),
+  useShowThreads: () => fixture.showThreads,
+}));
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
+// Record every popover menu's items; the trigger still renders so the markup
+// assertions elsewhere in this file see the same header.
+vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./SidebarPopoverMenu")>(),
+  SidebarPopoverMenu: (props: { ariaLabel: string; items: never[]; renderTrigger: (state: { open: boolean }) => unknown }) => {
+    fixture.menus.push({ ariaLabel: props.ariaLabel, items: props.items });
+    return props.renderTrigger({ open: false });
+  },
+}));
 vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite }));
 vi.mock("./CitationUI", async (importOriginal) => ({
   ...await importOriginal<typeof import("./CitationUI")>(),
@@ -40,7 +54,8 @@ vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (props: Compone
   return createElement("span", { "data-test-approval-control": true });
 } }));
 
-const { ChatView, ErrorRow, NewConversationInstead, claudeUpdateTarget } = await import("./ChatView");
+const { ChatView, ErrorRow, FailedTurnRow, NewConversationInstead, claudeUpdateTarget } = await import("./ChatView");
+const { activityPreview } = await import("@/lib/failed-turn");
 afterAll(() => vi.unstubAllGlobals());
 
 const bot: Bot = {
@@ -51,11 +66,99 @@ const bot: Bot = {
     modelSelection: { instanceId: "test", model: "thread-model" }, approvalMode: "ask" }],
 };
 
-describe("thread control placement", () => {
-  it("keeps the full thread picker accessible without the sidebar", () => {
+describe("Advanced mode in the header menu", () => {
+  const inspector = () => {
+    fixture.menus = [];
+    renderToStaticMarkup(createElement(ChatView, { bot }));
+    const more = fixture.menus.find((menu) => menu.ariaLabel === "More")!;
+    return more.items.find((item) => item.key === "inspector")!;
+  };
+
+  it("keeps the inspector visible but locked, labelled for Advanced mode, in Simple mode", () => {
+    fixture.advanced = false;
+    const item = inspector();
+    expect(item.disabled).toBe(true);
+    expect(item.heading).toBe("In Advanced mode");
+    fixture.advanced = true;
+  });
+
+  it("leaves the inspector exactly as it was in Advanced mode", () => {
+    fixture.advanced = true;
+    const item = inspector();
+    expect(item.disabled).toBeFalsy();
+    expect(item.heading).toBeUndefined();
+  });
+});
+
+describe("header name", () => {
+  it("renames only from the bot's settings in Simple mode: no pencil, and the whole pill opens them", () => {
+    fixture.advanced = false;
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
-    expect(markup).toContain('aria-label="All threads"');
+    expect(markup).not.toContain('aria-label="Rename Pepper"');
+    // one button holds the avatar and the name together
+    const pill = markup.match(/<button[^>]*data-chathead-pill="true"[^>]*>([\s\S]*?)<\/button>/);
+    expect(pill?.[0]).toContain('aria-label="Open Pepper&#x27;s profile"');
+    expect(pill?.[1]).toContain(">Pepper</span>");
+    expect(pill?.[0]).toContain("rounded-full");
+    fixture.advanced = true;
+  });
+
+  it("keeps the rename pencil in Advanced mode, inside the same pill as the avatar and name", () => {
+    fixture.advanced = true;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const start = markup.indexOf('<div data-chathead-pill="true"');
+    expect(start).toBeGreaterThan(-1);
+    const pill = markup.slice(start, markup.indexOf("data-chathead-controls"));
+    expect(pill).toContain('aria-label="Open Pepper&#x27;s profile"');
+    expect(pill).toContain("Rename Pepper");
+  });
+
+  it("centres the bot in the header's middle column, with the controls in the last", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const row = markup.match(/data-chathead-row="true" class="([^"]*)"/)?.[1] ?? "";
+    expect(row).toContain("@min-[30rem]/chathead:grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)]");
+    expect(markup).toMatch(/data-chathead-identity="true" class="[^"]*@min-\[30rem\]\/chathead:col-start-2[^"]*justify-self-center/);
+    expect(markup).toMatch(/data-chathead-controls="true" class="[^"]*@min-\[30rem\]\/chathead:col-start-3/);
+  });
+});
+
+describe("glass header", () => {
+  it("floats the header over the transcript, which starts below it and scrolls on underneath", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const frame = markup.indexOf("data-glass-frame");
+    const header = markup.indexOf('data-glass-bar="top"');
+    const name = markup.indexOf("data-chathead-row");
+    const scroller = markup.indexOf('class="glass-scroller ');
+    expect(frame).toBeGreaterThan(-1);
+    expect(frame).toBeLessThan(header);
+    expect(header).toBeLessThan(name);
+    expect(name).toBeLessThan(scroller);
+    // The glass is tinted with the chat's own background, not the sidebar's.
+    expect(markup.slice(frame, header)).toContain("[--glass-tint:var(--color-app)]");
+    // The transcript is padded by the header's measured height.
+    expect(markup.slice(scroller)).toMatch(/class="glass-scroller-content[^"]*"[^>]*role="log"/);
+  });
+});
+
+describe("thread control placement", () => {
+  it.each([true, false])("leaves All threads to the sidebar in both modes (advanced: %s)", (advanced) => {
+    fixture.advanced = advanced;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(markup).not.toContain('aria-label="All threads"');
     expect(markup).toContain('data-testid="chat-more"');
+    fixture.advanced = true;
+  });
+
+  it.each([true, false])("calls from the composer beside dictation, not the header (advanced %s)", (advanced) => {
+    fixture.advanced = advanced;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const header = markup.slice(markup.indexOf("data-chathead-controls"), markup.indexOf("data-composer-row"));
+    expect(header).not.toContain("data-call-button");
+    expect(markup).not.toContain('data-call-button="header"');
+    const actions = markup.slice(markup.indexOf("data-composer-actions"));
+    expect(actions).toContain('data-call-button="composer"');
+    expect(markup.match(/data-call-button=/g)).toHaveLength(1);
+    fixture.advanced = true;
   });
 
   it("gives the editor its own row in a narrow chat", () => {
@@ -95,6 +198,30 @@ describe("thread control placement", () => {
     expect(markup).toContain("Manage usage");
     expect(markup).toContain("https://chatgpt.com/settings/usage");
     expect(markup).not.toContain(">Retry<");
+  });
+  it("opens a signed-out engine's failed turn with one sentence and the sign-in, the CLI's words under Details", () => {
+    const claude = {
+      instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude",
+      snapshot: { state: "available", authenticated: false },
+      install: { command: { darwin: "x", linux: "x", win32: "x" }, signInCommand: "claude /login", server: { package: "@anthropic-ai/claude-code" } },
+      authentication: { method: "paste-code" },
+      models: { default: "sonnet", options: [] },
+    } as InstanceInfo;
+    const markup = renderToStaticMarkup(createElement(FailedTurnRow, { tool: { name: "error: Not logged in · Please run /login", ok: false, setup: true }, engine: claude, onRetry: () => {} }));
+    expect(markup).toContain(">Claude isn&#x27;t signed in yet. Sign in below, then send your message again.</span>");
+    expect(markup).toContain("Sign in to Claude</button>");
+    expect(markup).toMatch(/<summary[^>]*>Details<\/summary><p[^>]*>Not logged in · Please run \/login<\/p>/);
+    expect(markup).not.toContain(">Retry<");
+    // an update offer is not a sign-in: the row keeps the engine's words,
+    // on a company-managed Claude too (chat cannot update it, so no offer
+    // shows, but the row is still about the update, as the list says)
+    const update = { name: "error: Claude Code 2.1.268 does not support this model", ok: false, setup: true, claudeUpdate: true };
+    for (const engine of [claude, { ...claude, readOnly: true }]) {
+      const row = renderToStaticMarkup(createElement(FailedTurnRow, { tool: update, engine }));
+      expect(row).toContain(">Claude Code 2.1.268 does not support this model</span>");
+      expect(row).not.toContain("isn&#x27;t signed in");
+      expect(activityPreview(update, engine)).toBe("Claude Code 2.1.268 does not support this model");
+    }
   });
   it("offers to update Claude Code for a too-old install, or hands over the command", () => {
     const claude = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", snapshot: { state: "available", authenticated: true } } as InstanceInfo;
@@ -259,6 +386,16 @@ describe("thread control placement", () => {
     expect(markup).not.toContain("data-test-model-control");
     expect(markup).not.toContain("data-test-approval-control");
     delete window.ogb;
+  });
+
+  it.each([true, false])("pins a place per conversation from the composer only in Advanced (advanced: %s)", (advanced) => {
+    fixture.advanced = advanced;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const pill = markup.slice(markup.indexOf("rounded-3xl bg-composer"), markup.indexOf("<textarea"));
+    expect(pill.match(/data-testid="place-chip"/g) ?? []).toHaveLength(advanced ? 1 : 0);
+    // Nowhere else in the chat either: Simple follows the bot's Works on.
+    expect(markup.includes("Where this conversation works")).toBe(advanced);
+    fixture.advanced = true;
   });
 });
 

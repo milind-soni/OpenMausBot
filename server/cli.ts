@@ -31,11 +31,13 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 
+import { phonePairingLink } from "../shared/pairing-link.ts";
 import { parseAllowList } from "./account-signin.ts";
 import { appendAdminAction, flushAdminActivity, sharedSignIn } from "./admin-activity.ts";
 import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
 import { resolveLoopbackTrust } from "./request-auth.ts";
+import { restartPolicy } from "./restart.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
@@ -491,15 +493,6 @@ export function pairingBlock(input: {
   return lines.join("\n");
 }
 
-/** The scheme and host of a link, or null if it is not one we can dial. */
-function originOf(link: string): string | null {
-  try {
-    return new URL(link).origin;
-  } catch {
-    return null;
-  }
-}
-
 export function qrToString(text: string): string {
   let out = "";
   qrcode.generate(text, { small: true }, (rendered: string) => {
@@ -516,20 +509,18 @@ async function mintPairing(port: number, options: { label?: string; client?: boo
   if (refusedAsService(status, body)) throw new Error(SERVICE_TRUST_HELP);
   if (status !== 200) throw new Error(`server refused to mint a pairing code: ${typeof body?.error === "string" ? body.error : status}`);
   const url = options.publicUrl ? `${options.publicUrl}/pair#code=${body.code}` : typeof body.url === "string" ? body.url : null;
-  // A server too old to mint a credential simply has no invite: the web link
-  // still works, so an upgrade is never required to pair a browser.
-  // The address the phone will dial. `--public-url` wins, exactly as it does
-  // for the web link above: a server behind someone else's proxy often does
-  // not know its own public name, which is what that flag is for. Gate on the
-  // credential, never on the server's own invite — a server started without
-  // OMB_PUBLIC_URL returns a credential and no invite, and gating on the
-  // invite would throw away a secret the CLI has every part it needs to use.
-  const address = options.publicUrl ?? (typeof body.url === "string" ? originOf(body.url) : null);
-  // A server too old to mint a credential simply has no invite: the web link
-  // still works, so an upgrade is never required to pair a browser.
-  const invite = typeof body.credential === "string" && address
-    ? `openmausbot://pair?address=${encodeURIComponent(address)}&token=${encodeURIComponent(body.credential)}${typeof body.serverName === "string" ? `&name=${encodeURIComponent(body.serverName)}` : ""}`
-    : typeof body.inviteUrl === "string" ? body.inviteUrl : null;
+  // The phone-app invite. This command asks over loopback, so the server
+  // already built it from its own public address with the same builder; it is
+  // printed as it came. `--public-url` wins, exactly as it does for the web
+  // link above: a server behind someone else's proxy often does not know its
+  // own public name, which is what that flag is for. That case gates on the
+  // credential, never on the server's invite — a server started without
+  // OMB_PUBLIC_URL returns a credential and no invite. A server too old to
+  // mint a credential simply has no invite: the web link still works, so an
+  // upgrade is never required to pair a browser.
+  const invite = (options.publicUrl && typeof body.credential === "string"
+    ? phonePairingLink({ address: options.publicUrl, token: body.credential, name: typeof body.serverName === "string" ? body.serverName : undefined })
+    : null) ?? (typeof body.inviteUrl === "string" ? body.inviteUrl : null);
   return pairingBlock({ code: body.code, url, inviteUrl: invite, expiresAt: body.expiresAt, hint: typeof body.hint === "string" ? body.hint : null, phone: options.phone });
 }
 
@@ -816,7 +807,7 @@ export async function runBrowser(options: CliOptions, io: CliIo = defaultIo()): 
     if (process.platform === "linux" && !options.withDeps) io.error("on Linux, install Chrome's system libraries with `sudo openmausbot browser install --with-deps`, then retry `openmausbot browser install` as the user running serve");
     return 1;
   }
-  io.log("browser installed for this user and data directory; run serve as the same user, then enable it under Settings → Experimental and per bot");
+  io.log("browser installed for this user and data directory; run serve as the same user, then enable it under Settings → Computers and per bot");
   if (process.platform === "linux" && options.withDeps) io.log("if serve runs as another user, run `openmausbot browser install` from that user's login shell too");
   return 0;
 }
@@ -866,7 +857,7 @@ async function planTunnel(options: CliOptions, log: (line: string) => void, reco
       return { error: `--tunnel: ${message(error)}` };
     }
   } else {
-    account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion(), recovery });
+    account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion(), recovery, log: (line) => log(`tunnel: ${line}`) });
     if (account.credentials.status === "unavailable") return fail(`${account.credentials.file} exists but could not be read; fix or remove it`);
     if (!describeTunnelAccount(account.credentials.read()).email) {
       return fail("no account on this machine yet: run `openmausbot login` first, then `openmausbot serve --tunnel`");
@@ -1128,12 +1119,28 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   }
 }
 
+/** `serve` until the server stops for good. A server that exits with
+ * RESTART_EXIT_CODE (a copied workspace committed; docs/copy-workspace.md)
+ * is started again in this process, with its tunnel, Tailscale or domain
+ * address unchanged, and without a second pairing code or browser tab; at
+ * most MAX_RESTARTS times in a row (server/restart.ts restartPolicy). */
+export async function serveUntilStopped(options: CliOptions, run: (options: CliOptions) => Promise<number> = runServe, now: () => number = Date.now): Promise<number> {
+  const policy = restartPolicy(now);
+  let launch = options;
+  for (;;) {
+    const code = await run(launch);
+    if (!policy.again(code)) return code;
+    console.log("\nOpenMausBot is starting again to finish installing a copy from the desktop app…");
+    launch = { ...options, pair: false, open: false };
+  }
+}
+
 /** Keep setup imports behind the data-dir override: config binds its paths
  * when first imported. `serve` remains usable with stdin closed. */
 export async function runOnboardingCommand(
   options: CliOptions,
   io: CliIo = defaultIo(),
-  startServer: (options: CliOptions) => Promise<number> = runServe,
+  startServer: (options: CliOptions) => Promise<number> = serveUntilStopped,
   flow: { prompts?: SetupIo; phoneSetup?: typeof runPhoneSetup; running?: typeof isWorkspaceRunning; open?: typeof openDashboard } = {},
 ): Promise<number> {
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
@@ -1209,7 +1216,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     case "start":
       return runOnboardingCommand(options);
     case "serve":
-      return runServe(options);
+      return serveUntilStopped(options);
     case "pair":
       return runPair(options);
     case "sessions":

@@ -8,10 +8,17 @@
 //
 // The update entry is the one item that reports progress in place, so it
 // keeps the menu open and re-labels itself as it works.
+//
+// The phone has two entries: Connect your phone, which opens the pairing
+// this window can do and says where the phone will connect (this computer,
+// your Cloud, this server), and Get the phone app (iPhone and Android). On
+// this computer, a paid Cloud that is Ready adds a Connect your phone line
+// of its own, first: to your Cloud, always on.
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   Check,
+  Download,
   Info,
   HelpCircle,
   Keyboard,
@@ -24,14 +31,29 @@ import {
 import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
+import { PhoneAppDialog } from "./PhoneAppDialog";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { ShortcutHint } from "./ShortcutHint";
-import { phoneSettingsAction, useSidebarPhoneStatus } from "./SidebarPhoneButton";
-import { useStore } from "@/state/store";
+import { useSidebarPhoneStatus } from "./SidebarPhoneButton";
+import { useStore, type Action } from "@/state/store";
+import type { CloudAccountBridge, CloudAccountState } from "../../electron/cloud-account.mjs";
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
+import { brand } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
+import {
+  cloudPhoneDestination,
+  connectPhoneEntry,
+  currentPhonePairingTarget,
+  loadPhonePairingAccess,
+  phoneDestinations,
+  phonePairingSettingsAction,
+  type CloudPhoneDestination,
+  type ConnectPhoneEntry,
+  type PhoneDestination,
+  type PhonePairingAccess,
+} from "@/lib/phone-pairing";
 
 /** "Milind Soni" → "MS", "milind" → "M", "you@x.dev" → "Y", unset → "?" */
 export function profileInitials(profile?: { name?: string; email?: string }): string {
@@ -69,9 +91,6 @@ export function updatePhase(state: UpdaterState | null, upToDate: boolean): Upda
 
 export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): string {
   switch (phase) {
-    case "available":
-      // an unknown version leaves a double space behind, in every language
-      return t("sidebar.update.available", { version: state?.version ?? "" }).replace("  ", " ");
     case "downloading":
       return state?.percent == null
         ? t("sidebar.update.startingDownload")
@@ -79,10 +98,12 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
     case "preparing":
       return t("sidebar.update.preparing");
     case "downloaded":
+      // Named: on My Cloud's page it is this app that restarts, not the Cloud.
+      // An unknown version leaves a double space behind, in every language.
       return (
         state?.installMode === "handoff"
-          ? t("sidebar.update.readyInstall", { version: state?.version ?? "" })
-          : t("sidebar.update.ready", { version: state?.version ?? "" })
+          ? t("sidebar.update.readyInstall", { app: brand().name, version: state?.version ?? "" })
+          : t("sidebar.update.ready", { app: brand().name, version: state?.version ?? "" })
       ).replace("  ", " ");
     case "installing":
       return (
@@ -105,8 +126,8 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
 }
 
 /** A phase that is mid-flight takes no further clicks. `pending` covers the
- * gap between the click and the bridge reporting the state it started: both
- * download and install round-trip through main first, and without this the
+ * gap between the click and the bridge reporting the state it started: a
+ * check and an install round-trip through main first, and without this the
  * row would sit there looking clickable. */
 export function updateBusy(phase: UpdatePhase, pending = false): boolean {
   return pending || phase === "checking" || phase === "downloading" || phase === "preparing" || phase === "installing";
@@ -115,7 +136,7 @@ export function updateBusy(phase: UpdatePhase, pending = false): boolean {
 function UpdateIcon({ phase, pending, size = 18 }: { phase: UpdatePhase; pending: boolean; size?: number }) {
   if (updateBusy(phase, pending)) return <Loader2 size={size} className="animate-spin" />;
   if (phase === "up-to-date") return <Check size={size} />;
-  if (phase === "available" || phase === "downloaded") return <ArrowDownToLine size={size} />;
+  if (phase === "downloaded") return <ArrowDownToLine size={size} />;
   return <RefreshCw size={size} />;
 }
 
@@ -134,15 +155,16 @@ interface UpdateEntry {
 }
 
 /** The updater bridge exists only in the packaged app; in dev the entry is
- * absent rather than dead. */
-function useUpdateItem(): UpdateEntry | null {
+ * absent rather than dead. The desktop app answers only this computer's page
+ * and the person's own Cloud page, so until it does there is no entry. */
+export function useUpdateItem(): UpdateEntry | null {
   const state = useUpdaterState();
   const updater = window.ogb?.updater;
   const [pending, setPending] = useState(false);
   const [checkedAt, setCheckedAt] = useState(0);
   const status = state?.status ?? "idle";
 
-  // download and install both round-trip through main before the status
+  // a check and an install both round-trip through main before the status
   // changes — spin on the click itself, and let the new status clear it
   useEffect(() => setPending(false), [status]);
 
@@ -154,7 +176,7 @@ function useUpdateItem(): UpdateEntry | null {
     return () => clearTimeout(timer);
   }, [upToDate]);
 
-  if (!updater) return null;
+  if (!updater || !state) return null;
 
   const phase = updatePhase(state, upToDate);
   const label = updateLabel(phase, state);
@@ -176,10 +198,6 @@ function useUpdateItem(): UpdateEntry | null {
           setPending(true);
           return void updater.install();
         }
-        if (phase === "available") {
-          setPending(true);
-          return void updater.download();
-        }
         setCheckedAt(Date.now());
         void updater.check();
       },
@@ -187,27 +205,112 @@ function useUpdateItem(): UpdateEntry | null {
   };
 }
 
+/** Connect your phone for this window, once it is known whether this
+ * session may pair one. This computer's own phone flow needs no asking. */
+function useConnectPhoneEntry(cloudHome: boolean): ConnectPhoneEntry | null {
+  const target = currentPhonePairingTarget(cloudHome);
+  const [access, setAccess] = useState<PhonePairingAccess | null>(null);
+  useEffect(() => {
+    if (target === "computer") return;
+    let alive = true;
+    void loadPhonePairingAccess().then((next) => {
+      if (alive) setAccess(next);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [target]);
+  return connectPhoneEntry(target, access);
+}
+
+/** On this computer only: the person's Cloud as a phone destination, from
+ * the verified native snapshot (null elsewhere, signed out, or no plan). */
+export function useCloudPhoneDestination(enabled: boolean): { cloud: CloudPhoneDestination; bridge?: CloudAccountBridge } {
+  const bridge = enabled && !window.ogb?.remoteClient?.active ? window.ogb?.cloudAccount : undefined;
+  const [account, setAccount] = useState<CloudAccountState | null>(null);
+  useEffect(() => {
+    if (!bridge) return;
+    let active = true, updated = false;
+    const unsubscribe = bridge.onState((next) => { updated = true; if (active) setAccount(next); });
+    // Reads the native snapshot only; never signs in, refreshes or connects.
+    void bridge.state().then((next) => { if (active && !updated) setAccount(next); }).catch(() => {});
+    return () => { active = false; unsubscribe(); };
+  }, [bridge]);
+  return bridge ? { cloud: cloudPhoneDestination(account), bridge } : { cloud: null };
+}
+
+/** What choosing a destination does. Here: Settings → Remote access on this
+ * window's pairing. Cloud: open the Cloud in this window on its phone
+ * pairing, as Settings → OMB Cloud's Use your Cloud on your phone does; if
+ * that fails, Settings → OMB Cloud, which says what to do. */
+export function selectPhoneDestination(destination: PhoneDestination, { bridge, dispatch }: { bridge?: Pick<CloudAccountBridge, "connectHomeForPhone">; dispatch: (action: Action) => void }): void {
+  if (destination.id !== "cloud" || !bridge) {
+    dispatch(phonePairingSettingsAction());
+    return;
+  }
+  void bridge.connectHomeForPhone().catch(() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }));
+}
+
+/** The phone entries at the top of the menu: a Connect your phone line per
+ * destination, then Get the phone app. Connect your phone is absent where
+ * this window cannot pair one (a chat-only session, a server whose people
+ * sign in through their organization). */
+export function phoneMenuItems({
+  destinations,
+  connected,
+  onConnect,
+  onGetApp,
+}: {
+  destinations: PhoneDestination[];
+  /** a phone is connected to this computer right now */
+  connected: boolean;
+  onConnect: (destination: PhoneDestination) => void;
+  onGetApp: () => void;
+}): SidebarMenuItem[] {
+  return [
+    ...destinations.map((destination) => ({
+      key: destination.id === "cloud" ? "connect-phone-cloud" : "connect-phone",
+      label: t("sidebar.menu.connectPhone"),
+      subtitle: t(destination.subtitleKey),
+      ...(destination.noteKey ? { note: t(destination.noteKey) } : {}),
+      icon: <Smartphone size={18} />,
+      trailing:
+        destination.id === "here" && destination.target === "computer" && connected ? (
+          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-success" />
+        ) : undefined,
+      onSelect: () => onConnect(destination),
+    } satisfies SidebarMenuItem)),
+    {
+      key: "phone-app",
+      label: t("sidebar.menu.getPhoneApp"),
+      icon: <Download size={18} />,
+      onSelect: onGetApp,
+    },
+  ];
+}
+
 export function SidebarProfileMenu() {
   const { state, dispatch } = useStore();
   const phone = useSidebarPhoneStatus();
+  const connectPhone = useConnectPhoneEntry(state.config?.cloudHome === true);
+  const cloudPhone = useCloudPhoneDestination(connectPhone?.target === "computer");
+  const destinations = phoneDestinations(connectPhone, cloudPhone.cloud);
   const update = useUpdateItem();
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [phoneAppOpen, setPhoneAppOpen] = useState(false);
   const triggerRef = useRef<HTMLSpanElement>(null);
 
   const profile = state.config?.profile;
   const name = profileLabel(profile);
+  const connectTo = (destination: PhoneDestination) => selectPhoneDestination(destination, { bridge: cloudPhone.bridge, dispatch });
 
   const items: SidebarMenuItem[] = [
-    {
-      key: "phone",
-      label: phone.pairedCount ? t("sidebar.menu.yourPhone") : t("sidebar.menu.getIos"),
-      icon: <Smartphone size={18} />,
-      trailing:
-        phone.kind === "connected" ? (
-          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-success" />
-        ) : undefined,
-      onSelect: () => dispatch(phoneSettingsAction()),
-    },
+    ...phoneMenuItems({
+      destinations,
+      connected: phone.kind === "connected",
+      onConnect: connectTo,
+      onGetApp: () => setPhoneAppOpen(true),
+    }),
     {
       key: "settings",
       label: t("sidebar.menu.settings"),
@@ -280,6 +383,15 @@ export function SidebarProfileMenu() {
         )}
       />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <PhoneAppDialog
+        open={phoneAppOpen}
+        onClose={() => setPhoneAppOpen(false)}
+        connect={destinations.map((destination) => ({
+          key: destination.id,
+          subtitle: t(destination.subtitleKey),
+          onSelect: () => connectTo(destination),
+        }))}
+      />
     </>
   );
 }

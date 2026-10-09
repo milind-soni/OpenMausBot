@@ -153,7 +153,10 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     await finish(); await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: updated.requestId, behavior: "allow" }); await continueOnce(updated.requestId);
     const changed = (await state()).find((bot: any) => bot.id === engineer.id);
     expect(changed).toMatchObject({ section: "Growth", modelSelection: selection(claude), description: "Shared delivery specialist" });
-    expect(changed.tasks.find((task: any) => task.threadId === engineer.threadId).modelSelection).toEqual(selection(codex));
+    // The existing thread stays, with its history; it has no model of its
+    // own, so it follows Patch onto Claude.
+    expect(changed.tasks.find((task: any) => task.threadId === engineer.threadId))
+      .toMatchObject({ modelSelection: selection(claude), followsBotModel: true });
 
     token = await start("Review another profile change for Patch.");
     const stale = await api("POST", "/api/internal/team-setup-requests", { plan: { reason: "Review stale behavior", operations: [

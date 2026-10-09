@@ -3,11 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   BOAT_ACCOUNT_RESOURCES_ERROR,
   CLOUD_BACKEND_CHANGE_ERROR,
-  VPS_ALIAS_CHANGE_ERROR,
   VPS_ALIAS_RESOURCES_ERROR,
   boatAccountResourceChangeError,
   cloudBackendChangeError,
-  vpsAliasChangeError,
   vpsAliasResourceChangeError,
 } from "./cloud-backend.ts";
 
@@ -23,12 +21,6 @@ describe("cloud backend switching", () => {
 
   it("allows changes while idle", () => {
     expect(cloudBackendChangeError(false, false)).toBeNull();
-  });
-
-  it("keeps an active VPS turn on its original SSH host", () => {
-    expect(vpsAliasChangeError("old-vps", "new-vps", true)).toBe(VPS_ALIAS_CHANGE_ERROR);
-    expect(vpsAliasChangeError("old-vps", "old-vps", true)).toBeNull();
-    expect(vpsAliasChangeError("old-vps", "new-vps", false)).toBeNull();
   });
 
   it("allows Boat token rotation only when the replacement sees the same resources", () => {

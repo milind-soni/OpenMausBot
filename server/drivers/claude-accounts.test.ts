@@ -149,7 +149,8 @@ describe("Claude account configuration", () => {
     await provider.adapter.sendTurn({ threadId: "account-injected", text: "hello", model: "unsloth::fixture-model" });
     await recorder.until(event => event.type === "turn.completed");
     recorder.stop();
-    expect(calls(dir)[1]?.env).toEqual({
+    // The turn is the last spawn (a version check may come before it).
+    expect(calls(dir).at(-1)?.env).toEqual({
       ANTHROPIC_BASE_URL: "http://127.0.0.1:8888",
       ANTHROPIC_AUTH_TOKEN: "fixture-local-key",
       ANTHROPIC_API_KEY: "fixture-local-key",

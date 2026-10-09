@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ChatMarkdown,
   CodeBlock,
+  HIGHLIGHT_CACHE_MAX,
+  HIGHLIGHT_CACHE_MAX_CHARS,
   samePeers,
   chatUrlTransform,
   markdownImageName,
@@ -23,6 +25,22 @@ vi.mock("react", async (importOriginal) => {
   const react = await importOriginal<typeof React>();
   return { ...react, useEffect: vi.fn(react.useEffect) };
 });
+
+// The highlighter is created once per page. Tests replace what that one
+// instance calls, instead of swapping the module out from under it.
+const shiki = vi.hoisted(() => ({
+  codeToHtml: vi.fn(async (_code: string, _options: unknown) => "<pre></pre>"),
+  loadLanguage: vi.fn(async (_grammar: unknown) => undefined),
+}));
+vi.mock("shiki/core", () => ({
+  createHighlighterCore: async () => ({
+    codeToHtml: (code: string, options: unknown) => shiki.codeToHtml(code, options),
+    loadLanguage: (grammar: unknown) => shiki.loadLanguage(grammar),
+  }),
+}));
+vi.mock("shiki/engine/javascript", () => ({
+  createJavaScriptRegexEngine: () => ({}),
+}));
 
 describe("mention highlighting", () => {
   const mentionPeers = [{ name: "Atlas" }, { name: "調査担当" }];
@@ -103,7 +121,7 @@ describe("math rendering", () => {
 
   it("keeps code dollar signs and malformed TeX delimiters literal", () => {
     const text = "`const price = '$5'`\n\n```tex\n\\(not rendered\\)\n```\n\nUnclosed \\(x";
-    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text, streaming: true }));
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
     expect(html).not.toContain('class="katex"');
     expect(normalizeMathDelimiters(text)).toBe(text);
   });
@@ -244,13 +262,18 @@ describe("math rendering", () => {
     const text = `Price R$ 120; \\( x^2 \\) and \`$5\`.\n\n${image}\n\nPay $10.\n\n${image}`;
     const preview = vi.spyOn(AttachmentPreview, "MarkdownImagePreview");
     try {
-      const html = renderToStaticMarkup(createElement(ChatMarkdown, {
-        text, message: { threadId: "thread-1", messageId: "message-1" },
-      }));
-      expect(html).toContain('class="katex"');
-      expect(preview.mock.calls.map(([props]) => props.sourceOffset)).toEqual([
-        text.indexOf(image), text.lastIndexOf(image),
-      ]);
+      // the second render reads the message's normalized text from the cache;
+      // its image offsets must still point into the stored text
+      for (const _render of ["first", "cached"]) {
+        preview.mockClear();
+        const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+          text, message: { threadId: "thread-1", messageId: "message-1" },
+        }));
+        expect(html).toContain('class="katex"');
+        expect(preview.mock.calls.map(([props]) => props.sourceOffset)).toEqual([
+          text.indexOf(image), text.lastIndexOf(image),
+        ]);
+      }
     } finally {
       preview.mockRestore();
     }
@@ -272,7 +295,7 @@ describe("repaired tables", () => {
     }));
     expect(html).toContain('font-semibold">Pros | Cons</div>');
     expect(html.match(/<table\b/g)).toHaveLength(1);
-    expect(html).toContain(">a | b</th>");
+    expect(html).toContain(">a | b</span>");
     expect(html.match(/<th\b/g)).toHaveLength(2);
   });
 
@@ -323,21 +346,111 @@ it("requests both code palettes for skin-aware highlighting", async () => {
   const originalUseEffect = (await vi.importActual<typeof React>("react")).useEffect;
   const effects: React.EffectCallback[] = [];
   const effect = vi.mocked(React.useEffect).mockImplementation((callback) => { effects.push(callback); });
-  const codeToHtml = vi.fn().mockResolvedValue("<pre>dual palette</pre>");
-  vi.doMock("shiki", () => ({ codeToHtml }));
+  shiki.codeToHtml.mockResolvedValue("<pre>dual palette</pre>");
   const cleanup: ReturnType<React.EffectCallback>[] = [];
+  // effects stay captured, so each static render is a fresh first frame
+  const fence = createElement(ChatMarkdown, { text: "```text\nPalette regression sample\n```" });
   try {
-    renderToStaticMarkup(createElement(ChatMarkdown, { text: "```text\nPalette regression sample\n```" }));
-    for (const callback of effects) cleanup.push(callback());
-    await vi.waitFor(() => expect(codeToHtml).toHaveBeenCalledWith("Palette regression sample", {
+    expect(renderToStaticMarkup(fence)).not.toContain("dual palette");
+    for (const callback of effects.splice(0)) cleanup.push(callback());
+    await vi.waitFor(() => expect(shiki.codeToHtml).toHaveBeenCalledWith("Palette regression sample", {
       lang: "text",
       themes: { light: "github-light-default", dark: "github-dark-default" },
       defaultColor: "light-dark()",
     }));
+    // a remount (revisiting the thread) paints the cached highlight at once,
+    // never plain text first
+    await vi.waitFor(() => expect(renderToStaticMarkup(fence)).toContain("dual palette"));
   } finally {
     for (const close of cleanup) if (typeof close === "function") close();
     effect.mockImplementation(originalUseEffect);
-    vi.doUnmock("shiki");
+    shiki.codeToHtml.mockReset();
+  }
+});
+
+it("keeps the newest highlighted code within both the count and the size bound", async () => {
+  const originalUseEffect = (await vi.importActual<typeof React>("react")).useEffect;
+  const effects: React.EffectCallback[] = [];
+  const effect = vi.mocked(React.useEffect).mockImplementation((callback) => { effects.push(callback); });
+  // each block's highlighted HTML is padded to the size the step needs
+  let htmlChars = 0;
+  shiki.codeToHtml.mockImplementation(async (code: string) => `<pre class="cache-probe">${code}</pre>`.padEnd(htmlChars, " "));
+  const cleanup: ReturnType<React.EffectCallback>[] = [];
+  const block = (code: string) => createElement(CodeBlock, { code, lang: "text" });
+  // a cached block paints highlighted in its first frame
+  const painted = (code: string) => {
+    const html = renderToStaticMarkup(block(code));
+    effects.length = 0;
+    return html.includes('class="cache-probe"');
+  };
+  // mount a block and let its highlight settle
+  const highlight = async (code: string) => {
+    const calls = shiki.codeToHtml.mock.results.length;
+    renderToStaticMarkup(block(code));
+    for (const callback of effects.splice(0)) cleanup.push(callback());
+    await vi.waitFor(() => expect(shiki.codeToHtml.mock.results.length).toBe(calls + 1), { interval: 1 });
+    await shiki.codeToHtml.mock.results[calls]!.value;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+  try {
+    // past the count, the oldest block goes
+    const small = Array.from({ length: HIGHLIGHT_CACHE_MAX + 1 }, (_, i) => `small block ${i}`);
+    for (const code of small) await highlight(code);
+    expect(painted(small[0]!)).toBe(false);
+    expect(small.slice(1).every(painted)).toBe(true);
+
+    // four quarter-size blocks fill the size bound, pushing the small ones out
+    htmlChars = Math.floor(HIGHLIGHT_CACHE_MAX_CHARS / 4);
+    const big = Array.from({ length: 5 }, (_, i) => `big block ${i}`);
+    for (const code of big.slice(0, 4)) await highlight(code);
+    expect(small.some(painted)).toBe(false);
+    expect(big.slice(0, 4).every(painted)).toBe(true);
+    // past the size, the oldest block goes
+    await highlight(big[4]!);
+    expect(painted(big[0]!)).toBe(false);
+    expect(big.slice(1).every(painted)).toBe(true);
+
+    // a block bigger than the whole bound is not kept and pushes nothing out
+    htmlChars = HIGHLIGHT_CACHE_MAX_CHARS + 1;
+    await highlight("huge block");
+    expect(painted("huge block")).toBe(false);
+    expect(big.slice(1).every(painted)).toBe(true);
+  } finally {
+    for (const close of cleanup) if (typeof close === "function") close();
+    effect.mockImplementation(originalUseEffect);
+    shiki.codeToHtml.mockReset();
+  }
+});
+
+it("loads a curated grammar once and leaves an unbundled language plain", async () => {
+  const originalUseEffect = (await vi.importActual<typeof React>("react")).useEffect;
+  const effects: React.EffectCallback[] = [];
+  const effect = vi.mocked(React.useEffect).mockImplementation((callback) => { effects.push(callback); });
+  shiki.codeToHtml.mockResolvedValue("<pre>typed</pre>");
+  shiki.loadLanguage.mockClear();
+  const cleanup: ReturnType<React.EffectCallback>[] = [];
+  const paint = (text: string) => {
+    renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    for (const callback of effects.splice(0)) cleanup.push(callback());
+  };
+  try {
+    paint("```ts\nconst a = 1\n```");
+    await vi.waitFor(() => expect(shiki.loadLanguage).toHaveBeenCalledTimes(1));
+    const grammar = shiki.loadLanguage.mock.calls[0]?.[0] as unknown as { name?: string }[];
+    expect(grammar[0]?.name).toBe("typescript");
+    expect(shiki.codeToHtml).toHaveBeenCalledWith("const a = 1", expect.objectContaining({ lang: "typescript" }));
+    paint("```ts\nconst b = 2\n```");
+    await vi.waitFor(() => expect(shiki.codeToHtml).toHaveBeenCalledWith("const b = 2", expect.objectContaining({ lang: "typescript" })));
+    expect(shiki.loadLanguage).toHaveBeenCalledTimes(1);
+    const before = shiki.codeToHtml.mock.calls.length;
+    paint("```zig\nfn main() void {}\n```");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(shiki.codeToHtml.mock.calls.length).toBe(before);
+  } finally {
+    for (const close of cleanup) if (typeof close === "function") close();
+    effect.mockImplementation(originalUseEffect);
+    shiki.codeToHtml.mockReset();
+    shiki.loadLanguage.mockReset();
   }
 });
 
@@ -507,6 +620,100 @@ describe("ChatMarkdown attachments", () => {
     expect(html).not.toContain("type=\"button\"");
   });
 
+  it("lists the files of a linked folder under the link", () => {
+    const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+      state: "idle",
+      reason: "",
+      savedTo: "",
+      outsideWorkspace: false,
+      folder: {
+        name: "04_post",
+        entries: [{ name: "cover.png", bytes: 2048, mime: "image/png" }],
+        truncated: false,
+      },
+      save: vi.fn(async () => undefined),
+    });
+    try {
+      const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+        text: "[post](Instagram/04_post/)", message: { threadId: "thread-1", messageId: "message-1" },
+      }));
+      expect(html).toContain("aria-label=\"Files in 04_post\"");
+      expect(html).toContain("cover.png");
+      expect(html).toContain("2 KB");
+    } finally {
+      save.mockRestore();
+    }
+  });
+
+  describe("a file link outside the conversation's workspace", () => {
+    const filePath = "C:\\Users\\Maus\\_draft\\ollama-gen.js";
+    const render = (outsideWorkspace: boolean, href = filePath) => {
+      const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+        state: "failed",
+        reason: "the linked file is outside this conversation's workspace",
+        savedTo: "",
+        outsideWorkspace,
+        folder: null,
+        save: vi.fn(async () => undefined),
+      });
+      try {
+        return renderToStaticMarkup(createElement(ChatMarkdown, {
+          text: `[ollama-gen.js](${href})`, message: { threadId: "thread-1", messageId: "message-1" },
+        }));
+      } finally {
+        save.mockRestore();
+      }
+    };
+    const revealInFolder = vi.fn(async () => "shown" as const);
+
+    it("offers Show in folder in the local desktop app, without printing the path", () => {
+      vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
+      try {
+        const html = render(true);
+        expect(html).toContain("This file is outside this chat&#x27;s working folder, so it can&#x27;t be saved from here");
+        expect(html).not.toContain("the linked file is outside");
+        expect(html).toContain("Show in folder");
+        expect(html).not.toContain("<code");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("shows the full path as selectable text to a remote client instead", () => {
+      vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: true } } });
+      try {
+        const html = render(true);
+        expect(html).not.toContain("Show in folder");
+        expect(html).toMatch(/<code[^>]*select-all[^>]*>C:\\Users\\Maus\\_draft\\ollama-gen\.js<\/code>/);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("does not offer a retry for a refusal that happens on every try", () => {
+      // The arrow read as a retry or a loading state, for files and folders alike.
+      expect(render(true)).not.toContain("lucide-rotate-ccw");
+      expect(render(true, "file:///Users/maus/Desktop/designs/Posts/2026-10-08_News")).not.toContain("lucide-rotate-ccw");
+      expect(render(false)).toContain("lucide-rotate-ccw");
+    });
+
+    it("shows the path in a browser, which has no desktop bridge", () => {
+      expect(render(true)).toContain(`>${filePath}</code>`);
+    });
+
+    it("leaves other failures alone", () => {
+      vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
+      try {
+        const html = render(false);
+        expect(html).toContain("the linked file is outside this conversation&#x27;s workspace");
+        expect(html).not.toContain("Show in folder");
+        expect(html).not.toContain(filePath);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+  });
+
   it("makes a message-authorized file link downloadable", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: "[Download the report](/workspace/final-report.pdf)",
@@ -545,7 +752,7 @@ describe("ChatMarkdown code blocks", () => {
     ["averylongunknownlanguageidentifier", "Averylongunknownlanguageidentifier"],
   ])("lets the %s badge shrink without wrapping the count or controls", (lang, label) => {
     const html = renderToStaticMarkup(createElement(CodeBlock, {
-      code: "first\nsecond", lang, streaming: false,
+      code: "first\nsecond", lang,
     }));
     const badge = html.match(/<span[^>]*title="[^"]*"[^>]*>/)?.[0];
     expect(badge).toContain(`title="${label}"`);
@@ -605,7 +812,6 @@ describe("ChatMarkdown code blocks", () => {
     const html = renderToStaticMarkup(createElement(CodeBlock, {
       code: "line1\nline2\nline3\n",
       lang: "py",
-      streaming: false,
     }));
 
     expect(html).toContain("Python");
@@ -697,7 +903,7 @@ describe("bidi: message content carries its own direction", () => {
     expect(html).toContain("list-disc space-y-1 ps-5");
     expect(html).toContain("list-decimal space-y-1 ps-5");
     expect(html).toContain("border-s-2 border-hairline ps-3");
-    expect(html).toContain("px-2 py-1.5 text-start font-semibold");
+    expect(html).toContain('scope="col"');
     expect(html).not.toMatch(/class="[^"]*\bpl-5\b/);
     expect(html).not.toMatch(/class="[^"]*\bborder-l-2\b/);
     expect(html).not.toMatch(/class="[^"]*\btext-left\b/);
@@ -713,7 +919,6 @@ describe("bidi: message content carries its own direction", () => {
     const fenced = renderToStaticMarkup(createElement(CodeBlock, {
       code: "const total = items[0].count + 1;",
       lang: "ts",
-      streaming: false,
     }));
     expect(fenced).toContain('<div dir="ltr"');
   });
@@ -824,8 +1029,9 @@ it("renders mermaid strictly and serves repeat views from cache", async () => {
     expect(render).toHaveBeenCalledWith(expect.any(String), "flowchart LR\n  Ship-->Sea");
 
     // a settled remount (revisiting the thread, a skin flip) re-renders from
-    // cache: still exactly one real mermaid render for this source
-    renderToStaticMarkup(createElement(ChatMarkdown, { text: fence }));
+    // cache: the diagram is in its first frame, and still exactly one real
+    // mermaid render for this source
+    expect(renderToStaticMarkup(createElement(ChatMarkdown, { text: fence }))).toContain("<svg>sea lanes</svg>");
     for (const callback of effects.splice(0)) cleanup.push(callback());
     await Promise.resolve();
     expect(render).toHaveBeenCalledTimes(1);

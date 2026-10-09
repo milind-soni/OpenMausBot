@@ -19,10 +19,13 @@ import { encodeInjectId, localHost } from "./local-inject.ts";
 import {
   applyPiLocalCatalog,
   buildMcpServers,
+  decodePiFrame,
   ensurePiInjectModel,
   fetchPiModels,
   parsePiCatalog,
   PiDriver,
+  PiRpcChunks,
+  piLineReader,
   preferPiInjectRows,
   splitPiModel,
   updatePiModelCatalog,
@@ -78,6 +81,80 @@ describe("parsePiCatalog", () => {
   });
 });
 
+describe("PiRpcChunks", () => {
+  /** Split one JSON frame into two `rpc_chunk` frames around `at`. */
+  const split = (json: string, at: number, chunkId = "c1") => {
+    const bytes = Buffer.from(json, "utf8");
+    const data = (start: number, end: number) => bytes.subarray(start, end).toString("base64");
+    return [
+      { type: "rpc_chunk", chunkId, index: 0, count: 2, byteLength: bytes.length, data: data(0, at) },
+      { type: "rpc_chunk", chunkId, index: 1, count: 2, byteLength: bytes.length, data: data(at, bytes.length) },
+    ];
+  };
+
+  it("reassembles a split frame and passes plain frames through", () => {
+    const chunks = new PiRpcChunks();
+    const json = JSON.stringify({ type: "turn_end", usage: { input: 1, output: 2 } });
+    const [head, tail] = split(json, 7);
+    expect(decodePiFrame(JSON.stringify(head), chunks)).toBeNull();
+    expect(decodePiFrame(JSON.stringify(tail), chunks)).toEqual({ type: "turn_end", usage: { input: 1, output: 2 } });
+    expect(decodePiFrame(JSON.stringify({ type: "agent_end" }), chunks)).toEqual({ type: "agent_end" });
+  });
+
+  it.each([
+    ["a mismatched count", { count: 3 }],
+    ["a mismatched byteLength", { byteLength: 1 }],
+    ["a skipped index", { index: 2 }],
+  ])("drops the sequence on %s and recovers on the next one", (_label, overrides) => {
+    const chunks = new PiRpcChunks();
+    const json = JSON.stringify({ type: "turn_end" });
+    const [head, tail] = split(json, 4);
+    expect(decodePiFrame(JSON.stringify(head), chunks)).toBeNull();
+    expect(decodePiFrame(JSON.stringify({ ...tail, ...overrides }), chunks)).toBeNull();
+    // The broken sequence is forgotten: a fresh one still assembles.
+    const [head2, tail2] = split(json, 4, "c2");
+    expect(decodePiFrame(JSON.stringify(head2), chunks)).toBeNull();
+    expect(decodePiFrame(JSON.stringify(tail2), chunks)).toEqual({ type: "turn_end" });
+  });
+
+  it("ignores single-chunk, incomplete and non-JSON frames", () => {
+    const chunks = new PiRpcChunks();
+    expect(decodePiFrame(JSON.stringify({ type: "rpc_chunk", chunkId: "c", index: 0, count: 1, byteLength: 2, data: "e30=" }), chunks)).toBeNull();
+    expect(decodePiFrame(JSON.stringify({ type: "rpc_chunk", chunkId: "c", index: 0, count: 2, byteLength: 2 }), chunks)).toBeNull();
+    expect(decodePiFrame("not json", chunks)).toBeNull();
+  });
+
+  it("does not return a frame whose reassembled bytes are not JSON", () => {
+    const chunks = new PiRpcChunks();
+    const [head, tail] = split("not json at all", 4);
+    expect(decodePiFrame(JSON.stringify(head), chunks)).toBeNull();
+    expect(decodePiFrame(JSON.stringify(tail), chunks)).toBeNull();
+  });
+
+  it("rejects empty, oversized and too-many pieces without keeping the sequence", () => {
+    const piece = (overrides: Record<string, unknown>) =>
+      JSON.stringify({ type: "rpc_chunk", chunkId: "c", index: 0, count: 2, byteLength: 2, data: "e30=", ...overrides });
+    const oversized = "A".repeat(Math.ceil(PiRpcChunks.MAX_PIECE_BYTES / 3) * 4 + 4);
+    for (const overrides of [{ data: "" }, { data: "=" }, { data: oversized }, { count: PiRpcChunks.MAX_COUNT + 1 }]) {
+      const chunks = new PiRpcChunks();
+      expect(decodePiFrame(piece(overrides), chunks)).toBeNull();
+      // the follow-up piece ("{}", which would complete the frame) finds no sequence to join
+      expect(decodePiFrame(piece({ ...overrides, index: 1, data: "e30=" }), chunks)).toBeNull();
+    }
+  });
+});
+
+describe("piLineReader", () => {
+  it("drops a line longer than the frame cap and resumes at the next newline", () => {
+    const lines: string[] = [];
+    const read = piLineReader((line) => void lines.push(line));
+    read('{"a":1}\n');
+    read("x".repeat(PiRpcChunks.MAX_BYTES + 1));
+    read('{"type":"forged"}\n\n{"b":2}\n');
+    expect(lines).toEqual(['{"a":1}', '{"b":2}']);
+  });
+});
+
 describe("buildMcpServers", () => {
   it("mounts a selected custom mail server without unrelated built-ins", () => {
     const servers = buildMcpServers({ threadId: "selected", text: "Read mail", toolScope: { allow: ["mcp:mail:*"] }, integrations: {
@@ -124,6 +201,24 @@ describe("buildMcpServers", () => {
       },
     });
     expect(servers?.computer).toEqual({ command: "node", args: ["mcp"], env: { X: "y" } });
+  });
+
+  it("searches a URL server's catalog through the remote proxy, behind the gate when selected", () => {
+    const whop = { type: "http" as const, url: "https://mcp.example.test/mcp", headers: { Authorization: "Bearer disposable-pi-token" } };
+    const servers = buildMcpServers({ threadId: "t", text: "hi", integrations: { custom: { whop, notes: { command: "node", args: ["notes"], env: {} } } } });
+    const mounted = servers?.whop as { command: string; args: string[]; env: Record<string, string> };
+    expect(mounted).toMatchObject({ command: process.execPath, scope: "custom", directory: true });
+    expect(mounted.args[0]).toContain("mcp-remote-proxy");
+    expect(JSON.parse(mounted.env.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop" });
+    expect(JSON.stringify(mounted.args)).not.toContain("disposable-pi-token");
+    // a command server has no catalog to search for it
+    expect(servers?.notes).not.toHaveProperty("directory");
+    const toolScope = { allow: ["mcp:whop:*"], deny: ["mcp:whop:payments_create"] };
+    const scoped = buildMcpServers({ threadId: "t", text: "hi", toolScope, integrations: { custom: { whop } } })?.whop as { args: string[]; env: Record<string, string> };
+    expect(scoped).toMatchObject({ directory: true });
+    expect(scoped.args[0]).toContain("mcp-gate");
+    expect(scoped.env.OMB_GATE_DIRECTORY).toBe("1");
+    expect(JSON.parse(JSON.parse(scoped.env.OMB_GATE_UPSTREAM).env.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop", toolScope });
   });
 
   it("marks a host computer with scope so the extension gates its tools", () => {
@@ -189,6 +284,22 @@ describe("PiDriver catalog (fake CLI)", () => {
       FAKE_PI_MODE: "no-models",
     });
     expect(catalog.options).toEqual([]);
+  });
+
+  it("reassembles the chunked catalog from a protocol-v2 runtime", async () => {
+    const catalog = await fetchPiModels(FAKE_CLI, {
+      PATH: process.env.PATH ?? "",
+      HOME: join(tmpdir(), "omb-pi-omp-chunk"),
+      FAKE_PI_MODE: "omp-chunk",
+    });
+    // This runtime replaces the catalog with the v1 overflow stub unless the
+    // protocol-2 negotiation preceded the request, so a non-empty catalog
+    // also pins that the negotiation was sent first.
+    expect(catalog.options).toEqual([
+      { id: "ollama-cloud/glm-5.2", label: "glm-5.2", custom: true, provider: "ollama-cloud" },
+      { id: "openai/gpt-4o", label: "gpt-4o", custom: true, provider: "openai" },
+    ]);
+    expect(catalog.default).toBe("ollama-cloud/glm-5.2");
   });
 
   it("updates pi's catalog only on explicit refresh, then probes it again", async () => {
@@ -302,6 +413,18 @@ describe("PiDriver turns (fake CLI)", () => {
     const done = recorder.events.at(-1)!;
     expect(done).toMatchObject({ type: "turn.completed", ok: true, stopReason: "end_turn", usage: { input: 12, output: 3 } });
     expect(instance.adapter.hasSession("t-happy")).toBe(false);
+  });
+
+  it("reassembles chunked turn frames from a protocol-v2 runtime", async () => {
+    await create("omp-chunk");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-omp-chunk", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+
+    const text = recorder.events.find(
+      (e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text",
+    )!;
+    expect((text as { text: string }).text).toBe("Hello from pi");
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, stopReason: "end_turn" });
   });
 
   it("sends images as native base64 prompt content without copying bytes into diagnostics", async () => {
@@ -696,7 +819,6 @@ describe("PiDriver turns (fake CLI)", () => {
       text: "hi",
       integrations: {
         composio: { command: "node", args: ["connector-proxy.js"], env: { COMPOSIO_KEY: "ck" } },
-        computer: { kind: "box", boxId: "b1", token: "bt", control: { url: "http://c", token: "ct" } },
       },
     });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);

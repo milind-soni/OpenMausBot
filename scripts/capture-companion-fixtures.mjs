@@ -4,7 +4,7 @@
 //   node scripts/capture-companion-fixtures.mjs
 //   node scripts/capture-companion-fixtures.mjs --overview-only
 //
-// The fixtures in ios/Tests/CompanionCoreTests/Fixtures are server payloads,
+// The companion apps' fixtures are server payloads,
 // with local fixture paths redacted. Hand-written test JSON
 // tests our idea of the API, and the entire risk in a two-language client is
 // that our idea drifts from the API without anything failing. Re-running this
@@ -22,11 +22,17 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = join(ROOT, "ios", "Tests", "CompanionCoreTests", "Fixtures");
+// `--out <dir>`: the fixtures directory to write.
+const outFlag = process.argv.indexOf("--out");
+if (outFlag === -1 || !process.argv[outFlag + 1]) {
+  console.error("Usage: node scripts/capture-companion-fixtures.mjs --out <fixtures dir> [--overview-only]");
+  process.exit(2);
+}
+const OUT = resolve(process.argv[outFlag + 1]);
 const overviewOnly = process.argv.includes("--overview-only");
 
 const base = 19100 + Math.floor(Math.random() * 3000);
@@ -388,6 +394,31 @@ async function main() {
   const overview = await json(`${SIDECAR}/api/bots/${kiwi.id}/overview`, asDevice());
   if (overview.status !== 200) throw new Error(`could not read Kiwi's overview: ${JSON.stringify(overview.body)}`);
   write("bot-overview", overview.body);
+
+  // The bot's activity log. A fixture harness has no tool runs, so the rows
+  // are empty; the shape of the page is what both phone suites pin.
+  const activity = await json(`${SIDECAR}/api/bots/${kiwi.id}/activity?limit=50`, asDevice());
+  if (activity.status !== 200) throw new Error(`could not read Kiwi's activity: ${JSON.stringify(activity.body)}`);
+  write("bot-activity", activity.body);
+
+  // The General section's team memory, with one of each kind the person can
+  // add by hand, so a phone decodes every field an entry carries.
+  for (const entry of [
+    { kind: "person", name: "Ada Lovelace", detail: "Runs the team", aliases: ["Ada"] },
+    { kind: "place", name: "Launch plan", detail: "Notion, Marketing space" },
+    { kind: "decision", name: "Ship Android first", detail: "Decided in the Monday sync" },
+    { kind: "term", name: "MCHQ", detail: "MissionControlHQ, the old name" },
+  ]) {
+    const added = await json(`${SIDECAR}/api/team-memory?section=`, asDevice({
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(entry),
+    }));
+    if (added.status !== 201) throw new Error(`could not add team memory: ${JSON.stringify(added.body)}`);
+  }
+  const memory = await json(`${SIDECAR}/api/team-memory?section=`, asDevice());
+  if (memory.status !== 200) throw new Error(`could not read team memory: ${JSON.stringify(memory.body)}`);
+  write("team-memory", memory.body);
 
   console.log("\nnot captured: options-card.json — needs a real approval from a real turn");
 }

@@ -20,6 +20,8 @@ export type BotUpdatePatch = Partial<
     | "avatarFocusY"
     | "autoApprove"
     | "approvalMode"
+    | "outbound"
+    | "fallback"
     | "speakReplies"
     | "voice"
     | "voiceNotes"
@@ -44,6 +46,7 @@ export type BotUpdatePatch = Partial<
    * and returning to the legacy all-tools boolean. Bot state keeps that as
    * an absent field. */
   connectorTools?: Bot["connectorTools"] | null;
+  connectorScopes?: Bot["connectorScopes"] | null;
   /** Rides the PATCH body only: the server's proof that the local-auto
    * warning dialog was shown (see server/index.ts's consent gate). It must
    * reach the wire inside the coalesced body and must never fold into bot
@@ -60,10 +63,11 @@ export type BotUpdatePatch = Partial<
 /** A wire patch after clear-only values have been normalized for Bot state. */
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "connectorTools" | "acknowledgeLocalAuto" | "confirmFullAccess" | "applyToAllThreads"
+  "computer" | "connectorTools" | "connectorScopes" | "acknowledgeLocalAuto" | "confirmFullAccess" | "applyToAllThreads"
 > & {
   computer?: Bot["computer"];
   connectorTools?: Bot["connectorTools"];
+  connectorScopes?: Bot["connectorScopes"];
 };
 
 interface BotPatchQueueEntry {
@@ -121,6 +125,7 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     applyToAllThreads: _allThreads,
     computer,
     connectorTools,
+    connectorScopes,
     ...fields
   } = patch;
   const normalized: BotStatePatch = { ...fields };
@@ -128,6 +133,8 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
   else if (computer !== undefined) normalized.computer = computer;
   if (connectorTools === null) normalized.connectorTools = undefined;
   else if (connectorTools !== undefined) normalized.connectorTools = connectorTools;
+  if (connectorScopes === null) normalized.connectorScopes = undefined;
+  else if (connectorScopes !== undefined) normalized.connectorScopes = connectorScopes;
   return normalized;
 };
 

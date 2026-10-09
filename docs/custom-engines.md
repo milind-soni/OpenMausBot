@@ -84,7 +84,7 @@ entry:
   VPS, Boat cloud or built-in browser tools and return their screenshots to the model.
   The existing platform, computer-selection and approval checks still apply.
   Boat turns retain the selected API model in direct chats, rooms and cloud
-  routines. Other drivers continue to use the native Boat runner.
+  routines, as they do for every engine with computer tools.
 - Set `config.tools` to `false` for a model without tool support. Image support
   also depends on the chosen model; the driver cannot add vision to a text-only
   model. See [tool verification](verification/openai-tools.md) for scope and tests.

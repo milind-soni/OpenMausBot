@@ -47,3 +47,14 @@ describe("local computer proxy runtime path", () => {
     }
   });
 });
+
+describe("harness MCP proxy runtime path", () => {
+  it("ships the one proxy the built-in browser and the cloud computer share", () => {
+    expect(SPAWNED_PROXIES.harnessMcp).toBe(join(SERVER_ROOT, "harness-mcp-proxy.ts"));
+    expect(existsSync(SPAWNED_PROXIES.harnessMcp)).toBe(true);
+    const script = readFileSync(join(SERVER_ROOT, "../scripts/bundle-server.mjs"), "utf8");
+    const entryPoints = script.match(/const ENTRY_POINTS = \[([\s\S]*?)\];/)?.[1];
+    expect(entryPoints).toMatch(/["']harness-mcp-proxy\.ts["']/);
+    expect(entryPoints).not.toMatch(/["']browser-proxy\.ts["']/);
+  });
+});

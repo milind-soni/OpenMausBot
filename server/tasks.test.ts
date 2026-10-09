@@ -192,9 +192,12 @@ describe("tasks", () => {
     const replacement = store.activeTask(bot.id)!;
     expect(replacement.threadId).not.toBe(first);
     expect(replacement).toMatchObject({
-      title: UNTITLED_THREAD, resumeCursors: {}, modelSelection: bot.modelSelection,
+      title: UNTITLED_THREAD, resumeCursors: {},
       busy: false, unread: false, activity: "idle",
     });
+    // Fresh context follows the bot's model; the old thread's own is gone.
+    expect(replacement.modelSelection).toBeUndefined();
+    expect(store.projectBotForTask(bot.id, replacement.threadId)?.modelSelection).toEqual(bot.modelSelection);
     expect(replacement.pinnedMessageId).toBeUndefined();
     expect(replacement.rewound).toBeUndefined();
     expect(bot.resumeCursors).toEqual({});

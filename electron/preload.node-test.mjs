@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 
 const listeners = new Map(); // channel -> Set<handler>
 const exposed = { name: null, api: null };
+const invocations = [];
 const fakeIpcRenderer = {
   on: (channel, handler) => {
     if (!listeners.has(channel)) listeners.set(channel, new Set());
@@ -18,7 +19,7 @@ const fakeIpcRenderer = {
   removeListener: (channel, handler) => {
     listeners.get(channel)?.delete(handler);
   },
-  invoke: async () => undefined,
+  invoke: async (...args) => { invocations.push(args); },
   send: () => undefined,
 };
 const fakeElectron = {
@@ -53,6 +54,23 @@ test("exposes the full local-shell bridge on window.ogb", () => {
   // The settings channel is local-shell only, so it exists on the bridge
   // exactly when the page is local (no --omb-local-origin in argv here).
   assert.equal(typeof exposed.api.onOpenAppSettings, "function");
+});
+
+test("copyText forwards only the text over the explicit clipboard:write-text channel", async () => {
+  const before = invocations.length;
+  await exposed.api.copyText("hello");
+  assert.deepEqual(invocations.slice(before), [["clipboard:write-text", "hello"]]);
+  assert.equal("ipcRenderer" in exposed.api, false);
+});
+
+test("browser control forwards a separate per-device capability, not the cloud grant", async () => {
+  const before = invocations.length;
+  await exposed.api.companion.browserControl("phone-1", true);
+  await exposed.api.companion.browserControl("phone-1", false);
+  assert.deepEqual(invocations.slice(before), [
+    ["companion:browser-control", "phone-1", true],
+    ["companion:browser-control", "phone-1", false],
+  ]);
 });
 
 test("onOpenAppSettings subscribes to the exact app:open-settings channel, forwards every emit, and unsubscribes cleanly", () => {

@@ -101,11 +101,12 @@ describe("sidebar phone status", () => {
     });
   });
 
-  it("opens Settings directly on the internal Remote access section", () => {
+  it("opens Settings directly on the internal Remote access section, at the phone pairing", () => {
     expect(phoneSettingsAction()).toEqual({
       type: "toggleAppSettings",
       open: true,
       section: "companion",
+      phonePairing: true,
     });
   });
 });

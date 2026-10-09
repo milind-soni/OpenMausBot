@@ -169,8 +169,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     if (closed) throw new Paused("This app is closing.");
     const verdict = cloudLendingVerdict(grant.cloud, cloud(), env);
     if (verdict.allow) return;
-    if (verdict.stop) { endCloud(env, verdict.stop); throw new Error("Lending to your Cloud stopped."); }
-    throw new Paused("Waiting for your Cloud sign-in.");
+    if (verdict.stop) { endCloud(env, verdict.stop); throw new Error("Lending to My Cloud stopped."); }
+    throw new Paused("Waiting for your OpenMausBot Cloud sign-in.");
   };
   const store = next => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -213,7 +213,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   /** The person's Cloud home, signed in as one of their own admin devices. */
   const cloudIdentity = async env => {
     const { auth, info } = await describe(env);
-    if (auth.cloudHome !== true || !Array.isArray(auth.scopes) || !auth.scopes.includes("admin")) throw Object.assign(new Error("This server is not your Cloud"), { problem: "not-cloud" });
+    if (auth.cloudHome !== true || !Array.isArray(auth.scopes) || !auth.scopes.includes("admin")) throw Object.assign(new Error("This server is not My Cloud"), { problem: "not-cloud" });
     return info;
   };
   const matches = (grant, info) => grant?.sessionId === info.sessionId && grant?.environmentId === info.environmentId;
@@ -382,11 +382,11 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
      * editable) and optionally apps and screen. Never a terminal. The Cloud
      * account and its machine must be verified right now; the Cloud home's
      * identity is bound on first contact if this desktop is not signed in
-     * there yet (Connect to my Cloud does that). */
+     * there yet (Open My Cloud does that). */
     async saveCloud(env, input) {
       if (closed) throw new Error("Lending is unavailable while the app is closing.");
       const current = cloud();
-      if (current?.status !== "connected" || !current.accountId || current.origin !== env.origin) throw Object.assign(new Error("Connect to your Cloud first."), { problem: "connect-first" });
+      if (current?.status !== "connected" || !current.accountId || current.origin !== env.origin) throw Object.assign(new Error("Open My Cloud first."), { problem: "connect-first" });
       const folders = await validateSharedFolders(input?.folders);
       if (!folders.length && input?.screen !== true) throw new Error("Choose at least one folder, or apps and screen.");
       let info = { sessionId: null, environmentId: null };

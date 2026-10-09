@@ -13,6 +13,7 @@ function profile(overrides: Partial<CatalogProfile> = {}): CatalogProfile {
     sharedComputers: false,
     voiceNotes: false,
     cloudHome: false,
+    chief: false,
     botId: WATCHER_OPTIONS_CARD_BOT_ID,
     ...overrides,
   };
@@ -29,13 +30,6 @@ function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
     client: {
       api: async () => ({}),
       apiResponse: async () => ({ ok: true, status: 200, body: {} }),
-    },
-    turn: {
-      createdThisTurn: 0,
-      roomPostsThisTurn: 0,
-      threadsOpenedThisTurn: 0,
-      memoryRefusalsThisTurn: 0,
-      delegationTaskIdsThisTurn: new Set(),
     },
     ...overrides,
   };

@@ -15,7 +15,7 @@ import {
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
-import { botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
+import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
 
 export const EYE_SCALE = 1.12;
@@ -267,12 +267,7 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
     );
   }
 
-  const radius =
-    profile.avatarCrop === "circle"
-      ? "50%"
-      : profile.avatarCrop === "rounded"
-        ? "22%"
-        : "0";
+  const radius = avatarCropRadius(profile.avatarCrop);
   const zoom = clampAvatarZoom(bot.avatarZoom ?? 1);
   const focusX = clampAvatarFocus(bot.avatarFocusX ?? 0.5);
   const focusY = clampAvatarFocus(bot.avatarFocusY ?? 0.5);

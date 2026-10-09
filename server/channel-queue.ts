@@ -42,8 +42,11 @@ export function restoreChannelMessages(): void {
     if (row.status !== "pending") continue;
     const entry = queues.get(row.threadId) ?? { groupId: row.ownerId, items: [] };
     if (entry.groupId !== row.ownerId) throw new Error("queued task belongs to another channel");
+    // a channel line is only ever stamped "api"; "call" belongs to 1:1 rows
+    const { via, ...payload } = row.payload;
     entry.items.push({
-      ...row.payload,
+      ...payload,
+      ...(via === "api" ? { via } : {}),
       id: row.id,
       mode: row.payload.mode ?? "chat",
       // rows queued before timestamps were kept read as queued at restore

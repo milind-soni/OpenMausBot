@@ -27,7 +27,6 @@ const store = vi.hoisted(() => ({ state: {} as Record<string, unknown>, api: vi.
 vi.mock("@/state/store", () => ({
   api: store.api,
   useStore: () => ({ state: store.state, dispatch: vi.fn() }),
-  useStreaming: () => ({ streaming: {} }),
 }));
 vi.mock("@/lib/analytics", () => ({ emailGateDone: () => false }));
 vi.mock("./Spotlight", () => ({ Spotlight: () => null }));

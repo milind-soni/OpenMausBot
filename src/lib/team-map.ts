@@ -12,7 +12,7 @@ export interface TeamMapBot {
 
 export interface TeamMapSnapshot {
   collaborations: Array<{ groupId: string; botIds: [string, string]; lastAt: number }>;
-  queued: Array<{ sourceBotId: string; targetBotId: string; reason?: string }>;
+  queued: Array<{ sourceBotId: string; targetBotId: string; reason?: string; threadId?: string; groupId?: string }>;
   running: Array<{ sourceBotId: string; targetBotId: string; threadId: string; groupId?: string }>;
 }
 
@@ -30,6 +30,8 @@ export type TeamMapEdge = {
   state: "running" | "queued" | "connected";
   reason?: string;
   groupId?: string;
+  /** The thread doing the work, when the server named one. */
+  threadId?: string;
   lastAt?: number;
 };
 
@@ -87,6 +89,8 @@ export function buildTeamMapEdges(bots: TeamMapBot[], snapshot: TeamMapSnapshot)
       targetBotId: delegation.targetBotId,
       state: "queued",
       reason: delegation.reason,
+      groupId: delegation.groupId,
+      threadId: delegation.threadId,
     });
   }
   for (const delegation of snapshot.running) {
@@ -96,6 +100,7 @@ export function buildTeamMapEdges(bots: TeamMapBot[], snapshot: TeamMapSnapshot)
       targetBotId: delegation.targetBotId,
       state: "running",
       groupId: delegation.groupId,
+      threadId: delegation.threadId,
     });
   }
   return [...edges.values()].sort((a, b) => {

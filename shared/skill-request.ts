@@ -26,6 +26,9 @@ export interface SkillRequestCardData {
   sha256?: string;
   warnings: string[];
   createdAt: number;
+  /** An update that applied without a person: the SKILL.md it replaced, so
+   * Undo can put it back while the skill is unchanged since. */
+  previous?: { preview: string; source: string };
 }
 
 /** The hash a current client may echo after it displayed the complete

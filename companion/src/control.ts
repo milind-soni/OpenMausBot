@@ -16,8 +16,9 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 
 import type { DeviceRegistry } from "./devices.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
-import { lanAddresses, tailnetName, tailscaleAddress } from "./listener.ts";
+import { lanAddresses, lanInterfaces, tailnetName, tailscaleAddress } from "./listener.ts";
 import { defaultHostName } from "./mdns.ts";
+import { publicNetworks } from "./windows-network.ts";
 
 /** What the pairing page needs to render itself and act on what you click. */
 export interface ControlOptions {
@@ -40,9 +41,16 @@ export interface ControlOptions {
   /** Terminate every authenticated event stream and viewer relay session
    * owned by a device whose access changed or was revoked. */
   disconnectDevice?: (deviceId: string) => void;
+  /** A device was revoked (not merely changed): tell the harness, which
+   * sees a phone's requests as this computer's own, so it can end the Live
+   * call that phone holds. */
+  revoked?: (deviceId: string) => void;
   /** Re-read Tailscale after the sidecar has started. People commonly install,
    * sign in, or enable Tailscale while OpenMausBot is already running. */
   refreshTailscale?: () => Promise<void>;
+  /** The adapters Windows has on a Public network (windows-network.ts). Tests
+   * pass their own; the sidecar uses the real check. */
+  publicNetworks?: () => ReadonlySet<string>;
 }
 
 /** The host out of a `Host` header, port removed.
@@ -177,10 +185,19 @@ export function hostCandidates(
  * pairing window is open, and which phones are paired. Recomputed per request
  * rather than cached — addresses change when you join another network. */
 export function companionState(options: ControlOptions) {
-  const addresses = lanAddresses();
+  const interfaces = lanInterfaces();
+  const addresses = interfaces.map((entry) => entry.address);
   const tailscale = tailscaleAddress(addresses);
+  // The address the Wi-Fi QR leads with (companionPairingRoute takes the first
+  // LAN endpoint, which is this one).
+  const lead = interfaces.find((entry) => entry.address !== tailscale) ?? null;
   const name = tailnetName();
   const pairing = options.devices.pairing();
+  // Asked only while a pairing window is open, when a phone is about to dial
+  // this computer: on Windows the answer is a PowerShell process.
+  const publicNetwork = pairing && lead && (options.publicNetworks ?? publicNetworks)().has(lead.name)
+    ? lead.name
+    : null;
   const secretPublicKey = options.secretPublicKey?.() ?? null;
   return {
     // Whoever starts this sidecar as a child process needs to be able to tell
@@ -191,7 +208,10 @@ export function companionState(options: ControlOptions) {
     addresses,
     ...(tailscale ? { tailscale } : {}),
     ...(tailscale && name ? { tailnetName: name } : {}),
-    lan: addresses.find((a) => a !== tailscale) ?? null,
+    lan: lead?.address ?? null,
+    // Windows has the network that address is on down as Public, so its
+    // firewall most likely drops a phone's connection (windows-network.ts).
+    ...(publicNetwork ? { publicNetwork } : {}),
     // The ordered fallback list the pairing QR hands the phone, so it can
     // walk to the next address when the first stops resolving.
     hosts: hostCandidates(addresses, name),
@@ -320,10 +340,25 @@ export function createControlServer(options: ControlOptions): Server {
       options.disconnectDevice?.(cloudDesktop[1]);
       return json(res, 200, companionState(options));
     }
+    const browserControl = path.match(/^\/devices\/([\w-]+)\/browser-control$/);
+    if (browserControl && (method === "POST" || method === "DELETE")) {
+      try {
+        if (!options.devices.setBrowserControlAccess(browserControl[1], method === "POST")) {
+          return json(res, 404, { error: "no such device" });
+        }
+      } catch {
+        return json(res, 500, { error: "could not save browser control access" });
+      }
+      // Revoking must reach the streams this device already holds open, not
+      // just the next request it makes.
+      options.disconnectDevice?.(browserControl[1]);
+      return json(res, 200, companionState(options));
+    }
     const revoke = path.match(/^\/devices\/([\w-]+)$/);
     if (revoke && method === "DELETE") {
       if (!options.devices.revoke(revoke[1])) return json(res, 404, { error: "no such device" });
       options.disconnectDevice?.(revoke[1]);
+      options.revoked?.(revoke[1]);
       return json(res, 200, companionState(options));
     }
     return json(res, 404, { error: `no route: ${method} ${path}` });
@@ -426,7 +461,9 @@ function render(s) {
           "<li><div class='grow'><div class=name>" + esc(d.name) + "</div>" +
           "<div class=dim>Last seen " + ago(d.lastSeenAt) + "</div>" +
           "<button data-cloud='" + esc(d.id) + "' data-allowed='" + (d.cloudDesktopAccess ? "1" : "0") + "'>" +
-          (d.cloudDesktopAccess ? "Cloud desktop on" : "Allow cloud desktop") + "</button></div>" +
+          (d.cloudDesktopAccess ? "Cloud desktop on" : "Allow cloud desktop") + "</button>" +
+          "<button data-browser='" + esc(d.id) + "' data-browser-allowed='" + (d.browserControlAccess ? "1" : "0") + "'>" +
+          (d.browserControlAccess ? "Browser control on" : "Allow browser control") + "</button></div>" +
           "<button data-revoke='" + esc(d.id) + "'>Remove</button></li>").join("") + "</ul>"
       : "<p class=dim>No phones are paired yet.</p>");
 
@@ -439,6 +476,12 @@ function render(s) {
     b.addEventListener("click", async () => render(await api(
       "/devices/" + b.dataset.cloud + "/cloud-desktop",
       b.dataset.allowed === "1" ? "DELETE" : "POST"
+    )));
+  }
+  for (const b of document.querySelectorAll("[data-browser]")) {
+    b.addEventListener("click", async () => render(await api(
+      "/devices/" + b.dataset.browser + "/browser-control",
+      b.dataset.browserAllowed === "1" ? "DELETE" : "POST"
     )));
   }
   if (s.pairing) {

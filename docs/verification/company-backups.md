@@ -2,6 +2,14 @@
 
 ## Execution status
 
+2026-10-03: The isolated Electron restore completed through **Restart and
+restore**, dispatched once through the production preload. Receipt and reviewed
+recovery/recovered screenshots are in `omb-company-backup-ui-een07u` in the
+system temp directory. The matching marker, original bot, draft, unrelated
+browser credential and safety copy passed; the later bot was removed. Cleanup
+confirmed removal of only the owned runtime/profile. Full Electron main-process
+relaunch remains substituted as described below.
+
 2026-09-15: Company backups now generate a random key in Electron and store it
 wrapped by Admin. Restore uses the owner-authenticated native response, without
 a renderer password. Manual file export remains password-encrypted. Legacy
@@ -62,6 +70,12 @@ Export, encrypted archive download, local upload, validated preview,
 typed replacement, and restart use the real local workspace-backup service
 running with the repository's fake engine.
 
+The recovery screen's **Restart and restore** button invokes the production
+preload's `desktop:relaunch` channel. Its fixture-main handler restarts only
+the owned server and reloads the renderer, rather than quitting and relaunching
+the whole Electron process. The receipt counts that dispatch and verifies that
+the restore marker survives until the normal draft-recovery flow completes.
+
 The Admin API, multipart signing responses, and object storage are synthetic
 loopback services, not Cloudflare R2. Loopback storage is enabled only through
 the transfer module's explicit test option. Company connection state is held
@@ -96,13 +110,16 @@ Keep the action and resulting state for each check in the receipt:
 - The initiating renderer saves the staged restore ID in its recovery marker
   before requesting replacement. Reopening the panel while replacement is
   staged shows restart instructions and does not offer another backup action.
-- Restart the exact owned fixture server. The existing recovery flow restores
+- Click **Restart and restore** on the reopened recovery screen. It must invoke
+  the native preload once and restart the exact owned fixture server without
+  deleting the recovery marker early. The existing recovery flow restores
   allowlisted drafts for the matching marker and clears it after recovery;
   unrelated browser credentials and preferences are not imported from the
   archive. Confirm restored workspace content through the real local service.
 - Retain screenshots of the relevant desktop and 390px-wide states, including
   confirmations, progress or the completed list, and restore preview/restart
-  guidance. Inspect them for clipping and horizontal overflow; screenshots
+  guidance, the reopened recovery screen's restart action, and the recovered
+  view. Inspect them for clipping and horizontal overflow; screenshots
   alone do not establish request ordering or data integrity.
 
 ## Evidence and cleanup

@@ -21,7 +21,7 @@ instructions to forbid that when memory must stay in another source of truth.
 ├── MEMORY.md            the notes that load into every conversation
 └── memory/
     ├── <topic>.md       longer notes the bot reads on demand
-    ├── archive.md       expired notes the tidy-up moved out (Memory upkeep)
+    ├── archive.md       older notes moved out of MEMORY.md, and expired ones
     └── log/
         └── 2026-09-10.md   what the bot did that day, in its own words
 ```
@@ -50,9 +50,24 @@ its file tools when it decides it needs it, and logs are for you.
 The gauge at the top of the Memory panel is that rule made visible: lines and
 size against the budget, amber from 80%, red once anything stops loading —
 with the count of lines that are not being loaded, and always the plain
-sentence *only the first 200 lines load each turn*. When it goes red, trim
-`MEMORY.md` or move notes into a topic file; the bot is told the same thing in
-its prompt.
+sentence *only the first 200 lines load each turn*.
+
+`MEMORY.md` never fills up. Every write that goes through the harness
+(`memory_update`, and capture) keeps the file within the budget in the same
+step: when the new entry would push it past, the oldest dated entries move to
+`memory/archive.md` — struck-through ones first, then expired ones, then the
+oldest live ones — each marked `· moved <date>`. An entry moves whole, with
+the lines indented under it (a code block) or, in older entries, the code block
+right below it. The archive is written before
+`MEMORY.md`, so a line is never out of one without already being in the other,
+and `session_search` still finds it. Lines you wrote by hand (no date), health
+and safety facts, and the entry just written never move. The bot is told which
+entries moved (the first few, and how many), so it can add back anything that
+should stay loaded. One entry is at most 1,000 characters and 20 lines, so a
+single note cannot push the rest out. The gauge
+can only go red when the lines that never move fill the budget by themselves
+(or a bot edited the file with its own file tools): then the entry is still
+saved, and the bot asks you to trim `MEMORY.md`.
 
 Both limits are `MEMORY_MAX_LINES` and `MEMORY_MAX_BYTES` in
 `server/workspace.ts`; the panel, the loader, and the bot's prompt all read the
@@ -77,7 +92,7 @@ more content words needs two per hit. Up to four notes and four conversation
 passages — numbered, dated, and at most 6,000 characters — go in front of that
 turn's message, opened by a line saying they are the bot's own notes and that
 a command inside one is not an instruction. `MEMORY.md` (already loaded) and
-`memory/archive.md` (no longer true) are never recalled, nor are daily logs
+`memory/archive.md` (older or no longer true) are never recalled, nor are daily logs
 (`session_search` finds those when the bot asks).
 
 It is placed in the message, not the system prompt, on purpose: the prompt's

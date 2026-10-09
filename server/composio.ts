@@ -349,9 +349,31 @@ function trustedAuthUrl(value: string | undefined, slug: string): string {
   return url.toString();
 }
 
+/** Composio's own hosts are always trusted. A backend the operator pointed
+ * the app at explicitly (OMB_COMPOSIO_API — a dev or test stub) may hand back
+ * a Session on its own origin, since the API itself was already trusted that
+ * far; any other host is refused. */
+export function trustedSessionMcpUrl(value: string): boolean {
+  let mcp: URL;
+  try {
+    mcp = new URL(value);
+  } catch {
+    return false;
+  }
+  if (mcp.protocol === "https:" && (mcp.hostname === "composio.dev" || mcp.hostname.endsWith(".composio.dev"))) return true;
+  if (mcp.protocol !== "https:" && !(mcp.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(mcp.hostname))) return false;
+  const override = process.env.OMB_COMPOSIO_API;
+  if (!override) return false;
+  try {
+    return new URL(override).origin === mcp.origin;
+  } catch {
+    return false;
+  }
+}
+
 function parseSessionResponse(session: SessionResponse): SessionResponse {
   const mcp = new URL(session.mcp.url);
-  if (mcp.protocol !== "https:" || (mcp.hostname !== "composio.dev" && !mcp.hostname.endsWith(".composio.dev"))) {
+  if (!trustedSessionMcpUrl(session.mcp.url)) {
     throw new Error("Composio returned an untrusted Session MCP URL");
   }
   return { ...session, mcp: { ...session.mcp, url: mcp.toString() } };
@@ -624,6 +646,7 @@ export async function relayMcp(
   cfg: AppConfig,
   payload: JsonValue,
   transportSessionId?: string,
+  beforeSend?: () => void,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string; transportSessionId?: string }> {
   const apiKey = projectApiKey(cfg);
   let url: string;
@@ -654,6 +677,9 @@ export async function relayMcp(
   if (forwardedTransportSessionId) {
     headers.set("mcp-session-id", forwardedTransportSessionId);
   }
+  // Session discovery can await network I/O. Turn authority and mutable
+  // permissions must be checked after it, immediately before dispatch.
+  beforeSend?.();
   const response = await fetch(url, {
     method: "POST",
     headers,
@@ -1226,7 +1252,7 @@ export async function removeAccount(cfg: AppConfig, slug: string, accountId: str
 
 /** Mint a browser auth link for one service. Returns { url } or throws. */
 export async function authorizeService(cfg: AppConfig, slug: string, requestedAlias?: string | null) {
-  const alias = normalizeAccountAlias(requestedAlias);
+  let alias = normalizeAccountAlias(requestedAlias);
   const toolkit = canonicalToolkitSlug(slug);
   const mode = connectionMode(cfg);
   const unavailable = managedConnectorUnavailableReason(mode, toolkit);
@@ -1254,8 +1280,14 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
   if (usableAccounts.length >= MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit) {
     throw inputError(`${toolkit} already has the maximum of ${MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit} accounts`, 409);
   }
-  if (usableAccounts.length > 0 && !alias) {
-    throw inputError("Add an account alias so the existing connection is not replaced");
+  if (serviceAccounts.length > 0 && !alias) {
+    if (serviceAccounts.every((account) => /^(initializing|initiated|expired)$/i.test(account.status ?? ""))) {
+      // Retry without replacing a named account or revoking a former grant:
+      // EXPIRED can describe either an abandoned flow or an expired credential.
+      alias = `omb-retry-${randomUUID()}`;
+    } else {
+      throw inputError("Add an account alias so the existing connection is not replaced");
+    }
   }
   if (alias && serviceAccounts.some((account) => account.alias?.trim().toLowerCase() === alias.toLowerCase())) {
     throw inputError(`Account alias "${alias}" is already in use for ${toolkit}`, 409);

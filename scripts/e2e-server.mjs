@@ -6,8 +6,9 @@
 // Covered: server up + SSE hello, instance snapshots, a claude turn with a
 // streamed reply, the permission broker (allow AND deny), interrupt, a
 // codex turn, and — with --with-boat + OMB_E2E_BOX_TOKEN — boat provisioning,
-// a turn that runs ON the boat (boxAgent), and a panel screenshot. Boat computers are put to sleep at
-// the end. Test bots are deleted unless --keep-bots.
+// a Claude turn that uses the boat as its cloud computer, and a panel
+// screenshot. Boat computers are put to sleep at the end. Test bots are
+// deleted unless --keep-bots.
 //
 // Exits non-zero on the first hard failure; soft notes print as "skip".
 
@@ -222,30 +223,21 @@ async function main() {
       if (!cfg.box?.configured) fail("box token saved but /api/config still says unconfigured");
       log("  ✓ box token configured, providers hot-reloaded");
 
-      // a turn that runs ON the boat (boxAgent) — provisions on first use.
-      // One bot, models walked via PATCH: each bot owns one persistent boat,
-      // so re-provisioning per attempt would be wasteful. (On this account
-      // the substrate's claude-code auth is expired — codex answers.)
-      const boatBot = await makeBot("E2E Computer", "computer", byKind.boxAgent?.models.default ?? "sonnet");
+      // Works on: Cloud — the bot keeps its own engine and uses the boat as
+      // its cloud computer (provisioned on first use). No engine runs a turn
+      // on Boat's own agent.
+      if (byKind.claudeAgent?.snapshot.state !== "available") fail("--with-boat needs the claude CLI");
+      const boatBot = await makeBot("E2E Cloud computer", "claude", byKind.claudeAgent.models.default);
       created.push(boatBot.id);
-      let boatSaid = false;
-      for (const optn of byKind.boxAgent?.models.options ?? [{ id: "sonnet" }]) {
-        await api(`/api/bots/${boatBot.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ modelSelection: { instanceId: "computer", model: optn.id } }),
-        });
-        const want = marker("box");
-        await send(boatBot.id, `Say exactly: ${want} — then stop.`);
-        const settled = await waitTurnDone(boatBot.id, 600_000); // first provision can take minutes
-        if (settled.messages.some((m) => m.role === "bot" && m.kind === "text" && m.text?.includes(want))) {
-          log(`  ✓ box agent replied from its own computer on ${optn.id}`);
-          boatSaid = true;
-          break;
-        }
+      await api(`/api/bots/${boatBot.id}`, { method: "PATCH", body: JSON.stringify({ computer: "cloud" }) });
+      const want = marker("box");
+      await send(boatBot.id, `Take one screenshot of your cloud computer, then say exactly: ${want}`);
+      const settled = await waitTurnDone(boatBot.id, 600_000); // first provision can take minutes
+      if (!settled.messages.some((m) => m.role === "bot" && m.kind === "text" && m.text?.includes(want))) {
         const last = [...settled.messages].reverse().find((m) => m.role === "bot" && m.kind === "text");
-        log(`  box model ${optn.id} settled without the marker (${(last?.text ?? "?").slice(0, 90)}) — trying next`);
+        fail(`cloud computer turn settled without the marker (${(last?.text ?? "?").slice(0, 90)})`);
       }
-      if (!boatSaid) fail("box agent answered on no catalog model");
+      log("  ✓ Claude worked on its cloud computer");
 
       const shot = await api(`/api/bots/${boatBot.id}/computer/screenshot`, { method: "POST" });
       if (!shot.png || shot.png.length < 10_000) fail("box screenshot came back empty");

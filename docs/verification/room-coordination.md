@@ -29,8 +29,8 @@ handoff loop inside those turns.
 
 The tools are `list_room_targets` and `coordinate_bots`. Discovery includes
 reachable bots as well as rooms. The latter addresses 1–4 existing bots in this
-room (default), or — in ordinary direct chat without a room — a fresh thread
-for each distinct assignment to a recipient. A Chief can reach additional teams only
+room (default), or — in ordinary direct chat without a room — the sender's one
+thread with each recipient for that conversation. A Chief can reach additional teams only
 after the owner grants that access in [team settings](team-access.md).
 A multi-recipient room request posts its brief once, addressed to all accepted
 recipients. Each recipient still has a separate execution and result. An
@@ -44,14 +44,20 @@ specialists; it never inherits the parent Chief's cross-team access or permissio
 Advice is not a verification
 receipt: the lead must ask the reviewer to run the requested checks.
 
-Outside a room, each distinct assignment gets a fresh recipient thread titled
-for the sender and optional `label` (otherwise “@Clive · work”). Give each
-assignment a self-contained brief, including rework. Successful reported work
-closes in the sidebar but remains readable; failed or withheld work remains
-visible. Existing conversations are not adopted, retitled or reopened.
-An identical `request_key` retry keeps the original thread and executes once;
-conflicting reuse is refused without leaving an extra task. Room requests
-continue to use their explicit destination thread.
+Outside a room, a conversation has one thread with each recipient, titled
+“@Clive · work”. The first request opens it; every later request from that
+conversation — a follow-up, a change of plan, rework — goes into it, so the
+recipient has the earlier work in its own history. If the recipient is still
+working there, the request waits and runs next; the same work never runs twice
+in parallel. A different conversation of the sender gets its own thread.
+Successful reported work closes in the sidebar but remains readable, and
+reopens when the next request arrives; failed or withheld work remains
+visible. Each receipt names the thread the request went into. Within the
+sending turn and the turns that resume it, the same text to the same
+recipient and place is one request: a repeat while it is live is not sent
+again, and a repeat after it finished or failed runs again only with
+`rework=true`. Room requests continue to use their explicit destination
+thread.
 
 The chat shows an avatar and “Sent to Eli · Delivery”; clicking opens the
 receiving conversation. Same-room receipts have no unnecessary navigation.
@@ -136,8 +142,9 @@ approvals and validation. Multiple required approvals are presented together;
 no recipient starts until all are allowed. It does not claim model judgment or artifact correctness.
 The direct-chat suite exercises Clive → lead → specialist → lead → Clive with
 the real MCP proxy, no room, and no changes to unrelated conversations. It also
-checks fresh threads for separate direct assignments, their titles,
-labelled concurrent work that closes itself, recipient model/permission
+checks that follow-ups from one conversation continue one recipient thread
+(queued behind running work, never in parallel), that another conversation
+gets its own thread, thread titles, work that closes itself and reopens, recipient model/permission
 defaults, idempotency without extra tasks, capacity-bound queues, dispatch to a
 spare recipient thread while unrelated work remains active, pinned parent
 selection, steering a live coordination (including an automation turn

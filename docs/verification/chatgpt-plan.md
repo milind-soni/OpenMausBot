@@ -19,7 +19,7 @@ native turn counts as success.
 
 Credentials live in private `providers/chatgpt-plan/<account-hash>/` directories
 under the app data directory, with atomic owner-only files. Portable backups and
-Move to Cloud exclude these provider homes. No Codex credentials or personal
+Copy this computer here exclude these provider homes. No Codex credentials or personal
 configuration are read or overwritten. A cross-process lock prevents concurrent
 refresh-token reuse. If a process dies while holding that lock, the safe recovery
 is to stop the old process, confirm it has exited, and remove only that account's
@@ -39,7 +39,7 @@ configured providers remain unchanged.
 
 ```sh
 pnpm exec vitest run server/drivers/chatgpt-plan-auth.test.ts server/drivers/codex.test.ts server/chatgpt-plan-api.test.ts
-pnpm exec vitest run src/components/ChatGptPlanSignIn.interaction.test.ts src/components/CodexDeviceSignIn.test.ts src/components/CodexAccountSettings.test.ts src/components/EngineSetup.test.ts src/components/ModelPicker.interaction.test.ts src/components/ChatView.controls.test.ts
+pnpm exec vitest run src/components/ChatGptPlanSignIn.interaction.test.ts src/components/DeviceSignIn.test.ts src/components/CodexAccountSettings.test.ts src/components/EngineSetup.test.ts src/components/ModelPicker.interaction.test.ts src/components/ChatView.controls.test.ts
 pnpm typecheck
 pnpm i18n:check
 PROBE_CODEX=/path/to/codex node --experimental-strip-types scripts/verify-chatgpt-plan.mjs

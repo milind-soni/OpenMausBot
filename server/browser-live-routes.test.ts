@@ -49,8 +49,15 @@ describe("live browser route authorization", () => {
     const crossOrigin = await call(method, path, body, { ...remote, cookie: ownerCookie, origin: "https://attacker.invalid" });
     expect(crossOrigin.status).toBe(403);
     expect(crossOrigin.body.error).toContain("cross-origin");
-    // Authenticated owner reaches the feature gate; no native browser is
-    // installed or launched in this fixture.
+    // The authenticated owner gets past authorization to the feature gates;
+    // no native browser is installed or launched in this fixture. The built-in
+    // browser is on by default, so the first gate met is the missing engine…
+    expect((await call("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+    const onByDefault = await call(method, path, body, { ...remote, cookie: ownerCookie });
+    expect(onByDefault.status).toBe(503);
+    expect(onByDefault.body.error).toContain("Install the browser engine");
+    // …and a browser the person switched off still refuses before the engine.
+    expect((await call("PATCH", "/api/config", { features: { browser: false } })).status).toBe(200);
     const owner = await call(method, path, body, { ...remote, cookie: ownerCookie });
     expect(owner.status).toBe(409);
     expect(owner.body.error).toContain("Enable this bot's browser");

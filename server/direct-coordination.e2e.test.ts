@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,8 +8,26 @@ import { request } from "../scripts/mcp-server.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 
-/** Run direct Chief/lead/specialist workflows against an isolated scripted server. */
+/** What a fixture turn was told: the instructions its process was launched
+ * with, and the turn's own message, where a part of them that changed since
+ * arrives when the process was kept warm. */
+const told = (turn: any): string => {
+  const content = turn.prompt?.message?.content;
+  return `${turn.system}\n${typeof content === "string" ? content : JSON.stringify(content ?? "")}`;
+};
+
+/** Run direct Chief/lead/specialist workflows against an isolated scripted
+ * server. With OMB_TEST_DESKTOP_OWNER_TOKEN it runs as the desktop app runs
+ * it, and every change this test makes carries the app's owner capability. */
 async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessEnv = {}) {
+  const desktopOwner = fakeEnv.OMB_TEST_DESKTOP_OWNER_TOKEN;
+  const realFetch = globalThis.fetch;
+  if (desktopOwner) globalThis.fetch = (input, init = {}) => realFetch(input, { ...init,
+    headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": desktopOwner } });
+  try { await fixtureSession(test, fakeEnv); } finally { globalThis.fetch = realFetch; }
+}
+
+async function fixtureSession(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessEnv) {
   const session = await launchVerificationServer({ ...process.env, ...fakeEnv }, undefined, undefined, undefined, undefined, { scripted: true });
   const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
@@ -20,8 +38,8 @@ async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessE
     await api(`/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true }, "PATCH");
     const planPath = join(session.info.dataDir, "room-plan.json");
     const plan: Record<string, any> = {
-      [chief.id]: { steps: [{ arguments: { bot_ids: [lead.id], request_key: "build", message: "Implement and independently verify the CSV export" } }], reply: "Assigned to Engineering", resumeReply: "The requested CSV export is implemented and verified" },
-      [lead.id]: { steps: [{ arguments: { bot_ids: [specialist.id], request_key: "verify", message: "Independently verify the CSV export" } }], reply: "Sent for verification", resumeReply: "Implemented and reviewer confirmed checks" },
+      [chief.id]: { steps: [{ arguments: { bot_ids: [lead.id], message: "Implement and independently verify the CSV export" } }], reply: "Assigned to Engineering", resumeReply: "The requested CSV export is implemented and verified" },
+      [lead.id]: { steps: [{ arguments: { bot_ids: [specialist.id], message: "Independently verify the CSV export" } }], reply: "Sent for verification", resumeReply: "Implemented and reviewer confirmed checks" },
       [specialist.id]: { reply: "CSV boundary cases verified" },
     };
     const save = () => writeFileSync(planPath, JSON.stringify(plan));
@@ -85,7 +103,7 @@ it("marks a failed one-way send so restart recovery cannot duplicate its notice"
 
 it("does not grant a specialist direct access to its supervising Chief", () => fixture(async f => {
   f.plan[f.lead.id] = {
-    steps: [{ expectError: true, arguments: { bot_ids: [f.chief.id], request_key: "supervisor", message: "Contact the Chief without a shared room" } }],
+    steps: [{ expectError: true, arguments: { bot_ids: [f.chief.id], message: "Contact the Chief without a shared room" } }],
     reply: "The direct request was refused",
   };
   f.save();
@@ -417,6 +435,7 @@ it("returns a nested coordinated result after Claude retries a transient provide
   } finally { await removeTempDir(scratch); }
 }, 45_000);
 
+// The CLI ends between turns here, so each later turn resumes and is refused.
 it("returns nested results after Claude rejects the source's prior resume cursor", () => fixture(async f => {
   const coordination = f.plan[f.chief.id];
   f.plan[f.chief.id] = { reply: "Earlier conversation" };
@@ -431,7 +450,7 @@ it("returns nested results after Claude rejects the source's prior resume cursor
   expect(f.evidence().map((turn: any) => turn.botId)).toEqual([f.chief.id, f.chief.id, f.lead.id, f.specialist.id, f.lead.id, f.chief.id]);
   const transcript = await f.messages(f.chief.activeTaskId);
   expect(transcript.some((message: any) => message.tool?.name?.includes("resume_rejected"))).toBe(true);
-}, { FAKE_CLAUDE_MODE: "dead-session" }), 45_000);
+}, { FAKE_CLAUDE_MODE: "dead-session", FAKE_CLAUDE_EXIT_AFTER_TURN: "1" }), 45_000);
 
 it("uses recipient bot defaults for its new task, never the sender's or its selected old thread's settings", () => fixture(async f => {
   const models = await f.cli("models");
@@ -446,14 +465,22 @@ it("uses recipient bot defaults for its new task, never the sender's or its sele
   expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).every((turn: any) => turn.model === f.lead.modelSelection.model && turn.permissionMode === "default")).toBe(true);
 }), 45_000);
 
-it("opens a fresh recipient thread for every distinct direct assignment", () => fixture(async f => {
+/** What coordinate_bots answered to each send a bot made, in order. */
+const sendReceipts = (f: any, botId: string) => f.evidence().filter((turn: any) => turn.botId === botId)
+  .flatMap((turn: any) => turn.evidence.filter((entry: any) => entry.step))
+  .map((entry: any) => JSON.parse(entry.response.result.content[0].text).receipts[0]);
+
+// The standard since #1171: the durable thing is the relationship, and work
+// lands inside it. #2061 opened a fresh thread per call instead, so a
+// follow-up about the same work ran beside it as a second copy.
+it("continues one recipient thread for every follow-up from the same conversation", () => fixture(async f => {
   f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Header row added" }, { reply: "Write-up published" }] };
   f.plan[f.chief.id] = { turns: [
-    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } }], reply: "Assigned the build" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned the build" },
     { reply: "The export is implemented" },
-    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "header", message: "Add the header row to that export" } }], reply: "Assigned the header row" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Add the header row to that export" } }], reply: "Assigned the header row" },
     { reply: "The header row is in" },
-    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "docs", message: "Document the export you just built" } }], reply: "Assigned the write-up" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Document the export you just built" } }], reply: "Assigned the write-up" },
     { reply: "It is documented" },
   ] };
   f.save();
@@ -465,84 +492,172 @@ it("opens a fresh recipient thread for every distinct direct assignment", () => 
   await send("Ask Engineering to build the CSV export.");
   const first = (await leadTasks()).find((task: any) => task.threadId !== f.lead.activeTaskId);
   expect(first.title).toBe("@Clive · work");
-  expect(first.openedBy).toMatchObject({ botId: f.chief.id, name: "Clive", kind: "work" });
+  expect(first.openedBy).toMatchObject({ botId: f.chief.id, name: "Clive", kind: "work", threadId: f.chief.activeTaskId });
+  expect(first.closedBy).toMatchObject({ botId: f.chief.id });
   await send("Now ask them to add the header row.");
   await send("Now ask them to document it.");
   const tasks = await leadTasks();
-  expect(tasks).toHaveLength(4);
-  const threads = f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId);
-  expect(new Set(threads).size).toBe(3);
-  expect(threads).not.toContain(f.lead.activeTaskId);
-  expect(threads).toContain(first.threadId);
+  expect(tasks).toHaveLength(2);
+  // Reopened for each request and closed again once it was reported.
+  expect(tasks.find((task: any) => task.threadId === first.threadId)).toMatchObject({ title: "@Clive · work", closedBy: { botId: f.chief.id } });
+  expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId)).toEqual([first.threadId, first.threadId, first.threadId]);
   const briefs = ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"];
-  for (const [index, threadId] of threads.entries()) {
-    const transcript = (await f.messages(threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
-    expect(transcript).toContain(briefs[index]);
-    for (const other of briefs.filter((_, at) => at !== index)) expect(transcript).not.toContain(other);
-    expect(tasks.find((task: any) => task.threadId === threadId)).toMatchObject({ closedBy: { botId: f.chief.id } });
-  }
+  const transcript = (await f.messages(first.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
+  for (const brief of briefs) expect(transcript).toContain(brief);
   // Claude snapshots the system prompt at the session's first request. The
   // briefs must therefore travel in their user turns so they remain current
   // whether the CLI process is retained or the session is resumed.
   const leadTurns = f.evidence().filter((turn: any) => turn.botId === f.lead.id);
-  expect(leadTurns).toHaveLength(3);
-  expect(leadTurns[0].prompt.message.content).toContain("Implement the CSV export");
-  expect(leadTurns[1].prompt.message.content).toContain("Add the header row to that export");
-  expect(leadTurns[2].prompt.message.content).toContain("Document the export you just built");
+  expect(leadTurns.map((turn: any) => turn.threadId)).toEqual([first.threadId, first.threadId, first.threadId]);
+  for (const [index, brief] of briefs.entries()) expect(leadTurns[index].prompt.message.content).toContain(brief);
   expect(leadTurns.every((turn: any) => turn.system.includes("current request and returned results arrive in the user turn"))).toBe(true);
   expect(leadTurns.every((turn: any) => turn.snapshotMode === "off")).toBe(true);
-  for (const brief of ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"]) {
-    expect(leadTurns.every((turn: any) => !turn.system.includes(brief))).toBe(true);
-  }
-  const receipts = (await f.messages(f.chief.activeTaskId)).filter((message: any) => message.threadRef && threads.includes(message.threadRef.threadId));
-  expect(new Set(receipts.map((message: any) => message.threadRef.threadId))).toEqual(new Set(threads));
+  for (const brief of briefs) expect(leadTurns.every((turn: any) => !turn.system.includes(brief))).toBe(true);
+  // Every receipt names the thread the request went into.
+  const receipts = sendReceipts(f, f.chief.id);
+  expect(receipts.map((receipt: any) => receipt.threadId)).toEqual([first.threadId, first.threadId, first.threadId]);
+  for (const receipt of receipts) expect(receipt.detail).toBe('sent to "@Clive · work"; it runs after anything still running there');
+  const chips = (await f.messages(f.chief.activeTaskId)).filter((message: any) => message.threadRef?.threadId === first.threadId);
+  expect(chips.filter((message: any) => message.tool?.name === "Sent to Engineering lead")).toHaveLength(3);
   expect((await leadTasks()).find((task: any) => task.threadId === f.lead.activeTaskId)).not.toHaveProperty("closedBy");
 }, { FAKE_CLAUDE_VERSION: "2.1.270" }), 90_000);
 
-it("gives simultaneous assignments distinct work threads, which close once reported", () => fixture(async f => {
+// The same server code runs a VPS (`openmausbot serve`), the desktop app and
+// a Cloud home (server/cloud-personal.e2e.test.ts covers that one).
+it.each<[string, NodeJS.ProcessEnv]>([
+  ["a headless server", {}],
+  ["the desktop app", { OMB_TEST_DESKTOP_OWNER_TOKEN: randomBytes(32).toString("base64url") }],
+])("on %s, holds a follow-up sent while the teammate still works and runs it next in the same thread", (_where, env) => fixture(async f => {
+  expect((await f.api("/.well-known/openmausbot/environment", undefined, "GET")).capabilities.selfUpdate)
+    .toBe(env.OMB_TEST_DESKTOP_OWNER_TOKEN ? "desktop-managed" : "operator");
+  const gate = join(f.session.info.dataDir, "first-request.gate");
+  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "Export implemented" }, { reply: "Header row added" }] };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned the build" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Also add a header row to that export" } }], reply: "Sent the change" },
+    { reply: "Reviewed" },
+    { reply: "Reviewed" },
+  ] };
+  const chiefTurns = () => f.evidence().filter((turn: any) => turn.botId === f.chief.id);
+  const stream = await openSse(`${f.session.info.url}/api/events`);
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
+  await expect.poll(() => chiefTurns().length, { timeout: 15_000 }).toBe(1);
+  await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Change of plan: the export also needs a header row.", threadId: f.chief.activeTaskId });
+  await expect.poll(() => chiefTurns().length, { timeout: 20_000 }).toBe(2);
+  expect(told(chiefTurns()[1])).toContain("send the change to the same teammate with coordinate_bots");
+  const [running, followUp] = f.nodes().filter((node: any) => node.botId === f.lead.id);
+  expect(followUp.threadId).toBe(running.threadId);
+  expect(sendReceipts(f, f.chief.id)[1]).toMatchObject({ outcome: "queued", threadId: running.threadId });
+  // It waits for the request already running there; never beside it.
+  await new Promise(resolve => setTimeout(resolve, 1_500));
+  expect(f.nodes().find((node: any) => node.id === followUp.id).status).toBe("queued");
+  expect(f.nodes().find((node: any) => node.id === running.id).status).toBe("running");
+  writeFileSync(gate, "go");
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(() => f.nodes().filter((node: any) => node.parentId).every((node: any) => node.status === "completed"), { timeout: 15_000 }).toBe(true);
+  // A turn's index counts the turns that had already finished when it
+  // started, so 0 then 1 in one thread means one ran after the other.
+  const leadTurns = f.evidence().filter((turn: any) => turn.botId === f.lead.id);
+  expect(leadTurns.map((turn: any) => [turn.turnIndex, turn.threadId])).toEqual([[0, running.threadId], [1, running.threadId]]);
+  expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks).toHaveLength(2);
+  // The thread folds away once, after its last request reported, never
+  // while the next one was already waiting in it.
+  await stream.until(frame => frame.kind === "bot" && frame.bot?.id === f.lead.id
+    && frame.bot.tasks?.find((task: any) => task.threadId === running.threadId)?.closedBy);
+  const closed = stream.frames.filter(frame => frame.kind === "bot" && frame.bot?.id === f.lead.id)
+    .map(frame => Boolean(frame.bot.tasks?.find((task: any) => task.threadId === running.threadId)?.closedBy));
+  stream.close();
+  expect(closed.filter((now, at) => now && !closed[at - 1])).toHaveLength(1);
+}, env), 60_000);
+
+it("runs two assignments to one teammate from one turn in its thread, one after the other", () => fixture(async f => {
   f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Benchmark finished" }] };
   f.plan[f.chief.id] = { steps: [
-    { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } },
-    { arguments: { bot_ids: [f.lead.id], request_key: "bench", message: "Benchmark the exporter on the large fixture", label: "Benchmark" } },
+    { arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } },
+    { arguments: { bot_ids: [f.lead.id], message: "Benchmark the exporter on the large fixture" } },
   ], reply: "Both assignments are out", resumeReply: "Both came back" };
   await f.start();
   expect((await f.wait()).status).toBe("settled");
   const tasks = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
-  expect(tasks).toHaveLength(3);
-  const work = tasks.filter((task: any) => task.openedBy?.kind === "work");
-  expect(work.map((task: any) => task.title).sort()).toEqual(["@Clive · Benchmark", "@Clive · work"]);
-  const threads = f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId);
-  expect(new Set(threads)).toEqual(new Set(work.map((task: any) => task.threadId)));
-  const build = work.find((task: any) => task.title === "@Clive · work");
-  const benchmark = work.find((task: any) => task.title === "@Clive · Benchmark");
-  expect((await f.messages(build.threadId)).some((message: any) => message.text?.includes("Implement the CSV export"))).toBe(true);
-  expect((await f.messages(benchmark.threadId)).some((message: any) => message.text?.includes("Benchmark the exporter"))).toBe(true);
-  expect((await f.messages(build.threadId)).some((message: any) => message.text?.includes("Benchmark the exporter"))).toBe(false);
-  expect(work.every((task: any) => task.closedBy?.botId === f.chief.id)).toBe(true);
+  expect(tasks).toHaveLength(2);
+  const work = tasks.find((task: any) => task.openedBy?.kind === "work");
+  expect(work).toMatchObject({ title: "@Clive · work", closedBy: { botId: f.chief.id } });
+  expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId)).toEqual([work.threadId, work.threadId]);
+  expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => [turn.turnIndex, turn.threadId]))
+    .toEqual([[0, work.threadId], [1, work.threadId]]);
+  const transcript = (await f.messages(work.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
+  expect(transcript).toContain("Implement the CSV export");
+  expect(transcript).toContain("Benchmark the exporter");
 }), 60_000);
 
-it("refuses a reused request_key for different work and leaves no thread behind", () => fixture(async f => {
-  f.plan[f.lead.id] = { reply: "Export implemented" };
-  f.plan[f.chief.id] = { steps: [
-    { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } },
-    { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Something else entirely" }, expectError: true },
-  ], reply: "One assignment is out", resumeReply: "It came back" };
+it("gives another conversation of the same Chief its own thread with the teammate", () => fixture(async f => {
+  f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Invoices exported" }] };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export" } }], reply: "Assigned" },
+    { reply: "Done" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Export the invoices" } }], reply: "Assigned" },
+    { reply: "Done" },
+  ] };
   await f.start();
   expect((await f.wait()).status).toBe("settled");
-  const refused = f.evidence()[0].evidence.find((entry: any) => entry.step?.arguments?.message === "Something else entirely");
-  expect(JSON.stringify(refused.response)).toContain("request_key was already used for different work");
-  expect((await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks).toHaveLength(2);
-  expect(f.nodes().filter((node: any) => node.botId === f.lead.id)).toHaveLength(1);
-}), 45_000);
+  const other = (await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Invoices" })).task.threadId;
+  await f.cli("send", "--bot", f.chief.id, "--task", other, "--text", "Ask Engineering to export the invoices.");
+  expect((await f.cli("wait", "--bot", f.chief.id, "--task", other, "--timeout", "30")).status).toBe("settled");
+  const work = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.filter((task: any) => task.openedBy?.kind === "work");
+  expect(work.map((task: any) => task.openedBy.threadId).sort()).toEqual([f.chief.activeTaskId, other].sort());
+  expect(new Set(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId))).toEqual(new Set(work.map((task: any) => task.threadId)));
+}), 60_000);
 
-it("deduplicates a repeated direct request without creating extra recipient tasks", () => fixture(async f => {
+it("runs an identical call made twice in one turn once, without an extra recipient thread", () => fixture(async f => {
   f.plan[f.chief.id].steps.push(structuredClone(f.plan[f.chief.id].steps[0]));
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().filter((node: any) => node.botId === f.lead.id)).toHaveLength(1);
   const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
   expect(lead.tasks).toHaveLength(2);
   expect((await f.messages(f.chief.activeTaskId)).filter((message: any) => message.tool?.name === "Sent to Engineering lead")).toHaveLength(1);
+  const [sent, repeated] = sendReceipts(f, f.chief.id);
+  expect(repeated).toMatchObject({ requestId: sent.requestId, threadId: sent.threadId });
+  expect(repeated.detail).toContain("already sent");
 }), 45_000);
+
+// A repeat of work that already ran is not sent again unless the
+// coordinator asks for it with rework=true; then the same brief runs again
+// in the same thread, as a re-check after a fix or a retry after a failure.
+it.each<[string, Record<string, unknown>, string]>([
+  ["finished", { reply: "3 tests fail" }, "not sent again: it already finished and its result stands; send it with rework=true to run it again"],
+  ["failed", { fail: true }, "not sent again: it failed; send it with rework=true to retry"],
+])("runs an identical brief again only with rework=true once its first run %s", (how, firstRun, refusal) => fixture(async f => {
+  const brief = "Run the full test suite and report every failure";
+  f.plan[f.lead.id] = { turns: [firstRun, { reply: "All tests pass" }] };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: brief } }], reply: "Sent" },
+    { steps: [
+      { arguments: { bot_ids: [f.lead.id], message: brief }, expectError: true },
+      // An acknowledgement to a teammate that finished is refused in full.
+      ...(how === "finished" ? [{ arguments: { bot_ids: [f.lead.id], message: "Thanks, approved" }, expectError: true }] : []),
+      { arguments: { bot_ids: [f.lead.id], message: brief, rework: true } },
+    ], reply: "Sent again" },
+    { reply: "The suite is green" },
+  ] };
+  await f.start();
+  await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.chief.id).length, { timeout: 30_000 }).toBe(3);
+  expect((await f.wait()).status).toBe("settled");
+  // Nothing was sent by the plain repeat, so the call is refused with the
+  // way to run it again; the rework call runs the brief in the same thread.
+  const results = f.evidence().filter((turn: any) => turn.botId === f.chief.id)
+    .flatMap((turn: any) => turn.evidence.filter((entry: any) => entry.step)).map((entry: any) => entry.response.result);
+  const [sent, repeated] = results;
+  const rerun = results.at(-1);
+  expect(repeated.isError).toBe(true);
+  expect(repeated.content[0].text).toContain(refusal);
+  if (how === "finished") expect(results[2].content[0].text).toContain("Only use rework=true for concrete additional work.");
+  const [first, again] = [sent, rerun].map((result: any) => JSON.parse(result.content[0].text).receipts[0]);
+  expect(again).toMatchObject({ outcome: "queued", threadId: first.threadId });
+  expect(again.requestId).not.toBe(first.requestId);
+  expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => turn.threadId)).toEqual([first.threadId, first.threadId]);
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The suite is green")).toBe(true);
+}), 60_000);
 
 it("dispatches to a spare recipient thread without waiting for unrelated work", () => fixture(async f => {
   await f.api("/api/config", { threads: { maxConcurrentPerBot: 2 } }, "PUT");
@@ -604,9 +719,9 @@ it("runs a message sent while a teammate works, keeps the assignment, and names 
 
   const steered = f.evidence().filter((turn: any) => turn.botId === f.chief.id)[1];
   expect(steered.resumed).toBe(false);
-  expect(steered.system).toContain("Assignments you already sent are still outstanding");
-  expect(steered.system).toContain(assignment.id);
-  expect(steered.system).toContain("Engineering lead");
+  expect(told(steered)).toContain("Assignments you already sent are still outstanding");
+  expect(told(steered)).toContain(assignment.id);
+  expect(told(steered)).toContain("Engineering lead");
   // The teammate was never touched: it finishes and still returns here.
   expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
   expect((await f.wait()).status).toBe("settled");
@@ -644,7 +759,7 @@ it("parks a message behind outstanding teammate work when the bot opts in, then 
   await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.chief.id).length, { timeout: 20_000 }).toBe(3);
   const parked = f.evidence().filter((turn: any) => turn.botId === f.chief.id)[2];
   expect(parked.resumed).toBe(false);
-  expect(parked.system).not.toContain("Assignments you already sent are still outstanding");
+  expect(told(parked)).not.toContain("Assignments you already sent are still outstanding");
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Also make sure the export is UTF-8.")).toBe(true);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Noted; the export is UTF-8 too")).toBe(true);
 }), 60_000);
@@ -781,7 +896,7 @@ it("runs the owed direct follow-up while the same bot works in another thread", 
   const gate = join(f.session.info.dataDir, "hold-gate");
   f.plan[f.chief.id] = { turns: [
     { steps: [
-      { tool: "coordinate_bots", arguments: { bot_ids: [f.specialist.id], request_key: "check", message: "Independently verify the CSV export" } },
+      { tool: "coordinate_bots", arguments: { bot_ids: [f.specialist.id], message: "Independently verify the CSV export" } },
       { tool: "start_thread", arguments: { title: "Independent hold", message: "Run the long independent check." } },
     ], reply: "Assigned the check and opened the hold" },
     { gateFile: gate, reply: "The follow-up ran while the hold worked" },
@@ -817,10 +932,10 @@ it("sends each teammate result once in the turn that reviews it", () => fixture(
   expect(text.split("LEAD_RESULT_ONCE").length - 1).toBe(1);
 }), 45_000);
 
-it("gives a teammate's fresh thread its request once, never also as a bare assistant line", () => fixture(async f => {
+it("gives a teammate each request once, never also as a bare assistant line", () => fixture(async f => {
   f.plan[f.lead.id] = { reply: "round result" };
   for (const key of ["first", "second"]) {
-    f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: key, message: `REQUEST_${key.toUpperCase()} please do it` } }], reply: "Assigned", resumeReply: "Done" };
+    f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: `REQUEST_${key.toUpperCase()} please do it` } }], reply: "Assigned", resumeReply: "Done" };
     f.save();
     await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", `Delegate the ${key} request.`);
     expect((await f.wait()).status).toBe("settled");

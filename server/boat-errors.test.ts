@@ -4,7 +4,7 @@
 // provider's own wording wins over ours.
 import { describe, expect, it } from "vitest";
 
-import { boatErrorMessage } from "./boat.ts";
+import { boatErrorMessage, boatRefusal } from "./boat.ts";
 
 const billing = {
   ok: false,
@@ -55,5 +55,22 @@ describe("boatErrorMessage", () => {
 
   it("falls back to the status when nothing is known", () => {
     expect(boatErrorMessage(500, "boat create")).toBe("boat create failed (500)");
+  });
+});
+
+describe("boatRefusal", () => {
+  it("keeps the provider's status and the Admin's own code for reading the failed place", () => {
+    const inactive = { ok: false, code: "subscription_inactive", message: "Cloud computers are included with an active Cloud subscription.",
+      error: { code: "subscription_inactive", message: "Cloud computers are included with an active Cloud subscription.", status: 402 } };
+    expect(boatRefusal(402, "boat create", inactive, true)).toMatchObject({
+      message: "Cloud computers are included with an active Cloud subscription.", boatStatus: 402, boatCode: "subscription_inactive",
+    });
+  });
+
+  it("never sets the status a route would answer with", () => {
+    // A create the provider answered 200 without a computer is still this
+    // app's failure (500), not a success.
+    expect(boatRefusal(200, "boat create", { ok: false, message: "no box" })).not.toHaveProperty("status");
+    expect(boatRefusal(500, "boat create", { code: "Not A Code!" })).not.toHaveProperty("boatCode");
   });
 });

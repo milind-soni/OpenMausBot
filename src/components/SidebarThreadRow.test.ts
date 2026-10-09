@@ -1,8 +1,10 @@
-import { createElement } from "react";
+import { createElement, type ComponentProps, type MemoExoticComponent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, SidebarThreadRow, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, SidebarThreadRow, stampClock, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+
+type ThreadRowProps = ComponentProps<typeof SidebarThreadRow>;
 
 // The More menu lives behind component state and a portal, which a static
 // render never reaches. SidebarThreadRow uses exactly useState, useRef,
@@ -67,7 +69,7 @@ describe("sidebar thread visibility", () => {
     const render = (busy = false, activity?: "waiting-on-you") => renderToStaticMarkup(createElement(SidebarThreadRow, {
       task: { threadId: "queued", title: "Next job", queued: true, busy, activity },
       ownerId: "scout",
-      current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+      current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
     }));
     expect(render()).toContain("Next job · Queued");
     expect(render(true)).toContain("Next job · Working");
@@ -78,9 +80,9 @@ describe("sidebar thread visibility", () => {
 });
 
 describe("threads waiting on a teammate", () => {
-  const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"], props: Partial<Parameters<typeof SidebarThreadRow>[0]> = {}) =>
+  const render = (task: ThreadRowProps["task"], props: Partial<ThreadRowProps> = {}) =>
     renderToStaticMarkup(createElement(SidebarThreadRow, {
-      task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), ...props,
+      task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en", ...props,
     }));
   // #1223: the parent thread dispatched a teammate and its own turn is done.
   it("shows the wait as a quiet label over the busy paint, never the work spinner", () => {
@@ -103,8 +105,8 @@ describe("threads waiting on a teammate", () => {
 
 describe("threads a bot opened", () => {
   const openedBy = { botId: "scout", name: "Scout", at: 5 };
-  const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
-    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+  const render = (task: ThreadRowProps["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
   }));
   it("says who opened the thread in plain words, and nothing for the person's own", () => {
     expect(threadOpenerLabel({ openedBy })).toBe("opened by Scout");
@@ -166,8 +168,8 @@ describe("snoozed threads", () => {
 
 describe("threads a bot opened", () => {
   const openedBy = { botId: "scout", name: "Scout", at: 5 };
-  const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
-    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+  const render = (task: ThreadRowProps["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
   }));
   it("says who opened the thread in plain words, and nothing for the person's own", () => {
     expect(threadOpenerLabel({ openedBy })).toBe("opened by Scout");
@@ -197,8 +199,8 @@ describe("threads a bot opened", () => {
 describe("threads a bot closed", () => {
   const openedBy = { botId: "pm", name: "Parker", at: 5 };
   const closedBy = { botId: "pm", name: "Parker", at: 9 };
-  const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"], current = false) => renderToStaticMarkup(createElement(SidebarThreadRow, {
-    task, ownerId: "pm", current, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+  const render = (task: ThreadRowProps["task"], current = false) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+    task, ownerId: "pm", current, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
   }));
   it("folds closed threads out of the default list without spending the six recent rows on them", () => {
     // newest first: three helper threads the PM opened and closed sit on top of the person's own
@@ -241,7 +243,7 @@ describe("formatUpdatedAt", () => {
     expect(formatUpdatedAt(Number.NaN)).toBe("");
     const markup = renderToStaticMarkup(createElement(SidebarThreadRow, {
       task: { threadId: "t", title: "Notes", updatedAt: at },
-      ownerId: "b", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+      ownerId: "b", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
     }));
     expect(markup).toContain(formatUpdatedAt(at));
     expect(markup).toContain(new Date(at).toISOString());
@@ -276,6 +278,15 @@ describe("threadUpdatedLabel", () => {
     expect(threadUpdatedLabel(morning, night)).toBe("24 h ago");
   });
 
+  it("gives a row the clock exactly while its label reads relative", () => {
+    const halfPastSix = 6 * 86_400_000 + 12 * 3_600_000;
+    expect(stampClock(now - halfPastSix, now)).toBe(now);
+    expect(stampClock(now - 7 * 86_400_000, now)).toBeUndefined();
+    expect(stampClock(0, now)).toBeUndefined();
+    expect(stampClock(now - 60_000, Number.NaN)).toBeUndefined();
+    expect(threadUpdatedLabel(now - 60_000, Number.NaN)).toBe(formatUpdatedAt(now - 60_000));
+  });
+
   it("skips a missing stamp and clamps a future clock to just now", () => {
     expect(threadUpdatedLabel(0, now)).toBe("");
     expect(threadUpdatedLabel(Number.NaN, now)).toBe("");
@@ -286,7 +297,7 @@ describe("threadUpdatedLabel", () => {
     const at = Date.now() - 5 * 60_000;
     const markup = renderToStaticMarkup(createElement(SidebarThreadRow, {
       task: { threadId: "t", title: "Notes", updatedAt: at },
-      ownerId: "b", current: false, now: Date.now(), onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+      ownerId: "b", current: false, now: Date.now(), onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
     }));
     expect(markup).toContain("5 min ago");
     expect(markup).toContain(`title="Notes · ${formatUpdatedAt(at)}"`);
@@ -297,7 +308,7 @@ describe("threadUpdatedLabel", () => {
     const at = Date.now() - 5 * 60_000;
     const markup = renderToStaticMarkup(createElement(SidebarThreadRow, {
       task: { threadId: "t", title: "Notes", updatedAt: at },
-      ownerId: "b", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+      ownerId: "b", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
     }));
     expect(markup).toContain(`>${formatUpdatedAt(at)}<`);
   });
@@ -306,6 +317,34 @@ describe("threadUpdatedLabel", () => {
     setLocale("pt-br");
     expect(threadUpdatedLabel(now - 5 * 60_000, now)).toBe("há 5 min");
     expect(threadUpdatedLabel(now - 26 * 3_600_000, now)).toBe("ontem");
+  });
+});
+
+describe("thread title direction", () => {
+  const now = Date.UTC(2026, 8, 25, 12, 0, 0);
+  const row = (title: string, openedBy?: { botId: string; name: string; at: number }) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+    task: { threadId: "t", title, updatedAt: now - 2 * 3_600_000, ...(openedBy ? { openedBy } : {}) },
+    ownerId: "b", current: false, now, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
+  }));
+  const titleSpan = (markup: string, title: string) => {
+    const match = markup.match(new RegExp(`<span dir="auto" class="([^"]*)">${title}</span>`));
+    expect(match).not.toBeNull();
+    return match?.[1] ?? "";
+  };
+
+  it("renders the title with dir=auto and leaves the time a fixed column", () => {
+    const arabic = "انسخ محتوى الذكاء الاصطناعي وصمم منشورات";
+    const arabicClass = titleSpan(row(arabic), arabic);
+    const englishClass = titleSpan(row("New thread"), "New thread");
+    const withByline = titleSpan(row("QA PR 245", { botId: "scout", name: "Scout", at: 1 }), "QA PR 245");
+    for (const classes of [arabicClass, englishClass, withByline]) {
+      expect(classes).toContain("min-w-0");
+      expect(classes).toContain("flex-1");
+      expect(classes).toContain("max-w-max");
+      expect(classes).toContain("truncate");
+    }
+    expect(row("New thread")).toMatch(/<time [^>]*class="[^"]*\bshrink-0\b[^"]*"/);
+    expect(row(arabic)).not.toContain("<button dir=");
   });
 });
 
@@ -402,8 +441,8 @@ describe("orderedSidebarThreads", () => {
 });
 
 describe("archived threads", () => {
-  const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
-    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+  const render = (task: ThreadRowProps["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
   }));
   it("keeps the six newest open threads, and does not spend those slots on a pin", () => {
     const rows = [
@@ -452,13 +491,15 @@ describe("archived threads", () => {
 });
 
 // Row menu helpers: render the row, open its More menu, find a button.
-type RowTask = Parameters<typeof SidebarThreadRow>[0]["task"];
+type RowTask = ThreadRowProps["task"];
 type RowProps = { children?: unknown; [key: string]: unknown };
 type RowNode = { $$typeof?: unknown; type?: unknown; props?: RowProps; children?: unknown };
 
-const renderRow = (task: RowTask, ownerId: string, fresh = true, extra: Partial<Parameters<typeof SidebarThreadRow>[0]> = {}): RowNode => {
+const renderRow = (task: RowTask, ownerId: string, fresh = true, extra: Partial<ThreadRowProps> = {}): RowNode => {
   rowHooks.begin(fresh);
-  return SidebarThreadRow({ task, ownerId, current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), ...extra }) as RowNode;
+  // the memoized row's own function, called directly like the hooks above
+  const row = (SidebarThreadRow as MemoExoticComponent<(props: ThreadRowProps) => ReactNode>).type;
+  return row({ task, ownerId, current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en", ...extra }) as RowNode;
 };
 
 const walk = (node: unknown, visit: (element: RowNode) => void): void => {
@@ -582,7 +623,7 @@ describe("Regenerate title", () => {
     vi.stubGlobal("document", { body: { nodeType: 1 } });
     const task = { threadId: "t1", title: "Fix the login" };
     let settle: ((ok: boolean) => void) | undefined;
-    const onRegenerateTitle = vi.fn((onSettled: (ok: boolean) => void) => { settle = onSettled; });
+    const onRegenerateTitle = vi.fn((_task: unknown, onSettled: (ok: boolean) => void) => { settle = onSettled; });
     openMenu(renderRow(task, "scout", true, { onRegenerateTitle }));
     const idle = buttonWithLabel(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerate title")!;
     (idle.props!.onClick as () => void)();

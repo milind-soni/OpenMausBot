@@ -74,6 +74,7 @@ describe("OptionCard", () => {
     const card = msg({ id: "quiz", kind: "options", card: { title: "Pick one", subtitle: "", options: ["A thing"] } });
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(OptionCard, { botId: "atlas", message: card })));
     expect(markup).toContain(`aria-label="${t("onboarding.card.dismiss")}"`);
+    expect(markup).toContain('<input dir="auto"');
   });
 });
 

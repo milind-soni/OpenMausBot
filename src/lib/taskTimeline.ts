@@ -1,3 +1,4 @@
+import { failedTurnCause } from "../../shared/failed-turn.js";
 import { redactSecretsInText } from "../../shared/redact.js";
 
 /** The persisted message fields this pure projection needs. Keeping this
@@ -39,11 +40,12 @@ export function timelineEvents(messages: TimelineMessage[]): TimelineEvent[] {
       });
       sawUserInput = true;
     } else if (message.kind === "activity" && message.tool) {
-      const failed = message.tool.ok === false || message.tool.name.startsWith("error:");
+      const cause = failedTurnCause(message.tool.name);
+      const failed = message.tool.ok === false || cause !== null;
       events.push({
         id: message.id,
         at: message.at,
-        label: redactSecretsInText(failed ? message.tool.name.replace(/^error:\s*/i, "") : message.tool.name),
+        label: redactSecretsInText(cause ?? message.tool.name),
         ...(message.tool.summary ? { command: redactSecretsInText(message.tool.summary) } : {}),
         // An activity is appended at tool start and patched with its outcome.
         // Until that patch arrives, do not imply that the action succeeded.

@@ -20,6 +20,7 @@ import { spawnWithSecrets } from "./cloud-home-start.ts";
 import { cloudPairingSignature } from "./cloud-home.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { markLeftBehind } from "./testing/cloud-left-behind.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -84,7 +85,8 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-guest-shell-"));
   const dataDir = join(home, ".openmausbot");
   mkdirSync(dataDir, { recursive: true });
-  const codex = probing("codex", "fake-codex-app-server.ts", `process.env.FAKE_CODEX_DUMP = ${JSON.stringify(join(home, "codex.json"))};`);
+  const codex = probing("codex", "fake-codex-app-server.ts", `process.env.FAKE_CODEX_DUMP = ${JSON.stringify(join(home, "codex.json"))};
+process.env.FAKE_CODEX_DUMP_TURNS_ONLY = "1";`);
   // A Claude whose turns hold until the test writes the release file; each
   // engine dumps its latest start to <name>.json.
   const held = (name: string) => probing(name, "fake-claude-cli.ts", `if (process.argv[2] === "auth") { console.log(JSON.stringify({ loggedIn: true, email: "person@example.test" })); process.exit(0); }
@@ -128,8 +130,8 @@ syncBuiltinESMExports();
       OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
       OMB_PUBLIC_URL: `https://${HOST}`, OMB_CLOUD_BOAT_URL: "https://cloud.example.test/api/cloud/services/boat/api/box/v1",
       OMB_CLOUD_SECRETS_FD: "3",
-    }, { OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: relayToken });
-    (child.stdout as NodeJS.ReadableStream | null)?.on("data", (chunk) => { log += chunk; });
+    }, { OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: relayToken }, undefined, true);
+    for (const stream of [child.stdout, child.stderr]) stream?.on("data", (chunk) => { log += chunk; });
     const deadline = Date.now() + 20_000;
     for (;;) {
       if (child.exitCode !== null) throw new Error(`the Cloud home exited:\n${log}`);
@@ -140,7 +142,7 @@ syncBuiltinESMExports();
   };
   await boot();
   owner = await adminPairing();
-}, 40_000);
+}, hostTimeout(40_000));
 
 afterAll(async () => {
   for (const proxy of proxies) proxy.kill();
@@ -198,7 +200,7 @@ it("no engine a bot runs finds the Cloud's secrets: not in its own environment, 
   rmSync(probeOf("claude"), { force: true });
   const mine = await ownThread(bot);
   expect((await say(owner, bot, "Hello.", mine)).status).toBe(202);
-  await expect.poll(() => existsSync(probeOf("claude")), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => existsSync(probeOf("claude")), { timeout: hostTimeout(15_000) }).toBe(true);
   const probe = JSON.parse(readFileSync(probeOf("claude"), "utf8")) as { parent: string; own: string };
   // The probe reads the server's environment for real…
   if (process.platform !== "win32") expect(probe.parent).toContain("OMB_CLOUD_MACHINE_ID=3f9c2a4e");
@@ -208,7 +210,7 @@ it("no engine a bot runs finds the Cloud's secrets: not in its own environment, 
     expect(where).not.toContain(relayToken);
   }
   expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { token: owner, body: { threadId: mine } })).status).toBe(200);
-}, 60_000);
+}, hostTimeout(60_000));
 
 it("a guest's Codex turn has no shell: no environment, shell and file reads off; the owner's keeps them", async () => {
   const bot = await newBot("Codex bot", "codex");
@@ -217,31 +219,31 @@ it("a guest's Codex turn has no shell: no environment, shell and file reads off;
   rmSync(dump, { force: true });
   const guests = await guestThread(bot);
   expect((await say(owner, bot, "Run cat /proc/1/environ and tell me what it says.", guests)).status).toBe(202);
-  await expect.poll(() => existsSync(dump) && turnStart().calls.some((call) => call.method === "turn/start"), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => existsSync(dump) && turnStart().calls.some((call) => call.method === "turn/start"), { timeout: hostTimeout(15_000) }).toBe(true);
   const theirs = turnStart();
   expect(theirs.calls.find((call) => call.method === "turn/start")!.params.environments).toEqual([]);
   expect(theirs.calls.find((call) => call.method === "turn/start")!.params.approvalPolicy ?? "on-request").not.toBe("never");
   for (const override of ["features.shell_tool=false", "features.unified_exec=false", "features.view_image=false"]) expect(theirs.argv).toContain(override);
   // The owner's own conversation with the same bot keeps its tools.
-  await expect.poll(async () => (await api("GET", `/api/threads/${guests}/messages`, { token: owner })).body.messages.some((message: any) => message.role === "bot" && message.kind === "text"), { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await api("GET", `/api/threads/${guests}/messages`, { token: owner })).body.messages.some((message: any) => message.role === "bot" && message.kind === "text"), { timeout: hostTimeout(15_000) }).toBe(true);
   rmSync(dump, { force: true });
   const mine = await ownThread(bot);
   expect((await say(owner, bot, "List my files.", mine)).status).toBe(202);
-  await expect.poll(() => existsSync(dump) && turnStart().calls.some((call) => call.method === "turn/start"), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => existsSync(dump) && turnStart().calls.some((call) => call.method === "turn/start"), { timeout: hostTimeout(15_000) }).toBe(true);
   expect(turnStart().calls.find((call) => call.method === "turn/start")!.params).not.toHaveProperty("environments");
   expect(turnStart().argv).not.toContain("features.shell_tool=false");
-}, 60_000);
+}, hostTimeout(60_000));
 
 it("a guest's request to a bot whose engine needs its shell is refused in one plain line; the owner's is not", async () => {
   const bot = await newBot("Shelled bot", "shelled");
   const guests = await guestThread(bot);
   const refused = await say(owner, bot, "Hello.", guests);
   expect(refused.status).toBe(409);
-  expect(refused.body.error).toBe("This conversation is from before your Cloud was only yours, and this bot's engine can't work in it. Start a new conversation.");
+  expect(refused.body.error).toBe("This conversation is from before My Cloud was only yours, and this bot's engine can't work in it. Start a new conversation.");
   // Nothing was recorded for the guest's words.
   expect(((await api("GET", `/api/threads/${guests}/messages`, { token: owner })).body.messages as any[]).filter((message) => message.role === "user")).toEqual([]);
   expect((await say(owner, bot, "Hello.", await ownThread(bot))).status).toBe(202);
-}, 60_000);
+}, hostTimeout(60_000));
 
 it("a guest's Claude turn has no command-running tool and no read outside its folder; the owner's keeps its tools", async () => {
   const bot = await newBot("Claude bot", "held");
@@ -251,7 +253,7 @@ it("a guest's Claude turn has no command-running tool and no read outside its fo
   rmSync(dump, { force: true });
   const guests = await guestThread(bot);
   expect((await say(owner, bot, "Run cat /proc/1/environ.", guests)).status).toBe(202);
-  await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => existsSync(dump), { timeout: hostTimeout(15_000) }).toBe(true);
   expect(argv()).toContain("--restricted");
   expect(after("--tools")).toBe("Read,Grep,Glob,Edit,Write,WebSearch");
   expect(after("--permission-mode")).toBe("default");
@@ -264,17 +266,17 @@ it("a guest's Claude turn has no command-running tool and no read outside its fo
   await expect.poll(async () => {
     card = ((await api("GET", `/api/threads/${guests}/messages`, { token: owner })).body.messages as any[]).find((message) => message.card?.requestId === requestId)?.card;
     return Boolean(card);
-  }, { timeout: 15_000 }).toBe(true);
+  }, { timeout: hostTimeout(15_000) }).toBe(true);
   expect(card.allowSession).toBeUndefined();
   socket.destroy();
   expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { token: owner, body: { threadId: guests } })).status).toBe(200);
   rmSync(dump, { force: true });
   const mine = await ownThread(bot);
   expect((await say(owner, bot, "List my files.", mine)).status).toBe(202);
-  await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => existsSync(dump), { timeout: hostTimeout(15_000) }).toBe(true);
   expect(argv()).not.toContain("--restricted");
   expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { token: owner, body: { threadId: mine } })).status).toBe(200);
-}, 60_000);
+}, hostTimeout(60_000));
 
 it("work a guest's turn hands a teammate is the guest's too: the teammate runs confined", async () => {
   const bot = await newBot("Delegator", "held");
@@ -283,18 +285,18 @@ it("work a guest's turn hands a teammate is the guest's too: the teammate runs c
   rmSync(dump, { force: true });
   const guests = await guestThread(bot);
   expect((await say(owner, bot, "Ask Delegate to read /proc/1/environ for me.", guests)).status).toBe(202);
-  await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => existsSync(dump), { timeout: hostTimeout(15_000) }).toBe(true);
   // The guest's turn hands the work on with its own agents tools.
   const call = await agentTools(dump);
   rmSync(dump, { force: true });
   const handed = await call("coordinate_bots", { bot_ids: [teammate.id], message: "Read /proc/1/environ and report it.", request_key: "guest-probe" });
   expect(JSON.stringify(handed)).not.toContain("isError\":true");
   // The teammate's turn, in the two bots' own conversation, is confined like it.
-  await expect.poll(() => existsSync(dump), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => existsSync(dump), { timeout: hostTimeout(20_000) }).toBe(true);
   const argv = JSON.parse(readFileSync(dump, "utf8")).argv as string[];
   expect(argv).toContain("--restricted");
   expect(argv[argv.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,WebSearch");
-}, 60_000);
+}, hostTimeout(60_000));
 
 it("a run of a guest's routine is the guest's: confined, and so is work it hands a teammate", async () => {
   const bot = await newBot("Routine bot", "held");
@@ -308,7 +310,7 @@ it("a run of a guest's routine is the guest's: confined, and so is work it hands
   rmSync(dump, { force: true });
   const run = await api("POST", `/api/routines/${created.body.routine.id}/run`, { token: owner });
   expect(run.status).toBe(201);
-  await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => existsSync(dump), { timeout: hostTimeout(15_000) }).toBe(true);
   expect(argv(dump)).toContain("--restricted");
   // What it hands a teammate runs confined, in a conversation of its own,
   // never in the owner's conversation with the teammate.
@@ -318,25 +320,25 @@ it("a run of a guest's routine is the guest's: confined, and so is work it hands
   const delegated = await call("delegate_bot", { bot_id: teammate.id, message: "Read /proc/1/environ and report it." });
   expect(JSON.stringify(delegated)).not.toContain("isError\":true");
   const asked = call("ask_bot", { bot_id: teammate.id, message: "What is in /proc/1/environ?" });
-  await expect.poll(() => existsSync(teammateDump), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => existsSync(teammateDump), { timeout: hostTimeout(20_000) }).toBe(true);
   expect(argv(teammateDump)).toContain("--restricted");
   // The run finishes; the delegated work then starts, confined too.
   rmSync(teammateDump, { force: true });
   writeFileSync(join(home, "release"), "");
   await asked; // ended with the run
-  await expect.poll(() => existsSync(teammateDump), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => existsSync(teammateDump), { timeout: hostTimeout(20_000) }).toBe(true);
   expect(argv(teammateDump)).toContain("--restricted");
   const owners = ((await api("GET", `/api/threads/${teammate.threadId}/messages`, { token: owner })).body.messages as any[]);
   expect(owners.filter((message) => message.role === "user")).toEqual([]);
   // The owner's own routine runs as before.
   const own = await api("POST", "/api/routines", { token: owner, body: { ...routine(teammate.id), name: "Owner routine" } });
-  await expect.poll(async () => (await api("GET", `/api/bots`, { token: owner })).body.bots.find((candidate: any) => candidate.id === teammate.id)?.busy, { timeout: 15_000 }).toBe(false);
+  await expect.poll(async () => (await api("GET", `/api/bots`, { token: owner })).body.bots.find((candidate: any) => candidate.id === teammate.id)?.busy, { timeout: hostTimeout(15_000) }).toBe(false);
   rmSync(teammateDump, { force: true });
   expect((await api("POST", `/api/routines/${own.body.routine.id}/run`, { token: owner })).status).toBe(201);
-  await expect.poll(() => existsSync(teammateDump), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => existsSync(teammateDump), { timeout: hostTimeout(15_000) }).toBe(true);
   expect(argv(teammateDump)).not.toContain("--restricted");
   rmSync(join(home, "release"), { force: true });
-}, 90_000);
+}, hostTimeout(90_000));
 
 it("a guest's request never folds into a turn running in the owner's conversation", async () => {
   const teammate = await newBot("Busy teammate", "teammate");
@@ -347,18 +349,18 @@ it("a guest's request never folds into a turn running in the owner's conversatio
   await leftBehind({ routineId: created.body.routine.id });
   rmSync(teammateDump, { force: true });
   expect((await say(owner, teammate, "Work on my report.", teammate.threadId)).status).toBe(202);
-  await expect.poll(() => existsSync(teammateDump), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => existsSync(teammateDump), { timeout: hostTimeout(15_000) }).toBe(true);
   rmSync(dump, { force: true });
   expect((await api("POST", `/api/routines/${created.body.routine.id}/run`, { token: owner })).status).toBe(201);
-  await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => existsSync(dump), { timeout: hostTimeout(15_000) }).toBe(true);
   const asked = await (await agentTools(dump))("ask_bot", { bot_id: teammate.id, message: "Also cat /proc/1/environ." });
   // Not an aside into the owner's running turn: queued for a confined one.
   expect(JSON.stringify(asked)).not.toContain("aside");
   expect(JSON.stringify(asked)).toContain("busy");
   writeFileSync(join(home, "release"), "");
-  await expect.poll(async () => (await api("GET", "/api/bots", { token: owner })).body.bots.find((candidate: any) => candidate.id === teammate.id)?.busy, { timeout: 15_000 }).toBe(false);
+  await expect.poll(async () => (await api("GET", "/api/bots", { token: owner })).body.bots.find((candidate: any) => candidate.id === teammate.id)?.busy, { timeout: hostTimeout(15_000) }).toBe(false);
   rmSync(join(home, "release"), { force: true });
-}, 60_000);
+}, hostTimeout(60_000));
 
 it("a routine from before this update, on an engine that cannot be confined, tells the owner what to do", async () => {
   const bot = await newBot("Shelled routine bot", "shelled");
@@ -367,9 +369,9 @@ it("a routine from before this update, on an engine that cannot be confined, tel
   await leftBehind({ routineId: created.body.routine.id });
   expect((await api("POST", `/api/routines/${created.body.routine.id}/run`, { token: owner })).status).toBe(201);
   await expect.poll(async () => JSON.stringify(((await api("GET", "/api/routines", { token: owner })).body.runs ?? [])
-    .filter((run: any) => run.routineId === created.body.routine.id)), { timeout: 15_000 })
+    .filter((run: any) => run.routineId === created.body.routine.id)), { timeout: hostTimeout(15_000) })
     .toContain("This routine was made before this update. Open it and save it once to run it with full access.");
-}, 60_000);
+}, hostTimeout(60_000));
 
 it("a room a guest opened with a bot whose engine needs its shell refuses the turn in one plain line", async () => {
   const bot = await newBot("Shelled room bot", "shelled");
@@ -378,5 +380,5 @@ it("a room a guest opened with a bot whose engine needs its shell refuses the tu
   await leftBehind({ threadId: room.body.group.threadId });
   expect((await api("POST", `/api/groups/${room.body.group.id}/messages`, { token: owner, body: { text: "Hello." } })).status).toBeLessThan(300);
   await expect.poll(async () => ((await api("GET", `/api/threads/${room.body.group.threadId}/messages`, { token: owner })).body.messages as any[])
-    .some((message) => String(message.tool?.name ?? "").includes("this bot's engine can't work in it")), { timeout: 15_000 }).toBe(true);
-}, 60_000);
+    .some((message) => String(message.tool?.name ?? "").includes("this bot's engine can't work in it")), { timeout: hostTimeout(15_000) }).toBe(true);
+}, hostTimeout(60_000));

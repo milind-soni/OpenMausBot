@@ -1,4 +1,5 @@
 import type { InstanceInfo } from "@/state/store";
+import { canWorkOnCloud, type CloudEngine } from "../../shared/cloud-computer";
 import { isCloudComputerBusyMessage } from "../../shared/computer-contention";
 
 /** Older hosts return only a message/status pair. Do not hide unrelated
@@ -31,9 +32,15 @@ export function remoteScreenshotSource(raw: unknown): string | null {
   return `data:${frame.format === "jpeg" ? "image/jpeg" : "image/png"};base64,${frame.png}`;
 }
 
-/** Match the server: selected bridge-capable engine, otherwise the Boat runner. */
-export function cloudRunner(instances: readonly InstanceInfo[], selectedId?: string): InstanceInfo | undefined {
-  if (!selectedId) return undefined;
-  const selected = instances.find(instance => instance.instanceId === selectedId);
-  return selected?.capabilities?.cloudComputerMcp ? selected : instances.find(instance => instance.driverKind === "boxAgent");
+/** The engine fact the cloud-computer rule reads. */
+export function cloudEngineOf(instance: InstanceInfo | undefined): CloudEngine {
+  return { computerMcp: instance?.capabilities?.computerMcp };
+}
+
+/** The bot's own engine when it can work on the Boat cloud computer: the
+ * server's rule (shared/cloud-computer.ts). A cloud turn never runs on
+ * another engine, so a bot whose engine can't has none. */
+export function boatCapableEngine(instances: readonly InstanceInfo[], selectedId?: string): InstanceInfo | undefined {
+  const selected = selectedId ? instances.find(instance => instance.instanceId === selectedId) : undefined;
+  return selected && canWorkOnCloud(cloudEngineOf(selected)) ? selected : undefined;
 }

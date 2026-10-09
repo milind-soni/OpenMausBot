@@ -143,6 +143,26 @@ describe("appendDecision / readDecisions", () => {
     expect(rows.find((r) => r.requestId === "outside")?.actor).toBeUndefined();
   });
 
+  // A card decided by voice on a Live call says so, on the row and in the
+  // export: "yes" heard on a call is a weaker signal than a tap.
+  it("marks a person's decision made by voice on a Live call", async () => {
+    await withDecisionActor({ kind: "loopback" }, async () => {
+      appendDecision(dir, row({ requestId: "spoken", decision: "user-approved", source: "user" }));
+      appendDecision(dir, row({ requestId: "rule", decision: "auto-approved", source: "full-access" }));
+    }, "call");
+    await withDecisionActor({ kind: "loopback" }, async () => {
+      appendDecision(dir, row({ requestId: "tapped", decision: "user-approved", source: "user" }));
+    });
+    await flushDecisionLog(dir);
+    const rows = readDecisions(dir, 10);
+    expect(rows.find((r) => r.requestId === "spoken")).toMatchObject({ actor: { kind: "loopback" }, via: "call" });
+    expect(rows.find((r) => r.requestId === "rule")?.via).toBeUndefined();
+    expect(rows.find((r) => r.requestId === "tapped")?.via).toBeUndefined();
+    const csv = decisionsCsv(rows);
+    expect(csv).toContain("This computer (by voice)");
+    expect(csv.split("\n").filter((line) => line.includes("(by voice)"))).toHaveLength(1);
+  });
+
   it("exports a date range as CSV with formula cells neutralised and secrets still redacted", async () => {
     const legacy = { at: "2026-02-10T10:00:00.000Z", threadId: "t1", requestId: "r1", botName: "=HYPERLINK(\"https://evil\")", tool: "Bash",
       summary: "export STRIPE_API_KEY=sk-live-abcdefghijklmnop1234", decision: "user-approved", source: "user",

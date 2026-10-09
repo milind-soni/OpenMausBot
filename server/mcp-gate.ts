@@ -22,6 +22,7 @@ import { createInterface } from "node:readline";
 import { allowsTool, parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
 import { resolveCliSpawn } from "./env-path.ts";
+import { directoryCallTarget, isDirectoryTool } from "./mcp-directory.ts";
 import { DEFAULT_RESULT_BUDGET, trimResultText, trimStructured } from "./mcp-trim.ts";
 import { killCliTree } from "./procs.ts";
 
@@ -44,7 +45,7 @@ function gateEnvironment(): NodeJS.ProcessEnv {
   }
 }
 /** The gate's own settings never reach the upstream server's environment. */
-const GATE_ENV_KEYS = ["OMB_GATE_NAME", "OMB_GATE_SPILL_DIR", "OMB_GATE_BUDGET", "OMB_GATE_UPSTREAM", "OMB_GATE_SPILL_HINT", "OMB_GATE_TOOL_SCOPE"];
+const GATE_ENV_KEYS = ["OMB_GATE_NAME", "OMB_GATE_SPILL_DIR", "OMB_GATE_BUDGET", "OMB_GATE_UPSTREAM", "OMB_GATE_SPILL_HINT", "OMB_GATE_TOOL_SCOPE", "OMB_GATE_DIRECTORY"];
 const gateEnv = gateEnvironment();
 const NAME = gateEnv.OMB_GATE_NAME || "mcp";
 const SPILL_DIR = gateEnv.OMB_GATE_SPILL_DIR || "";
@@ -57,6 +58,14 @@ const SPILL_MAX_AGE_MS = 24 * 60 * 60_000;
  * default: offering the path measured WORSE than no trimming, because the
  * model reads the file back in. See TrimInput.spillHint. */
 const SPILL_HINT = gateEnv.OMB_GATE_SPILL_HINT === "1";
+/** The upstream is the remote proxy with its tool directory on
+ * (mcp-directory.ts). Its search_tools and describe_tool only read a catalog
+ * the proxy has already narrowed to this selection, so they pass, untrimmed:
+ * the directory bounds them itself, and a schema cut short is no schema.
+ * call_tool is checked, and trimmed, as the tool it runs; one naming no tool
+ * runs nothing and is answered by the directory. The proxy guarantees those
+ * three names mean nothing else. */
+const DIRECTORY = gateEnv.OMB_GATE_DIRECTORY === "1";
 
 function fail(message: string): never {
   process.stderr.write(`mcp-gate(${NAME}): ${message}\n`);
@@ -232,7 +241,13 @@ child.on("error", (error) => {
 });
 child.stderr.pipe(process.stderr);
 
-type Pending = { kind: "call"; tool: string } | { kind: "list" | "other" };
+type Pending = { kind: "call"; tool: string; trim: boolean } | { kind: "list" | "other" };
+
+/** The upstream tool one call runs: its own name or call_tool's target, or
+ * undefined when the directory answers the call itself. */
+function callTarget(name: string, args: unknown): string | undefined {
+  return DIRECTORY ? directoryCallTarget(name, args) : name;
+}
 /** JSON-RPC string and numeric IDs are separate, even when their text is equal. */
 const pending = new Map<string, Pending>();
 
@@ -255,7 +270,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       || (params.arguments !== undefined && !isRecord(params.arguments))) {
       return rejectRequest(message.id, -32602, "Invalid tool call");
     }
-    if (!allowsTool(scope, { kind: "mcp", server: NAME, name: params.name })) {
+    const target = callTarget(params.name, params.arguments);
+    if (target !== undefined && !allowsTool(scope, { kind: "mcp", server: NAME, name: target })) {
       return rejectRequest(message.id, -32602, "Tool selection excludes this tool. Check the bot's Access settings.");
     }
   }
@@ -265,7 +281,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (id && typeof message?.method === "string") {
     if (scope && pending.has(id)) fail("duplicate request ID on a restricted connection");
     if (message.method === "tools/call") {
-      pending.set(id, { kind: "call", tool: typeof params?.name === "string" ? params.name : "tool" });
+      const name = typeof params?.name === "string" ? params.name : "tool";
+      const target = callTarget(name, params?.arguments);
+      pending.set(id, { kind: "call", tool: target ?? name, trim: target !== undefined });
     } else if (scope) {
       pending.set(id, { kind: message.method === "tools/list" ? "list" : "other" });
     }
@@ -302,9 +320,10 @@ createInterface({ input: child.stdout }).on("line", (line) => {
       || (result.nextCursor !== undefined && typeof result.nextCursor !== "string")) {
       return rejectRequest(message.id, -32603, "Invalid tool catalog on a restricted connection");
     }
-    result.tools = result.tools.filter((tool: Json) => allowsTool(scope, { kind: "mcp", server: NAME, name: tool.name as string }));
+    result.tools = result.tools.filter((tool: Json) => (DIRECTORY && isDirectoryTool(tool.name))
+      || allowsTool(scope, { kind: "mcp", server: NAME, name: tool.name as string }));
   }
-  if (request?.kind === "call" && isRecord(result)) {
+  if (request?.kind === "call" && request.trim && isRecord(result)) {
     try {
       if (trimCallResult(result, request.tool)) {
         process.stderr.write(`mcp-gate(${NAME}): trimmed ${request.tool} to ${BUDGET} chars\n`);

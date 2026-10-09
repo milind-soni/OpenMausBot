@@ -1,7 +1,7 @@
 import { Children, createElement, type EffectCallback, type ImgHTMLAttributes, type KeyboardEvent, type PointerEvent, type ReactElement, type RefObject } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { BrowserViewport, browserViewportPoint, createBrowserPressedInputs } from "./BrowserViewport";
+import { BrowserViewport, browserFrameSize, browserViewportPoint, createBrowserPressedInputs } from "./BrowserViewport";
 
 const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[] }));
 vi.mock("react", async (importOriginal) => {
@@ -14,7 +14,10 @@ const key = (eventType: string, value = "a", modifiers = 0) => ({
   ...(eventType === "keyDown" && value.length === 1 ? { text: value } : {}),
 });
 
-function viewport(driving = true, metadata?: { deviceWidth: number; deviceHeight: number }) {
+// A frame's pixels keep its page's aspect: a reported frame arrives here as a
+// 2x (HiDPI) image unless a test supplies the image size itself.
+function viewport(driving = true, metadata?: { deviceWidth: number; deviceHeight: number },
+  natural = metadata ? { width: metadata.deviceWidth * 2, height: metadata.deviceHeight * 2 } : { width: 1280, height: 720 }) {
   fixture.effects = [];
   const input = vi.fn();
   const onReturnToToolbar = vi.fn();
@@ -26,7 +29,7 @@ function viewport(driving = true, metadata?: { deviceWidth: number; deviceHeight
     return tree;
   }
   renderToStaticMarkup(createElement(Capture));
-  const screen = { complete: true, naturalWidth: 1280, naturalHeight: 720, currentSrc: image.props.src,
+  const screen = { complete: true, naturalWidth: natural.width, naturalHeight: natural.height, currentSrc: image.props.src,
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 1280, height: 720 }),
     addEventListener: vi.fn((_name: string, _listener: (event: WheelEvent) => void, _options: AddEventListenerOptions) => {}),
     removeEventListener: vi.fn(),
@@ -45,6 +48,21 @@ describe("browser frame coordinate mapping", () => {
     expect(browserViewportPoint(rect, 1280, 720, 1280, 720, 310, 25)).toBeNull();
     expect(browserViewportPoint({ ...rect, width: 0 }, 1280, 720, 1280, 720, 310, 320)).toBeNull();
     expect(browserViewportPoint(rect, 1280, 720, 1280, 720, 310, 25, true)).toEqual({ x: 640, y: 0 });
+  });
+  it("maps into the page the frame shows when metadata reports the window instead", () => {
+    // Headless Chrome: a 1280×577 page sent as 1280×577 frames, reported as 1280×720.
+    const pane = { left: 0, top: 0, width: 1280, height: 577 };
+    expect(browserFrameSize(1280, 577, 1280, 720)).toEqual({ width: 1280, height: 577 });
+    expect(browserViewportPoint(pane, 1280, 577, 1280, 720, 640, 288.5)).toEqual({ x: 640, y: 288.5 });
+    expect(browserViewportPoint(pane, 1280, 577, 1280, 720, 100, 576)).toEqual({ x: 100, y: 576 });
+    // The same page in a smaller pane, letterboxed, still lands on the page's own coordinates.
+    expect(browserViewportPoint({ left: 0, top: 0, width: 640, height: 640 }, 1280, 577, 1280, 720, 320, 320)).toEqual({ x: 640, y: 288.5 });
+  });
+  it("keeps the reported size for consistent, HiDPI and downscaled frames", () => {
+    expect(browserFrameSize(1280, 720, 1280, 720)).toEqual({ width: 1280, height: 720 });
+    expect(browserFrameSize(2560, 1440, 1280, 720)).toEqual({ width: 1280, height: 720 });
+    expect(browserFrameSize(640, 361, 1280, 720)).toEqual({ width: 1280, height: 720 });
+    expect(browserFrameSize(800, 1600, 400, 800)).toEqual({ width: 400, height: 800 });
   });
   it("maps a scaled screenshot to CSS pixels, including a tall image in a wide pane", () => {
     expect(browserViewportPoint({ left: 0, top: 0, width: 1200, height: 400 }, 800, 1600, 400, 800, 600, 200)).toEqual({ x: 200, y: 400 });
@@ -131,6 +149,34 @@ describe("browser viewport input forwarding", () => {
     expect(input).toHaveBeenCalledTimes(2);
   });
 
+  it("lets Tab move focus past the page until the person clicks or types in it", () => {
+    const { input, props, screen } = viewport();
+    const keyEvent = (key: string, code: string, keyCode: number, shiftKey = false) => ({ key, code, keyCode, altKey: false, ctrlKey: false,
+      metaKey: false, shiftKey, nativeEvent: { isComposing: false }, preventDefault: vi.fn(), stopPropagation: vi.fn() }) as unknown as KeyboardEvent<HTMLImageElement>;
+    const tab = keyEvent("Tab", "Tab", 9);
+    const shiftTab = keyEvent("Tab", "Tab", 9, true);
+    props.onKeyDown!(tab); props.onKeyUp!(tab);
+    // A lone Shift does not count as typing in the page, so Shift+Tab still moves on.
+    props.onKeyDown!(keyEvent("Shift", "ShiftLeft", 16, true)); props.onKeyDown!(shiftTab);
+    expect(tab.preventDefault).not.toHaveBeenCalled();
+    expect(shiftTab.preventDefault).not.toHaveBeenCalled();
+    expect(input.mock.calls.map(([body]) => body.key)).toEqual(["Shift"]);
+    props.onKeyDown!(keyEvent("a", "KeyA", 65));
+    const inPage = keyEvent("Tab", "Tab", 9);
+    props.onKeyDown!(inPage);
+    expect(inPage.preventDefault).toHaveBeenCalledOnce();
+    expect(input).toHaveBeenLastCalledWith(expect.objectContaining({ eventType: "keyDown", key: "Tab" }));
+    // Leaving the page resets it; a click in the page counts as using it again.
+    props.onBlur!({} as never);
+    input.mockClear();
+    props.onKeyDown!(tab);
+    expect(input).not.toHaveBeenCalled();
+    props.onPointerDown!({ button: 0, clientX: 20, clientY: 30, currentTarget: screen, preventDefault: vi.fn() } as unknown as PointerEvent<HTMLImageElement>);
+    props.onKeyDown!(tab);
+    expect(input).toHaveBeenLastCalledWith(expect.objectContaining({ eventType: "keyDown", key: "Tab" }));
+    expect(props["aria-description"]).toContain("until then Tab moves on");
+  });
+
   it("does not send keyboard or pointer input while just watching", () => {
     const { input, onReturnToToolbar, props } = viewport(false);
     const event = { key: "Escape", nativeEvent: { isComposing: false } } as KeyboardEvent<HTMLImageElement>;
@@ -163,6 +209,21 @@ describe("browser viewport wheel forwarding", () => {
       x: 400, y: 300, deltaX: expectedX, deltaY: expectedY, modifiers: 2 });
     cleanup?.();
     expect(screen.removeEventListener).toHaveBeenCalledExactlyOnceWith("wheel", listener);
+  });
+});
+
+describe("browser viewport input when metadata reports the window", () => {
+  it("clicks and scrolls by pages within the page the frame shows", () => {
+    const { input, props, screen, effects } = viewport(true, { deviceWidth: 1280, deviceHeight: 720 }, { width: 1280, height: 577 });
+    screen.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1280, height: 577 });
+    props.onPointerDown!({ button: 0, detail: 1, clientX: 200, clientY: 500, currentTarget: screen, preventDefault: vi.fn() } as unknown as PointerEvent<HTMLImageElement>);
+    expect(input).toHaveBeenLastCalledWith(expect.objectContaining({ eventType: "mousePressed", x: 200, y: 500 }));
+    const cleanup = effects[2]!();
+    const listener = screen.addEventListener.mock.calls[0]![1];
+    listener({ clientX: 640, clientY: 288, deltaMode: 2, deltaX: 0, deltaY: 1,
+      altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, preventDefault: vi.fn() } as unknown as WheelEvent);
+    expect(input).toHaveBeenLastCalledWith(expect.objectContaining({ eventType: "mouseWheel", x: 640, y: 288, deltaY: 577 }));
+    cleanup?.();
   });
 });
 

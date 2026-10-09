@@ -26,14 +26,14 @@ import { mergeTopicText } from "./memory-topics.ts";
 import { applyMoves, MAX_MOVES, organizeCandidates, organizePrompt, parseMoves } from "./memory-organize.ts";
 import { recordMemoryChange } from "./memory-journal.ts";
 import { applyTidy, contradictionCandidates, contradictionPrompt, parseContradictions, planChanges, planTidy, type Contradiction } from "./memory-tidy.ts";
-import { ensureWorkspace, listMemoryTopics, memoryDate, memoryEntry, memoryTopicIndex, readMemoryText, updateMemory, workspaceDir, writeMemoryFile, writeMemoryTopic } from "./workspace.ts";
+import { appendMemoryArchive, ARCHIVE_TOPIC, ensureWorkspace, listMemoryTopics, memoryDate, memoryEntry, memoryTopicIndex, readMemoryText, updateMemory, workspaceDir, writeMemoryFile, writeMemoryTopic } from "./workspace.ts";
 
 export const CAPTURE_MAX_TURNS = 6;
 export const MODEL_TIMEOUT_MS = 60_000;
 export const TIDY_CHECK_MS = 10 * 60_000;
 /** Below this many live entries there is nothing a contradiction pass may change. */
 export const MIN_ENTRIES_FOR_CONTRADICTIONS = 5;
-export const ARCHIVE_TOPIC = "archive.md";
+const ARCHIVE_PATH = `memory/${ARCHIVE_TOPIC}`;
 /** A topic file past this size gains nothing more from capture. */
 export const TOPIC_MAX_BYTES = 64 * 1024;
 
@@ -234,23 +234,24 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     // Re-read after the await: the bot or the person may have written since.
     // From here to the journal rows there is no await, so no write interleaves.
     if (!upkeepEnabled(deps.bot(bot.id))) return off;
-    const { parsed, added, topics, full } = writing(bot.id, () => {
+    const { parsed, added, topics } = writing(bot.id, () => {
       const before = readRaw(bot.id, "MEMORY.md");
+      const archiveBefore = readRaw(bot.id, ARCHIVE_PATH);
       const parsed = parseCandidates(answer, today);
       const fresh = newCandidates(parsed, before ?? "");
       const source = `${deps.sourceLabel(bot.id, batch.threadId)} (noticed)`;
       let added = 0;
-      let full = false;
       const byTopic = new Map<string, Candidate[]>();
       for (const candidate of fresh) {
         if (candidate.topic) {
           byTopic.set(candidate.topic, [...(byTopic.get(candidate.topic) ?? []), candidate]);
           continue;
         }
-        const result = updateMemory(bot.id, { action: "append", text: candidate.text, ...(candidate.until ? { until: candidate.until } : {}) }, { source, now: now() });
-        if (result.ok) added += 1;
-        else if (result.code === "over-budget") full = true;
+        if (updateMemory(bot.id, { action: "append", text: candidate.text, ...(candidate.until ? { until: candidate.until } : {}) }, { source, now: now() }).ok) added += 1;
       }
+      // Older entries the appends moved out are journaled first, as the
+      // tidy-up does, so undoing the newest row (MEMORY.md) brings them back.
+      recordMemoryChange(bot.id, { path: ARCHIVE_PATH, actor: "upkeep", via: "capture", threadId: batch.threadId, before: archiveBefore, after: readRaw(bot.id, ARCHIVE_PATH) });
       if (added) recordMemoryChange(bot.id, { path: "MEMORY.md", actor: "upkeep", via: "capture", threadId: batch.threadId, before, after: readRaw(bot.id, "MEMORY.md") });
       // Detail goes to a topic file the bot keeps for that subject, created
       // with a header (title and other words for it) the first time.
@@ -277,7 +278,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
         existing.set(name.toLowerCase(), name);
         topics += lines.length;
       }
-      return { parsed, added, topics, full };
+      return { parsed, added, topics };
     });
     // Only the owner's own words reach About me: on a shared workspace
     // another person's facts are not the owner's profile. Every parsed fact
@@ -288,7 +289,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     // whoever wrote MEMORY.md — the bot, the person or this capture — detail
     // that is not core moves to its topic now, not only at night
     const organized = await organize(bot.id);
-    const report: CaptureReport = { at, added, topics, aboutMe, organized, ...(full ? { note: "MEMORY.md is full; the tidy-up or a person needs to make room." } : {}) };
+    const report: CaptureReport = { at, added, topics, aboutMe, organized };
     record(bot.id, { lastCapture: report });
     if (added || topics || aboutMe) log(`memory upkeep: noticed ${added} fact(s) for MEMORY.md, ${topics} for topic files and ${aboutMe} for About me — ${bot.name} (${bot.id}) from ${batch.threadId}`);
     return report;
@@ -367,11 +368,9 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   }
 
   function appendArchive(botId: string, archived: readonly string[]): void {
-    const archivePath = `memory/${ARCHIVE_TOPIC}`;
-    const archiveBefore = readRaw(botId, archivePath);
-    const head = archiveBefore ?? "---\ntitle: Archive\ndescription: expired notes moved out by the tidy-up\n---\n";
-    writeMemoryTopic(botId, ARCHIVE_TOPIC, `${head}${head.endsWith("\n") ? "" : "\n"}${archived.join("\n")}\n`);
-    recordMemoryChange(botId, { path: archivePath, actor: "upkeep", via: "tidy", before: archiveBefore, after: readRaw(botId, archivePath) });
+    const archiveBefore = readRaw(botId, ARCHIVE_PATH);
+    appendMemoryArchive(botId, archived);
+    recordMemoryChange(botId, { path: ARCHIVE_PATH, actor: "upkeep", via: "tidy", before: archiveBefore, after: readRaw(botId, ARCHIVE_PATH) });
   }
 
   async function runTidy(botId: string): Promise<TidyReport> {

@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
-it("confirms alert and voice proposals, expires stale cards, and supersedes credential requests in an isolated conversation", async () => {
+it("applies the bot's own alert and voice changes at once, refuses a stale Undo, and supersedes credential requests in an isolated conversation", async () => {
   const gates = mkdtempSync(join(tmpdir(), "omb-profile-cards-"));
   const gate = join(gates, "finish");
   const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate });
@@ -38,16 +38,18 @@ it("confirms alert and voice proposals, expires stale cards, and supersedes cred
     const propose = (changes: unknown) => api("POST", "/api/internal/profile-requests", {
       fromBotId: bot.id, fromThreadId: bot.threadId, changes, reason: "Requested fixture preferences",
     }, 201, token);
-    const stale: Array<{ requestId: string }> = [];
-    for (let index = 0; index < 8; index++) stale.push(await propose({ title: `Stale title ${index}` }));
-    await api("PATCH", `/api/bots/${bot.id}`, { description: "Changed after review was prepared" });
+    // A bot's changes to itself apply at once: no card waits, and none uses
+    // up the eight-card quota.
+    const applied: Array<{ requestId: string; state: string }> = [];
+    for (let index = 0; index < 9; index++) applied.push(await propose({ title: `Applied title ${index}` }));
+    expect(applied.every((proposal) => proposal.state === "applied")).toBe(true);
+    await api("PATCH", `/api/bots/${bot.id}`, { description: "Changed after the bot's change" });
     writeFileSync(gate, "finish");
     await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).bots.find((candidate: any) => candidate.id === bot.id).busy,
       { timeout: 15_000 }).toBe(false);
-    const respond = (requestId: string, expected = 200) => api("POST", `/api/threads/${bot.threadId}/respond`, { requestId, behavior: "allow" }, expected);
-    for (const proposal of stale) await respond(proposal.requestId, 409);
-    await respond(stale[0]!.requestId, 409);
-    // Terminal cards must not block waits or permanently consume the eight-card quota.
+    // The profile moved since, so Undo refuses and changes nothing.
+    const undo = (requestId: string, expected = 200) => api("POST", `/api/threads/${bot.threadId}/undo`, { requestId }, expected);
+    expect(await undo(applied.at(-1)!.requestId, 409)).toMatchObject({ code: "changed-since" });
     expect((await control("wait", "--bot", bot.id, "--task", bot.threadId, "--timeout", "20")).status).toBe("settled");
     const previousPid = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).pid;
     unlinkSync(gate);
@@ -65,12 +67,18 @@ it("confirms alert and voice proposals, expires stale cards, and supersedes cred
     writeFileSync(gate, "finish");
     await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).bots.find((candidate: any) => candidate.id === bot.id).busy,
       { timeout: 15_000 }).toBe(false);
-    await respond(toggle.requestId);
+    expect(toggle.state).toBe("applied");
     const changed = (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id);
-    expect(changed).toMatchObject({ notifications: false, speakReplies: true, title: "" });
+    expect(changed).toMatchObject({ notifications: false, speakReplies: true, title: "Applied title 8" });
+    // Undo puts the two toggles back, and only those.
+    expect(await undo(toggle.requestId)).toMatchObject({ ok: true, undone: true });
+    expect((await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id))
+      .toMatchObject({ notifications: true, speakReplies: false, title: "Applied title 8" });
     const transcript = await api("GET", `/api/threads/${bot.threadId}/messages`);
-    expect(transcript.messages.find((message: any) => message.card?.requestId === stale[0]!.requestId)?.card)
-      .toMatchObject({ expired: true, options: [] });
+    expect(transcript.messages.find((message: any) => message.card?.requestId === applied[0]!.requestId)?.card)
+      .toMatchObject({ autoApplied: true, answered: "allow", options: [] });
+    expect(transcript.messages.find((message: any) => message.card?.requestId === toggle.requestId)?.card)
+      .toMatchObject({ autoApplied: true, undone: true });
     expect(transcript.messages.find((message: any) => message.id === prior.messageId)?.secret)
       .toMatchObject({ superseded: true });
     for (const action of ["provided", "resume", "dismiss"]) {

@@ -161,6 +161,25 @@ describe("channel tasks", () => {
       .toBe("completed");
   });
 
+  it("keeps a longer turn limit on one conversation and reloads it", async () => {
+    const { store, Store } = await freshStore();
+    const bot = store.createBot();
+    const channel = store.createGroup("Product", [bot.id]);
+    const original = channel.threadId;
+    const sibling = store.createGroupTask(channel.id)!;
+    expect(store.setGroupTaskTurnTimeout(channel.id, original, 30)?.turnTimeoutMinutes).toBe(30);
+    expect(store.groupTaskByThread(channel.id, sibling.threadId)?.turnTimeoutMinutes).toBeUndefined();
+    const dm = store.createGroup("DM", [bot.id], true);
+    expect(store.patchGroup(dm.id, { turnTimeoutMinutes: 30 })?.turnTimeoutMinutes).toBe(30);
+
+    const reloaded = new Store(() => ({ instanceId: "claude", model: "m" }));
+    expect(reloaded.groupTaskByThread(channel.id, original)?.turnTimeoutMinutes).toBe(30);
+    expect(reloaded.groupTaskByThread(channel.id, sibling.threadId)?.turnTimeoutMinutes).toBeUndefined();
+    expect(reloaded.group(dm.id)?.turnTimeoutMinutes).toBe(30);
+    expect(reloaded.setGroupTaskTurnTimeout(channel.id, original, null)?.turnTimeoutMinutes).toBeUndefined();
+    expect(reloaded.patchGroup(dm.id, { turnTimeoutMinutes: null })?.turnTimeoutMinutes).toBeUndefined();
+  });
+
   it("adopts a legacy channel thread without losing its folder or pin", async () => {
     const { store, Store } = await freshStore();
     const bot = store.createBot();

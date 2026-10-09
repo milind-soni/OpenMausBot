@@ -115,15 +115,6 @@ export function mergeSkills(bundled: readonly BundledSkill[], user: readonly Bun
   return [...byId.values()];
 }
 
-export function skillInstructionsFor(
-  text: string,
-  capabilities: Iterable<string>,
-  skills: readonly BundledSkill[],
-  options?: { includeRoot?: boolean },
-): string {
-  return renderSkillInstructions(selectBundledSkills(text, capabilities, skills), options);
-}
-
 export function selectBundledSkills(
   text: string,
   capabilities: Iterable<string>,
@@ -405,17 +396,4 @@ export function setLibrarySkillReviewState(
   writeSkillLibraryIndex(root, index);
   skillLibraryEvents.emit("invalidate", { kind: "review-state", name });
   return librarySkillListing(root, entry);
-}
-
-/** The lane's one resolution rule, stated once: a skill name means the
- * bot-private copy when one exists, else the library entry, else the
- * bundled skill. Later slices route every lookup through this order. */
-export function resolveSkillSourceOrder<P, L, B>(
-  name: string,
-  sources: { private?: P; library?: L; bundled?: B },
-): { source: "private" | "library" | "bundled"; name: string; value: P | L | B } | null {
-  if (sources.private !== undefined) return { source: "private", name, value: sources.private };
-  if (sources.library !== undefined) return { source: "library", name, value: sources.library };
-  if (sources.bundled !== undefined) return { source: "bundled", name, value: sources.bundled };
-  return null;
 }

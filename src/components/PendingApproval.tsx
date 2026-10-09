@@ -14,6 +14,7 @@ import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 import { toolLabel } from "./ApprovalCard";
+import { outboundSummary } from "@/lib/approval-summary";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
@@ -71,7 +72,7 @@ export function pendingApprovals(messages: Message[]): Pending[] {
  * 20,000 characters). Calls should announce the concise, visible title and
  * let the user review those details on screen instead of reading them all. */
 export function spokenApprovalPrompt(pending: Pending, requester: string): string {
-  if (pending.message.card?.teamSetupRequest) return `${requester}: ${pending.message.card.title} Review the details and choose ${pending.message.card.options[0]} or Cancel.`;
+  if (pending.message.card?.teamSetupRequest) return `${requester}: ${pending.message.card.title} Review the details and choose ${pending.message.card.options[0]} or ${pending.message.card.options[1] ?? "Cancel"}.`;
   const isRoutineRequest = isRoutineApproval(pending);
   const isSkillRequest = isSkillApproval(pending);
   const isProfileRequest = isProfileApproval(pending);
@@ -147,6 +148,8 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   locale?: string;
 }) {
   const heldNote = tFromServer(pending.heldCode, pending.held);
+  // A held outbound action names where it sends and what, not its slug.
+  const outbound = pending.message.card ? outboundSummary(pending.message.card) : undefined;
   return (
     <div
       role="region"
@@ -170,8 +173,10 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
             {t("approval.position", { index: index + 1, count })}
           </span>
         )}
-        <span className="text-[13px] text-ink">{label(pending)}</span>
-        {!pending.message.card?.teamSetupRequest && <span className="font-mono text-[11px] text-ink-secondary">
+        <span className="text-[13px] text-ink">{outbound ? outbound.headline : label(pending)}</span>
+        {outbound ? (
+          outbound.summary && <span className="text-[13px] text-ink-secondary">{outbound.summary}</span>
+        ) : !pending.message.card?.teamSetupRequest && <span className="font-mono text-[11px] text-ink-secondary">
           {isSkillApproval(pending)
             ? pending.message.card?.skillRequest?.action === "update" ? "update_skill" : "stage_skill"
             : isRoutineApproval(pending)
@@ -225,6 +230,7 @@ export function PendingApprovalActions({
   const isSkillRequest = isSkillApproval(pending);
   const isProfileRequest = isProfileApproval(pending);
   const isTeamSetup = Boolean(pending.message.card?.teamSetupRequest);
+  const isSuggestion = Boolean(pending.message.card?.teamSetupRequest?.suggestion);
   const durableRequest = isRoutineRequest || isSkillRequest || isProfileRequest || isTeamSetup;
   const canRememberCommand = ownerOrAdmin === true && !durableRequest && !pending.allowKey && Boolean(pending.commandAllowlist);
   const reviewedSha256 = pending.message.card?.skillRequest
@@ -258,7 +264,7 @@ export function PendingApprovalActions({
         autoFocus={isTeamSetup}
         className={cn(base, "border border-danger/40 text-danger hover:bg-danger/10")}
       >
-        {isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny")}
+        {isSuggestion ? t("approval.action.notNow") : isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny")}
       </button>
       {!durableRequest && bot && pending.allowKey && (
         <button

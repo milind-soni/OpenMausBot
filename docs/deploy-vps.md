@@ -157,7 +157,7 @@ the service account's browser. Both commands must finish successfully.
 On Ubuntu 24.04, AppArmor may also require [administrator sandbox setup](#ubuntu-2404-browser-sandbox).
 The one-click installer downloads the browser; it does not grant these OS permissions.
 
-Then turn the browser on under Settings → Experimental, and per bot. Each bot
+Then turn the browser on under Settings → Computers, and per bot. Each bot
 gets its own isolated session whose logins persist across restarts.
 
 ## Install and sign the engines in

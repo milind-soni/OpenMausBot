@@ -35,6 +35,7 @@ import {
   MdnsResponder,
   type ServiceInfo,
 } from "./mdns.ts";
+import { notifyDeviceRevoked } from "./harness-notice.ts";
 import { createProxyHandler } from "./proxy.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
 import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
@@ -188,6 +189,14 @@ const control = createControlServer({
   disconnectDevice: (deviceId) => {
     connectedDevices.disconnect(deviceId);
     proxy.disconnectDevice(deviceId);
+  },
+  // The harness hears a phone as this computer, so only we can tell it the
+  // phone lost its access: a Live call that phone holds ends now, not at its
+  // idle hang-up. Under the desktop app the notice needs the relay token; a
+  // sidecar still waiting for it has no call to protect yet either.
+  revoked: (deviceId) => {
+    if (parentPort && !mutationToken) return;
+    void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
   },
   refreshTailscale: () => refreshTailnetName(),
 });

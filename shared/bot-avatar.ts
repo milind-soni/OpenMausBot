@@ -9,6 +9,13 @@ export const BOT_AVATAR_CROPS = ["mascot", "circle", "rounded", "square"] as con
 export const botAvatarCropSchema = z.enum(BOT_AVATAR_CROPS);
 export type BotAvatarCrop = z.infer<typeof botAvatarCropSchema>;
 
+/** CSS radius for a profile crop. Mascot is drawn, not photo-cropped, so it is not clipped. */
+export function avatarCropRadius(crop: BotAvatarCrop): string {
+  if (crop === "circle") return "50%";
+  if (crop === "rounded") return "22%";
+  return "0";
+}
+
 /** 1 shows the picture with object-fit cover. Larger values zoom in. */
 export const AVATAR_ZOOM_MIN = 1;
 export const AVATAR_ZOOM_MAX = 3;

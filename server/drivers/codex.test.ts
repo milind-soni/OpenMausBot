@@ -5,6 +5,7 @@
 //
 // The fake is a shebang script — the same constraint codex.cmd itself
 // hits on Windows. resolveCliSpawn covers both, so these run everywhere.
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
@@ -19,13 +20,17 @@ import { DATA_DIR, NATIVE_DIR } from "../config.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import {
+  CODEX_SIGN_IN_EXPIRED,
   CodexDriver,
   codexNativeIncomingLogMessage,
+  codexSignInRefused,
   codexUpdateCommand,
   codexUserError,
 } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
+import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import * as procs from "../procs.ts";
+import { autoVerdict } from "../auto-approve.ts";
 
 vi.mock("./codex-release.ts", async (importOriginal) => ({
   ...await importOriginal<typeof import("./codex-release.ts")>(),
@@ -97,6 +102,34 @@ describe("Codex native diagnostic sanitization", () => {
   });
 });
 
+// The fake must report what codex-cli 0.160.1's config/read does, or a test
+// pins a policy the driver never meets.
+describe("fake app-server shell policy", () => {
+  const readPolicy = async (args: string[], policy: unknown) => {
+    const child = spawn(process.execPath, [FAKE_CLI, "app-server", ...args], {
+      env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("FAKE_CODEX_"))), FAKE_CODEX_SHELL_ENVIRONMENT_POLICY: JSON.stringify(policy) },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    try {
+      const lines = createInterface({ input: child.stdout });
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "config/read", params: { includeLayers: false } })}\n`);
+      for await (const line of lines) {
+        const frame = JSON.parse(line);
+        if (frame.id === 1) return frame.result.config.shell_environment_policy;
+      }
+    } finally {
+      child.kill();
+    }
+  };
+
+  it("lets a `-c exclude` override drop the lower layers' filters but keep their include_only", async () => {
+    const policy = await readPolicy(["-c", 'shell_environment_policy.exclude=["OPENMAUSBOT_CHATGPT_TOKEN"]'],
+      { filters: { "USER_SECRET_*": "exclude" }, include_only: ["PATH", "HOME"] });
+    expect(policy).toMatchObject({ exclude: ["OPENMAUSBOT_CHATGPT_TOKEN"], filters: null, include_only: ["PATH", "HOME"] });
+    expect(await readPolicy([], { filters: { "USER_SECRET_*": "exclude" } })).toMatchObject({ exclude: null, filters: { "USER_SECRET_*": "exclude" } });
+  });
+});
+
 describe("CodexDriver turns (fake app-server)", () => {
   let instance: ProviderInstance;
   let recorder: EventRecorder;
@@ -123,6 +156,9 @@ describe("CodexDriver turns (fake app-server)", () => {
     });
     recorder = recordEvents(instance.adapter);
   };
+
+  /** A remote-proxy mount's private record (mcp-gate-config.ts). */
+  const record = (mount: string) => `OMB_REMOTE_MCP_CONFIG_${createHash("sha256").update(mount).digest("hex")}`;
 
   beforeEach(() => {
     chmodSync(FAKE_CLI, 0o755);
@@ -184,10 +220,54 @@ describe("CodexDriver turns (fake app-server)", () => {
       const seen = JSON.parse(readFileSync(dump, "utf8"));
       expect(seen.argv).toContain("features.shell_snapshot=false");
       const thread = seen.calls.find((call: { method: string }) => call.method === (resumeCursor ? "thread/resume" : "thread/start"));
-      expect(thread.params.config["shell_environment_policy.exclude"]).toEqual([...policy.exclude, "OMB_GATE_CONFIG_*"]);
+      // the gate record, and the switch the gate's mount sets, stay out of the shell
+      expect(thread.params.config["shell_environment_policy.exclude"]).toEqual([...policy.exclude, "OMB_GATE_CONFIG_*", "ELECTRON_RUN_AS_NODE"]);
       expect(thread.params.config).not.toHaveProperty("shell_environment_policy");
       expect(Object.keys(seen.env).some(name => name.startsWith("OMB_GATE_CONFIG_"))).toBe(true);
       expect(JSON.stringify({ argv: seen.argv, calls: seen.calls })).not.toContain("synthetic-fixture-credential");
+    }
+  });
+
+  // codex-cli 0.160 reports every unset policy field as null, even with an
+  // empty config.toml; the fake's default mirrors that shape.
+  it("runs scoped turns when Codex reports every shell policy field as null", async () => {
+    const dump = join(scratch, "null-shell-policy.json"); process.env.FAKE_CODEX_DUMP = dump;
+    await create({ mode: "resume", environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_OVERRIDES: "1" } });
+    for (const resumeCursor of [undefined, "old-session"]) {
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "null-shell-policy", text: "Fixture", resumeCursor,
+        toolScope: { allow: ["native:*", "mcp:notes:read"] },
+        integrations: { custom: { notes: { type: "http", url: "https://example.test/notes", headers: {} } } },
+      });
+      const completed = await recorder.until(event => event.type === "turn.completed" && event.turnId === turnId);
+      expect(recorder.events.filter(event => event.type === "runtime.error")).toEqual([]);
+      expect(completed).toMatchObject({ ok: true });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      const config = seen.calls.find((call: { method: string }) => call.method === (resumeCursor ? "thread/resume" : "thread/start")).params.config;
+      expect(config["shell_environment_policy.exclude"]).toEqual(["OMB_GATE_CONFIG_*", "ELECTRON_RUN_AS_NODE"]);
+      expect(Object.keys(config).filter(key => key.startsWith("shell_environment_policy"))).toEqual(["shell_environment_policy.exclude"]);
+    }
+  });
+
+  // A higher layer that writes the legacy `exclude` list drops the person's
+  // `filters` table (codex-cli 0.160), so their own rules are extended in kind.
+  it("keeps a person's shell filters and adds the gate pattern as an exclude filter", async () => {
+    const dump = join(scratch, "shell-filters.json"); process.env.FAKE_CODEX_DUMP = dump;
+    const policy = { inherit: "all", filters: { "USER_SECRET_*": "exclude", "KEEP_*": "include", "omb_gate_config_*": "include" } };
+    await create({ mode: "resume", environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"),
+      FAKE_CODEX_MCP_OVERRIDES: "1", FAKE_CODEX_SHELL_ENVIRONMENT_POLICY: JSON.stringify(policy) } });
+    for (const resumeCursor of [undefined, "old-session"]) {
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "shell-filters", text: "Fixture", resumeCursor,
+        toolScope: { allow: ["native:*", "mcp:notes:read"] },
+        integrations: { custom: { notes: { type: "http", url: "https://example.test/notes", headers: {} } } },
+      });
+      const completed = await recorder.until(event => event.type === "turn.completed" && event.turnId === turnId);
+      expect(completed).toMatchObject({ ok: true });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      const config = seen.calls.find((call: { method: string }) => call.method === (resumeCursor ? "thread/resume" : "thread/start")).params.config;
+      // Codex matches (and rejects duplicate) filter patterns ignoring case:
+      // the gate pattern replaces a case variant rather than sitting beside it.
+      expect(config["shell_environment_policy.filters"]).toEqual({ "USER_SECRET_*": "exclude", "KEEP_*": "include", "OMB_GATE_CONFIG_*": "exclude", ELECTRON_RUN_AS_NODE: "exclude" });
+      expect(Object.keys(config).filter(key => key.startsWith("shell_environment_policy"))).toEqual(["shell_environment_policy.filters"]);
     }
   });
 
@@ -206,7 +286,12 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(seen.calls.some((call: { method: string }) => call.method === "turn/start")).toBe(false);
   });
 
-  it.each([null, false, [], { exclude: null }, { exclude: ["SAFE_*", 42] }])("refuses a scoped prompt with a malformed shell policy %j", async (policy) => {
+  it.each([null, false, [], { exclude: "SAFE_*" }, { exclude: ["SAFE_*", 42] }, { filters: [] }, { filters: "SAFE_*" },
+    { filters: { "SAFE_*": "keep" } }, { filters: { "SAFE_*": null } },
+    // Codex refuses a layer that mixes the representations; a policy that
+    // reports both could not be extended without dropping one of them.
+    { exclude: ["SAFE_*"], filters: { "OTHER_*": "exclude" } }, { include_only: ["PATH"], filters: { "OTHER_*": "exclude" } },
+  ])("refuses a scoped prompt with a malformed shell policy %j", async (policy) => {
     const dump = join(scratch, "invalid-shell-policy.json"); process.env.FAKE_CODEX_DUMP = dump;
     await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"),
       FAKE_CODEX_MCP_OVERRIDES: "1", FAKE_CODEX_SHELL_ENVIRONMENT_POLICY: JSON.stringify(policy) } });
@@ -292,6 +377,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     delete process.env.FAKE_CODEX_RESUME_ERROR;
     delete process.env.FAKE_CODEX_START_ERROR;
     delete process.env.FAKE_CODEX_RESOLVED_SANDBOX;
+    delete process.env.FAKE_CODEX_MCP_START;
+    delete process.env.FAKE_CODEX_MCP_HANDSHAKE;
     delete process.env.FAKE_CODEX_STEER_ERROR;
     delete process.env.FAKE_CODEX_STEER_ERROR_FILE;
     delete process.env.FAKE_CODEX_STEER_HANG;
@@ -1060,37 +1147,360 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(argv).toContain("mcp_servers.notes.command");
   });
 
-  it("mounts a url server for codex to connect to, header values off argv", async () => {
+  it("reaches a url server through OpenMausBot's connector on Codex's own login, header values off argv", async () => {
     await create();
     const dump = join(scratch, "remote-mcp.json");
     process.env.FAKE_CODEX_DUMP = dump;
+    const docs = { type: "http" as const, url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs", "X-Org": "acme" } };
+    const legacy = { type: "sse" as const, url: "https://old.example/sse", headers: {} };
 
-    await instance.adapter.sendTurn({
-      threadId: "t-remote-mcp",
-      text: "go",
-      integrations: {
-        custom: {
-          docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs", "X-Org": "acme" } },
-          // codex has no SSE transport; the entry stays with Claude bots
-          legacy: { type: "sse", url: "https://old.example/sse", headers: {} },
-        },
-      },
-    });
+    await instance.adapter.sendTurn({ threadId: "t-remote-mcp", text: "go", integrations: { custom: { docs, legacy } } });
     await recorder.until((event) => event.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     const argv = seen.argv.join(" ");
-    expect(seen.argv).toContain('mcp_servers.docs.url="https://docs.example/mcp"');
-    // header values are credentials: the child env holds them under
-    // harness names, argv names only the variables — the bearer token via
-    // codex's own bearer setting, other headers via env_http_headers
-    expect(seen.argv).toContain('mcp_servers.docs.bearer_token_env_var="OMB_MCP_HEADER_DOCS_BEARER"');
-    expect(seen.argv).toContain('mcp_servers.docs.env_http_headers={ "X-Org" = "OMB_MCP_HEADER_DOCS_1" }');
+    // Codex never connects by itself: its own handshake is refused by strict
+    // servers (mcp-strict-handshake.test.ts), the proxy's is not
+    expect(argv).not.toContain("mcp_servers.docs.url");
+    expect(argv).not.toContain("bearer_token_env_var");
+    expect(argv).not.toContain("env_http_headers");
+    expect(argv).toContain("mcp-remote-proxy");
+    // the address and header values live in the mount's private record
     expect(argv).not.toContain("tok-docs");
-    expect(seen.env.OMB_MCP_HEADER_DOCS_BEARER).toBe("tok-docs");
-    expect(seen.env.OMB_MCP_HEADER_DOCS_1).toBe("acme");
+    expect(argv).not.toContain("docs.example");
+    const settings = JSON.parse(seen.env[record("docs")]);
+    expect(JSON.parse(settings.OMB_REMOTE_MCP_SERVER)).toEqual(docs);
+    // Codex on its own login searches tools itself: the catalog passes through
+    expect(settings.OMB_REMOTE_MCP_DIRECTORY).toBeUndefined();
+    expect(Object.keys(seen.env).filter((name) => name.startsWith("OMB_MCP_HEADER_"))).toEqual([]);
+    // the proxy speaks SSE, so Codex reaches that server too
+    expect(JSON.parse(seen.env[record("legacy")]).OMB_REMOTE_MCP_SERVER).toBe(JSON.stringify(legacy));
     // a user server keeps codex's on-request approval policy
     expect(argv).not.toContain("mcp_servers.docs.default_tools_approval_mode");
-    expect(argv).not.toContain("mcp_servers.legacy");
+    // the record sits in Codex's environment, so its shell must not see it
+    expect(seen.argv).toContain("features.shell_snapshot=false");
+    const thread = seen.calls.find((call: { method: string }) => call.method === "thread/start");
+    expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(["OMB_REMOTE_MCP_CONFIG_*", "ELECTRON_RUN_AS_NODE"]);
+  });
+
+  // A server that deserializes initialize strictly refuses the field
+  // Codex's own client can add (a Voluum server: "Unrecognized field
+  // 'schemaValidation'"), and Codex then runs the thread without its tools.
+  // The fake starts each mount as codex-cli 0.160.1 does and sends that
+  // handshake: only OpenMausBot's connector gets through.
+  describe("a strict URL server", () => {
+    const STRICT_TOOLS = [{ name: "report", inputSchema: { type: "object" } }, { name: "campaigns", inputSchema: { type: "object" } }];
+    const SCHEMA_VALIDATION = { protocolVersion: "2025-06-18", capabilities: { elicitation: { form: { schemaValidation: true }, url: {} } }, clientInfo: { name: "codex-mcp-client", title: "Codex", version: "0.160.1" } };
+    let strict: FakeHttpMcp | undefined;
+    afterEach(async () => { await strict?.close(); strict = undefined; });
+
+    it.each([
+      ["its own login", {}, undefined],
+      ["a Company model", { managed: true }, "company-codex-model"],
+    ] as const)("starts with its tools on %s", async (_name, opts, model) => {
+      strict = await startFakeHttpMcp({ strictInitialize: "http-400", strictSchema: "2025-11-25", tools: STRICT_TOOLS, requireHeader: { name: "Authorization", value: "Bearer tok-voluum" } });
+      process.env.FAKE_CODEX_MCP_START = "1";
+      process.env.FAKE_CODEX_MCP_HANDSHAKE = JSON.stringify(SCHEMA_VALIDATION);
+      await create(opts);
+      const dump = join(scratch, "strict-mcp.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      const voluum = { type: "http" as const, url: strict.url, headers: { Authorization: "Bearer tok-voluum" } };
+      await instance.adapter.sendTurn({ threadId: "t-strict-mcp", text: "go", model, integrations: { custom: { voluum } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.mcpStartup.voluum).toEqual({ status: "ready", tools: ["report", "campaigns"] });
+      // upstream saw only the minimal handshake, never Codex's own
+      expect(strict.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot tool proxy", version: "1" } }]);
+      expect(seen.argv.join(" ")).not.toContain("tok-voluum");
+    });
+
+    // withMcpSignIn gives every turn a fresh bearer token; Codex starts a
+    // new app-server, and so a new connector, for each turn
+    it("connects each turn with that turn's sign-in token", async () => {
+      let current = "tok-first";
+      strict = await startFakeHttpMcp({ strictInitialize: "http-400", tools: STRICT_TOOLS, acceptBearer: (authorization) => authorization === `Bearer ${current}` });
+      process.env.FAKE_CODEX_MCP_START = "1";
+      await create();
+      const dump = join(scratch, "strict-token.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      for (const token of ["tok-first", "tok-refreshed"]) {
+        current = token;
+        const { turnId } = await instance.adapter.sendTurn({ threadId: "t-strict-token", text: "go", integrations: { custom: {
+          voluum: { type: "http", url: strict.url, headers: { Authorization: `Bearer ${token}` } },
+        } } });
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+        expect(JSON.parse(readFileSync(dump, "utf8")).mcpStartup.voluum).toEqual({ status: "ready", tools: ["report", "campaigns"] });
+      }
+      expect(strict.seenHeaders.at(-1)?.authorization).toBe("Bearer tok-refreshed");
+    });
+
+    it("keeps a tool selection's gate in front of the connector", async () => {
+      strict = await startFakeHttpMcp({ strictInitialize: "http-400", strictSchema: "2025-11-25", tools: STRICT_TOOLS });
+      process.env.FAKE_CODEX_MCP_START = "1";
+      process.env.FAKE_CODEX_MCP_HANDSHAKE = JSON.stringify(SCHEMA_VALIDATION);
+      await create({ environment: { FAKE_CODEX_MCP_OVERRIDES: "1" } });
+      const dump = join(scratch, "strict-scoped.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      const toolScope = { allow: ["native:*", "mcp:voluum:report"] };
+      await instance.adapter.sendTurn({ threadId: "t-strict-scoped", text: "go", toolScope, integrations: { custom: { voluum: { type: "http", url: strict.url, headers: {} } } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.mcpStartup.voluum).toEqual({ status: "ready", tools: ["report"] });
+      expect(strict.initializes).toEqual([{ protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot tool proxy", version: "1" } }]);
+    });
+  });
+
+  it("keeps URL servers' connector records out of the shell, preserving the person's own exclusions", async () => {
+    const dump = join(scratch, "header-shell.json"); process.env.FAKE_CODEX_DUMP = dump;
+    const policy = { inherit: "all", exclude: ["USER_SECRET_*"] };
+    await create({ mode: "resume", environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_SHELL_ENVIRONMENT_POLICY: JSON.stringify(policy) } });
+    const docs = { type: "http" as const, url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } };
+    for (const resumeCursor of [undefined, "old-session"]) {
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "header-shell", text: "go", resumeCursor, integrations: { custom: { docs } } });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      const thread = seen.calls.find((call: { method: string }) => call.method === (resumeCursor ? "thread/resume" : "thread/start"));
+      expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(["USER_SECRET_*", "OMB_REMOTE_MCP_CONFIG_*", "ELECTRON_RUN_AS_NODE"]);
+    }
+    // a turn without such values leaves the person's policy alone
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "no-header-shell", text: "go" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.calls.find((call: { method: string }) => call.method === "thread/start").params.config).toBeUndefined();
+    expect(seen.argv).not.toContain("features.shell_snapshot=false");
+  });
+
+  it("keeps every variable an MCP mount writes out of the shell, and only those", async () => {
+    const dump = join(scratch, "mount-env-shell.json"); process.env.FAKE_CODEX_DUMP = dump;
+    const policy = { exclude: ["USER_SECRET_*"] };
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_SHELL_ENVIRONMENT_POLICY: JSON.stringify(policy),
+      // already here before any mount: one passed along unchanged, one a mount overrides
+      SHARED_SETTING: "same", OVERRIDDEN: "person", ELECTRON_RUN_AS_NODE: "1" } });
+    await instance.adapter.sendTurn({ threadId: "mount-env-shell", text: "go", integrations: {
+      agents: { command: process.execPath, args: ["/tmp/agents-proxy.js"], env: { ELECTRON_RUN_AS_NODE: "1", OMB_COMMS_TOKEN: "agents-capability" } },
+      composio: { command: process.execPath, args: ["/tmp/connector-proxy.js"], env: { OMB_CONNECTORS_TOKEN: "connector-capability" } },
+      phone: { command: process.execPath, args: ["/tmp/phone-proxy.js"], env: { OMB_PHONE_TOKEN: "phone-capability" } },
+      custom: {
+        // TZ is a variable no shell should lose, whoever set it
+        notes: { command: "npx", args: ["-y", "@x/notes-mcp"], env: { GITHUB_PERSONAL_ACCESS_TOKEN: "ghp-synthetic", SHARED_SETTING: "same", OVERRIDDEN: "server", TZ: "UTC" } },
+        docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } },
+      },
+    } });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain("features.shell_snapshot=false");
+    expect(seen.calls.find((call: { method: string }) => call.method === "thread/start").params.config["shell_environment_policy.exclude"]).toEqual([
+      "USER_SECRET_*", "OMB_REMOTE_MCP_CONFIG_*",
+      "ELECTRON_RUN_AS_NODE", "GITHUB_PERSONAL_ACCESS_TOKEN", "OMB_COMMS_TOKEN", "OMB_CONNECTORS_TOKEN", "OMB_PHONE_TOKEN", "OVERRIDDEN",
+    ]);
+  });
+
+  it("keeps working with a Codex that cannot say whether snapshots are off, connector records still excluded", async () => {
+    const dump = join(scratch, "header-old-codex.json"); process.env.FAKE_CODEX_DUMP = dump;
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_IGNORE_FEATURES: "1" } });
+    await instance.adapter.sendTurn({ threadId: "header-old-codex", text: "go", integrations: { custom: {
+      docs: { type: "http", url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } },
+    } } });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    const thread = JSON.parse(readFileSync(dump, "utf8")).calls.find((call: { method: string }) => call.method === "thread/start");
+    expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(["OMB_REMOTE_MCP_CONFIG_*", "ELECTRON_RUN_AS_NODE"]);
+  });
+
+  it("reads an MCP tool's name to the closing quote, so a lookalike is not auto-approved as web search", async () => {
+    process.env.FAKE_CODEX_APPROVAL_REQUEST = JSON.stringify({ method: "mcpServer/elicitation/request", params: {
+      serverName: "lookalike", mode: "form", message: 'Allow the lookalike MCP server to run tool "web_search" and then delete_everything"?',
+      _meta: { codex_approval_kind: "mcp_tool_call", tool_params: {} }, requestedSchema: { type: "object", properties: {} },
+    } });
+    await create({ mode: "approval" });
+    await instance.adapter.sendTurn({ threadId: "t-lookalike", text: "go", approvalMode: "auto" });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    if (opened.type !== "request.opened") throw new Error("expected a permission card");
+    expect(opened.tool).toBe('web_search" and then delete_everything');
+    expect(autoVerdict("auto", opened.tool).approve).toBeNull();
+    expect(autoVerdict("auto", "web_search").approve).not.toBeNull();
+    await instance.adapter.respondToRequest("t-lookalike", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+  });
+
+  describe("on a ChatGPT plan, which has no tool_search", () => {
+    const whop = { type: "http" as const, url: "https://mcp.example.test/mcp", headers: { Authorization: "Bearer tok-whop" } };
+    const plan = () => {
+      vi.spyOn(ChatGptPlanAuthController.prototype, "accessToken").mockResolvedValue("synthetic-plan-token");
+      vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
+    };
+
+    it("searches each URL server through the remote proxy, its settings kept from the shell", async () => {
+      plan();
+      await create({ authMode: "chatgpt-plan" });
+      const dump = join(scratch, "plan-directory.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId: "t-plan-directory", text: "go", model: "gpt-6.1-sol", integrations: { custom: {
+        whop, legacy: { type: "sse", url: "https://old.example/sse", headers: {} }, notes: { command: "npx", args: ["-y", "@x/notes-mcp"], env: {} },
+      } } });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(recorder.events.at(-1)).toMatchObject({ ok: true });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      const argv = seen.argv.join(" ");
+      const envVars = (mount: string) => JSON.parse(seen.argv.find((arg: string) => arg.startsWith(`mcp_servers.${mount}.env_vars=`)).split("=").slice(1).join("="));
+      expect(envVars("whop")).toEqual(expect.arrayContaining(["ELECTRON_RUN_AS_NODE", record("whop")]));
+      expect(argv).toContain("mcp-remote-proxy");
+      expect(argv).not.toContain("mcp_servers.whop.url");
+      expect(argv).not.toContain("tok-whop");
+      const settings = JSON.parse(seen.env[record("whop")]);
+      expect(JSON.parse(settings.OMB_REMOTE_MCP_SERVER)).toEqual(whop);
+      expect(JSON.parse(settings.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop" });
+      // the proxy speaks SSE, so a plan turn reaches that server too
+      expect(envVars("legacy")).toEqual(expect.arrayContaining(["ELECTRON_RUN_AS_NODE", record("legacy")]));
+      // a command server is mounted as before
+      expect(seen.argv).toContain('mcp_servers.notes.command="npx"');
+      // the proxies' records are kept from the shell, next to the plan token
+      expect(seen.argv).toContain("features.shell_snapshot=false");
+      const thread = seen.calls.find((call: { method: string }) => call.method === "thread/start");
+      expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(["OPENMAUSBOT_CHATGPT_TOKEN", "OMB_REMOTE_MCP_CONFIG_*", "ELECTRON_RUN_AS_NODE"]);
+      // still the person's own server: its tool calls keep asking
+      expect(argv).not.toContain("mcp_servers.whop.default_tools_approval_mode");
+    });
+
+    it("passes the person's proxy settings to the proxy, which Codex would otherwise drop", async () => {
+      plan();
+      await create({ authMode: "chatgpt-plan", environment: { HTTPS_PROXY: "http://proxy.example.test:3128", NODE_EXTRA_CA_CERTS: "/etc/corp-ca.pem" } });
+      const dump = join(scratch, "plan-proxy-env.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      const plain = { ...whop, url: "http://plain.example.test/mcp" };
+      await instance.adapter.sendTurn({ threadId: "t-plan-proxy-env", text: "go", model: "gpt-6.1-sol", integrations: { custom: { whop, plain } } });
+      await recorder.until((event) => event.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      const envVars = JSON.parse(seen.argv.find((arg: string) => arg.startsWith("mcp_servers.whop.env_vars=")).split("=").slice(1).join("="));
+      expect(envVars).toEqual(expect.arrayContaining(["HTTPS_PROXY", "NODE_EXTRA_CA_CERTS"]));
+      // the proxy's own switches ride its env table, never the shell's environment
+      expect(envVars).not.toContain("NODE_USE_ENV_PROXY");
+      expect(seen.argv).toContain('mcp_servers.whop.env={ "NODE_USE_ENV_PROXY" = "1", "NO_PROXY" = "localhost,127.0.0.1,::1,[::1]", "no_proxy" = "localhost,127.0.0.1,::1,[::1]" }');
+      expect(seen.env.NODE_USE_ENV_PROXY).toBeUndefined();
+      // an http:// server is reached directly, the switch explicitly off:
+      // Node 24's fetch hangs on a plain http request through an env proxy
+      // (mcp-gate-config.ts)
+      expect(seen.argv).toContain('mcp_servers.plain.env={ "NODE_USE_ENV_PROXY" = "0" }');
+      expect(JSON.parse(seen.argv.find((arg: string) => arg.startsWith("mcp_servers.plain.env_vars=")).split("=").slice(1).join("="))).not.toContain("NODE_USE_ENV_PROXY");
+      // the person's own settings reach both, unchanged, and are not excluded
+      expect(seen.env.HTTPS_PROXY).toBe("http://proxy.example.test:3128");
+      const exclusions = seen.calls.find((call: { method: string }) => call.method === "thread/start").params.config["shell_environment_policy.exclude"];
+      expect(exclusions).not.toContain("HTTPS_PROXY");
+      expect(exclusions).not.toContain("NODE_EXTRA_CA_CERTS");
+    });
+
+    // A `-c shell_environment_policy.exclude` would replace the lower
+    // layers' list and drop their filters (codex-cli 0.160.1); the token is
+    // added to the policy in the person's own representation instead, on
+    // every plan turn, with or without mounts.
+    it.each([
+      ["list", { exclude: ["USER_SECRET_*"] }, "shell_environment_policy.exclude", ["USER_SECRET_*", "OPENMAUSBOT_CHATGPT_TOKEN"]],
+      ["filters", { filters: { "USER_SECRET_*": "exclude" } }, "shell_environment_policy.filters", { "USER_SECRET_*": "exclude", OPENMAUSBOT_CHATGPT_TOKEN: "exclude" }],
+    ] as const)("keeps the person's own shell %s and adds the plan token to it", async (_name, policy, key, expected) => {
+      plan();
+      await create({ mode: "resume", authMode: "chatgpt-plan", environment: { FAKE_CODEX_SHELL_ENVIRONMENT_POLICY: JSON.stringify(policy) } });
+      const dump = join(scratch, "plan-own-policy.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      for (const resumeCursor of [undefined, "old-session"]) {
+        const { turnId } = await instance.adapter.sendTurn({ threadId: "t-plan-own-policy", text: "go", model: "gpt-6.1-sol", resumeCursor });
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+        const seen = JSON.parse(readFileSync(dump, "utf8"));
+        const thread = seen.calls.find((call: { method: string }) => call.method === (resumeCursor ? "thread/resume" : "thread/start"));
+        expect(thread.params.config).toEqual({ [key]: expected });
+      }
+    });
+
+    it("refuses the turn when Codex's shell exclusions cannot be confirmed", async () => {
+      plan();
+      await create({ authMode: "chatgpt-plan", environment: { FAKE_CODEX_SHELL_ENVIRONMENT_POLICY: JSON.stringify({ filters: { "OMB_*": "maybe" } }) } });
+      const dump = join(scratch, "plan-bad-policy.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId: "t-plan-policy", text: "go", model: "gpt-6.1-sol", integrations: { custom: { whop } } });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(recorder.events.at(-1)).toMatchObject({ ok: false });
+      expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("shell environment exclusions"))).toBe(true);
+      const seen = existsSync(dump) ? JSON.parse(readFileSync(dump, "utf8")) : { calls: [] };
+      expect(seen.calls.some((call: { method: string }) => call.method === "turn/start")).toBe(false);
+    });
+
+    it("refuses the turn when Codex cannot turn shell snapshots off", async () => {
+      plan();
+      await create({ authMode: "chatgpt-plan", environment: { FAKE_CODEX_IGNORE_FEATURES: "1" } });
+      await instance.adapter.sendTurn({ threadId: "t-plan-snapshot", text: "go", model: "gpt-6.1-sol", integrations: { custom: { whop } } });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(recorder.events.at(-1)).toMatchObject({ ok: false });
+      expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("shell snapshots"))).toBe(true);
+    });
+
+    it("keeps a selected URL server's directory behind the gate", async () => {
+      plan();
+      await create({ authMode: "chatgpt-plan", environment: { FAKE_CODEX_MCP_OVERRIDES: "1" } });
+      const dump = join(scratch, "plan-directory-scoped.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      const toolScope = { allow: ["native:*", "mcp:whop:*"], deny: ["mcp:whop:payments_create"] };
+      await instance.adapter.sendTurn({ threadId: "t-plan-scoped", text: "go", model: "gpt-6.1-sol", toolScope, integrations: { custom: { whop } } });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(recorder.events.at(-1)).toMatchObject({ ok: true });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      const gate = JSON.parse(seen.env[`OMB_GATE_CONFIG_${createHash("sha256").update("whop").digest("hex")}`]);
+      expect(gate.OMB_GATE_DIRECTORY).toBe("1");
+      expect(JSON.parse(JSON.parse(gate.OMB_GATE_UPSTREAM).env.OMB_REMOTE_MCP_DIRECTORY)).toEqual({ name: "whop", toolScope: { allow: ["native:*", "mcp:whop:*"], deny: ["mcp:whop:payments_create"] } });
+      expect(seen.argv.join(" ")).not.toContain("tok-whop");
+    });
+
+    const elicitation = (tool: string, toolParams: unknown) => JSON.stringify({ method: "mcpServer/elicitation/request", params: {
+      serverName: "whop", mode: "form", message: `Allow the whop MCP server to run tool "${tool}"?`,
+      _meta: { codex_approval_kind: "mcp_tool_call", tool_params: toolParams }, requestedSchema: { type: "object", properties: {} },
+    } });
+
+    it("lets a catalog search through without a card", async () => {
+      plan();
+      process.env.FAKE_CODEX_APPROVAL_REQUEST = elicitation("search_tools", { query: "list payments" });
+      await create({ authMode: "chatgpt-plan", mode: "approval" });
+      const dump = join(scratch, "plan-search.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId: "t-plan-search", text: "go", model: "gpt-6.1-sol", integrations: { custom: { whop } } });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+      expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "accept", content: {} });
+    });
+
+    it("asks about the tool call_tool runs", async () => {
+      plan();
+      process.env.FAKE_CODEX_APPROVAL_REQUEST = elicitation("call_tool", { name: "payments_list", arguments: { company_id: "biz_1" } });
+      await create({ authMode: "chatgpt-plan", mode: "approval" });
+      const dump = join(scratch, "plan-call.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId: "t-plan-call", text: "go", model: "gpt-6.1-sol", integrations: { custom: { whop } } });
+      const opened = await recorder.until((event) => event.type === "request.opened");
+      expect(opened).toMatchObject({ requestType: "permission", tool: "payments_list", summary: 'Allow the whop MCP server to run tool "payments_list"?' });
+      await instance.adapter.respondToRequest("t-plan-call", opened.requestId!, { behavior: "allow" });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "accept", content: {} });
+    });
+
+    it("answers a catalog read for no card only when Codex asks exactly about it", async () => {
+      plan();
+      process.env.FAKE_CODEX_APPROVAL_REQUEST = JSON.stringify({ method: "mcpServer/elicitation/request", params: {
+        serverName: "whop", mode: "form", message: 'Allow the whop MCP server to run tool "search_tools"? It is harmless.',
+        _meta: { codex_approval_kind: "mcp_tool_call", tool_params: {} }, requestedSchema: { type: "object", properties: {} },
+      } });
+      await create({ authMode: "chatgpt-plan", mode: "approval" });
+      await instance.adapter.sendTurn({ threadId: "t-plan-not-exact", text: "go", model: "gpt-6.1-sol", integrations: { custom: { whop } } });
+      const opened = await recorder.until((event) => event.type === "request.opened");
+      if (opened.type !== "request.opened") throw new Error("expected a permission card");
+      expect(opened.tool).not.toBe("search_tools");
+      await instance.adapter.respondToRequest("t-plan-not-exact", opened.requestId!, { behavior: "deny" });
+      await recorder.until((event) => event.type === "turn.completed");
+    });
+
+    it("leaves the same names alone off a plan, where the server is mounted whole", async () => {
+      process.env.FAKE_CODEX_APPROVAL_REQUEST = elicitation("call_tool", { name: "payments_list", arguments: {} });
+      await create({ mode: "approval" });
+      await instance.adapter.sendTurn({ threadId: "t-own-call", text: "go", integrations: { custom: { whop } } });
+      const opened = await recorder.until((event) => event.type === "request.opened");
+      expect(opened).toMatchObject({ tool: "call_tool", summary: 'Allow the whop MCP server to run tool "call_tool"?' });
+      await instance.adapter.respondToRequest("t-own-call", opened.requestId!, { behavior: "deny" });
+      await recorder.until((event) => event.type === "turn.completed");
+    });
   });
 
   it("does not let a custom MCP server capture a built-in capability variable", async () => {
@@ -1163,10 +1573,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       integrations: {
         browser: {
           command: process.execPath,
-          args: ["/tmp/browser-proxy.js"],
+          args: ["/tmp/harness-mcp-proxy.js"],
           env: {
             OMB_HARNESS_URL: "http://127.0.0.1:8799",
-            OMB_BROWSER_TOKEN: "browser-capability-secret",
+            OMB_MCP_TOKEN: "browser-capability-secret",
           },
         },
       },
@@ -1181,9 +1591,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(seen.argv.some((arg: string) => arg.startsWith("web_search="))).toBe(false);
     expect(seen.argv).toContain('plugins={ "browser@openai-bundled" = { enabled = false }, "computer-use@openai-bundled" = { enabled = false }, "unified-computer-use@openai-bundled" = { enabled = false } }');
     expect(seen.argv).toContain('mcp_servers.browser.default_tools_approval_mode="auto"');
-    expect(seen.argv.join(" ")).toContain("/tmp/browser-proxy.js");
+    expect(seen.argv.join(" ")).toContain("/tmp/harness-mcp-proxy.js");
     expect(seen.argv.join(" ")).not.toContain("browser-capability-secret");
-    expect(seen.env.OMB_BROWSER_TOKEN).toBe("browser-capability-secret");
+    expect(seen.env.OMB_MCP_TOKEN).toBe("browser-capability-secret");
     for (const method of ["thread/start", "turn/start"]) {
       expect(seen.calls.find((call: { method: string }) => call.method === method)?.params).toMatchObject({
         approvalPolicy: "on-request",
@@ -1336,10 +1746,13 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       if (plan) {
         expect(seen.env.CODEX_HOME.startsWith(join(DATA_DIR, "providers", "chatgpt-plan") + sep)).toBe(true);
         expect(seen.env.CODEX_HOME).not.toBe(join(scratch, ".codex"));
-        expect(seen.argv).toContain('shell_environment_policy.exclude=["OPENMAUSBOT_CHATGPT_TOKEN"]');
+        // the token is excluded on the thread, not by a `-c exclude` that
+        // would replace the policy's lower layers
+        expect(seen.argv.some((arg: string) => arg.startsWith("shell_environment_policy.exclude="))).toBe(false);
       } else expect(seen.env.CODEX_HOME).toBe(join(scratch, ".codex"));
       const threadCalls = seen.calls.filter((call: { method: string }) => ["thread/start", "thread/resume"].includes(call.method));
       expect(threadCalls).toHaveLength(1);
+      if (plan) expect(threadCalls[0].params.config["shell_environment_policy.exclude"]).toEqual(["OPENMAUSBOT_CHATGPT_TOKEN"]);
       expect(threadCalls[0]).toMatchObject({
         method: index ? "thread/resume" : "thread/start",
         params: { model: expectedModel, modelProvider, ...(index ? { threadId: "codex-thread-1" } : {}) },
@@ -2425,6 +2838,124 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(errors[0]).toMatchObject({ message: expect.stringContaining("blocked by our safety systems") });
     expect(errors[0]).not.toHaveProperty("setup");
     expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+  });
+
+  describe("Codex's own retries and a refused ChatGPT sign-in", () => {
+    const signedIn = () => {
+      const codexHome = join(scratch, ".codex");
+      mkdirSync(codexHome, { recursive: true });
+      writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ tokens: { refresh_token: "expired-fixture" } }));
+      return { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: codexHome };
+    };
+    const runTurn = async (threadId: string, model?: string) => {
+      const { turnId } = await instance.adapter.sendTurn({ threadId, text: "hi", ...(model ? { model } : {}) });
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      return { done, errors: recorder.events.filter((e) => e.type === "runtime.error" && e.turnId === turnId) };
+    };
+
+    it("keeps reconnects Codex will retry out of the transcript, and a turn that then succeeds leaves no error", async () => {
+      await create({ mode: "retry-then-complete", environment: signedIn() });
+      const { done, errors } = await runTurn("t-reconnect");
+      expect(done).toMatchObject({ ok: true });
+      expect(errors).toEqual([]);
+    });
+
+    it("says an expired sign-in once, in plain words with sign-in, and Settings asks for it until a turn succeeds", async () => {
+      await create({ mode: "signin-refused", environment: signedIn() });
+      const { done, errors } = await runTurn("t-refused");
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({ setup: true });
+      const message = (errors[0] as { message: string }).message;
+      expect(message.startsWith(CODEX_SIGN_IN_EXPIRED)).toBe(true);
+      expect(message).toContain("workspace routing discovery unauthorized (401)");
+      expect(message).not.toContain("Reconnecting");
+      // what a peer bot asking this one is told
+      expect(done).toMatchObject({ ok: false, stopReason: message });
+      const refused = await instance.snapshot();
+      expect(refused).toMatchObject({ state: "available", authenticated: false, reason: CODEX_SIGN_IN_EXPIRED });
+      expect(refused).not.toHaveProperty("account");
+
+      process.env.FAKE_CODEX_MODE = "happy";
+      expect((await runTurn("t-after")).done).toMatchObject({ ok: true });
+      await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: true });
+    });
+
+    it("clears the mark when Codex stores a new sign-in", async () => {
+      const environment = signedIn();
+      await create({ mode: "signin-refused", environment });
+      await runTurn("t-refused-again");
+      await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: false });
+      writeFileSync(join(environment.CODEX_HOME, "auth.json"), JSON.stringify({ tokens: { refresh_token: "new-fixture" } }));
+      await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: true });
+    });
+
+    it("counts a 401 after Codex tried to recover its sign-in as a refused sign-in", async () => {
+      await create({ mode: "auth-recovery", environment: signedIn() });
+      const { errors } = await runTurn("t-recovery");
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({ setup: true, message: expect.stringContaining(CODEX_SIGN_IN_EXPIRED) });
+      await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: false });
+    });
+
+    it("leaves the ChatGPT sign-in alone for a custom provider's 401, and its success clears no refusal", async () => {
+      await create({ mode: "key-401", environment: signedIn() });
+      const { errors } = await runTurn("t-provider-401", "badprov::badmodel");
+      expect(errors).toHaveLength(1);
+      expect((errors[0] as { message: string }).message).not.toMatch(/ChatGPT/);
+      await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: true });
+
+      process.env.FAKE_CODEX_MODE = "signin-refused";
+      await runTurn("t-official-refused");
+      process.env.FAKE_CODEX_MODE = "happy";
+      expect((await runTurn("t-provider-ok", "badprov::badmodel")).done).toMatchObject({ ok: true });
+      await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: false, reason: CODEX_SIGN_IN_EXPIRED });
+    });
+
+    it("does not call a refused API-key login an expired ChatGPT sign-in", async () => {
+      const environment = signedIn();
+      writeFileSync(join(environment.CODEX_HOME, "auth.json"), JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: "sk-fixture", tokens: null }));
+      await create({ mode: "key-401", environment });
+      const { errors } = await runTurn("t-api-key-401");
+      expect(errors).toHaveLength(1);
+      expect((errors[0] as { message: string }).message).not.toMatch(/ChatGPT/);
+      await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: true });
+    });
+
+    it.each(["recovered-403", "recovered-401", "recovering-403"])(
+      "does not count %s (a recovered sign-in, or a 403) as a refused sign-in", async (mode) => {
+        await create({ mode, environment: signedIn() });
+        const { errors } = await runTurn(`t-${mode}`);
+        expect(errors).toHaveLength(1);
+        expect((errors[0] as { message: string }).message).not.toMatch(/ChatGPT/);
+        await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: true });
+      });
+
+    it("leaves the sign-in alone for a tool's 401", async () => {
+      await create({ mode: "mcp-401", environment: signedIn() });
+      const { done, errors } = await runTurn("t-mcp-401");
+      expect(done).toMatchObject({ ok: true });
+      expect(errors).toEqual([]);
+      await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: true });
+    });
+
+    it("reports an older Codex's error, which carries no willRetry, once and as before", async () => {
+      await create({ mode: "legacy-error", environment: signedIn() });
+      const { done, errors } = await runTurn("t-legacy");
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({ message: "stream disconnected before completion" });
+      expect(errors[0]).not.toHaveProperty("setup");
+      expect(done).toMatchObject({ ok: false, stopReason: "stream disconnected before completion" });
+      await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: true });
+    });
+
+    it("reads only Codex's own sign-in failures as refused", () => {
+      expect(codexSignInRefused({ message: "anything", codexErrorInfo: "unauthorized" })).toBe(true);
+      expect(codexSignInRefused({ message: "x", codexErrorInfo: { responseStreamConnectionFailed: { httpStatusCode: 401 } } })).toBe(true);
+      expect(codexSignInRefused({ message: "Your access token could not be refreshed. Please log out and sign in again." })).toBe(true);
+      expect(codexSignInRefused({ message: "x", codexErrorInfo: { responseStreamConnectionFailed: { httpStatusCode: 503 } } })).toBe(false);
+      expect(codexSignInRefused({ message: "unexpected status 401 Unauthorized", codexErrorInfo: null })).toBe(false);
+      expect(codexSignInRefused({ message: "Reconnecting... 1/5", codexErrorInfo: "serverOverloaded" })).toBe(false);
+    });
   });
 
   it("auto-retries a transient turn/start failure, then completes with one final message", async () => {

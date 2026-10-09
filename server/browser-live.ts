@@ -2,20 +2,60 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { promisify } from "node:util";
-import { browserRuntimeEnv, type BrowserRuntime } from "./browser-runtime.ts";
+import { BROWSER_VIEWPORT_ARGS, browserRuntimeEnv, ownsBrowserViewport, type BrowserRuntime } from "./browser-runtime.ts";
 import { closeBrowserSession } from "./browser-engine.ts";
 
 const execute = promisify(execFile);
 const MAX_FRAME = 3 * 1024 * 1024;
 const MAX_BUFFER = 4 * 1024 * 1024;
 const HEARTBEAT_MS = 10_000;
+const COMMAND_TIMEOUT_MS = 30_000;
+const VIEWPORT_TIMEOUT_MS = 5_000;
+// Opening a view while the bot's own command holds the session: each stream
+// probe waits up to STATUS_PROBE_MS (it may also have to launch the browser),
+// then the view shows that it is waiting and probes again with a bounded
+// backoff for as long as the viewer stays, up to a limit. A probe that is
+// waiting in line answers as soon as the bot's command finishes.
+const STATUS_PROBE_MS = 10_000;
+const BUSY_RETRY_MS = [1_000, 2_000, 5_000];
+const BUSY_LIMIT_MS = 10 * 60_000;
 // The native press resolver supplies the virtual key codes and Enter/Tab text
 // that its raw input_keyboard relay omits. Keep unknown keys literal.
 const DISCRETE_KEYS = new Set(["Backspace", "Enter", "Tab", "Escape", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
+// The panel has no take-control button: interacting takes control, and an
+// interrupted action is recovered from the panel's menu.
+const RESTART_NEEDED = "A browser action was interrupted. Choose Restart browser… in the browser menu before continuing.";
 
 export class BrowserLiveError extends Error {
   readonly status: number;
   constructor(message: string, status = 400) { super(message); this.name = "BrowserLiveError"; this.status = status; }
+}
+
+/** The engine ran the person's command and answered that it failed, such as
+ * an address that does not resolve. The browser is fine: the view says what
+ * failed and keeps working (isSettledBrowserFailure), with no restart. */
+export class BrowserActionFailedError extends BrowserLiveError {
+  readonly settled = true;
+  constructor(args: readonly string[]) {
+    const opening = args[0] === "open" || (args[0] === "tab" && args[1] === "new" && args.length > 2);
+    super(opening ? "This page could not be opened. Check the address and try again." : "The browser could not do that. Try again.", 422);
+    this.name = "BrowserActionFailedError";
+  }
+}
+
+/** The engine is there but did not answer in time: another command, usually
+ * the bot's own, holds the same browser session. Not a missing engine. */
+export class BrowserBusyError extends BrowserLiveError {
+  constructor(message = "The browser is busy with another action and did not answer in time. Try again shortly.") {
+    super(message, 503); this.name = "BrowserBusyError";
+  }
+}
+
+/** execFile's own timeout: it killed a command that had not exited, as
+ * opposed to a missing binary, a failed command, an abort or an overflow. */
+function timedOut(error: unknown): boolean {
+  const failure = error as { killed?: unknown; signal?: unknown; code?: unknown } | null;
+  return failure?.killed === true && failure.signal === "SIGKILL" && failure.code == null;
 }
 
 type ObjectValue = Record<string, unknown>;
@@ -45,6 +85,15 @@ function displayUrl(value: unknown): string {
  * Distinct from a missing engine — the fix is a fresh session, not an
  * install, so the generic "check the engine is installed" guidance would
  * send the operator the wrong way (#1383). */
+/** The engine's own JSON answer says the command failed, whether it exited
+ * non-zero or not: it ran to the end. A timeout, an abort or a crash leaves
+ * no such answer, and stays an interrupted action. */
+function engineAnsweredFailure(error: unknown): boolean {
+  const stdout = (error as { stdout?: unknown } | null)?.stdout;
+  if (typeof stdout !== "string" || !stdout.trim()) return false;
+  try { return object(JSON.parse(stdout))?.success === false; } catch { return false; }
+}
+
 function browserLaunchFailure(error: unknown): boolean {
   const detail = [
     (error as { stderr?: unknown })?.stderr,
@@ -168,6 +217,9 @@ interface Viewer extends OpenOptions {
   pressedButtons: Set<string>;
   port?: number;
   restarting: boolean;
+  /** Headers are out, but the browser has not answered yet: only waiting and error events. */
+  waiting: boolean;
+  abort: AbortController;
 }
 
 export class BrowserLive {
@@ -183,6 +235,7 @@ export class BrowserLive {
   private send(viewer: Viewer, message: ObjectValue): void {
     if (!this.current(viewer)) { this.close(viewer); return; }
     if (!viewer.res.headersSent) return; // A peer can change control while this viewer is still starting.
+    if (viewer.waiting && message.type !== "waiting" && message.type !== "error") return;
     if (viewer.res.writableLength > MAX_BUFFER) { this.close(viewer); return; }
     if (viewer.blocked) return;
     const { type, ...data } = message;
@@ -248,6 +301,7 @@ export class BrowserLive {
   private close(viewer: Viewer, endResponse = true): void {
     if (viewer.closed) return;
     viewer.closed = true;
+    viewer.abort.abort();
     this.viewers.delete(viewer.id);
     clearTimeout(viewer.heartbeat); clearTimeout(viewer.drainTimer);
     viewer.socket?.close();
@@ -269,12 +323,16 @@ export class BrowserLive {
     if (viewer.pressedKeys.size || viewer.pressedButtons.size) this.runtime.abandonHumanInput(viewer.session, viewer.id);
   }
 
-  private async command(viewer: Viewer, args: string[]): Promise<ObjectValue> {
+  /** `person`: the person's own command (navigate, a tab), whose answered
+   * failure is theirs to see and retry. The view's own setup keeps its
+   * engine errors. */
+  private async command(viewer: Viewer, args: string[], timeout = COMMAND_TIMEOUT_MS, person = false): Promise<ObjectValue> {
     if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
     const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
     try {
       const { stdout } = await execute(viewer.spec.command, [...args, "--json", "--no-webmcp"], {
-        env, timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true,
+        env, timeout, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true,
+        signal: viewer.abort.signal,
       });
       if (!this.current(viewer)) throw new Error("stale viewer");
       const result = object(JSON.parse(stdout));
@@ -283,10 +341,11 @@ export class BrowserLive {
         // Keep the engine's own error internal (logged, never sent) so a
         // launch failure is recognized for what it is below.
         const detail = [result?.error, result?.message].filter((part): part is string => typeof part === "string").join(" ");
-        throw new Error(detail ? `browser command failed: ${detail}` : "browser command failed");
+        throw Object.assign(new Error(detail ? `browser command failed: ${detail}` : "browser command failed"), { stdout });
       }
       return data;
     } catch (error) {
+      if (timedOut(error)) throw new BrowserBusyError();
       console.warn("browser-live:", error);
       if (browserLaunchFailure(error)) {
         // The daemon is alive but holding a launch configuration Chrome
@@ -306,8 +365,68 @@ export class BrowserLive {
         }
         throw new BrowserLiveError("The browser could not start on this server. Reconnect to retry with a fresh browser session.", 503);
       }
+      if (person && engineAnsweredFailure(error)) throw new BrowserActionFailedError(args);
       throw new BrowserLiveError("The browser could not complete this action. Check that the browser engine is installed, then reconnect.", 503);
     }
+  }
+
+  /** Find (or start) the session's stream and make sure its browser runs. */
+  private async connect(viewer: Viewer): Promise<number> {
+    // A failed launch already started this session's daemon teardown; wait
+    // for it so the status probe meets a fresh daemon, not the stuck one.
+    // Checked on every attempt: a reset can start while the view waits.
+    const resetting = this.sessionResets.get(viewer.session);
+    if (resetting) await resetting;
+    let status = await this.command(viewer, ["stream", "status"], STATUS_PROBE_MS);
+    if (status.enabled !== true) {
+      try { status = await this.command(viewer, ["stream", "enable"]); }
+      catch (error) {
+        if (error instanceof BrowserBusyError) throw error;
+        status = await this.command(viewer, ["stream", "status"]); // Another view may have enabled the same session.
+      }
+    }
+    const port = browserStreamPort(status);
+    // `open` without a URL is an idempotent launch, never navigation away from the bot's page.
+    if (status.connected !== true) await this.command(viewer, ["open"]);
+    // The status probe itself may have launched the browser. Give its page the
+    // standard size, as the bot's runtime does, so the page, the frames and
+    // the clicks share one geometry; at that size this changes nothing. Best
+    // effort and brief: a failure or a busy session keeps the current size.
+    if (ownsBrowserViewport(viewer.spec.env ?? {})) {
+      await this.command(viewer, [...BROWSER_VIEWPORT_ARGS], VIEWPORT_TIMEOUT_MS).catch(() => undefined);
+    }
+    return port;
+  }
+
+  /** While another command holds the session, keep the view open and waiting
+   * instead of failing it: start the event stream, say so, and retry with a
+   * bounded backoff until the browser answers, the viewer leaves, or the
+   * limit passes. */
+  private async connectWhenFree(viewer: Viewer): Promise<number> {
+    const deadline = Date.now() + BUSY_LIMIT_MS;
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.connect(viewer); }
+      catch (error) {
+        if (!(error instanceof BrowserBusyError) || !this.current(viewer)) throw error;
+        if (Date.now() >= deadline) throw new BrowserBusyError("The bot is still using this browser. Reconnect when it has finished.");
+      }
+      viewer.waiting = true;
+      this.startEvents(viewer);
+      this.send(viewer, { type: "waiting", reason: "busy" });
+      await new Promise<void>((resolve) => {
+        const done = () => { clearTimeout(timer); viewer.abort.signal.removeEventListener("abort", done); resolve(); };
+        const timer = setTimeout(done, BUSY_RETRY_MS[Math.min(attempt, BUSY_RETRY_MS.length - 1)]);
+        timer.unref?.();
+        viewer.abort.signal.addEventListener("abort", done, { once: true });
+      });
+      if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
+    }
+  }
+
+  private startEvents(viewer: Viewer): void {
+    if (viewer.res.headersSent) return;
+    viewer.res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", "X-Accel-Buffering": "no", Connection: "keep-alive" });
+    viewer.res.flushHeaders();
   }
 
   private async input(viewer: Viewer, message: ObjectValue): Promise<void> {
@@ -359,29 +478,21 @@ export class BrowserLive {
     if (this.viewers.size >= 8 || [...this.viewers.values()].filter((v) => v.session === options.session).length >= 2) {
       throw new BrowserLiveError("Too many browser views are open. Close another browser panel first.", 429);
     }
-    const viewer: Viewer = { ...options, id: randomUUID(), closed: false, blocked: false, pendingActions: 0, restarting: false, pressedKeys: new Set(), pressedButtons: new Set() };
+    const viewer: Viewer = { ...options, id: randomUUID(), closed: false, blocked: false, pendingActions: 0, restarting: false, pressedKeys: new Set(), pressedButtons: new Set(), waiting: false, abort: new AbortController() };
     if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
     this.viewers.set(viewer.id, viewer);
     options.res.once("close", () => this.close(viewer));
     options.res.once("error", () => this.close(viewer));
     try {
-      // A failed launch already started this session's daemon teardown; wait
-      // for it so the status probe meets a fresh daemon, not the stuck one.
-      const resetting = this.sessionResets.get(viewer.session);
-      if (resetting) await resetting;
-      let status = await this.command(viewer, ["stream", "status"]);
-      if (status.enabled !== true) {
-        try { status = await this.command(viewer, ["stream", "enable"]); }
-        catch { status = await this.command(viewer, ["stream", "status"]); } // Another view may have enabled the same session.
-      }
-      const port = browserStreamPort(status);
+      const port = await this.connectWhenFree(viewer);
+      // Best-effort steps of the startup swallow their own failures, an abort
+      // by close() included; a viewer closed meanwhile gets no socket.
+      if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
       viewer.port = port;
-      // `open` without a URL is an idempotent launch, never navigation away from the bot's page.
-      if (status.connected !== true) await this.command(viewer, ["open"]);
       const socket = new WebSocket(`ws://127.0.0.1:${port}/?pacing=ack&maxFps=15`);
       viewer.socket = socket;
-      options.res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", "X-Accel-Buffering": "no", Connection: "keep-alive" });
-      options.res.flushHeaders();
+      this.startEvents(viewer);
+      viewer.waiting = false;
       this.send(viewer, { type: "ready", viewerId: viewer.id });
       this.control(viewer.session);
       socket.addEventListener("message", (event) => {
@@ -417,7 +528,10 @@ export class BrowserLive {
     } catch (error) {
       console.warn("browser-live:", error);
       if (options.res.headersSent) {
-        this.send(viewer, { type: "error", retryable: true, message: "The browser stream could not start." });
+        // A view that waited out a busy browser gets the reason, and no
+        // automatic retry loop on top of the wait it already did.
+        const busy = error instanceof BrowserBusyError;
+        this.send(viewer, { type: "error", retryable: !busy, message: busy ? error.message : "The browser stream could not start." });
         this.close(viewer); return;
       }
       this.close(viewer, options.res.headersSent);
@@ -464,24 +578,31 @@ export class BrowserLive {
       try {
         const taking = this.runtime.take(viewer.session, viewer.id);
         this.control(viewer.session);
-        await taking;
+        // waited: the bot's own action finished first, so input the person
+        // aimed at the page before the grant may no longer fit it.
+        const waited = await taking;
         if (!this.current(viewer)) { this.close(viewer); throw new BrowserLiveError("This browser view closed.", 409); }
-        return { ok: true };
-      } catch { throw new BrowserLiveError("Another browser view or bot action is using this browser. Try again shortly.", 409); }
+        return { ok: true, waited: waited === true };
+      } catch { throw this.refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly."); }
       finally { this.control(viewer.session); }
     }
-    if (!this.runtime.canControl(viewer.session, viewer.id)) throw new BrowserLiveError("Take control of this browser before interacting.", 409);
+    if (!this.runtime.canControl(viewer.session, viewer.id)) throw this.refusal(viewer, "Browser control changed. Try again.");
     if (viewer.pendingActions >= 32) throw new BrowserLiveError("Too many browser actions are pending. Try again shortly.", 429);
     viewer.pendingActions += 1;
     try {
       await this.runtime.withHumanAction(viewer.session, viewer.id, async () => {
         if (!this.current(viewer)) throw new BrowserLiveError("This browser view closed.", 409);
         if (action.type === "input") await this.input(viewer, action.message);
-        else if (action.type === "command") await this.command(viewer, action.args);
+        else if (action.type === "command") await this.command(viewer, action.args, COMMAND_TIMEOUT_MS, true);
       });
       return { ok: true };
-    } catch (error) { throw error instanceof BrowserLiveError ? error : new BrowserLiveError("Browser control changed. Take control again to continue.", 409); }
+    } catch (error) { throw error instanceof BrowserLiveError ? error : this.refusal(viewer, "Browser control changed. Try again."); }
     finally { viewer.pendingActions -= 1; this.control(viewer.session); }
+  }
+
+  /** Why this viewer cannot act now: an interrupted browser needs a restart. */
+  private refusal(viewer: Viewer, otherwise: string): BrowserLiveError {
+    return new BrowserLiveError(this.runtime.interrupted(viewer.session) ? RESTART_NEEDED : otherwise, 409);
   }
 
   closeForSession(session: string): void { for (const viewer of this.viewers.values()) if (viewer.session === session) this.close(viewer); }

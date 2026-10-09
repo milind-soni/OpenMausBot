@@ -17,9 +17,14 @@ type SoulRead = { soul: string; revision: string; bytes: number; limit: number; 
 export function SoulField({
   bot,
   onPatch,
+  simple,
 }: {
   bot: Bot;
   onPatch: (patch: { soul?: string; description?: string }) => void;
+  /** The Simple bot panel's plain "Instructions" box: same value, save path
+   * and drift banner, without the file name, mono font and byte counter
+   * (the counter returns only when the text is over the cap). */
+  simple?: { label: string; placeholder: string };
 }) {
   const { dispatch, flushBotPatches } = useStore();
   const { request: api } = useBotEditor();
@@ -76,10 +81,10 @@ export function SoulField({
   return (
     <div className="block">
       <div className="mb-1.5 flex items-center justify-between gap-3">
-        <label htmlFor={`bot-soul-${bot.id}`} className="text-[13px] text-ink-secondary">
-          Standing instructions (SOUL.md)
+        <label htmlFor={`bot-soul-${bot.id}`} className={simple ? "text-[12px] text-ink-secondary" : "text-[13px] text-ink-secondary"}>
+          {simple ? simple.label : "Standing instructions (SOUL.md)"}
         </label>
-        {canMigrate && (
+        {!simple && canMigrate && (
           <button
             type="button"
             disabled={resolving}
@@ -109,21 +114,25 @@ export function SoulField({
       )}
       <textarea
         id={`bot-soul-${bot.id}`}
-        className={cn(inputCls, "min-h-[220px] resize-y font-mono leading-relaxed", over && "ring-2 ring-red-500/60")}
-        placeholder="Who this bot is and the rules it never breaks. Keep it short; put step-by-step procedure into a skill."
+        className={cn(
+          inputCls,
+          simple ? "min-h-[140px] resize-y rounded-xl text-[14px] leading-relaxed" : "min-h-[220px] resize-y font-mono leading-relaxed",
+          over && "ring-2 ring-red-500/60",
+        )}
+        placeholder={simple ? simple.placeholder : "Who this bot is and the rules it never breaks. Keep it short; put step-by-step procedure into a skill."}
         aria-invalid={over || undefined}
         disabled={resolving}
         value={draft}
         onChange={(e) => change(e.target.value)}
       />
-      <div className="mt-1.5 flex items-start justify-between gap-3 text-[11px] text-ink-secondary">
+      {(!simple || over) && <div className="mt-1.5 flex items-start justify-between gap-3 text-[11px] text-ink-secondary">
         <span>
-          In this bot’s context on every turn.{info?.file ? <> Mirrored to <span className="break-all">{info.file}</span>.</> : null}
+          {!simple && <>In this bot’s context on every turn.{info?.file ? <> Mirrored to <span className="break-all">{info.file}</span>.</> : null}</>}
         </span>
         <span className={cn("shrink-0 tabular-nums", over && "font-medium text-red-500")}>
           {bytes.toLocaleString()} / {limit.toLocaleString()} bytes{over ? " — not saved" : ""}
         </span>
-      </div>
+      </div>}
     </div>
   );
 }

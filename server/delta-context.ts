@@ -34,6 +34,10 @@ export interface HandedState {
   /** A fingerprint of the standing instructions the session was started
    * with: persona, soul and section context. */
   config?: string;
+  /** Codex: the last reasoning effort the session's thread was sent, null if
+   * none (it runs on the engine's default). The thread keeps it until it is
+   * sent another, and no turn can clear one. Absent on older records. */
+  effort?: string | null;
   /** The newest context message left out of the history the session was
    * started with. It and everything before it were neither received nor are
    * they offered, exactly like the messages a replay's window leaves out. */
@@ -163,6 +167,7 @@ export function recordHanded(state: HandedState, order: readonly string[], recei
   return {
     ...(state.session === undefined ? {} : { session: state.session }),
     ...(state.config === undefined ? {} : { config: state.config }),
+    ...(state.effort === undefined ? {} : { effort: state.effort }),
     ...(state.omitted === undefined ? {} : { omitted: state.omitted }),
     ...(through === undefined ? {} : { through }),
     ids: sorted,
@@ -203,6 +208,8 @@ export interface Handoff {
   resumeCursor: string | undefined;
   /** HandedState.config for a session this turn starts */
   config: string;
+  /** Codex: the effort this turn sends, null for none (HandedState.effort) */
+  effort?: string | null;
   /** a session started from the turn's own text (a replay, or no history) */
   started: SessionStart;
   /** a session a driver rebuilds from the turn's recovery text */
@@ -352,11 +359,15 @@ export class Handoffs {
       ? pending.resumeCursor === undefined ? pending.started : pending.recovery
       : existing === undefined ? pending.resumed : undefined;
     if (!start) {
+      if (typeof pending.effort === "string" && existing?.session === session && existing.effort !== pending.effort) {
+        this.store.write(pending.botId, threadId, pending.instanceId, { ...existing, effort: pending.effort });
+      }
       this.add(threadId, pending, [...pending.placed, ...pending.carried]);
       return;
     }
     this.store.write(pending.botId, threadId, pending.instanceId, recordHanded(
-      { session, config: pending.config, ...(start.omitted === undefined ? {} : { omitted: start.omitted }), ids: [] },
+      { session, config: pending.config, ...(pending.effort === undefined ? {} : { effort: pending.effort }),
+        ...(start.omitted === undefined ? {} : { omitted: start.omitted }), ids: [] },
       this.store.order(threadId), start.sent));
   }
 

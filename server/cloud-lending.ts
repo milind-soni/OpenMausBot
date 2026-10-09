@@ -33,8 +33,8 @@ export interface CloudLendingTurn {
   /** Who opened this conversation (and the room it is in), where recorded.
    * Whoever opened it chose its title, so it must be the owner too. */
   starters?: readonly (string | undefined)[];
-  /** The conversation holds a report of work someone else directed (a
-   * routine the owner did not write). */
+  /** The conversation holds words someone else chose: a "post" webhook's
+   * payload, or a report of a routine the owner did not write. */
   reportsFromOthers?: boolean;
   /** Whether a person key is one of the owner's own devices right now. */
   ownerPerson: (person: string | undefined) => boolean;
@@ -49,10 +49,6 @@ const personOf = (line: Line | undefined) => line?.role === "user" && !line.peer
 
 /** Why a turn may not use the lent Mac, or null when it may. */
 export type CloudLendingRefusal = "unproven" | "not-owner" | "someone-else";
-
-export function cloudHomeTurnMayLend(turn: CloudLendingTurn): boolean {
-  return cloudHomeLendingRefusal(turn) === null;
-}
 
 export function cloudHomeLendingRefusal(turn: CloudLendingTurn): CloudLendingRefusal | null {
   const { request } = turn;

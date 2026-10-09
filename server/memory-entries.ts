@@ -2,17 +2,30 @@
 // `- YYYY-MM-DD · from <source> · text[ · until YYYY-MM-DD]`, with a
 // struck-through body for a superseded fact. Pure helpers shared by the
 // prompt loader (which hides expired lines), background capture (which
-// must not add a fact the notebook already holds) and the nightly tidy-up.
+// must not add a fact the notebook already holds), the nightly tidy-up and
+// the rule that keeps MEMORY.md within what loads (server/workspace.ts).
 
 export const UNTIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DATED = /^(- (\d{4}-\d{2}-\d{2}) · (?:from [^·\n]* · )?)(.*)$/;
 const UNTIL_MARK = / · until (\d{4}-\d{2}-\d{2})(?= · |$)/;
-const TRAILING_MARKS = /(?: · (?:updated|confirmed|until|expired|superseded) \d{4}-\d{2}-\d{2})+$/;
+const TRAILING_MARKS = /(?: · (?:updated|confirmed|until|expired|superseded|moved) \d{4}-\d{2}-\d{2})+$/;
 const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+/;
+/** A safety or health fact must load into every turn: neither the organize
+ * step nor the size rule moves one out of MEMORY.md, whatever else happens.
+ * Seen live — a model moved "is vegetarian" into a food topic despite being
+ * told diet is core. */
+const ALWAYS_CORE = /\b(?:allerg\w*|anaphyla\w*|intoleran\w*|vegetarian|vegan|halal|kosher|gluten|lactose|diet\w*|diabet\w*|asthma\w*|epilep\w*|pregnan\w*|medicat\w*|medicine|medical|disabilit\w*|wheelchair|blind|deaf|health)\b/i;
+
+export function alwaysCore(body: string): boolean {
+  return ALWAYS_CORE.test(body);
+}
 
 export interface MemoryEntryLine {
   /** Zero-based line number in the file. */
   line: number;
+  /** One past the entry's last line: the lines under it belong to it. */
+  end: number;
+  /** The dated line alone. */
   raw: string;
   /** `- 2026-09-25 · from chat "X" · ` */
   prefix: string;
@@ -34,19 +47,39 @@ export function untilMark(until: string | undefined): string {
   return until ? ` · until ${until}` : "";
 }
 
+/** A line with an odd number of fences opens or closes a code block. */
+const togglesFence = (line: string) => (line.match(/```/g)?.length ?? 0) % 2 === 1;
+
 /** Every dated entry in a MEMORY.md text, in file order. Hand-written lines
- * without a date are not entries and are never touched by upkeep. */
+ * without a date are not entries and are never touched by upkeep. An entry
+ * also owns the lines under it, up to the next dated line: indented ones
+ * (Markdown's list rule; how an entry with a code block is written) and a
+ * code block it opens, through its closing fence (how such entries were
+ * written before). A fence that never closes claims nothing. */
 export function parseMemoryEntries(text: string): MemoryEntryLine[] {
   const out: MemoryEntryLine[] = [];
-  text.split("\n").forEach((raw, line) => {
+  const lines = text.split("\n");
+  for (let line = 0; line < lines.length;) {
+    const raw = lines[line];
     const m = DATED.exec(raw);
-    if (!m) return;
+    if (!m) {
+      line += 1;
+      continue;
+    }
+    let open = togglesFence(raw);
+    let end = line + 1;
+    for (let next = line + 1; next < lines.length && !DATED.test(lines[next]); next += 1) {
+      if (!open && !/^[ \t]/.test(lines[next]) && !lines[next].startsWith("```")) break;
+      if (togglesFence(lines[next])) open = !open;
+      if (!open) end = next + 1;
+    }
     const rest = m[3];
     const struck = rest.startsWith("~~");
     const until = UNTIL_MARK.exec(rest)?.[1] ?? null;
     const body = rest.replace(TRAILING_MARKS, "").replace(/^~~/, "").replace(/~~$/, "").trim();
-    out.push({ line, raw, prefix: m[1], body, date: m[2], until, struck });
-  });
+    out.push({ line, end, raw, prefix: m[1], body, date: m[2], until, struck });
+    line = end;
+  }
   return out;
 }
 

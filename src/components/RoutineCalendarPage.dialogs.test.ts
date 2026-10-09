@@ -1,6 +1,8 @@
-// The calendar's paused-routines list and event details are modal dialogs:
-// each must hand its element to the shared modal keyboard handling (focus in,
-// Tab trapped, Escape closes) and name its icon-only close button.
+// The calendar's paused-routines list is a modal dialog: it must hand its
+// element to the shared modal keyboard handling (focus in, Tab trapped, Escape
+// closes) and name its icon-only close button. Event details are a drawer
+// beside the calendar instead (the grid stays usable while it is open), so it
+// must not trap focus; the page's own Escape handling closes it.
 import { Children, createElement, isValidElement, type ReactElement, type ReactNode, type RefObject } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,14 +61,6 @@ describe.each([
     closeLabel: t("routines.paused.close"),
     render: (onClose: () => void) => PausedList({ routines: [routine], bots: [bot], groups: [], onClose, onEdit: vi.fn(), onOpenRoom: vi.fn() }),
   },
-  {
-    name: "event details",
-    closeLabel: "Close",
-    render: (onClose: () => void) => EventDetails({
-      item: { kind: "routine", id: routine.id, at: 1, durationMinutes: 30, routine, run: null },
-      bots: [bot], onClose, onEdit: vi.fn(), onCallChanged: vi.fn(), onOpenRoom: vi.fn(),
-    }),
-  },
 ])("calendar $name dialog", ({ closeLabel, render: dialog }) => {
   it("hands its dialog element to the modal keyboard handling", () => {
     const onClose = vi.fn();
@@ -83,6 +77,28 @@ describe.each([
   it("names its close button", () => {
     const onClose = vi.fn();
     const close = render(() => dialog(onClose)).find((node) => node.type === "button" && node.props["aria-label"] === closeLabel);
+    expect(close).toBeDefined();
+    close!.props.onClick!();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("calendar event details drawer", () => {
+  const drawer = (onClose: () => void) => EventDetails({
+    item: { kind: "routine", id: routine.id, at: 1, durationMinutes: 30, routine, run: null },
+    bots: [bot], onClose, onEdit: vi.fn(), onCallChanged: vi.fn(), onOpenRoom: vi.fn(),
+  });
+
+  it("is a labelled drawer beside the calendar, not a focus-trapping modal", () => {
+    const tree = render(() => drawer(vi.fn()));
+    expect(tree.find((node) => node.type === "aside" && node.props["aria-label"] === t("routines.drawer.label"))).toBeDefined();
+    expect(tree.some((node) => node.props.role === "dialog")).toBe(false);
+    expect(fixture.calls).toHaveLength(0);
+  });
+
+  it("names its close button", () => {
+    const onClose = vi.fn();
+    const close = render(() => drawer(onClose)).find((node) => node.type === "button" && node.props["aria-label"] === t("routines.drawer.close"));
     expect(close).toBeDefined();
     close!.props.onClick!();
     expect(onClose).toHaveBeenCalledOnce();

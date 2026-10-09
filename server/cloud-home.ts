@@ -29,7 +29,6 @@ import { writeFileAtomic } from "./atomic.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
 import { formatPairingCode, type SessionRegistry } from "./sessions.ts";
 
-export const CLOUD_HOME_CONTRACT_VERSION = 1;
 /** Any of these switches the server into Cloud home mode; then all are required. */
 export const CLOUD_HOME_KEYS = ["OMB_CLOUD_ROLE", "OMB_CLOUD_MACHINE_ID", "OMB_CLOUD_ADMIN_URL", "OMB_CLOUD_BOOTSTRAP_SECRET"] as const;
 /** A platform model gateway's settings. A Cloud home never uses them: given
@@ -49,10 +48,6 @@ export const CLOUD_PAIRING_SKEW_S = 300;
 export const CLOUD_PAIRING_NONCE_MS = 10 * 60_000;
 const MAX_NONCES = 10_000;
 export const CLOUD_HOME_MARKER = ".omb-cloud-home.json";
-/** The server exits with this after a restore commits (Move to Cloud): the
- * launcher then starts it again, and startup installs the restore. Any other
- * exit stops the machine for Fly to restart. */
-export const CLOUD_HOME_RESTART_EXIT_CODE = 75;
 
 export interface CloudHomeConfig {
   machineId: string;
@@ -121,20 +116,14 @@ export { cloudHomeOffersPlace } from "../shared/cloud-home.ts";
  * the person's, no Local VM), in the words the person reads; undefined for a
  * place it offers. A turn's error shows 160 characters, so each fits. */
 export function cloudHomePlaceRefusal(place: Surface): string | undefined {
-  if (place === "local") return "This computer isn't a place on your OMB Cloud: its bots run in the cloud. Set Works on to Auto, Cloud or Browser, or lend your Mac under Settings → OMB Cloud.";
-  if (place === "vm") return "Bots on your OMB Cloud can't use a Local VM: the cloud machine has no container runtime. Set Works on to Auto, Cloud or Browser.";
+  if (place === "local") return "This computer isn't a place on My Cloud. Set Works on to Auto, Cloud computer or Browser, or lend your Mac under Settings → OpenMausBot Cloud.";
+  if (place === "vm") return "Bots on My Cloud can't use a Local VM. Set Works on to Auto, Cloud computer or Browser.";
   return undefined;
 }
 
-/** What a turn is told when Cloud is chosen but no Boat account is set up (no
- * key of the person's and no included Boat). A Cloud home has no Local VM to
- * suggest instead. */
-export function boatNotConfiguredMessage(cloudHome: boolean): string {
-  return `Cloud Boat is not configured — add a Boat API key or choose ${cloudHome ? "Browser" : "Local VM"}`;
-}
-
-/** The Cloud's setup checklist (docs/cloud-pro.md) has a "try something"
- * step that is done once a bot's turn finishes on the machine itself. The
+/** The Cloud's setup checklist (docs/cloud-pro.md) counts a first job as given,
+ * and a Cloud set up without one as done, once a bot's turn finishes on the
+ * machine itself. The
  * server records when, once, in this Cloud's own onboarding record: that
  * section never travels with Move to Cloud (workspace-backup-policy.ts), so a
  * moved-in history of turns does not count. Null when there is nothing to
@@ -208,7 +197,7 @@ export function createCloudPairing(options: {
       const ttl = Math.min((ttlSeconds as number | undefined) ?? CLOUD_PAIRING_DEFAULT_TTL_S, browser ? CLOUD_BROWSER_SIGN_IN_MAX_TTL_S : CLOUD_PAIRING_MAX_TTL_S);
       const opened = sessions.openPairing({
         scopes: ["admin", "client"],
-        label: typeof label === "string" && label.trim() ? label.trim() : "OMB Cloud",
+        label: typeof label === "string" && label.trim() ? label.trim() : "OpenMausBot Cloud",
         ttlMs: ttl * 1000,
         browser,
         ...(browser ? { owner: owner as string } : {}),

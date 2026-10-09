@@ -19,9 +19,6 @@ export interface SignInAllowList {
   members: string[];
 }
 
-export const ADMIN_EMAILS_ENV = "OMB_SIGNIN_EMAILS";
-export const MEMBER_EMAILS_ENV = "OMB_SIGNIN_MEMBER_EMAILS";
-
 /** Commas, spaces or newlines between entries; case does not matter. */
 export function parseAllowList(value: string | undefined | null): string[] {
   return (value ?? "")

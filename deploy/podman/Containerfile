@@ -36,4 +36,5 @@ ENV HOME=/data \
     OMB_WEBHOOK_PORT=8800 \
     NODE_ENV=production
 USER maus
-CMD ["node", "dist-server/index.js"]
+# Starts dist-server/index.js again when it asks to (server/restart.ts).
+CMD ["node", "dist-server/server-launcher.js"]

@@ -175,29 +175,18 @@ keeping a second screenshot.
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/thinking-timer-ui.e2e.test.ts
 ```
 
-## Paused-frame stream buffering
+## In-flight reply text
 
-`scripts/testing/stream-buffer.e2e.test.ts` launches the same isolated server,
-Vite and disposable browser session, mounting the real `StoreProvider` with a
-fixture-only text/reasoning probe. It pauses `requestAnimationFrame`, sends
-through the shared control surface, and holds the fake CLI's final frames
-until both intermediate channels reach the renderer. After settlement it
-asserts exactly one complete reply and empty stream channels, including after
-the fallback timer could fire. This probes state; the current app's active-turn
-tail displays presence rather than partial text/reasoning.
+The desktop shows a reply once it is finished; while a turn runs, the chat
+shows the bot's busy state. The renderer keeps no streamed text:
+`runtimeFrameAction` in `src/state/store.tsx` passes only the model-variant
+frames on, and `src/state/store.test.ts` checks that a reply or reasoning
+delta leaves the store state unchanged. `src/components/ChatView.follow.test.ts`
+checks that the finished reply still moves a following transcript to its end.
 
 ```sh
-OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/stream-buffer.e2e.test.ts
-pnpm exec vitest run src/state/store.test.ts
+pnpm exec vitest run src/state/store.test.ts src/components/ChatView.follow.test.ts
 ```
-
-Only the **pending buffer** is drained: once per frame, after 100ms when timers
-run, or at 64 × 1024 UTF-16 characters (not bytes). The size test also pauses
-timers and proves an oversized chunk is flushed intact. Total accumulated
-output is intentionally unbounded; no output is truncated and this is not a
-hard memory cap. Fully suspended browser execution cannot run either callback.
-The fixture prints a persistent `.stream.json` evidence path after closing its
-browser and server and removing its temporary data.
 
 ## Bot setup and MCP access recipe
 
@@ -220,20 +209,26 @@ and removes only its data directory; the server log stays at the printed path
 and the tools directory keeps the downloads. Every verb refuses a handle whose
 launch has stopped.
 
+## Live key prompt cancellation
+
+With a fresh `ui launch` handle in `$H`, run the delayed-key-save regression:
+
+```sh
+pnpm control:omb ui eval --ui "$H" --js "$(cat scripts/testing/live-key-lifecycle.js)"
+```
+
+It submits the real key form, then dismisses it or switches chats by keyboard-style
+activation before the synthetic save resolves. Both results must show
+`oldPromptDetached: true`, `microphoneStarts: 0`, and `phase: "idle"`. The script
+clears only the disposable fixture's Live key, stubs credential saving and media,
+and restores the bridge and call mode in `finally`. It never saves a real key or
+opens the microphone; it does not prove real-audio acceptance. Stop the launcher
+as described above.
+
 ## Queued edits and Claude update recovery
 
 The queued-message Edit action must remove the server's held send before
 returning its text to the same thread's draft, ahead of any existing text.
-A phone's `404 no such queued message` response retires a stale queue row,
-but must return **false** for editing: those words may already be running.
-The client regressions cover that distinction and successful cancellation:
-
-```sh
-cd ios && swift test --filter QueuedSendClientTests
-# From android/ with JDK 17 and the Android SDK configured:
-./gradlew :core:test --tests '*SessionP1Test*'
-```
-
 To exercise the desktop Claude update card without an actual provider,
 launch an isolated UI with `FAKE_CLAUDE_MODE=api-error` and
 `FAKE_CLAUDE_API_ERROR="API Error: 400 Claude Code 2.1.268 does not support this model; version 2.1.280 or newer is required."`.
@@ -241,12 +236,6 @@ Send one short message, then click **Update Claude for me**. The fake updater
 must report its synthetic version and the card must offer **Retry**, even
 when a digest follows the error. This proves the update request and recovery
 UI, not a real Claude installation or a successful provider retry.
-
-The native transcript suites also exercise wrapper-free pasted text and the
-update card with offline data. Android drives a failed update and a successful
-retry against loopback responses; iOS checks the manual command path in a
-disposable simulator. See [iOS](ios-transcript.md) and
-[Android](android-transcript.md).
 
 ## What this proves, and what it does not
 

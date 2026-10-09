@@ -46,6 +46,20 @@ describe("bounded browser input queue", () => {
     expect(send.mock.calls.map(([body]) => body)).toEqual([key("keyDown"), key("keyUp"), up]);
   });
 
+  it("counts unsent input and settles without discarding movement", async () => {
+    const first = deferred();
+    const send = vi.fn<(body: Record<string, unknown>) => Promise<void>>().mockResolvedValue();
+    send.mockImplementationOnce(() => first.promise);
+    const queue = createBrowserInputQueue(send, vi.fn());
+    expect(queue.size()).toBe(0);
+    queue.enqueue(key("keyDown")); queue.enqueue(move(1)); queue.enqueue(key("keyUp"));
+    expect(queue.size()).toBe(3);
+    const settled = queue.settle();
+    first.resolve(); await settled;
+    expect(send.mock.calls.map(([body]) => body)).toEqual([key("keyDown"), move(1), key("keyUp")]);
+    expect(queue.size()).toBe(0);
+  });
+
   it("invalidates old unsent input and ignores old errors after reconnect", async () => {
     let fail!: (cause: Error) => void;
     const first = new Promise<void>((_, reject) => { fail = reject; });
@@ -69,7 +83,7 @@ describe("bounded browser input queue", () => {
     queue.enqueue(key("keyDown", "held")); queue.enqueue(key("keyUp", "held"));
     for (let n = 0; n < 40; n++) queue.enqueue(key("keyDown", String(n)));
     queue.enqueue(up);
-    expect(onError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining("Release control and reconnect") }));
+    expect(onError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: expect.stringContaining("Reconnect the view before typing again") }));
     // A hung engine fills the queue too; the message must not blame only the network.
     expect(onError.mock.calls[0][0].message).not.toMatch(/connection is too slow\./);
     expect(onError.mock.calls[0][0].message).toContain("restart the browser");

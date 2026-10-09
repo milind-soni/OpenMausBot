@@ -431,15 +431,6 @@ export function resolveBoatCreate(request: BoatCreateRequest): BoatCreateRequest
   });
 }
 
-/** Read-only deletion guard. Both a key-only request with an ambiguous
- * provider outcome and a known-but-not-yet-named Boat must keep its bot owner. */
-export function hasUnresolvedBoatCreate(botId: string): boolean {
-  if (!BOT_ID.test(botId)) throw new Error("invalid bot id for cloud computer creation");
-  return withJournalLock((requests) => (
-    requests.some((request) => request.botId === botId && request.resolved !== true)
-  ));
-}
-
 /** Sanitized local recovery authority for configuration guards. The fresh,
  * lock-protected read can prove a remembered provider id even while the
  * account-wide LIST endpoint is eventually consistent. Provider request

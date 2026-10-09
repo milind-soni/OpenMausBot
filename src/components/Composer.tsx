@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import {
   draftRevision,
   appendDraftAttachments,
@@ -25,6 +26,7 @@ import {
   type FailedComposerSend,
 } from "@/lib/drafts";
 import { BotAvatar } from "./Avatar";
+import { ComposerMenuRow } from "./ComposerMenuRow";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
@@ -55,6 +57,7 @@ import {
 import { normalizeState } from "@/lib/mascot";
 import { goalCoordinatorForComposer, groupComposerHint, jevRoomRoutingOn, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
+import { CallButton } from "./CallView";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
 import { useThreadRefs } from "./ThreadRefs";
@@ -65,7 +68,7 @@ import {
   doubleEnterSteersQueue,
 } from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
-import { mentionChoicesForQuery } from "@/lib/mentions";
+import { mentionChoicesForQuery, mentionRowDescription } from "@/lib/mentions";
 import { serializeThreadRefs, threadTokenFromPaste, threadTokenSpacing } from "@/lib/thread-refs";
 import {
   composerSlashTrigger,
@@ -121,6 +124,9 @@ export function Composer({
   const ownerOrAdmin = useOwnerOrAdmin();
   const { threads, currentBotId } = useThreadRefs();
   const { capabilities } = useDesktopCapabilities();
+  // Simple leaves where a conversation works to its bot's Works on (Auto by
+  // default); pinning a place per conversation is an Advanced control.
+  const advanced = useAdvancedMode();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers members plus @everyone; explicit mentions override the room's
@@ -357,6 +363,9 @@ export function Composer({
           .map((member) => ({ id: member.id, name: member.name, bot: member }));
     return mentionChoicesForQuery(pool, mention.query);
   }, [mention, dismissedAt, state.bots, bot?.id, group, members]);
+  // @everyone reaches the room's visible bots. Hidden members stay out of
+  // the count so the line matches who the server will actually answer.
+  const mentionEveryoneCount = (members ?? []).filter((member) => !member.hidden).length;
   const mentionPickerOpen = candidates.length > 0;
   const commandMotion = useMenuMotion(commandPickerOpen);
   const mentionMotion = useMenuMotion(mentionPickerOpen);
@@ -863,38 +872,39 @@ export function Composer({
             ref={mentionListRef}
             role="listbox"
             aria-label={t("composer.mention.aria")}
-            className={cn("absolute bottom-full left-2 z-20 mb-2 max-h-72 w-72 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", mentionMotion.className)} {...mentionMotion.exitProps}
+            className={cn("absolute bottom-full start-2 z-20 mb-2 max-h-72 w-72 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", mentionMotion.className)} {...mentionMotion.exitProps}
           >
-            {candidates.map((peer, i) => (
-              <button
-                key={peer.id}
-                data-mention-index={i}
-                role="option"
-                aria-selected={i === highlight}
-                onClick={() => pickMention(peer)}
-                onMouseEnter={() => setHighlight(i)}
-                className={cn(
-                  "flex w-full items-center gap-2.5 px-3 py-2 text-left",
-                  i === highlight ? "bg-raised-hover" : "",
-                )}
-              >
-                {peer.bot ? (
-                  <BotAvatar
-                    bot={peer.bot}
-                    state={normalizeState(peer.bot.mascotExpression) ?? "happy"}
-                    size={24}
-                  />
-                ) : (
-                  <span className="flex size-6 items-center justify-center rounded-full bg-raised text-ink-secondary">
-                    <Users size={14} aria-hidden="true" />
-                  </span>
-                )}
-                <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{peer.name}</span>
-                <span className="shrink-0 text-xs text-ink-secondary">
-                  {peer.bot ? t("composer.mention.agent") : t("composer.mention.channel")}
-                </span>
-              </button>
-            ))}
+            {candidates.map((peer, i) => {
+              const description = mentionRowDescription(peer.bot
+                ? { kind: "bot", title: peer.bot.title }
+                : { kind: "everyone", count: mentionEveryoneCount });
+              return (
+                <ComposerMenuRow
+                  key={peer.id}
+                  id={`composer-mention-${peer.id}`}
+                  data-mention-index={i}
+                  role="option"
+                  aria-selected={i === highlight}
+                  onClick={() => pickMention(peer)}
+                  onMouseEnter={() => setHighlight(i)}
+                  selected={i === highlight}
+                  icon={peer.bot ? (
+                    <BotAvatar
+                      bot={peer.bot}
+                      state={normalizeState(peer.bot.mascotExpression) ?? "happy"}
+                      size={24}
+                    />
+                  ) : (
+                    <span className="flex size-6 items-center justify-center rounded-full bg-raised text-ink-secondary">
+                      <Users size={14} aria-hidden="true" />
+                    </span>
+                  )}
+                  name={peer.name}
+                  description={description || undefined}
+                  kind={peer.bot ? t("composer.mention.agent") : t("composer.mention.channel")}
+                />
+              );
+            })}
           </div>
         )}
         {/* An approval takes over the composer: you answer it before you
@@ -1036,7 +1046,7 @@ export function Composer({
                   onManageCommandAllowlist={ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: modeBot.id, botName: modeBot.name, threadId: modeBot.threadId }) : undefined}
                 />
               )}
-              {modeBot && !remoteClient && (
+              {modeBot && !remoteClient && advanced && (
                 <PlaceChip
                   bot={modeBot}
                   task={composerTask}
@@ -1191,6 +1201,10 @@ export function Composer({
             <Mic size={18} />
           </button>
         )}
+        {/* Calling the bot lives here, beside dictation, rather than in the
+            chat header: it is another way to talk to it. Rooms keep their
+            group call button in the room header. */}
+        {bot && !group && <CallButton bot={bot} placement="composer" />}
         {hasContent && !locked && (
           <button
             onClick={send}

@@ -76,13 +76,16 @@ function harness(t, { fetchZip = true } = {}) {
     native.removeAllListeners();
     rmSync(workspace, { recursive: true, force: true });
   });
+  let transfer = null;
   updater.downloadUpdate = () => {
     downloads += 1;
-    return updater.updateDownloaded(
+    transfer = updater.updateDownloaded(
       { info: { size: 17 }, url: new URL("https://fixture.invalid/update.zip") },
       { version: "2.0.0", downloadedFile: zip },
     );
+    return transfer;
   };
+  // Counts only the checks made once the update is downloading.
   updater.checkForUpdates = async () => { checks += 1; };
   let state = { status: "idle" };
   const states = [];
@@ -105,8 +108,20 @@ function harness(t, { fetchZip = true } = {}) {
     }
     originalClear(timer);
   });
+  /** The hourly check finds 2.0.0, and it downloads by itself: the only way
+   * a download starts. */
+  const found = async () => {
+    const counting = updater.checkForUpdates;
+    updater.checkForUpdates = async () => { updater.emit("update-available", { version: "2.0.0" }); };
+    try { await coordinator.check(); } finally { updater.checkForUpdates = counting; }
+  };
+  /** The download has settled, and the coordinator has heard how. */
+  const downloadSettled = async () => {
+    await transfer?.catch(() => {});
+    await new Promise((resolve) => setImmediate(resolve));
+  };
   return {
-    native, updater, coordinator, states, timers, nativeCalled, transferred, warnings,
+    native, updater, coordinator, states, timers, nativeCalled, transferred, warnings, found, downloadSettled,
     state: () => state,
     calls: () => ({ downloads, checks, quitCalls }),
   };
@@ -114,12 +129,11 @@ function harness(t, { fetchZip = true } = {}) {
 
 test("real Mac ZIP transfer stays preparing until native ready; restart is single-flight", async (t) => {
   const h = harness(t);
-  const download = h.coordinator.download();
+  await h.found();
   await h.transferred.promise;
   assert.equal(h.state().status, "preparing");
   assert.equal(h.updater.squirrelDownloadedUpdate, false);
   h.coordinator.install();
-  await h.coordinator.download();
   await h.coordinator.check(true);
   assert.deepEqual(h.calls(), { downloads: 1, checks: 0, quitCalls: 0 });
   const waitingListeners = h.native.listenerCount("update-downloaded");
@@ -127,7 +141,7 @@ test("real Mac ZIP transfer stays preparing until native ready; restart is singl
   assert.equal(h.native.listenerCount("update-downloaded"), waitingListeners, "premature Restart never arms a future quit");
 
   h.native.emit("update-downloaded");
-  await download;
+  await h.downloadSettled();
   assert.equal(h.state().status, "downloaded");
   assert.equal(h.updater.squirrelDownloadedUpdate, true);
   assert.equal(h.native.listenerCount("update-downloaded"), 1, "temporary staging listener was removed");
@@ -138,7 +152,6 @@ test("real Mac ZIP transfer stays preparing until native ready; restart is singl
   assert.match(h.state().message, /Quit and reopen/);
   assert.ok(h.warnings.some((message) => /restart handoff exceeded/.test(message)));
   h.coordinator.install();
-  await h.coordinator.download();
   await h.coordinator.check(true);
   h.native.emit("update-downloaded");
   assert.deepEqual(h.calls(), { downloads: 1, checks: 0, quitCalls: 1 });
@@ -147,7 +160,7 @@ test("real Mac ZIP transfer stays preparing until native ready; restart is singl
 
 test("a native staging deadline fails visibly without retrying or reviving on late readiness", async (t) => {
   const h = harness(t, { fetchZip: false });
-  const download = h.coordinator.download();
+  await h.found();
   await h.nativeCalled.promise;
   assert.equal(h.state().status, "preparing");
   h.timers.get(300_000).callback();
@@ -156,11 +169,10 @@ test("a native staging deadline fails visibly without retrying or reviving on la
   assert.match(h.state().message, /took too long.*Quit and reopen/);
   assert.ok(h.warnings.some((message) => /preparation exceeded/.test(message)));
   const failed = h.state();
-  await h.coordinator.download();
   await h.coordinator.check(true);
   h.coordinator.install();
   h.native.emit("update-downloaded");
-  await download;
+  await h.downloadSettled();
   h.updater.emit("download-progress", { percent: 100 });
   h.updater.emit("update-downloaded", { version: "9.0.0" });
   assert.deepEqual(h.state(), failed);
@@ -171,10 +183,10 @@ test("a native staging deadline fails visibly without retrying or reviving on la
 
 test("native validation errors after ZIP transfer remain visible and clean up staging listeners", async (t) => {
   const h = harness(t);
-  const download = h.coordinator.download();
+  await h.found();
   await h.transferred.promise;
   h.native.emit("error", new Error("signature validation failed"));
-  await download;
+  await h.downloadSettled();
   assert.equal(h.state().status, "error");
   assert.equal(h.state().retryable, false);
   assert.match(h.state().message, /failed verification.*Quit and reopen/);
@@ -183,7 +195,6 @@ test("native validation errors after ZIP transfer remain visible and clean up st
   assert.equal(h.native.listenerCount("update-downloaded"), 1);
   assert.equal(h.timers.has(300_000), false);
   const failed = h.state();
-  await h.coordinator.download();
   await h.coordinator.check(true);
   h.coordinator.install();
   h.native.emit("update-downloaded");
@@ -193,10 +204,10 @@ test("native validation errors after ZIP transfer remain visible and clean up st
 
 test("a late native error after readiness is not silently routed as a background check", async (t) => {
   const h = harness(t);
-  const download = h.coordinator.download();
+  await h.found();
   await h.transferred.promise;
   h.native.emit("update-downloaded");
-  await download;
+  await h.downloadSettled();
   h.native.emit("error", new Error("native stage lost"));
   assert.equal(h.state().status, "error");
   assert.equal(h.state().retryable, false);

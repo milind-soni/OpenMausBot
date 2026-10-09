@@ -267,6 +267,25 @@ describe("the upkeep loop", () => {
     expect(aboutMeAdded).toEqual(["The person is vegetarian"]);
   });
 
+  it("captures onto a full MEMORY.md: every fact lands, the oldest entries move to the archive, both journaled", async () => {
+    const old = Array.from({ length: 200 }, (_, i) => `- 2026-08-01 · old fact ${i}`);
+    writeMemoryFile(BOT.id, `${old.join("\n")}\n`);
+    answers.push(JSON.stringify([
+      { text: "The staging host is kestrel", kind: "fact", confidence: 0.9 },
+      { text: "Deploys go out on Tuesdays", kind: "fact", confidence: 0.9 },
+    ]));
+    const report = await upkeep().capture({ botId: BOT.id, threadId: "t1", turns: [{ person: "staging is kestrel; we deploy Tuesdays", bot: "Noted." }] });
+    expect(report).toMatchObject({ added: 2 });
+    expect(report).not.toHaveProperty("note");
+    expect(memory()).toContain("· The staging host is kestrel\n");
+    expect(memory()).toContain("· Deploys go out on Tuesdays\n");
+    expect(memory().split("\n").filter(Boolean)).toHaveLength(200);
+    expect(readMemoryTopic(BOT.id, "archive.md")).toContain("- 2026-08-01 · old fact 0 · moved 2026-09-25\n- 2026-08-01 · old fact 1 · moved 2026-09-25\n");
+    await flushMemoryJournal(BOT.id);
+    // newest first: undoing the top row puts MEMORY.md back, and the archive keeps its copy
+    expect(readMemoryJournal(BOT.id, 5).filter((row) => row.via === "capture").map((row) => row.path)).toEqual(["MEMORY.md", "memory/archive.md"]);
+  });
+
   it("adds to About me a fact the notebook already holds, without appending it again", async () => {
     ensureWorkspace(BOT.id);
     writeMemoryFile(BOT.id, "- 2026-09-25 · The user's company is called Northwind Studio.\n");

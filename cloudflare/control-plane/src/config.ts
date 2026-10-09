@@ -44,8 +44,9 @@ export const MIN_OFFLINE_RECLAIM_DAYS = 7;
 // Each cleanup makes at most ten Cloudflare API calls. Twenty rows plus the
 // two capacity reads stay near 200 calls per five-minute run: well under the
 // 1,200-requests-per-five-minutes API token limit and the Workers Paid
-// 10,000-subrequest invocation limit. Lower this to 4 on Workers Free, whose
-// invocation limit is 50 subrequests.
+// 10,000-subrequest invocation limit. A run also makes up to two Cache API
+// deletes (the /healthz copy), which count as subrequests too. Lower this to 4
+// on Workers Free, whose invocation limit is 50 subrequests (4 x 10 + 2 + 2 = 44).
 export const DEFAULT_CLEANUP_SWEEP_LIMIT = 20;
 export const MAX_CLEANUP_SWEEP_LIMIT = 50;
 

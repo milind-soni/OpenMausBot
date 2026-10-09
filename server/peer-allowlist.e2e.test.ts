@@ -267,8 +267,11 @@ describe("peer allow-list", () => {
       // 1. an ordinary bot is finally told who its teammates are
       const systemPrompt = String(dump.systemPrompt);
       expect(systemPrompt).toContain("[TEAM ROSTER]");
-      expect(systemPrompt).toContain("- Quill — General assistant (available)");
-      expect(systemPrompt).toContain("- Patch — General assistant (available)");
+      expect(systemPrompt).toContain(`- Quill — General assistant [id: ${quill.id}]`);
+      expect(systemPrompt).toContain(`- Patch — General assistant [id: ${patch.id}]`);
+      // Who is busy is its own line, outside the roster (peer-roster.test.ts
+      // pins that it sits in the volatile half).
+      expect(systemPrompt).toContain("Team availability: every teammate is available.");
       // Ordinary chats may coordinate bounded subwork, but never inherit a
       // Chief's authority or a teammate's permissions.
       expect(systemPrompt).toContain("Use coordinate_bots");
@@ -365,7 +368,7 @@ describe("peer allow-list", () => {
       await expect.poll(() => readDump(boundDump)()?.systemPrompt, { timeout: 10_000 }).toBeTruthy();
 
       const systemPrompt = String(readDump(boundDump)()!.systemPrompt);
-      expect(systemPrompt).toContain("- Near — General assistant (available)");
+      expect(systemPrompt).toContain(`- Near — General assistant [id: ${near.id}]`);
       // the roster can never name a peer this bot's own ask_bot would refuse
       expect(systemPrompt).not.toContain("Farside");
     } finally {

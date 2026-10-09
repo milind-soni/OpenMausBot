@@ -75,6 +75,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
         <Search size={15} className="shrink-0 text-ink-secondary" />
         <input
           ref={inputRef}
+          dir="auto"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {

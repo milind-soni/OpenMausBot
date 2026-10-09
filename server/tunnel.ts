@@ -166,6 +166,8 @@ export function createTunnelAccount(options: {
   fetchImpl?: typeof fetch;
   machineName?: string;
   recovery?: TunnelRecovery;
+  /** Where failed setup steps (code, status, support reference) are written. */
+  log?: (line: string) => void;
   /** Test seam for the recovery timers and the time they compare against. */
   clock?: {
     setTimer: (callback: () => void, milliseconds: number) => unknown;
@@ -184,6 +186,7 @@ export function createTunnelAccount(options: {
     updateCredentials: (derive, afterPersist) => credentials.update(derive, afterPersist),
     identity: { name: options.machineName ?? hostname(), platform: platformName(), appVersion: options.version },
     newClientInstanceId: () => randomUUID(),
+    ...(options.log ? { log: options.log } : {}),
     ...(recovery
       ? {
           autoRecover: true,
@@ -225,7 +228,9 @@ export async function fleetAccess(options: { credential: string; env?: NodeJS.Pr
     if (error instanceof ControlPlaneError && error.status === 401) {
       throw new Error(`the installation credential in ${FLEET_CREDENTIAL_ENV} was rejected by ${controlPlane}; the fleet has to issue a new one`);
     }
-    throw new Error(`could not get this machine's public address from ${controlPlane}: ${error instanceof Error ? error.message : String(error)}`);
+    // The request id is what support looks the failure up by.
+    const reference = error instanceof ControlPlaneError && error.requestId ? ` (reference ${error.requestId})` : "";
+    throw new Error(`could not get this machine's public address from ${controlPlane}: ${error instanceof Error ? error.message : String(error)}${reference}`);
   }
 }
 

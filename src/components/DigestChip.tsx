@@ -10,8 +10,12 @@ import type { Message } from "@/state/store";
 export function DigestChip({ message }: { message: Message }) {
   const digest = message.digest;
   if (!digest) return null;
-  const tools = digest.toolCalls ?? `${digest.tools.reduce((n, tool) => n + tool.count, 0)}${digest.toolsDropped ? "+" : ""}`;
   const files = digest.files ? digest.files.changed.length + digest.files.added.length + digest.files.deleted.length + (digest.files.truncated ?? 0) : null;
+  // Like the phone transcript, omit receipts for ordinary replies with no
+  // observed work. Missing file capture does not itself imply any changes.
+  if (!digest.tools.length && !digest.toolCalls && !digest.toolsDropped &&
+      !files && !digest.memory.length && !digest.memoryDropped) return null;
+  const tools = digest.toolCalls ?? `${digest.tools.reduce((n, tool) => n + tool.count, 0)}${digest.toolsDropped ? "+" : ""}`;
   const label = files === null
     ? t("chat.digestChipNoFiles", { tools })
     : t("chat.digestChip", { tools, files });

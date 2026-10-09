@@ -14,7 +14,15 @@ export const APPROVAL_LEVELS_URL = `${APP_REPOSITORY}/blob/main/docs/approval-le
 export const FEEDBACK_URL = "https://discord.gg/9Wb8MEpXRs";
 export const RELEASES_URL = `${APP_REPOSITORY}/releases`;
 export const PRO_URL = "https://www.openmausbot.com/pro";
+/** Every OMB Cloud plan side by side (Personal, Pro, Max). */
+export const PRICING_URL = "https://www.openmausbot.com/pricing";
 export const LICENSE_URL = `${APP_REPOSITORY}/blob/main/LICENSE`;
+/** The phone apps, the same two links openmausbot.com (lib/config.ts) and the
+ * Cloud page offer. iOS is on the App Store, listed as "MausBot". Android is
+ * an APK attached to a GitHub release: the link names a version, so a new
+ * Android release updates it here too. */
+export const IOS_APP_STORE_URL = "https://apps.apple.com/in/app/mausbot/id6803387923";
+export const ANDROID_APK_URL = `${APP_REPOSITORY}/releases/download/android-v1.5.0/OpenMausBot.apk`;
 
 /** The version Vite inlined from package.json; "dev" when the define is
  * missing (a bare `tsc`/test run outside the bundler). */

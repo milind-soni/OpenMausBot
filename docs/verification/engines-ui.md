@@ -48,6 +48,17 @@ recreating a removed fixture directory.
    **Update OpenCode on this server**. Click each and confirm the fixture error
    appears with its button usable again. Terminal commands remain under
    **Prefer a terminal?**. These clicks never perform a real installation.
+7. Expand Claude and use **Add Claude account** inside its card. Enter an
+   account name, collapse/reopen the card, and confirm the draft remains.
+   Cancel, then repeat with **Add ChatGPT account** in the ChatGPT plan card.
+   Submit once to check that the fixture-only error stays inside that card and
+   the form remains editable. Neither action should appear below the engine
+   grid, in unrelated providers, or in read-only managed cards. Provider-icon
+   editing controls should not appear. Repeat at a 390px viewport.
+   Repeat with **Add Google account** inside Antigravity. Toggle its sample
+   connection and confirm `google@example.test` appears without losing the
+   account-name draft. A failed save must leave the draft editable. The hint
+   should explain selecting accounts in the model picker, not quota rotation.
 7. Expand Codex, choose **Google Gemini** under **Provider icon**, and reload.
    The selected icon should persist while sibling instances keep their icons.
    Upload a small PNG, JPEG, or WebP and check that it renders in the card and
@@ -67,7 +78,8 @@ Automated coverage:
 
 ```sh
 pnpm exec vitest run scripts/verify-engines-ui.test.mjs
-pnpm exec vitest run src/components/EngineLibrary.test.ts src/components/EnginesSettings.test.ts src/components/EngineSetup.test.ts src/components/ClaudeAccountSettings.test.ts src/components/CodexAccountSettings.test.ts src/components/ClaudeSignIn.test.ts src/components/CodexDeviceSignIn.test.ts src/components/EngineUpdateNotice.test.ts src/components/SettingsModal.appearance.test.ts src/components/ModelPicker.test.ts
+pnpm exec vitest run server/antigravity-account-api.test.ts server/drivers/antigravity-account.test.ts src/components/ChatGptPlanSignIn.interaction.test.ts
+pnpm exec vitest run src/components/EngineLibrary.test.ts src/components/EnginesSettings.test.ts src/components/EngineSetup.test.ts src/components/ClaudeAccountSettings.test.ts src/components/CodexAccountSettings.test.ts src/components/ClaudeSignIn.test.ts src/components/DeviceSignIn.test.ts src/components/GrokSignIn.interaction.test.ts src/components/EngineSetup.grok.test.ts src/components/EngineUpdateNotice.test.ts src/components/SettingsModal.appearance.test.ts src/components/ModelPicker.test.ts
 pnpm typecheck
 pnpm i18n:check
 pnpm build
@@ -78,6 +90,12 @@ temporary data. Keep the printed server log as evidence. Restore any temporary
 browser viewport override after responsive checks. This recipe does not prove
 real provider installations or sign-ins; use the separate
 [offline server sign-in recipe](server-settings.md) for the real auth boundary.
+
+The Antigravity HTTP fixture creates two independent accounts, rejects invalid
+and non-admin requests, switches a bot's model account, and restarts its isolated
+server to verify persistence. Identity tests mock Google's token and userinfo
+responses and cover caching, credential replacement and lookup failures. Neither
+uses a real Google account or proves live Google consent or quota behavior.
 
 Stopping during unfinished Vite dependency transforms can still report exit 13
 from `ui.close()`. The app server and its disposable data are cleaned first;

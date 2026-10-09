@@ -11,6 +11,8 @@ beforeAll(() => {
   (globalThis as { document?: unknown }).document ??= { documentElement: { dataset: {} } };
 });
 
+// Pinned to Advanced: these cover the Advanced rail; Simple has its own suite.
+vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 vi.mock("@/lib/analytics", () => ({
   analyticsEnabled: () => false,
   setAnalyticsEnabled: () => {},

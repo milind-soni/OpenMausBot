@@ -517,12 +517,16 @@ describe("pairing", () => {
       streams.push(opened);
       return opened;
     }
+    // The names of saved OpenCode provider keys are the admin's to see.
+    expect((await call("/api/config", { method: "PUT", body: JSON.stringify({ opencodeGo: { providerKeys: { VENICE_API_KEY: "venice-fixture-key" } } }) })).status).toBe(200);
     function expectClientConfig(config: any) {
+      expect(config.opencodeGo).toEqual({ configured: false, providerKeys: [] });
       expect(config.profile).toEqual({ name: "Updated fixture", email: "" });
       expect(config.vps).toEqual({ configured: true, sshAlias: "" });
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser" }]);
     }
     function expectAdminConfig(config: any) {
+      expect(config.opencodeGo).toEqual({ configured: false, providerKeys: ["VENICE_API_KEY"] });
       expect(config.profile).toEqual({ name: "Updated fixture", email: "updated-private@example.invalid", aboutMe: "" });
       expect(config.vps).toEqual({ configured: true, sshAlias: "fixture-private-host" });
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser", partitionId: "fixture-private-partition" }]);

@@ -100,6 +100,9 @@ it.each(["already busy", "became busy during approval"])(
       await expect.poll(async () => (await receipt(queued.taskId)).status, { timeout: 20_000 }).toBe("done");
       expect((await receipt(queued.taskId)).result).toContain(requestText);
       expect((await control("wait", "--bot", peer.id, "--task", peerThread)).status).toBe("settled");
+      // The gateway polls this receipt; the source bot's own engine never runs.
+      expect((await control("wait", "--bot", source.id, "--task", sourceThread)).status).toBe("settled");
+      expect((await messages(sourceThread)).filter(message => message.role === "bot" && message.turnId && !message.from)).toEqual([]);
       const requests = await peerRequests();
       expect(requests).toHaveLength(1);
       expect(requests[0].text).toContain(requestText);

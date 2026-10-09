@@ -24,6 +24,9 @@ describe("MessageActions", () => {
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain("grid-cols-[0fr]");
     expect(html).toContain("group-hover/actions:grid-cols-[1fr]");
+    // keyboard focus reveals it, a mouse click that leaves focus behind does not
+    expect(html).toContain("group-has-[:focus-visible]/actions:grid-cols-[1fr]");
+    expect(html).not.toContain("group-focus-within/actions:grid-cols-[1fr]");
     expect(html).toContain(">copy<");
     expect(html).toContain(">reply<");
     expect(html).not.toContain('data-open="true"');

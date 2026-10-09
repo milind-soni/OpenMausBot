@@ -20,7 +20,7 @@ vi.mock("@/state/store", async (importOriginal) => {
     useStore: () => ({
       state: {
         ...original.initialState,
-        appSettingsSection: "experimental",
+        appSettingsSection: "computer",
         config: { box: { configured: false }, ...fixture.config },
         instances: [{
           instanceId: "fixture", driverKind: "claudeAgent", displayName: "Fixture",
@@ -69,14 +69,16 @@ describe("browser installation opt-in", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
-  it("allows an explicitly disabled bot to opt in after the workspace, while its browser destination stays unavailable", () => {
+  it("allows an explicitly disabled bot to opt in after the workspace, leaving its destination to the Computer panel", () => {
     expect(switchTag(access(), "Give this bot a built-in browser")).toContain("disabled=");
     fixture.config.features = { browser: true };
     const markup = access();
     const toggle = switchTag(markup, "Give this bot a built-in browser");
     expect(toggle).toContain('aria-checked="false"');
     expect(toggle).not.toContain("disabled=");
-    expect(markup.match(/<button[^>]*>Browser<\/button>/)?.[0]).toContain("disabled=");
+    // Where the bot works is chosen in the Computer panel only: the Access
+    // section names it in one line and has no destination buttons of its own.
+    expect(markup.match(/<button[^>]*>Browser<\/button>/)).toBeNull();
     expect(panel(false)).not.toContain("Install the browser engine");
     expect(panel(true)).toContain("Install the browser engine");
     expect(fixture.dispatch).not.toHaveBeenCalled();

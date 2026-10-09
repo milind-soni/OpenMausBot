@@ -6,14 +6,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale, t } from "@/lib/i18n";
-import { StoreProvider, type Bot } from "@/state/store";
+import { initialState, type Bot } from "@/state/store";
 
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotListItem, BotThreadList, botConfirmCopy, roomDeleteCopy } from "./Sidebar";
+import { BotListItem, BotThreadList, botConfirmCopy, botRowProps, roomDeleteCopy } from "./Sidebar";
 
 const bot = (overrides: Partial<Bot> = {}): Bot => ({
   id: "atlas",
@@ -29,18 +29,10 @@ const bot = (overrides: Partial<Bot> = {}): Bot => ({
   ...overrides,
 }) as Bot;
 
+const rowProps = (value: Bot) => botRowProps(initialState, () => {}, value, { density: "comfortable", quiet: false, query: "", onMenu: () => {} });
+
 function renderRow(value: Bot): string {
-  return renderToStaticMarkup(
-    createElement(
-      StoreProvider,
-      null,
-      createElement(BotListItem, {
-        bot: value,
-        density: "comfortable",
-        onMenu: () => {},
-      }),
-    ),
-  );
+  return renderToStaticMarkup(createElement(BotListItem, rowProps(value)));
 }
 
 afterEach(() => {
@@ -50,8 +42,7 @@ afterEach(() => {
 describe("sidebar rows", () => {
   it("translates a legacy thread's fallback title", () => {
     setLocale("ja");
-    const markup = renderToStaticMarkup(createElement(StoreProvider, null,
-      createElement(BotThreadList, { bot: bot(), selected: true })));
+    const markup = renderToStaticMarkup(createElement(BotThreadList, { ...rowProps(bot()), selected: true }));
     expect(markup).toContain(`title="${t("task.newShort")}"`);
     expect(markup).not.toContain('title="New thread"');
   });

@@ -1,0 +1,68 @@
+{
+  "$comment": "Known flaky tests that get two retries in CI only (process.env.CI), never locally. Each entry names its file, its full test name (describe blocks and test joined with ' > '), an owner and the evidence. A retried test is listed in its vitest job's summary. Fix the test, then delete its entry. docs/ci.md, 'Flaky tests'.",
+  "tests": [
+    {
+      "file": "server/delta-context.e2e.test.ts",
+      "test": "offers the results again when the person stops the return turn before the provider acts on it",
+      "owner": "milind-soni",
+      "reason": "Failed 9 runs (6 branches, 4 main runs) since Sep 24, mostly Windows; same commit later green.",
+      "since": "2026-10-08"
+    },
+    {
+      "file": "server/delta-context.e2e.test.ts",
+      "test": "offers a steer written into a resume the provider then rejected on the next turn",
+      "owner": "milind-soni",
+      "reason": "Failed 7 runs (6 branches, 2 main runs) since Sep 24, Windows; same commit later green.",
+      "since": "2026-10-08"
+    },
+    {
+      "file": "server/delta-context.e2e.test.ts",
+      "test": "gives a replacement session the full assignment when a result returns after its resume was rejected",
+      "owner": "milind-soni",
+      "reason": "Failed 5 runs since Sep 24, mostly Windows; same commit later green.",
+      "since": "2026-10-08"
+    },
+    {
+      "file": "server/delta-context.e2e.test.ts",
+      "test": "gives a replacement session an earlier round's result that its rebuild could not replay, and credits it only with that rebuild",
+      "owner": "milind-soni",
+      "reason": "Failed 5 runs since Sep 24, mostly Windows; same commit later green.",
+      "since": "2026-10-08"
+    },
+    {
+      "file": "server/delta-context.e2e.test.ts",
+      "test": "does not send a message again that a recovery replay carried, including one the unseen limit had deferred",
+      "owner": "milind-soni",
+      "reason": "Failed 4 runs since Sep 24, mostly Windows; same commit later green.",
+      "since": "2026-10-08"
+    },
+    {
+      "file": "server/delta-context.e2e.test.ts",
+      "test": "replays again when a replacement session fails before the provider acts on it",
+      "owner": "milind-soni",
+      "reason": "Timed out at 60 s in 3 Windows runs since Sep 24 (its timeout now doubles on Windows too).",
+      "since": "2026-10-08"
+    },
+    {
+      "file": "server/cloud-move.e2e.test.ts",
+      "test": "backs up a Cloud that has work before replacing it; swapping back keeps what it replaces, so it can be swapped again",
+      "owner": "milind-soni",
+      "reason": "Failed 11 runs (9 branches, 3 main runs) since Sep 24: Windows 8, Ubuntu 3; same commit later green.",
+      "since": "2026-10-08"
+    },
+    {
+      "file": "server/boat-included.test.ts",
+      "test": "waking a sleeping computer > forgets a server error once a later resume is accepted",
+      "owner": "milind-soni",
+      "reason": "Failed 7 runs (3 main runs) since Sep 24: Ubuntu 5, Windows 2. #2444 targeted it; delete this entry once no retry is reported for a week.",
+      "since": "2026-10-08"
+    },
+    {
+      "file": "server/lending-memory.test.ts",
+      "test": "a bot's memory and a lent Mac (server/lending-memory.ts) > fingerprints the instruction files an engine reads in each working folder and the folders above it",
+      "owner": "milind-soni",
+      "reason": "Failed 8 runs (7 branches, 2 main runs) since Sep 24, Windows; same commit later green.",
+      "since": "2026-10-08"
+    }
+  ]
+}

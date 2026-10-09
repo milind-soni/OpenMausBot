@@ -14,27 +14,18 @@
 // itself, which is why there is no OAuth client code in this repository.
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
+import { canonicalPath } from "./device-auth.ts";
 
 const MAX_OUTPUT = 32_768;
 /** Where Anthropic's sign-in lives. Anything else in the CLI's output is not a link we show. */
 const SIGN_IN_HOSTS = ["claude.com", "claude.ai", "console.anthropic.com", "platform.claude.com"];
 // One login per credential home at a time; turns are never blocked by this.
 const authenticatingHomes = new Set<string>();
-
-function canonicalPath(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    const parent = dirname(path);
-    return parent === path ? path : join(canonicalPath(parent), basename(path));
-  }
-}
 
 /** The sign-in link, or null for anything that is not Anthropic's own page over https. */
 export function claudeSignInLink(value: string | null | undefined): string | null {

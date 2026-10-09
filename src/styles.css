@@ -74,6 +74,20 @@
    rendered values rather than reading the hex. `scripts/check-skin-contrast.mjs`
    re-runs that check.
    ───────────────────────────────────────────────────────────────────────── */
+.table-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 6px;
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+}
+.table-action:hover, .table-action[aria-pressed="true"] { background: var(--color-raised); color: var(--color-ink); }
+.table-action:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+@media (pointer: coarse) { .table-action { min-width: 40px; min-height: 40px; } }
+
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-workspace-in: workspace-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
@@ -573,6 +587,54 @@
   --radius-xl: 14px;
 }
 
+/* ── Meadow ───────────────────────────────────────────────────────────────
+   The MausBot brand look: a white page, a sidebar washed in the faintest
+   green, mint for the selected row and a calm green accent. Like Daylight,
+   your own bubble is the one dark surface (green-black), so it gets the same
+   @scope treatment further down. The brand green #1f8a52 carries white at
+   only 4.3:1, so the filled accent is one step deeper; the brand green stays
+   as the accent border.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="meadow"] {
+  --code-color-scheme: light;
+  --color-app: #ffffff;           /* the thread */
+  --color-panel: #f6f8f6;         /* sidebar */
+  --color-raised: #e9eeea;
+  --color-raised-hover: #d6efdf;  /* the selected row, mint */
+  --color-card: #f1f5f2;          /* what a bot says */
+  --color-inset: #e7ece8;         /* the search field */
+  --color-control: #dce3de;       /* a chip on a card */
+  --color-hairline: #c9d3cc;
+
+  --color-ink: #0f1a13;
+  --color-ink-secondary: #4d5a52;
+  --color-ink-tertiary: #4f5c54;
+
+  --color-accent: #1a7a48;
+  --color-accent-border: #1f8a52;
+  --color-accent-text: #176b3f;
+  --color-focus: #1a7a48;
+  --color-accent-ink: #ffffff;
+  --color-composer: #ffffff;
+  --color-composer-ring: #e3e9e4;
+  --color-menu: #ffffff;
+  --color-bubble-user: #0f1a13;   /* your own messages, inverted */
+  --color-bubble-user-ink: #ffffff;
+
+  --color-success: #1a7a48;
+  --color-danger: #c02b3a;
+  --color-danger-ink: #ffffff;
+  --color-success-ink: #ffffff;
+  --color-warning: #8a5a00;
+  --color-scrollbar: #c3cdc6;
+  --color-maus-line: #5a675f;
+
+  --font-sans: "Inter", -apple-system, blinkmacsystemfont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 10px;
+  --radius-xl: 16px;
+}
+
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
    re-tokenizing. Scope the scheme to code; native controls keep their styling. */
 .chat-md .shiki {
@@ -639,7 +701,11 @@ body {
   background-color: var(--color-app);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+  /* Greyscale smoothing (`antialiased`) draws macOS stems lighter than the
+     system UI, which is the washed-out look on a Retina display. The window
+     background is opaque, so the default smoothing can stay. */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   overflow: hidden;
 }
 
@@ -690,6 +756,152 @@ body {
   }
 }
 
+/* Liquid glass: the surface for centred pop-ups (Settings, Apps, Triggers).
+   Every value is derived from the active skin's own tokens, so each of the
+   nine skins gets a glass of its own colour and no skin block changes. The
+   app behind stays visible, blurred, through a light scrim. Unlayered so a
+   leftover `bg-panel` on the same element cannot win. */
+.glass-surface {
+  background: color-mix(in srgb, var(--color-menu) 62%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  backdrop-filter: blur(28px) saturate(170%);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 16%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, white 4%, transparent),
+    0 24px 64px -12px color-mix(in srgb, black 45%, transparent),
+    0 2px 8px color-mix(in srgb, black 12%, transparent);
+}
+/* Where a glass pop-up sits: inside the window less a safe area. The top
+   inset clears the macOS traffic lights and the Windows caption buttons
+   (--glass-popup-top, set from lib/glass-popup.ts); 24px elsewhere. The pane
+   is min(1040px, 100% - 48px) wide and min(760px, 100% - top - 24px) tall:
+   the padding takes the insets off, so 100% here is what is left. */
+.glass-popup-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--glass-popup-top, 24px) 24px 24px;
+}
+.glass-popup {
+  width: min(1040px, 100%);
+  height: min(760px, 100%);
+  min-height: 0;
+}
+/* Cards and rails sitting on the glass: a second, thinner pane. */
+.glass-card {
+  background: color-mix(in srgb, var(--color-card) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
+}
+/* Existing pages dropped onto glass (every Settings page) keep their markup;
+   their solid cards turn into the same thinner pane. */
+.glass-surface .bg-card {
+  background-color: color-mix(in srgb, var(--color-card) 60%, transparent);
+}
+.glass-rail {
+  background: color-mix(in srgb, var(--color-app) 22%, transparent);
+}
+/* Behind a glass pop-up: dim a little and blur, never black out. */
+.glass-scrim {
+  background: color-mix(in srgb, black 28%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-surface {
+    background: var(--color-menu);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .glass-card,
+  .glass-surface .bg-card { background: var(--color-card); }
+  .glass-rail { background: var(--color-app); }
+  .glass-scrim {
+    background: color-mix(in srgb, black 50%, transparent);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (forced-colors: active) {
+  .glass-surface,
+  .glass-card {
+    background: Canvas;
+    border-color: CanvasText;
+  }
+}
+
+/* Glass bars (GlassScrollFrame): the sidebar's head and foot and the chat
+   header float over their scroller, which runs on underneath them. The glass
+   is a layer behind the bar's own controls: the tint of the surface the bar
+   sits on, so at rest the bar reads as that surface, over a blur of whatever
+   scrolls beneath. A top bar's inner edge fades out across --glass-edge, so
+   content melts into the glass instead of meeting a hard line. A bottom bar
+   can be one short row (Simple mode's profile row), where a fade inside it
+   left a half-sharp strip of text showing above the row: its glass is solid
+   to the bar's edge and reaches --glass-reach past it instead, fading there,
+   and the list gets that much more room at its end so a resting row is never
+   blurred. The layer is a pseudo-element, so the bar itself never becomes a
+   containing block for the fixed-position menus it opens. */
+[data-glass-frame] {
+  --glass-reach: 24px;
+}
+[data-glass-frame]:has(> [data-glass-bar="bottom"]) {
+  --glass-bottom-reach: var(--glass-reach);
+}
+.glass-bar {
+  --glass-edge: 20px;
+  isolation: isolate;
+}
+.glass-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--glass-tint, var(--color-panel)) 55%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+.glass-bar[data-glass-bar="top"]::before {
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--glass-edge)), transparent);
+}
+.glass-bar[data-glass-bar="bottom"]::before {
+  top: calc(-1 * var(--glass-reach, 0px));
+  mask-image: linear-gradient(to top, black calc(100% - var(--glass-reach, 0px)), transparent);
+}
+/* The frame publishes its bars' heights. Rows rest clear of the glass,
+   keyboard focus scrolls them clear, and the scrollbar runs only between the
+   bars (a bar over it would swallow the drag). */
+.glass-scroller {
+  scroll-padding-top: var(--glass-top, 0px);
+  scroll-padding-bottom: calc(var(--glass-bottom, 0px) + var(--glass-bottom-reach, 0px));
+}
+.glass-scroller::-webkit-scrollbar-track {
+  margin-top: var(--glass-top, 0px);
+  margin-bottom: var(--glass-bottom, 0px);
+}
+.glass-scroller-content {
+  padding-top: var(--glass-top, 0px);
+  padding-bottom: calc(var(--glass-bottom, 0px) + var(--glass-bottom-reach, 0px));
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-bar::before {
+    background: var(--glass-tint, var(--color-panel));
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (forced-colors: active) {
+  .glass-bar::before {
+    background: Canvas;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
 /* Keep focus visible after components clear the browser outline. These
    unlayered rules outrank Tailwind utilities without needing !important. */
 :focus-visible {
@@ -726,17 +938,32 @@ body {
   color: var(--color-ink);
 }
 
+/* Scrollbars: a slim pill in each skin's own --color-scrollbar, never a
+   full-height slab. At rest it is a 2px line, enough to say "this scrolls";
+   with the pointer on it (anywhere across the 8px gutter, since the
+   transparent border is part of the thumb) or while dragged it widens to a
+   6px pill and darkens, as macOS and Windows 11 scrollbars do. The gutter
+   never changes width, so nothing reflows, and the track stays clear, so no
+   gray rail runs down a panel. (Widening on hover of the scrolling area
+   instead, via `*:hover::-webkit-scrollbar-thumb`, does not repaint in
+   Chromium, so it is not used.) */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-scrollbar);
-  border-radius: 4px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: var(--color-scrollbar);
 }
+::-webkit-scrollbar-thumb:vertical { min-height: 40px; }
+::-webkit-scrollbar-thumb:horizontal { min-width: 40px; }
 /* the thumb was inert — it never acknowledged the pointer */
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-raised-hover);
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  border-width: 1px;
+  background-color: color-mix(in srgb, var(--color-scrollbar) 55%, var(--color-ink));
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -848,6 +1075,65 @@ body {
   animation-duration: 0.28s;
   animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
+/* Cloud setup (CloudEngineSignIn, CloudSetup) shares the welcome flow's
+   rare, first-time motion. A step's details open on grid rows, the one
+   height animation allowed because an accordion has no transform
+   equivalent. A finished step's check lands with a small overshoot, then
+   its tick draws in. */
+.step-open {
+  display: grid;
+  animation: step-open 0.3s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+.step-open > * {
+  min-height: 0;
+  overflow: clip;
+  overflow-clip-margin: 10px;
+}
+@keyframes step-open {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to { grid-template-rows: 1fr; opacity: 1; }
+}
+.check-in { animation: check-in 0.42s cubic-bezier(0.23, 1, 0.32, 1) both; }
+@keyframes check-in {
+  0% { transform: scale(0.85); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) .check-in path {
+    stroke-dasharray: 24;
+    stroke-dashoffset: 24;
+    animation: check-draw 0.3s 0.14s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+  }
+}
+@keyframes check-draw {
+  to { stroke-dashoffset: 0; }
+}
+/* Cloud intent (CloudIntent.tsx): the first-job box, the job waiting above
+   the sign-in, and the chat's composer are one element across each change,
+   so the box rises into the sign-in and then settles into the composer. The
+   composer takes the name only while that hand-off runs. */
+html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: cloud-intent; }
+::view-transition-group(cloud-intent) {
+  animation-duration: 0.5s;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+/* Cloud setup progress: each segment fills left to right on clip-path, so
+   its rounded ends stay round. A segment that fills (on arrival, or when a
+   step finishes) waits for the step's check to land, and on arrival each
+   waits for the one before it. Emptying is the transition, and is quick. */
+.progress-fill {
+  clip-path: inset(0 100% 0 0 round 999px);
+  transition: clip-path 0.2s cubic-bezier(0.23, 1, 0.32, 1), background-color 0.3s ease;
+}
+.progress-fill[data-filled] {
+  clip-path: inset(0 0 0 0 round 999px);
+  animation: progress-fill 0.55s cubic-bezier(0.23, 1, 0.32, 1) backwards;
+  animation-delay: calc(0.2s + var(--i, 0) * 0.09s);
+}
+@keyframes progress-fill {
+  from { clip-path: inset(0 100% 0 0 round 999px); }
+}
 /* "Thinking…" label sheen while the model reasons */
 @keyframes shimmer {
   from { background-position: 200% 50%; }
@@ -879,6 +1165,7 @@ body {
   .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
   .animate-rise, .animate-spot-in { animation: none; }
   .animate-ripple, .animate-bolt { animation: none; }
+  .step-open, .check-in, .progress-fill { animation: none; transition: none; }
   /* The drawer still moves, it just arrives instantly. */
   aside { transition: none; }
 }
@@ -889,6 +1176,9 @@ body {
 :root[data-reduced-motion="true"] .animate-spot-in,
 :root[data-reduced-motion="true"] .animate-pop-in,
 :root[data-reduced-motion="true"] .animate-pop-out,
+:root[data-reduced-motion="true"] .step-open,
+:root[data-reduced-motion="true"] .check-in,
+:root[data-reduced-motion="true"] .progress-fill,
 :root[data-reduced-motion="true"] .welcome-card * {
   animation: none !important;
   transition: none !important;
@@ -1429,6 +1719,30 @@ body {
   }
 }
 
+/* Meadow's own bubble is green-black on white: the same inverted context as
+   Daylight's, tuned to the green ink. */
+@scope ([data-skin="meadow"]) to ([data-skin]) {
+  .bg-bubble-user {
+    --color-ink: #ffffff;
+    --color-ink-secondary: #c3d6ca;
+    --color-ink-tertiary: #a9bfb1;
+    --color-panel: #142219;
+    --color-inset: #1b2b21;
+    --color-raised: #2a3b30;
+    --color-raised-hover: #35493c;
+    --color-control: #2a3b30;
+    --color-hairline: #5f7266;
+    --color-accent: #7fdca8;
+    --color-accent-text: #7fdca8;
+    --color-accent-ink: #0f1a13;
+    --color-focus: #7fdca8;
+    --color-danger: #ff7788;
+    --color-danger-ink: #0f1a13;
+    --color-success: #7fdca8;
+    --color-success-ink: #0f1a13;
+  }
+}
+
 /* Disabled buttons.
    Upstream fades them with `disabled:opacity-40`. On a dark ground that holds:
    the button stays darker than the page and the white label survives. On a
@@ -1452,4 +1766,90 @@ button:disabled.bg-danger {
 }
 ::highlight(omb-citation-source) {
   background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+/* Wide-gamut displays. The sRGB values above stay the fallback.
+   On Display P3 the same hue is a little more chromatic, with lightness
+   held, so the skin reads less dull without moving the neutrals. */
+@media (color-gamut: p3) {
+  :is([data-skin="midnight"]) {
+    --color-accent: color(display-p3 0.2062 0.5041 0.9917);
+    --color-accent-border: color(display-p3 0.3457 0.6136 0.9909);
+    --color-accent-text: color(display-p3 0.5417 0.7465 0.9948);
+    --color-success: color(display-p3 0.3728 0.8349 0.5737);
+    --color-danger: color(display-p3 0.9587 0.3424 0.3958);
+    --color-warning: color(display-p3 0.9705 0.5992 0.0744);
+  }
+  :is([data-skin="atelier"]) {
+    --color-accent: color(display-p3 0.6084 0.3747 0.1500);
+    --color-accent-border: color(display-p3 0.6696 0.4180 0.1773);
+    --color-accent-text: color(display-p3 0.5695 0.3354 0.1264);
+    --color-focus: color(display-p3 0.5695 0.3354 0.1264);
+    --color-success: color(display-p3 0.2751 0.4198 0.2805);
+    --color-danger: color(display-p3 0.6130 0.2306 0.1920);
+    --color-warning: color(display-p3 0.4699 0.3740 0.1945);
+  }
+  :is([data-skin="foundry"]) {
+    --color-accent: color(display-p3 0.8317 0.6065 0.2525);
+    --color-accent-border: color(display-p3 0.8928 0.7007 0.3733);
+    --color-accent-text: color(display-p3 0.8598 0.6457 0.3048);
+    --color-focus: color(display-p3 0.8598 0.6457 0.3048);
+    --color-success: color(display-p3 0.4046 0.6902 0.4742);
+    --color-danger: color(display-p3 0.8455 0.4114 0.3635);
+    --color-warning: color(display-p3 0.8564 0.6457 0.2655);
+  }
+  :is([data-skin="lagoon"]) {
+    --color-accent: color(display-p3 0.1708 0.4496 0.4300);
+    --color-accent-border: color(display-p3 0.1933 0.5005 0.4813);
+    --color-accent-text: color(display-p3 0.1370 0.3714 0.3551);
+    --color-focus: color(display-p3 0.1370 0.3714 0.3551);
+    --color-success: color(display-p3 0.2280 0.4194 0.3117);
+    --color-danger: color(display-p3 0.6315 0.2229 0.1802);
+    --color-warning: color(display-p3 0.4684 0.3544 0.1678);
+  }
+  :is([data-skin="graphite"]) {
+    --color-accent: color(display-p3 0.3280 0.4543 0.6408);
+    --color-accent-border: color(display-p3 0.4292 0.5567 0.7384);
+    --color-accent-text: color(display-p3 0.5770 0.7021 0.8792);
+    --color-focus: color(display-p3 0.5770 0.7021 0.8792);
+    --color-success: color(display-p3 0.4428 0.7097 0.5438);
+    --color-danger: color(display-p3 0.8343 0.4228 0.4455);
+    --color-warning: color(display-p3 0.8118 0.6338 0.3191);
+  }
+  :is([data-skin="linen"]) {
+    --color-accent: color(display-p3 0.2306 0.3679 0.5469);
+    --color-accent-border: color(display-p3 0.3109 0.4658 0.6570);
+    --color-accent-text: color(display-p3 0.1963 0.3325 0.5077);
+    --color-focus: color(display-p3 0.1963 0.3325 0.5077);
+    --color-success: color(display-p3 0.2332 0.4391 0.3120);
+    --color-danger: color(display-p3 0.6315 0.2423 0.2772);
+    --color-warning: color(display-p3 0.4543 0.3583 0.1717);
+  }
+  :is([data-skin="dusk"]) {
+    --color-accent: color(display-p3 0.4495 0.3350 0.5154);
+    --color-accent-border: color(display-p3 0.5725 0.4369 0.6409);
+    --color-accent-text: color(display-p3 0.7511 0.6056 0.8251);
+    --color-focus: color(display-p3 0.7511 0.6056 0.8251);
+    --color-success: color(display-p3 0.4731 0.6785 0.5159);
+    --color-danger: color(display-p3 0.8279 0.4499 0.4734);
+    --color-warning: color(display-p3 0.8014 0.6416 0.3675);
+  }
+  :is([data-skin="daylight"]) {
+    --color-accent: color(display-p3 0.1269 0.3689 0.7837);
+    --color-accent-border: color(display-p3 0.2062 0.5041 0.9917);
+    --color-accent-text: color(display-p3 0.1193 0.3464 0.7357);
+    --color-focus: color(display-p3 0.1269 0.3689 0.7837);
+    --color-success: color(display-p3 0.2075 0.4783 0.3054);
+    --color-danger: color(display-p3 0.7202 0.1738 0.2207);
+    --color-warning: color(display-p3 0.5270 0.3546 0.0278);
+  }
+  :is([data-skin="meadow"]) {
+    --color-accent: color(display-p3 0.1985 0.4783 0.2864);
+    --color-accent-border: color(display-p3 0.2288 0.5411 0.3261);
+    --color-accent-text: color(display-p3 0.1731 0.4195 0.2506);
+    --color-focus: color(display-p3 0.1985 0.4783 0.2864);
+    --color-success: color(display-p3 0.1985 0.4783 0.2864);
+    --color-danger: color(display-p3 0.7202 0.1738 0.2207);
+    --color-warning: color(display-p3 0.5270 0.3546 0.0278);
+  }
 }

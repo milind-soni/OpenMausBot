@@ -1,4 +1,4 @@
-import { cloudRunner } from "@/lib/remote-desktop";
+import { boatCapableEngine } from "@/lib/remote-desktop";
 import { useEffect, useRef, useState } from "react";
 import { CalendarClock, CalendarDays, ImageOff, Loader2, Monitor, Plus, X } from "lucide-react";
 
@@ -79,7 +79,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   );
   const cloudRoutineReady = Boolean(
     state.config?.box.configured &&
-      cloudRunner(state.instances, bot.modelSelection.instanceId)?.snapshot.state === "available",
+      boatCapableEngine(state.instances, bot.modelSelection.instanceId)?.snapshot.state === "available",
   );
 
   useEffect(() => {

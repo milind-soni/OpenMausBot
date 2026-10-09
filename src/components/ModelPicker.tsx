@@ -7,22 +7,28 @@
 // the person making it, so the chat header and the settings dialog render the
 // same row and write through the same action.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, KeyRound, Loader2, Plus, RefreshCw, Search } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, KeyRound, Loader2, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
 import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail, type SignInFamily } from "@/lib/engine-rail";
 import { InstanceProviderMark } from "./ProviderIcons";
-import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
+import { EngineSetup, EngineUpdateNotice, hasSavedApiKey, needsCli, needsSignIn } from "./EngineSetup";
 import { EngineGroupLabel } from "./EngineGroupLabel";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
+import { repeatedModelLabels, SimpleModelPane } from "./SimpleModelPane";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { friendlyEffort, simpleEffortLevels } from "@/lib/model-friendly";
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
+import { threadsOnOwnModel } from "../../shared/thread-model";
+import { ThreadModelsLine } from "./ThreadModelsLine";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
 const COMPACT_MODEL_COUNT = 5;
@@ -164,13 +170,15 @@ function variantLabel(option: ModelVariantOption): string {
 }
 
 /** ACP variant ids are opaque; their model/session declares the available choices. */
-export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false }: {
+export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false, wide = false }: {
   bot: Bot;
   threadId?: string;
   updateBotDefault?: boolean;
   className?: string;
   label?: ReactNode;
   compact?: boolean;
+  /** Compact only: the select spans the whole row (the Simple picker's band). */
+  wide?: boolean;
 }) {
   const { state, dispatch } = useStore();
   const selection = bot.modelSelection;
@@ -195,7 +203,8 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
         <select aria-label="Reasoning variant" disabled={bot.busy}
           value={selection.variant === undefined ? "unset" : missing ? "missing" : String(options.findIndex((option) => option.id === selection.variant))}
           onChange={(event) => choose(options[Number(event.target.value)]?.id)}
-          className="min-w-0 max-w-[65%] rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50">
+          className={cn("min-w-0 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[12px] text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50",
+            wide ? "flex-1" : "max-w-[65%]")}>
           <option value="unset">Use session setting</option>
           {missing && <option value="missing" disabled>{selection.variant} ({unavailable ? "unavailable" : "unverified"})</option>}
           {options.map((option, index) => <option key={option.id} value={String(index)}>{variantLabel(option)}</option>)}
@@ -260,11 +269,14 @@ function ModelRow({
   option,
   current,
   defaultId,
+  botModel = false,
   onPick,
 }: {
   option: ModelOption;
   current: boolean;
   defaultId: string;
+  /** The bot's model, in a thread's picker: "(bot's model)". */
+  botModel?: boolean;
   onPick: () => void;
 }) {
   return (
@@ -292,8 +304,32 @@ function ModelRow({
         {option.loaded && (
           <span className="shrink-0 rounded bg-accent/10 px-1.5 py-px text-[10px] text-accent">Loaded</span>
         )}
+        {botModel && <span data-bot-model className="shrink-0 text-[11px] text-ink-secondary">{t("model.botModelTag")}</span>}
       </span>
       {current && <Check size={14} className="shrink-0 text-accent" />}
+    </button>
+  );
+}
+
+/** A thread's picker: back onto the bot's model, so the thread moves with
+ * the bot again. Checked while the thread follows the bot. */
+export function FollowBotModelRow({ name, model, follows, onPick }: { name: string; model: string; follows: boolean; onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      data-follow-bot-model
+      aria-pressed={follows}
+      onClick={onPick}
+      className={cn(
+        "flex w-full shrink-0 items-center justify-between gap-2 border-b border-hairline/40 px-4 py-2.5 text-left text-[13px] text-ink hover:bg-control/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+        follows && "bg-control/40",
+      )}
+    >
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className="shrink-0 font-medium">{t("model.useBotModel", { name })}</span>
+        <span className="truncate text-[12px] text-ink-secondary">{model}</span>
+      </span>
+      {follows && <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />}
     </button>
   );
 }
@@ -330,6 +366,48 @@ function ModelSearch({
   );
 }
 
+export type RailProvider = {
+  /** The rail's own entry: one per sign-in family, else one per instance. */
+  instance: InstanceInfo;
+  /** What a click opens: for a sign-in family, the account last browsed. */
+  target: InstanceInfo;
+  label: string;
+  selected: boolean;
+};
+
+/** The providers the rail shows, one button each, folded per sign-in family
+ * and grouped Cloud / API keys / Local. Shared with the Simple view so both
+ * list the same providers the same way. */
+export function railProviders(instances: InstanceInfo[], selectedInstance: InstanceInfo | undefined,
+  claudeInstance: InstanceInfo | undefined, openaiInstance: InstanceInfo | undefined) {
+  const firstOf: Record<SignInFamily, InstanceInfo | undefined> = {
+    claude: instances.find((instance) => isClaudeAccount(instance) && instance.claudeAccount?.isDefault)
+      ?? instances.find(isClaudeAccount),
+    openai: instances.find((instance) => signInFamily(instance) === "openai"),
+  };
+  const opensOn: Record<SignInFamily, InstanceInfo | undefined> = { claude: claudeInstance, openai: openaiInstance };
+  const providers = instances.filter((instance) => {
+    const family = signInFamily(instance);
+    return !family || instance === firstOf[family];
+  });
+  const entry = (instance: InstanceInfo): RailProvider => {
+    const family = signInFamily(instance);
+    return {
+      instance,
+      target: family ? opensOn[family] ?? instance : instance,
+      label: family ? SIGN_IN_FAMILY_LABEL[family] : instance.displayName,
+      selected: family ? signInFamily(selectedInstance) === family : instance.instanceId === selectedInstance?.instanceId,
+    };
+  };
+  const { subscription, api, custom } = splitEngineRail(providers);
+  return { subscription: subscription.map(entry), api: api.map(entry), custom: custom.map(entry) };
+}
+
+/** Once any key is saved, the keys shortcut is also the way to fix one. */
+function apiKeysLabel(instances: InstanceInfo[]): string {
+  return t(instances.some(hasSavedApiKey) ? "model.addOrChangeApiKeys" : "model.addApiKeys");
+}
+
 export function ModelEngineRail({ instances, selectedInstance, claudeInstance, openaiInstance, onSelect, onAddApiKeys }: {
   instances: InstanceInfo[];
   selectedInstance?: InstanceInfo;
@@ -341,22 +419,8 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
    * has no keys section (a remote client). */
   onAddApiKeys?: () => void;
 }) {
-  const firstOf: Record<SignInFamily, InstanceInfo | undefined> = {
-    claude: instances.find((instance) => isClaudeAccount(instance) && instance.claudeAccount?.isDefault)
-      ?? instances.find(isClaudeAccount),
-    openai: instances.find((instance) => signInFamily(instance) === "openai"),
-  };
-  const opensOn: Record<SignInFamily, InstanceInfo | undefined> = { claude: claudeInstance, openai: openaiInstance };
-  const providers = instances.filter((instance) => {
-    const family = signInFamily(instance);
-    return !family || instance === firstOf[family];
-  });
-  const { subscription, api, custom: local } = splitEngineRail(providers);
-  const railButton = (instance: InstanceInfo) => {
-    const family = signInFamily(instance);
-    const target = family ? opensOn[family] ?? instance : instance;
-    const selected = family ? signInFamily(selectedInstance) === family : instance.instanceId === selectedInstance?.instanceId;
-    const label = family ? SIGN_IN_FAMILY_LABEL[family] : instance.displayName;
+  const { subscription, api, custom: local } = railProviders(instances, selectedInstance, claudeInstance, openaiInstance);
+  const railButton = ({ instance, target, selected, label }: RailProvider) => {
     const attention = needsCli(target) || needsSignIn(target) || Boolean(target.snapshot.update);
     const managedBy = target.policy ? t("policy.managedBy", { organization: target.policy.organizationName }) : undefined;
     return (
@@ -391,8 +455,8 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
           type="button"
           data-rail-add-api-key
           onClick={onAddApiKeys}
-          aria-label={t("model.addApiKeys")}
-          title={t("model.addApiKeys")}
+          aria-label={apiKeysLabel(instances)}
+          title={apiKeysLabel(instances)}
           className="flex size-9 items-center justify-center rounded-lg border border-dashed border-hairline text-ink-secondary hover:bg-control/60 hover:text-ink"
         >
           <Plus size={16} aria-hidden="true" />
@@ -427,6 +491,12 @@ export function ClaudeAccountSelect({ accounts, selectedId, onSelect }: {
   );
 }
 
+const POPOVER_WIDTH = 420;
+/** The Simple view's width: a 128px provider column beside the models. */
+export const SIMPLE_POPOVER_WIDTH = 380;
+/** Past this many models, the Simple view's opened list gets a search box. */
+const SIMPLE_SEARCH_AFTER = 12;
+
 export function ModelPicker({
   bot,
   threadId,
@@ -452,27 +522,43 @@ export function ModelPicker({
   const [refreshing, setRefreshing] = useState(false);
   const [probingLocal, setProbingLocal] = useState<string | null>(null);
   const [scope, setScope] = useState<"bot" | "thread">("thread");
+  // Simple mode opens on the plain-words view; a provider's "Set up" (or
+  // Advanced mode) shows the full picker in the same popover.
+  const advanced = useAdvancedMode();
+  const ownerOrAdmin = useOwnerOrAdmin();
+  // Guests can choose a model for their own Cloud conversation, not change
+  // the shared bot's default. Keep choices thread-only until authority loads.
+  const simpleUpdatesBotDefault = !state.config?.cloudHome || ownerOrAdmin === true;
+  const [fullView, setFullView] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
     selection: ModelSelection; updateBotDefault: boolean; name: string } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<{ left: number; maxHeight: number }>();
+  // The bot's model just changed from this thread's picker: say how many
+  // threads kept a model of their own, until the picker opens again.
+  const [changedBotModel, setChangedBotModel] = useState(false);
   const refreshingRef = useRef(false);
   const lastClaudeIdRef = useRef<string | null>(null);
   const lastOpenaiIdRef = useRef<string | null>(null);
 
+  // Simple mode shows the plain-words pane in the chat header's popover and
+  // inline where the picker is contained (the bot panel's Default model).
+  const simpleView = !advanced && !fullView;
+  // The Simple view has its own, narrower width; the full picker keeps its.
+  const popoverWidth = simpleView ? SIMPLE_POPOVER_WIDTH : POPOVER_WIDTH;
   useLayoutEffect(() => {
     if (!open || contained) return;
     const place = () => {
       const rect = rootRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const width = Math.min(420, window.innerWidth - 32);
+      const width = Math.min(popoverWidth, window.innerWidth - 32);
       setPlacement({ left: Math.max(16, Math.min(rect.right - width, window.innerWidth - width - 16)) - rect.left,
         maxHeight: Math.max(0, Math.min(600, window.innerHeight - rect.bottom - 24)) });
     };
     place();
     window.addEventListener("resize", place);
     return () => window.removeEventListener("resize", place);
-  }, [open, contained]);
+  }, [open, contained, popoverWidth]);
 
   const selection = bot.modelSelection;
   const active = state.instances.find((instance) => instance.instanceId === selection.instanceId);
@@ -555,7 +641,8 @@ export function ModelPicker({
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (query) setQuery("");
-      else if (pane === "custom" && railInstance?.models.options.some((option) => !option.custom)) setPane("main");
+      // The Simple view shows no local pane to step back from.
+      else if (!simpleView && pane === "custom" && railInstance?.models.options.some((option) => !option.custom)) setPane("main");
       else setOpen(false);
     };
     window.addEventListener("mousedown", closeOnOutsideClick);
@@ -564,7 +651,7 @@ export function ModelPicker({
       window.removeEventListener("mousedown", closeOnOutsideClick);
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [open, pane, query, railInstance]);
+  }, [open, pane, query, railInstance, simpleView]);
 
   const resetList = () => {
     setQuery("");
@@ -580,13 +667,17 @@ export function ModelPicker({
     resetList();
   };
 
-  const openLocalModels = (instance: InstanceInfo) => {
-    setPane("custom");
-    resetList();
+  const lookForLocal = (instance: InstanceInfo) => {
     if (needsCli(instance) || instance.policy || probingLocal === instance.instanceId) return;
     setProbingLocal(instance.instanceId);
     void probeLocalModels(instance.instanceId, refreshInstanceModels).then(() =>
       setProbingLocal((current) => (current === instance.instanceId ? null : current)));
+  };
+
+  const openLocalModels = (instance: InstanceInfo) => {
+    setPane("custom");
+    resetList();
+    lookForLocal(instance);
   };
 
   const openApiKeys = () => {
@@ -603,11 +694,38 @@ export function ModelPicker({
     resetList();
   };
 
+  // A thread's picker knows whether the thread follows its bot's model
+  // (absent from a server too old to say).
+  const profile = state.bots.find((candidate) => candidate.id === bot.id) ?? bot;
+  const follows = threadId ? profile.tasks?.find((task) => task.threadId === threadId)?.followsBotModel : undefined;
+  const botModelInstance = state.instances.find((instance) => instance.instanceId === profile.modelSelection.instanceId);
+  const botModelName = botModelInstance
+    ? `${botModelInstance.displayName} · ${modelLabel(botModelInstance, profile.modelSelection.model)}`
+    : profile.modelSelection.model;
+  const ownModelThreads = threadsOnOwnModel(profile.modelSelection, profile.tasks ?? []).length;
+
+  /** Back onto the bot's model: the server keeps no model of the thread's
+   * own for a pick that is the bot's. */
+  const pickBotModel = () => {
+    if (bot.busy) return;
+    setOpen(false);
+    if (follows !== false) return;
+    const target = currentTaskBot(profile, threadId ?? bot.threadId);
+    if (modelSwitchNeedsAsk(approvalModeFor(target),
+      state.instances.find((candidate) => candidate.instanceId === target.modelSelection.instanceId)?.driverKind,
+      botModelInstance?.driverKind)) {
+      setPendingSwitch({ botId: bot.id, threadId: threadId ?? bot.threadId, selection: profile.modelSelection, updateBotDefault: false, name: botModelName });
+      return;
+    }
+    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: false, selection: profile.modelSelection });
+  };
+
   const pick = (instance: InstanceInfo, model: string) => {
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
-    const updateBotDefault = !threadId || scope === "bot";
-    const profile = state.bots.find((candidate) => candidate.id === bot.id) ?? bot;
+    // Simple mode has no scope choice: an owner's pick is also the bot's
+    // default, while a Cloud guest changes only their own conversation.
+    const updateBotDefault = !threadId || (simpleView ? simpleUpdatesBotDefault : scope === "bot");
     const targets = updateBotDefault ? [currentTaskBot(profile, threadId ?? bot.threadId), profile] : [bot];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
       state.instances.find((candidate) => candidate.instanceId === target.modelSelection.instanceId)?.driverKind,
@@ -624,6 +742,7 @@ export function ModelPicker({
       updateBotDefault,
       selection: nextSelection,
     });
+    if (updateBotDefault && threadId) setChangedBotModel(true);
     setOpen(false);
   };
 
@@ -652,15 +771,82 @@ export function ModelPicker({
     </span>
   );
 
+  // Simple mode lists every provider the picker knows, in the rail's order:
+  // sign-ins, then API keys, then local engines. A sign-in family's row opens
+  // on the account last browsed, else the bot's, else the first one ready to
+  // use, so a signed-out first account never hides a signed-in second one;
+  // the family's other accounts are a select away above its models.
+  const simpleOpensOn = (accounts: InstanceInfo[], lastId: string | null) =>
+    accounts.find((account) => account.instanceId === lastId)
+      ?? accounts.find((account) => account.instanceId === selection.instanceId)
+      ?? accounts.find((account) => !needsCli(account) && !needsSignIn(account))
+      ?? accounts[0];
+  const simpleProviders = (() => {
+    const groups = railProviders(pickerInstances, railInstance,
+      simpleOpensOn(claudeAccounts, lastClaudeIdRef.current), simpleOpensOn(openaiAccounts, lastOpenaiIdRef.current));
+    return [...groups.subscription, ...groups.api, ...groups.custom];
+  })();
+  const simpleFamily = signInFamily(railInstance);
+  const simpleAccounts = simpleFamily === "claude" ? claudeAccounts : simpleFamily === "openai" ? openaiAccounts : [];
+  const simpleLabel = simpleProviders.find((provider) => provider.selected)?.label ?? railInstance?.displayName ?? "";
+  // Simple mode has no separate local pane: a provider lists its own models,
+  // then the local ones it can run (loaded first). Its own models need the
+  // sign-in local ones do not, so a signed-out engine lists only those, and
+  // a way to sign in after them. None of this hangs on the full picker's
+  // pane, so browsing back to a provider shows the same list.
+  const simpleSignIn = !customOnly && needsSignIn(railInstance);
+  const simpleOfficial = customOnly || simpleSignIn ? [] : official;
+  const simpleLocal = partitionCustomModels(custom);
+  const simpleAll = [...simpleOfficial, ...simpleLocal.pinned, ...simpleLocal.rest];
+  const simpleSetup = Boolean(railInstance && (railInstance.policy || needsCli(railInstance) || (simpleSignIn && simpleAll.length === 0)));
+  const simpleSuggested = railInstance
+    ? suggestedModels(simpleAll, railInstance.models.default, currentModel, COMPACT_MODEL_COUNT)
+    : [];
+  // "Show all" opens the list in place: the suggested rows stay on top.
+  const simpleOpened = [...simpleSuggested, ...simpleAll.filter((option) => !simpleSuggested.includes(option))];
+  const simpleSearch = showAll && simpleAll.length > SIMPLE_SEARCH_AFTER;
+  const simpleQuery = simpleSearch ? query : "";
+  const simpleModels = simpleQuery ? filterCustomModels(simpleOpened, simpleQuery) : showAll ? simpleOpened : simpleSuggested;
+  // Browsing to a provider, or opening its whole list, is asking for every
+  // model it has, so one that runs local models looks for them again (local
+  // servers are otherwise probed only at startup, after sign-in or on refresh).
+  const lookForLocalIn = (instance: InstanceInfo) => {
+    if (offersLocalModels(instance, instance.models.options.filter((option) => option.custom).length)) lookForLocal(instance);
+  };
+  const browseSimple = (instance: InstanceInfo) => {
+    selectRail(instance);
+    lookForLocalIn(instance);
+  };
+  const activeLevels = active?.capabilities?.effortLevels ?? [];
+  const simpleEffort = activeLevels.length > 0 ? {
+    levels: simpleEffortLevels(activeLevels, selection.effort),
+    current: selection.effort,
+    // Follow the same Cloud authority rule as a Simple model pick.
+    onPick: (level: EffortLevel) => dispatch({ type: "setModel", botId: bot.id, threadId,
+      ...(threadId && simpleUpdatesBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } }),
+  } : null;
+
+  // In a thread's picker the bot's model says so, beside the thread's own.
+  const botModelId = follows !== undefined && profile.modelSelection.instanceId === railInstance?.instanceId
+    ? profile.modelSelection.model : undefined;
   const renderRow = (option: ModelOption) => (
     <ModelRow
       key={option.id}
       option={option}
       current={selection.instanceId === railInstance?.instanceId && selection.model === option.id}
       defaultId={railInstance?.models.default ?? ""}
+      botModel={option.id === botModelId}
       onPick={() => railInstance && pick(railInstance, option.id)}
     />
   );
+
+  // The idle tooltip's whole text, and the busy tooltip's first line.
+  const summary = active
+    ? `${active.displayName} · ${modelLabel(active, selection.model)}${
+        modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
+      }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${effortLabel(selection.effort)} effort` : ""}`
+    : selection.model;
+  const followLine = follows === true ? `\n${t("model.followsBot", { name: profile.name })}` : follows === false ? `\n${t("model.ownModel")}` : "";
 
   const trigger = (
     <button data-tour="model"
@@ -672,9 +858,13 @@ export function ModelPicker({
         if (active && signInFamily(active) === "openai") lastOpenaiIdRef.current = active.instanceId;
         const initial = pickerInstances.find((instance) => instance.instanceId === selection.instanceId) ?? pickerInstances[0];
         setRailId(initial?.instanceId ?? null);
+        setChangedBotModel(false);
         setOpen((wasOpen) => {
           const next = !wasOpen;
-          if (next) openFor(initial);
+          if (next) {
+            openFor(initial);
+            setFullView(false);
+          }
           return next;
         });
       }}
@@ -688,15 +878,7 @@ export function ModelPicker({
         // Multiple Claude accounts keep their name even in the compact chip.
         !contained && active && !showActiveAccount && COMPACT_SQUARE,
       )}
-      title={
-        bot.busy
-          ? t(threadId ? "model.threadBusy" : "model.busy")
-          : active
-          ? `${active.displayName} · ${modelLabel(active, selection.model)}${
-              modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
-            }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${effortLabel(selection.effort)} effort` : ""}`
-          : selection.model
-      }
+      title={bot.busy ? `${summary}${followLine}\n${t(threadId ? "model.threadBusy" : "model.busy")}` : `${summary}${followLine}`}
     >
       {active && <InstanceProviderMark instance={active} size={14} />}
       {!contained && active && showActiveAccount && (
@@ -718,7 +900,7 @@ export function ModelPicker({
           <span data-model-variant className="max-w-[120px] truncate text-ink-secondary">· {selectedVariantLabel}</span>
         ) : selection.effort && (
           <span data-model-effort className="shrink-0 text-ink-secondary">
-            · {effortLabel(selection.effort)}
+            · {advanced ? effortLabel(selection.effort) : friendlyEffort(selection.effort)}
           </span>
         )}
       </span>
@@ -750,15 +932,77 @@ export function ModelPicker({
           role="dialog"
           aria-label={t("model.choose")}
           {...motion.exitProps}
-          style={contained ? undefined : placement}
+          style={contained ? undefined : { ...placement, width: popoverWidth }}
           className={cn(
-            "flex overflow-hidden rounded-2xl border border-hairline/50 bg-card",
+            "flex flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-card",
             contained
               ? "relative mt-3 w-full max-h-[min(420px,50dvh)]"
-              : "absolute right-0 top-full z-30 mt-2 w-[420px] max-w-[calc(100vw-2rem)] max-h-[min(600px,calc(100dvh-7rem))] shadow-2xl shadow-black/50",
+              : "absolute right-0 top-full z-30 mt-2 max-w-[calc(100vw-2rem)] max-h-[min(600px,calc(100dvh-7rem))] shadow-2xl shadow-black/50",
             motion.className,
           )}
         >
+          {follows !== undefined && (
+            <FollowBotModelRow name={profile.name} model={botModelName} follows={follows} onPick={pickBotModel} />
+          )}
+          <div className="flex min-h-0 min-w-0 flex-1">
+          {simpleView ? (
+            <SimpleModelPane
+              providers={simpleProviders}
+              onProvider={browseSimple}
+              account={railInstance && simpleAccounts.length > 1 ? (
+                <ClaudeAccountSelect accounts={simpleAccounts} selectedId={railInstance.instanceId} onSelect={browseSimple} />
+              ) : undefined}
+              managedBy={railInstance?.policy?.organizationName ?? null}
+              // With several accounts the select above names the one at issue.
+              needsSetup={railInstance && simpleSetup ? { name: simpleAccounts.length > 1 ? railInstance.displayName : simpleLabel } : null}
+              signIn={railInstance && simpleSignIn && !simpleSetup ? { name: simpleLabel } : null}
+              onSetUp={() => {
+                // Sign-in is for the provider's own models: the full picker's main list.
+                if (simpleSignIn && hasOfficialModels) setPane("main");
+                setFullView(true);
+              }}
+              models={simpleModels}
+              repeatedLabels={repeatedModelLabels(simpleAll)}
+              query={simpleQuery}
+              // One button that opens the list and folds it back, so focus stays on it.
+              showAll={simpleAll.length > simpleSuggested.length && !simpleQuery ? {
+                count: simpleAll.length,
+                open: showAll,
+                onToggle: () => {
+                  if (showAll) {
+                    resetList();
+                    return;
+                  }
+                  setShowAll(true);
+                  if (railInstance) lookForLocalIn(railInstance);
+                },
+              } : null}
+              onRefresh={refreshModels}
+              refreshing={refreshing}
+              search={simpleSearch ? (
+                <ModelSearch
+                  value={query}
+                  local={simpleOfficial.length === 0}
+                  onChange={setQuery}
+                  onEscape={() => (query ? setQuery("") : setOpen(false))}
+                />
+              ) : undefined}
+              currentModelId={currentModel}
+              botModelId={botModelId}
+              onPick={(model) => railInstance && pick(railInstance, model)}
+              variantsRow={active?.capabilities?.modelVariants ? (
+                // A closed select shows only its choice, so it keeps a short name.
+                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId) && simpleUpdatesBotDefault}
+                  label={<span className="shrink-0 text-[12px] font-medium text-ink-secondary">{t("model.simple.reasoning")}</span>} />
+              ) : undefined}
+              effort={simpleEffort}
+              onManage={() => {
+                setOpen(false);
+                dispatch({ type: "toggleAppSettings", open: true, section: "engines" });
+              }}
+            />
+          ) : (
+          <>
           {pickerInstances.length > 0 && <ModelEngineRail instances={pickerInstances} selectedInstance={railInstance} claudeInstance={claudeRailInstance} openaiInstance={openaiRailInstance} onSelect={selectRail}
             onAddApiKeys={window.ogb?.remoteClient?.active === true ? undefined : openApiKeys} />}
 
@@ -774,7 +1018,7 @@ export function ModelPicker({
                   ))}
                 </div>
                 <p className="mt-1 text-[11px] text-ink-secondary">
-                  {scope === "bot" ? "This thread, groups, and new threads. Other existing threads keep their model." : "Other threads and groups keep their model."}
+                  {scope === "bot" ? "The bot's model: this thread, groups, and every thread that uses the bot's model." : "This thread only. It keeps this model when the bot's model changes."}
                 </p>
               </div>
             )}
@@ -1020,11 +1264,24 @@ export function ModelPicker({
               {window.ogb?.remoteClient?.active !== true && (
                 <button type="button" data-model-add-api-keys onClick={openApiKeys} className="flex shrink-0 items-center gap-1.5 px-4 py-2 text-[12px] text-ink-secondary hover:bg-control/60 hover:text-ink">
                   <KeyRound size={12} aria-hidden="true" />
-                  {t("model.addApiKeys")}
+                  {apiKeysLabel(pickerInstances)}
                 </button>
               )}
             </div>
           </div>
+          </>
+          )}
+          </div>
+        </div>
+      )}
+      {!contained && changedBotModel && !open && ownModelThreads > 0 && (
+        <div data-thread-models-notice role="status"
+          className="absolute right-0 top-full z-30 mt-2 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-xl border border-hairline/50 bg-card py-2 pl-3 pr-2 shadow-xl shadow-black/30">
+          <ThreadModelsLine bot={profile} />
+          <button type="button" aria-label={t("common.close")} onClick={() => setChangedBotModel(false)}
+            className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-control/60 hover:text-ink">
+            <X size={13} aria-hidden="true" />
+          </button>
         </div>
       )}
       <ConfirmDialog
@@ -1043,6 +1300,7 @@ export function ModelPicker({
           dispatch({ type: "setModel", botId: pendingSwitch.botId, threadId: pendingSwitch.threadId,
             selection: pendingSwitch.selection, updateBotDefault: pendingSwitch.updateBotDefault,
             resetApprovalToAsk: true });
+          if (pendingSwitch.updateBotDefault && threadId) setChangedBotModel(true);
           setPendingSwitch(null);
         }}
       />

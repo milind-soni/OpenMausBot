@@ -62,13 +62,15 @@ await import(${JSON.stringify(fake)});
     if (!rejects) assert(rpc.indexOf("session/set_config_option") < rpc.indexOf("session/prompt"));
     evidence.push({ name, model, wait, messages, calls, rpc });
   }
-  // Qwen acknowledges a live load without replacing its MCP configuration.
-  // Each new bearer must therefore resume on a fresh child. Real proxy calls
-  // prove authentication on session/new and two successive session/load turns.
+  // Qwen acknowledges a live load without replacing its MCP configuration, so
+  // a changed bearer would need a fresh child. OMB keeps the agents bearer
+  // while the grants are unchanged, so one child and its live session serve
+  // every turn. Real proxy calls prove authentication on each turn, and the
+  // bearer is refused once each turn settles.
   unlinkSync(blockSwitch);
   writeFileSync(useAgents, "1");
   writeFileSync(rpcAppend, "");
-  const created = await control(["new-bot", "--name", "Rotating credentials"]) as { bot: { id: string } };
+  const created = await control(["new-bot", "--name", "Warm credentials"]) as { bot: { id: string } };
   const id = created.bot.id;
   await control(["set-model", "--bot", id, "--instance", "qwen", "--model", expected.options[1].id]);
   const auto = await fetch(`${url}/api/bots/${id}`, {
@@ -90,26 +92,24 @@ await import(${JSON.stringify(fake)});
     assert.equal(text.match(/^list_bots:/gm)?.length, turn * 2, "both roster calls must succeed on every turn");
     assert.equal(text.match(/^session_search:/gm)?.length, turn, "history search must succeed on every turn");
     pids.add(pid);
-    assert.equal(pids.size, turn, "rotated MCP credentials require a fresh Qwen process");
-    assert.equal(rpc.filter(({ method }) => method === "initialize").length, turn);
+    assert.equal(pids.size, 1, "an unchanged bearer keeps one Qwen process");
+    assert.equal(rpc.filter(({ method }) => method === "initialize").length, 1);
     assert.equal(rpc.filter(({ method }) => method === "session/new").length, 1);
-    assert.equal(rpc.filter(({ method }) => method === "session/load").length, turn - 1);
+    assert.equal(rpc.filter(({ method }) => method === "session/load").length, 0);
     assert.equal(rpc.filter(({ method }) => method === "session/prompt").length, turn);
     const currentRpc = rpc.filter((call) => call.pid === pid).map((call) => call.method);
     const selection = currentRpc.indexOf("session/set_config_option");
     assert(selection >= 0 && selection < currentRpc.indexOf("session/prompt"));
     const calls = JSON.parse(readFileSync(`${dump}.config.json`, "utf8")) as Array<{ params: { value?: string } }>;
-    assert(calls.some((call) => call.params.value === expected.options[1].id), "every resumed turn must restore the chosen endpoint");
+    assert(calls.some((call) => call.params.value === expected.options[1].id), "the session must run on the chosen endpoint");
     const servers = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8")) as Array<{ name: string; env: Array<{ name: string; value: string }> }>;
     const token = servers.find((server) => server.name === "agents")?.env.find((entry) => entry.name === "OMB_COMMS_TOKEN")?.value;
     assert(token, "the agents proxy must receive turn credentials");
     tokens.add(token);
-    assert.equal(tokens.size, turn, "each turn must receive a distinct token");
-    for (const expired of tokens) {
-      const response = await fetch(`${url}/api/internal/agents?self=${id}`, { headers: { authorization: `Bearer ${expired}` } });
-      revokedStatuses.push(response.status);
-      assert.equal(response.status, 401, "settled turns must lose agents access");
-    }
+    assert.equal(tokens.size, 1, "every turn keeps the same agents bearer");
+    const response = await fetch(`${url}/api/internal/agents?self=${id}`, { headers: { authorization: `Bearer ${token}` } });
+    revokedStatuses.push(response.status);
+    assert.equal(response.status, 401, "a settled turn's bearer must lose agents access");
   }
   console.log(JSON.stringify({ ok: true, fixture: fixture.info, evidence }, null, 2));
 } catch (error) {

@@ -61,12 +61,9 @@ export function localComputerDisabledReason({
   return "CUA Driver is not ready for local computer control.";
 }
 
-export function linuxAutoDescription(): string {
-  return "Auto reuses an existing Boat cloud computer; otherwise computer use stays off.";
-}
-
 export type BoatPanelAction =
-  | "ensure-boat"
+  | "cloud-new"
+  | "cloud-asleep"
   | "attach-ready-boat"
   | "busy-boat"
   | "team-boat"
@@ -86,10 +83,12 @@ export function isReadyBoatState(state: string | null | undefined): boolean {
 const SLEEPING_BOAT_STATES = new Set(["archived", "stopped"]);
 
 /** Mirror the turn router's Boat choice without letting a passive panel open
- * mutate infrastructure. Auto only reports an existing Boat's current state;
- * it never creates, wakes, bootstraps, or opens one. This is deliberately
- * independent of the engine: even the boat-native Computer engine needs an
- * explicit Cloud choice before the panel may provision. */
+ * mutate infrastructure. Opening the panel never creates, wakes, bootstraps,
+ * or opens a Boat: with Cloud computer chosen the bot's first computer call
+ * starts it, and the panel says so (cloud-new, cloud-asleep) next to the
+ * person's own button to start it now. Auto only reports an existing Boat's
+ * current state. This is deliberately independent of the engine: every engine
+ * needs an explicit Cloud choice before anything may provision. */
 export function resolveBoatPanelAction({
   computer,
   configured,
@@ -121,10 +120,12 @@ export function resolveBoatPanelAction({
   }
   if (explicitCloud) {
     if (!canUseCloud) return "auto-unavailable";
-    // Mid-turn the panel only watches: a ready boat is shown as-is (its
-    // frames already stream in), anything else is left to the turn.
-    if (busy) return boatState && READY_BOAT_STATES.has(boatState) ? "attach-ready-boat" : "busy-boat";
-    return "ensure-boat";
+    // A ready boat is shown as-is (mid-turn its frames already stream in).
+    if (boatState && READY_BOAT_STATES.has(boatState)) return "attach-ready-boat";
+    // Mid-turn the panel only watches: anything else is the turn's to start
+    // on its first computer call, and so is a boat already starting.
+    if (busy || (boatState && !SLEEPING_BOAT_STATES.has(boatState))) return "busy-boat";
+    return boatState ? "cloud-asleep" : "cloud-new";
   }
   if (canUseCloud && boatState) {
     if (READY_BOAT_STATES.has(boatState)) return "show-ready-boat";
@@ -132,6 +133,20 @@ export function resolveBoatPanelAction({
     return "show-pending-boat";
   }
   return autoLocal ? "local" : "auto-unavailable";
+}
+
+/** What the panel shows while it watches a conversation's cloud computer
+ * (busy-boat). A missing or sleeping computer is started only by the bot's
+ * first computer call, so there is nothing to wait for: the panel says what
+ * it found, without a spinner. Only a computer that is really starting spins:
+ * a turn bringing it up, or one still coming up after a turn. */
+export function busyBoatView(boatState: string | null, busy: boolean): {
+  line: "computer.cloud.new" | "computer.cloud.asleep" | "computer.phase.busyBoat" | "computer.phase.starting";
+  spinner: boolean;
+} {
+  if (!boatState) return { line: "computer.cloud.new", spinner: false };
+  if (SLEEPING_BOAT_STATES.has(boatState)) return { line: "computer.cloud.asleep", spinner: false };
+  return { line: busy ? "computer.phase.busyBoat" : "computer.phase.starting", spinner: true };
 }
 
 /** A stale ready phase can survive one render while the selected bot or its

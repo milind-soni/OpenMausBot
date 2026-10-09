@@ -19,13 +19,21 @@ A bot keeps its identity, instructions, memory, approved skills, connected tools
 
 The conversations previously called **Tasks** are now **Threads**. Expand a bot in the sidebar and choose **New thread**, or use **All threads** to find an older conversation. Existing history is preserved.
 
-Each thread remembers its own model and has its own progress, approvals, and Stop control. Start another thread while one is working; changing or stopping one does not redirect its siblings. Up to three direct threads can run per bot, including threads waiting for your approval.
+Each thread has its own progress, approvals, and Stop control. Start another thread while one is working; stopping one does not redirect its siblings. Up to three direct threads can run per bot, including threads waiting for your approval.
+
+## Threads use their bot's model
+
+Every thread runs on its bot's model. Change the bot's model and its threads change with it, including old ones a routine, a delegation or a hand-off opens again. A thread keeps a model of its own only when you pick one in that thread; choose the bot's own model in that thread's model menu (for a bot named Ada, **Use Ada's model**) to put it back on the bot's. A thread that follows the bot shows **(bot's model)** beside that model.
+
+When some threads use their own model, the bot's model setting says how many, with **Switch them too**. That moves them all back onto the bot's model once; it is not a setting. A thread that is working keeps its model until it finishes.
+
+If a thread's own model can't run (its engine was removed, turned off, can't start, or isn't allowed), the turn runs on the bot's model instead, the thread uses the bot's model from then on, and one line in the thread says so. A thread whose engine is signed out does the same only when the bot's model is on another engine that can run; on the same engine you see the sign-in prompt.
 
 ## Folders keep related threads together
 
 Folders are optional organization under a bot. For example, Pepper can have an **Email** folder containing **Triage Gmail** and **Triage iCloud**, alongside a **Website** folder.
 
-A thread chooses its model in the chat header and its Ask/Auto setting inside the composer. Folders have no model or permission settings. Moving a thread does not change its model, account, or access, or interrupt it. Removing a folder leaves its conversations ungrouped; it does not delete their history.
+A thread can choose its own model in the chat header and its Ask/Auto setting inside the composer. Folders have no model or permission settings. Moving a thread does not change its model, account, or access, or interrupt it. Removing a folder leaves its conversations ungrouped; it does not delete their history.
 
 All the bot's threads share its saved memory and skills; they do not automatically receive every sibling transcript. Folders are not separate accounts or privacy boundaries. Bot profiles can carry different access preferences, but app organization is not an operating-system sandbox.
 

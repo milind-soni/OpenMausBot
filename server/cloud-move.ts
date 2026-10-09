@@ -1,16 +1,18 @@
-// Move to Cloud (docs/cloud-pro.md): a person's one-time copy of their local
-// workspace onto their OMB Cloud home. The desktop exports the ordinary
-// encrypted workspace backup (workspace-backup.ts) and uploads it here in
-// parts; this machine then previews and restores it like any other backup,
-// so everything that backup policy keeps out (credentials, sign-ins, pairing
-// and sessions, runtime state) stays where it is on both sides.
+// Copy this computer here (docs/copy-workspace.md): a person's copy of their
+// desktop's workspace onto a server they own and added in the desktop app, an
+// OMB Cloud home included. The desktop exports the ordinary encrypted
+// workspace backup (workspace-backup.ts) and uploads it here in parts; this
+// server then previews and restores it like any other backup, so everything
+// that backup policy keeps out (credentials, sign-ins, pairing and sessions,
+// runtime state) stays where it is on both sides.
 //
 // What this file adds: the workspace's size and contents, a resumable upload
-// slot, the space check for the machine's fixed-size volume, a backup of the
-// Cloud's own workspace taken before it is replaced ("Restore previous Cloud"
-// swaps it back), and the tidying that keeps that backup the only copy left
-// behind. Everything lives under `.backups`, which no snapshot includes and
-// no restore replaces.
+// slot, the space check for the server's volume, a backup of this server's
+// own workspace taken before it is replaced (Swap back puts it back), and the
+// tidying that keeps that backup the only copy left behind. Everything lives
+// under `.backups`, which no snapshot includes and no restore replaces. The
+// file and folder names still say "cloud" (`cloud-move`, `cloud-previous`):
+// renaming them would orphan the swap back on servers already running.
 import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
@@ -95,6 +97,23 @@ export function freeVolumeBytes(path: string): number {
   return free > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(free);
 }
 
+/** The whole volume, so the app can tell how far a disk that grows may still grow. */
+export function totalVolumeBytes(path: string): number {
+  const disk = statfsSync(path, { bigint: true });
+  const total = disk.blocks * disk.bsize;
+  return total > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(total);
+}
+
+/** Routines switched on in this workspace. A move brings them paused, so the
+ * app says how many to turn on there. */
+export function enabledRoutineCount(dataDir: string): number {
+  try {
+    const value: unknown = JSON.parse(readFileSync(join(dataDir, "routines.json"), "utf8"));
+    const routines = value && typeof value === "object" ? (value as { routines?: unknown }).routines : undefined;
+    return Array.isArray(routines) ? routines.filter((routine) => routine && typeof routine === "object" && (routine as { enabled?: unknown }).enabled !== false).length : 0;
+  } catch { return 0; }
+}
+
 /** Peak extra space a move of `upload` bytes needs: the upload, its decrypted
  * copy and its staged files exist together while it is checked; the restore
  * then installs from the staged copy. Replacing a workspace first backs it up
@@ -154,9 +173,9 @@ export function discardUpload(dataDir: string): void {
 export function validUploadDeclaration(input: { sha256: unknown; bytes: unknown; files?: unknown }): { sha256: string; bytes: number } {
   if (typeof input.sha256 !== "string" || !SHA256.test(input.sha256)) throw fail("This is not a workspace backup.", 400);
   if (!Number.isSafeInteger(input.bytes) || (input.bytes as number) < MIN_BYTES) throw fail("This is not a workspace backup.", 400);
-  if ((input.bytes as number) > CLOUD_MOVE_MAX_BYTES) throw fail("This workspace is larger than the 10 GB a move can carry.", 413);
+  if ((input.bytes as number) > CLOUD_MOVE_MAX_BYTES) throw fail("This workspace is larger than the 10 GB a copy can carry.", 413);
   if (input.files !== undefined && (!Number.isSafeInteger(input.files) || (input.files as number) < 0 || (input.files as number) > CLOUD_MOVE_MAX_FILES)) {
-    throw fail("This workspace has more than the 100,000 files a move can carry.", 413);
+    throw fail("This workspace has more than the 100,000 files a copy can carry.", 413);
   }
   return { sha256: input.sha256, bytes: input.bytes as number };
 }
@@ -181,7 +200,7 @@ export function beginUpload(dataDir: string, declared: { sha256: string; bytes: 
  * upload stands (409, `received`). A failed part is cut back off. */
 export async function writeUploadPart(dataDir: string, sha256: string, offset: number, length: number, body: AsyncIterable<Buffer>, now = Date.now()): Promise<number> {
   const meta = readUploadMeta(dataDir);
-  if (!meta || meta.sha256 !== sha256) throw fail("This upload is not in progress on your Cloud. Start the move again.", 404);
+  if (!meta || meta.sha256 !== sha256) throw fail("This upload is not in progress on this server. Start the copy again.", 404);
   if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length <= 0 || length > CLOUD_MOVE_MAX_PART_BYTES) {
     throw fail("Invalid upload part.", 400);
   }
@@ -212,20 +231,20 @@ export async function writeUploadPart(dataDir: string, sha256: string, offset: n
 /** The complete upload's path, once its size and SHA-256 match what was declared. */
 export async function completedUpload(dataDir: string, sha256: string): Promise<string> {
   const status = uploadStatus(dataDir);
-  if (!status || status.sha256 !== sha256) throw fail("This upload is not in progress on your Cloud. Start the move again.", 404);
+  if (!status || status.sha256 !== sha256) throw fail("This upload is not in progress on this server. Start the copy again.", 404);
   if (status.received !== status.bytes) throw fail("The upload is not complete yet.", 409, { received: status.received });
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(uploadPartPath(dataDir), { highWaterMark: 1024 * 1024 })) hash.update(chunk as Buffer);
   if (hash.digest("hex") !== sha256) {
     discardUpload(dataDir);
-    throw fail("The uploaded file was damaged on the way. Start the move again.", 400);
+    throw fail("The uploaded file was damaged on the way. Start the copy again.", 400);
   }
   return uploadPartPath(dataDir);
 }
 
-// ── The previous Cloud ──────────────────────────────────────────────────
-// Before a move replaces the Cloud's workspace, and before Restore previous
-// Cloud swaps it back, the workspace about to be replaced is backed up. That
+// ── The previous workspace ("previous Cloud" in names) ──────────────────
+// Before a copy replaces this server's workspace, and before Swap back swaps
+// it back, the workspace about to be replaced is backed up. That
 // one archive is the only undo point kept: once startup has installed the
 // restore, the restore's own safety copy and staged files are deleted
 // (tidyCloudMoveStorage). The archive's random password sits beside it: this
@@ -293,7 +312,7 @@ export function discardNextPreviousCloud(dataDir: string): void {
 /** Stage the previous Cloud for an ordinary restore; its archive stays. */
 export async function stagePreviousCloud(dataDir: string, appVersion: string): Promise<{ id: string; summary: WorkspaceBackupSummary; bytes: number }> {
   const previous = readPrevious(previousFolder(dataDir));
-  if (!previous || isEmptyWorkspace(previous.contents)) throw fail("There is no previous Cloud to restore.", 404);
+  if (!previous || isEmptyWorkspace(previous.contents)) throw fail("There is nothing on this server to swap back to.", 404);
   const archive = join(previousFolder(dataDir), "workspace.ombbackup");
   const staged = await stageWorkspaceBackup(dataDir, archive, { password: previous.password, currentAppVersion: appVersion });
   return { ...staged, bytes: lstatSync(archive).size };
@@ -343,7 +362,7 @@ function pendingRestoreId(dataDir: string): string | null {
   } catch { return null; }
 }
 
-/** At a Cloud home's startup, after any pending restore was applied:
+/** At every server's startup, after any pending restore was applied:
  * - a next previous Cloud becomes the previous Cloud once its restore is
  *   installed, and is dropped otherwise;
  * - moves' and swaps' restores, once settled, keep no safety copy or staged
