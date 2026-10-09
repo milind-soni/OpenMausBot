@@ -1,5 +1,6 @@
 // "files" is a Simple-mode tab; Advanced mode reads it back as "computer".
-export type ComputerPanelView = "computer" | "android" | "browser" | "routines" | "files";
+// "data" is the Data tab (shared/data-surface.ts DATA_PANEL_VIEW), in both modes.
+export type ComputerPanelView = "computer" | "android" | "browser" | "routines" | "files" | "data";
 
 const STORAGE_PREFIX = "omb-computer-panel-view";
 
@@ -13,7 +14,7 @@ export function readComputerPanelView(
 ): ComputerPanelView {
   try {
     const value = storage.getItem(storageKey(botId));
-    if (value === "android" || value === "browser" || value === "routines" || value === "files") return value;
+    if (value === "android" || value === "browser" || value === "routines" || value === "files" || value === "data") return value;
   } catch {
     // Storage can be unavailable in hardened or private renderer sessions.
   }
