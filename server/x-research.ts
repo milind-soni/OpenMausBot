@@ -24,6 +24,11 @@ const TEXT_LIMIT = 1_500;
 const QUOTE_LIMIT = 300;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const TIMEOUT_MS = 30_000;
+/** Characters an answer may take: under the agents server's 24,000-character
+ * cap (server/tool-results.ts), so the bot never needs tool_result_read for
+ * it. Long posts can push 50 of them past that, so trailing ones are dropped
+ * and `more` says so. */
+const RESULT_BUDGET = 22_000;
 
 /** treg catalog ids: the cheapest scraper for each job, then treg's routed
  * endpoint for the same job (identity fields only, one page). */
@@ -78,7 +83,8 @@ export interface XPost {
   isReply?: boolean;
   quoted?: XQuoted;
 }
-export interface XPostList { posts: XPost[]; newestId?: string; more: boolean }
+/** `newestId` and `more` come first so they survive any cut. */
+export interface XPostList { newestId?: string; more: boolean; posts: XPost[] }
 export interface XPostWithReplies { post: XPost; replies?: XPost[]; moreReplies?: boolean }
 export interface XProfile {
   handle: string;
@@ -249,6 +255,16 @@ function cursorOf(answer: Row): string | undefined {
   return firstText(at(output, "data", "nextCursor"), at(output, "next_cursor"), at(output, "nextCursor"));
 }
 
+/** How many leading posts fit in `budget` characters of JSON. */
+function fitting(posts: XPost[], budget: number): number {
+  let used = 0;
+  for (let i = 0; i < posts.length; i++) {
+    used += JSON.stringify(posts[i]).length + 1;
+    if (used > budget) return i;
+  }
+  return posts.length;
+}
+
 function newestOf(posts: XPost[]): string | undefined {
   let newest: bigint | undefined;
   for (const post of posts) {
@@ -309,7 +325,7 @@ async function withFallback<T>(primary: () => Promise<T>, fallback: () => Promis
 interface ListOptions {
   limit: number;
   sinceId?: string;
-  /** Newest-first lists stop at the first post already seen. */
+  /** Newest-first lists stop paging once a page shows a post already seen. */
   newestFirst: boolean;
   keepReplies: boolean;
   /** Send limit and cursor (catalog endpoints; routed ones take neither). */
@@ -369,20 +385,19 @@ export function createTregXClient(options: { token: string; fetcher?: typeof fet
     for (let page = 0; page < opts.pages; page++) {
       const answer = await call(endpoint, opts.paged ? { ...body, limit: opts.limit, ...(cursor ? { cursor } : {}) } : body);
       const rows = rowsOf(answer);
+      // The page is paid for, so every row is read: an old post can sit among
+      // new ones (a pinned post, or a retweet a scraper lists under the
+      // original's id). An old post past the first row ends the paging.
       let reachedSeen = false;
-      for (const raw of rows) {
+      rows.forEach((raw, index) => {
         const post = toPost(raw, opts.knownHandle);
-        if (!post || (!opts.keepReplies && post.isReply === true)) continue;
+        if (!post || (!opts.keepReplies && post.isReply === true)) return;
         if (since !== undefined && BigInt(post.id) <= since) {
-          // A pinned post is listed first however old it is.
-          if (opts.newestFirst && at(raw, "isPinned") !== true) {
-            reachedSeen = true;
-            break;
-          }
-          continue;
+          if (opts.newestFirst && index > 0 && at(raw, "isPinned") !== true) reachedSeen = true;
+          return;
         }
         posts.push(post);
-      }
+      });
       cursor = cursorOf(answer);
       more = Boolean(cursor) && rows.length > 0 && !reachedSeen;
       if (!more || posts.length >= opts.limit) break;
@@ -391,7 +406,12 @@ export function createTregXClient(options: { token: string; fetcher?: typeof fet
       posts.length = opts.limit;
       more = true;
     }
-    return { posts, newestId: newestOf(posts), more };
+    const fit = fitting(posts, RESULT_BUDGET);
+    if (fit < posts.length) {
+      posts.length = fit;
+      more = true;
+    }
+    return { newestId: newestOf(posts), more, posts };
   }
 
   return {
@@ -419,7 +439,8 @@ export function createTregXClient(options: { token: string; fetcher?: typeof fet
         () => list(TREG_X_ENDPOINTS.replies, { url }, { limit: REPLIES_PAGE, newestFirst: false, keepReplies: true, paged: true, pages: 1 }),
         () => list(TREG_X_ENDPOINTS.repliesRouted, { tweet_id: id }, { limit: REPLIES_PAGE, newestFirst: false, keepReplies: true, paged: false, pages: 1 }),
       );
-      return { post, replies: page.posts, moreReplies: page.more };
+      const fit = fitting(page.posts, RESULT_BUDGET - JSON.stringify(post).length);
+      return { post, replies: page.posts.slice(0, fit), moreReplies: page.more || fit < page.posts.length };
     },
     async profile(handle) {
       // Routed already: treg tries each scraper and answers one normalized

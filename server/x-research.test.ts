@@ -252,6 +252,32 @@ describe("search", () => {
   });
 });
 
+describe("result size", () => {
+  it("keeps a big answer under the agents result cap, newest id and more first", async () => {
+    const rows = Array.from({ length: 50 }, (_, i) => searchRow(String(1000 - i), { text: "x".repeat(900) }));
+    const { fetcher } = fakeFetch({ body: anyapi({ items: rows, nextCursor: "" }) });
+    const result = await clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 50 });
+    expect(JSON.stringify(result).length).toBeLessThanOrEqual(22_000);
+    expect(Object.keys(result).slice(0, 2)).toEqual(["newestId", "more"]);
+    expect(result.posts.length).toBeLessThan(50);
+    expect(result.posts[0]!.id).toBe("1000");
+    expect(result.newestId).toBe("1000");
+    expect(result.more).toBe(true);
+  });
+
+  it("trims a post's replies the same way", async () => {
+    const replies = Array.from({ length: 20 }, (_, i) => ({ authorHandle: "r", id: String(500 + i), text: "y".repeat(1_400) }));
+    const { fetcher } = fakeFetch(
+      { body: { output: { found: true, data: { id: "42", text: "hello" } } } },
+      { body: anyapi({ items: replies, nextCursor: "" }) },
+    );
+    const result = await clientWith(fetcher).post({ id: "42", replies: true });
+    expect(JSON.stringify(result).length).toBeLessThanOrEqual(22_000);
+    expect(result.replies!.length).toBeLessThan(20);
+    expect(result.moreReplies).toBe(true);
+  });
+});
+
 describe("userPosts", () => {
   it("reads an account's posts, naming the author, without its replies by default", async () => {
     const { fetcher, calls } = fakeFetch({ body: anyapi({ tweets: [timelineRow("3"), timelineRow("2", { isReply: true })], nextCursor: "" }) });
@@ -269,6 +295,14 @@ describe("userPosts", () => {
 
   it("skips an old pinned post instead of stopping at it", async () => {
     const rows = [timelineRow("50", { isPinned: true }), timelineRow("120"), timelineRow("110"), timelineRow("100"), timelineRow("90")];
+    const { fetcher } = fakeFetch({ body: anyapi({ tweets: rows, nextCursor: "more" }) });
+    const result = await clientWith(fetcher).userPosts({ handle: "maus", limit: 20, sinceId: "100", includeReplies: false });
+    expect(result.posts.map((post) => post.id)).toEqual(["120", "110"]);
+    expect(result.more).toBe(false);
+  });
+
+  it("keeps reading past one old post a scraper lists out of order, such as a retweet under its original id", async () => {
+    const rows = [timelineRow("120"), timelineRow("60"), timelineRow("110"), timelineRow("100"), timelineRow("90")];
     const { fetcher } = fakeFetch({ body: anyapi({ tweets: rows, nextCursor: "more" }) });
     const result = await clientWith(fetcher).userPosts({ handle: "maus", limit: 20, sinceId: "100", includeReplies: false });
     expect(result.posts.map((post) => post.id)).toEqual(["120", "110"]);
