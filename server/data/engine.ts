@@ -44,6 +44,8 @@ type Cell = string | number | boolean | null;
 export const DATA_DB_FILE = "data.duckdb";
 export const DATA_TMP_DIR = "data-tmp";
 const IDLE_CLOSE_MS = 10 * 60_000;
+/** A first-time INSTALL downloads the extension; it gets this budget, not the statement's. */
+export const EXTENSION_INSTALL_TIMEOUT_MS = 5 * 60_000;
 const HISTOGRAM_BINS = 20;
 const SAMPLE_SCAN_ROWS = 1_000;
 const STATS_CACHE_MAX = 64;
@@ -59,6 +61,8 @@ export interface DataEngineOptions {
   env?: NodeJS.ProcessEnv;
   /** Minutes of silence before a bot's database closes; default 10. */
   idleMs?: number;
+  /** The loaded @duckdb/node-api module. Default: loaded from duckdbDirectory() on first use. */
+  binding?: Binding;
 }
 
 /** The directory whose node_modules/@duckdb holds the binding: a packaged
@@ -192,19 +196,20 @@ type InterruptCause = "timeout" | "cancelled";
 
 /** DuckDB's text travels verbatim; only the code and the position are ours. */
 function failureFrom(error: unknown, sql: string, interrupted: InterruptCause | null, timeoutMs: number): DataFailure {
+  // Already structured (loadExtensions' hint, say): an interrupt must not reword it as a slow query.
+  if (error instanceof DataFailure) return error;
   const message = error instanceof Error ? error.message : String(error);
   if (interrupted === "timeout") {
     return new DataFailure({ code: "timeout", message, sql, retryable: true, hint: `Stopped after ${timeoutMs} ms. Narrow the query or aggregate first.` });
   }
   if (interrupted === "cancelled") return new DataFailure({ code: "cancelled", message, sql });
-  if (error instanceof DataFailure) return error;
   const line = parseLine(message);
   if (missingTableName(message)) return new DataFailure({ code: "table_not_found", message, sql, line });
   return new DataFailure({ code: "sql_error", message, sql, line });
 }
 
 /** One connection, one statement at a time, with the interrupt aimed at it. */
-class Lane {
+export class Lane {
   private queue: Promise<unknown> = Promise.resolve();
   private running: { interrupted: InterruptCause | null } | null = null;
 
@@ -390,10 +395,18 @@ class BotDb implements BotDatabase {
 
   async run(sql: string, options: RunOptions): Promise<RunResult> {
     const maxRows = options.maxRows === undefined ? Infinity : Math.max(0, options.maxRows);
-    return this.statement(options.connection, sql, options, async (open, conn) => {
-      await loadExtensions(conn, options.extensions ?? []);
-      return this.read(open, conn, sql, maxRows);
-    });
+    await this.loadExtensions(options);
+    return this.statement(options.connection, sql, options, (open, conn) => this.read(open, conn, sql, maxRows));
+  }
+
+  /** Extensions load as their own lane step, ahead of the statement and on
+   * their own budget: a first-time INSTALL is a download, which must not
+   * count against the statement's timeout. */
+  private async loadExtensions(options: RunOptions): Promise<void> {
+    const extensions = options.extensions ?? [];
+    if (!extensions.length) return;
+    const label = extensions.map((extension) => `INSTALL ${extension} FROM core`).join("; ");
+    await this.statement(options.connection, label, { timeoutMs: EXTENSION_INSTALL_TIMEOUT_MS, signal: options.signal }, (_open, conn) => loadExtensions(conn, extensions));
   }
 
   async materialise(sql: string, name: string, options: RunOptions): Promise<MaterialiseResult> {
@@ -725,6 +738,7 @@ class Engine implements DataEngine {
     this.dataDir = options.dataDir ?? DATA_DIR;
     this.idleMs = options.idleMs ?? IDLE_CLOSE_MS;
     this.folder = options.botFolder ?? defaultBotFolder;
+    if (options.binding) this.loaded = { binding: options.binding };
   }
 
   private load(): { binding: Binding } | { reason: string } {

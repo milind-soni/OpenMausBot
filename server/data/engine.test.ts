@@ -10,7 +10,7 @@ import type { DuckDBConnection } from "@duckdb/node-api";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
-import { closeNames, createDataEngine, dataEngine, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
+import { EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
 import { DataFailure, type BotDatabase, type DataEngine } from "./types.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-data-engine-"));
@@ -154,6 +154,73 @@ describe("extensions", () => {
     expect(error.error).toMatchObject({ code: "sql_error", message: "Could not connect", retryable: true, hint: expect.stringContaining("excel extension") });
     expect(error.error.hint).toContain("http://extensions.duckdb.org");
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  /** A binding whose connections answer `SELECT 1`, spend `installMs` on an
+   * INSTALL (honouring interrupt() like a download would), and fail an
+   * INSTALL with `installError` when set. */
+  function fakeBinding(installMs: number) {
+    const statements: string[] = [];
+    const fake = { statements, installError: null as Error | null, interrupts: 0 };
+    const result = (select: boolean) => ({
+      statementType: select ? 1 : 0, rowCount: select ? 1 : 0, columnCount: select ? 1 : 0, chunkCount: select ? 1 : 0,
+      columnName: () => "one", columnType: () => ({ toString: () => "INTEGER" }),
+      getChunk: () => ({ convertRows: (convert: (value: unknown, type: unknown) => unknown) => [[convert(1, { typeId: 0 })]] }),
+    });
+    const connection = () => {
+      let abandon: (() => void) | null = null;
+      return {
+        async run(sql: string) {
+          statements.push(sql);
+          if (sql.startsWith("INSTALL")) {
+            if (fake.installError) throw fake.installError;
+            await new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(resolve, installMs);
+              abandon = () => { clearTimeout(timer); reject(new Error("INTERRUPT Error: Interrupted!")); };
+            });
+          }
+          return result(sql.startsWith("SELECT"));
+        },
+        runAndReadAll: async () => ({ getRowsJson: () => [] }),
+        interrupt() { fake.interrupts++; abandon?.(); },
+        closeSync() {},
+      };
+    };
+    const binding = {
+      version: () => "fake",
+      DuckDBInstance: { create: async () => ({ connect: async () => connection(), closeSync() {} }) },
+      StatementType: { SELECT: 1, EXPLAIN: 2 },
+      DuckDBTypeId: { BLOB: 99 },
+      JsonDuckDBValueConverter: (value: unknown) => value,
+    };
+    return Object.assign(fake, { connection, binding: binding as unknown as NonNullable<DataEngineOptions["binding"]> });
+  }
+
+  it("installs on its own budget ahead of the statement, so a download outlasting the statement timeout still runs it", async () => {
+    const fake = fakeBinding(300);
+    const db = await engine({ binding: fake.binding }).forBot("extensions");
+    const started = Date.now();
+    const seen = await db.run("SELECT 1", { ...bot, timeoutMs: 100, extensions: ["excel"] });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(250);
+    expect(seen.rows).toEqual([[1]]);
+    expect(fake.interrupts).toBe(0);
+    expect(fake.statements.slice(1)).toEqual(["INSTALL excel FROM core", "LOAD excel", "SELECT 1"]);
+    // The budget is the extension step's, not the statement's.
+    expect(EXTENSION_INSTALL_TIMEOUT_MS).toBe(5 * 60_000);
+    fake.installError = new Error("Could not connect");
+    const offline = await failure(db.run("SELECT 1", { ...bot, extensions: ["excel"] }));
+    expect(offline.error).toMatchObject({ code: "sql_error", message: "Could not connect", retryable: true });
+    expect(offline.error.hint).toContain("http://extensions.duckdb.org");
+  });
+
+  it("keeps the extension hint when the install itself is cut off, instead of calling it a slow query", async () => {
+    const fake = fakeBinding(300);
+    const lane = new Lane(fake.connection() as never);
+    const cut = await failure(lane.run("INSTALL excel FROM core", { timeoutMs: 100 }, (conn) => loadExtensions(conn, ["excel"])));
+    expect(fake.interrupts).toBe(1);
+    expect(cut.error).toMatchObject({ code: "sql_error", message: "INTERRUPT Error: Interrupted!", retryable: true });
+    expect(cut.error.hint).toContain("http://extensions.duckdb.org");
+    expect(cut.error.hint).not.toContain("Narrow the query");
   });
 });
 
