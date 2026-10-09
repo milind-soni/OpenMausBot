@@ -169,10 +169,38 @@ repository, that called `startFakeOpenAiLive` and `emit` the way the e2e does.
 - `pnpm exec vitest run server/live-call.e2e.test.ts server/chat-followups-restart.test.ts`:
   2 files, 18 tests passed in 258 s with the machine's load average above 150.
   The 13 unit files in the second and third commands above: 404 passed.
-- Since that run the final fix wave changed what the renderer draws. These are
-  pinned by `src/components/CallRecordRow.test.ts` and were not driven in the
-  fixture again: the record is a `group`, so the snapshot lists
-  `group "Live call: …"` where this run saw `region`; the words a screen reader
-  hears after a step are the tool chip's own ("Running a command (Completed)",
-  where this run saw "(Done)"); and a step the harness never settled reads as
+- Since that run the final fix wave changed what the renderer draws: the record
+  is a `group`, so the snapshot lists `group "Live call: …"` where this run saw
+  `region`; the words a screen reader hears after a step are the tool chip's own
+  ("Running a command (Completed)", where this run saw "(Done)"); a long line
+  truncates inside the pill; and a step the harness never settled reads as
   running only while the chat works, and as a dash after.
+
+## Re-exercised after the final fix wave
+
+2026-10-09, the same isolated fixture (`ui launch`, the fake GPT-Live driven by
+the same throwaway script, headless Chrome for Testing 153) on
+`feat/live-call-record` at 40099d93, whose production code is d81c3b05's: one
+call, titles off, one spoken request ("what is six times seven"), hung up.
+
+- The row was written as before (`Call with Pepper · 0:42`, `seconds: 42`,
+  `hung-up`, the spoken line carrying the call's `callId`). `ui snapshot`
+  listed `group "Live call: Call with Pepper, 0:42"` with `StaticText "Call with
+  Pepper"`, `StaticText "Running a command"` and `StaticText "(Completed)"`, and
+  no `region`. The screenshot showed the pill centred under the reply, the
+  waveform glyph, the title, `· 0:42` and one line with a check.
+- Width, measured in the page: with a line of about 300 characters the pill
+  stayed at its 32 rem limit, the list inside it at 478 px, and the line
+  truncated; with `max-w-full` taken off the list (the old markup) the list
+  measured 1816 px and ran from -108 px to 1708 px, past both sides of the
+  pill.
+- `text-ink-tertiary`, the dash's colour, resolved to a real colour
+  (`rgba(252, 252, 252, 0.565)`, against `0.6` for the pill's own text). The
+  console held four debug and two info entries and no error or warning.
+- Not driven here, because the fake engine settles every tool call it makes and
+  a page of more than 200 messages is out of reach of a hand run: a step with no
+  outcome (the dash), "Expired", and the partial-record hint. The component
+  tests pin them (`src/components/CallRecordRow.test.ts`,
+  `src/components/ChatView.via-call.test.ts`).
+- SIGINT to the exact `ui launch` pid removed its data directory and the driver
+  was stopped; `ps` showed no fixture, preview, driver or browser process left.
