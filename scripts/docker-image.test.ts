@@ -66,8 +66,14 @@ describe("container images", () => {
       const app = steps.flatMap((step, i) => (step.op === "COPY" && !step.args.includes("--from=edge") ? [i] : []));
       // agent-browser + Chrome, then the engines, then the app files (and the Cloud home's Caddyfile)
       expect(heavy, target).toHaveLength(2);
-      expect(steps.filter(step => step.op === "COPY" && step.args.includes("--from=build")), target).toHaveLength(2);
+      const fromBuild = steps.flatMap((step, i) => (step.op === "COPY" && step.args.includes("--from=build") ? [i] : []));
+      expect(fromBuild, target).toHaveLength(3);
       expect(Math.max(...heavy), target).toBeLessThan(Math.min(...app));
+      // The Data engine's native tree (DuckDB, resvg) changes on a version bump,
+      // not per commit, so it is copied before the per-commit app files.
+      const native = steps.findIndex(step => step.op === "COPY" && step.args.includes("/dist-native/duckdb/"));
+      expect(native, target).toBeGreaterThan(-1);
+      expect(native, target).toBeLessThan(Math.min(...fromBuild.filter(i => i !== native)));
     }
   });
 
@@ -97,7 +103,7 @@ describe("container images", () => {
     expect(home.findIndex(step => step.args.startsWith("--from=edge "))).toBeLessThan(home.findLastIndex(npmInstall));
     expect(home.filter(step => step.op === "RUN" && /\b(cp|mv)\b[^&]*caddy/.test(step.args))).toEqual([]);
     expect(home.filter(step => step.args.includes("--from=build")).map(step => step.args)).toEqual([
-      "/src/dist-server ./dist-server", "/src/dist ./dist",
+      "/src/dist-native/duckdb/linux-x64 ./duckdb", "/src/dist-server ./dist-server", "/src/dist ./dist",
     ].map(path => `--from=build ${path}`));
     expect(chain("server").filter(step => step.args.includes("--from=build")).every(step => step.args.startsWith("--from=build --chown=maus:maus "))).toBe(true);
   });

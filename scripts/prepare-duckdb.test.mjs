@@ -46,6 +46,18 @@ afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
 });
 
+describe("the installer", () => {
+  it("copies the node_modules directory itself: electron-builder drops a root-level node_modules from any tree it copies", () => {
+    const yml = fs.readFileSync(new URL("../electron-builder.yml", import.meta.url), "utf8");
+    const entries = [...yml.matchAll(/from: (dist-native\/duckdb\/[^\n]+)\n\s+to: ([^\n]+)/g)].map((m) => [m[1], m[2]]);
+    expect(entries.length).toBeGreaterThanOrEqual(3);
+    for (const [from, to] of entries) {
+      expect(from, from).toMatch(/\/node_modules$/);
+      expect(to).toBe("duckdb/node_modules");
+    }
+  });
+});
+
 describe("the pin", () => {
   it("requires an exact x.y.z version of @resvg/resvg-js", () => {
     const { root } = flatInstall();

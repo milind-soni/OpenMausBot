@@ -43,7 +43,10 @@ COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs
 RUN pnpm install --frozen-lockfile
 COPY . .
 # The Cloud home runs these as root, so nobody else may write them.
-RUN pnpm build:server && pnpm exec vite build && node scripts/prepare-duckdb.mjs && chmod -R go-w dist dist-server dist-native/duckdb
+# The Data engine's native modules (server/data/engine.ts), staged like the
+# desktop app's extraResources; the runtime stages copy this tree.
+RUN node scripts/prepare-duckdb.mjs && chmod -R go-w dist-native/duckdb
+RUN pnpm build:server && pnpm exec vite build && chmod -R go-w dist dist-server
 
 FROM node:24-bookworm-slim AS runtime
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
@@ -129,9 +132,10 @@ COPY deploy/fly/Caddyfile /app/cloud/Caddyfile
 # no file there may be one `maus` can change: unlike the server image's, these
 # copies stay root's. Only the /data volume is maus's; the launcher refuses to
 # start otherwise (codeTrustProblem), and this check refuses to build.
+# DuckDB and resvg change on a version bump, not per commit: beneath the app files.
+COPY --from=build /src/dist-native/duckdb/linux-x64 ./duckdb
 COPY --from=build /src/dist-server ./dist-server
 COPY --from=build /src/dist ./dist
-COPY --from=build /src/dist-native/duckdb/linux-x64 ./duckdb
 RUN export HOME=/tmp/omb-build-home \
  && chmod go-w /app/cloud /app/cloud/Caddyfile \
  && caddy version \
@@ -158,9 +162,9 @@ FROM runtime AS server
 # Optional engine CLIs baked into the image (space-separated npm packages).
 ARG ENGINES=""
 RUN if [ -n "$ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $ENGINES && rm -rf /tmp/omb-build-home /tmp/node-compile-cache; fi
+COPY --from=build --chown=maus:maus /src/dist-native/duckdb/linux-x64 ./duckdb
 COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
 COPY --from=build --chown=maus:maus /src/dist ./dist
-COPY --from=build --chown=maus:maus /src/dist-native/duckdb/linux-x64 ./duckdb
 ENV HOME=/data
 VOLUME ["/data"]
 USER maus

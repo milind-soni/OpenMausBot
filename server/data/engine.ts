@@ -12,7 +12,8 @@
 // never waits behind the bot's query and each side cancels only its own.
 // `interrupt()` is per connection, so each connection runs one statement at
 // a time: a cancellation always hits the statement it was meant for.
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { cpus, totalmem } from "node:os";
 import { join } from "node:path";
@@ -736,7 +737,8 @@ class Engine implements DataEngine {
     await db?.close();
     const folder = this.folder(botId);
     for (const name of [DATA_DB_FILE, `${DATA_DB_FILE}.wal`, DATA_TMP_DIR]) {
-      rmSync(join(folder, name), { recursive: true, force: true });
+      // Windows keeps a just-closed file busy for a moment; rm retries EBUSY/EPERM.
+      await rm(join(folder, name), { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
     }
   }
 
