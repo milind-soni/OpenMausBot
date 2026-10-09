@@ -204,6 +204,8 @@ class FakeCloudflare {
   /** Provider error codes returned (HTTP 400) for an operation. */
   readonly providerErrors = new Map<string, number>();
   readonly rateLimited = new Set<string>();
+  /** Operations the API token lacks a permission for (HTTP 403, code 10000). */
+  readonly forbidden = new Set<string>();
   /** Retry-After header sent with a rate-limited response, if any. */
   rateLimitRetryAfter: string | null = null;
   readonly afterHooks = new Map<string, () => void>();
@@ -248,6 +250,14 @@ class FakeCloudflare {
         headers: this.rateLimitRetryAfter === null ? {} : { "retry-after": this.rateLimitRetryAfter },
         status: 429,
       });
+    }
+    if (this.forbidden.has(operation)) {
+      return Response.json({
+        errors: [{ code: 10_000, message: "Authentication error" }],
+        messages: [],
+        result: null,
+        success: false,
+      }, { status: 403 });
     }
     const providerError = this.providerErrors.get(operation);
     if (providerError !== undefined) {
@@ -2432,6 +2442,35 @@ describe("managed endpoints in several Cloudflare accounts", () => {
     expect(await endpointState(untotalled.installation.id)).toMatchObject({ last_error_code: "cf_tunnel_quota" });
   });
 
+  it("judges a create 429 by the scan less what cleanup has deleted since", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "cap-after-sweep@example.com");
+    const installation = await createInstallation(worker, owner.token, "cap-after-sweep");
+    // The cron's scan finds the account at its tunnel limit; its sweep then
+    // deletes a revoked endpoint's tunnel and record.
+    const orphan = await orphanIn(cloudflare, PRIMARY_ACCOUNT, HOST_SUFFIX, "a".repeat(32));
+    cloudflare.tunnelTotalCount = 1000;
+    cloudflare.dnsTotalCount = 500;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await runScheduledCleanup(worker);
+    expect(await endpointState(orphan.installationId)).toMatchObject({ status: "deleted" });
+    expect(await env.DB.prepare(
+      "SELECT tunnel_count, dns_record_count FROM managed_endpoint_account_capacity WHERE provider_account = ?",
+    ).bind(PRIMARY_ACCOUNT).first()).toEqual({ dns_record_count: 499, tunnel_count: 999 });
+
+    // Minutes later the token is rate limited: creation and the count both
+    // answer 429. The account has a free tunnel, so that is no quota.
+    cloudflare.rateLimited.add("create_tunnel");
+    cloudflare.rateLimited.add("scan_tunnels");
+    const limited = await call(worker, ENDPOINT_PATH, { method: "POST", token: installation.credential });
+    expect(limited.status).toBe(503);
+    await expect(limited.json()).resolves.toEqual({ error: "endpoint_rate_limited" });
+    expect(await endpointState(installation.installation.id)).toMatchObject({ last_error_code: "cf_rate_limited" });
+    expect(await capacityRejectedAt()).toBeNull();
+  });
+
   it("keeps a 429 below the tunnel cap a rate limit that closes nothing and moves nothing", async () => {
     const fixture = twoAccounts();
     const owner = await signIn(fixture.worker, "accounts-throttled@example.com");
@@ -2731,9 +2770,10 @@ describe("managed endpoints in several Cloudflare accounts", () => {
     const snapshots = await env.DB.prepare(
       "SELECT provider_account, tunnel_count FROM managed_endpoint_account_capacity ORDER BY provider_account",
     ).all();
+    // The second account's scan saw 9; the sweep then deleted the reclaimed tunnel.
     expect(snapshots.results).toEqual([
       { provider_account: PRIMARY_ACCOUNT, tunnel_count: 950 },
-      { provider_account: SECOND_ACCOUNT_ID, tunnel_count: 9 },
+      { provider_account: SECOND_ACCOUNT_ID, tunnel_count: 8 },
     ]);
     expect(loggedJSON(errors, "managed endpoint capacity high")).toEqual([
       expect.objectContaining({ hostSuffix: HOST_SUFFIX, limit: 1000, resource: "tunnels", used: 950 }),
@@ -2746,7 +2786,10 @@ describe("managed endpoints in several Cloudflare accounts", () => {
       alert: "managed_endpoint_pool_capacity",
       requestId: expect.any(String),
       status: "high",
-      accounts: [{ hostSuffix: HOST_SUFFIX, status: "full" }, { hostSuffix: SECOND_SUFFIX, status: "high" }],
+      accounts: [
+        { hostSuffix: HOST_SUFFIX, newEndpoints: true, status: "full" },
+        { hostSuffix: SECOND_SUFFIX, newEndpoints: true, status: "high" },
+      ],
     }]);
     expect(fixture.violations).toEqual([]);
   });
@@ -2919,6 +2962,7 @@ describe("managed endpoints in several Cloudflare accounts", () => {
         accounts: [
           {
             hostSuffix: HOST_SUFFIX,
+            newEndpoints: true,
             status: "full",
             checkedAt: now - 60_000,
             tunnels: { used: 1000, limit: 1000 },
@@ -2928,6 +2972,7 @@ describe("managed endpoints in several Cloudflare accounts", () => {
           },
           {
             hostSuffix: SECOND_SUFFIX,
+            newEndpoints: true,
             status: "ok",
             checkedAt: now - 120_000,
             tunnels: { used: 10, limit: 1000 },
@@ -2957,5 +3002,247 @@ describe("managed endpoints in several Cloudflare accounts", () => {
       capacity: { providerRejectedAt: number | null; status: string };
     }>();
     expect(refusing.capacity).toMatchObject({ providerRejectedAt: now - 1_000, status: "full" });
+  });
+
+  it("leaves a closed account out of the pool, so a full primary pages, and keeps its endpoints working", async () => {
+    const fixture = twoAccounts({ dnsRecordLimit: 200, newEndpoints: false });
+    const owner = await signIn(fixture.worker, "accounts-closed@example.com");
+    // An endpoint the account took before it was closed.
+    const kept = await createInstallation(fixture.worker, owner.token, "accounts-closed-kept");
+    const opaque = "c".repeat(32);
+    const hostname = `c-${opaque}.${SECOND_SUFFIX}`;
+    const tunnel: FakeTunnel = { id: "b0000000-0000-4000-8000-0000000000cc", name: `omb-c-${opaque}` };
+    fixture.second.tunnels.set(tunnel.name, tunnel);
+    fixture.second.dns.set(hostname, {
+      content: `${tunnel.id}.cfargotunnel.com`,
+      id: "dns-closed-kept",
+      name: hostname,
+      proxied: true,
+      type: "CNAME",
+    });
+    const now = Date.now();
+    await env.DB.prepare(
+      `INSERT INTO installation_endpoints
+        (installation_id, provider_account, hostname, tunnel_name, tunnel_id, dns_record_id,
+         status, last_reconciled_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'dns-closed-kept', 'ready', ?, ?, ?)`,
+    ).bind(kept.installation.id, SECOND_ACCOUNT_ID, hostname, tunnel.name, tunnel.id, now, now, now).run();
+    // The primary is full and refusing; the closed account has room.
+    await primaryRefusing();
+    await setSnapshot(SECOND_ACCOUNT_ID, { dns_record_count: 120, tunnel_count: 10 });
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    // Even the newest release is not given the closed account.
+    const refused = await provisionIn(fixture, owner.token, "accounts-closed-new", { appVersion: "0.1.104" });
+    expect(refused.response.status).toBe(503);
+    await expect(refused.response.json()).resolves.toEqual({ error: "endpoint_capacity" });
+    expect(await endpointState(refused.id)).toMatchObject({ provider_account: PRIMARY_ACCOUNT });
+    expect(fixture.second.calls).toEqual([]);
+
+    // Its own endpoint still renews there.
+    const renewed = await call(fixture.worker, ENDPOINT_PATH, { env: fixture.env, method: "POST", token: kept.credential });
+    expect(renewed.status).toBe(200);
+    await expect(renewed.json()).resolves.toMatchObject({ endpoint: { hostname } });
+    expect(await endpointState(kept.installation.id)).toMatchObject({ provider_account: SECOND_ACCOUNT_ID, tunnel_id: tunnel.id });
+
+    // The pool a new installation sees is the open primary alone: full.
+    const health = await (await call(fixture.worker, "/healthz", { env: fixture.env })).json<{ capacity: unknown }>();
+    expect(health.capacity).toMatchObject({
+      status: "full",
+      tunnels: { used: 1000, limit: 1000 },
+      dnsRecords: { limit: 1000 },
+      providerRejectedAt: expect.any(Number),
+      accounts: [
+        expect.objectContaining({ hostSuffix: HOST_SUFFIX, newEndpoints: true, status: "full" }),
+        expect.objectContaining({ hostSuffix: SECOND_SUFFIX, newEndpoints: false, status: "ok" }),
+      ],
+    });
+
+    // And the cron pages on it.
+    fixture.first.tunnelTotalCount = 1000;
+    fixture.second.tunnelTotalCount = 10;
+    await runScheduledCleanup(fixture.worker, fixture.vars);
+    expect(loggedJSON(errors, "managed endpoint pool capacity high")).toEqual([expect.objectContaining({
+      alert: "managed_endpoint_pool_capacity",
+      status: "full",
+      accounts: [
+        { hostSuffix: HOST_SUFFIX, newEndpoints: true, status: "full" },
+        { hostSuffix: SECOND_SUFFIX, newEndpoints: false, status: "ok" },
+      ],
+    })]);
+    expect(fixture.violations).toEqual([]);
+  });
+
+  it("takes an account whose token Cloudflare refuses out of the ranking, moves its new endpoint, and pages", async () => {
+    const fixture = twoAccounts();
+    const owner = await signIn(fixture.worker, "accounts-token@example.com");
+    // The second account has the most room, but its token may only read tunnels.
+    await setSnapshot(PRIMARY_ACCOUNT, { tunnel_count: 900 });
+    await setSnapshot(SECOND_ACCOUNT_ID, { tunnel_count: 10 });
+    fixture.second.forbidden.add("create_tunnel");
+    const logged = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const moved = await provisionIn(fixture, owner.token, "accounts-token");
+    expect(moved.response.status).toBe(200);
+    const state = await endpointState(moved.id);
+    expect(state).toMatchObject({ provider_account: PRIMARY_ACCOUNT, status: "ready" });
+    expect(state.hostname.endsWith(`.${HOST_SUFFIX}`)).toBe(true);
+    expect(fixture.second.tunnels.size).toBe(0);
+    expect(loggedJSON(logged, "managed endpoint relocated")).toEqual([
+      expect.objectContaining({ from: SECOND_SUFFIX, to: HOST_SUFFIX }),
+    ]);
+    expect(loggedJSON(errors, "managed endpoint account token refused")).toEqual([{
+      message: "managed endpoint account token refused",
+      alert: "managed_endpoint_account_refused",
+      requestId: expect.any(String),
+      hostSuffix: SECOND_SUFFIX,
+      errorCode: "cf_api_10000",
+    }]);
+    expect(await env.DB.prepare(
+      `SELECT capacity_rejected_at, capacity_rejected_code
+         FROM managed_endpoint_account_capacity WHERE provider_account = ?`,
+    ).bind(SECOND_ACCOUNT_ID).first()).toEqual({
+      capacity_rejected_at: expect.any(Number),
+      capacity_rejected_code: "cf_api_10000",
+    });
+
+    // The next new installation goes straight to the primary.
+    const callsBefore = fixture.second.calls.length;
+    const next = await provisionIn(fixture, owner.token, "accounts-token-next");
+    expect(next.response.status).toBe(200);
+    expect(await endpointState(next.id)).toMatchObject({ provider_account: PRIMARY_ACCOUNT });
+    expect(fixture.second.calls).toHaveLength(callsBefore);
+    expect(fixture.violations).toEqual([]);
+  });
+
+  it("closes an account whose token may not write DNS, answering its waiting endpoints as unavailable", async () => {
+    const fixture = twoAccounts();
+    const owner = await signIn(fixture.worker, "accounts-dns-token@example.com");
+    await setSnapshot(PRIMARY_ACCOUNT, { tunnel_count: 900 });
+    await setSnapshot(SECOND_ACCOUNT_ID, { tunnel_count: 10 });
+    // An endpoint made there while its token still worked, since reclaimed.
+    const away = await provisionIn(fixture, owner.token, "accounts-dns-token-away");
+    expect(away.response.status).toBe(200);
+    expect(await endpointState(away.id)).toMatchObject({ provider_account: SECOND_ACCOUNT_ID });
+    await reclaimedEarlier(fixture.second, away.id);
+    fixture.second.forbidden.add("create_dns");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const failed = await provisionIn(fixture, owner.token, "accounts-dns-token");
+    expect(failed.response.status).toBe(502);
+    await expect(failed.response.json()).resolves.toEqual({ error: "endpoint_unavailable" });
+    expect(await endpointState(failed.id)).toMatchObject({
+      last_error_code: "cf_api_10000",
+      provider_account: SECOND_ACCOUNT_ID,
+      status: "error",
+      tunnel_id: null,
+    });
+    // The tunnel this attempt created was rolled back.
+    expect(fixture.second.tunnels.size).toBe(0);
+    expect(await capacityRejectedAt(SECOND_ACCOUNT_ID)).toEqual(expect.any(Number));
+    expect(loggedJSON(errors, "managed endpoint account token refused")).toEqual([
+      expect.objectContaining({ alert: "managed_endpoint_account_refused", hostSuffix: SECOND_SUFFIX }),
+    ]);
+
+    // The reclaimed endpoint keeps its address and waits for its account,
+    // answered locally with what the refusal got, not endpoint_capacity.
+    const callsBefore = fixture.second.calls.length;
+    const waiting = await call(fixture.worker, ENDPOINT_PATH, { env: fixture.env, method: "POST", token: away.credential });
+    expect(waiting.status).toBe(502);
+    await expect(waiting.json()).resolves.toEqual({ error: "endpoint_unavailable" });
+    expect(await endpointState(away.id)).toMatchObject({ provider_account: SECOND_ACCOUNT_ID, status: "deleted" });
+    expect(fixture.second.calls).toHaveLength(callsBefore);
+
+    // The row that never got an address moves on its next request, after
+    // the two lookups that prove the closed account holds nothing for it.
+    const retried = await call(fixture.worker, ENDPOINT_PATH, { env: fixture.env, method: "POST", token: failed.credential });
+    expect(retried.status).toBe(200);
+    expect(await endpointState(failed.id)).toMatchObject({ provider_account: PRIMARY_ACCOUNT, status: "ready" });
+    expect(fixture.second.calls.slice(callsBefore).map((entry) => entry.method)).toEqual(["GET", "GET"]);
+    expect(fixture.violations).toEqual([]);
+  });
+
+  it("pages on a refused token with one account and otherwise answers exactly as before", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "single-token@example.com");
+    const first = await createInstallation(worker, owner.token, "single-token-first");
+    const second = await createInstallation(worker, owner.token, "single-token-second");
+    cloudflare.forbidden.add("create_tunnel");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    for (const installation of [first, second]) {
+      const callsBefore = cloudflare.calls.length;
+      const refused = await call(worker, ENDPOINT_PATH, { method: "POST", token: installation.credential });
+      expect(refused.status).toBe(502);
+      await expect(refused.json()).resolves.toEqual({ error: "endpoint_unavailable" });
+      expect(await endpointState(installation.installation.id)).toMatchObject({
+        last_error_code: "cf_api_10000",
+        status: "error",
+      });
+      // Nothing is gated: each request still asks Cloudflare.
+      expect(cloudflare.calls.length).toBeGreaterThan(callsBefore);
+    }
+    expect(await capacityRejectedAt()).toBeNull();
+    expect(loggedJSON(errors, "managed endpoint account token refused")).toEqual([
+      expect.objectContaining({ alert: "managed_endpoint_account_refused", errorCode: "cf_api_10000", hostSuffix: HOST_SUFFIX }),
+      expect.objectContaining({ alert: "managed_endpoint_account_refused", errorCode: "cf_api_10000", hostSuffix: HOST_SUFFIX }),
+    ]);
+  });
+
+  it("never acts on a row whose hostname is not one opaque label under its account's suffix, and counts it", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "accounts-renamed@example.com");
+    const installation = await createInstallation(worker, owner.token, "accounts-renamed");
+    // Rows made under a suffix the primary no longer has: an operator edited
+    // COMPANION_HOST_SUFFIX. One is an idle endpoint, one a revoked one.
+    const rows = [
+      { id: installation.installation.id, opaque: "4".repeat(32), status: "ready", tunnelId: "40000000-0000-4000-8000-000000000044" },
+      { id: "orphan-renamed", opaque: "5".repeat(32), status: "deleting", tunnelId: "50000000-0000-4000-8000-000000000055" },
+    ];
+    const longAgo = Date.now() - 30 * DAY_MS;
+    for (const row of rows) {
+      const tunnel: FakeTunnel = { id: row.tunnelId, name: `omb-c-${row.opaque}` };
+      neverRan(tunnel, 30);
+      cloudflare.tunnels.set(tunnel.name, tunnel);
+      await env.DB.prepare(
+        `INSERT INTO installation_endpoints
+          (installation_id, hostname, tunnel_name, tunnel_id, status, last_reconciled_at,
+           delete_requested_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        row.id,
+        `c-${row.opaque}.old-suffix.example`,
+        tunnel.name,
+        tunnel.id,
+        row.status,
+        longAgo,
+        row.status === "deleting" ? longAgo : null,
+        longAgo,
+        longAgo,
+      ).run();
+    }
+    await quiet(installation.installation.id, 30 * DAY_MS);
+    const logged = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await runScheduledCleanup(worker);
+
+    // The scan never marks it, and the sweep never claims it.
+    expect(await endpointState(installation.installation.id)).toMatchObject({ reclaim_requested_at: null, status: "ready" });
+    expect(await env.DB.prepare(
+      "SELECT status, cleanup_attempts FROM installation_endpoints WHERE installation_id = 'orphan-renamed'",
+    ).first()).toEqual({ cleanup_attempts: 0, status: "deleting" });
+    expect(loggedJSON(logged, "managed endpoint tunnel scan")).toEqual([
+      expect.objectContaining({ managed: 2, marked: 0, unmatched: 2 }),
+    ]);
+    expect(cleanupCalls(cloudflare)).toEqual([]);
+    expect(loggedJSON(errors, "managed endpoints in an unconfigured account")).toEqual([
+      expect.objectContaining({ alert: "managed_endpoint_account_unconfigured", endpoints: 2 }),
+    ]);
   });
 });

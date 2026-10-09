@@ -111,8 +111,9 @@ Account bearer tokens are rejected.
   `503 endpoint_capacity` with `Retry-After: 600`. A full account can also
   answer tunnel creation with `429`: the control plane then reads the
   account's tunnel count (or, when that read fails, its last scan if under 30
-  minutes old) and, at or over the account's tunnel limit, treats the `429` as
-  the quota (`cf_tunnel_quota`). For the next ten minutes (or until scheduled
+  minutes old, less the tunnels scheduled cleanup has deleted since) and, at
+  or over the account's tunnel limit, treats the `429` as the quota
+  (`cf_tunnel_quota`). For the next ten minutes (or until scheduled
   cleanup frees one of its resources) further allocations in that account
   that would need a new tunnel are answered the same way without calling
   Cloudflare, protecting the shared API budget. An endpoint that never
@@ -122,7 +123,9 @@ Account bearer tokens are rejected.
   rate limit (`cf_rate_limited`) returns `503 endpoint_rate_limited` with
   Cloudflare's `Retry-After` clamped to 30–300 seconds (60 when Cloudflare
   sent none) and closes nothing. Every other provider failure remains
-  `502 endpoint_unavailable`.
+  `502 endpoint_unavailable`; with several accounts, one where Cloudflare
+  refused the account's token also closes that account (see **A refused
+  token**).
 - `DELETE` removes DNS first and then the tunnel. It returns `204` when done or
   when already deleted. A partial Cloudflare failure returns
   `503 endpoint_cleanup_pending` and retains only the IDs needed for a retry.
@@ -157,8 +160,9 @@ it needs Workers Paid, whose per-invocation subrequest and D1 limits the
 default relies on) expired-lease rows per run when
 they are already deleting, belong to a revoked installation, or outlive a
 hard-deleted installation. Each row is cleaned in its own account, and rows
-of an account that is not configured are skipped. Rows run five at a time
-(the Workers limit is six connections awaiting headers), and a run stops
+no configured account acts on (see **Several Cloudflare accounts**) are
+skipped. Rows run five at a time (the Workers limit is six connections
+awaiting headers), and a run stops
 starting new rows in an account as soon as that account's API answers `429`.
 At ten provider calls per row the default is about
 200 calls per run: a sixth of the API token's 1,200 requests per five minutes,
@@ -208,8 +212,10 @@ A failure in one account is logged and never stops the others:
 4. It writes the account's capacity snapshot (counts, timestamps, pending
    reclaims, and dormant endpoints: those of active installations whose tunnel
    is gone) and logs one `managed endpoint tunnel scan` summary with the
-   account's `hostSuffix`. When usage reaches 90% of the account's tunnel or
-   DNS record limit it emits `console.error` with
+   account's `hostSuffix`. Until the next scan, scheduled cleanup lowers the
+   snapshot's tunnel and DNS record counts by what it deletes, so a slot it
+   freed is not counted as used. When usage reaches 90% of the account's
+   tunnel or DNS record limit it emits `console.error` with
    `"alert": "managed_endpoint_capacity"`, the `hostSuffix`, resource, used,
    limit, and percentage. Create a Workers Logs alert on that field. With more
    than one account, a run whose pool status (below) is `high` or `full` also
@@ -245,10 +251,11 @@ account's snapshot:
 }
 ```
 
-`status` is `full` while a recent quota rejection is gating allocations,
-`unknown` when the snapshot is more than 30 minutes old. With more than one
-account the same fields describe the pool a new installation sees, and
-`accounts` lists each account by its host suffix (never by account or zone
+`status` is `full` while a recent quota rejection (with several accounts,
+also a refused token) is gating allocations, `unknown` when the snapshot is
+more than 30 minutes old. With more than one account the same fields describe
+the pool a new installation sees (the accounts that take new endpoints), and
+`accounts` lists every account by its host suffix (never by account or zone
 ID):
 
 ```json
@@ -262,6 +269,7 @@ ID):
   "accounts": [
     {
       "hostSuffix": "openmausbot.com",
+      "newEndpoints": true,
       "status": "full",
       "checkedAt": 1790000060000,
       "tunnels": { "used": 1000, "limit": 1000 },
@@ -271,6 +279,7 @@ ID):
     },
     {
       "hostSuffix": "mausbot.si",
+      "newEndpoints": true,
       "status": "ok",
       "checkedAt": 1790000000000,
       "tunnels": { "used": 10, "limit": 1000 },
@@ -282,15 +291,19 @@ ID):
 }
 ```
 
-The pool `status` is the best known account status (`ok`, then `high`, then
-`full`; an account refusing allocations counts as `full`). `used` is the sum
-across accounts, or `null` when any account's snapshot is unknown or stale;
-`limit` and `reclaim.pending` are sums; `checkedAt` is the oldest scan; and
-`providerRejectedAt` is set only while every account is refusing. Monitors
-that read the top-level numbers should read `accounts` once a second account
-is configured. Each Cloudflare data center reuses one read of the snapshots
-for up to two minutes, so `capacity` can trail D1 by that long; allocation
-gating always reads D1.
+The pool is every account whose `newEndpoints` is not `false`; the primary
+always counts. Its `status` is the best known status among them (`ok`, then
+`high`, then `full`; an account refusing allocations counts as `full`).
+`used` is their sum, or `null` when any of their snapshots is unknown or
+stale; `limit` and `reclaim.pending` are sums; `checkedAt` is the oldest
+scan; and `providerRejectedAt` is set only while every one of them is
+refusing. The pool assumes the newest release, so an account's
+`minAppVersion` does not take it out: installations on older releases are
+refused there by design (see **Why `minAppVersion`**), and the pool alert does
+not page for them. Monitors that read the top-level numbers should read
+`accounts` once a second account is configured. Each Cloudflare data center
+reuses one read of the snapshots for up to two minutes, so `capacity` can
+trail D1 by that long; allocation gating always reads D1.
 
 ### Several Cloudflare accounts
 
@@ -328,6 +341,7 @@ repository:
 | `tunnelLimit` | The account's tunnel quota. Default 1000. |
 | `dnsRecordLimit` | The zone's DNS record quota. Default 1000. |
 | `minAppVersion` | Optional `x.y.z`. Only installations that report at least this release get a new endpoint in this account. |
+| `newEndpoints` | Optional, default `true`. `false` closes the account to new endpoints and keeps the ones it holds working. |
 
 Account IDs, zone IDs, and suffixes must each be unique across all accounts,
 including the primary. An invalid entry never takes the Worker down: it is
@@ -344,14 +358,18 @@ and nowhere else. An endpoint whose account is not configured, or whose
 hostname is not exactly one opaque label under that account's suffix, is
 never acted on: `POST` answers `502 endpoint_unavailable` without calling
 Cloudflare, `DELETE` and revocation keep the row with `503
-endpoint_cleanup_pending`, the sweep skips it, and each cron run logs their
-number with `"alert": "managed_endpoint_account_unconfigured"`. So:
+endpoint_cleanup_pending`, the idle scan never matches its tunnel, the sweep
+skips it, and each cron run logs their number with
+`"alert": "managed_endpoint_account_unconfigured"`. So:
 
 - Never edit an entry's `accountId`, `zoneId`, or `companionHostSuffix` once it
   holds endpoints. To use another domain or account, add a new entry.
 - Removing an entry strands its endpoints until the same entry is added back.
   To stop new endpoints going to an account while keeping its existing ones,
-  set its `minAppVersion` to a release that does not exist, such as `999.0.0`.
+  set its `"newEndpoints": false`: its endpoints keep renewing,
+  re-provisioning after a reclaim, and cleaning up there, no new endpoint and
+  no moving row is given to it, and it leaves the pool that `/healthz` and
+  the pool alert describe.
 - Do not roll the Worker back to a version from before migration `0007` once
   an extra account holds endpoints. An older Worker ignores
   `provider_account`: it would create tunnels for those rows in the primary
@@ -364,11 +382,11 @@ dnsRecordLimit − DNS records) − dormant endpoints`, from that account's last
 scan (an unknown DNS count is left out; an unknown tunnel count ranks last;
 ties go to configuration order). The dormant endpoints are a slot set aside
 for each address already handed out whose owner may come back. An account is
-eligible when its last scan is under 30 minutes old (so a new account takes
-nothing before its first cron run), Cloudflare has not refused it a resource
-in the last ten minutes, and the installation's version is at least its
-`minAppVersion`. Room only ranks: when no account is eligible the primary is
-used, exactly as with one account.
+eligible when it takes new endpoints, its last scan is under 30 minutes old
+(so a new account takes nothing before its first cron run), Cloudflare has
+not refused it a resource, or its token, in the last ten minutes, and the
+installation's version is at least its `minAppVersion`. Room only ranks:
+when no account is eligible the primary is used, exactly as with one account.
 
 A row that never handed out an address (no tunnel, no DNS record, never
 ready) may move, at most once per request, to the best other eligible account
@@ -379,6 +397,19 @@ there is adopted instead. Each move logs `managed endpoint relocated` with
 both host suffixes. A row that was ever ready never moves: a reclaimed
 endpoint waits for a slot in its own account and keeps its hostname, so a
 paired phone keeps working.
+
+**A refused token.** A read-only check cannot show that an account's token
+may create tunnels and DNS records; the first new endpoint there does. With
+several accounts, Cloudflare answering a request in an endpoint's account
+with `401` or `403` (its token is invalid or revoked, or lacks Tunnel or DNS
+Edit) closes that account to new endpoints for ten minutes, as a quota
+refusal does: a row that never handed out an address moves to another
+eligible account (in the same request when tunnel creation was refused,
+otherwise on its next request), and the account's other endpoints that need a
+new tunnel are answered `502 endpoint_unavailable` without calling
+Cloudflare. Every such refusal, with one account too, logs
+`"alert": "managed_endpoint_account_refused"` with the account's `hostSuffix`
+and `errorCode`; only an operator can fix the token.
 
 **Why `minAppVersion`.** Desktop releases up to 0.1.103 accept only
 `openmausbot.com` names for **Remote computer → Desktop companion** pairing
@@ -409,7 +440,11 @@ Tailscale still work).
    since September 2024 allow 200 records, older Free zones 1,000, Pro and
    Business 3,500. Note the account's current tunnel count.
 4. Create an API token limited to that account and that zone, with Account →
-   Cloudflare Tunnel → Edit and Zone → DNS → Read and Edit.
+   Cloudflare Tunnel → Edit and Zone → DNS → Edit. Before relying on it, you
+   can prove it may write: with the token, create a tunnel
+   (`POST accounts/<account id>/cfd_tunnel` with
+   `{"name": "omb-token-check", "config_src": "cloudflare"}`) and a TXT record
+   in the zone, then delete both.
 5. `wrangler secret put CLOUDFLARE_API_TOKEN_MAUSBOT_SI` (or the name you
    chose). Never put a token in `vars`, `.dev.vars.example`, logs, or CI output.
 6. Set `CLOUDFLARE_ENDPOINT_ACCOUNTS` with `dnsRecordLimit` equal to the
@@ -419,10 +454,13 @@ Tailscale still work).
    `dnsRecords.used` filled in (a `null` DNS count means the token cannot read
    the zone: fix that before new endpoints fail there); new endpoints go there
    from then on. Watch for `managed endpoint relocated`,
-   `managed endpoint DNS record count failed`, and
-   `managed_endpoint_account_config` in Workers Logs.
-8. Move Workers Logs paging from `managed_endpoint_capacity` to
-   `managed_endpoint_pool_capacity`.
+   `managed endpoint DNS record count failed`,
+   `managed_endpoint_account_config`, and `managed_endpoint_account_refused`
+   in Workers Logs.
+8. Page on `managed_endpoint_pool_capacity` instead of
+   `managed_endpoint_capacity`, and on `managed_endpoint_account_refused`,
+   `managed_endpoint_account_config`, and
+   `managed_endpoint_account_unconfigured`.
 
 Each account adds two Cloudflare reads to every cron run (a tunnel page and a
 DNS count), and each move two lookups in the old account. Tokens created by
@@ -450,7 +488,10 @@ pnpm --filter @openmausbot/control-plane exec wrangler d1 migrations apply DB --
 pnpm --filter @openmausbot/control-plane exec wrangler dev --config wrangler.jsonc
 ```
 
-Do not commit `.dev.vars`.
+Do not commit `.dev.vars`. Because `wrangler.jsonc` declares
+`secrets.required`, `wrangler dev` reads from `.dev.vars` only the names it
+declares, so a second account cannot be configured there; the test suite
+covers several accounts, and `.dev.vars.example` says how to try one by hand.
 
 ## Troubleshooting managed HTTPS setup
 
@@ -465,7 +506,8 @@ by every request this Worker makes) pushed back; it clears on its own within
 minutes. `endpoint_unavailable` is every other failure, including
 `endpoint_account_unavailable` in the logs: the endpoint's account is not
 configured, or its configuration entry was ignored (look for
-`managed_endpoint_account_config`). All three come from authenticated
+`managed_endpoint_account_config`), and a token Cloudflare refused (look for
+`managed_endpoint_account_refused`). All three come from authenticated
 endpoint provisioning, before
 the desktop starts its connector or a phone connects. A successful `/healthz`
 response only validates Worker configuration; it does **not** check provider

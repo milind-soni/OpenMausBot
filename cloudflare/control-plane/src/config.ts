@@ -38,6 +38,11 @@ export interface EndpointAccount {
   /** New endpoints go here only for installations reporting at least this
    * version (`x.y.z`), or for any installation when null. */
   minAppVersion: string | null;
+  /** False keeps every endpoint the account holds but gives it no new ones:
+   * it is never chosen for a new endpoint and never a row's relocation
+   * target, and it leaves the pool /healthz and the pool alert describe.
+   * Always true for the primary. */
+  newEndpoints: boolean;
   /** Account tunnel quota: ranks accounts, tells a quota 429 from a rate
    * limit, and drives the usage alert. */
   tunnelLimit: number;
@@ -192,6 +197,7 @@ const endpointAccountSchema = z.strictObject({
   tunnelLimit: quotaSchema.optional(),
   dnsRecordLimit: quotaSchema.optional(),
   minAppVersion: z.string().regex(MIN_APP_VERSION).optional(),
+  newEndpoints: z.boolean().optional(),
 });
 
 /**
@@ -199,7 +205,7 @@ const endpointAccountSchema = z.strictObject({
  * JSON array (a wrangler.jsonc JSON var, or the same JSON as a string or a
  * secret) of
  * `{ accountId, zoneId, companionHostSuffix, apiTokenSecret, tunnelLimit?,
- * dnsRecordLimit?, minAppVersion? }`.
+ * dnsRecordLimit?, minAppVersion?, newEndpoints? }`.
  *
  * A bad entry never throws: sign-in, recovery, and every endpoint already in
  * a good account must keep working. It is dropped and reported as a redacted
@@ -270,6 +276,7 @@ export function readEndpointAccounts(
       companionHostSuffix,
       dnsRecordLimit: parsed.data.dnsRecordLimit ?? DEFAULT_DNS_RECORD_LIMIT,
       minAppVersion: parsed.data.minAppVersion ?? null,
+      newEndpoints: parsed.data.newEndpoints ?? true,
       tunnelLimit: parsed.data.tunnelLimit ?? DEFAULT_TUNNEL_LIMIT,
       zoneId,
     });
@@ -319,6 +326,7 @@ export function readConfig(env: Env): ControlPlaneConfig {
     companionHostSuffix: hostnameSuffix(hostSuffix.data),
     dnsRecordLimit: capacity.dnsRecordLimit,
     minAppVersion: null,
+    newEndpoints: true,
     tunnelLimit: capacity.tunnelLimit,
     zoneId: env.CLOUDFLARE_ZONE_ID.toLowerCase(),
   };

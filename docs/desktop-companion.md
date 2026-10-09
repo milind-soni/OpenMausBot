@@ -26,7 +26,7 @@ below. The two connection types intentionally do not share credentials.
 4. Enter the host's managed companion address (`https://c-….openmausbot.com` or `https://c-….mausbot.si`) and the six-digit code.
 5. Choose **Pair and switch to client mode**. The client restarts and opens the host's bot UI.
 
-The HTTPS address uses the host's managed outbound tunnel. TLS is verified by the operating system, and the client does not need Tailscale. HTTPS is intentionally restricted to OpenMausBot-managed companion names (under `openmausbot.com` or `mausbot.si`) so a typo cannot redirect a paired-device token to an unrelated site. Desktop releases up to 0.1.103 accept only `openmausbot.com` names; update the client to pair with a host whose address is on `mausbot.si`, or pair over Tailscale.
+The HTTPS address uses the host's managed outbound tunnel. TLS is verified by the operating system, and the client does not need Tailscale. HTTPS is intentionally restricted to the names OpenMausBot issues (`c-` and 32 hexadecimal characters under `openmausbot.com` or `mausbot.si`) so a typo, or any other host in those domains, cannot receive the pairing code or a paired-device token. Desktop releases up to 0.1.103 accept only `openmausbot.com` names; update the client to pair with a host whose address is on `mausbot.si`, or pair over Tailscale.
 
 ## Pair over Tailscale
 

@@ -48,11 +48,13 @@ const cleanLabel = (value, fallback) => {
   return label || fallback;
 };
 
-/** The domains the OpenMausBot control plane gives managed companion
- * addresses under (`c-<id>.<domain>`), one per Cloudflare account it uses. A
- * new domain must be listed here, and shipped, before the control plane hands
- * out addresses under it. */
-const MANAGED_COMPANION_SUFFIXES = [".openmausbot.com", ".mausbot.si"];
+/** Exactly the managed companion addresses the OpenMausBot control plane
+ * issues: `c-` and 32 lowercase hex digits under the domain of one of the
+ * Cloudflare accounts it uses. Any other name in those zones (another
+ * service, or a record someone else came to control) never receives a
+ * pairing code. A new domain must be listed here, and shipped, before the
+ * control plane hands out addresses under it. */
+const MANAGED_COMPANION_HOSTNAME = /^c-[0-9a-f]{32}\.(?:openmausbot\.com|mausbot\.si)$/;
 
 /** Pairing tokens may travel through a verified OpenMausBot HTTPS endpoint or
  * an explicit Tailscale MagicDNS name. WireGuard protects cleartext HTTP on
@@ -73,8 +75,7 @@ export function normalizeDesktopCompanionEndpoint(value) {
   const hostname = parsed.hostname.toLowerCase();
   const tailscaleHttp = parsed.protocol === "http:" && hostname.endsWith(".ts.net");
   const managedHttps =
-    parsed.protocol === "https:" &&
-    MANAGED_COMPANION_SUFFIXES.some((suffix) => hostname.endsWith(suffix));
+    parsed.protocol === "https:" && MANAGED_COMPANION_HOSTNAME.test(hostname);
   if (
     (!tailscaleHttp && !managedHttps) ||
     parsed.username ||

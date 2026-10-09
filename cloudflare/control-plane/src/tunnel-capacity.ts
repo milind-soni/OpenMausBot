@@ -10,7 +10,10 @@
 import { CloudflareAPI, CloudflareAPIError, type CloudflareFetch } from "./cloudflare-api";
 import type { ControlPlaneConfig, EndpointAccount } from "./config";
 import {
+  ACTED_ON_ENDPOINT_SQL,
+  actedOnAccounts,
   emptySnapshot,
+  opaqueHostnameSQL,
   rejectionActive,
   snapshotFresh,
   type AccountSnapshot,
@@ -143,9 +146,10 @@ async function cachedSnapshots(
   return snapshotMap(config, rows);
 }
 
-/** Cloudflare refused `account` a new tunnel or DNS record: its new
- * allocations are answered locally for the next ten minutes. */
-export async function recordCapacityRejection(
+/** Cloudflare refused `account` a new tunnel or DNS record (`code` is a
+ * capacity code), or refused its token: for the next ten minutes no new
+ * endpoint goes there, and its allocations are answered locally. */
+export async function recordAccountRefusal(
   env: Env,
   config: ControlPlaneConfig,
   account: EndpointAccount,
@@ -164,21 +168,38 @@ export async function recordCapacityRejection(
   await forgetCachedCapacity(config);
 }
 
-/** Called after cleanup freed provider resources in these accounts: their
- * next allocation may succeed, so stop answering it locally. */
-export async function clearCapacityRejections(
+/** What one cleanup sweep did in one account. */
+export interface AccountCleanup {
+  /** It deleted an endpoint, so Cloudflare may take a new resource there. */
+  deleted: boolean;
+  /** Provider resources it deleted, which the account's last scan counted. */
+  dnsRecords: number;
+  tunnels: number;
+}
+
+/** Called after a cleanup sweep. An account where it deleted an endpoint is
+ * no longer answered locally: its next allocation may succeed. And the
+ * account's last scan stops counting the tunnels and DNS records cleanup
+ * deleted, so until the next scan neither the ranking nor a tunnel-creation
+ * 429 judged by the scan (endpoints.ts classifyCreate429) takes a slot
+ * cleanup freed for a used one. */
+export async function releaseCleanedCapacity(
   env: Env,
   config: ControlPlaneConfig,
-  accounts: readonly string[],
+  cleaned: ReadonlyMap<string, AccountCleanup>,
   now = Date.now(),
 ): Promise<void> {
-  if (accounts.length === 0) return;
-  await env.DB.prepare(
+  if (cleaned.size === 0) return;
+  // An unknown count (NULL) stays unknown.
+  await env.DB.batch([...cleaned].map(([account, each]) => env.DB.prepare(
     `UPDATE managed_endpoint_account_capacity
-        SET capacity_rejected_at = NULL, capacity_rejected_code = NULL, updated_at = ?
-      WHERE provider_account IN (SELECT value FROM json_each(?))
-        AND capacity_rejected_at IS NOT NULL`,
-  ).bind(now, JSON.stringify(accounts)).run();
+        SET tunnel_count = MAX(tunnel_count - ?, 0),
+            dns_record_count = MAX(dns_record_count - ?, 0),
+            capacity_rejected_at = CASE WHEN ? = 1 THEN NULL ELSE capacity_rejected_at END,
+            capacity_rejected_code = CASE WHEN ? = 1 THEN NULL ELSE capacity_rejected_code END,
+            updated_at = ?
+      WHERE provider_account = ?`,
+  ).bind(each.tunnels, each.dnsRecords, each.deleted ? 1 : 0, each.deleted ? 1 : 0, now, account)));
   await forgetCachedCapacity(config);
 }
 
@@ -331,14 +352,22 @@ async function scanAccount(
   const managed = listing.tunnels.filter((tunnel) => (
     tunnel.managedConfig && MANAGED_TUNNEL_NAME.test(tunnel.name)
   ));
+  // Only rows this account acts on (endpointAccountFor): a row whose
+  // hostname is not one opaque label under the account's suffix is never
+  // touched, so its tunnel counts as unmatched.
   const rows = new Map<string, ScanEndpointRow>();
   if (managed.length > 0) {
     const found = await env.DB.prepare(
       `SELECT installation_id, tunnel_name
          FROM installation_endpoints
         WHERE provider_account = ?
+          AND ${opaqueHostnameSQL("hostname", "?")}
           AND tunnel_name IN (SELECT value FROM json_each(?))`,
-    ).bind(account.accountId, JSON.stringify(managed.map((tunnel) => tunnel.name))).all<ScanEndpointRow>();
+    ).bind(
+      account.accountId,
+      account.companionHostSuffix,
+      JSON.stringify(managed.map((tunnel) => tunnel.name)),
+    ).all<ScanEndpointRow>();
     for (const row of found.results) rows.set(row.tunnel_name, row);
   }
 
@@ -381,8 +410,9 @@ async function scanAccount(
               AS dormant_endpoints
        FROM installation_endpoints e
        LEFT JOIN installations i ON i.id = e.installation_id
-      WHERE e.provider_account = ?`,
-  ).bind(account.accountId).first<{ dormant_endpoints: number; reclaim_pending: number }>();
+      WHERE e.provider_account = ?
+        AND ${opaqueHostnameSQL("e.hostname", "?")}`,
+  ).bind(account.accountId, account.companionHostSuffix).first<{ dormant_endpoints: number; reclaim_pending: number }>();
   const reclaimPending = counts?.reclaim_pending ?? 0;
   const dormantEndpoints = counts?.dormant_endpoints ?? 0;
 
@@ -497,6 +527,7 @@ export async function scanTunnelCapacity(
         status: pool.status,
         accounts: pool.accounts.map((each) => ({
           hostSuffix: each.account.companionHostSuffix,
+          newEndpoints: each.account.newEndpoints,
           status: each.status,
         })),
       }));
@@ -506,8 +537,10 @@ export async function scanTunnelCapacity(
 }
 
 /** Operator signals that need no provider call: ignored account config, and
- * endpoints whose account is not (or no longer) configured. Those endpoints
- * refuse every action until their account is configured again. */
+ * endpoints no configured account acts on (`endpointAccountFor`): their
+ * account is not, or no longer, configured, or their hostname is not one
+ * opaque label under its suffix. Those endpoints refuse every action until
+ * their account is configured as it was. */
 export async function reportEndpointAccountProblems(
   env: Env,
   config: ControlPlaneConfig,
@@ -524,7 +557,7 @@ export async function reportEndpointAccountProblems(
   const stranded = await env.DB.prepare(
     `SELECT COUNT(*) AS count
        FROM installation_endpoints e
-      WHERE e.provider_account NOT IN (SELECT value FROM json_each(?))
+      WHERE NOT ${ACTED_ON_ENDPOINT_SQL}
         AND (
           e.status != 'deleted'
           OR EXISTS (
@@ -532,7 +565,7 @@ export async function reportEndpointAccountProblems(
              WHERE i.id = e.installation_id AND i.revoked_at IS NULL
           )
         )`,
-  ).bind(JSON.stringify(accountIds(config))).first<{ count: number }>();
+  ).bind(actedOnAccounts(config)).first<{ count: number }>();
   if ((stranded?.count ?? 0) > 0) {
     console.error(JSON.stringify({
       message: "managed endpoints in an unconfigured account",
@@ -591,18 +624,24 @@ function accountHealth(account: EndpointAccount, snapshot: AccountSnapshot, now:
   };
 }
 
-/** What a new installation sees: the best known account. */
+/** What a new installation sees: the best known status among the accounts
+ * that take new endpoints (`open`; the primary always does). A new
+ * installation runs the newest release, which meets every `minAppVersion`,
+ * so a gated account counts: older releases are refused there by design
+ * (README "Why minAppVersion"), and paging on that would page for as long as
+ * older releases run. `accounts` is every account, for the report. */
 function poolHealth(
   config: ControlPlaneConfig,
   snapshots: ReadonlyMap<string, AccountSnapshot>,
   now: number,
-): { accounts: AccountHealth[]; status: CapacityStatus } {
+): { accounts: AccountHealth[]; open: AccountHealth[]; status: CapacityStatus } {
   const accounts = config.endpointAccounts.map((account) => accountHealth(
     account,
     snapshots.get(account.accountId) ?? emptySnapshot(account.accountId),
     now,
   ));
-  return { accounts, status: knownStatus(accounts.map((each) => each.status), "best") };
+  const open = accounts.filter((each) => each.account.newEndpoints);
+  return { accounts, open, status: knownStatus(open.map((each) => each.status), "best") };
 }
 
 function sumOrNull(values: Array<number | null>): number | null {
@@ -615,9 +654,10 @@ function sumOrNull(values: Array<number | null>): number | null {
 }
 
 /** Counts and timestamps only: safe for the unauthenticated health check.
- * With one account this is that account's snapshot, unchanged; with more it
- * is the pool a new installation sees plus one entry per account, named by
- * its host suffix, never by an account or zone ID. */
+ * With one account this is that account's snapshot, unchanged; with more the
+ * top level is the pool a new installation sees (the accounts that take new
+ * endpoints), plus one entry per account, named by its host suffix, never by
+ * an account or zone ID. */
 export async function capacityHealth(
   env: Env,
   config: ControlPlaneConfig,
@@ -636,31 +676,33 @@ export async function capacityHealth(
       reclaim: { mode: config.capacity.reclaimMode, pending: only.snapshot.reclaim_pending },
     };
   }
-  const known = (pick: (each: AccountHealth) => number | null) => sumOrNull(pool.accounts.map(
+  const { open } = pool;
+  const known = (pick: (each: AccountHealth) => number | null) => sumOrNull(open.map(
     (each) => (each.stale ? null : pick(each)),
   ));
-  const checkedAt = pool.accounts.map((each) => each.snapshot.checked_at);
-  const allRejected = pool.accounts.every((each) => each.rejected);
+  const checkedAt = open.map((each) => each.snapshot.checked_at);
+  const allRejected = open.every((each) => each.rejected);
   return {
     status: pool.status,
     checkedAt: checkedAt.includes(null) ? null : Math.min(...checkedAt.map(Number)),
     tunnels: {
       used: known((each) => each.snapshot.tunnel_count),
-      limit: pool.accounts.reduce((total, each) => total + each.account.tunnelLimit, 0),
+      limit: open.reduce((total, each) => total + each.account.tunnelLimit, 0),
     },
     dnsRecords: {
       used: known((each) => each.snapshot.dns_record_count),
-      limit: pool.accounts.reduce((total, each) => total + each.account.dnsRecordLimit, 0),
+      limit: open.reduce((total, each) => total + each.account.dnsRecordLimit, 0),
     },
     providerRejectedAt: allRejected
-      ? Math.max(...pool.accounts.map((each) => each.snapshot.capacity_rejected_at ?? 0))
+      ? Math.max(...open.map((each) => each.snapshot.capacity_rejected_at ?? 0))
       : null,
     reclaim: {
       mode: config.capacity.reclaimMode,
-      pending: pool.accounts.reduce((total, each) => total + each.snapshot.reclaim_pending, 0),
+      pending: open.reduce((total, each) => total + each.snapshot.reclaim_pending, 0),
     },
     accounts: pool.accounts.map((each) => ({
       hostSuffix: each.account.companionHostSuffix,
+      newEndpoints: each.account.newEndpoints,
       status: each.status,
       checkedAt: each.snapshot.checked_at,
       tunnels: { used: each.snapshot.tunnel_count, limit: each.account.tunnelLimit },

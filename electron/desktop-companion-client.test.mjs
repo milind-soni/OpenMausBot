@@ -20,6 +20,8 @@ import {
 } from "./desktop-companion-client.mjs";
 
 const token = `omb_${"a".repeat(43)}`;
+// The one opaque label the control plane puts in front of a managed domain.
+const LABEL = "c-0123456789abcdef0123456789abcdef";
 const deviceId = "123e4567-e89b-12d3-a456-426614174000";
 const access = {
   endpoint: "http://host.example-tailnet.ts.net:8810",
@@ -56,52 +58,68 @@ describe("desktop companion endpoint", () => {
     expect(normalizeTailscaleCompanionEndpoint("http://HOST.example-tailnet.ts.net:9910/")).toBe(
       "http://host.example-tailnet.ts.net:9910",
     );
-    expect(normalizeDesktopCompanionEndpoint("https://c-opaque.openmausbot.com")).toBe(
-      "https://c-opaque.openmausbot.com",
+    expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.openmausbot.com`)).toBe(
+      `https://${LABEL}.openmausbot.com`,
     );
-    expect(normalizeDesktopCompanionEndpoint("c-opaque.openmausbot.com")).toBe(
-      "https://c-opaque.openmausbot.com",
+    expect(normalizeDesktopCompanionEndpoint(`${LABEL}.openmausbot.com`)).toBe(
+      `https://${LABEL}.openmausbot.com`,
     );
     // The control plane's second Cloudflare account gives addresses here.
-    expect(normalizeDesktopCompanionEndpoint("https://c-opaque.mausbot.si")).toBe(
-      "https://c-opaque.mausbot.si",
+    expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.mausbot.si`)).toBe(
+      `https://${LABEL}.mausbot.si`,
     );
-    expect(normalizeDesktopCompanionEndpoint(" C-Opaque.Mausbot.SI/ ")).toBe(
-      "https://c-opaque.mausbot.si",
+    expect(normalizeDesktopCompanionEndpoint(` ${LABEL.toUpperCase()}.Mausbot.SI/ `)).toBe(
+      `https://${LABEL}.mausbot.si`,
     );
     for (const endpoint of [
       "https://unrelated.example.com",
-      "http://c-opaque.openmausbot.com",
+      `http://${LABEL}.openmausbot.com`,
       "http://10.0.0.4:8810",
       "http://host.local:8810",
       "https://10.0.0.4",
       "http://host.example-tailnet.ts.net/path",
-      "https://c-opaque.openmausbot.com/path",
+      `https://${LABEL}.openmausbot.com/path`,
       "http://user@host.example-tailnet.ts.net",
       "http://host.example-tailnet.ts.net.evil.test",
-      "https://c-opaque.openmausbot.com.evil.test",
-      "http://c-opaque.mausbot.si",
-      "https://c-opaque.mausbot.si/path",
-      "https://c-opaque.mausbot.si.evil.test",
+      `https://${LABEL}.openmausbot.com.evil.test`,
+      `http://${LABEL}.mausbot.si`,
+      `https://${LABEL}.mausbot.si/path`,
+      `https://${LABEL}.mausbot.si.evil.test`,
       "https://mausbot.si",
       "mausbot.si",
       "https://evilmausbot.si",
-      "https://c-opaque.evilmausbot.si",
+      `https://${LABEL}.evilmausbot.si`,
+      // Only the names the control plane issues: never another record in
+      // either zone, which may serve something else entirely.
+      "https://www.mausbot.si",
+      "https://app.mausbot.si",
+      "https://accounts.openmausbot.com",
+      "https://c-opaque.openmausbot.com",
+      "https://c-opaque.mausbot.si",
+      `https://${LABEL.slice(0, -1)}.mausbot.si`,
+      `https://${LABEL}0.mausbot.si`,
+      `https://${LABEL.replace("c-", "d-")}.mausbot.si`,
+      `https://${LABEL}.extra.mausbot.si`,
+      `https://www.${LABEL}.mausbot.si`,
     ]) {
       expect(normalizeDesktopCompanionEndpoint(endpoint), endpoint).toBe("");
     }
   });
 
   it("validates, adds, and removes the encrypted credential document field", () => {
-    const hostedAccess = { ...access, endpoint: "https://c-opaque.openmausbot.com" };
+    const hostedAccess = { ...access, endpoint: `https://${LABEL}.openmausbot.com` };
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: hostedAccess })).toEqual(
       hostedAccess,
     );
     // A saved pairing with a computer whose address is on mausbot.si loads.
-    const secondDomain = { ...access, endpoint: "https://c-opaque.mausbot.si" };
+    const secondDomain = { ...access, endpoint: `https://${LABEL}.mausbot.si` };
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: secondDomain })).toEqual(
       secondDomain,
     );
+    // One that names any other host in those zones does not.
+    expect(
+      desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: { ...access, endpoint: "https://app.mausbot.si" } }),
+    ).toBeNull();
 
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: access })).toEqual(access);
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: { ...access, token: "bad" } })).toBeNull();
@@ -151,30 +169,42 @@ describe("desktop companion pairing", () => {
       }),
     );
     const paired = await pairDesktopCompanion({
-      endpoint: "https://c-opaque.openmausbot.com",
+      endpoint: `https://${LABEL}.openmausbot.com`,
       code: "654321",
       deviceName: "Desktop client",
       requestId: "request-https-01",
       fetchImpl,
     });
-    expect(paired).toEqual({ ...access, endpoint: "https://c-opaque.openmausbot.com" });
+    expect(paired).toEqual({ ...access, endpoint: `https://${LABEL}.openmausbot.com` });
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://c-opaque.openmausbot.com/api/pair",
+      `https://${LABEL}.openmausbot.com/api/pair`,
       expect.objectContaining({ method: "POST" }),
     );
 
     const secondDomain = await pairDesktopCompanion({
-      endpoint: "c-opaque.mausbot.si",
+      endpoint: `${LABEL}.mausbot.si`,
       code: "654321",
       deviceName: "Desktop client",
       requestId: "request-https-02",
       fetchImpl,
     });
-    expect(secondDomain).toEqual({ ...access, endpoint: "https://c-opaque.mausbot.si" });
+    expect(secondDomain).toEqual({ ...access, endpoint: `https://${LABEL}.mausbot.si` });
     expect(fetchImpl).toHaveBeenLastCalledWith(
-      "https://c-opaque.mausbot.si/api/pair",
+      `https://${LABEL}.mausbot.si/api/pair`,
       expect.objectContaining({ method: "POST" }),
     );
+
+    // Any other name in the zone never receives the pairing code.
+    await expect(
+      pairDesktopCompanion({
+        endpoint: "https://app.mausbot.si",
+        code: "654321",
+        deviceName: "Desktop client",
+        requestId: "request-https-03",
+        fetchImpl,
+      }),
+    ).rejects.toThrow("OpenMausBot HTTPS companion address");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("rejects bad codes and surfaces a sidecar error without returning secrets", async () => {

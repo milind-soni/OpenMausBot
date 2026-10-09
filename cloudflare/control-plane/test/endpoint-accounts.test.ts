@@ -4,11 +4,14 @@ import { describe, expect, it } from "vitest";
 import { MAX_ENDPOINT_ACCOUNTS, readConfig, type ControlPlaneConfig, type EndpointAccount } from "../src/config";
 import {
   accountRoom,
+  ACTED_ON_ENDPOINT_SQL,
+  actedOnAccounts,
   appVersionAtLeast,
   chooseNewEndpointAccount,
   emptySnapshot,
   endpointAccountFor,
   neverReady,
+  opaqueHostnameSQL,
   relocationTarget,
   type AccountSnapshot,
 } from "../src/endpoint-accounts";
@@ -35,6 +38,7 @@ describe("endpoint account configuration", () => {
       companionHostSuffix: env.COMPANION_HOST_SUFFIX,
       dnsRecordLimit: 1000,
       minAppVersion: null,
+      newEndpoints: true,
       tunnelLimit: 1000,
       zoneId: env.CLOUDFLARE_ZONE_ID,
     });
@@ -56,6 +60,7 @@ describe("endpoint account configuration", () => {
         companionHostSuffix: "mausbot.si",
         dnsRecordLimit: 200,
         minAppVersion: "0.1.103",
+        newEndpoints: true,
         tunnelLimit: 1000,
         zoneId: "3c".repeat(16),
       }]);
@@ -67,8 +72,13 @@ describe("endpoint account configuration", () => {
       apiToken: env.CLOUDFLARE_API_TOKEN,
       dnsRecordLimit: 1000,
       minAppVersion: null,
+      newEndpoints: true,
       tunnelLimit: 1000,
     });
+    // Closed to new endpoints, keeping the ones it holds.
+    const closed = readConfig(withAccounts([{ ...SECOND_ENTRY, newEndpoints: false }]));
+    expect(closed.endpointAccountIssues).toEqual([]);
+    expect(closed.endpointAccounts[1]).toMatchObject({ companionHostSuffix: "mausbot.si", newEndpoints: false });
   });
 
   it("drops a bad entry with a redacted issue code and never throws", () => {
@@ -95,6 +105,7 @@ describe("endpoint account configuration", () => {
       { value: [{ ...SECOND_ENTRY, minAppVersion: "0.1" }], accounts: 1, issues: ["entry_1_shape"] },
       { value: [{ ...SECOND_ENTRY, tunnelLimit: 0 }], accounts: 1, issues: ["entry_1_shape"] },
       { value: [{ ...SECOND_ENTRY, tunnelLimit: "1000" }], accounts: 1, issues: ["entry_1_shape"] },
+      { value: [{ ...SECOND_ENTRY, newEndpoints: "false" }], accounts: 1, issues: ["entry_1_shape"] },
       { value: [{ ...SECOND_ENTRY, accountID: SECOND_ENTRY.accountId }], accounts: 1, issues: ["entry_1_shape"] },
       { value: [1, 2, 3, 4].map(extra), accounts: MAX_ENDPOINT_ACCOUNTS, issues: ["entry_4_over_limit"] },
     ];
@@ -114,6 +125,7 @@ const PRIMARY: EndpointAccount = {
   companionHostSuffix: "openmausbot.com",
   dnsRecordLimit: 1000,
   minAppVersion: null,
+  newEndpoints: true,
   tunnelLimit: 1000,
   zoneId: "a".repeat(32),
 };
@@ -123,6 +135,7 @@ const SECOND: EndpointAccount = {
   companionHostSuffix: "mausbot.si",
   dnsRecordLimit: 200,
   minAppVersion: null,
+  newEndpoints: true,
   tunnelLimit: 1000,
   zoneId: "b".repeat(32),
 };
@@ -187,6 +200,16 @@ describe("endpoint account rules", () => {
     expect(chooseNewEndpointAccount(config, new Map(), "0.1.103", NOW)).toBe(PRIMARY);
   });
 
+  it("never gives a closed account a new endpoint, nor moves one there", () => {
+    const closed = { ...SECOND, newEndpoints: false };
+    const snapshots = new Map([scanned(PRIMARY, { tunnel_count: 999 }), scanned(SECOND, { tunnel_count: 0 })]);
+    expect(chooseNewEndpointAccount(accounts(PRIMARY, closed), snapshots, "0.1.104", NOW)).toBe(PRIMARY);
+    expect(relocationTarget(accounts(PRIMARY, closed), snapshots, "0.1.104", PRIMARY, NOW)).toBeNull();
+    // Open, the same account takes them.
+    expect(chooseNewEndpointAccount(accounts(PRIMARY, SECOND), snapshots, "0.1.104", NOW)).toBe(SECOND);
+    expect(relocationTarget(accounts(PRIMARY, SECOND), snapshots, "0.1.104", PRIMARY, NOW)).toBe(SECOND);
+  });
+
   it("relocates only to another eligible account, with no fallback", () => {
     const config = accounts(PRIMARY, SECOND);
     const snapshots = new Map([scanned(PRIMARY, { tunnel_count: 10 }), scanned(SECOND, { tunnel_count: 10 })]);
@@ -213,6 +236,55 @@ describe("endpoint account rules", () => {
       [SECOND.accountId, "mausbot.si"],
     ]) {
       expect(endpointAccountFor(config, { hostname, provider_account: providerAccount }), hostname).toBeNull();
+    }
+  });
+
+  it("states that rule identically in SQL, for the queries that pick or count rows", async () => {
+    const config = accounts(PRIMARY, SECOND);
+    const label = (index: number) => `c-${index.toString(16).padStart(32, "0")}`;
+    const cases: Array<[string, string]> = [
+      [SECOND.accountId, `${label(1)}.mausbot.si`],
+      [PRIMARY.accountId, `${label(2)}.openmausbot.com`],
+      [SECOND.accountId, `c-${"0123456789abcdef".repeat(2)}.mausbot.si`],
+      [SECOND.accountId, `${label(3)}.openmausbot.com`],
+      [PRIMARY.accountId, `${label(4)}.mausbot.si`],
+      ["9".repeat(32), `${label(5)}.mausbot.si`],
+      [SECOND.accountId, `www.${label(6)}.mausbot.si`],
+      [SECOND.accountId, `${label(7).toUpperCase()}.mausbot.si`],
+      [SECOND.accountId, `c-${"0123456789abcdeg".repeat(2)}.mausbot.si`],
+      [SECOND.accountId, "c-abc.mausbot.si"],
+      [SECOND.accountId, `${label(8)}0.mausbot.si`],
+      [SECOND.accountId, `${label(9)}.evilmausbot.si`],
+      [SECOND.accountId, `${label(10)}.mausbot.si.evil.test`],
+      [SECOND.accountId, `${label(11)}.mausbot.si.`],
+      [SECOND.accountId, `d-${"0".repeat(31)}c.mausbot.si`],
+      [SECOND.accountId, `${label(12)}mausbot.si`],
+      [SECOND.accountId, "mausbot.si"],
+    ];
+    const now = Date.now();
+    await env.DB.batch(cases.map(([providerAccount, hostname], index) => env.DB.prepare(
+      `INSERT INTO installation_endpoints
+        (installation_id, provider_account, hostname, tunnel_name, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'ready', ?, ?)`,
+    ).bind(`rule-${index}`, providerAccount, hostname, `rule-tunnel-${index}`, now, now)));
+    const expected = cases.flatMap(([providerAccount, hostname], index) => (
+      endpointAccountFor(config, { hostname, provider_account: providerAccount }) ? [`rule-${index}`] : []
+    ));
+    expect(expected).toEqual(["rule-0", "rule-1", "rule-2"]);
+
+    const everyAccount = await env.DB.prepare(
+      `SELECT e.installation_id FROM installation_endpoints e
+        WHERE ${ACTED_ON_ENDPOINT_SQL} ORDER BY e.rowid`,
+    ).bind(actedOnAccounts(config)).all<{ installation_id: string }>();
+    expect(everyAccount.results.map((row) => row.installation_id)).toEqual(expected);
+    for (const account of [PRIMARY, SECOND]) {
+      const one = await env.DB.prepare(
+        `SELECT installation_id FROM installation_endpoints
+          WHERE provider_account = ? AND ${opaqueHostnameSQL("hostname", "?")} ORDER BY rowid`,
+      ).bind(account.accountId, account.companionHostSuffix).all<{ installation_id: string }>();
+      expect(one.results.map((row) => row.installation_id)).toEqual(cases.flatMap(([providerAccount, hostname], index) => (
+        endpointAccountFor(config, { hostname, provider_account: providerAccount }) === account ? [`rule-${index}`] : []
+      )));
     }
   });
 

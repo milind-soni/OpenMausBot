@@ -7,7 +7,8 @@ ALLOWED_ORIGINS=https://app.openmausbot.test
 CLOUDFLARE_ACCOUNT_ID=00000000000000000000000000000000
 CLOUDFLARE_ZONE_ID=00000000000000000000000000000000
 COMPANION_HOST_SUFFIX=openmausbot.test
-# Optional further Cloudflare accounts for managed endpoints (README "Several
-# Cloudflare accounts"). Each entry names the secret that holds its token.
-# CLOUDFLARE_ENDPOINT_ACCOUNTS='[{"accountId":"11111111111111111111111111111111","zoneId":"22222222222222222222222222222222","companionHostSuffix":"mausbot.test","apiTokenSecret":"CLOUDFLARE_API_TOKEN_SECOND"}]'
-# CLOUDFLARE_API_TOKEN_SECOND=replace-with-a-second-scoped-cloudflare-api-token
+# Further Cloudflare accounts (README "Several Cloudflare accounts") cannot be
+# set here: wrangler dev reads from this file only the names wrangler.jsonc
+# declares (its vars and secrets.required). To try one locally, uncomment
+# CLOUDFLARE_ENDPOINT_ACCOUNTS in wrangler.jsonc without committing it, with
+# test IDs and "apiTokenSecret": "CLOUDFLARE_API_TOKEN".

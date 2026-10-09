@@ -6,8 +6,10 @@
 // that never handed out an address may move.
 import type { ControlPlaneConfig, EndpointAccount } from "./config";
 
-/** After a quota refusal, an account takes no new tunnels for this long
- * (unless cleanup frees one of its resources first). */
+/** After Cloudflare refuses an account a new tunnel or DNS record (its
+ * quota) or, with several accounts, refuses its token, the account takes no
+ * new tunnels for this long (unless cleanup frees one of its resources
+ * first). */
 export const CAPACITY_GATE_MS = 10 * 60 * 1_000;
 /** An account whose last capacity scan is older than this is not known. */
 export const SNAPSHOT_STALE_MS = 30 * 60 * 1_000;
@@ -49,7 +51,8 @@ const OPAQUE_LABEL = /^c-[0-9a-f]{32}$/;
 /** The configured account that holds this row, or null when its account is
  * not configured (or was dropped as invalid), or its hostname is not exactly
  * one opaque label under that account's suffix. Such a row refuses to act
- * rather than touch an account or zone it does not belong to. */
+ * rather than touch an account or zone it does not belong to. The same rule
+ * in SQL is `opaqueHostnameSQL` and `ACTED_ON_ENDPOINT_SQL`. */
 export function endpointAccountFor(
   config: ControlPlaneConfig,
   row: { hostname: string; provider_account: string },
@@ -59,6 +62,34 @@ export function endpointAccountFor(
   const suffix = `.${account.companionHostSuffix}`;
   if (!row.hostname.endsWith(suffix)) return null;
   return OPAQUE_LABEL.test(row.hostname.slice(0, -suffix.length)) ? account : null;
+}
+
+/** `endpointAccountFor`'s hostname rule in SQL for the column `hostname` and
+ * the suffix expression `suffix`: `c-`, 32 lowercase hex digits, a dot, then
+ * exactly the suffix. (D1 caps GLOB and LIKE patterns at 50 bytes, too short
+ * for 32 character classes.) */
+export function opaqueHostnameSQL(hostname: string, suffix: string): string {
+  return `(substr(${hostname}, 1, 2) = 'c-'
+             AND ltrim(substr(${hostname}, 3, 32), '0123456789abcdef') = ''
+             AND substr(${hostname}, 35) = '.' || ${suffix})`;
+}
+
+/** `endpointAccountFor` over every account in SQL: true for an endpoint row
+ * aliased `e` that some configured account acts on. Bind
+ * `actedOnAccounts(config)` to its one parameter. The queries that pick rows
+ * to act on, or count the rows nothing acts on, use it so that they agree
+ * with the actions themselves. */
+export const ACTED_ON_ENDPOINT_SQL = `EXISTS (
+          SELECT 1 FROM json_each(?) AS account
+           WHERE json_extract(account.value, '$.id') = e.provider_account
+             AND ${opaqueHostnameSQL("e.hostname", "json_extract(account.value, '$.suffix')")}
+        )`;
+
+export function actedOnAccounts(config: ControlPlaneConfig): string {
+  return JSON.stringify(config.endpointAccounts.map((account) => ({
+    id: account.accountId,
+    suffix: account.companionHostSuffix,
+  })));
 }
 
 /** A row that never finished provisioning and holds no provider resource. It
@@ -115,7 +146,8 @@ function eligible(
   appVersion: string | null,
   now: number,
 ): boolean {
-  return (account.minAppVersion === null || appVersionAtLeast(appVersion, account.minAppVersion))
+  return account.newEndpoints
+    && (account.minAppVersion === null || appVersionAtLeast(appVersion, account.minAppVersion))
     && !rejectionActive(snapshot, now)
     // A new or broken account takes nothing before its first good scan.
     && snapshotFresh(snapshot, now);

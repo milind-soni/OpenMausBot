@@ -9,6 +9,8 @@ import {
 } from "./cloudflare-api";
 import type { ControlPlaneConfig, EndpointAccount } from "./config";
 import {
+  ACTED_ON_ENDPOINT_SQL,
+  actedOnAccounts,
   chooseNewEndpointAccount,
   endpointAccountFor,
   neverReady,
@@ -28,10 +30,11 @@ import { idleTunnelReason } from "./tunnel-activity";
 import {
   accountSnapshots,
   CAPACITY_RETRY_AFTER_SECONDS,
-  clearCapacityRejections,
   idlePolicy,
   isCapacityErrorCode,
-  recordCapacityRejection,
+  recordAccountRefusal,
+  releaseCleanedCapacity,
+  type AccountCleanup,
 } from "./tunnel-capacity";
 
 type EndpointStatus = "pending" | "provisioning" | "ready" | "deleting" | "deleted" | "error";
@@ -90,8 +93,11 @@ class EndpointOperationError extends Error {
   constructor(
     public readonly code: string,
     public readonly retryAfterSeconds: number | null = null,
-    /** The account the operation was acting in when it failed. */
-    public readonly account: EndpointAccount | null = null,
+    /** The ID of the account the operation was acting in when it failed (an
+     * ID, never the account: the account carries its API token). */
+    public readonly accountId: string | null = null,
+    /** Cloudflare refused that account's token (see `tokenRefused`). */
+    public readonly tokenRefused = false,
   ) {
     super(code);
     this.name = "EndpointOperationError";
@@ -101,6 +107,26 @@ class EndpointOperationError extends Error {
 function errorCode(error: unknown): string {
   if (error instanceof CloudflareAPIError || error instanceof EndpointOperationError) return error.code;
   return "endpoint_internal";
+}
+
+/** Cloudflare answered 401 or 403: the account's token is invalid, revoked,
+ * or lacks a permission (Tunnel or DNS Edit). That holds for every request in
+ * the account until an operator fixes the token, not for this one alone. */
+function tokenRefused(error: unknown): boolean {
+  if (error instanceof EndpointOperationError) return error.tokenRefused;
+  return error instanceof CloudflareAPIError && (error.status === 401 || error.status === 403);
+}
+
+/** Only an operator can fix a refused token. A stable `alert` field gives
+ * Workers Logs a single filter; the host suffix names the account. */
+function tokenRefusedAlert(requestId: string, account: EndpointAccount, code: string): void {
+  console.error(JSON.stringify({
+    message: "managed endpoint account token refused",
+    alert: "managed_endpoint_account_refused",
+    requestId,
+    hostSuffix: account.companionHostSuffix,
+    errorCode: code,
+  }));
 }
 
 function retryAfterSeconds(error: unknown): number | null {
@@ -633,10 +659,11 @@ async function rollbackCreatedResources(
 
 /** Cloudflare answers tunnel creation with 429 both for its API rate limit
  * and, at an account's tunnel quota, instead of error 1045. Nothing was
- * created either way. Tell them apart by the account's tunnel count (or its
- * last scan, when the count cannot be read): at or over the account's limit it
- * is the quota (`cf_tunnel_quota`, a capacity refusal); otherwise it stays a
- * rate limit. */
+ * created either way. Tell them apart by the account's tunnel count (or, when
+ * the count cannot be read, its last scan less the tunnels scheduled cleanup
+ * deleted since: see releaseCleanedCapacity): at or over the account's limit
+ * it is the quota (`cf_tunnel_quota`, a capacity refusal); otherwise it stays
+ * a rate limit. */
 async function classifyCreate429(
   env: Env,
   claim: ClaimedEndpoint,
@@ -801,13 +828,20 @@ async function reconcileClaim(
       acquired = await acquireTunnel(env, claim, api, account, allocation);
     } catch (refusal) {
       const code = errorCode(refusal);
-      const target = !moved && TUNNEL_QUOTA_CODES.has(code) && neverReady(claim.row)
+      // Cloudflare refused the account, not this request: it is out of
+      // tunnels, or its token is refused. Either holds for every request
+      // there.
+      const accountRefused = TUNNEL_QUOTA_CODES.has(code) || tokenRefused(refusal);
+      const target = !moved && accountRefused && neverReady(claim.row)
         ? await relocationFor(config, allocation, account)
         : null;
       if (!target) throw refusal;
-      // Close the full account to every other request before leaving it.
-      await recordCapacityRejection(env, config, account, code).catch(() => undefined);
+      // Close the account to every other request before leaving it.
+      await recordAccountRefusal(env, config, account, code).catch(() => undefined);
       if (!(await relocateClaim(env, claim, api, account, target, requestId))) throw refusal;
+      // This row found a working account; the refused token still needs an
+      // operator.
+      if (tokenRefused(refusal)) tokenRefusedAlert(requestId, account, code);
       account = target;
       api = new CloudflareAPI(target, fetcher);
       acquired = await acquireTunnel(env, claim, api, account, allocation);
@@ -929,17 +963,29 @@ async function reconcileClaim(
     } catch {
       // The original redacted failure is the useful client-facing result.
     }
-    throw new EndpointOperationError(operationCode, retryAfterSeconds(failure), account);
+    throw new EndpointOperationError(
+      operationCode,
+      retryAfterSeconds(failure),
+      account.accountId,
+      tokenRefused(failure),
+    );
   }
 }
 
 type DeleteOutcome = "cancelled" | "deleted";
+
+/** Provider resources a cleanup deleted, whatever its outcome. */
+interface FreedResources {
+  dnsRecords: number;
+  tunnels: number;
+}
 
 async function deleteClaim(
   env: Env,
   config: ControlPlaneConfig,
   claim: ClaimedEndpoint,
   fetcher: CloudflareFetch,
+  freed: FreedResources = { dnsRecords: 0, tunnels: 0 },
 ): Promise<DeleteOutcome> {
   let tunnelId = claim.row.tunnel_id;
   let dnsRecordId = claim.row.dns_record_id;
@@ -1015,6 +1061,7 @@ async function deleteClaim(
         }
         await renewClaim(env, claim);
         await api.deleteDNSRecord(dnsRecordId);
+        freed.dnsRecords += 1;
       }
       dnsRecordId = null;
       await updateClaimedResources(env, claim, tunnelId, dnsRecordId);
@@ -1028,6 +1075,7 @@ async function deleteClaim(
         }
         await renewClaim(env, claim);
         await api.deleteTunnel(tunnelId);
+        freed.tunnels += 1;
       }
       tunnelId = null;
       await updateClaimedResources(env, claim, tunnelId, dnsRecordId);
@@ -1090,16 +1138,20 @@ export async function provisionManagedEndpoint(
     && await refusingNewTunnels(allocation, account)
     && !(neverReady(row) && await relocationFor(config, allocation, account))
   ) {
-    // Cloudflare refused this account a new tunnel or DNS record moments ago,
-    // and the row cannot move. Answer locally instead of spending the shared
-    // API budget on a sure failure.
+    // Cloudflare refused this account a new tunnel or DNS record, or its
+    // token, moments ago, and the row cannot move. Answer locally instead of
+    // spending the shared API budget on a sure failure, with the answer that
+    // refusal got.
+    const refusal = (await allocation.snapshots()).get(account.accountId)?.capacity_rejected_code ?? null;
+    const capacity = refusal === null || isCapacityErrorCode(refusal);
     console.log(JSON.stringify({
       message: "managed endpoint allocation deferred",
       requestId,
-      errorCode: "endpoint_capacity",
+      errorCode: capacity ? "endpoint_capacity" : "endpoint_unavailable",
       hostSuffix: account.companionHostSuffix,
     }));
-    return capacityResponse();
+    if (capacity) return capacityResponse();
+    throw new HTTPError(502, "endpoint_unavailable");
   }
   const claim = await claimEndpoint(env, row, "provisioning");
   if (!claim) return busyResponse();
@@ -1110,7 +1162,9 @@ export async function provisionManagedEndpoint(
   } catch (error) {
     const code = errorCode(error);
     const capacity = isCapacityErrorCode(code);
-    const failedIn = error instanceof EndpointOperationError ? error.account ?? account : account;
+    const refused = tokenRefused(error);
+    const failedInId = error instanceof EndpointOperationError ? error.accountId : null;
+    const failedIn = config.endpointAccounts.find((each) => each.accountId === failedInId) ?? account;
     console.error(JSON.stringify({
       message: "managed endpoint reconcile failed",
       requestId,
@@ -1118,10 +1172,14 @@ export async function provisionManagedEndpoint(
       capacity,
       hostSuffix: failedIn.companionHostSuffix,
     }));
-    if (capacity) {
-      await recordCapacityRejection(env, config, failedIn, code).catch(() => undefined);
-      return capacityResponse();
+    if (refused) tokenRefusedAlert(requestId, failedIn, code);
+    // A refused token closes the account like a quota, but only where
+    // another account can take its new endpoints; with one account nothing
+    // changes but the alert.
+    if (capacity || (refused && config.endpointAccounts.length > 1)) {
+      await recordAccountRefusal(env, config, failedIn, code).catch(() => undefined);
     }
+    if (capacity) return capacityResponse();
     if (code === "cf_rate_limited") return rateLimitedResponse(retryAfterSeconds(error));
     throw new HTTPError(502, "endpoint_unavailable");
   }
@@ -1158,6 +1216,8 @@ export async function deleteManagedEndpoint(
 
 interface CleanupOutcome {
   errorCode?: string;
+  /** What it deleted at Cloudflare, even when it then failed. */
+  freed?: FreedResources;
   result: DeleteOutcome | "failed" | "skipped";
 }
 
@@ -1174,8 +1234,9 @@ export async function cleanupEndpointRow(
   if (!row || row.status === "deleted") return { result: "skipped" };
   const claim = await claimEndpoint(env, row, "deleting", { keepReclaim });
   if (!claim) return { result: "skipped" };
+  const freed: FreedResources = { dnsRecords: 0, tunnels: 0 };
   try {
-    return { result: await deleteClaim(env, config, claim, fetcher) };
+    return { freed, result: await deleteClaim(env, config, claim, fetcher, freed) };
   } catch (error) {
     const code = errorCode(error);
     console.error(JSON.stringify({
@@ -1183,7 +1244,7 @@ export async function cleanupEndpointRow(
       requestId,
       errorCode: code,
     }));
-    return { errorCode: code, result: "failed" };
+    return { errorCode: code, freed, result: "failed" };
   }
 }
 
@@ -1214,15 +1275,16 @@ export async function sweepManagedEndpointCleanup(
   requestId: string,
 ): Promise<CleanupSweepSummary> {
   const now = Date.now();
-  // Rows of an unconfigured account cannot be cleaned and must not crowd the
-  // LIMIT; the cron reports how many there are.
+  // Rows no configured account acts on (endpointAccountFor) cannot be
+  // cleaned and must not crowd the LIMIT; the cron reports how many there
+  // are.
   const candidates = await env.DB.prepare(
     `SELECT e.installation_id, e.provider_account, e.cleanup_attempts, e.delete_requested_at,
             e.last_error_code
        FROM installation_endpoints e
        LEFT JOIN installations i ON i.id = e.installation_id
       WHERE e.status != 'deleted'
-        AND e.provider_account IN (SELECT value FROM json_each(?))
+        AND ${ACTED_ON_ENDPOINT_SQL}
         AND (
           e.status = 'deleting'
           OR i.revoked_at IS NOT NULL
@@ -1244,7 +1306,7 @@ export async function sweepManagedEndpointCleanup(
                e.installation_id ASC
       LIMIT ?`,
   ).bind(
-    JSON.stringify(config.endpointAccounts.map((account) => account.accountId)),
+    actedOnAccounts(config),
     now,
     now - CLEANUP_BACKOFF_1_MS,
     now - CLEANUP_BACKOFF_2_MS,
@@ -1283,10 +1345,18 @@ export async function sweepManagedEndpointCleanup(
     failed: 0,
     rateLimited: false,
   };
-  // Accounts whose API answered 429 this run, and accounts where cleanup
-  // freed a resource.
+  // Accounts whose API answered 429 this run, and what cleanup did in each
+  // account.
   const rateLimited = new Set<string>();
-  const freed = new Set<string>();
+  const cleaned = new Map<string, AccountCleanup>();
+  const tally = (account: string, deleted: boolean, freed: FreedResources | undefined) => {
+    if (!deleted && !freed?.tunnels && !freed?.dnsRecords) return;
+    const each = cleaned.get(account) ?? { deleted: false, dnsRecords: 0, tunnels: 0 };
+    each.deleted ||= deleted;
+    each.dnsRecords += freed?.dnsRecords ?? 0;
+    each.tunnels += freed?.tunnels ?? 0;
+    cleaned.set(account, each);
+  };
   let next = 0;
   const worker = async () => {
     while (next < candidates.results.length) {
@@ -1306,10 +1376,9 @@ export async function sweepManagedEndpointCleanup(
           requestId,
           true,
         );
-        if (outcome.result === "deleted") {
-          summary.deleted += 1;
-          freed.add(candidate.provider_account);
-        } else if (outcome.result === "cancelled") summary.cancelled += 1;
+        tally(candidate.provider_account, outcome.result === "deleted", outcome.freed);
+        if (outcome.result === "deleted") summary.deleted += 1;
+        else if (outcome.result === "cancelled") summary.cancelled += 1;
         else if (outcome.result === "failed") summary.failed += 1;
         if (outcome.errorCode === "cf_rate_limited") {
           rateLimited.add(candidate.provider_account);
@@ -1330,7 +1399,7 @@ export async function sweepManagedEndpointCleanup(
     worker,
   ));
 
-  await clearCapacityRejections(env, config, [...freed]).catch(() => undefined);
+  await releaseCleanedCapacity(env, config, cleaned).catch(() => undefined);
   if (summary.candidates > 0) {
     console.log(JSON.stringify({
       message: "managed endpoint cleanup sweep",
