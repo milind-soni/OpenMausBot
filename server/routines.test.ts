@@ -772,6 +772,51 @@ describe("RoutineManager", () => {
     expect(create("Above maximum", 241).durationMinutes).toBe(240);
   });
 
+  it("refuses to overwrite a routines file it could not read", () => {
+    const h = harness();
+    const input = {
+      name: "Health check",
+      prompt: "Check the fixture",
+      botId: "maus-1",
+      schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: new Date(2026, 7, 17, 8, 0, 0).getTime() },
+    };
+    h.manager.create({ ...input, name: "First" });
+    h.manager.create({ ...input, name: "Second" });
+    const file = h.options.file as string;
+    const corrupt = readFileSync(file, "utf8").slice(0, 100);
+    writeFileSync(file, corrupt);
+    const reloaded = new RoutineManager(h.options);
+    expect(reloaded.listRoutines()).toEqual([]);
+    expect(() => reloaded.create(input)).toThrow(expect.objectContaining({ status: 503 }));
+    expect(() => reloaded.remove("anything")).toThrow(expect.objectContaining({ status: 503 }));
+    expect(() => reloaded.enqueueWebhook({
+      webhookId: "hook-1",
+      webhookName: "Lead",
+      prompt: "Qualify it",
+      botId: "maus-1",
+      runOn: "maus",
+      deliveryId: "evt-1",
+      receivedAt: Date.now(),
+    })).toThrow(expect.objectContaining({ status: 503 }));
+    expect(readFileSync(file, "utf8")).toBe(corrupt);
+  });
+
+  it("treats a routines file with a damaged top-level shape as unreadable", () => {
+    const h = harness();
+    const file = h.options.file as string;
+    const damaged = JSON.stringify({ version: 1, routines: "garbage", runs: [] });
+    writeFileSync(file, damaged);
+    const reloaded = new RoutineManager(h.options);
+    expect(reloaded.listRoutines()).toEqual([]);
+    expect(() => reloaded.create({
+      name: "Health check",
+      prompt: "Check the fixture",
+      botId: "maus-1",
+      schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: new Date(2026, 7, 17, 8, 0, 0).getTime() },
+    })).toThrow(expect.objectContaining({ status: 503 }));
+    expect(readFileSync(file, "utf8")).toBe(damaged);
+  });
+
   it("validates, preserves, and clears the optional safety timeout", () => {
     const h = harness();
     const input = {

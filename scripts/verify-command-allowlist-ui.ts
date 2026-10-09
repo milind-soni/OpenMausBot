@@ -54,7 +54,20 @@ await press("Shift+Tab");
 assert.equal(await evaluate("document.activeElement?.closest('label')?.textContent.trim()"), "Working folder");
 await press("Tab");
 assert.equal(await activeLabel(), "Close command allowlist");
-console.log("PASS composer opens allowlist with server folder, initial focus and keyboard containment");
+await click("Close command allowlist");
+await poll(dialogOpen, false, "Close button dismisses the allowlist");
+assert.equal(await activeLabel(), trigger);
+await click(trigger);
+await click("Command allowlist");
+await visible("No commands saved yet.");
+await evaluate(`document.querySelector("[data-tour=composer] textarea")?.focus()`);
+await press("Escape");
+await poll(dialogOpen, false, "Escape closes the allowlist when focus is outside it");
+assert.equal(await activeLabel(), trigger);
+await click(trigger);
+await click("Command allowlist");
+await visible("No commands saved yet.");
+console.log("PASS composer opens allowlist with server folder, initial focus, keyboard containment, a working close button, and Escape from the message box");
 
 const command = "git status --short";
 await type("Command", command);
@@ -85,11 +98,18 @@ await ui("click", "--ref", `@${profileRef}`);
 await click("Permissions");
 await click("Manage command allowlist");
 await visible("No commands saved yet.");
+await evaluate(`[...document.querySelectorAll("button")].find((button) => button.textContent === "Manage command allowlist")?.focus()`);
 await press("Escape");
-await poll(dialogOpen, false, "nested allowlist closes");
+await poll(dialogOpen, false, "nested allowlist closes while focus is still on its opener");
 assert.equal(await evaluate("document.activeElement?.textContent"), "Manage command allowlist");
 assert.ok((await snapshot()).includes('button "Close settings"'));
-console.log("PASS settings management opens the same allowlist and Escape leaves settings open");
+await click("Manage command allowlist");
+await visible("No commands saved yet.");
+await click("Close command allowlist");
+await poll(dialogOpen, false, "Close button dismisses the nested allowlist");
+assert.equal(await evaluate("document.activeElement?.textContent"), "Manage command allowlist");
+assert.ok((await snapshot()).includes('button "Close settings"'));
+console.log("PASS settings management opens the same allowlist; Escape and the close button leave settings open");
 
 // Restrict the stubs to the exact allowlist GET; all real writes and the
 // successful retry still pass through the isolated server.

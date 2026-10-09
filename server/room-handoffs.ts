@@ -335,6 +335,21 @@ export class RoomHandoffs {
       return Boolean(parent && !parent.groupId && parent.threadId === threadId);
     });
   }
+  /** Teammate work that has not settled yet, as ids only: who asked, who is
+   * working on it, and where. The request and result text stay out, so the
+   * Team map can show the link without reading anyone's conversation. */
+  liveEdges(): Array<{ sourceBotId: string; targetBotId: string; state: "queued" | "running"; threadId: string; groupId?: string }> {
+    return [...this.nodes.values()].flatMap(node => {
+      if (terminal(node) || !node.parentId) return [];
+      const parent = this.nodes.get(node.parentId);
+      if (!parent || parent.botId === node.botId) return [];
+      return [{
+        sourceBotId: parent.botId, targetBotId: node.botId,
+        state: node.status === "queued" ? "queued" as const : "running" as const,
+        threadId: node.threadId, ...(node.groupId ? { groupId: node.groupId } : {}),
+      }];
+    });
+  }
   /** Stop this conversation without reaching into a teammate that is already
    * working. Its provider process is left alone: it finishes and its result
    * is still reported here. Work that never started is cancelled, because

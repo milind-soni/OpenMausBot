@@ -347,6 +347,15 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(caddy).toMatch(/^:8080 \{/m);
   const upstreams = [...caddy.matchAll(/reverse_proxy (\S+)/g)].map(match => match[1]);
   expect(new Set(upstreams)).toEqual(new Set(["127.0.0.1:8799", "127.0.0.1:8800"]));
+  // Webhooks reach a Cloud at its own address: only /hooks/* goes to the
+  // receiver (whose /health stays private), the rest to the server.
+  expect(caddy).toMatch(/handle \/hooks\/\* \{\s*reverse_proxy 127\.0\.0\.1:8800 \{/);
+  expect(caddy.match(/127\.0\.0\.1:8800/g)).toHaveLength(1);
+  // ...and only for the Cloud's own name, like everything but the health check.
+  const homeStart = caddy.indexOf("handle @home {");
+  let homeEnd = homeStart + "handle @home {".length;
+  for (let depth = 1; depth > 0; homeEnd++) depth += caddy[homeEnd] === "{" ? 1 : caddy[homeEnd] === "}" ? -1 : 0;
+  expect(caddy.slice(homeStart, homeEnd)).toContain("handle /hooks/* {");
   // every forwarded request is marked as proxied
   expect(caddy.match(/header_up X-Forwarded-For \{client_ip\}/g)).toHaveLength(upstreams.length);
   // The root supervisor's code is root's: maus owns only the volume. The
@@ -434,4 +443,25 @@ writeFileSync(${JSON.stringify(out)}, JSON.stringify({ secrets, env: process.env
   } finally {
     await removeTempDir(dir);
   }
+});
+
+it("captures a child's stdout and stderr when asked, and shares this process's otherwise", async () => {
+  const dir = directory();
+  const script = join(dir, "streams.mjs");
+  writeFileSync(script, `process.stdout.write("stdout marker"); process.stderr.write("stderr marker");`);
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) };
+  const run = async (capture: boolean) => {
+    const child = spawnWithSecrets(process.execPath, [script], env, { OMB_CLOUD_BOOTSTRAP_SECRET: secret }, undefined, capture);
+    let out = "", err = "";
+    child.stdout?.on("data", (chunk) => { out += chunk; });
+    child.stderr?.on("data", (chunk) => { err += chunk; });
+    await new Promise((resolve) => child.once("close", resolve));
+    return { child, out, err };
+  };
+  const captured = await run(true);
+  expect(captured.out).toContain("stdout marker");
+  expect(captured.err).toContain("stderr marker");
+  const shared = await run(false);
+  expect(shared.child.stdout).toBeNull();
+  expect(shared.child.stderr).toBeNull();
 });

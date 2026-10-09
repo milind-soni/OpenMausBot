@@ -396,6 +396,32 @@ describe("message-linked files", () => {
       .rejects.toMatchObject({ status: 404 });
   });
 
+  it("matches a raw file URL with non-ASCII names, then refuses it only for its folder", async () => {
+    // A bot saved to a folder the person asked for, outside every root. The
+    // link is the message's own, so the refusal is the root check, for a file
+    // and a folder alike, and the same link opens once that folder is a root.
+    // Bots on macOS write the URL unencoded; Windows needs a real file URL.
+    const url = (path: string) => process.platform === "win32" ? pathToFileURL(path).href : `file://${path}`;
+    const folder = join(outside, "Posts", "2026-10-08_News");
+    mkdirSync(join(folder, "00_غلاف"), { recursive: true });
+    writeFileSync(join(outside, "PREVIEW.jpg"), "jpg");
+    const file = url(join(outside, "PREVIEW.jpg"));
+    const linkedFolder = url(folder);
+    const nested = url(join(folder, "00_غلاف"));
+    const text = `- [PREVIEW.jpg](${file})\n- [2026-10-08_News](${linkedFolder})\n- [00_غلاف](${nested})`;
+    for (const href of [file, linkedFolder, nested]) expect(messageReferencesFile(text, href)).toBe(true);
+
+    const roots = [workspace];
+    const refusal = { status: 403, code: "outside_workspace" };
+    await expect(openMessageFile(file, roots)).rejects.toMatchObject(refusal);
+    await expect(openMessageFile(linkedFolder, roots)).rejects.toMatchObject(refusal);
+    await expect(listMessageFolder(nested, roots)).rejects.toMatchObject(refusal);
+
+    const opened = await openMessageFile(file, [workspace, outside]);
+    await opened.handle.close();
+    await expect(listMessageFolder(linkedFolder, [workspace, outside])).resolves.toMatchObject({ name: "2026-10-08_News" });
+  });
+
   it("emits a safe UTF-8 attachment filename", () => {
     const header = messageFileDisposition("résumé \"final\".md");
     expect(header).toContain('filename="re_sume_ _final_.md"');

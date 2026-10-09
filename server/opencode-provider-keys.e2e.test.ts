@@ -28,6 +28,7 @@ let dataDir = "";
 let dump = "";
 let base = "";
 let child: ChildProcess;
+let log = "";
 let owner = "";
 
 async function api(method: string, path: string, body?: unknown) {
@@ -84,12 +85,13 @@ beforeAll(async () => {
     OMB_PUBLIC_URL: `https://${HOST}`, OMB_CLOUD_SECRETS_FD: "3",
     // Provider keys in the server's own environment: never the owner's to spend from a bot.
     ANTHROPIC_API_KEY: "anthropic-server-own", OPENAI_API_KEY: "openai-server-own",
-  }, { OMB_CLOUD_BOOTSTRAP_SECRET: secret });
+  }, { OMB_CLOUD_BOOTSTRAP_SECRET: secret }, undefined, true);
+  for (const stream of [child.stdout, child.stderr]) stream?.on("data", (chunk) => { log += chunk; });
   const deadline = Date.now() + 20_000;
   for (;;) {
-    if (child.exitCode !== null) throw new Error("the Cloud home exited");
+    if (child.exitCode !== null) throw new Error(`the Cloud home exited:\n${log}`);
     try { if ((await fetch(`${base}/api/health`)).ok) break; } catch { /* starting */ }
-    if (Date.now() > deadline) throw new Error("the Cloud home did not start");
+    if (Date.now() > deadline) throw new Error(`the Cloud home did not start:\n${log}`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   owner = await adminPairing();

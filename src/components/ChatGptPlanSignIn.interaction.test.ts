@@ -19,7 +19,7 @@ vi.mock("@/state/store", async (original) => ({
   useStore: () => ({ dispatch: fixture.dispatch, refreshInstances: fixture.refreshInstances, refreshModels: fixture.refreshModels }),
 }));
 const { DeviceSignIn } = await import("./DeviceSignIn");
-const { AddChatGptAccount } = await import("./CodexAccountSettings");
+const { AddProviderAccount } = await import("./CodexAccountSettings");
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => Promise<void> }>;
 function nodes(tree: ReactNode): Node[] {
@@ -76,19 +76,19 @@ it("cancels the same flow and never opens an untrusted authorization URL", async
   expect(fixture.refreshModels).not.toHaveBeenCalled();
 });
 
-it("adds a named account independently without signing it in or replacing an existing identity", async () => {
+it.each([undefined, "google-original"])("adds a named account independently without signing it in or replacing an existing identity (%s)", async (antigravityInstanceId) => {
   const accounts = [{ instanceId: "chatgpt-second", displayName: "Work" }];
   fixture.api.mockResolvedValueOnce({ instanceId: "chatgpt-second", instances: accounts });
   fixture.index = 0;
-  nodes(AddChatGptAccount()).find((node) => node.type === "button")!.props.onClick!();
+  nodes(AddProviderAccount({ antigravityInstanceId })).find((node) => node.type === "button")!.props.onClick!();
   fixture.index = 0;
-  const input = nodes(AddChatGptAccount()).find((node) => node.type === "input") as ReactElement<{ onChange: (event: { target: { value: string } }) => void }>;
+  const input = nodes(AddProviderAccount({ antigravityInstanceId })).find((node) => node.type === "input") as ReactElement<{ onChange: (event: { target: { value: string } }) => void }>;
   input.props.onChange({ target: { value: " Work " } });
   fixture.index = 0;
-  const form = nodes(AddChatGptAccount()).find((node) => node.type === "form") as ReactElement<{ onSubmit: (event: { preventDefault: () => void }) => void }>;
+  const form = nodes(AddProviderAccount({ antigravityInstanceId })).find((node) => node.type === "form") as ReactElement<{ onSubmit: (event: { preventDefault: () => void }) => void }>;
   form.props.onSubmit({ preventDefault: () => {} });
   await flush();
-  expect(fixture.api).toHaveBeenCalledWith("/api/instances/chatgpt-accounts", { method: "POST", body: JSON.stringify({ displayName: "Work" }) });
+  expect(fixture.api).toHaveBeenCalledWith(`/api/instances/${antigravityInstanceId ? "antigravity" : "chatgpt"}-accounts`, { method: "POST", body: JSON.stringify({ displayName: "Work", ...(antigravityInstanceId ? { sourceInstanceId: antigravityInstanceId } : {}) }) });
   expect(fixture.api).toHaveBeenCalledOnce();
   expect(fixture.dispatch).toHaveBeenCalledWith({ type: "instances", instances: accounts });
   expect(fixture.openExternal).not.toHaveBeenCalled();

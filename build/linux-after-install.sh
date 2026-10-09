@@ -138,6 +138,12 @@ install_browser_apparmor_profile() {
     fi
     return
   fi
+  # Older hosts lack the AppArmor 4 ABI and user-namespace restriction.
+  # They use Chrome's normal sandbox without this optional allowlist.
+  # Never skip policy setup on a host exposing the restriction sysctl.
+  if [ ! -f "$APPARMOR_DIR/abi/4.0" ] && [ ! -e "$USERNS_RESTRICTION" ]; then
+    return
+  fi
   # The policy directory belongs to the OS: validate it, never chmod it.
   if [ -L "$APPARMOR_DIR" ] || [ "$(stat -c '%U:%G:%a' -- "$APPARMOR_DIR")" != "$EXPECTED_OWNER:755" ]; then
     echo "OpenMausBot AppArmor policy directory is unsafe: $APPARMOR_DIR" >&2
