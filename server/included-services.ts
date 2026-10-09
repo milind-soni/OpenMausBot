@@ -7,6 +7,7 @@
 //   OMB_CLOUD_BOAT_URL    + OMB_CLOUD_BOAT_TOKEN     the Boat relay, ending in /api/box/v1
 //   OMB_CLOUD_VOICE_URL   + OMB_CLOUD_VOICE_TOKEN    the ElevenLabs relay, ending in /v1
 //   OMB_CLOUD_DECIDER_URL + OMB_CLOUD_DECIDER_TOKEN  the Jev relay, a Jev base URL
+//   OMB_CLOUD_AI_URL      + OMB_CLOUD_AI_TOKEN       the trial's Claude credit, an OpenAI-compatible base URL
 //
 // An included token is only a fallback. The person's own key (Settings, or
 // BOX_TOKEN / OMB_TTS_KEY / OMB_JEV_API_KEY) always wins, and removing it
@@ -21,7 +22,7 @@ import { JEV_DEFAULT_BASE_URL } from "./decider/jev.ts";
 export const BOAT_API_DEFAULT = "https://ascii.dev/api/box/v1";
 export const ELEVENLABS_API_DEFAULT = "https://api.elevenlabs.io/v1";
 /** Also on WORKSPACE_CREDENTIAL_ENV (config.ts). */
-export const INCLUDED_TOKEN_ENV = ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN"] as const;
+export const INCLUDED_TOKEN_ENV = ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_AI_TOKEN"] as const;
 
 export interface ServiceCredential {
   token: string;
@@ -35,6 +36,7 @@ interface Included {
   boat: ServiceCredential | null;
   voice: ServiceCredential | null;
   decider: ServiceCredential | null;
+  ai: ServiceCredential | null;
 }
 
 function includedService(url: string | undefined, token: string | undefined): ServiceCredential | null {
@@ -48,7 +50,25 @@ const includedFrom = (env: NodeJS.ProcessEnv): Included => ({
   voice: includedService(env.OMB_CLOUD_VOICE_URL, env.OMB_CLOUD_VOICE_TOKEN),
   // A Jev base URL as it is: the decider adds /v1/systemone, the relay's one route.
   decider: includedService(env.OMB_CLOUD_DECIDER_URL, env.OMB_CLOUD_DECIDER_TOKEN),
+  ai: trialCreditService(env.OMB_CLOUD_AI_URL, env.OMB_CLOUD_AI_TOKEN),
 });
+
+/** The trial's Claude credit: an OpenAI-compatible base URL on the Admin
+ * (its routes under /v1) and this machine's own token for it. The token is a
+ * key the chat engine sends there (cloud-credit-provider.ts), so the address
+ * must be HTTPS (loopback for tests) and the token the Admin's own shape;
+ * anything else is no credit. */
+function trialCreditService(url: string | undefined, token: string | undefined): ServiceCredential | null {
+  const credential = includedService(url, token);
+  if (!credential || !/^omb_ai_[A-Za-z0-9_-]{43}$/.test(credential.token)) return null;
+  try {
+    const parsed = new URL(credential.api);
+    const loopback = parsed.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(parsed.hostname);
+    return (parsed.protocol === "https:" || loopback) && !parsed.username && !parsed.password && !parsed.search && !parsed.hash ? credential : null;
+  } catch {
+    return null;
+  }
+}
 
 let held: Included | null = null;
 
@@ -83,6 +103,13 @@ export function boatCredential(own: string | undefined, env: NodeJS.ProcessEnv =
 /** The ElevenLabs credential in use: the person's own key, else the included one. */
 export function voiceCredential(own: string | undefined, env: NodeJS.ProcessEnv = process.env): ServiceCredential | null {
   return resolve(own, elevenLabsProviderApi(env), (held ?? includedFrom(env)).voice);
+}
+
+/** The trial's Claude credit on this Cloud home, when the Admin gave it one:
+ * the relay (an OpenAI-compatible base URL) and this machine's token for it.
+ * Never the person's own: their engines never see it (cloud-credit-provider.ts). */
+export function trialCreditCredential(env: NodeJS.ProcessEnv = process.env): ServiceCredential | null {
+  return (held ?? includedFrom(env)).ai;
 }
 
 /** The decision model's credential in use: the person's own Jev key (saved,

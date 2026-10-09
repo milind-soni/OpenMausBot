@@ -3,6 +3,13 @@ import { ChevronDown, Cloud, Laptop } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
+/** The native server menu; resolves when it closes. While the Show me how tip
+ * is up (`howTo`) it opens as reached from the tip, and `onClosed` ends the
+ * tip when it closes, whatever was chosen. */
+export function openServerMenu(bridge: { menu: (options?: { from?: "howto" }) => Promise<void> }, { howTo = false, onClosed }: { howTo?: boolean; onClosed?: () => void } = {}): Promise<void> {
+  return bridge.menu(howTo ? { from: "howto" } : undefined).finally(() => { if (howTo) onClosed?.(); });
+}
+
 /** "· always on" after the server's name while the window shows an OMB Cloud
  * home (config.cloudHome), so people know which computer they are on. */
 function AlwaysOn() {
@@ -22,8 +29,13 @@ function AlwaysOn() {
  * The dropdown is native: a remote workspace cannot choose a destination
  * itself or read the other workspaces saved on this computer. Outside the
  * desktop app there is nothing to switch; a Cloud home still says what it is,
- * and whose it is when this browser signed in from the Cloud page (`owner`). */
-export function DesktopWorkspaceSwitcher({ compact = false, inline = false, cloudHome = false, owner = null }: { compact?: boolean; inline?: boolean; cloudHome?: boolean; owner?: string | null }) {
+ * and whose it is when this browser signed in from the Cloud page (`owner`).
+ * Both buttons are the Show me how tip's anchor ("server-switcher"); while
+ * the tip is up (`howTo`), the menu opens as reached from it, and
+ * `onMenuClosed` ends the tip when it closes. */
+export function DesktopWorkspaceSwitcher({ compact = false, inline = false, cloudHome = false, owner = null, howTo = false, onMenuClosed }: {
+  compact?: boolean; inline?: boolean; cloudHome?: boolean; owner?: string | null; howTo?: boolean; onMenuClosed?: () => void;
+}) {
   const bridge = window.ogb?.workspaces;
   const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string } | null>(null);
   const [open, setOpen] = useState(false);
@@ -59,11 +71,12 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, clou
   const openMenu = () => {
     if (open) return;
     setError(""); setOpen(true);
-    void bridge.menu().catch(() => setError("Could not open the server list. Try the Server menu.")).finally(() => setOpen(false));
+    void openServerMenu(bridge, { howTo, onClosed: onMenuClosed }).catch(() => setError("Could not open the server list. Try the Server menu."))
+      .finally(() => setOpen(false));
   };
   if (inline) return <div data-workspace-switcher="inline" className="flex min-w-0">
     <button type="button" aria-label={`Switch server: ${shown}`} aria-haspopup="menu" aria-expanded={open} data-cloud-home-indicator={cloudHome || undefined}
-      title={title} onClick={openMenu}
+      data-tour="server-switcher" title={title} onClick={openMenu}
       className="flex h-7 min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md px-1.5 text-left text-[12.5px] font-medium text-ink hover:bg-control focus-visible:outline focus-visible:outline-accent"
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
       <Icon size={14} aria-hidden="true" className="shrink-0 text-ink-secondary" />
@@ -74,7 +87,7 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, clou
   </div>;
   return <div className={cn("py-1.5", compact ? "px-2" : "px-3")}>
     <button type="button" aria-label={`Switch server: ${shown}`} aria-haspopup="menu" aria-expanded={open} data-cloud-home-indicator={cloudHome || undefined}
-      title={title}
+      data-tour="server-switcher" title={title}
       onClick={openMenu}
       className={cn("flex w-full items-center gap-2 rounded-lg py-2 text-left text-[13px] font-medium text-ink hover:bg-control focus-visible:outline focus-visible:outline-accent", compact ? "justify-center px-1" : "px-2")}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>

@@ -19,7 +19,9 @@
 //
 // Cloud Pro includes no AI. The person signs in on the machine with their own
 // Claude or ChatGPT account, or an API key, exactly as on any server; nothing
-// on a Cloud home is ever routed to a platform model gateway.
+// on a Cloud home is ever routed to a platform model gateway. The one
+// exception is a free trial's Claude credit, on OpenMausBot's own chat engine
+// until they connect their own (cloud-credit-provider.ts).
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import type { IncomingMessage } from "node:http";

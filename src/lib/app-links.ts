@@ -13,9 +13,15 @@ export const APPROVAL_LEVELS_URL = `${APP_REPOSITORY}/blob/main/docs/approval-le
  * Discord in minutes instead of sitting open as an issue. */
 export const FEEDBACK_URL = "https://discord.gg/9Wb8MEpXRs";
 export const RELEASES_URL = `${APP_REPOSITORY}/releases`;
-export const PRO_URL = "https://www.openmausbot.com/pro";
-/** Every OMB Cloud plan side by side (Personal, Pro, Max). */
+/** Every OpenMausBot Cloud plan side by side (Personal, Pro, Max). */
 export const PRICING_URL = "https://www.openmausbot.com/pricing";
+/** A link to the website or the Cloud page, tagged with where in the app it
+ * was opened (`src`, one of lib/cloud-plan's sources), for the counts. */
+export function withSource(url: string, source: string): string {
+  const target = new URL(url);
+  target.searchParams.set("src", source);
+  return target.href;
+}
 export const LICENSE_URL = `${APP_REPOSITORY}/blob/main/LICENSE`;
 /** The phone apps, the same two links openmausbot.com (lib/config.ts) and the
  * Cloud page offer. iOS is on the App Store, listed as "MausBot". Android is

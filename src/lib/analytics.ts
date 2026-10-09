@@ -9,6 +9,7 @@
 // import would put ~240 kB into the startup bundle that every launch
 // evaluates before first paint, opted-out installs included.
 import type { PostHog } from "posthog-js";
+import { appVersion } from "@/lib/app-links";
 
 const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
 
@@ -118,6 +119,11 @@ function start(posthog: PostHog) {
   // before the first capture of the session.
   if (posthog.has_opted_out_capturing()) posthog.opt_in_capturing();
   client = posthog;
+  // Every event says which app sent it, and from where: this computer's own
+  // page ("local"), or a server's page opened in it or in a browser
+  // ("server", My Cloud included), so a count can be made per release and
+  // per surface. Registered before the first event.
+  posthog.register({ app_version: appVersion(), surface: analyticsSurface() });
   const platform = navigator.userAgent.includes("Electron") ? "desktop" : "browser";
   // one-time install marker — app_first_open counts installs (the closest
   // truth to "downloads that mattered"; raw download counts live on the
@@ -128,6 +134,12 @@ function start(posthog: PostHog) {
   }
   posthog.capture("app_opened", { platform });
   for (const call of pending.splice(0)) call(posthog);
+}
+
+/** "local" on this computer's own page (the only one with the desktop's
+ * saved servers), "server" on any server's page. */
+export function analyticsSurface(): "local" | "server" {
+  return globalThis.window?.ogb?.environments ? "local" : "server";
 }
 
 // Calls before initAnalytics() are dropped, as they always were; calls made

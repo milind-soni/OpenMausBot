@@ -101,14 +101,19 @@ function workspaceSenderAllowed(event, contents, state, localOrigin) {
 }
 
 /** Native menu choices, never renderer-supplied destinations or callbacks. */
-function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget }) {
+/** The sidebar's server menu. `onAddCloud`: "Add a Cloud…" just under the
+ * saved servers, only where main offers OpenMausBot Cloud (cloudOffersAllowed);
+ * `sublabels`: a saved server's line under its name in place of its host (My
+ * Cloud's "Always on"). */
+function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {} }) {
   const active = activeEnvironment(state);
   return [
     { id: "workspace-local", label: "This computer", type: "radio", checked: !active, click: () => onSwitch(LOCAL_ID) },
     ...state.environments.map((entry) => ({
-      id: `workspace-${entry.id}`, label: entry.name, sublabel: new URL(entry.origin).host,
+      id: `workspace-${entry.id}`, label: entry.name, sublabel: Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : new URL(entry.origin).host,
       type: "radio", checked: entry.id === state.activeId, click: () => onSwitch(entry.id),
     })),
+    ...(onAddCloud ? [{ id: "workspace-add-cloud", label: "Add a Cloud…", sublabel: "Keeps your bots running 24/7", click: onAddCloud }] : []),
     { type: "separator" },
     { id: "workspace-connect", label: "Connect to a server…", click: onConnect },
     ...(active ? [{ id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),

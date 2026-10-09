@@ -323,9 +323,11 @@ import {
 import { CLOUD_PERSONAL_REFUSAL, settleCloudOwnership, type CloudOwnership } from "./cloud-owner.ts";
 import { createCloudMoveRoutes, workspaceShared } from "./cloud-move-http.ts";
 import { RESTART_EXIT_CODE } from "./restart.ts";
-import { holdIncludedServices } from "./included-services.ts";
+import { holdIncludedServices, trialCreditCredential } from "./included-services.ts";
+import { CloudCreditProvider } from "./cloud-credit-provider.ts";
+import { TRIAL_CREDIT_OWN_AI } from "./trial-credit.ts";
 import type { ProviderInstance } from "./contracts.ts";
-import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
+import { readyToRun, selectDefaultModelSelection, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
 import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
 import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngineMoveLines } from "./computer-engine-removal.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -2102,6 +2104,23 @@ const managedDesktop = new ManagedDesktopProviders({
     resyncOpenCodeProviderKeys();
   },
 });
+// The trial's Claude credit on an OpenMausBot Cloud home
+// (cloud-credit-provider.ts): one read-only engine, OpenMausBot's own chat
+// engine on the Admin's OpenAI-compatible relay, for bots while the person has
+// no AI of their own here. Theirs always wins (moveOffTrialCredit). Off the
+// Cloud, and on a Cloud without a credit, there is none.
+const cloudCredit = CLOUD_HOME ? new CloudCreditProvider({
+  registry, dataDirectory: DATA_DIR, credential: trialCreditCredential(),
+  onChange: ids => {
+    bus.attach(ids.flatMap(id => { const instance = registry.get(id); return instance ? [instance] : []; }));
+    // The pages' config event refreshes /api/instances, once this server serves.
+    void companyRuntimeStarted.then(() => broadcast({ kind: "config", ...configStatus() }));
+  },
+  log: line => console.warn(line),
+}) : null;
+const cloudCreditStarted = (cloudCredit?.start() ?? Promise.resolve()).catch((error) => {
+  console.warn(`[trial credit] could not start: ${error instanceof Error ? error.message : String(error)}`);
+});
 // An organisation-managed desktop's environment is not the person's shell.
 openCodeOrganisationManaged = () => managedPolicy.current() !== null || managedDesktop.enrolled();
 utilityParentPort?.on("message", event => {
@@ -3299,12 +3318,59 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
 // turn now (Claude first). While enrolled, a Company model that can run beats
 // a signed-out personal engine, and the organisation's policy is respected;
 // otherwise inert. `null` leaves the saved choice out (moveOffComputerEngine).
+// On a Cloud home, the trial's Claude credit counts like a Company engine: a
+// working engine of the person's own wins over it.
 async function defaultSelection(saved: ModelSelection | null = cfg.defaultModelSelection ?? null) {
   if (hostedModels) return hostedModels.select(saved ?? undefined);
   return selectDefaultModelSelection(await registry.describe(), saved ?? undefined, {
-    company: (instanceId) => managedDesktop.owns(instanceId),
+    company: (instanceId) => managedDesktop.owns(instanceId) || cloudCredit?.owns(instanceId) === true,
     refusal: (instance) => policyModelRefusal(instance),
   });
+}
+/** Engines that are not the person's own: a Company one, and the trial's
+ * Claude credit. A working engine of their own wins over both. */
+const selectionContext = {
+  company: (instanceId: string) => managedDesktop.owns(instanceId) || cloudCredit?.owns(instanceId) === true,
+  refusal: (instance: SelectableInstance) => policyModelRefusal(instance),
+};
+
+/** The person's own engine can run here now, so nothing runs on the trial's
+ * Claude credit any more: each bot and conversation still on it, and a saved
+ * default, moves to the engine a new bot gets (as propose_model moves a bot,
+ * a conversation's own model following its bot again), with one line in each
+ * moved conversation. One working right now moves the next time the engines
+ * are read. */
+function moveOffTrialCredit(instances: readonly SelectableInstance[]): void {
+  if (!cloudCredit) return;
+  const onCredit = (selection?: { instanceId: string }) => Boolean(selection && cloudCredit.owns(selection.instanceId));
+  const defaults = onCredit(cfg.defaultModelSelection) || onCredit(cfg.newBotDefaults?.profile.modelSelection);
+  if (!defaults && !onCredit(bootSelection) && !store.bots.some(bot => onCredit(bot.modelSelection) || store.tasks(bot.id).some(task => onCredit(task.modelSelection)))) return;
+  const own = instances.filter(instance => !selectionContext.company(instance.instanceId) && readyToRun(instance, selectionContext));
+  const replacement = own.length ? selectDefaultModelSelection(own, undefined, selectionContext) : null;
+  if (!replacement?.instanceId) return;
+  if (defaults) {
+    // One write keeps both saved defaults on it (saveConfig syncs them), as moveOffComputerEngine does.
+    const newBotDefaults = cfg.newBotDefaults && newBotDefaultsSchema.parse({
+      ...cfg.newBotDefaults, profile: { ...cfg.newBotDefaults.profile, modelSelection: replacement },
+    });
+    saveConfig(newBotDefaults ? { newBotDefaults } : { defaultModelSelection: replacement });
+    cfg.defaultModelSelection = replacement;
+    if (newBotDefaults) cfg.newBotDefaults = newBotDefaults;
+  }
+  if (onCredit(bootSelection)) bootSelection = replacement;
+  const engine = registry.get(replacement.instanceId)?.displayName ?? replacement.instanceId;
+  const line = (threadId: string) => store.appendMessage(threadId, { role: "bot", kind: "activity",
+    tool: { name: `notice: ${engine} is connected, so this conversation uses it now instead of the trial Claude credit.`, ok: true } });
+  for (const bot of store.bots) {
+    const tasks = store.tasks(bot.id);
+    const moving = tasks.filter(task => onCredit(task.modelSelection ?? bot.modelSelection));
+    if (!moving.length && !onCredit(bot.modelSelection)) continue;
+    if (moving.some(task => threadBusy(bot.id, task.threadId))) continue;
+    if (onCredit(bot.modelSelection)) store.applyModelDefault(bot.id, replacement);
+    const own = moving.filter(task => task.modelSelection !== undefined).map(task => task.threadId);
+    if (own.length) store.followBotModel(bot.id, own);
+    for (const task of moving) line(task.threadId);
+  }
 }
 
 /** The Computer engine was removed: it ran a whole turn on Boat's own agent.
@@ -3754,6 +3820,9 @@ await retryComputerEngineMove();
 // timeout), and at start only the first-run seed needs the answer. A later
 // start listens without waiting: the same read runs behind it, and turns
 // wait for it (enginesRead).
+// A new Cloud home's first bot runs on its trial Claude credit when the
+// person has no AI of their own there yet: the credit's engine is waited for, briefly.
+if (store.needsSeed()) await Promise.race([cloudCreditStarted, new Promise(resolve => setTimeout(resolve, 15_000).unref())]);
 if (store.needsSeed()) bootSelection = await defaultSelection();
 else enginesRead = defaultSelection().then(
   (selection) => { bootSelection = selection; },
@@ -15617,7 +15686,12 @@ async function describeInstances() {
   // (an install, a sign-in, a key or a Company engine), so a bot still on the
   // removed Computer engine moves now rather than at the next start.
   void retryComputerEngineMove();
-  return (await registry.describe()).map((instance) => {
+  const engines = await registry.describe();
+  // ...and where a Cloud home learns the person's own AI can run: from then
+  // on nothing runs on the trial's Claude credit, which says so.
+  moveOffTrialCredit(engines);
+  const ownReady = cloudCredit !== null && engines.some(instance => !selectionContext.company(instance.instanceId) && readyToRun(instance, selectionContext));
+  return engines.map((instance) => {
     const entry = configs[instance.instanceId];
     const described = {
       ...instance,
@@ -15626,6 +15700,12 @@ async function describeInstances() {
     };
     if (hostedModels) return { ...described, readOnly: true,
       install: undefined, authentication: undefined, cli: undefined, cliCandidates: [],
+    };
+    // The trial's Claude credit: nothing to install or sign in to, and once
+    // the person's own engine can run, not an engine for bots any more.
+    if (cloudCredit?.owns(instance.instanceId)) return { ...described, readOnly: true, trialCredit: cloudCredit.status(),
+      install: undefined, authentication: undefined, cli: undefined, cliCandidates: [],
+      ...(ownReady && described.snapshot.state === "available" ? { snapshot: { state: "unavailable" as const, reason: TRIAL_CREDIT_OWN_AI } } : {}),
     };
     const policyReason = policyModelRefusal(instance);
     const policy = policyReason ? { policy: { organizationName: managedPolicy.current()!.organizationName, reason: policyReason } } : {};
@@ -15751,6 +15831,7 @@ async function reloadProviders() {
     // expired Company runtime cannot leave the rebuilt personal fleet mute.
     bus.attach(registry.instances());
     await managedDesktop.restore();
+    await cloudCredit?.restore();
   } finally {
     // Settle every exact conversation, not whichever one is selected now.
     // Teardown can swallow terminal events; no task may remain busy forever.

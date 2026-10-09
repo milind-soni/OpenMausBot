@@ -182,7 +182,11 @@ export type RuntimeEvent = RuntimeEventBase &
     // transient error or a legacy provider's diagnostic during cancellation.
     // `claudeUpdate: true` narrows a setup failure to "this Claude Code is
     // too old for the model": the UI offers to run `claude update` for them.
-    | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean }
+    // `trialCredit`: the trial's Claude credit refused the call (used up, no
+    // longer on this Cloud, paused for now, or too little left for this
+    // request); its engine stops offering itself only when used up or gone
+    // (server/cloud-credit-provider.ts).
+    | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low" }
     /** Something the person should know that did not fail the turn — for
      * example, a saved model the engine no longer offers was replaced. */
     | { type: "runtime.notice"; message: string }

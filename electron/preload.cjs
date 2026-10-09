@@ -15,10 +15,11 @@ ipcRenderer.on("package:install", (_event, url) => {
 });
 
 // Main can finish loading the document before React subscribes. Retain only
-// the fixed actions (Organisation, the openmausbot://cloud link, and plain
-// Settings → OMB Cloud from the lending menu-bar item), never a destination
-// supplied by a renderer.
-const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings"]);
+// the fixed actions (Organisation, the openmausbot://cloud link, plain
+// Settings → OpenMausBot Cloud from the lending menu-bar item, and the Add a
+// Cloud dialog from the server menu, plain or reached through Show me how),
+// never a destination supplied by a renderer.
+const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto"]);
 let pendingSettingsAction = null;
 const appSettingsListeners = new Set();
 ipcRenderer.on("app:open-settings", (_event, section) => {
@@ -88,7 +89,8 @@ const bridge = {
   // Electron. No direct switching, saved-list reads, host files or secrets.
   workspaces: {
     state: () => ipcRenderer.invoke("workspaces:state"),
-    menu: () => ipcRenderer.invoke("workspaces:menu"),
+    // `from: "howto"` only says the Show me how tip opened it; nothing else passes.
+    menu: (options) => ipcRenderer.invoke("workspaces:menu", ...(options?.from === "howto" ? ["howto"] : [])),
   },
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
   onCapabilitiesChanged: (cb) => {
@@ -324,6 +326,10 @@ const bridge = {
     refresh: () => ipcRenderer.invoke("cloud-account:refresh"),
     signOut: () => ipcRenderer.invoke("cloud-account:signOut"),
     openDashboard: () => ipcRenderer.invoke("cloud-account:openDashboard"),
+    // What this person may buy now; no arguments.
+    offer: () => ipcRenderer.invoke("cloud-account:offer"),
+    // A checkout for one of the offer's plans, opened by main in the browser; main checks both.
+    checkout: (plan, source) => ipcRenderer.invoke("cloud-account:checkout", String(plan), String(source)),
     connectHome: () => ipcRenderer.invoke("cloud-account:connectHome"),
     connectHomeForPhone: () => ipcRenderer.invoke("cloud-account:connectHomeForPhone"),
     onState: cb => {
@@ -366,13 +372,16 @@ const bridge = {
   } : undefined,
   /** The plan, read only, in Settings on the person's own Cloud: its name and
    * whether it is active, Manage (the Plan page in the browser) and
-   * back to this computer. No arguments; a remote page acts only on a click. */
+   * back to this computer. No arguments; a remote page acts only on a click.
+   * Also the free trial's popup, on this computer's page and the Cloud's:
+   * noticeSeen says the notice due now was shown (main knows which). */
   cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-plan:state"),
     manage: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-plan:manage") : Promise.reject(new Error("Choose Manage to open your Plan page.")),
     useThisComputer: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-plan:local") : Promise.reject(new Error("Choose Use this computer to switch.")),
+    noticeSeen: () => ipcRenderer.invoke("cloud-plan:notice-seen"),
   } : undefined,
   organization: process.argv.includes("--omb-company-desktop=1") ? {
     settingsOpened: () => ipcRenderer.invoke("organization:settings-opened"),

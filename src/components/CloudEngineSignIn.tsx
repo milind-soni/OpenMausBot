@@ -1,8 +1,9 @@
 // Shown on an OMB Cloud home in place of a chat until one of the person's own
 // engines is signed in (docs/cloud-pro.md; lib/onboarding cloudSignInDue).
 // Cloud Pro includes no AI: the person brings a Claude, ChatGPT or Grok
-// account, or an API key. Each choice opens the setup that already exists for
-// it: the paste-code Claude sign-in and the Codex and Grok device codes
+// account, or an API key. A free trial's AI credit runs bots until then; once
+// it is used up, this says so first. Each choice opens the setup that already
+// exists for it: the paste-code Claude sign-in and the Codex and Grok device codes
 // (EngineSetup, the card the model picker shows), or the model-provider keys
 // in Settings → Connections. Grok is offered only where this Cloud computer
 // has the Grok CLI. Once an engine can run, the chat takes this screen's place.
@@ -43,11 +44,14 @@ export function CloudEngineSignIn() {
       : []),
   ];
   const row = "flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-raised/40";
+  // Shown here because the trial's AI credit can no longer run a bot.
+  const credit = state.instances.find((instance) => instance.trialCredit && instance.trialCredit !== "active")?.trialCredit;
 
   return (
     <main data-cloud-sign-in className="flex h-full min-w-0 flex-1 flex-col overflow-y-auto bg-app">
       <div className="mx-auto w-full max-w-[560px] px-6 py-12">
         <h1 className="text-[20px] font-semibold text-ink">{t("cloudSignIn.title")}</h1>
+        {credit && <p role="status" data-trial-credit={credit} className="mt-1.5 text-[13.5px] font-medium leading-relaxed text-ink">{t(credit === "used_up" ? "cloudSignIn.creditUsedUp" : "cloudSignIn.creditEnded")}</p>}
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-secondary">{t("cloudSignIn.intro")}</p>
         <p role="note" className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudSignIn.limits")}</p>
 

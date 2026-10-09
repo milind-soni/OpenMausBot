@@ -5,7 +5,7 @@ import vm from "node:vm";
 import localOrigin from "./local-origin.cjs";
 import environments from "./environments.cjs";
 
-const origin = "http://127.0.0.1:48993", methods = ["state", "begin", "signInAgain", "reopen", "cancel", "refresh", "signOut", "openDashboard"];
+const origin = "http://127.0.0.1:48993", methods = ["state", "begin", "signInAgain", "reopen", "cancel", "refresh", "signOut", "openDashboard", "offer"];
 const bridgeMethods = [...methods, "connectHome", "connectHomeForPhone"];
 function preload({ enabled = true, remote = false } = {}) {
   let bridge; const invoked = [];
@@ -45,4 +45,38 @@ test("production personal Cloud IPC guards exact local main frame and forwards n
   }
   // connectHomeForPhone forwards only its own fixed "phone", never what the page sent.
   assert.deepEqual(calls, bridgeMethods.map(method => method === "connectHomeForPhone" ? ["connectHome", "phone"] : [method]));
+});
+test("a checkout from the page carries only a plan and a source, as text; the server menu only 'howto'", async () => {
+  const f = preload();
+  await f.bridge.cloudAccount.checkout("pro", "app_card", { origin: "https://evil.example.test", paid: true });
+  await f.bridge.cloudAccount.checkout({ toString: () => "max" }, undefined);
+  await f.bridge.workspaces.menu({ from: "howto", origin: "https://evil.example.test" });
+  await f.bridge.workspaces.menu({ from: "elsewhere" });
+  await f.bridge.workspaces.menu();
+  assert.deepEqual(f.invoked, [["cloud-account:checkout", "pro", "app_card"], ["cloud-account:checkout", "max", "undefined"],
+    ["workspaces:menu", "howto"], ["workspaces:menu"], ["workspaces:menu"]]);
+});
+test("main opens a checkout only for a plan the offer sells now and one of this app's sources, where Cloud is offered", async () => {
+  const { CHECKOUT_SOURCES } = await import("./cloud-account.mjs");
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8"), start = source.indexOf("const workspaceOnly ="), end = source.indexOf('ipcMain.handle("organization:settings-opened"', start);
+  const handlers = new Map(), calls = [], frame = { url: `${origin}/` }, contents = { mainFrame: frame };
+  localOrigin.setLocalOrigin(origin);
+  let allowed = true;
+  const offer = { plans: [{ tier: "personal", amount: 2900 }, { tier: "pro", amount: 4900, trialDays: 7 }], recommended: "pro" };
+  const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
+    rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" }, CHECKOUT_SOURCES, cloudOffersReady: async () => allowed,
+    ensureCloudAccount: () => ({ offer: async () => offer, checkout: async (...args) => { calls.push(args); return { outcome: "opened", state: { status: "connected" } }; } }),
+    connectCloudHome: () => ({ status: "connected" }),
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const handle = handlers.get("cloud-account:checkout"), event = { sender: contents, senderFrame: frame };
+  assert.deepEqual(await handle(event, "pro", "app_card"), { outcome: "opened", state: { status: "connected" } });
+  for (const [plan, from] of [["max", "app_card"], ["team", "app_menu"], ["pro", "site_pro"], ["pro", "cloud_page"], [{ tier: "pro" }, "app_card"], ["pro", undefined]]) {
+    await assert.rejects(handle(event, plan, from), /Choose a plan/, `${plan} ${from}`);
+  }
+  assert.throws(() => handle({ sender: contents, senderFrame: { url: "https://remote.example.test/" } }, "pro", "app_card"), /only available/);
+  allowed = false;
+  await assert.rejects(handle(event, "pro", "app_card"), /isn't offered/);
+  assert.deepEqual(calls, [["pro", "app_card"]]);
 });

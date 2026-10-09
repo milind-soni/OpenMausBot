@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { analyticsEnabled, initAnalytics, optAction, setAnalyticsEnabled } from "./analytics";
+import { appVersion } from "./app-links";
 
 // posthog-js is replaced by a recorder. `loads` counts evaluations of the
 // library (an opted-out session must leave it at 0), `calls` is everything
@@ -17,6 +18,7 @@ const ph = vi.hoisted(() => {
     initThrows: false,
     calls: [] as string[],
     options: [] as Record<string, unknown>[],
+    registered: [] as Record<string, unknown>[],
     module: () => {
       if (ph.fail) throw new Error("chunk failed to load");
       ph.loads += 1;
@@ -37,6 +39,7 @@ const ph = vi.hoisted(() => {
             optedOut = true;
             ph.calls.push("opt_out_capturing");
           },
+          register: (properties: Record<string, unknown>) => { ph.calls.push("register"); ph.registered.push(properties); },
           capture: (event: string) => void ph.calls.push(`capture ${event}`),
           identify: (id: string) => void ph.calls.push(`identify ${id}`),
         },
@@ -63,6 +66,7 @@ beforeEach(() => {
   ph.initThrows = false;
   ph.calls = [];
   ph.options = [];
+  ph.registered = [];
 });
 // Tests that swap in a throwing storage get the base one back even when an
 // assertion fails mid-test — an inline restore at the end would be skipped.
@@ -78,7 +82,7 @@ async function freshAnalytics() {
   return import("./analytics");
 }
 
-const OPENED = ["init", "capture app_first_open", "capture app_opened"];
+const OPENED = ["init", "register", "capture app_first_open", "capture app_opened"];
 
 describe("optAction", () => {
   it("initialises on the first opt-in of a session that started off", () => {
@@ -179,6 +183,19 @@ describe("loading the client", () => {
     expect(ph.loads).toBe(0);
     await fresh.initAnalytics();
     expect(ph.loads).toBe(1);
+  });
+
+  it("says which app sent every event, and from which page, before the first one", async () => {
+    const fresh = await freshAnalytics();
+    await fresh.initAnalytics();
+    // This release's version; no desktop bridge here, so a server's page.
+    expect(ph.registered).toEqual([{ app_version: appVersion(), surface: "server" }]);
+    expect(appVersion()).toMatch(/^\d+\.\d+\.\d+/);
+    expect(ph.calls.indexOf("register")).toBeLessThan(ph.calls.indexOf("capture app_first_open"));
+    // This computer's own page is the one with the desktop's saved servers.
+    vi.stubGlobal("window", { ogb: { environments: {} } });
+    try { expect(fresh.analyticsSurface()).toBe("local"); } finally { vi.unstubAllGlobals(); vi.stubGlobal("localStorage", baseStorage); }
+    expect(fresh.analyticsSurface()).toBe("server");
   });
 
   it("initialises once, with autocapture and surveys off", async () => {

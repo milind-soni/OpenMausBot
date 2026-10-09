@@ -138,7 +138,8 @@ const __APP_VERSION__: string;
       };
       workspaces?: {
         state: () => Promise<{ local: boolean; name: string; origin?: string }>;
-        menu: () => Promise<void>;
+        /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
+        menu: (options?: { from?: "howto" }) => Promise<void>;
       };
       /** Saved servers and the active one (desktop Server menu). Present on
        * the local server's UI; a remote server's page sees a reduced bridge. */
@@ -261,7 +262,7 @@ const __APP_VERSION__: string;
        * app Settings. Local-shell only: remote server pages never receive
        * the channel, and the bridge is absent in the browser. "cloud" is the
        * openmausbot://cloud link (Settings → OMB Cloud, opened by the link). */
-      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings") => void): () => void;
+      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto") => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */

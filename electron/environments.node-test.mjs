@@ -142,6 +142,24 @@ test("native workspace choices use saved IDs and connect opens settings without 
   assert.equal(state.activeId, "cloud");
 });
 
+test("Add a Cloud… sits just under the saved servers only where main offers it, and My Cloud's line can say Always on", () => {
+  const state = { environments: [{ id: "cloud", name: "My Cloud", origin: "https://omb-u-1.fly.dev" }, { id: "office", name: "Office", origin: "https://office.example" }], activeId: "local" };
+  const calls = [];
+  const base = { onSwitch: (id) => calls.push(["switch", id]), onConnect: () => calls.push(["settings"]), onForget: () => {} };
+  // Without onAddCloud (a dev build, companion mode, a branded build): today's menu, hosts as sublabels.
+  const plain = env.workspaceMenuTemplate(state, base);
+  assert.equal(plain.some(item => item.id === "workspace-add-cloud"), false);
+  assert.deepEqual(plain.filter(item => item.sublabel).map(item => item.sublabel), ["omb-u-1.fly.dev", "office.example"]);
+  const items = env.workspaceMenuTemplate(state, { ...base, onAddCloud: () => calls.push(["add-cloud"]), sublabels: { cloud: "Free trial until 15 Oct" } });
+  assert.deepEqual(items.map(item => item.id ?? item.type), ["workspace-local", "workspace-cloud", "workspace-office", "workspace-add-cloud", "separator", "workspace-connect"]);
+  const add = items.find(item => item.id === "workspace-add-cloud");
+  assert.deepEqual([add.label, add.sublabel, add.type], ["Add a Cloud…", "Keeps your bots running 24/7", undefined]);
+  add.click();
+  assert.deepEqual(items.find(item => item.id === "workspace-cloud").sublabel, "Free trial until 15 Oct");
+  assert.deepEqual(items.find(item => item.id === "workspace-office").sublabel, "office.example");
+  assert.deepEqual(calls, [["add-cloud"]]);
+});
+
 test("native window identity distinguishes hosted HTML, companion data, and the local workspace", () => {
   const state = { environments: [{ id: "old", name: "Old team", origin: "https://old.example" }], activeId: "old" };
   assert.equal(env.workspaceWindowTitle(state), "OpenMausBot — Hosted: Old team (old.example)");

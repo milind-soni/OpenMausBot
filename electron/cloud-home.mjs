@@ -70,6 +70,114 @@ export function parseCloudPurchase(input) {
   return { state: input.state, ...(tier ? { tier } : {}), ...(moment(input.paidAt) ? { paidAt: input.paidAt } : {}) };
 }
 
+export const CLOUD_TRIAL_STATES = Object.freeze(["active", "ending", "processing", "late", "ended"]);
+const TRIAL_KEEP = Object.freeze(["none", "portal", "checkout"]);
+const at = value => moment(value) ? value : null;
+/** The free trial on this account's Cloud (`cloud.trial`, additive): what the
+ * trial notice and Settings say, never an entitlement (only `entitlement`
+ * grants anything). The Admin's state, the trial's end (when the first
+ * charge is due) and what keeps the Cloud decide; a state this app does not
+ * know is no trial. The rest is optional: a malformed date or amount is left
+ * out, never the trial. `amount` is the first charge before tax, in US cents;
+ * `personalAmount` (additive), while it runs on a plan above Personal,
+ * Personal's price in US cents: the way down its notice offers. */
+export function parseCloudTrial(input) {
+  if (!record(input) || !CLOUD_TRIAL_STATES.includes(input.state) || !moment(input.endsAt) || !TRIAL_KEEP.includes(input.keep)) return null;
+  const tier = typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : null;
+  const cents = value => Number.isSafeInteger(value) && value >= 0 && value <= 10_000_000 ? value : null;
+  const amount = cents(input.amount), personal = cents(input.personalAmount);
+  return { state: input.state, ...(tier ? { tier } : {}), endsAt: input.endsAt, amount,
+    chargeAt: at(input.chargeAt), holdUntil: at(input.holdUntil), deleteAt: at(input.deleteAt), keep: input.keep, ...(personal ? { personalAmount: personal } : {}) };
+}
+
+const dollars = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 10_000;
+/** The trial's AI credit (`cloud.credit`, additive), in US dollars: shown
+ * here, spent and metered only by the Admin. Absent when there is none or it
+ * ended; a malformed one is none. */
+export function parseCloudCredit(input) {
+  if (!record(input) || !["active", "used_up"].includes(input.state) || !dollars(input.grantedUsd) || input.grantedUsd <= 0 ||
+    !dollars(input.remainingUsd) || input.remainingUsd > input.grantedUsd) return null;
+  return { grantedUsd: input.grantedUsd, remainingUsd: input.remainingUsd, state: input.state };
+}
+
+const days = (value, max) => Number.isSafeInteger(value) && value >= 1 && value <= max ? value : null;
+const count = value => Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000_000;
+// oxlint-disable-next-line no-control-regex
+const label = value => typeof value === "string" && value.trim().length > 0 && value.length <= 40 && !/[\x00-\x1f\x7f<>]/.test(value) ? value.trim() : null;
+/** What a plan includes, as the Admin's catalog says: all of it or none of it. */
+function planAllowances(input) {
+  if (!record(input) || !["cpus", "memoryMb", "diskGb", "maxDiskGb", "computers", "computerHours", "voiceCharacters"].every(key => count(input[key]))) return null;
+  return { cpus: input.cpus, memoryMb: input.memoryMb, diskGb: input.diskGb, maxDiskGb: Math.max(input.maxDiskGb, input.diskGb),
+    computers: input.computers, computerHours: input.computerHours, voiceCharacters: input.voiceCharacters };
+}
+/** One plan OpenMausBot Cloud sells (its catalog: the public config's
+ * `plans`, the session's `offer.plans`): its tier and name, its monthly price
+ * before tax in US cents, what it includes when the Admin says, and its free
+ * trial's days when it comes with one. Without a monthly price in US dollars
+ * it is not sold here. */
+function offerPlan(input) {
+  if (!record(input) || typeof input.tier !== "string" || !TIER.test(input.tier) || !record(input.price)) return null;
+  const { price } = input;
+  if (price.currency !== "USD" || price.interval !== "month" || !Number.isSafeInteger(price.amount) || price.amount < 1 || price.amount > 10_000_000) return null;
+  const allowances = planAllowances(input.allowances), trial = days(input.trialDays, 30);
+  return { tier: input.tier, ...(label(input.label) ? { label: label(input.label) } : {}), amount: price.amount,
+    ...(allowances ? { allowances } : {}), ...(trial ? { trialDays: trial } : {}) };
+}
+/** The offer's plans, each tier once. A trial the Admin names per plan is
+ * that plan's alone; one it names only for all (`allDays`) is every plan's. */
+function offerPlans(input, allDays) {
+  const plans = [];
+  for (const entry of Array.isArray(input) ? input.slice(0, 10) : []) {
+    const plan = offerPlan(entry);
+    if (plan && !plans.some(known => known.tier === plan.tier)) plans.push(plan);
+  }
+  if (allDays && !plans.some(plan => plan.trialDays)) return plans.map(plan => ({ ...plan, trialDays: allDays }));
+  return plans;
+}
+/** The parts every offer shares: the plans, the one preselected (the
+ * Admin's, else Pro, else the first), and the trial's extras only when some
+ * plan has a trial. Nothing to sell is no offer. */
+function offerOf(plans, { recommended, creditUsd, reminderDays, refundDays }) {
+  if (!plans.length) return null;
+  const trial = plans.some(plan => plan.trialDays);
+  const preselected = plans.find(plan => plan.tier === recommended) ?? plans.find(plan => plan.tier === "pro") ?? plans[0];
+  const credit = trial && typeof creditUsd === "number" && Number.isFinite(creditUsd) && creditUsd > 0 && creditUsd <= 100 ? creditUsd : null;
+  const reminder = trial ? days(reminderDays, 30) : null, refund = days(refundDays, 90);
+  return { plans, recommended: preselected.tier, ...(credit ? { creditUsd: credit } : {}), ...(reminder ? { reminderDays: reminder } : {}), ...(refund ? { refundDays: refund } : {}) };
+}
+
+/** What this account can buy now, as its Cloud session says (`offer`,
+ * additive; absent for anyone with a plan, a Cloud or a payment being
+ * linked, and from an Admin before it). Its trial, credit and reminder are
+ * this account's own: checkout decides, and this only words the offer.
+ * `checkout`: a checkout of theirs still open, and until when. A malformed
+ * offer is no offer, never a partly trusted one; a malformed extra is left out. */
+export function parseCloudOffer(input) {
+  if (!record(input)) return null;
+  const offer = offerOf(offerPlans(input.plans, days(input.trialDays, 30)), input);
+  if (!offer) return null;
+  const open = record(input.checkout) && offer.plans.some(plan => plan.tier === input.checkout.plan) && moment(input.checkout.openUntil)
+    ? { plan: input.checkout.plan, openUntil: input.checkout.openUntil } : null;
+  return { ...offer, ...(open ? { checkout: open } : {}) };
+}
+
+/** What OpenMausBot Cloud's public config says it sells to anyone (`plans`,
+ * and the additive `trial` and `refundDays`): the offer for someone signed
+ * out. Its trial is for new customers; checkout decides who gets it. */
+export function parsePublicOffer(config) {
+  if (!record(config)) return null;
+  const trial = record(config.trial) ? config.trial : {};
+  return offerOf(offerPlans(config.plans, days(trial.days, 30)), { creditUsd: trial.creditUsd, reminderDays: trial.reminderDays, refundDays: config.refundDays });
+}
+
+/** The same offer for an account whose own trial is not known (an Admin
+ * that sends no session offer): its plans and money-back, never a trial. */
+export function withoutTrial(offer) {
+  if (!offer) return null;
+  const { creditUsd: _credit, reminderDays: _reminder, checkout: _checkout, ...rest } = offer;
+  return { ...rest, plans: offer.plans.map(({ trialDays: _days, ...plan }) => plan) };
+}
+
 /** The paid plan with the largest disk: nobody on it is pointed at a larger one. */
 const LARGEST_TIER = "max";
 /** The disk a verified paid plan's Cloud has now and may grow to, only as

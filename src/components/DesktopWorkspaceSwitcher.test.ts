@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
+import { DesktopWorkspaceSwitcher, openServerMenu } from "./DesktopWorkspaceSwitcher";
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -54,4 +54,19 @@ it("names whose Cloud a browser signed in to under My Cloud · always on, quietl
   expect(compact).toContain('<span class="sr-only">My Cloud · always on · ada@example.test’s Cloud</span>');
   // Not on a server that is not a Cloud home.
   expect(renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { owner: "ada@example.test" }))).toBe("");
+});
+
+it("is the Show me how tip's anchor, and opens the menu as reached from the tip only while the tip is up", async () => {
+  vi.stubGlobal("window", { ogb: { workspaces: { state: () => new Promise(() => {}), menu: () => Promise.resolve() } } });
+  for (const props of [{}, { inline: true }, { compact: true }]) expect(renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, props))).toContain('data-tour="server-switcher"');
+  const menu = vi.fn(() => Promise.resolve()), onClosed = vi.fn();
+  await openServerMenu({ menu }, { howTo: true, onClosed });
+  expect(menu).toHaveBeenLastCalledWith({ from: "howto" }); expect(onClosed).toHaveBeenCalledOnce();
+  // Closed with an error too, the tip ends.
+  menu.mockRejectedValueOnce(new Error("no menu"));
+  await expect(openServerMenu({ menu }, { howTo: true, onClosed })).rejects.toThrow("no menu");
+  expect(onClosed).toHaveBeenCalledTimes(2);
+  // Without the tip: today's menu, and nothing ends.
+  await openServerMenu({ menu }, { onClosed });
+  expect(menu).toHaveBeenLastCalledWith(undefined); expect(onClosed).toHaveBeenCalledTimes(2);
 });

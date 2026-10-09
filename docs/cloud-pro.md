@@ -10,7 +10,9 @@ the web are windows onto it. Local use of the app is unchanged and free.
 OMB Cloud includes no AI usage. The person signs in on their machine with their
 own Claude or ChatGPT subscription, or an API key, through the same sign-in
 flows as any OpenMausBot server. Nothing on a Cloud home is routed to a
-platform model gateway.
+platform model gateway. The one exception is a free trial's Claude credit, a
+small one-time amount the Admin meters on its own relay, used only until the
+person connects their own AI ([Trial Claude credit](#trial-claude-credit)).
 
 This page is the OpenMausBot half of a contract with three parties:
 
@@ -774,8 +776,9 @@ ignores them:
   them from its own at startup, so no engine or tool ever sees them;
 - the portal workspace model policy (`server/hosted-models.ts`) stays off on a
   Cloud home whatever they hold, so no instance is routed to a gateway;
-- no `included.*` or other read-only instance is served; the person's own
-  engines are the only way to a model.
+- no `included.*` or other read-only instance is served, apart from a free
+  trial's Claude credit (below); the person's own engines are otherwise the
+  only way to a model.
 
 ### Included Boat computers, voice and decisions
 
@@ -858,6 +861,53 @@ computers belong to this machine on every request.
   upstream) never reaches a turn: as with any decision-model failure, the room
   does what it would without it (its lead answers). Only **Test** shows it,
   as a fixed sentence.
+
+### Trial Claude credit
+
+A free trial may come with a one-time Claude credit (the Admin's
+`OMB_CLOUD_TRIAL_CREDIT_USD`). While it lasts, and only while the person has
+no AI of their own on My Cloud, bots run on Claude through the Admin's relay,
+which holds the provider key and meters the credit. For an account with a
+credit, the Admin also sets:
+
+| Variable | Fly | Value |
+| --- | --- | --- |
+| `OMB_CLOUD_AI_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/ai/v1`, an OpenAI-compatible base URL with its `/v1` (as the Admin sends it): `POST {url}/chat/completions` and `GET {url}/models` only. Nothing Anthropic-shaped (no `/v1/messages`) answers a credit token. |
+| `OMB_CLOUD_AI_TOKEN` | secret | This machine's credit token (`omb_ai_…`), sent as `Authorization: Bearer`. It works only through the relay, only for this account's credit, and not at all once it is spent or the Cloud is deleted. |
+
+- **OpenMausBot's own chat engine, nothing else.** `server/cloud-credit-provider.ts`
+  adds one read-only **Trial credit · Claude** engine: the OpenAI-compatible
+  driver (`openai-compat`, the same chat engine and tools as any API key) with
+  the relay as its address and the token as its own key, on the models the
+  relay lists, cheapest first (OpenRouter's `provider/model` ids too). Never Claude Code and never Codex: the
+  platform's key is never used to run another product's agent for anyone, and
+  no `ANTHROPIC_*` variable or Claude config folder ever holds the token. It
+  is never saved to `config.json` and has no sign-in. The token is held like
+  the included tokens (pipe, memory, the credential lists) and reaches only
+  the relay; it is never shown, saved or logged. The address must be HTTPS and
+  the token the Admin's shape, or there is no credit.
+- **Out of the box.** A new Cloud's first bot runs on it when nothing of the
+  person's own can run there (the first start waits up to 15 seconds for the
+  relay's model list), so My Cloud opens on the chat, not the engine sign-in.
+- **Their own always wins.** A new bot gets the person's own engine whenever
+  one can run. From the moment one can (a sign-in, a key), each bot and
+  conversation still on the credit moves to it, with one line in each, and the
+  credit is not offered to bots any more.
+- **Used up or gone.** The relay's refusal reads as one plain sentence that
+  names the next step, never the API's JSON (`server/trial-credit.ts`), told
+  apart by the relay's own error `code`, which it puts first in its error
+  object (the chat engine keeps only the start of an error body): `402`
+  `trial_credit_used_up` is used up, `402` `trial_credit_ended` or `401`
+  `invalid_api_key` (a token it no longer knows) is no longer on this Cloud.
+  The engine then stops offering itself until another token arrives (kept
+  across restarts), and with no AI of their own My Cloud opens on its engine
+  sign-in, saying why. A `401`, `402` or `403` without the relay's code (a
+  proxy's page) is an ordinary failed turn. `429` (paused for now: the day's
+  ceiling, a Cloud being stopped, or the Admin's own account with Anthropic)
+  and `400` `trial_credit_too_low` (too little left for this chat; a new chat
+  still runs) are only failed turns. A background call (a title, a summary)
+  the relay refuses for good ends the credit the same way. Chat words each
+  refusal again in the reader's language (`shared/trial-credit.ts`).
 
 ## Pairing: the Admin's signed request
 
@@ -949,6 +999,77 @@ without them works as before; a malformed one is dropped, never the machine):
 - `cloud.purchase: {state: "confirming" | "held", plan, paidAt}`: a payment
   received but not yet linked to this account. While it is there, the app shows
   "payment received" and offers nothing to buy. It never activates anything.
+- `cloud.trial: {state, tier, endsAt, amount, chargeAt, holdUntil, deleteAt, keep, personalAmount?}`:
+  a free trial on this account's Cloud (`electron/cloud-home.mjs`
+  `parseCloudTrial`). `state` is `active`, `ending` (renewal off, or cancelled),
+  `processing` (the first charge is being taken), `late` or `ended`; `endsAt`
+  is when the first charge is due, `amount` that charge before tax in US cents,
+  `deleteAt` when the Cloud's files are deleted if nobody subscribes, and
+  `keep` what keeps the Cloud on the Cloud page: `portal` (turn renewal back
+  on; for `ending`, renewal is off), `checkout` (subscribe again once ended),
+  or `none` (nothing: renewing, or, for `ending`, cancelled outright).
+  `personalAmount`, while it runs on a plan above Personal, is Personal's price
+  in US cents, so the way down reads the same on every page of the app. An
+  unknown state is no trial; a malformed date or amount is left out. It is
+  display only: the entitlement still decides everything.
+- `cloud.credit: {grantedUsd, remainingUsd, state}`: the trial's Claude
+  credit (`active` or `used_up`), shown in Settings here and on the Cloud.
+- `offer` (top level, beside `cloud`): what this account may buy now, only
+  while it can (no plan, no Cloud, no payment being linked). See
+  [Add a Cloud](#add-a-cloud) for its fields.
+
+#### The free trial's notice
+
+`lib/cloud-plan.ts` `cloudTrialView` is the one place that words a trial, for
+the notice and for Settings (here and on My Cloud), with the same facts as the
+Cloud page. Each state has one message and at most one next step, which opens
+the Cloud page (`openDashboard`): **Manage subscription** (active, with the
+date, the price after it and how to cancel; in its last two days on a plan
+above Personal, also how to step down to Personal, with its price when the
+app knows it), **Subscribe to keep it** (ending with renewal off, `keep`
+`portal`, or ended: when My Cloud stops and when its files are deleted),
+**Check payment status** (late), or nothing to do (processing; a trial
+cancelled outright, `ending` with any other `keep`, which offers nothing to
+buy until it has ended, because a new checkout would stop the running
+Cloud).
+
+Main decides when a notice is due and remembers it was shown
+(`electron/cloud-trial-notice.mjs`, a small file in the app's data folder
+holding only today's hashed keys), so it shows at most once a day per state,
+on whichever page shows it first: an active trial only in its last two days,
+a processing payment only after an hour (most cards settle at once), and
+ending, late or ended whenever the Admin says. The page says it showed one
+with `cloud-plan:notice-seen`, which names nothing. It is an entry in the
+notice queue (below), on this computer's page and on My Cloud's own page.
+
+#### One card at a time: the notice queue
+
+`components/AppNotices.tsx` is the one place for the cards at the bottom left
+(`lib/notices.ts`), asked in order, one on screen at a time, and none after
+one closes until another launch:
+
+1. **The card after the update** (`CloudTrialIntro`, id `cloud-trial-intro-v1`):
+   OpenMausBot Cloud's free trial for someone signed out or with no plan who
+   has used the app before this launch, only while the Admin offers a trial
+   (it waits for one). Its numbers are the Admin's: the trial's days, the
+   lowest monthly price, the Claude credit and money-back. At most once a
+   calendar day, on at most three days (one for someone who closed the
+   earlier Pro card), kept in browser storage and the workspace's hint record;
+   any button, its X or Escape end it for good. **Start free trial** opens the
+   Add a Cloud dialog, **Show me how** lights the server menu (below), **Sign
+   in to your Cloud plan** (signed out) only hides it for now. Never on a
+   branded build or a desktop signed in with an organization.
+2. **The free trial's notice** (above), on this computer's page and on My
+   Cloud's own page (its only entry there, after its engine sign-in and setup
+   checklist).
+3. **This computer's My Cloud card** (`CloudNotice`): a ready My Cloud for
+   someone with a plan, or **Sign in again** where the sign-in ended (Not now
+   kept per card).
+4. **Star us on GitHub**, asked once.
+
+None of them shows over setup (the welcome flow, the tour), a dialog, Settings,
+the Add a Cloud dialog or its tip, busy work, or an update being offered; none
+takes focus, and each is announced once to a screen reader.
 
 How the app holds the answer (`electron/cloud-account.mjs`): it asks every
 minute (every 15 seconds while the Cloud is set up or a payment is linked),
@@ -993,6 +1114,93 @@ origin, with `expiresAt` at most ten minutes away. It then adds or selects the
 pairing-link flow as Connect to a server. The code stays in main-process
 memory for that one navigation: never on disk, never in a renderer. A
 malformed session summary or grant is treated as none.
+
+## Add a Cloud
+
+The one way to buy OpenMausBot Cloud in the app, the same for every way in:
+the card after the update, **Show me how**, **Add a Cloud…** in the server
+menu (the sidebar's and the menu bar's Server menu), Settings (the Cloud card
+in General, and OpenMausBot Cloud), and the routine screen's note.
+
+- **The menu item.** Main adds **Add a Cloud…** under the saved servers only
+  for the installed app on this computer (never a dev build, companion mode or
+  a branded build, read once from the local `/api/brand`), and decides on a
+  click with nothing from the page: someone with a Cloud (paying or in a
+  trial) gets a native "You already have My Cloud" box (**Email me when it's
+  ready** registers interest once per account, `POST /api/cloud/desktop/interest`);
+  anyone else gets the dialog on this computer's page, which the window
+  switches to first. My Cloud's line in both menus (`electron/cloud-account.mjs`
+  `cloudMenuSublabel`) says **Free trial until <date>** while a trial's end is
+  ahead, **Always on** while it is paid for (a first charge processing
+  included), **Stopped** when it isn't (a trial that ended, a payment problem,
+  a subscription that ended), and nothing while this computer can't say
+  (signed out, its sign-in ended).
+- **Show me how.** One spotlight on the sidebar's server menu
+  (`data-tour="server-switcher"`); the menu opened from it counts as reached
+  from the tip, and the tip ends when the menu closes, or on Skip or Escape.
+  With the menu off screen, the dialog opens instead with a line saying where
+  the menu is.
+- **The dialog** (`components/CloudAddDialog.tsx`, one state→view function,
+  `lib/cloud-plan` `cloudAddView`) covers the buying journey only: the offer
+  (the Admin's plans, Pro preselected and marked most popular, each row
+  leading with cloud computers at once and storage; the trial's timeline with
+  the reminder line only while the Admin sends one; the Claude credit;
+  money-back beside the button; prices plus tax), the sign-in (its last step
+  names the checkout only when the sign-in is on the way to one), the next
+  step in the browser (the checkout open there, or, signed in on the way to
+  one, the Admin's page after approval, which leads to it), the payment
+  received, My Cloud starting, and My Cloud ready (**Open My Cloud**; never
+  for someone who already had My Cloud before this sign-in). When a step
+  ended without going on (the sign-in code expired or the sign-in ended, a
+  checkout already being prepared), the offer says why. The plan picker is a
+  radio group with one tab stop and arrow keys, and each new step takes focus
+  at its heading. A payment problem, an ended sign-in or a Cloud that can't
+  be reached go to Settings → OpenMausBot Cloud instead.
+- **Checkout runs in the default browser, never the app.** Signed in, main
+  asks the Admin for this account's checkout (`POST /api/cloud/desktop/checkout`
+  with the plan and where it was opened) and opens the address only when it is
+  Dodo Payments' own checkout page (`https://checkout.dodopayments.com`, no
+  credentials, no fragment; its test origin only for a fixture Admin). An
+  Admin before that route gets its Cloud page's
+  `/cloud?checkout=start&plan=<plan>&src=<source>` instead. Signed out, the
+  browser signs in first: main opens the Admin's own verified sign-in link
+  with `&next=checkout&plan=<plan>&src=<source>` added (older Admins ignore it).
+  The app follows its own session, never the return page: every 15 seconds
+  for 30 minutes after it opened a checkout, and at once when the window comes
+  back or `openmausbot://cloud` arrives (which then opens the dialog).
+- **Ready.** When My Cloud is ready after a checkout this app opened and the
+  window is elsewhere, one system notification says so.
+
+### What the app reads (contract v1, additive)
+
+- **Desktop session** `GET /api/cloud/desktop/session`, beside `cloud`:
+  `offer: {plans, recommended?, trialDays?, creditUsd?, reminderDays?, refundDays?, checkout?}`,
+  only while this account can buy. `plans[]` are the catalog entries on sale
+  (`{tier, label, price: {currency: "USD", amount, interval: "month"}, allowances?, trialDays?}`):
+  a plan's own `trialDays` is its trial; with none on any plan, a top-level
+  `trialDays` is every plan's. `creditUsd` and `reminderDays` (days before the
+  end that the reminder email goes out, sent only while it does) count only
+  with a trial; `refundDays` only while this person can still have a
+  money-back refund; `checkout: {plan, openUntil}` a checkout of theirs still
+  open. A malformed offer is no offer; an Admin without `offer` gets the
+  public plans with no trial (this account's own trial isn't known).
+- **Public config** `GET /api/public/config` (signed out, no sign-in or
+  cookie, at most every 10 minutes): `plans` as above, `trial: {days, holdDays,
+  creditUsd?, reminderDays?}` and `refundDays`.
+- **Device checkout** `POST /api/cloud/desktop/checkout`
+  `{plan, source}` → `{cloudContractVersion: 1, url}`; `409` reads the session
+  again, `429` says to use the open checkout or wait, anything else says
+  nothing was charged; `404`/`405`/`501` is an Admin before the route.
+  `source` is one of `app_card`, `app_howto`, `app_menu`, `app_settings`,
+  `app_routines` (main refuses any other, and any plan the offer doesn't sell).
+- **Interest** `POST /api/cloud/desktop/interest` `{kind: "another_cloud"}` → `{ok: true}`.
+- Every signed-in request carries this app's version in `x-openmausbot-version`.
+
+Nothing in the app is a price: with the Admin's trial switch off, no card is
+shown, and the dialog offers today's plans at the Admin's prices, charged
+today. Analytics (the app's existing, optional PostHog) register `app_version`
+and `surface` (`local` or `server`) on every event, and count the card, its
+actions, the tip, the dialog's views and checkouts opened, with no content.
 
 ## Copy this computer to your Cloud
 

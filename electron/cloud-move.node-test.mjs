@@ -879,12 +879,14 @@ test("the Cloud's setup checklist can open the lending switch here, and nothing 
 
 test("Settings on the person's own Cloud shows the plan read only, and can only open the dashboard or switch back", async () => {
   const page = preload({ remote: true });
-  assert.deepEqual(Object.keys(page.bridge.cloudPlan), ["state", "manage", "useThisComputer"]);
+  assert.deepEqual(Object.keys(page.bridge.cloudPlan), ["state", "manage", "useThisComputer", "noticeSeen"]);
   assert.equal(page.bridge.cloudAccount, undefined, "no account, credential or address reaches the Cloud's page");
   await page.bridge.cloudPlan.state({ origin: "https://evil.example.test" });
   await assert.rejects(page.bridge.cloudPlan.manage(), /Choose Manage/);
   await assert.rejects(page.bridge.cloudPlan.useThisComputer(), /Choose Use this computer/);
-  assert.deepEqual(page.invoked, [["cloud-plan:state"]]);
+  // The trial's popup says it was shown with no click and no argument: main knows which notice was due.
+  await page.bridge.cloudPlan.noticeSeen("ended", { day: "2099-01-01" });
+  assert.deepEqual(page.invoked, [["cloud-plan:state"], ["cloud-plan:notice-seen"]]);
   const clicked = preload({ remote: true, activation: true });
   await clicked.bridge.cloudPlan.manage("https://evil.example.test"); await clicked.bridge.cloudPlan.useThisComputer("vps");
   assert.deepEqual(clicked.invoked, [["cloud-plan:manage"], ["cloud-plan:local"]]);
@@ -903,6 +905,7 @@ test("Settings on the person's own Cloud shows the plan read only, and can only 
     mainWindow: { isDestroyed: () => false, webContents: cloudContents },
     environmentsState: { environments: [{ id: "cloud", name: "My Cloud", origin: ORIGIN }], activeId: "cloud" },
     cloudAccount: { homeTarget: () => ({ origin: ORIGIN }), state: () => account }, cloudPlanSnapshot, LOCAL_ID: environments.LOCAL_ID, myCloudOrigin, rememberedHome: null,
+    cloudTrialNotices: () => ({ due: () => null, seen: (...args) => { calls.push(["notice-seen", ...args]); } }),
     ensureCloudAccount: () => ({ openDashboard: async (...args) => { calls.push(["dashboard", ...args]); return account; } }),
     openLendingSettings: async () => { calls.push(["lending"]); },
     workspaceMenuAction: action => action(), switchEnvironment: id => { calls.push(["switch", id]); },
@@ -914,8 +917,20 @@ test("Settings on the person's own Cloud shows the plan read only, and can only 
   await handlers.get("cloud-plan:local")(event, "vps");
   assert.deepEqual(calls, [["dashboard"], ["switch", environments.LOCAL_ID]]);
   for (const sender of [{ sender: cloudContents, senderFrame: { url: "https://other.example.test/" } }, { sender: {}, senderFrame: cloudFrame }]) {
-    for (const channel of ["cloud-plan:state", "cloud-plan:manage", "cloud-plan:local"]) assert.throws(() => handlers.get(channel)(sender), /only available/);
+    for (const channel of ["cloud-plan:state", "cloud-plan:manage", "cloud-plan:local", "cloud-plan:notice-seen"]) assert.throws(() => handlers.get(channel)(sender), /only available/);
   }
+  // The trial's popup: main records the notice due for this account's own state, never what the page sends.
+  calls.length = 0;
+  await handlers.get("cloud-plan:notice-seen")(event, "ended");
+  assert.deepEqual(calls, [["notice-seen", account]]);
+  calls.length = 0;
+  // ...and says which notice is due, with the trial it is about.
+  const trial = { state: "ending", tier: "max", endsAt: 1_900_000_000_000, amount: 9900, chargeAt: null, holdUntil: null, deleteAt: 1_900_259_200_000, keep: "portal" };
+  const onTrial = { ...account, trial };
+  context.cloudAccount = { homeTarget: () => ({ origin: ORIGIN }), state: () => onTrial };
+  context.cloudTrialNotices = () => ({ due: state => state === onTrial ? "ending" : null, seen: () => {} });
+  assert.deepEqual(await handlers.get("cloud-plan:state")(event), { status: "paid", tier: "max", trial, notice: "ending" });
+  context.cloudAccount = { homeTarget: () => ({ origin: ORIGIN }), state: () => account };
   // The sign-in is being checked, or has ended: there is no verified Cloud to
   // connect to, but the one this account last verified still answers, never an error.
   let current = { status: "reauth-required", message: "expired", account: account.account, lastPlan: { tier: "max", active: true } };

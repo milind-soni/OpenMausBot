@@ -98,6 +98,7 @@ import {
   type RoutineTarget,
 } from "@/lib/routines";
 import { api, openNotificationTarget, useStore, type Bot, type Group } from "@/state/store";
+import { RoutineScheduleNote } from "./RoutineScheduleNote";
 
 const HOUR_HEIGHT = 64;
 const DAY_CHIP_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -669,11 +670,7 @@ export function EventEditor({
                 </select>
               </div>
   );
-  const scheduleNote = kind === "routine" && (
-                <p className="text-[11px] leading-relaxed text-ink-secondary">
-                  Runs while OpenMausBot is open on this computer — it cannot wake a sleeping Mac. A run missed by less than 12 hours still happens when the app is back; for 24/7, run OpenMausBot on a VPS.
-                </p>
-              );
+  const scheduleNote = kind === "routine" && <RoutineScheduleNote />;
   const repeatDetails = (
     <>
               {isCronChoice(recurrence) && kind === "routine" && cron && <CronScheduleFields choice={recurrence} value={cronDraft} onChange={(draft) => { setCronDraft(draft); setCronChanged(true); }} runs={cron.runs} error={cron.error} />}

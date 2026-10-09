@@ -1195,10 +1195,12 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_COMPOSIO_BROKER_TOKEN",
   // Cloud Pro's included Boat, voice and decision relay tokens
   // (included-services.ts), used only in-process by the Boat, voice and
-  // decider modules.
+  // decider modules, and the trial's Claude credit token, which reaches only
+  // its own chat engine (cloud-credit-provider.ts), in memory.
   "OMB_CLOUD_BOAT_TOKEN",
   "OMB_CLOUD_VOICE_TOKEN",
   "OMB_CLOUD_DECIDER_TOKEN",
+  "OMB_CLOUD_AI_TOKEN",
   // Harness-private filesystem hints are not credentials themselves, but
   // exposing them to a shell-capable agent points straight at app-owned
   // state. The built-in browser master is delivered privately in memory.

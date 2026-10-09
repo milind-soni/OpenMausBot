@@ -45,9 +45,8 @@ function retiredIn(text: string, boat: RegExp = BOAT): string[] {
   return found;
 }
 
-// pro.* belong to the open Pro-card PR, which rewrites them; they join this
-// check when it lands.
-const PENDING_KEY_PREFIXES = ["pro."];
+// Keys another branch rewrites with its own wording go here until it lands.
+const PENDING_KEY_PREFIXES: string[] = [];
 const EN_ALLOWED: Record<string, string> = {};
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));

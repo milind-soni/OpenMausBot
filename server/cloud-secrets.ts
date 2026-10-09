@@ -4,14 +4,15 @@
 // (cloud-secrets-boot.ts, the server's first import).
 import { closeSync, readFileSync } from "node:fs";
 
-/** The Cloud home's secrets: the signing secret and the included services'
- * relay tokens (server/included-services.ts). The Admin sets them as Fly app
+/** The Cloud home's secrets: the signing secret, the included services' relay
+ * tokens and the trial's Claude credit token (server/included-services.ts). The
+ * Admin sets them as Fly app
  * secrets, which reach the machine as the launcher's environment; the
  * launcher never puts them in a child's environment, because
  * /proc/<pid>/environ keeps a process's starting environment for anything
  * running as the same user to read. It hands them to the server over an
  * inherited pipe instead (CLOUD_SECRETS_FD_ENV names its descriptor). */
-export const CLOUD_HOME_SECRET_KEYS = ["OMB_CLOUD_BOOTSTRAP_SECRET", "OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN"] as const;
+export const CLOUD_HOME_SECRET_KEYS = ["OMB_CLOUD_BOOTSTRAP_SECRET", "OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_AI_TOKEN"] as const;
 export const CLOUD_SECRETS_FD_ENV = "OMB_CLOUD_SECRETS_FD";
 
 /** The secrets present in an environment (the launcher's). */
