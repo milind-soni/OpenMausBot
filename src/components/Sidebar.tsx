@@ -63,7 +63,7 @@ import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
-import { orderedThreadList, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
+import { orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
   loadSectionOrder,
@@ -1017,6 +1017,7 @@ export function BotThreadList({ bot, selected, density, query, pendingQueued, re
   const [folderDrop, setFolderDrop] = useState<{ id: string; place: "before" | "after" } | null>(null);
   const draggingFolder = useRef<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [helpersOpen, setHelpersOpen] = useState(false);
   const [permissionRefresh, setPermissionRefresh] = useState<{ threadId: string; kind: "full" | "local-auto" } | null>(null);
   const currentProjectId = tasks.find((task) => task.threadId === bot.threadId)?.projectId;
   useEffect(() => {
@@ -1028,8 +1029,12 @@ export function BotThreadList({ bot, selected, density, query, pendingQueued, re
     });
   }, [selected, currentProjectId]);
   useSnoozeExpiry(tasks);
+  // Open threads a bot opened fold into one group, so they neither bury the
+  // person's own threads nor use up the visible rows (MOCA-92).
+  const { own: ownTasks, helpers } = partitionHelperThreads(tasks, bot.threadId, query, projects);
+  const helperTasks = orderedThreadList(helpers);
   // Pin, then newest update. Search keeps the same order among matches.
-  const visibleTasks = orderedThreadList(visibleSidebarThreads(tasks, bot.threadId, query, projects, showAll));
+  const visibleTasks = orderedThreadList(visibleSidebarThreads(ownTasks, bot.threadId, query, projects, showAll));
   // A folder rises with the thread of its that sits highest in that order.
   // An empty index sorts last. Saved order breaks ties, and still governs
   // move up and down.
@@ -1177,7 +1182,18 @@ export function BotThreadList({ bot, selected, density, query, pendingQueued, re
       <span role="status" className="sr-only">{readStatus}</span>
       {projects.length > 0 && ungrouped.length > 0 && <div className="pl-6 pr-3 pb-1 pt-2 text-[10.5px] text-ink-tertiary">{t("task.list")}</div>}
       {ungrouped.map(renderThread)}
-      {!query && !showAll && tasks.length > visibleTasks.length && <button type="button" onClick={() => setShowAll(true)} className="pl-6 pr-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
+      {helperTasks.length > 0 && <div data-sidebar-helper-threads="">
+        <button type="button" aria-expanded={helpersOpen} onClick={() => setHelpersOpen((open) => !open)}
+          aria-label={t(helpersOpen ? "task.collapseNamed" : "task.expandNamed", { name: t("task.helperGroup") })}
+          className="flex min-h-8 w-full items-center gap-1.5 rounded-md py-1 pl-1.5 pr-3 text-left text-[12px] text-ink-secondary hover:bg-raised/30 hover:text-ink">
+          <ChevronRight aria-hidden="true" size={11} className={cn("shrink-0 transition-transform", helpersOpen && "rotate-90")} />
+          <span className="truncate">{t("task.helperGroup")}</span>
+          <span className="shrink-0 text-[10px] opacity-50">{helperTasks.length}</span>
+          {!helpersOpen && helperTasks.some((task) => currentTaskBot(bot, task.threadId).busy) && <Loader2 size={10} className="shrink-0 animate-spin text-success" />}
+        </button>
+        {helpersOpen && <div role="group" aria-label={t("task.helperGroup")}>{helperTasks.map(renderThread)}</div>}
+      </div>}
+      {!query && !showAll && ownTasks.length > visibleTasks.length && <button type="button" onClick={() => setShowAll(true)} className="pl-6 pr-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: ownTasks.length })}</button>}
       <FullAccessWarning
         open={permissionRefresh?.kind === "full"}
         scope="thread"

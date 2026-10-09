@@ -622,6 +622,7 @@
   "task.updated.hours": "hace {count} h",
   "task.updated.yesterday": "ayer",
   "task.updated.days": "hace {count} d",
+  "task.helperGroup": "Abiertos por bots",
   "onboarding.welcome": "Te damos la bienvenida a {app}",
   "onboarding.intro": "Bots que hacen trabajo de verdad en su propio equipo. Cuéntanos quién eres y te avisamos cuando salga algo grande.",
   "onboarding.name": "Tu nombre",

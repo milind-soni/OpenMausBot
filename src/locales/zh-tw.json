@@ -1405,6 +1405,7 @@
   "task.waiting": "等待中",
   "task.waitingOnTeammate": "等待隊友",
   "task.openedBy": "由 {name} 開啟",
+  "task.helperGroup": "由機器人開啟",
   "task.closedBy": "由 {name} 關閉",
   "task.closed": "已關閉",
   "task.archive": "封存",

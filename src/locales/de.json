@@ -592,6 +592,7 @@
   "task.updated.hours": "vor {count} Std.",
   "task.updated.yesterday": "gestern",
   "task.updated.days": "vor {count} T.",
+  "task.helperGroup": "Von Bots geöffnet",
   "model.backTo": "Zurück zu den {name}-Modellen",
   "model.afterSetupOne": "Nach der Einrichtung erscheint 1 Modell.",
   "model.afterSetupMany": "Nach der Einrichtung erscheinen {count} Modelle.",

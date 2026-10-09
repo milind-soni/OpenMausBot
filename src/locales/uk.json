@@ -674,6 +674,7 @@
   "task.waiting": "Очікує",
   "task.waitingOnTeammate": "Очікуємо на колегу",
   "task.openedBy": "відкрито {name}",
+  "task.helperGroup": "Відкриті ботами",
   "task.closedBy": "закрито {name}",
   "task.closed": "Закрито",
   "thread.gone": "Цієї гілки більше немає.",

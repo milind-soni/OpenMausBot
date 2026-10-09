@@ -592,6 +592,7 @@
   "task.updated.hours": "há {count} h",
   "task.updated.yesterday": "ontem",
   "task.updated.days": "há {count} d",
+  "task.helperGroup": "Abertos por bots",
   "model.backTo": "Voltar aos modelos de {name}",
   "model.afterSetupOne": "1 modelo aparecerá depois da configuração.",
   "model.afterSetupMany": "{count} modelos aparecerão depois da configuração.",

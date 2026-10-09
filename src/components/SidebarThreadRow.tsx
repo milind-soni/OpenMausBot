@@ -142,6 +142,27 @@ const isWaitingOnTeammate = (task: Pick<Task, "waitingForTeammates">): boolean =
 const demandsAttention = (task: ThreadRowTask, activeId: string) =>
   task.threadId === activeId || task.activity === "waiting-on-you" || isWorking(task) || isWaitingOnTeammate(task) || Boolean(task.queued) || Boolean(task.unread);
 
+/** Split a bot's unfiled threads into the person's own and the open helper
+ * threads a bot opened (MOCA-92). Helpers fold into one collapsed group so
+ * a busy team does not bury the person's threads, and they no longer use
+ * up the six visible rows. A helper stays out of the group while it needs
+ * the person: it is open, waits on a card, or has something unread. Pinned
+ * threads, threads filed in a folder, and closed, archived or snoozed ones
+ * keep their usual place. Search lists everything as before. */
+export function partitionHelperThreads<T extends ThreadRowTask & { pinned?: boolean }>(tasks: T[], activeId: string, query = "", folders: BotProject[] = []): { own: T[]; helpers: T[] } {
+  if (query.trim()) return { own: tasks, helpers: [] };
+  const own: T[] = [];
+  const helpers: T[] = [];
+  for (const task of tasks) {
+    const filed = folders.some((folder) => folder.id === task.projectId);
+    const needsPerson = task.threadId === activeId || task.activity === "waiting-on-you" || Boolean(task.unread);
+    const helper = Boolean(task.openedBy) && task.pinned !== true && !filed && !needsPerson &&
+      !task.closedBy && !isArchived(task) && !isSnoozed(task);
+    (helper ? helpers : own).push(task);
+  }
+  return { own, helpers };
+}
+
 /** The default list is the six most recently updated OPEN threads, plus
  * anything pinned or demanding attention. Pins and attention rows do not
  * consume one of the six. A thread a bot closed is folded away — a PM bot

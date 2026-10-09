@@ -876,6 +876,7 @@
   "task.waiting": "等待中",
   "task.waitingOnTeammate": "等待队友",
   "task.openedBy": "由 {name} 打开",
+  "task.helperGroup": "由机器人打开",
   "task.closedBy": "由 {name} 关闭",
   "task.closed": "已关闭",
   "task.archive": "封存",

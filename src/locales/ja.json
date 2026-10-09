@@ -624,6 +624,7 @@
   "task.updated.hours": "{count} 時間前",
   "task.updated.yesterday": "昨日",
   "task.updated.days": "{count} 日前",
+  "task.helperGroup": "ボットが開いたスレッド",
   "onboarding.welcome": "{app} へようこそ",
   "onboarding.intro": "自分のコンピューターで実際に仕事をするボットです。あなたのことを教えてください。大きな更新があればお知らせします。",
   "onboarding.name": "あなたの名前",
