@@ -7,7 +7,7 @@
 // OpenCode; Settings shows their names, never their values; the server's own
 // provider keys stay out, as before. Disposable home; no network.
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,6 +59,16 @@ async function adminPairing(): Promise<string> {
 
 /** The environment OpenCode was last started with, and that process's id. */
 const started = () => JSON.parse(readFileSync(dump, "utf8")) as { pid: number; env: Record<string, string> };
+/** True once the fake CLI has finished writing the file: existence alone can
+ * catch a half-written file on a busy runner (SyntaxError: Unexpected end).
+ * The dump is one JSON document; the prompt log is one JSON line per prompt. */
+const written = (file: string, shape: "document" | "lines" = "document") => {
+  try {
+    const text = readFileSync(file, "utf8");
+    JSON.parse(shape === "lines" ? text.trim().split("\n").at(-1)! : text);
+    return true;
+  } catch { return false; }
+};
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-opencode-keys-"));
@@ -106,7 +116,7 @@ it("saves keys for any OpenCode provider on a Cloud, shows only their names, and
   expect(owner).toMatch(/^omb_sess_/);
   expect((await api("GET", "/api/config")).body.opencodeGo).toEqual({ configured: false, providerKeys: [] });
   // Before: the server's own provider keys stay out of OpenCode on a Cloud.
-  await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => written(dump), { timeout: 15_000 }).toBe(true);
   expect(started().env.ANTHROPIC_API_KEY).toBeUndefined();
   expect(started().env.OPENAI_API_KEY).toBeUndefined();
 
@@ -123,7 +133,7 @@ it("saves keys for any OpenCode provider on a Cloud, shows only their names, and
   expect(reread.body.opencodeGo.providerKeys).toEqual(["ANTHROPIC_API_KEY", "VENICE_API_KEY"]);
   // Saving reloads the engines, so OpenCode lists the new provider's models
   // straight away: its catalog is read in an environment that has the keys.
-  await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => written(dump), { timeout: 15_000 }).toBe(true);
   expect(started().env.VENICE_API_KEY).toBe(VENICE);
   expect(started().env.ANTHROPIC_API_KEY).toBe(OWNER_ANTHROPIC);
   expect(started().env.OPENAI_API_KEY).toBeUndefined();
@@ -134,7 +144,7 @@ it("saves keys for any OpenCode provider on a Cloud, shows only their names, and
   const prompts = `${dump}.prompts.jsonl`;
   rmSync(prompts, { force: true });
   expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Hello.", threadId: thread })).status).toBe(202);
-  await expect.poll(() => existsSync(prompts), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => written(prompts, "lines"), { timeout: 15_000 }).toBe(true);
   const turnPid = JSON.parse(readFileSync(prompts, "utf8").trim().split("\n").at(-1)!).pid as number;
   expect(started().pid).toBe(turnPid);
   expect(started().env.VENICE_API_KEY).toBe(VENICE);
@@ -148,7 +158,7 @@ it("saves keys for any OpenCode provider on a Cloud, shows only their names, and
   const removed = await api("PUT", "/api/config", { opencodeGo: { providerKeys: { VENICE_API_KEY: "" } } });
   expect(removed.status, removed.text).toBe(200);
   expect(removed.body.opencodeGo.providerKeys).toEqual(["ANTHROPIC_API_KEY"]);
-  await expect.poll(() => existsSync(dump), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => written(dump), { timeout: 15_000 }).toBe(true);
   expect(started().env.VENICE_API_KEY).toBeUndefined();
   expect(started().env.ANTHROPIC_API_KEY).toBe(OWNER_ANTHROPIC);
 }, 90_000);

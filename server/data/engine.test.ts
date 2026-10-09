@@ -49,7 +49,8 @@ const panel = { connection: "panel" as const };
 
 afterAll(async () => {
   await Promise.all(engines.map((e) => e.closeAll()));
-  rmSync(root, { recursive: true, force: true });
+  // Windows keeps a just-closed database busy for a moment (EPERM on rm).
+  rmSync(root, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
 });
 
 describe("loading the binding", () => {
