@@ -49,24 +49,23 @@ const bot = { connection: "bot" as const };
 const panel = { connection: "panel" as const };
 
 afterAll(async () => {
+  // On Windows CI, DuckDB's native close blocks the worker thread after
+  // these tests (the hook timed out with no JavaScript timer firing), so no
+  // bound in here can help. The process exit reclaims the handles; the
+  // tests themselves have already decided the result.
+  if (process.platform === "win32") {
+    console.warn("engine.test: leaving the databases to the process on Windows (native close blocks the thread)");
+    return;
+  }
   // A close gives up on a stuck statement after CLOSE_DRAIN_MS; the hook must
-  // outlast that for every engine, and a Windows runner that still hangs in
-  // the native close is not a failure of these tests.
+  // outlast that for every engine.
   const closing = Promise.all(engines.map((e) => e.closeAll()));
   const gaveUp = new Promise<"gave-up">((resolve) => setTimeout(() => resolve("gave-up"), CLOSE_DRAIN_MS * 2).unref());
-  if (await Promise.race([closing.then(() => "closed" as const), gaveUp]) === "gave-up") {
-    if (process.platform !== "win32") throw new Error("closeAll did not finish");
-    console.warn("engine.test: closeAll still running on Windows; leaving it to the process");
-  }
+  if (await Promise.race([closing.then(() => "closed" as const), gaveUp]) === "gave-up") throw new Error("closeAll did not finish");
   // Windows keeps a just-closed database busy for a while (EPERM on rm); a
   // temp directory left on a runner is not a test failure there. rm's retry
   // delay grows linearly, so 10 × 100 ms stays well inside the hook timeout.
-  try {
-    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  } catch (error) {
-    if (process.platform !== "win32") throw error;
-    console.warn(`engine.test: left ${root} behind: ${(error as Error).message}`);
-  }
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }, CLOSE_DRAIN_MS * 4);
 
 describe("closing", () => {
