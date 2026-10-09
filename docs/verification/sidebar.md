@@ -45,7 +45,7 @@ Open only the printed `previewUrl`:
 
 `src/lib/bot-read.test.ts` covers legacy state, all folders/unfiled/archived
 threads, work and approval preservation, ordered requests for 250 threads,
-partial failure/retry and new-thread arrivals. `SidebarBotRead.test.ts` mounts
+partial failure/retry and new-thread arrivals. `src/components/SidebarBotRead.test.ts` mounts
 the actual menu to check progress, duplicate-click protection, error recovery,
 Portuguese copy, hidden thread trees and a menu reopened during a read.
 Folder reads use the same request helper and retain their existing tests.
