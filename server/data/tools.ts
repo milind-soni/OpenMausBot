@@ -860,8 +860,8 @@ export async function exportData(ctx: DataContext, input: ExportInput): Promise<
   if (input.id && !card) throw fail("card_not_found", `No card ${input.id} on the sheet.`);
   if (input.format === "png" || input.format === "svg") {
     if (!card) throw fail("invalid_input", "png and svg render a chart card: pass its id.");
-    const image = await renderCard(ctx, card, input.format, { theme: input.theme, width: input.width, scale: input.scale });
     const path = resolveExportPath(ctx.exportRoots(), input.path, card.title, input.format);
+    const image = await renderCard(ctx, card, input.format, { theme: input.theme, width: input.width, scale: input.scale });
     writeFileSync(path, image);
     return { path, bytes: statSync(path).size };
   }
