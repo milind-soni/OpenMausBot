@@ -1872,7 +1872,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             let init = session.initResult;
 
             const cursor = !turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
-            let sessionResult: any = null;
             let promptTurn = turn;
             let rebuiltFromReplay = false;
             for (;;) {
@@ -1947,7 +1946,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              sessionResult = await request("session/new", { cwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
+              await request("session/new", { cwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result);
@@ -2012,7 +2011,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   }
                 }
                 if (cliTurn.model && cliTurn.model !== selectedModel) {
-                  sessionResult = await request(
+                  await request(
                     "session/set_config_option",
                     { sessionId, configId, value: cliTurn.model },
                     INIT_TIMEOUT,
