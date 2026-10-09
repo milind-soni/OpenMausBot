@@ -58,7 +58,7 @@ describe.skipIf(process.platform === "win32")("direct final-screen settlement", 
       'if (args[0] === "screenshot") {',
       '  writeFileSync(dir + "/capture.entered", "started");',
       '  while (!existsSync(dir + "/capture.gate")) await new Promise(resolve => setTimeout(resolve, 10));',
-      '  writeFileSync(args[1], Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==", "base64"));',
+      '  writeFileSync(args[1], Buffer.from("/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==", "base64"));',
       '  writeFileSync(dir + "/capture.finished", "finished");',
       '} else if (args[0] === "mcp") {',
       '  createInterface({ input: process.stdin }).on("line", line => {',
@@ -135,15 +135,15 @@ describe.skipIf(process.platform === "win32")("direct final-screen settlement", 
     gate("capture.gate");
     const frame = await events.until((candidate) => candidate.kind === "message" &&
       candidate.threadId === threadId && candidate.message?.kind === "screen", 15_000);
-    expect(frame.message).toMatchObject({ hasImage: true, mime: "image/png" });
+    expect(frame.message).toMatchObject({ hasImage: true, mime: "image/jpeg" });
     expect(frame.message.png).toBeUndefined();
-    expect(JSON.stringify(frame)).not.toContain("iVBORw0KGgo");
+    expect(JSON.stringify(frame)).not.toContain("/9j/4AAQ");
     const image = await fetch(`${session.info.url}/api/threads/${threadId}/messages/${frame.message.id}/image`,
       { headers: { origin: session.info.url } });
     expect(image.status).toBe(200);
-    expect(image.headers.get("content-type")).toBe("image/png");
+    expect(image.headers.get("content-type")).toBe("image/jpeg");
     expect(Buffer.from(await image.arrayBuffer()).toString("base64"))
-      .toBe("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==");
+      .toBe("/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==");
   }, 30_000);
 
   it("bounds capture settlement and discards a late frame after the thread is deleted", async () => {
