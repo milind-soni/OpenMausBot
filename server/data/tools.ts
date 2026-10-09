@@ -96,7 +96,7 @@ export const DATA_TOOLS = [
   ),
   tool(
     "data_show",
-    "Put a table or a chart on the Data tab the person sees. Give sql (a SELECT) or table (a loaded table); kind \"chart\" also takes chart (the small spec: type, x, y, color, agg, …) or, rarely, vegaLite (a data-free Vega-Lite spec). Pass an existing id to change that card in place; otherwise a new card is added at the bottom. Aggregate or filter in SQL first: a chart may draw at most 10,000 marks.",
+    "Put a table or a chart on the Data tab the person sees. Give sql (a SELECT) or table (a loaded table); kind \"chart\" also takes chart (the small spec: type, x, y, color, agg, …) or, rarely, vegaLite (a data-free Vega-Lite spec). For a line of daily/weekly totals pass agg and/or timeUnit; a line with only y draws the raw series. Pass an existing id to change that card in place; otherwise a new card is added at the bottom. Aggregate or filter in SQL first: a chart may draw at most 10,000 marks.",
     {
       id: { type: "string", pattern: "^c_[0-9]+$" },
       title: { type: "string", maxLength: 200 },
@@ -760,7 +760,10 @@ export async function showCard(ctx: DataContext, input: ShowInput): Promise<Show
         throw fail("output_too_large", `The chart would draw ${materialised.rowCount.toLocaleString("en-US")} marks; the limit is ${DATA_LIMITS.chartMaxMarks.toLocaleString("en-US")}.`, { sql: compiled.sql, hint: OUTPUT_TOO_LARGE_HINT });
       }
       const counted = await ctx.database.run(`SELECT count(*) FROM ${from}`, runOptions(ctx, { maxRows: 1 }));
-      const reduction: DataReduction = { ...compiled.reduction, inputRows: Number(counted.rows[0]?.[0] ?? 0), outputRows: materialised.rowCount };
+      const inputRows = Number(counted.rows[0]?.[0] ?? 0);
+      // The compiler never sees counts: a top-N or sample that kept every row reduced nothing.
+      const method = inputRows === materialised.rowCount ? "none" : compiled.reduction.method;
+      const reduction: DataReduction = { ...compiled.reduction, method, inputRows, outputRows: materialised.rowCount };
       patch = { result: card.id, columns: materialised.columns, rowCount: materialised.rowCount, truncated: false, chart: input.chart, vegaLite: compiled.vegaLite, reduction };
     } else {
       const vegaLite = await ctx.validateVegaLite(input.vegaLite);

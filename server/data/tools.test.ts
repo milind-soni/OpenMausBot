@@ -379,6 +379,10 @@ describe("data_show", () => {
     const materialised = database.calls.find((call) => call.method === "materialise")!;
     expect(materialised.sql).toBe("SELECT region, count(*) AS n FROM (SELECT * FROM orders) GROUP BY ALL");
     expect(database.calls.some((call) => call.sql === "SELECT * FROM (SELECT * FROM orders) LIMIT 0")).toBe(true);
+    // The compiler never sees counts: a reduction that kept every row is labelled "none".
+    database.onRun = (sql) => (sql.startsWith("SELECT count(*)") ? { columns: [{ name: "n", type: "BIGINT" }], rows: [[3]], rowCount: 1, truncated: false, elapsedMs: 1 } : undefined);
+    const whole = await showCard(ctx, { kind: "chart", sql: "SELECT * FROM small", chart: { type: "scatter", x: "a", y: "b" } });
+    expect(whole.reduction).toEqual({ method: "none", inputRows: 3, outputRows: 3 });
   });
 
   it("refuses a chart over the mark cap with the aggregate hint, and leaves the card failed", async () => {
