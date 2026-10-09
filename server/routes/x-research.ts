@@ -1,15 +1,17 @@
 // X research routes: the four internal calls behind the agents server's x_*
-// tools, and Settings → API keys' Test for the treg token.
+// tools.
 //
 // The internal handler runs inside index.ts's /api/internal/ block, after the
 // capability bearer is checked (the route table runs before that block). It
-// still re-checks the token and the bot's own switch on every call: the tool
-// list a bot was shown at the start of its turn is not permission to spend.
+// still re-checks the Cloud plan's credential and the bot's own switch on every
+// call: the tool list a bot was shown at the start of its turn is not
+// permission to spend. The Admin's relay checks the plan again.
 import type { ServerResponse } from "node:http";
 import { z } from "zod";
 import type { json as sendJson } from "../harness/http.ts";
+import type { ServiceCredential } from "../included-services.ts";
 import {
-  createTregXClient,
+  createXRelayClient,
   DEFAULT_POSTS,
   MAX_POSTS,
   normalizeHandle,
@@ -19,15 +21,15 @@ import {
   type XResearchClient,
   type XResearchErrorCode,
 } from "../x-research.ts";
-import { PASS, type RouteHandler } from "./table.ts";
+import { PASS } from "./table.ts";
 
 export interface XResearchDeps {
-  /** The saved treg token, read per request. */
-  token: () => string | undefined;
+  /** The included relay credential (included-services.ts xCredential), read per request. */
+  credential: () => ServiceCredential | null;
   /** bot.xResearch === true */
   botEnabled: (botId: string) => boolean;
   /** Tests pass a fake; the server builds the real client per call. */
-  client?: (token: string) => XResearchClient;
+  client?: (credential: ServiceCredential) => XResearchClient;
 }
 
 export interface XInternalContext {
@@ -94,40 +96,20 @@ async function run(action: string, body: unknown, client: XResearchClient): Prom
 }
 
 export function createXResearchInternalRoutes(deps: XResearchDeps) {
-  const clientFor = deps.client ?? ((token: string) => createTregXClient({ token }));
+  const clientFor = deps.client ?? ((credential: ServiceCredential) => createXRelayClient({ url: credential.api, token: credential.token }));
   return async (ctx: XInternalContext): Promise<typeof PASS | void> => {
     if (ctx.method !== "POST" || !ctx.path.startsWith(PREFIX)) return PASS;
     const action = ctx.path.slice(PREFIX.length);
     if (!ACTIONS.has(action)) return PASS;
-    const token = deps.token()?.trim();
-    if (!token) return void ctx.json(ctx.res, 403, { error: X_MESSAGES.noKey });
+    const credential = deps.credential();
+    if (!credential) return void ctx.json(ctx.res, 403, { error: X_MESSAGES.noKey });
     if (!deps.botEnabled(ctx.botId)) return void ctx.json(ctx.res, 403, { error: X_MESSAGES.botOff });
     const body = await ctx.readBody();
     try {
-      ctx.json(ctx.res, 200, await run(action, body, clientFor(token)));
+      ctx.json(ctx.res, 200, await run(action, body, clientFor(credential)));
     } catch (error) {
       if (!(error instanceof XResearchError)) throw error;
       ctx.json(ctx.res, statusFor(error.code), { error: error.message, code: error.code });
-    }
-  };
-}
-
-/** Settings → API keys' Test: two free account calls; the verdict never
- * carries the token. Admin-only like every route not opened to clients. */
-export function createXResearchKeyTestRoute(deps: Pick<XResearchDeps, "token" | "client">): RouteHandler {
-  const clientFor = deps.client ?? ((token: string) => createTregXClient({ token }));
-  return async ({ method, path, res, json }) => {
-    if (method !== "POST" || path !== "/api/x-research/test") return PASS;
-    res.setHeader("cache-control", "no-store");
-    const token = deps.token()?.trim();
-    if (!token) return void json(res, 400, { error: "No token to test. Paste one or save one first." });
-    try {
-      const { balanceUsd } = await clientFor(token).accountInfo();
-      json(res, 200, { ok: true, dollars: balanceUsd });
-    } catch (error) {
-      if (!(error instanceof XResearchError)) throw error;
-      const reason = error.code === "bad_key" ? "rejected" : error.code === "unavailable" ? "unreachable" : "unexpected";
-      json(res, 200, { ok: false, reason, message: error.message });
     }
   };
 }

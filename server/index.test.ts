@@ -10928,16 +10928,6 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("keeps an externally stored treg token off disk, reporting only that it is configured", async () => {
-    const saved = await api("PUT", "/api/config?secretStorage=external", { treg: { token: "treg-external" } });
-    expect(saved.status).toBe(200);
-    expect(saved.body.treg).toEqual({ configured: true });
-    expect(JSON.stringify(saved.body)).not.toContain("treg-external");
-    const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-    expect(disk.treg).toEqual({ token: "" });
-    expect(JSON.stringify(disk)).not.toContain("treg-external");
-  });
-
   it("keeps second-account cards separate and waits for the requested alias, not an existing account", async () => {
     expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
     const bot = (await api("POST", "/api/bots")).body.bot;

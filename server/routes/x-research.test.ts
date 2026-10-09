@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { X_MESSAGES, XResearchError, type XResearchClient } from "../x-research.ts";
-import { PASS, type RouteContext } from "./table.ts";
-import { createXResearchInternalRoutes, createXResearchKeyTestRoute, type XInternalContext } from "./x-research.ts";
+import type { ServiceCredential } from "../included-services.ts";
+import { PASS } from "./table.ts";
+import { createXResearchInternalRoutes, type XInternalContext } from "./x-research.ts";
 
 function fakeClient(overrides: Partial<XResearchClient> = {}): XResearchClient {
   return {
@@ -9,7 +10,6 @@ function fakeClient(overrides: Partial<XResearchClient> = {}): XResearchClient {
     userPosts: vi.fn(async () => ({ posts: [], more: false })),
     post: vi.fn(async () => ({ post: { id: "1", url: "https://x.com/i/status/1", author: "@a", text: "hi" } })),
     profile: vi.fn(async () => ({ handle: "@a", url: "https://x.com/a" })),
-    accountInfo: vi.fn(async () => ({ balanceUsd: 0.97 })),
     ...overrides,
   };
 }
@@ -34,8 +34,9 @@ async function callInternal(
 }
 
 describe("X research internal routes", () => {
-  const enabled = (client = fakeClient(), token: () => string | undefined = () => "t") =>
-    ({ client, handler: createXResearchInternalRoutes({ token, botEnabled: (id) => id === "bot-1", client: () => client }) });
+  const included: ServiceCredential = { token: "omb_xd_t", api: "https://cloud.example.test/api/cloud/services/x", included: true };
+  const enabled = (client = fakeClient(), credential: () => ServiceCredential | null = () => included) =>
+    ({ client, handler: createXResearchInternalRoutes({ credential, botEnabled: (id) => id === "bot-1", client: () => client }) });
 
   it("passes requests that are not its own", async () => {
     const { handler } = enabled();
@@ -44,20 +45,20 @@ describe("X research internal routes", () => {
     expect((await callInternal(handler, { method: "GET" })).out).toBe(PASS);
   });
 
-  it("refuses without a token, and refuses a bot that is not switched on, before any spend", async () => {
+  it("refuses without a Cloud plan's credential, and refuses a bot that is not switched on, before any spend", async () => {
     const client = fakeClient();
-    const noToken = createXResearchInternalRoutes({ token: () => undefined, botEnabled: () => true, client: () => client });
+    const noToken = createXResearchInternalRoutes({ credential: () => null, botEnabled: () => true, client: () => client });
     expect(await callInternal(noToken, { body: { query: "maus" } })).toMatchObject({ status: 403, body: { error: X_MESSAGES.noKey } });
     const { handler } = enabled(client);
     expect(await callInternal(handler, { botId: "bot-2", body: { query: "maus" } })).toMatchObject({ status: 403, body: { error: X_MESSAGES.botOff } });
     expect(client.search).not.toHaveBeenCalled();
   });
 
-  it("reads the token on every call, so clearing it stops the next one", async () => {
-    let token: string | undefined = "t";
-    const { handler } = enabled(fakeClient(), () => token);
+  it("reads the credential on every call, so a plan that lapsed (the desktop cleared it) stops the next one", async () => {
+    let credential: ServiceCredential | null = included;
+    const { handler } = enabled(fakeClient(), () => credential);
     expect((await callInternal(handler, { body: { query: "maus" } })).status).toBe(200);
-    token = undefined;
+    credential = null;
     expect((await callInternal(handler, { body: { query: "maus" } })).status).toBe(403);
   });
 
@@ -102,35 +103,5 @@ describe("X research internal routes", () => {
     const badToken = enabled(fakeClient({ search: vi.fn(async () => { throw new XResearchError("bad_key", X_MESSAGES.badKey); }) }));
     expect(await callInternal(badToken.handler, { body: { query: "maus" } }))
       .toMatchObject({ status: 502, body: { error: X_MESSAGES.badKey, code: "bad_key" } });
-  });
-});
-
-describe("X research token test route", () => {
-  async function callTest(handler: ReturnType<typeof createXResearchKeyTestRoute>, path = "/api/x-research/test", method = "POST") {
-    const { sent, json, res } = sink();
-    const out = await handler({ method, path, res, json } as unknown as RouteContext);
-    return { out, ...sent };
-  }
-
-  it("passes other requests", async () => {
-    const handler = createXResearchKeyTestRoute({ token: () => "t", client: () => fakeClient() });
-    expect((await callTest(handler, "/api/keys/test")).out).toBe(PASS);
-    expect((await callTest(handler, "/api/x-research/test", "GET")).out).toBe(PASS);
-  });
-
-  it("asks for a token first", async () => {
-    const handler = createXResearchKeyTestRoute({ token: () => "  ", client: () => fakeClient() });
-    expect(await callTest(handler)).toMatchObject({ status: 400 });
-  });
-
-  it("reports the balance in dollars", async () => {
-    const handler = createXResearchKeyTestRoute({ token: () => "t", client: () => fakeClient() });
-    expect(await callTest(handler)).toMatchObject({ status: 200, body: { ok: true, dollars: 0.97 } });
-  });
-
-  it("names a rejected token", async () => {
-    const client = fakeClient({ accountInfo: vi.fn(async () => { throw new XResearchError("bad_key", X_MESSAGES.badKey); }) });
-    const handler = createXResearchKeyTestRoute({ token: () => "t", client: () => client });
-    expect(await callTest(handler)).toMatchObject({ status: 200, body: { ok: false, reason: "rejected", message: X_MESSAGES.badKey } });
   });
 });

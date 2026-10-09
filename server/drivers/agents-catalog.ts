@@ -30,7 +30,7 @@ export interface CatalogProfile {
   /** A voice is actually configured for this bot (tts voiceReady). */
   voiceNotes: boolean;
   /** The bot is switched on for X research and a treg token is saved.
-   * Absent means off: these tools spend the person's treg balance. */
+   * Absent means off: these tools count against the person's Cloud plan's X calls. */
   xResearch?: boolean;
   /** The server is a Cloud home (server/cloud-home.ts): no "this computer"
    * of the person's and no Local VM to offer. */
@@ -593,7 +593,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "x_search",
     description:
-      "Search posts on X (Twitter) without an X account, through the user's treg account. Each call spends a fraction of a cent of their treg balance, so write one well-filtered query instead of many broad ones. The query takes X operators: from:handle, to:handle, \"exact phrase\", since:YYYY-MM-DD, until:YYYY-MM-DD, min_faves:N, -filter:replies, lang:en, OR. Bare words are all required, so use a short phrase or OR between alternatives. Returns compact posts (link, author, time, text, likes, reposts, replies, quotes, views) and newestId. To monitor X, for example in a routine, keep newestId and pass it back as sinceId next time to get only newer posts. Read-only: you cannot post, like or reply.",
+      "Search posts on X (Twitter) without an X account; included with the user's OpenMausBot Cloud plan. Each call counts against the plan's monthly X research calls, so write one well-filtered query instead of many broad ones. The query takes X operators: from:handle, to:handle, \"exact phrase\", since:YYYY-MM-DD, until:YYYY-MM-DD, min_faves:N, -filter:replies, lang:en, OR. Bare words are all required, so use a short phrase or OR between alternatives. Returns compact posts (link, author, time, text, likes, reposts, replies, quotes, views) and newestId. To monitor X, for example in a routine, keep newestId and pass it back as sinceId next time to get only newer posts. Read-only: you cannot post, like or reply.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -609,7 +609,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "x_user_posts",
     description:
-      "Read an X account's recent posts, newest first, through the user's treg account (each call spends a fraction of a cent). Returns compact posts and newestId; pass newestId back as sinceId later to get only newer posts. Read-only.",
+      "Read an X account's recent posts, newest first (each call counts against the plan's monthly X research calls). Returns compact posts and newestId; pass newestId back as sinceId later to get only newer posts. Read-only.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -625,7 +625,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "x_post",
     description:
-      "Read one X post from its link or id, and optionally the first page of up to 20 replies to it, through the user's treg account (each call spends a fraction of a cent). Read-only.",
+      "Read one X post from its link or id, and optionally the first page of up to 20 replies to it (each call counts against the plan's monthly X research calls). Read-only.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -639,7 +639,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "x_profile",
     description:
-      "Look up an X account's profile: name, bio, followers, following, post count and verified status. Spends a fraction of a cent of the user's treg balance. Read-only.",
+      "Look up an X account's profile: name, bio, followers, following, post count and verified status. Counts against the plan's monthly X research calls. Read-only.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -986,9 +986,10 @@ export const SHARED_COMPUTER_TOOL_NAMES = new Set(["list_shared_computers", "sha
 // tool whose every call would end in a setup error. The route behind it
 // refuses regardless; this keeps the catalog honest about what can work.
 const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
-// And for X research: these spend the person's treg balance, so a bot sees
-// them only when its person switched X research on for it and a token is
-// saved. The routes (server/routes/x-research.ts) re-check both on every call.
+// And for X research: these count against the person's Cloud plan's X calls,
+// so a bot sees them only when its person switched X research on for it and
+// the plan's relay credential is held. The routes (server/routes/x-research.ts)
+// re-check both on every call.
 const X_TOOL_NAMES = new Set(["x_search", "x_user_posts", "x_post", "x_profile"]);
 // And for a role: every route behind these refuses a bot that is not its
 // section's Chief of Staff, as it does a for_bot_id naming another bot on

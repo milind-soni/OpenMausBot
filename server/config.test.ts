@@ -2110,21 +2110,9 @@ describe("a value derived from config.json", () => {
   );
 });
 
-describe("treg token", () => {
-  it("is a workspace credential that never reaches an engine", () => {
-    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TREG_TOKEN");
-  });
-
-  it("follows a save into the running process and leaves on a clear", () => {
-    const before = process.env.OMB_TREG_TOKEN;
-    try {
-      syncCredentialEnv({ treg: { token: "new-token" } });
-      expect(process.env.OMB_TREG_TOKEN).toBe("new-token");
-      syncCredentialEnv({ treg: { token: "" } });
-      expect(process.env.OMB_TREG_TOKEN).toBeUndefined();
-    } finally {
-      if (before === undefined) delete process.env.OMB_TREG_TOKEN;
-      else process.env.OMB_TREG_TOKEN = before;
-    }
+describe("X research's included relay token", () => {
+  it("is a workspace credential that never reaches an engine, and there is no own treg token any more", () => {
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_X_TOKEN");
+    expect(WORKSPACE_CREDENTIAL_ENV).not.toContain("OMB_TREG_TOKEN");
   });
 });

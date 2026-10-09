@@ -1,8 +1,11 @@
-// X research: the x_* agents tools' only way out. A thin client over treg
-// (treg.to, "OpenRouter for agent tools"), which sells per-call access to X
-// scrapers on the person's own treg token. It hands back compact posts and
-// profiles, never a scraper's raw JSON, and turns every failure into an
-// XResearchError carrying a sentence a bot can pass on.
+// X research: the x_* agents tools' only way out. A thin client over the
+// OpenMausBot Cloud Admin's X relay (openmaus-cloud server/cloud-services.ts),
+// which calls treg (treg.to, "OpenRouter for agent tools") on our account for
+// paying Cloud plans only, within each plan's monthly calls. A Cloud home has
+// the relay token in its env; a desktop gets its own with its Cloud sign-in
+// (included-services.ts). It hands back compact posts and profiles, never a
+// scraper's raw JSON, and turns every failure into an XResearchError carrying
+// a sentence a bot can pass on.
 //
 // Each job calls the cheapest scraper treg lists for it, with its paging and
 // sort options; when that one is down, it falls back once to treg's routed
@@ -10,16 +13,12 @@
 // same fields differently, so rows are read through short alias lists. A
 // managed relay (step 2) replaces this module only.
 
-export const TREG_BASE_URL = "https://treg.to";
 /** Posts one call may return. Fifty compact posts stay under the agents
  * server's result cap. */
 export const MAX_POSTS = 50;
 export const DEFAULT_POSTS = 20;
 const REPLIES_PAGE = 20;
 const MAX_PAGES = 3;
-/** Most one call may spend, in USD. Every X route here costs between $0.00022
- * and $0.015, so this stops only a mispriced route, never a normal call. */
-const MAX_COST_USD = "0.05";
 const TEXT_LIMIT = 1_500;
 const QUOTE_LIMIT = 300;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -31,7 +30,8 @@ const TIMEOUT_MS = 30_000;
 const RESULT_BUDGET = 22_000;
 
 /** treg catalog ids: the cheapest scraper for each job, then treg's routed
- * endpoint for the same job (identity fields only, one page). */
+ * endpoint for the same job (identity fields only, one page). The relay serves
+ * exactly these (openmaus-cloud X_ENDPOINTS). */
 export const TREG_X_ENDPOINTS = {
   search: "anyapi.x.search.posts",
   searchRouted: "treg.x.search.posts",
@@ -47,13 +47,13 @@ export type XResearchErrorCode = "bad_input" | "bad_key" | "no_credit" | "rate_l
 
 /** Every sentence a bot or the Settings page can be shown about X research. */
 export const X_MESSAGES = {
-  noKey: "X research isn't set up. Add a treg token in Settings → API keys.",
+  noKey: "X research is included with OpenMausBot Cloud plans. Sign in to a paid plan under App Settings → OpenMausBot Cloud to use it.",
   botOff: "X research is off for this bot. Turn it on in this bot's settings under Access.",
-  badKey: "treg rejected the token. Check it in Settings → API keys.",
-  noCredit: "The treg balance has run out. Top up at treg.to, then try again.",
-  rateLimited: "treg is rate-limiting requests. Wait a minute and try again.",
-  badRequest: "treg refused that request. Check the query, handle or post link.",
-  unavailable: "X research couldn't reach a working X source through treg. Try again shortly.",
+  badKey: "Sign in to OpenMausBot Cloud again in Settings to use X research.",
+  noPlan: "X research comes with OpenMausBot Cloud plans, and this account's plan isn't active.",
+  rateLimited: "X research is busy right now. Try again in a moment.",
+  badRequest: "That X research request was refused. Check the query, handle or post link.",
+  unavailable: "X research is temporarily unavailable. Try again shortly.",
   postNotFound: "That X post was not found. It may be deleted or private.",
   accountNotFound: (handle: string) => `No X account named @${handle}.`,
 } as const;
@@ -106,7 +106,6 @@ export interface XResearchClient {
   userPosts(input: { handle: string; limit: number; sinceId?: string; includeReplies: boolean }): Promise<XPostList>;
   post(input: { id: string; handle?: string; replies: boolean }): Promise<XPostWithReplies>;
   profile(handle: string): Promise<XProfile>;
-  accountInfo(): Promise<{ balanceUsd: number }>;
 }
 
 type Row = Record<string, unknown>;
@@ -286,15 +285,16 @@ function newestOf(posts: XPost[]): string | undefined {
 
 /** An HTTP refusal from treg as one of the sentences in X_MESSAGES. */
 export function errorFor(status: number, body: unknown): XResearchError {
+  // The relay's own refusals (openmaus-cloud server/cloud-services.ts); a 5xx
+  // there is a scraper or our treg account, never the person's to fix.
   if (status === 401 || status === 403) return new XResearchError("bad_key", X_MESSAGES.badKey);
-  // A 402 is an empty balance, except the per-call ceiling this client sends.
-  if (status === 402) {
-    return at(body, "error") === "route_max_cost"
-      ? new XResearchError("unavailable", X_MESSAGES.unavailable)
-      : new XResearchError("no_credit", X_MESSAGES.noCredit);
-  }
+  if (status === 402) return new XResearchError("no_credit", X_MESSAGES.noPlan);
   if (status === 422) return new XResearchError("bad_input", X_MESSAGES.badRequest);
-  if (status === 429) return new XResearchError("rate_limited", X_MESSAGES.rateLimited);
+  if (status === 429) {
+    // The month's allowance: the relay's sentence names the plan, the number and the reset date.
+    const said = at(body, "message");
+    return new XResearchError("rate_limited", at(body, "error") === "quota_exceeded" && typeof said === "string" && said.length <= 300 ? said : X_MESSAGES.rateLimited);
+  }
   return new XResearchError("unavailable", X_MESSAGES.unavailable);
 }
 
@@ -346,24 +346,22 @@ interface ListOptions {
   knownHandle?: string;
 }
 
-export function createTregXClient(options: { token: string; fetcher?: typeof fetch; baseUrl?: string; timeoutMs?: number }): XResearchClient {
+/** `url` is the relay base (OMB_CLOUD_X_URL, or a desktop's from its Cloud
+ * sign-in) and `token` its relay token: the only things that leave here. */
+export function createXRelayClient(options: { url: string; token: string; fetcher?: typeof fetch; timeoutMs?: number }): XResearchClient {
   const fetcher = options.fetcher ?? fetch;
-  const base = options.baseUrl ?? TREG_BASE_URL;
+  const base = options.url.replace(/\/+$/, "");
   const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
 
-  async function send(method: "GET" | "POST", path: string, body?: Row): Promise<Row> {
+  async function send(path: string, body: Row): Promise<Row> {
     let status: number;
     let ok: boolean;
     let raw: string;
     try {
-      const response = await fetcher(new URL(path, base), {
-        method,
-        headers: {
-          "X-Treg-Token": options.token,
-          accept: "application/json",
-          ...(body ? { "content-type": "application/json", "X-Treg-Route-Max-Cost": MAX_COST_USD } : {}),
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
+      const response = await fetcher(`${base}${path}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${options.token}`, accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify(body),
         redirect: "error",
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -385,7 +383,7 @@ export function createTregXClient(options: { token: string; fetcher?: typeof fet
     return parsed;
   }
 
-  const call = (endpoint: string, body: Row) => send("POST", `/call/${endpoint}`, body);
+  const call = (endpoint: string, body: Row) => send(`/call/${endpoint}`, body);
 
   async function list(endpoint: string, body: Row, opts: ListOptions): Promise<XPostList> {
     const since = opts.sinceId === undefined ? undefined : BigInt(opts.sinceId);
@@ -473,15 +471,6 @@ export function createTregXClient(options: { token: string; fetcher?: typeof fet
         createdAt: timeOf(at(out, "created_at")),
         url: `https://x.com/${username}`,
       };
-    },
-    async accountInfo() {
-      const me = await send("GET", "/auth/me");
-      const orgId = idOf(me.org_id);
-      if (!orgId) throw unavailable();
-      const balance = await send("GET", `/orgs/${orgId}/balance?limit=1`);
-      const micro = balance.balance_micro;
-      if (typeof micro !== "number" || !Number.isFinite(micro)) throw unavailable();
-      return { balanceUsd: micro / 1_000_000 };
     },
   };
 }

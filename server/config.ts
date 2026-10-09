@@ -428,8 +428,6 @@ const appConfigSchema = z.object({
   }).optional(),
   mistral: z.object({ key: optionalText }).optional(),
   cerebras: z.object({ key: optionalText }).optional(),
-  /** treg: the X research tools' scraper router, paid from this token. */
-  treg: z.object({ token: optionalText }).optional(),
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
   /** Anthropic API key for Claude Code billed per token, handed only to
    * Claude instances; `url` only for a proxy or a test double. Never a
@@ -621,7 +619,6 @@ export interface AppConfig {
   xai?: { key?: string; url?: string };
   mistral?: { key?: string };
   cerebras?: { key?: string };
-  treg?: { token?: string };
   /** `everyClaudeBot`: the key runs every Claude bot instead of its login.
    * Unset means true, which is how a key behaved before it had its own
    * `claudeApi` instance; a key first saved from Settings sets false. */
@@ -1048,8 +1045,6 @@ export function loadConfig(): AppConfig {
   if (process.env.MISTRAL_API_KEY !== undefined) cfg.mistral.key = process.env.MISTRAL_API_KEY;
   cfg.cerebras = { ...cfg.cerebras };
   if (process.env.CEREBRAS_API_KEY !== undefined) cfg.cerebras.key = process.env.CEREBRAS_API_KEY;
-  cfg.treg = { ...cfg.treg };
-  if (process.env.OMB_TREG_TOKEN !== undefined) cfg.treg.token = process.env.OMB_TREG_TOKEN;
   cfg.xai = { ...cfg.xai };
   if (process.env.XAI_API_KEY !== undefined) cfg.xai.key = process.env.XAI_API_KEY;
   // Deliberately not ANTHROPIC_API_KEY: a key in the server's own env is
@@ -1150,7 +1145,6 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
     [patch.live?.key, "OMB_OPENAI_LIVE_KEY"],
-    [patch.treg?.token, "OMB_TREG_TOKEN"],
   ];
   for (const [value, name] of secrets) {
     if (value === undefined) continue;
@@ -1197,7 +1191,6 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_OPENAI_IMAGE_KEY",
   "OMB_CUSTOM_IMAGE_KEY",
   "OMB_OPENAI_LIVE_KEY",
-  "OMB_TREG_TOKEN",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   // Cloud Pro's included Boat, voice and decision relay tokens
@@ -1206,6 +1199,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_CLOUD_BOAT_TOKEN",
   "OMB_CLOUD_VOICE_TOKEN",
   "OMB_CLOUD_DECIDER_TOKEN",
+  "OMB_CLOUD_X_TOKEN",
   // Harness-private filesystem hints are not credentials themselves, but
   // exposing them to a shell-capable agent points straight at app-owned
   // state. The built-in browser master is delivered privately in memory.
@@ -1370,7 +1364,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

@@ -1932,8 +1932,8 @@
     ]
   },
   "direct+skills+shared+voice+x": {
-    "bytes": 56281,
-    "sha256": "24cda6e0fffd151b00b5926c68f846e28f6eb8ab658bf4e299bf1731316b2d10",
+    "bytes": 56274,
+    "sha256": "3e2791619b1790697ed965490291432817aca32365264723d04f3365a54ee7e0",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1980,8 +1980,8 @@
     ]
   },
   "room+own-thread+skills+shared+voice+x": {
-    "bytes": 55997,
-    "sha256": "1ff7db3b49966d3eaa6f7a29859bbaf74f2c54ae4372327934abc5c2dd9d1dc9",
+    "bytes": 55990,
+    "sha256": "7dd3edc8087c4a0c1eb208682d695d97a8885cbdc60942d41c8e784266196f51",
     "tools": [
       "tool_result_read",
       "list_shared_computers",

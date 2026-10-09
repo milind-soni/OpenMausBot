@@ -31,12 +31,12 @@ export const CREDENTIAL_ENV_NAMES = [
   "OMB_OPENAI_IMAGE_KEY",
   "OMB_CUSTOM_IMAGE_KEY",
   "OMB_OPENAI_LIVE_KEY",
-  "OMB_TREG_TOKEN",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   "OMB_CLOUD_BOAT_TOKEN",
   "OMB_CLOUD_VOICE_TOKEN",
   "OMB_CLOUD_DECIDER_TOKEN",
+  "OMB_CLOUD_X_TOKEN",
   // Browser capability files and app-owned state paths are private even
   // though they are not traditional API credentials.
   "OMB_BROWSER_CONNECTION",

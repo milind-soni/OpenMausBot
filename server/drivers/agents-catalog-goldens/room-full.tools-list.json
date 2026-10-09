@@ -696,7 +696,7 @@
     },
     {
       "name": "x_search",
-      "description": "Search posts on X (Twitter) without an X account, through the user's treg account. Each call spends a fraction of a cent of their treg balance, so write one well-filtered query instead of many broad ones. The query takes X operators: from:handle, to:handle, \"exact phrase\", since:YYYY-MM-DD, until:YYYY-MM-DD, min_faves:N, -filter:replies, lang:en, OR. Bare words are all required, so use a short phrase or OR between alternatives. Returns compact posts (link, author, time, text, likes, reposts, replies, quotes, views) and newestId. To monitor X, for example in a routine, keep newestId and pass it back as sinceId next time to get only newer posts. Read-only: you cannot post, like or reply.",
+      "description": "Search posts on X (Twitter) without an X account; included with the user's OpenMausBot Cloud plan. Each call counts against the plan's monthly X research calls, so write one well-filtered query instead of many broad ones. The query takes X operators: from:handle, to:handle, \"exact phrase\", since:YYYY-MM-DD, until:YYYY-MM-DD, min_faves:N, -filter:replies, lang:en, OR. Bare words are all required, so use a short phrase or OR between alternatives. Returns compact posts (link, author, time, text, likes, reposts, replies, quotes, views) and newestId. To monitor X, for example in a routine, keep newestId and pass it back as sinceId next time to get only newer posts. Read-only: you cannot post, like or reply.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -734,7 +734,7 @@
     },
     {
       "name": "x_user_posts",
-      "description": "Read an X account's recent posts, newest first, through the user's treg account (each call spends a fraction of a cent). Returns compact posts and newestId; pass newestId back as sinceId later to get only newer posts. Read-only.",
+      "description": "Read an X account's recent posts, newest first (each call counts against the plan's monthly X research calls). Returns compact posts and newestId; pass newestId back as sinceId later to get only newer posts. Read-only.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -767,7 +767,7 @@
     },
     {
       "name": "x_post",
-      "description": "Read one X post from its link or id, and optionally the first page of up to 20 replies to it, through the user's treg account (each call spends a fraction of a cent). Read-only.",
+      "description": "Read one X post from its link or id, and optionally the first page of up to 20 replies to it (each call counts against the plan's monthly X research calls). Read-only.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -789,7 +789,7 @@
     },
     {
       "name": "x_profile",
-      "description": "Look up an X account's profile: name, bio, followers, following, post count and verified status. Spends a fraction of a cent of the user's treg balance. Read-only.",
+      "description": "Look up an X account's profile: name, bio, followers, following, post count and verified status. Counts against the plan's monthly X research calls. Read-only.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

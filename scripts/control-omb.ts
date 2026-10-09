@@ -388,10 +388,13 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     childEnv.OMB_OPENAI_LIVE_URL = liveUrl;
     if (parentEnv.OMB_OPENAI_LIVE_KEY) childEnv.OMB_OPENAI_LIVE_KEY = parentEnv.OMB_OPENAI_LIVE_KEY;
   }
-  // X research against a loopback treg stub only (server/x-research.e2e.test.ts):
-  // a token saved in the fixture can never reach treg.to.
-  const tregUrl = parentEnv.OMB_TREG_URL?.trim() ?? "";
-  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(tregUrl)) childEnv.OMB_TREG_URL = tregUrl;
+  // X research against a loopback relay stub only (server/x-research.e2e.test.ts):
+  // the relay token crosses only with it, so it can never reach a real relay.
+  const xUrl = parentEnv.OMB_CLOUD_X_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}(?:\/[A-Za-z0-9_-]+)*$/.test(xUrl)) {
+    childEnv.OMB_CLOUD_X_URL = xUrl;
+    if (parentEnv.OMB_CLOUD_X_TOKEN) childEnv.OMB_CLOUD_X_TOKEN = parentEnv.OMB_CLOUD_X_TOKEN;
+  }
   // Voice-note e2e fault injection: arms the one-shot audio-append failure
   // prelude inside the fixture server (see fail-audio-append-once.mjs).
   if (parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE) {

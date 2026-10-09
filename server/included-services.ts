@@ -21,7 +21,7 @@ import { JEV_DEFAULT_BASE_URL } from "./decider/jev.ts";
 export const BOAT_API_DEFAULT = "https://ascii.dev/api/box/v1";
 export const ELEVENLABS_API_DEFAULT = "https://api.elevenlabs.io/v1";
 /** Also on WORKSPACE_CREDENTIAL_ENV (config.ts). */
-export const INCLUDED_TOKEN_ENV = ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN"] as const;
+export const INCLUDED_TOKEN_ENV = ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_X_TOKEN"] as const;
 
 export interface ServiceCredential {
   token: string;
@@ -35,6 +35,7 @@ interface Included {
   boat: ServiceCredential | null;
   voice: ServiceCredential | null;
   decider: ServiceCredential | null;
+  x: ServiceCredential | null;
 }
 
 function includedService(url: string | undefined, token: string | undefined): ServiceCredential | null {
@@ -48,6 +49,7 @@ const includedFrom = (env: NodeJS.ProcessEnv): Included => ({
   voice: includedService(env.OMB_CLOUD_VOICE_URL, env.OMB_CLOUD_VOICE_TOKEN),
   // A Jev base URL as it is: the decider adds /v1/systemone, the relay's one route.
   decider: includedService(env.OMB_CLOUD_DECIDER_URL, env.OMB_CLOUD_DECIDER_TOKEN),
+  x: includedService(env.OMB_CLOUD_X_URL, env.OMB_CLOUD_X_TOKEN),
 });
 
 let held: Included | null = null;
@@ -94,4 +96,42 @@ export function deciderCredential(
   env: NodeJS.ProcessEnv = process.env,
 ): ServiceCredential | null {
   return resolve(own?.trim(), ownBaseUrl?.trim() || JEV_DEFAULT_BASE_URL, (held ?? includedFrom(env)).decider);
+}
+
+/** X research's relay token on a signed-in desktop: the desktop's main process
+ * fetches it with its OpenMausBot Cloud sign-in while the plan is paid
+ * (electron/main.mjs) and hands it over on the private parent port. Held in
+ * memory only, never written to config. */
+let desktopX: ServiceCredential | null = null;
+
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+/** `{ type: "openmausbot:included-x", access: { url, token } | null }` from
+ * the desktop's main process. True when it was one (then applied), false for
+ * any other message; a malformed one throws and changes nothing. */
+export function applyIncludedXMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object" || (message as { type?: unknown }).type !== "openmausbot:included-x") return false;
+  const access = (message as { access?: unknown }).access;
+  if (access === null) {
+    desktopX = null;
+    return true;
+  }
+  const { url, token } = (access && typeof access === "object" ? access : {}) as { url?: unknown; token?: unknown };
+  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{8,256}$/.test(token) || typeof url !== "string") throw new Error("invalid X research access");
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("invalid X research relay URL");
+  }
+  // The token goes only to our relay: https, or a loopback relay in development and tests.
+  if (!(parsed.protocol === "https:" || (parsed.protocol === "http:" && LOOPBACK.has(parsed.hostname)))) throw new Error("invalid X research relay URL");
+  desktopX = { token, api: url.trim().replace(/\/+$/, ""), included: true };
+  return true;
+}
+
+/** X research's credential: a Cloud home's included token, else a signed-in
+ * desktop's. There is no own-key path: X research is a Cloud plan feature. */
+export function xCredential(env: NodeJS.ProcessEnv = process.env): ServiceCredential | null {
+  return (held ?? includedFrom(env)).x ?? desktopX;
 }

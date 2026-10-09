@@ -323,7 +323,7 @@ import {
 import { CLOUD_PERSONAL_REFUSAL, settleCloudOwnership, type CloudOwnership } from "./cloud-owner.ts";
 import { createCloudMoveRoutes, workspaceShared } from "./cloud-move-http.ts";
 import { RESTART_EXIT_CODE } from "./restart.ts";
-import { holdIncludedServices } from "./included-services.ts";
+import { applyIncludedXMessage, holdIncludedServices, xCredential } from "./included-services.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
@@ -628,8 +628,7 @@ import {
 // loading the table after everything above leaves module start-up order as is.
 import { json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
 import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts";
-import { createXResearchInternalRoutes, createXResearchKeyTestRoute } from "./routes/x-research.ts";
-import { createTregXClient } from "./x-research.ts";
+import { createXResearchInternalRoutes } from "./routes/x-research.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
@@ -2058,6 +2057,11 @@ utilityParentPort?.on("message", (event) => {
     if (handleDesktopTrustedApprovalMessage(message)) return;
     if (browserCleanup.receive(message)) return;
     if (phoneSecrets.receive(message)) return;
+    // A paying desktop's X research relay token (or null when the plan lapsed or it signed out).
+    if (applyIncludedXMessage(message)) {
+      broadcast({ kind: "config", ...configStatus() });
+      return;
+    }
     composio.applyManagedBrokerMessage(message);
   } catch (error) {
     console.error(`[desktop-sync] rejected private parent message: ${error instanceof Error ? error.message : String(error)}`);
@@ -2507,10 +2511,11 @@ function agentsIntegration(
         const speaking = botForThread(botId, threadId) ?? store.bot(botId);
         return tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false ? "1" : "0";
       })(),
-      // X research spends the person's own treg balance, so the tools are
-      // shown only to a bot they switched on, and only with a token saved;
-      // the routes (server/routes/x-research.ts) re-check both on every call.
-      OMB_X_RESEARCH: cfg.treg?.token && store.bot(botId)?.xResearch === true ? "1" : "0",
+      // X research comes with OpenMausBot Cloud plans and counts against the
+      // plan's monthly calls, so the tools are shown only to a bot its person
+      // switched on, and only with the plan's relay credential; the routes
+      // (server/routes/x-research.ts) re-check both on every call.
+      OMB_X_RESEARCH: xCredential() && store.bot(botId)?.xResearch === true ? "1" : "0",
       // And for a role: team setup, bot creation and deletion, rooms and
       // retries are shown only to a Chief of Staff, whom their routes require.
       OMB_CHIEF_OF_STAFF: store.bot(botId)?.chiefOfStaff === true ? "1" : "0",
@@ -15462,7 +15467,8 @@ function configStatus() {
     mistral: { configured: Boolean(cfg.mistral?.key) },
     cerebras: { configured: Boolean(cfg.cerebras?.key) },
     // configured flag only: the token itself never leaves the server
-    treg: { configured: Boolean(cfg.treg?.token) },
+    // X research comes with OpenMausBot Cloud plans: a Cloud home's included token, or a paying desktop's (included-services.ts).
+    xResearch: { included: Boolean(xCredential()) },
     anthropic: { configured: Boolean(cfg.anthropic?.key), everyClaudeBot: cfg.anthropic?.everyClaudeBot !== false },
     openai: { configured: Boolean(cfg.openai?.key) },
     openrouter: { configured: Boolean(cfg.openrouter?.key) },
@@ -16013,17 +16019,12 @@ ROUTES.push(createAntigravityAccountRoutes({
 }));
 
 ROUTES.push(desktopViewer.route);
-// X research (server/routes/x-research.ts): Settings' token Test runs from the
-// table; the four tool routes run inside the /api/internal/ block below,
-// after the capability bearer is checked. `cfg` is reassigned on reload, so
-// both read it per request. OMB_TREG_URL points the client at a self-hosted
-// treg registry (or a test's loopback stub) instead of treg.to.
-const xResearchClient = (token: string) => createTregXClient({ token, baseUrl: process.env.OMB_TREG_URL?.trim() || undefined });
-ROUTES.push(createXResearchKeyTestRoute({ token: () => cfg.treg?.token, client: xResearchClient }));
+// X research (server/routes/x-research.ts): the four tool routes run inside
+// the /api/internal/ block below, after the capability bearer is checked, on
+// the Cloud plan's included relay credential, read per request.
 const xResearchRoutes = createXResearchInternalRoutes({
-  token: () => cfg.treg?.token,
+  credential: () => xCredential(),
   botEnabled: (botId) => store.bot(botId)?.xResearch === true,
-  client: xResearchClient,
 });
 
 // Live calls (GPT-Live as the voice, the bot as the brain). A client holds
@@ -21579,8 +21580,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (typeof body.voiceNotes !== "boolean") return json(res, 400, { error: "voiceNotes must be true or false" });
         patch.voiceNotes = body.voiceNotes;
       }
-      // per-bot gate on the X research tools: they spend the workspace's
-      // treg balance, so like voiceNotes this is an admin decision, never
+      // per-bot gate on the X research tools: they spend the Cloud plan's
+      // monthly X calls, so like voiceNotes this is an admin decision, never
       // part of the client-writable profile surface.
       if (body.xResearch !== undefined) {
         if (typeof body.xResearch !== "boolean") return json(res, 400, { error: "xResearch must be true or false" });
@@ -24896,7 +24897,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           if (persisted.live?.key !== undefined) persisted.live.key = "";
-          if (persisted.treg?.token !== undefined) persisted.treg.token = "";
           saveConfig(persisted);
           configWriteCommitted = true;
           syncCredentialEnv(patch);

@@ -1,5 +1,6 @@
 // End-to-end coverage for X research: the per-bot switch a real server keeps,
-// and, with a loopback treg stub (OMB_TREG_URL), the x_* tools a real agents
+// and, with a loopback stand-in for the Admin's X relay (OMB_CLOUD_X_URL and
+// OMB_CLOUD_X_TOKEN, as a Cloud home is wired), the x_* tools a real agents
 // proxy advertises and calls. No external service is reached.
 import { createServer, type Server } from "node:http";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -8,16 +9,17 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
 
-interface Seen { path: string; token: string | undefined; body: unknown }
+interface Seen { path: string; authorization: string | undefined; body: unknown }
+const RELAY_PATH = "/api/cloud/services/x", TOKEN = "omb_x_e2e_fixture";
 
-/** A loopback treg answering anyapi's search with one row. */
-async function serveTreg(seen: Seen[]): Promise<{ server: Server; url: string }> {
+/** A loopback relay answering anyapi's search with one row, as the Admin passes treg's answer on. */
+async function serveRelay(seen: Seen[]): Promise<{ server: Server; url: string }> {
   const server = createServer((req, res) => {
     let raw = "";
     req.on("data", (chunk: Buffer) => { raw += chunk; });
     req.on("end", () => {
-      seen.push({ path: req.url ?? "", token: req.headers["x-treg-token"] as string | undefined, body: raw ? JSON.parse(raw) : undefined });
-      if (req.url !== "/call/anyapi.x.search.posts") {
+      seen.push({ path: req.url ?? "", authorization: req.headers.authorization, body: raw ? JSON.parse(raw) : undefined });
+      if (req.url !== `${RELAY_PATH}/call/anyapi.x.search.posts` || req.headers.authorization !== `Bearer ${TOKEN}`) {
         res.writeHead(404, { "content-type": "application/json" });
         res.end("{}");
         return;
@@ -34,10 +36,11 @@ async function serveTreg(seen: Seen[]): Promise<{ server: Server; url: string }>
   return { server, url: `http://127.0.0.1:${address.port}` };
 }
 
-async function withXFixture(test: (f: any) => Promise<void>) {
+async function withXFixture(test: (f: any) => Promise<void>, options: { plan: boolean } = { plan: true }) {
   const seen: Seen[] = [];
-  const treg = await serveTreg(seen);
-  const session = await launchVerificationServer({ ...process.env, OMB_TREG_URL: treg.url }, undefined, undefined, undefined, undefined, { scripted: true });
+  const relay = await serveRelay(seen);
+  const env = options.plan ? { OMB_CLOUD_X_URL: `${relay.url}${RELAY_PATH}`, OMB_CLOUD_X_TOKEN: TOKEN } : {};
+  const session = await launchVerificationServer({ ...process.env, ...env }, undefined, undefined, undefined, undefined, { scripted: true });
   const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") =>
     request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
@@ -54,7 +57,7 @@ async function withXFixture(test: (f: any) => Promise<void>) {
       },
     });
   } finally {
-    treg.server.close();
+    relay.server.close();
     await session.close();
   }
 }
@@ -67,8 +70,8 @@ it("keeps X research off for a new bot and accepts only a boolean switch", async
   await expect(f.api("/api/bots/" + bot.id, { xResearch: "yes" }, "PATCH")).rejects.toThrow(/xResearch must be true or false/);
 }), 60_000);
 
-it("shows the X tools only to a switched-on bot, and serves its search through treg with the saved token", async () => withXFixture(async (f) => {
-  await f.api("/api/config", { treg: { token: "e2e-token" } }, "PUT");
+it("shows the X tools only to a switched-on bot, and serves its search through the plan's relay with its token", async () => withXFixture(async (f) => {
+  expect((await f.api("/api/config", undefined, "GET")).xResearch).toEqual({ included: true });
   const off = (await f.cli("new-bot", "--name", "X off")).bot;
   const on = (await f.cli("new-bot", "--name", "X on")).bot;
   await f.api("/api/bots/" + on.id, { xResearch: true }, "PATCH");
@@ -89,8 +92,19 @@ it("shows the X tools only to a switched-on bot, and serves its search through t
   const step = turn.evidence.find((entry: any) => entry.step);
   expect(step.response.result.isError, step.response.result.content?.[0]?.text).toBeFalsy();
   const answer = JSON.parse(step.response.result.content[0].text);
-  expect(answer.posts).toEqual([expect.objectContaining({ id: "2107987482155561188", author: "@maus", text: "MausBot searched X", likes: 4, views: 120 })]);
+  expect(answer.posts).toEqual([expect.objectContaining({ id: "2107987482155561188", author: "@maus", url: "https://x.com/maus/status/2107987482155561188", text: "MausBot searched X" })]);
   expect(answer.newestId).toBe("2107987482155561188");
 
-  expect(f.seen).toEqual([{ path: "/call/anyapi.x.search.posts", token: "e2e-token", body: { query: "mausbot", queryType: "Latest", limit: 20 } }]);
+  expect(f.seen).toEqual([{ path: `${RELAY_PATH}/call/anyapi.x.search.posts`, authorization: `Bearer ${TOKEN}`, body: { query: "mausbot", queryType: "Latest", limit: 20 } }]);
 }), 90_000);
+
+it("shows no X tools without a Cloud plan's credential, even to a bot that is switched on", async () => withXFixture(async (f) => {
+  expect((await f.api("/api/config", undefined, "GET")).xResearch).toEqual({ included: false });
+  const bot = (await f.cli("new-bot", "--name", "X no plan")).bot;
+  await f.api("/api/bots/" + bot.id, { xResearch: true }, "PATCH");
+  f.savePlan({ [bot.id]: { steps: [], reply: "No plan, no X." } });
+  await f.cli("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Search X.");
+  expect((await f.cli("wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30")).status).toBe("settled");
+  expect(f.turnFor(bot.id).evidence[0].result.tools.map((tool: any) => tool.name)).not.toContain("x_search");
+  expect(f.seen).toEqual([]);
+}, { plan: false }), 60_000);

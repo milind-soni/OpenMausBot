@@ -6,9 +6,9 @@
 // standing grants) are new.
 import { useEffect, useState } from "react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
-import { ChevronDown, ChevronRight, FolderOpen, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Crown, FolderOpen, Plus } from "lucide-react";
 
-import { api, useStore, type Bot } from "@/state/store";
+import { api, CLOUD_LINK_SETTINGS, useStore, type Bot } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -22,6 +22,8 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import { Switch } from "../SettingsPrimitives";
 import { ProposalStatus } from "./ProposalStatus";
 import { ToolSelectionCard } from "./ToolSelectionCard";
+import { ProLink, useCloudPlan } from "../ProIntroduction";
+import { xResearchAction } from "@/lib/cloud-plan";
 import { preloadConnectedApps, type ConnectorInventory } from "../PluginsPanel";
 import {
   classifyConnectorTool,
@@ -507,41 +509,42 @@ function ConnectorToolsGrants({
   );
 }
 
-/** X research: four read-only X tools paid from the workspace's own treg
- * token. Off unless the person turns it on for this bot; a bot already on can
- * always be switched off, even after the token is cleared. */
+/** X research: four read-only X tools included with OpenMausBot Cloud plans,
+ * relayed by our Cloud within each plan's monthly calls. Off unless the person
+ * turns it on for this bot; a bot already on can always be switched off, even
+ * after the plan has gone. Without the plan, the card says so and offers the
+ * way to it (signing in, or a plan) on the desktop app. */
 function XResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: boolean }) => void }) {
   const { state, dispatch } = useStore();
-  const tokenSaved = state.config?.treg?.configured === true;
+  const action = xResearchAction(useCloudPlan());
+  const included = state.config?.xResearch?.included === true;
   const on = bot.xResearch === true;
   return (
     <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4" data-testid="access-x-research">
       <div>
-        <div className="text-[15px] font-medium text-ink">X research</div>
-        <div className="mt-0.5 text-[13px] text-ink-secondary">
-          {!tokenSaved ? (
-            <>
-              Add a treg token in{" "}
-              <button
-                type="button"
-                className="underline"
-                onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
-              >
-                Settings → API keys
-              </button>{" "}
-              to let bots search and read X.
-            </>
-          ) : on ? (
-            "This bot can search and read X. Each search spends a fraction of a cent of your treg balance."
-          ) : (
-            "Let this bot search and read X without an X account. It only reads, never posts."
-          )}
+        <div className="flex items-center gap-1.5 text-[15px] font-medium text-ink">
+          X research
+          {!included && <Crown size={13} aria-hidden="true" className="text-ink-secondary" />}
         </div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">
+          {included ? t(on ? "xResearch.includedOn" : "xResearch.includedOff")
+            : t(action === "connecting" ? "xResearch.connecting" : "xResearch.locked")}
+        </div>
+        {!included && (action === "sign-in" || action === "get-pro") && (
+          <div className="mt-2 flex items-center gap-3">
+            {action === "sign-in" && (
+              <button type="button" className="text-[12.5px] font-medium text-accent underline underline-offset-2 hover:text-ink" onClick={() => dispatch(CLOUD_LINK_SETTINGS)}>
+                {t("pro.signIn")}
+              </button>
+            )}
+            {action === "get-pro" && <ProLink />}
+          </div>
+        )}
       </div>
       <Switch
         checked={on}
         aria-label="Let this bot search and read X"
-        disabled={!tokenSaved && !on}
+        disabled={!included && !on}
         onClick={() => patch({ xResearch: !on })}
         className="disabled:cursor-not-allowed"
       />
