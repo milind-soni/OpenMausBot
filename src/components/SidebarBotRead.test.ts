@@ -79,6 +79,7 @@ describe("bot menu bulk reads", () => {
     fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ error: "Fixture read failed" }), { status: 500 }));
     vi.stubGlobal("fetch", fetch); draw(); flushSync(() => button().click());
     await expect.poll(() => document.querySelector('[role="alert"]')?.textContent).toContain("Completed reads were kept");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Fixture read failed");
     expect(onClose).not.toHaveBeenCalled();
     expect(state.bots[0]!.tasks!.find((task) => task.threadId === "background")?.unread).toBe(false);
     expect(state.bots[0]!.tasks!.find((task) => task.threadId === "next")?.unread).toBe(true);

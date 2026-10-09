@@ -774,7 +774,7 @@ export function BotContextMenu({
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
   const menuRef = useRef<HTMLDivElement>(null);
   const latestMenu = useRef(menu);
-  latestMenu.current = menu;
+  useLayoutEffect(() => { latestMenu.current = menu; }, [menu]);
   const readInFlight = useRef(false);
   const [readingBotId, setReadingBotId] = useState<string | null>(null);
   const [readError, setReadError] = useState<{ botId: string; message: string } | null>(null);
@@ -788,8 +788,9 @@ export function BotContextMenu({
     try {
       await markBotRead(owner, api, (updated) => dispatch({ type: "botPatched", bot: updated }));
       if (latestMenu.current === openedMenu) onClose();
-    } catch {
-      setReadError({ botId: owner.id, message: t("sidebar.bot.markAllReadFailed") });
+    } catch (error) {
+      const guidance = t("sidebar.bot.markAllReadFailed");
+      setReadError({ botId: owner.id, message: error instanceof Error ? `${guidance} ${error.message}` : guidance });
     } finally {
       readInFlight.current = false;
       setReadingBotId(null);
