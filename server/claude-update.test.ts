@@ -95,7 +95,9 @@ describe("isAppInstalledClaude", () => {
       const other = join(root, "elsewhere");
       mkdirSync(engines, { recursive: true });
       mkdirSync(other, { recursive: true });
-      writeFileSync(join(engines, "claude"), "#!/bin/sh\n", { mode: 0o755 });
+      // Windows discovery follows PATHEXT; an extensionless POSIX stub is not a runnable CLI there.
+      const name = process.platform === "win32" ? "claude.cmd" : "claude";
+      writeFileSync(join(engines, name), process.platform === "win32" ? "@echo off\r\n" : "#!/bin/sh\n", { mode: 0o755 });
       resetPathCacheForTests();
       registerPathDir(engines);
 
