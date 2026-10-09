@@ -170,7 +170,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     const verdict = cloudLendingVerdict(grant.cloud, cloud(), env);
     if (verdict.allow) return;
     if (verdict.stop) { endCloud(env, verdict.stop); throw new Error("Lending to My Cloud stopped."); }
-    throw new Paused("Waiting for your OpenMausBot Cloud sign-in.");
+    throw new Paused("Waiting for your MausBot Cloud sign-in.");
   };
   const store = next => {
     fs.mkdirSync(path.dirname(file), { recursive: true });

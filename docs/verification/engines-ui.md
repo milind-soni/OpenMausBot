@@ -69,7 +69,7 @@ recreating a removed fixture directory.
 8. Expand **ChatGPT plan**. Its setup card offers **Continue with ChatGPT**,
    not a device code or terminal login. Toggle the sample plan connection:
    the first-use dialog should focus **Got it**, fit at 390px, and explain
-   ChatGPT plan usage separately from OpenMausBot Pro. Dismiss it, disconnect
+   ChatGPT plan usage separately from MausBot Cloud. Dismiss it, disconnect
    and reconnect the sample: it must not return. The connected card retains
    **Using ChatGPT plan**, **Manage usage**, the synthetic account address,
    and protected sign-out. Check Midnight and Atelier; no horizontal overflow.

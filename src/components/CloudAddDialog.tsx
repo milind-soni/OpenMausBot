@@ -173,8 +173,8 @@ export function CloudAddPanel({ view, chosen, offerShown, now, busy = false, ope
       const trial = view.trial;
       const terms = trial ? [
         trial.amount !== null
-          ? t("cloudAdd.trialTerms", { date: shortDate(trial.endsAt), plan: trial.tier ? cloudPlanLabel(trial.tier) : "OpenMausBot Cloud", price: t("cloudAdd.perMonth", { price: usd(trial.amount / 100) }) })
-          : t("cloudAdd.trialTermsNoPrice", { date: shortDate(trial.endsAt), plan: trial.tier ? cloudPlanLabel(trial.tier) : "OpenMausBot Cloud" }),
+          ? t("cloudAdd.trialTerms", { date: shortDate(trial.endsAt), plan: trial.tier ? cloudPlanLabel(trial.tier) : "MausBot Cloud", price: t("cloudAdd.perMonth", { price: usd(trial.amount / 100) }) })
+          : t("cloudAdd.trialTermsNoPrice", { date: shortDate(trial.endsAt), plan: trial.tier ? cloudPlanLabel(trial.tier) : "MausBot Cloud" }),
         offerShown?.reminderDays ? t("cloudAdd.reminderTerms", { days: offerShown.reminderDays }) : null,
         t("cloudAdd.cancelAnyTime"),
       ].filter(Boolean).join(" ") : null;

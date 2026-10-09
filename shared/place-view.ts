@@ -154,7 +154,7 @@ export const PLACE_EN = {
   "place.view.ccUnavailable.short": "Not available now",
   "place.view.ccUnavailable.line": "Cloud computers can't start right now. It isn't anything you did.",
   "place.view.ccEnded.short": "Plan ended",
-  "place.view.ccEnded.line": "Your OpenMausBot Cloud plan has ended, so cloud computers are off.",
+  "place.view.ccEnded.line": "Your MausBot Cloud plan has ended, so cloud computers are off.",
   "place.view.ccNoStart.short": "Didn't start",
   "place.view.ccNoStart.line": "{bot}'s cloud computer didn't start.",
   "place.view.ccClearing.short": "Clearing up",

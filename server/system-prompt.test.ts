@@ -282,7 +282,7 @@ describe("cloudHomePrompt", () => {
 
   it("points to a lent Mac only when the turn has the shared-computer tools", () => {
     expect(cloudHomePrompt(true)).toContain("check list_shared_computers: a Mac they lend to My Cloud is reachable through shared_computer");
-    expect(cloudHomePrompt(true)).toContain("turn on Let My Cloud use this Mac under Settings → OpenMausBot Cloud in the desktop app on that Mac");
+    expect(cloudHomePrompt(true)).toContain("turn on Let My Cloud use this Mac under Settings → MausBot Cloud in the desktop app on that Mac");
     expect(cloudHomePrompt(false)).not.toMatch(/shared_computer|list_shared_computers/);
     expect(cloudHomePrompt(false)).toContain("You cannot see or use their Mac or PC, its screen or its files from here.");
   });

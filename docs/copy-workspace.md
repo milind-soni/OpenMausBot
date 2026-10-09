@@ -35,7 +35,7 @@ and keep their swap back in those folders.
   the person starts the copy there (Security, below); on the person's own
   OMB Cloud, verified through the Admin, it starts the copy at once.
 - **Settings → Servers → Copy this computer here**, on every saved server's
-  row (not This computer), and **Settings → OpenMausBot Cloud** under My Cloud once
+  row (not This computer), and **Settings → MausBot Cloud** under My Cloud once
   it is Ready. Both open the same panel: the size and counts
   (`GET /api/cloud-move/estimate` on this computer's own server), that API keys
   and sign-ins stay on this computer, and **Copy to {server}**. When the server

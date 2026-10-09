@@ -31,7 +31,7 @@ export function pairsAutomatically(initialCode: string | null, desktop = typeof 
  * read a code from: it says where its connection starts instead. */
 export function pairIntro({ mode, sent, email, cloudHome }: { mode: "email" | "code" | null; sent: boolean; email: string; cloudHome: boolean }): string {
   if (mode === "email") return sent ? `We emailed an 8-digit code to ${email}. It works once and expires in ten minutes.` : "Enter your email and we will send you a one-time code.";
-  if (cloudHome) return "To open My Cloud, choose Open My Cloud in the OpenMausBot app on your computer (Settings → OpenMausBot Cloud), or Use in your browser on your Plan page. Have a pairing code? Enter it below.";
+  if (cloudHome) return "To open My Cloud, choose Open My Cloud in the OpenMausBot app on your computer (Settings → MausBot Cloud), or Use in your browser on your Plan page. Have a pairing code? Enter it below.";
   return "Enter the pairing code shown on the server. Codes work once and expire after five minutes.";
 }
 
@@ -135,7 +135,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
         </p>
         {reasonWorthShowing(reason) && !connected ? <p className="mt-3 text-[13px] text-ink-secondary">{reasonWorthShowing(reason)}</p> : null}
         {/* An expired or used code on a Cloud: the app starts a fresh one. */}
-        {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">This link has expired or was already used. In the OpenMausBot app on your computer, open Settings → OpenMausBot Cloud and choose Open My Cloud.</p> : null}
+        {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">This link has expired or was already used. In the OpenMausBot app on your computer, open Settings → MausBot Cloud and choose Open My Cloud.</p> : null}
         </>}
         {opening ? null : connected ? (
           <p className="mt-4 text-[13.5px]">

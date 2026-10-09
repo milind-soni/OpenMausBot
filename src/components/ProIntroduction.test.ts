@@ -50,9 +50,9 @@ const press = (label: string) => {
 
 it("for someone who may buy: what Cloud does, the Admin's lowest price and money-back, Start free trial (the dialog) and Compare plans", async () => {
   const html = await card(signedOut);
-  for (const text of ["OpenMausBot Cloud", "Keeps your bots and routines running 24/7, even when this computer is off.", "OpenMausBot Cloud plans from $29/month + tax.",
+  for (const text of ["MausBot Cloud", "Keeps your bots and routines running 24/7, even when this computer is off.", "MausBot Cloud plans from $29/month + tax.",
     "14-day money-back on every plan.", "OpenMausBot on this computer stays free and open source.", "Compare plans", "Start free trial", "Sign in to your Cloud plan"]) expect(html).toContain(text);
-  for (const gone of ["OMB", "$89", "launch price", "New features first", "Get Pro", "OpenMausBot Pro"]) expect(html).not.toContain(gone);
+  for (const gone of ["OMB", "$89", "launch price", "New features first", "Get Pro", "OpenMausBot Pro", "OpenMausBot Cloud"]) expect(html).not.toContain(gone);
   press("Start free trial");
   expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "app_settings" });
   press("Compare plans"); await flush();
@@ -73,20 +73,20 @@ it("without a trial it says Add a Cloud; signed in, no sign-in link; without the
 
 it("someone with a plan sees that plan and the way to it, never an offer, and Cloud is never asked", async () => {
   for (const [state, text] of [
-    [plan({ entitlement: paid("max") }), "Max active · verified by OpenMausBot Cloud"],
+    [plan({ entitlement: paid("max") }), "Max active · verified by MausBot Cloud"],
     [plan({ entitlement: paid("pro", "inactive") }), "Pro · not active right now"],
     [plan({ purchase: { state: "confirming", tier: "personal" } }), "Personal · payment received"],
-    [{ status: "unavailable", lastPlan: { tier: "personal", active: true } }, "Personal · checking with OpenMausBot Cloud…"],
+    [{ status: "unavailable", lastPlan: { tier: "personal", active: true } }, "Personal · checking with MausBot Cloud…"],
     [{ status: "reauth-required", message: "expired", lastPlan: { tier: "max", active: true } }, "Sign in again to use My Cloud on this computer. Your plan is not affected."],
   ] as const) {
     const html = await card(state as CloudAccountState);
-    expect(html).toContain(text); expect(html).toContain("OpenMausBot Cloud settings");
+    expect(html).toContain(text); expect(html).toContain("MausBot Cloud settings");
     expect(html).not.toContain("Start free trial"); expect(html).not.toContain("$29");
   }
   expect(bridge.offer).not.toHaveBeenCalled();
   for (const state of [{ status: "unavailable" }, { status: "connecting" }, { status: "signed-out", message: "restoring" }] as CloudAccountState[]) expect(await card(state)).toBe("");
   await card(plan({ entitlement: paid("max") }));
-  press("OpenMausBot Cloud settings");
+  press("MausBot Cloud settings");
   expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
 });
 

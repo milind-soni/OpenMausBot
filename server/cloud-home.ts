@@ -118,7 +118,7 @@ export { cloudHomeOffersPlace } from "../shared/cloud-home.ts";
  * the person's, no Local VM), in the words the person reads; undefined for a
  * place it offers. A turn's error shows 160 characters, so each fits. */
 export function cloudHomePlaceRefusal(place: Surface): string | undefined {
-  if (place === "local") return "This computer isn't a place on My Cloud. Set Works on to Auto, Cloud computer or Browser, or lend your Mac under Settings → OpenMausBot Cloud.";
+  if (place === "local") return "This computer isn't a place on My Cloud. Set Works on to Auto, Cloud computer or Browser, or lend your Mac under Settings → MausBot Cloud.";
   if (place === "vm") return "Bots on My Cloud can't use a Local VM. Set Works on to Auto, Cloud computer or Browser.";
   return undefined;
 }
@@ -199,7 +199,7 @@ export function createCloudPairing(options: {
       const ttl = Math.min((ttlSeconds as number | undefined) ?? CLOUD_PAIRING_DEFAULT_TTL_S, browser ? CLOUD_BROWSER_SIGN_IN_MAX_TTL_S : CLOUD_PAIRING_MAX_TTL_S);
       const opened = sessions.openPairing({
         scopes: ["admin", "client"],
-        label: typeof label === "string" && label.trim() ? label.trim() : "OpenMausBot Cloud",
+        label: typeof label === "string" && label.trim() ? label.trim() : "MausBot Cloud",
         ttlMs: ttl * 1000,
         browser,
         ...(browser ? { owner: owner as string } : {}),

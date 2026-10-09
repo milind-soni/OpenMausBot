@@ -50,7 +50,7 @@ async function ready(component: () => ReactNode, state = overview()) {
 const failed = (error: NonNullable<CloudMoveState["error"]>, destination = CLOUD, extra: Partial<CloudMoveState> = {}) =>
   moveView(null, { phase: "failed", action: "move", error, destination, ...extra });
 
-it("Settings → OpenMausBot Cloud: what comes and its size, that sign-ins stay here, and one click that names the Cloud", async () => {
+it("Settings → MausBot Cloud: what comes and its size, that sign-ins stay here, and one click that names the Cloud", async () => {
   await ready(settings());
   const { html } = render(settings());
   expect(bridge.state).toHaveBeenCalledWith("cloud");

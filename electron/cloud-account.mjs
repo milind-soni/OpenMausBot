@@ -45,7 +45,7 @@ export function checkoutDestination(value, { fixture = false } = {}) {
 export function cloudOrigin(value = CLOUD_ORIGIN, fixture = false) {
   const url = new URL(value);
   if (value !== url.origin || (value !== CLOUD_ORIGIN && !(fixture && url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname)))) {
-    throw new Error("Invalid OpenMausBot Cloud address.");
+    throw new Error("Invalid MausBot Cloud address.");
   }
   return value;
 }
@@ -333,7 +333,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (typeof plan !== "string" || !TIER.test(plan) || !CHECKOUT_SOURCES.includes(source)) throw new Error("Invalid Cloud checkout.");
     const current = state();
     if (current.status === "signed-out" && !grant) return { outcome: "signing-in", state: await begin({ plan, source }) };
-    if (current.status !== "connected" || !grant) throw new Error("Sign in to OpenMausBot Cloud before choosing a plan.");
+    if (current.status !== "connected" || !grant) throw new Error("Sign in to MausBot Cloud before choosing a plan.");
     const signedIn = grant;
     let destination;
     try {
@@ -398,7 +398,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * removed): forget it and start a new sign-in in one step, never showing
      * "signed out" in between. */
     async signInAgain() {
-      if (state().status !== "reauth-required") throw new Error("This computer is still signed in to OpenMausBot Cloud.");
+      if (state().status !== "reauth-required") throw new Error("This computer is still signed in to MausBot Cloud.");
       publish({ status: "connecting" });
       const forgotten = await forget({ quiet: true });
       if (forgotten.status === "unavailable") return forgotten;
@@ -436,7 +436,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     async interest(kind) {
       if (kind !== "another_cloud") throw new Error("Invalid Cloud interest.");
       const signedIn = grant;
-      if (!signedIn || state().status !== "connected") throw new Error("Sign in to OpenMausBot Cloud first.");
+      if (!signedIn || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
       const result = await request("interest", { method: "POST", body: { kind }, token: signedIn.token });
       if (result?.ok !== true) throw new Error("Invalid Cloud response.");
     },

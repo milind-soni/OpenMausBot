@@ -1017,7 +1017,7 @@ function syncPhoneSecretKey(proc) {
 
 function ensureCloudAccount() {
   if (cloudAccount) return cloudAccount;
-  if (!app.isPackaged || desktopRemoteAccess) throw new Error("OpenMausBot Cloud sign-in requires the local desktop app.");
+  if (!app.isPackaged || desktopRemoteAccess) throw new Error("MausBot Cloud sign-in requires the local desktop app.");
   cloudAccount = createCloudAccountClient({
     store: createCloudAccountStore({ file: path.join(app.getPath("userData"), "cloud-account.bin"), encryption: {
       available: async () => (await safeStorage.isAsyncEncryptionAvailable()) &&
@@ -1141,7 +1141,7 @@ async function anotherCloudBox(state) {
     await ensureCloudAccount().interest("another_cloud");
     await dialog.showMessageBox({ type: "info", message: "Thanks. We’ll email you when you can add another Cloud." });
   } catch {
-    await dialog.showMessageBox({ type: "error", message: "Could not reach OpenMausBot Cloud", detail: "Nothing was saved. Check your connection and try again." });
+    await dialog.showMessageBox({ type: "error", message: "Could not reach MausBot Cloud", detail: "Nothing was saved. Check your connection and try again." });
   }
 }
 /** Once, when a Cloud this app checked out for is ready and the window is
@@ -2113,8 +2113,8 @@ async function deliverOrganizationEntry() {
  * My Cloud by itself (CloudAccountSettings). No prompt: a hosted server left
  * for it stays saved under Servers, and the Cloud replaces it anyway. */
 async function openCloudEntry() {
-  if (!app.isPackaged) throw new Error("OpenMausBot Cloud requires the installed desktop app.");
-  if (desktopRemoteAccess) throw new Error("This app is connected to another computer. Disconnect it to use OpenMausBot Cloud on this computer.");
+  if (!app.isPackaged) throw new Error("MausBot Cloud requires the installed desktop app.");
+  if (desktopRemoteAccess) throw new Error("This app is connected to another computer. Disconnect it to use MausBot Cloud on this computer.");
   if (!serverReady) throw new Error("This installation is unavailable. Restart the app and open My Cloud again.");
   // Let a saved sign-in finish restoring first: the view must not take it for
   // signed out and start another.
@@ -2949,7 +2949,7 @@ for (const method of ["state", "begin", "signInAgain", "reopen", "cancel", "refr
 // and one of this app's own sources; main makes the request and opens only
 // Dodo's checkout page (cloud-account.mjs checkoutDestination).
 ipcMain.handle("cloud-account:checkout", localWorkspaceOnly("cloud-account:checkout", async (_event, plan, source) => {
-  if (!(await cloudOffersReady())) throw new Error("OpenMausBot Cloud isn't offered in this app.");
+  if (!(await cloudOffersReady())) throw new Error("MausBot Cloud isn't offered in this app.");
   const client = ensureCloudAccount();
   if (typeof plan !== "string" || !CHECKOUT_SOURCES.includes(source)) throw new Error("Choose a plan to continue.");
   const offer = await client.offer();
