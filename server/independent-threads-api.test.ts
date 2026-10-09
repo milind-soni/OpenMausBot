@@ -386,13 +386,14 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect((await api("POST", `/api/bots/${botId}/messages/${userA.id}/edit`, { threadId: taskB, text: "wrong task" })).status).toBe(404);
     expect((await api("POST", `/api/bots/${botId}/active-branch`, { threadId: taskB, messageId: userA.id })).status).toBe(404);
 
-    // Compatibility: changing the profile model updates only the selected
-    // idle task, not the independently configured sibling.
+    // Changing the profile model moves the selected idle task (A, which
+    // follows the bot) and never the independently configured sibling.
+    await tool("switch_task", { target_type: "bot", target_id: botId, task_id: taskA });
     const legacyModel = models.at(-1)!;
     expect((await api("PATCH", `/api/bots/${botId}`, { modelSelection: { instanceId: "claude", model: legacyModel } })).status).toBe(200);
     const final = await botState(botId);
-    expect(final.tasks.find((task: any) => task.taskId === taskB).modelSelection.model).toBe(legacyModel);
-    expect(final.tasks.find((task: any) => task.taskId === taskA).modelSelection.model).toBe(models[0]);
+    expect(final.tasks.find((task: any) => task.taskId === taskA).modelSelection.model).toBe(legacyModel);
+    expect(final.tasks.find((task: any) => task.taskId === taskB).modelSelection.model).toBe(models[1]);
   }, 45_000);
 
   it("cancels a detached routine on its captured provider after an idle sibling changes the default", async () => {
@@ -418,8 +419,10 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect((await api("POST", `/api/routine-runs/${run.id}/cancel`)).status).toBe(200);
     await expect.poll(async () => (await botState(botId)).tasks.find((task: any) => task.taskId === run.threadId)?.busy,
       { timeout: 10_000 }).toBe(false);
+    // The cancel reached Claude, which ran the turn; the run's thread, with no
+    // model of its own, now follows the bot's new default like the rest.
     const final = await botState(botId);
-    expect(final.tasks.find((task: any) => task.taskId === run.threadId)?.modelSelection.instanceId).toBe("claude");
+    expect(final.tasks.find((task: any) => task.taskId === run.threadId)?.modelSelection.instanceId).toBe("offline-fixture");
     expect(final.tasks.find((task: any) => task.taskId === selectedThread)?.modelSelection.instanceId).toBe("offline-fixture");
     evidence.push({ routineCancelledOnOriginalProvider: true, runId: run.id, taskId: run.threadId });
   }, 30_000);

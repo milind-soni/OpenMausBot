@@ -23,17 +23,20 @@ import { evictStartupCacheOnce } from "./startup-cache-eviction.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
+import { serverChildLaunch } from "./server-child-launch.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
+import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 import { createStartupScreen } from "./startup-screen.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
 let startupScreen = null;
 let desktopTray = null;
-import { collisionFreeDownloadPath, defaultSaveName, revealDownloadWhenDone, withSavableFile } from "./save-file.mjs";
+import { collisionFreeDownloadPath, defaultSaveName, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionHandlers, externalWebUrl } from "./app-permissions.mjs";
+import { writeClipboardText } from "./clipboard-write.mjs";
 import {
   ensureManagedComposioCredentials,
   managedComposioAccess,
@@ -1301,7 +1304,12 @@ function receivePhoneSecretSave(proc, rawMessage) {
 
 async function startServerOn(port) {
   if (desktopShutdownStarted) return { proc: null, abort: true };
-  const entry = path.join(process.resourcesPath, "server", "index.js");
+  // A bootstrap beside index.js that turns on Node's compile cache for this
+  // child, so a relaunch skips recompiling the server bundle.
+  const { entry, compileCacheDir } = serverChildLaunch({
+    resourcesPath: process.resourcesPath,
+    userData: app.getPath("userData"),
+  });
   const childEnv = managedComposioChildEnvironment(composioBrokerUrl(), secureCredentials, {
     ...process.env,
     // The desktop parent owns the durable data-directory lease. Each utility
@@ -1331,6 +1339,11 @@ async function startServerOn(port) {
     ...workspaceCredentialEnv(secureCredentials),
   });
   delete childEnv.OMB_BROWSER_CONNECTION;
+  // Set here or not at all, never inherited from the launching shell. The
+  // bootstrap removes it before the server runs, so nothing the server
+  // spawns sees it.
+  delete childEnv.OMB_SERVER_COMPILE_CACHE;
+  if (compileCacheDir) childEnv.OMB_SERVER_COMPILE_CACHE = compileCacheDir;
   slog(`fork ${entry} port=${port}`);
   const proc = utilityProcess.fork(entry, [], {
     env: childEnv,
@@ -2464,6 +2477,10 @@ ipcMain.handle("engine:open-terminal", localOnly("engine:open-terminal", async (
   return openBlankTerminal();
 }));
 
+// Fallback for the renderer's copy button when the web Clipboard API rejects
+// (unfocused page, denied permission). Plain text only; resolves false on failure.
+ipcMain.handle("clipboard:write-text", localOnly("clipboard:write-text", (_event, text) => writeClipboardText(clipboard, text)));
+
 // OAuth/connect links are returned asynchronously, after Chromium's direct
 // click gesture has ended. Opening them through window.open can therefore be
 // rejected as a popup before setWindowOpenHandler ever sees the URL. Keep the
@@ -2533,6 +2550,14 @@ ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event,
     shell.showItemInFolder(choice.filePath);
     return choice.filePath;
   });
+}));
+
+// "Show in folder" for a bot-linked file outside its conversation's workspace.
+// The file must be on this computer: a window paired to another computer's
+// server is refused, because that server's paths mean nothing here.
+ipcMain.handle("desktop:reveal-file", localOnly("desktop:reveal-file", async (_event, rawPath) => {
+  if (desktopRemoteAccess) throw new Error("That file is on the computer this app is connected to");
+  return revealInFolder(rawPath, { reveal: (target) => shell.showItemInFolder(target) });
 }));
 
 // The renderer owns the skin, including the Windows caption buttons it draws
@@ -3025,8 +3050,8 @@ ipcMain.handle("cloud-move:restore-previous", (event, id) => {
   return ensureCloudMove().restorePrevious(dest).then(afterCloudMove(dest));
 });
 /** The person's own Cloud, by the one rule (cloud-home.mjs myCloudOrigin):
- * its page in the main window gets the channels below and the microphone
- * (appPermissionHandlers). While the sign-in is being checked or has ended it
+ * its page in the main window gets the channels below, the microphone and
+ * clipboard writes (appPermissionHandlers). While the sign-in is being checked or has ended it
  * is still the Cloud this account last verified, so its Settings says
  * "checking" or "sign in again on your computer", never an error, and a Live
  * call keeps the microphone. */
@@ -3496,14 +3521,18 @@ app.whenReady().then(async () => {
   // Device permissions (microphone, notifications, clipboard) are for the
   // local UI only; privileged capabilities (camera, geolocation, USB, MIDI,
   // serial) stay off. Client mode's loopback relay is the local UI. The
-  // person's own Cloud, open in this window, also gets the microphone (only
-  // that) for a Live call: it is theirs alone. No other server does. A call
-  // placed while the saved sign-in is still restoring waits for it.
+  // person's own Cloud, open in this window, also gets the microphone for a
+  // Live call and clipboard writes for its copy buttons (only those): it is
+  // theirs alone. No other server does. A call placed while the saved sign-in
+  // is still restoring waits for it. The active paired server, in this
+  // window's main frame, may also write the clipboard. Neither ever reads it;
+  // both are re-evaluated per request, so a server switch or sign-out withdraws it.
   appPermissions = appPermissionHandlers({
     rendererOrigin,
     mainContents: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null),
     cloudHomeOrigin: myCloud,
     cloudHomeRestoring: () => cloudAccountRestoring ? cloudAccountRestored() : null,
+    activeRemoteOrigin: () => activeEnvironment(environmentsState)?.origin ?? null,
   });
   session.defaultSession.setPermissionRequestHandler(appPermissions.request);
   session.defaultSession.setPermissionCheckHandler(appPermissions.check);
@@ -3560,10 +3589,15 @@ app.whenReady().then(async () => {
     if (desktopTray?.show()) return;
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-});
+}).finally(() => allWindowsClosedQuit.settleStartup());
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+// The startup splash is the only window while boot runs; its recovery
+// timers can destroy it mid-boot (issue #2028). An unconditional
+// last-window-closed quit would fire there, killing the app before the
+// server child forks — exactly the exit the recovery was meant to avoid.
+const allWindowsClosedQuit = createAllWindowsClosedQuit({
+  app,
+  allWindows: () => BrowserWindow.getAllWindows(),
 });
 
 // EMBEDDING.md lifecycle rule: defer the first quit until the embedded

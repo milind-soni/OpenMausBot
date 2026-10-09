@@ -22,3 +22,9 @@ evals/golden/**/*.json text eol=lf
 server/model-catalog/models-dev.snapshot.json text eol=lf
 third_party/models-dev/LICENSE text eol=lf
 third_party/opencode/LICENSE text eol=lf
+# scripts/docker-image.test.ts and server/cloud-home.test.ts read the
+# Dockerfile's instructions line by line, joining a line that ends in "\" to
+# the next. A CRLF checkout on Windows ends those lines in "\r", so nothing
+# joins and every layering, healthcheck and trust check fails for a reason
+# that has nothing to do with the image. Docker itself reads LF everywhere.
+Dockerfile text eol=lf

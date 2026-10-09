@@ -12,7 +12,7 @@ import {
   runSummary,
   showRun,
   skillPrompt,
-  skillStaged,
+  runSkill,
   verifySteps,
   verifySummary,
 } from "./verify-steps";
@@ -31,9 +31,9 @@ const acp = (command: string, ok?: boolean): Message =>
 const text = (body: string): Message => ({ id: `m${++seq}`, at: seq, role: "bot", kind: "text", text: body });
 /** What the person typed: the message that opens an ask. */
 const ask = (body: string): Message => ({ id: `u${++seq}`, at: seq, role: "user", kind: "text", text: body });
-const stagedSkill = (): Message => ({
+const stagedSkill = (card: Record<string, unknown> = {}): Message => ({
   id: `o${++seq}`, at: seq, role: "bot", kind: "options",
-  card: { title: "Enable this skill?", options: [], skillRequest: { name: "verify-omb" } } as unknown as Message["card"],
+  card: { title: "Enable this skill?", options: [], skillRequest: { name: "verify-omb" }, ...card } as unknown as Message["card"],
 });
 const triggerTerms = (): string[] =>
   JSON.parse(readFileSync(new URL("../../skills/create-verification-skill/manifest.json", import.meta.url), "utf8")).triggerTerms;
@@ -265,15 +265,20 @@ describe("runSummary", () => {
   });
 });
 
-describe("skillStaged", () => {
-  it("is true once a skill proposal follows the run's first step", () => {
+describe("runSkill", () => {
+  it("follows the last skill card after the run's first step", () => {
     const run = [claude(DOCTOR, true), codex(SEND, false)];
     const steps = runSteps(run);
-    expect(skillStaged([text("hi"), ...run], steps)).toBe(false);
-    expect(skillStaged([text("hi"), ...run, stagedSkill()], steps)).toBe(true);
+    expect(runSkill([text("hi"), ...run], steps)).toBeNull();
+    expect(runSkill([text("hi"), ...run, stagedSkill()], steps)).toBe("pending");
     // a proposal from before the run is not this run's
-    expect(skillStaged([stagedSkill(), ...run], steps)).toBe(false);
-    expect(skillStaged([stagedSkill()], [])).toBe(false);
+    expect(runSkill([stagedSkill(), ...run], steps)).toBeNull();
+    expect(runSkill([stagedSkill()], [])).toBeNull();
+    // a bot's own skill applies at once: saved, not waiting for review
+    expect(runSkill([...run, stagedSkill({ answered: "allow", autoApplied: true })], steps)).toBe("saved");
+    // undone or declined, the card offers Save again
+    expect(runSkill([...run, stagedSkill({ answered: "allow", autoApplied: true, undone: true })], steps)).toBeNull();
+    expect(runSkill([...run, stagedSkill({ answered: "deny" })], steps)).toBeNull();
   });
 });
 

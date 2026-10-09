@@ -248,6 +248,15 @@ Upgrade with `docker compose pull omb && docker compose up -d` (or
 `git pull && docker compose up -d --build`). State (chats, routines,
 engine logins, paired sessions) is on the `data` volume; back that up.
 
+The published image installs the current Chrome for Testing whenever a new
+Stable ships. A build from source keeps the Chrome (and any `ENGINES`) it
+installed first, because those layers sit beneath the app and stay cached
+across code changes. To pick up the current ones, rebuild with a new tag:
+
+```sh
+docker compose build --build-arg CHROME_CACHE_TAG=$(date +%F) omb && docker compose up -d
+```
+
 ## From source
 
 Requirements: Node 24+, pnpm, and at least one agent CLI installed and

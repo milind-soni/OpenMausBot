@@ -34,6 +34,7 @@ import {
   skillsSystemPrompt,
   stageSkillWrite,
   syncSkillLinks,
+  undoSkillWrite,
 } from "./skills.ts";
 import { parseSkillSource } from "./skill-fetch.ts";
 import { buildSystemPrompt } from "./system-prompt.ts";
@@ -1202,5 +1203,47 @@ describe("parseSkillSource", () => {
     expect("error" in parseSkillSource("https://evil.example/skill.md")).toBe(true);
     expect("error" in parseSkillSource("")).toBe(true);
     expect("error" in parseSkillSource("https://skills.sh/only-an-owner")).toBe(true);
+  });
+});
+
+describe("undo of a skill a bot wrote without a person", () => {
+  const write = (action: "create" | "update", instructions: string) => {
+    const staged = stageSkillWrite(bot, {
+      action,
+      ...(action === "update" ? { targetName: "own-skill" } : {}),
+      files: [{ path: "SKILL.md", content: SKILL("own-skill", instructions) }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+    const previous = action === "update" ? readSkillFile(bot, "own-skill") : null;
+    const source = listSkills(bot).find((skill) => skill.name === "own-skill")?.source;
+    const applied = applySkillWriteWithReceipt(bot, staged, () => {});
+    if ("error" in applied) throw new Error(applied.error);
+    return { stagedId: staged.id, name: "own-skill", action, ...(previous && source ? { previous: { skillMd: previous, source } } : {}) };
+  };
+
+  it("removes a created skill, once", () => {
+    const created = write("create", "First version.");
+    expect(undoSkillWrite(bot, created)).toEqual({ undone: true });
+    expect(listSkills(bot).some((skill) => skill.name === "own-skill")).toBe(false);
+    expect(undoSkillWrite(bot, created)).toEqual({ stale: true });
+  });
+
+  it("puts an updated skill's previous SKILL.md back while it is unchanged since", () => {
+    write("create", "First version.");
+    const original = readSkillFile(bot, "own-skill");
+    const updated = write("update", "Second version.");
+    expect(undoSkillWrite(bot, updated)).toEqual({ undone: true });
+    expect(readSkillFile(bot, "own-skill")).toBe(original);
+    expect(listSkills(bot).find((skill) => skill.name === "own-skill")).toMatchObject({ enabled: true, description: "First version." });
+    expect(listStagedSkillWrites(bot)).toEqual([]);
+    // The restore is itself a change, so the old update's Undo is stale now.
+    expect(undoSkillWrite(bot, updated)).toEqual({ stale: true });
+  });
+
+  it("refuses a create's Undo once the skill was updated since", () => {
+    const created = write("create", "First version.");
+    write("update", "Second version.");
+    expect(undoSkillWrite(bot, created)).toEqual({ stale: true });
+    expect(readSkillFile(bot, "own-skill")).toContain("Second version.");
   });
 });

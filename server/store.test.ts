@@ -300,7 +300,7 @@ describe("Store", () => {
     expect(reloaded.messagesFor(bot.threadId)).toHaveLength(2);
     expect(reloaded.messagesFor(bot.threadId)[1].compaction?.summary).toContain("-5 != 5");
     expect(JSON.stringify(reloaded.messagesFor(bot.threadId))).not.toContain(key);
-    const wire = toWireTask(reloaded.taskByThread(bot.id, bot.threadId)!);
+    const wire = toWireTask(reloaded.taskByThread(bot.id, bot.threadId)!, selection());
     for (const field of Object.keys(patch)) expect(wire).not.toHaveProperty(field);
   });
 
@@ -352,7 +352,7 @@ describe("Store", () => {
     store.patchTask(bot.id, bot.threadId, { surface: "local", surfaceSource: "user" });
     const reloaded = new Store(selection);
     expect(reloaded.taskByThread(bot.id, bot.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
-    expect(toWireTask(reloaded.taskByThread(bot.id, bot.threadId)!)).not.toHaveProperty("surfaceSource");
+    expect(toWireTask(reloaded.taskByThread(bot.id, bot.threadId)!, selection())).not.toHaveProperty("surfaceSource");
     const saved = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as any[];
     expect(saved[0].tasks[0]).toMatchObject({ surface: "local", surfaceSource: "user" });
   });
@@ -489,31 +489,43 @@ describe("Store", () => {
     } finally { database.close(); }
   });
 
-  it("commits a confirmed model switch once, preserving siblings and rolling back failed writes", () => {
-    const store = new Store(selection);
+  it("commits a confirmed model switch once, moving followers safely and rolling back failed writes", () => {
+    const store = new Store(selection, undefined, (instanceId) => ({ claude: "claudeAgent", codex: "codex" })[instanceId]);
     const bot = store.createBot();
     store.patchBot(bot.id, { approvalMode: "full", alwaysAllow: ["old-tool"] });
     const first = store.activeTask(bot.id)!;
     const sibling = store.createTask(bot.id)!;
+    const picked = store.createTask(bot.id)!;
+    const opus = { instanceId: "claude", model: "claude-opus-5" };
+    store.switchTaskModel(bot.id, picked.threadId, opus, false, false);
     const next = { instanceId: "codex", model: "fixture-model" };
     const save = vi.spyOn(store as unknown as { saveBots(bots: BotRecord[]): void }, "saveBots");
     store.switchTaskModel(bot.id, first.threadId, next, false, true);
     expect(save).toHaveBeenCalledTimes(1);
     expect(store.projectBotForTask(bot.id, first.threadId)).toMatchObject({ modelSelection: next, approvalMode: "ask", alwaysAllow: [] });
     expect(bot).toMatchObject({ modelSelection: selection(), approvalMode: "full" });
-    expect(sibling).toMatchObject({ modelSelection: selection(), approvalMode: "full", alwaysAllow: ["old-tool"] });
+    expect(sibling).toMatchObject({ approvalMode: "full", alwaysAllow: ["old-tool"] });
+    expect(sibling.modelSelection).toBeUndefined();
     delete sibling.approvalMode;
     delete sibling.autoApprove;
     delete sibling.alwaysAllow;
     save.mockImplementationOnce(() => { throw new Error("disk full"); });
     expect(() => store.switchTaskModel(bot.id, first.threadId, next, true, true)).toThrow("disk full");
     expect(bot).toMatchObject({ modelSelection: selection(), approvalMode: "full" });
+    expect(sibling.modelSelection).toBeUndefined();
     store.switchTaskModel(bot.id, first.threadId, next, true, true);
     expect(bot).toMatchObject({ modelSelection: next, approvalMode: "ask", alwaysAllow: [] });
-    expect(sibling).toMatchObject({ modelSelection: selection(), approvalMode: "full", alwaysAllow: ["old-tool"] });
+    // The thread it was changed from now follows the bot; a sibling that
+    // follows moves to the new engine and, its Full access belonging to the
+    // old one, back to Ask; a thread's own model and level stay.
+    expect(first.modelSelection).toBeUndefined();
+    expect(sibling).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: [] });
+    expect(store.projectBotForTask(bot.id, sibling.threadId)?.modelSelection).toEqual(next);
+    expect(picked).toMatchObject({ modelSelection: opus, approvalMode: "full", alwaysAllow: ["old-tool"] });
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)).toMatchObject({ modelSelection: next, approvalMode: "ask" });
-    expect(reloaded.taskByThread(bot.id, sibling.threadId)).toMatchObject({ modelSelection: selection(), approvalMode: "full" });
+    expect(reloaded.taskByThread(bot.id, sibling.threadId)).toMatchObject({ approvalMode: "ask" });
+    expect(reloaded.taskByThread(bot.id, picked.threadId)).toMatchObject({ modelSelection: opus, approvalMode: "full" });
   });
 
   it("createBot seeds a greeting without promising engine-specific tools", () => {
@@ -1201,7 +1213,8 @@ describe("Store", () => {
     expect(explicit.modelSelection).toEqual({ instanceId: "codex", model: "chosen", effort: "medium" });
     for (const bot of [defaulted, explicit, new Store(selection).bot("set-up")!]) {
       expect(bot.modelSelection.effort).toBe("medium");
-      expect(bot.tasks?.[0].modelSelection).toEqual(bot.modelSelection);
+      // The first thread follows the bot's completed selection.
+      expect(bot.tasks?.[0].modelSelection).toBeUndefined();
     }
   });
 
@@ -1219,7 +1232,7 @@ describe("Store", () => {
     expect("cwd" in (store.bot("plain-bot") ?? {})).toBe(false);
   });
 
-  it("stores variants independently and seeds future conversations from the bot default", () => {
+  it("stores variants independently; conversations without one of their own follow the bot", () => {
     const store = new Store(selection);
     const bot = store.createBot();
     const first = bot.threadId;
@@ -1231,7 +1244,7 @@ describe("Store", () => {
     const future = store.createTask(bot.id, "Future")!;
     const reloaded = new Store(selection);
     expect(reloaded.projectBotForTask(bot.id, first)!.modelSelection).toEqual(chosen);
-    expect(reloaded.projectBotForTask(bot.id, second.threadId)!.modelSelection).toEqual(selection());
+    expect(reloaded.projectBotForTask(bot.id, second.threadId)!.modelSelection).toEqual({ ...chosen, variant: "minimal" });
     expect(reloaded.projectBotForTask(bot.id, future.threadId)!.modelSelection).toEqual({ ...chosen, variant: "minimal" });
   });
 
@@ -1256,18 +1269,16 @@ describe("Store", () => {
     const second = store.createTask(bot.id, "Second")!;
     const pinned = { instanceId: "claude", model: "claude-opus-4-5" };
     store.switchTaskModel(bot.id, first, pinned, false, false);
-    // A legacy thread with no selection of its own must not silently follow
-    // the new default: it is pinned to the previous one at apply time.
-    const legacy = store.bot(bot.id)!.tasks!.find((task) => task.threadId === second.threadId)!;
-    legacy.modelSelection = undefined;
+    // A person's pick stays; a thread with no model of its own follows the
+    // bot onto the new one.
     const next = { instanceId: "codex", model: "gpt-5-codex" };
     expect(store.applyModelDefault(bot.id, next)?.modelSelection).toEqual(next);
     expect(store.projectBotForTask(bot.id, first)!.modelSelection).toEqual(pinned);
-    expect(store.projectBotForTask(bot.id, second.threadId)!.modelSelection).toEqual(selection());
+    expect(store.projectBotForTask(bot.id, second.threadId)!.modelSelection).toEqual(next);
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)!.modelSelection).toEqual(next);
     expect(reloaded.projectBotForTask(bot.id, first)!.modelSelection).toEqual(pinned);
-    expect(reloaded.projectBotForTask(bot.id, second.threadId)!.modelSelection).toEqual(selection());
+    expect(reloaded.projectBotForTask(bot.id, second.threadId)!.modelSelection).toEqual(next);
   });
 
   it("keeps one persisted Chief of Staff per section and supports handoff", () => {
@@ -2457,7 +2468,11 @@ describe("soul", () => {
     expect(reloaded.bot(chief.id)?.managedSections).toContain(name);
     expect(reloaded.bot(chief.id)?.lastTeamSetupReceipt?.requestId).toBe(request.requestId);
     expect(reloaded.bot(bot.id)).toMatchObject({ section: name, modelSelection: { instanceId: "codex", model: "fixture" } });
-    expect(reloaded.bot(bot.id)?.tasks?.[0]).toMatchObject({ modelSelection: selection(), approvalMode: "edits", autoApprove: false, alwaysAllow: ["Read"] });
+    // The legacy thread follows the bot onto Codex, which can't auto-accept
+    // edits: its frozen level goes back to Ask, as on any engine switch.
+    expect(reloaded.bot(bot.id)?.tasks?.[0]).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: [] });
+    expect(reloaded.bot(bot.id)?.tasks?.[0].modelSelection).toBeUndefined();
+    expect(reloaded.projectBotForTask(bot.id, bot.threadId)?.modelSelection).toEqual({ instanceId: "codex", model: "fixture" });
     expect(() => reloaded.applyTeamSetup({ ...request, requestId: "too-many", newTeams: ["Overflow"] })).toThrow(/scope/);
     expect(() => reloaded.applyTeamSetup({ ...request, requestId: "too-long", newTeams: ["X".repeat(61)] })).toThrow(/scope/);
     expect(reloaded.bot(chief.id)?.managedSections).toHaveLength(100);

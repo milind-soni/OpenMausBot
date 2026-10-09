@@ -1,6 +1,7 @@
-// Signing in to a URL MCP server from the desktop: the server starts the
-// sign-in and listens for the browser's return on this machine; the app
-// opens the sign-in page, offers paste-back for another computer, and polls.
+// Signing in to a URL MCP server: the server starts the sign-in and waits
+// for the browser's return (on its own machine, or at its own https address
+// for a browser elsewhere); the app opens the sign-in page, offers
+// paste-back when the return cannot reach the server, and polls.
 
 export type McpSignInPhase = "waiting" | "succeeded" | "failed" | "cancelled" | "expired";
 
@@ -10,6 +11,9 @@ export interface McpSignInStatus {
   authorizationUrl: string | null;
   expiresAt?: string;
   message?: string;
+  /** The browser ends on a page on the server's own machine that cannot
+   * load here: the person pastes its address instead. */
+  pasteBack?: boolean;
 }
 
 interface Deps {

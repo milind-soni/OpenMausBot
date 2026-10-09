@@ -36,6 +36,7 @@ vi.mock("@/lib/live-call-media", async (original) => {
   return { ...actual, useLiveMedia: actual.liveMedia };
 });
 import { BotListItem, botRowProps, type BotRowProps } from "./Sidebar";
+import { forgetSearchDisclosuresForTests } from "@/lib/search-disclosure";
 
 const bot: Bot = {
   id: "atlas", threadId: "current", name: "Atlas", title: "", description: "",
@@ -56,7 +57,7 @@ function expectSoleRow(markup: string) {
   expect(markup).not.toContain('data-sidebar-thread-row=');
   expect(markup).not.toContain("Collapse Atlas threads");
 }
-beforeEach(() => { fixture.slots = []; fixture.state.revealThread = null; });
+beforeEach(() => { fixture.slots = []; fixture.state.revealThread = null; forgetSearchDisclosuresForTests(); });
 
 describe("bot row expansion follows the visible thread tree", () => {
   it("restores the sole conversation preview after clearing a thread search", () => {
@@ -66,9 +67,28 @@ describe("bot row expansion follows the visible thread tree", () => {
     expect(markup).toContain("The latest reply");
   });
 
+  it("puts a list back the way it was when the search that opened it is cleared (MOCA-293)", () => {
+    const multiple = { ...bot, tasks: [...bot.tasks!, { threadId: "older", title: "Earlier", createdAt: 0 }] };
+    expect(render(multiple, "Current")).toContain('data-sidebar-thread-row="current"');
+    const cleared = render(multiple);
+    expect(cleared).not.toContain('data-sidebar-thread-row=');
+    expect(cleared).toContain("Expand Atlas threads");
+  });
+
+  it("does not open a bot that matches a search only by name", () => {
+    const multiple = { ...bot, tasks: [...bot.tasks!, { threadId: "older", title: "Earlier", createdAt: 0 }] };
+    const markup = render(multiple, "Atlas");
+    expect(markup).not.toContain('data-sidebar-thread-row=');
+    expect(markup).toContain("Expand Atlas threads");
+  });
+
   it("restores the owner row when an expanded list loses its second thread", () => {
     const multiple = { ...bot, tasks: [...bot.tasks!, { threadId: "older", title: "Earlier", createdAt: 0 }] };
-    render(multiple, "Current");
+    // opened the way a person lands on a thread: a reveal, not a search
+    fixture.state.revealThread = { threadId: "older", nonce: 1 };
+    render(multiple);
+    fixture.effects.forEach(effect => effect());
+    fixture.state.revealThread = null;
     const expanded = render(multiple);
     expect(expanded).toContain('data-sidebar-thread-row="older"');
     expect(ownerTag(expanded)).not.toContain('aria-current="page"');

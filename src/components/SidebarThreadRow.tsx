@@ -7,6 +7,7 @@ import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
 import { threadRefUrl } from "@/lib/thread-refs";
+import { copyText } from "@/lib/copy-text";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates"> & {
@@ -297,9 +298,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const copyLink = () => {
     setMenu(null);
-    navigator.clipboard?.writeText(threadRefUrl({ botId: ownerId, threadId: task.threadId })).catch(() => {
-      // clipboard write rejected — the link stays available to copy again
-    });
+    // A failed write leaves the link available to copy again.
+    void copyText(threadRefUrl({ botId: ownerId, threadId: task.threadId }));
   };
   // The menu stays open on "Regenerating…" until the answer lands; a failure
   // keeps it open behind the error so the person can rename by hand.

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const mode = process.env.FAKE_MCP_MODE ?? "healthy";
@@ -21,7 +22,8 @@ else {
       process.stdout.write(`${JSON.stringify({
         jsonrpc: "2.0",
         id: frame.id,
-        result: { tools: [{
+        // FAKE_MCP_TOOLS_FILE: a JSON array of tools to list instead
+        result: { tools: process.env.FAKE_MCP_TOOLS_FILE ? JSON.parse(readFileSync(process.env.FAKE_MCP_TOOLS_FILE, "utf8")) : [{
           name: "read_notes",
           description: process.env.FAKE_MCP_DESCRIPTION ?? "Read saved notes",
         }] },

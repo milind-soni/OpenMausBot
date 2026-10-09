@@ -8,7 +8,7 @@
 // page and rejects every later import() of it at once, so the screen says it
 // could not load and offers a reload instead of showing nothing.
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createElement, useState } from "react";
 import { flushSync } from "react-dom";
@@ -235,7 +235,8 @@ describe("launch bundle", () => {
         if (target) queue.push(target);
       }
     }
-    return new Set([...seen].map((file) => file.slice(srcRoot.length + 1)));
+    // join() writes backslashes on Windows; name the modules with forward slashes everywhere.
+    return new Set([...seen].map((file) => file.slice(srcRoot.length + 1).split(sep).join("/")));
   };
 
   it("leaves the on-request screens out of it", () => {

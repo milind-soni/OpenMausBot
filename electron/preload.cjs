@@ -205,6 +205,9 @@ const bridge = {
   /** Copies an engine install command and opens a blank terminal. Resolves
    * false if no terminal could be launched; the clipboard still has it. */
   openInstallTerminal: (command) => ipcRenderer.invoke("engine:open-terminal", command),
+  /** Writes plain text to the system clipboard; the copy button's fallback
+   * when the web Clipboard API is rejected. Resolves false on failure. */
+  copyText: (text) => ipcRenderer.invoke("clipboard:write-text", text),
   /** Open a web link in the default browser. Unlike renderer window.open,
    * this remains reliable after an asynchronous API request. */
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
@@ -270,6 +273,9 @@ const bridge = {
       const message = String(error?.message ?? error);
       throw new Error(message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
     }),
+  /** Point the file manager at a file a bot linked outside its workspace,
+   * without opening it. Resolves "shown", "missing" or "invalid". */
+  revealInFolder: (filePath) => ipcRenderer.invoke("desktop:reveal-file", filePath),
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 

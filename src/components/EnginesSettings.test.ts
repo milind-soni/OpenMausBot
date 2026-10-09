@@ -173,6 +173,42 @@ describe("Settings → Engines → setup cards", () => {
     fixture.instances[0].access = "custom";
     expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Sign in with Google");
   });
+
+  // MOCA-292: a key engine has no CLI, so it used to drop off this page the
+  // moment its key was saved, even a mistyped one, with no way back to it.
+  it("keeps an API-key engine listed after its key is saved and links to changing the key", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    const openai = (snapshot: InstanceInfo["snapshot"]): InstanceInfo => ({
+      instanceId: "openai", displayName: "OpenAI", driverKind: "openai-compat", access: "api",
+      snapshot, models: { default: "gpt-5", options: [] },
+    });
+    fixture.instances = [openai({ state: "unavailable", reason: "No API key" })];
+    const before = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(before).toContain("OpenAI needs an API key");
+    expect(before).toContain("Open API keys");
+    expect(before).not.toContain("Change key");
+
+    fixture.instances = [openai({ state: "available", authenticated: true, version: null })];
+    const saved = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(saved).toContain('data-engine-card="openai"');
+    expect(saved).toContain('data-engine-setup-api-key="configured"');
+    expect(saved).toContain("OpenAI uses your API key");
+    expect(saved).toContain("Change key");
+    expect(saved).not.toContain("OpenAI needs an API key");
+
+    // A remote client cannot reach this server's key settings.
+    vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
+    const remote = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(remote).toContain("open Settings → API keys on the computer running OpenMausBot");
+    expect(remote).not.toContain("Change key");
+
+    // A Company-managed key is not the person's to change.
+    vi.stubGlobal("window", {});
+    fixture.instances = [{ ...openai({ state: "available", authenticated: true, version: null }), managed: { organizationId: "org", organizationName: "Acme" } }];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Change key");
+  });
 });
 
 describe("Settings → Engines → Antigravity → Free up space", () => {

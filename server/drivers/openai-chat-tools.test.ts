@@ -12,6 +12,8 @@ import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance, SendTurnInput } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
+import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { GrokDriver } from "./grok.ts";
 import { CerebrasDriver } from "./cerebras.ts";
 import { MinimaxDriver } from "./minimax.ts";
@@ -155,6 +157,55 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
     },
   };
 }
+
+describe("a searched MCP catalog", () => {
+  it("asks about the tool call_tool runs, and never about a search", async () => {
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300) });
+    cleanups.push(() => remote.close());
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ content: null, tool_calls: [toolCall("whop_search_tools", '{"query":"list payments"}', "call_search")] }, "tool_calls")]);
+      else if (round === 2) sse(response, [chunk({ content: null, tool_calls: [toolCall("whop_call_tool", '{"name":"payments_list","arguments":{"company_id":"biz_1"}}', "call_run")] }, "tool_calls")]);
+      else answer(response);
+    });
+    await f.start({ integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } } });
+    const opened = await f.recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "whop_payments_list", summary: expect.stringContaining("biz_1") });
+    expect(remote.calls).toEqual([]);
+    await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "allow" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.recorder.events.filter((event) => event.type === "request.opened")).toHaveLength(1);
+    expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
+    expect(f.recorder.events.flatMap((event) => event.type === "item.started" && event.itemType === "tool" ? [event.title] : []))
+      .toEqual(["whop_search_tools", "whop_payments_list"]);
+    // the model was handed three tools for the server, not three hundred
+    const names = f.requests[0].tools!.map((tool) => tool.function.name);
+    expect(names.filter((name) => name.startsWith("whop_"))).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
+    expect(f.requests[1].messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_search", content: expect.stringContaining("payments_list") });
+  });
+});
+
+describe("a searched MCP catalog's misses", () => {
+  it("are guidance the model recovers from, so the turn still succeeds", async () => {
+    const remote = await startFakeHttpMcp({ tools: whopLikeCatalog(300) });
+    cleanups.push(() => remote.close());
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ content: null, tool_calls: [
+        toolCall("whop_describe_tool", '{"name":"payments_teleport"}', "call_unknown"),
+        { ...toolCall("whop_search_tools", '{"limit":"eight"}', "call_empty"), index: 1 },
+      ] }, "tool_calls")]);
+      else answer(response, "There is no such tool; I searched for the right one instead.");
+    });
+    await f.start({ integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } } });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    const results = f.requests[1].messages.filter((message) => message.role === "tool").map((message) => JSON.parse(message.content as string));
+    expect(results).toEqual([
+      { ok: true, result: expect.stringContaining("No tool named") },
+      { ok: true, result: expect.stringContaining("search_tools needs") },
+    ]);
+    expect(remote.calls).toEqual([]);
+  });
+});
 
 describe("optional built-in question compatibility", () => {
   const unsupported = { error: { message: "This model does not support tools." } };

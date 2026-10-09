@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { readFileSync } from "node:fs";
-import { appPermissionAllowed, appPermissionHandlers, externalWebUrl } from "./app-permissions.mjs";
+import { appPermissionAllowed, appPermissionHandlers, externalWebUrl, remoteClipboardWriteAllowed } from "./app-permissions.mjs";
 import { cloudPlanSnapshot, createCloudAccountClient } from "./cloud-account.mjs";
 import { myCloudOrigin, rememberedCloudHome } from "./cloud-home.mjs";
 
@@ -101,9 +101,10 @@ test("fails closed on unparsable or opaque origins", () => {
 
 // ── The person's own Cloud, open in this app's window ──
 // A Cloud is personal, so its page hearing the microphone for a Live call is
-// the person's own page hearing it. Only that: the microphone, in the main
-// frame of the main window, at the exact origin the verified Cloud sign-in
-// reports. Every other server, and every other capability, stays refused.
+// the person's own page hearing it. Only that and clipboard writes (its copy
+// buttons): in the main frame of the main window, at the exact origin the
+// verified Cloud sign-in reports. Every other server, and every other
+// capability, stays refused.
 const CLOUD = "https://omb-u-0123456789ab.fly.dev";
 function cloudFixture({ home = CLOUD } = {}) {
   const main = { getURL: () => `${CLOUD}/chat?botId=bot-1` };
@@ -129,7 +130,7 @@ test("the verified Cloud open in this window may use the microphone", () => {
   assert.equal(check("media", CLOUD, { requestingUrl: `${CLOUD}/`, isMainFrame: true, mediaType: "audio" }), true);
 });
 
-test("the Cloud never gets the camera, screen capture or any other capability", () => {
+test("the Cloud never gets the camera, screen capture or any other capability but clipboard writes", () => {
   const { ask, check } = cloudFixture();
   for (const mediaTypes of [["video"], ["audio", "video"], [], ["unknown"]]) {
     assert.equal(ask("media", onCloud({ mediaTypes })), false, JSON.stringify(mediaTypes));
@@ -137,7 +138,7 @@ test("the Cloud never gets the camera, screen capture or any other capability", 
   assert.equal(ask("media", onCloud()), false, "media with no type");
   assert.equal(check("media", CLOUD, { isMainFrame: true, mediaType: "video" }), false);
   assert.equal(check("media", CLOUD, { isMainFrame: true, mediaType: "unknown" }), false);
-  for (const permission of ["notifications", "clipboard-read", "clipboard-sanitized-write", "fullscreen", "geolocation", "display-capture", "camera"]) {
+  for (const permission of ["notifications", "clipboard-read", "fullscreen", "geolocation", "display-capture", "camera"]) {
     assert.equal(ask(permission, onCloud()), false, permission);
     assert.equal(check(permission, CLOUD, { isMainFrame: true }), false, permission);
     // Audio details on another permission do not make it the microphone.
@@ -183,6 +184,38 @@ test("signed out of Cloud, or the Cloud not running, its page loses the micropho
   assert.equal(ask("media", onCloud({ mediaTypes: ["audio"] })), false);
   state.home = "not a url";
   assert.equal(ask("media", onCloud({ mediaTypes: ["audio"] })), false);
+});
+
+test("the verified Cloud open in this window may write the clipboard, by the remote server's rule", () => {
+  const write = "clipboard-sanitized-write";
+  const { state, ask, check } = cloudFixture();
+  // The Grok sign-in card's copy button, on My Cloud.
+  assert.equal(ask(write, onCloud()), true);
+  assert.equal(check(write, CLOUD, { requestingUrl: `${CLOUD}/`, isMainFrame: true }), true);
+  // Never reading it.
+  assert.equal(ask("clipboard-read", onCloud()), false);
+  assert.equal(check("clipboard-read", CLOUD, { isMainFrame: true }), false);
+  // Never a subframe, or no frame information.
+  assert.equal(ask(write, onCloud({ isMainFrame: false })), false, "a subframe");
+  assert.equal(check(write, CLOUD, { isMainFrame: false }), false, "a subframe");
+  assert.equal(check(write, CLOUD, {}), false, "no frame information");
+  // Never another origin.
+  for (const other of ["https://my-vps.example.com", "http://omb-u-0123456789ab.fly.dev", "https://omb-u-0123456789ab.fly.dev:8443", "https://evil.fly.dev"]) {
+    assert.equal(ask(write, { requestingUrl: `${other}/chat`, isMainFrame: true }), false, other);
+    assert.equal(check(write, other, { isMainFrame: true }), false, other);
+  }
+  // Never another window, or with no window at all.
+  assert.equal(ask(write, onCloud(), { getURL: () => `${CLOUD}/` }), false, "another window");
+  assert.equal(check(write, CLOUD, { isMainFrame: true }, null), false, "no window");
+  // Signed out of Cloud (no Cloud), or a damaged value: withdrawn at once.
+  for (const home of [null, "not a url", "about:blank"]) {
+    state.home = home;
+    assert.equal(ask(write, onCloud()), false, String(home));
+    assert.equal(check(write, CLOUD, { isMainFrame: true }), false, String(home));
+  }
+  state.home = CLOUD;
+  state.main = null;
+  assert.equal(ask(write, onCloud(), { getURL: () => `${CLOUD}/` }), false, "the main window is gone");
 });
 
 test("this computer's own page keeps its permissions through the same handlers", () => {
@@ -465,5 +498,38 @@ test("the page's answer is the request handler's answer for its microphone", asy
         }
       }
     }
+  }
+});
+
+const REMOTE = "https://viernes.tail1.ts.net:9444";
+
+test("a remote server may write clipboard text only as the active origin's main frame", () => {
+  const write = "clipboard-sanitized-write";
+  assert.equal(remoteClipboardWriteAllowed(write, `${REMOTE}/chat?x=1`, REMOTE, { isMainFrame: true }), true);
+  assert.equal(remoteClipboardWriteAllowed(write, REMOTE, `${REMOTE}/`, { isMainFrame: true }), true);
+  // Read and everything else stay denied for the same trusted origin.
+  for (const permission of ["clipboard-read", "notifications", "fullscreen", "media", "geolocation", "camera", "openExternal", "unknown", undefined]) {
+    assert.equal(remoteClipboardWriteAllowed(permission, REMOTE, REMOTE, { isMainFrame: true }), false, String(permission));
+  }
+  // Frame requirement: a child frame, or no frame information, never counts.
+  for (const details of [{ isMainFrame: false }, {}, undefined, null, { isMainFrame: "true" }]) {
+    assert.equal(remoteClipboardWriteAllowed(write, REMOTE, REMOTE, details), false);
+  }
+  // Exact origin only.
+  for (const requesting of [
+    "https://viernes.tail1.ts.net:9445/", "https://viernes.tail1.ts.net/", "http://viernes.tail1.ts.net:9444/",
+    "https://other.tail1.ts.net:9444/", "https://viernes.tail1.ts.net.evil.test:9444/", "https://evil.test/#https://viernes.tail1.ts.net:9444",
+    "about:blank", "data:text/html,x", "javascript:alert(1)", "not a url", "", null, undefined,
+  ]) assert.equal(remoteClipboardWriteAllowed(write, requesting, REMOTE, { isMainFrame: true }), false, String(requesting));
+  // No active remote server (Local, or a damaged value): nothing to match.
+  for (const active of [undefined, null, "", "not a url", "about:blank", "data:text/html,x"]) {
+    assert.equal(remoteClipboardWriteAllowed(write, REMOTE, active, { isMainFrame: true }), false, String(active));
+    assert.equal(remoteClipboardWriteAllowed(write, "about:blank", active, { isMainFrame: true }), false);
+  }
+});
+
+test("the base policy itself still grants a remote origin nothing", () => {
+  for (const permission of ["clipboard-sanitized-write", "clipboard-read", "notifications", "fullscreen"]) {
+    assert.equal(appPermissionAllowed(permission, REMOTE, LOCAL_ORIGIN, { isMainFrame: true }), false, permission);
   }
 });

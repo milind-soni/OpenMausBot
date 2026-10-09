@@ -349,11 +349,15 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(new Set(upstreams)).toEqual(new Set(["127.0.0.1:8799", "127.0.0.1:8800"]));
   // every forwarded request is marked as proxied
   expect(caddy.match(/header_up X-Forwarded-For \{client_ip\}/g)).toHaveLength(upstreams.length);
-  // The root supervisor's code is root's: maus owns only the volume.
-  const image = readFileSync(join(import.meta.dirname, "../deploy/fly/Dockerfile"), "utf8");
-  expect(image).toMatch(/chown -R root:root \/app\b/);
-  expect(image).toMatch(/chmod -R go-w \/app\b/);
-  expect(image.indexOf("chmod -R go-w /app")).toBeLessThan(image.indexOf("CMD ["));
+  // The root supervisor's code is root's: maus owns only the volume. The
+  // image's last step refuses to build if anything there is not.
+  const dockerfile = readFileSync(join(import.meta.dirname, "../Dockerfile"), "utf8");
+  const image = dockerfile.slice(dockerfile.indexOf("FROM runtime AS cloud-home"), dockerfile.indexOf("FROM runtime AS server"));
+  const check = image.indexOf('untrusted="$(find /app /usr/local/bin/caddy \\( ! -user root -o ! -type l -perm /022 \\) -print)"');
+  expect(image.slice(check)).toMatch(/^untrusted=.*\n && if \[ -n "\$untrusted" \]; then .*exit 1; fi \\\n/);
+  expect(check).toBeGreaterThan(image.lastIndexOf("COPY "));
+  expect(check).toBeLessThan(image.indexOf("CMD ["));
+  expect(image).toContain("COPY deploy/fly/Caddyfile /app/cloud/Caddyfile");
   const fly = readFileSync(join(import.meta.dirname, "../deploy/fly/fly.toml"), "utf8");
   expect(fly).toMatch(/internal_port = 8080/);
   expect(fly).toMatch(/destination = "\/data"/);

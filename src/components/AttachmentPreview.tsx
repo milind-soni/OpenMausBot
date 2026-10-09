@@ -17,6 +17,7 @@ import {
   Download,
   ExternalLink,
   FileText,
+  FolderOpen,
   ImageOff,
   LoaderCircle,
   Maximize2,
@@ -214,25 +215,41 @@ export async function requestMessageFile(
   filePath: string,
   message: MessageAttachmentContext,
   signal: AbortSignal,
+  folder?: { entry?: string; list?: boolean },
 ): Promise<Response> {
   const response = await fetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: filePath }),
+    // A linked folder answers with its files instead of a 400; an entry is
+    // one of those files, fetched by name under the same message grant.
+    body: JSON.stringify({
+      path: filePath,
+      ...(folder?.entry !== undefined ? { entry: folder.entry } : folder?.list ? { listFolder: true } : {}),
+    }),
     signal,
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(body?.error ?? t("attach.downloadFailed"));
+    const body = await response.json().catch(() => null) as { error?: string; code?: string } | null;
+    throw Object.assign(new Error(body?.error ?? t("attach.downloadFailed")), { code: body?.code });
   }
   return response;
 }
 
 /** Shared save state for transcript file chips and bot-authored file links. */
-export function useLocalFileSave(filePath: string, name?: string, message?: MessageAttachmentContext) {
+export interface MessageFolderListing {
+  name: string;
+  entries: { name: string; bytes: number; mime: string }[];
+  truncated: boolean;
+}
+
+export function useLocalFileSave(filePath: string, name?: string, message?: MessageAttachmentContext, entry?: string) {
   const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [folder, setFolder] = useState<MessageFolderListing | null>(null);
   const [reason, setReason] = useState("");
   const [savedTo, setSavedTo] = useState("");
+  // The server refused because the file sits outside the conversation's
+  // workspace; the bot link offers Show in folder for that case alone.
+  const [outsideWorkspace, setOutsideWorkspace] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const request = useRef<AbortController | null>(null);
   const saving = useRef(false);
@@ -253,8 +270,10 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     saving.current = false;
     setReason("");
     setSavedTo("");
+    setOutsideWorkspace(false);
+    setFolder(null);
     setState("idle");
-  }, [filePath, message?.messageId, message?.threadId]);
+  }, [filePath, entry, message?.messageId, message?.threadId]);
 
   const save = useCallback(async () => {
     if (saving.current) return;
@@ -269,18 +288,26 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
       resetTimer.current = null;
     }
     setReason("");
+    setOutsideWorkspace(false);
     setState("saving");
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
     try {
-      const response = await requestMessageFile(filePath, message, controller.signal);
+      const response = await requestMessageFile(filePath, message, controller.signal, entry === undefined ? { list: true } : { entry });
+      if (response.headers.get("x-openmausbot-folder") === "1") {
+        const listing = await response.json() as MessageFolderListing;
+        if (!mounted.current || controller.signal.aborted) return;
+        setFolder(listing);
+        setState("idle");
+        return;
+      }
       const blob = await response.blob();
       if (!mounted.current || controller.signal.aborted) return;
       const url = URL.createObjectURL(blob);
       const saved = canonicalDownloadFilename({
         contentDisposition: response.headers.get("content-disposition"),
-        fallback: name || attachmentBasename(filePath),
+        fallback: name || entry || attachmentBasename(filePath),
         source: filePath,
         mime: blob.type || response.headers.get("content-type"),
       });
@@ -309,6 +336,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     } catch (error) {
       if (!mounted.current || controller.signal.aborted) return;
       setReason(error instanceof Error ? error.message : t("attach.saveFailed"));
+      setOutsideWorkspace((error as { code?: unknown } | null)?.code === "outside_workspace");
       setState("failed");
     } finally {
       if (request.current === controller) {
@@ -316,9 +344,116 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
         saving.current = false;
       }
     }
-  }, [filePath, message?.messageId, message?.threadId, name]);
+  }, [filePath, entry, message?.messageId, message?.threadId, name]);
 
-  return { state, reason, savedTo, save };
+  return { state, reason, savedTo, outsideWorkspace, folder, save };
+}
+
+function folderFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 102.4) / 10} KB`;
+  return `${Math.round(bytes / (1024 * 102.4)) / 10} MB`;
+}
+
+function MessageFolderFile({ folderPath, name, bytes, message }: {
+  folderPath: string;
+  name: string;
+  bytes: number;
+  message: MessageAttachmentContext;
+}) {
+  const save = useLocalFileSave(folderPath, name, message, name);
+  return (
+    <li className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+      <button
+        type="button"
+        onClick={() => void save.save()}
+        disabled={save.state === "saving"}
+        aria-label={t("attach.saveAria", { name })}
+        className="inline-flex min-h-8 min-w-0 items-center gap-1 break-all text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
+      >
+        {save.state === "saving" ? (
+          <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
+        ) : save.state === "saved" ? (
+          <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
+        ) : (
+          <FileText size={12} className="shrink-0" aria-hidden="true" />
+        )}
+        {name}
+      </button>
+      <span className="text-ink-secondary">{folderFileSize(bytes)}</span>
+      {save.state === "failed" && <span role="alert" className="text-danger">{save.reason}</span>}
+    </li>
+  );
+}
+
+/** The files directly inside a folder a bot linked; each one saves like a file link. */
+export function MessageFolderFiles({ folderPath, listing, message }: {
+  folderPath: string;
+  listing: MessageFolderListing;
+  message: MessageAttachmentContext;
+}) {
+  return (
+    <span dir="ltr" className="block w-full text-[12px] [unicode-bidi:isolate]">
+      {listing.entries.length === 0 ? (
+        <span className="text-ink-secondary">{t("attach.folderEmpty")}</span>
+      ) : (
+        <ul aria-label={t("attach.folderFilesAria", { name: listing.name })} className="flex flex-col gap-0.5 ps-1">
+          {listing.entries.map((entry) => (
+            <MessageFolderFile key={entry.name} folderPath={folderPath} name={entry.name} bytes={entry.bytes} message={message} />
+          ))}
+        </ul>
+      )}
+      {listing.truncated && <span className="text-ink-secondary">{t("attach.folderTruncated")}</span>}
+    </span>
+  );
+}
+
+// A file outside the conversation's workspace is never served, but the local
+// desktop app can ask its own file manager to show where it is. A paired
+// remote client or a browser is not on the computer holding the file, so it
+// shows the path as selectable text instead. UNC and relative paths are not
+// offered for reveal: main refuses them. Shared by the inline bot link and its
+// attachment chip; the caller sets the text size.
+const REVEALABLE_PATH = /^(?:\/(?!\/)|[a-zA-Z]:[\\/])/;
+function revealBridge(): NonNullable<Window["ogb"]>["revealInFolder"] {
+  const ogb = typeof window === "undefined" ? undefined : window.ogb;
+  return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
+}
+
+export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
+  const [problem, setProblem] = useState("");
+  const reveal = revealBridge();
+  if (!reveal || !REVEALABLE_PATH.test(filePath)) {
+    return (
+      <code title={t("attach.outsideWorkspacePath")} className="select-all break-all text-ink">
+        {filePath}
+      </code>
+    );
+  }
+  const show = async () => {
+    setProblem("");
+    try {
+      const result = await reveal(filePath);
+      if (result === "missing") setProblem(t("attach.revealMissing"));
+      else if (result !== "shown") setProblem(t("attach.revealFailed"));
+    } catch {
+      setProblem(t("attach.revealFailed"));
+    }
+  };
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void show()}
+        title={filePath}
+        className="inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"
+      >
+        <FolderOpen size={12} className="shrink-0" aria-hidden="true" />
+        {t("attach.showInFolder")}
+      </button>
+      {problem && <span role="alert" className="text-danger">{problem}</span>}
+    </>
+  );
 }
 
 export function AttachmentPreviewDialog({
@@ -821,6 +956,11 @@ export function AttachedFileChip({ file, message, linked = false, className }: {
             : save.state === "saved"
               ? t("attach.downloaded")
               : save.reason}
+          {failed && save.outsideWorkspace && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-1.5">
+              <OutsideWorkspaceFile filePath={file.path} />
+            </div>
+          )}
         </div>
       )}
     </div>

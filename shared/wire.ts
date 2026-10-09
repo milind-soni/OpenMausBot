@@ -149,8 +149,14 @@ export interface WireTask {
    * "until then" and reads treat an expired value as absent, so no timer or
    * migration is ever needed. Absent = not snoozed. */
   snoozedUntil?: number;
-  /** Defaults are copied when a task is created. */
+  /** The model this thread's turns run on: its own when a person picked one
+   * in this thread, else its bot's (followsBotModel). The server stores none
+   * for a thread that follows its bot, and always sends the effective one. */
   modelSelection?: ModelSelection;
+  /** true: the thread runs on its bot's model and moves with it; false: a
+   * person picked this thread's model. Derived at projection, never stored;
+   * absent from servers older than this field. */
+  followsBotModel?: boolean;
   approvalMode?: ApprovalMode;
   autoApprove?: boolean;
   alwaysAllow?: string[];
@@ -273,7 +279,8 @@ export interface WireBot {
   avatarFocusY?: number;
   /** True when any task has unread output. */
   unread: boolean;
-  /** Default for new tasks; navigating tasks never changes this value. */
+  /** The bot's model: every thread without a model of its own runs on it
+   * and moves with it. Navigating tasks never changes this value. */
   modelSelection: ModelSelection;
   /** where the bot works ("Works on"). Unset = auto. */
   computer?: Surface | "off";
@@ -552,6 +559,12 @@ export interface OptionCardData {
   commandAllowlist?: CommandAllowlistCandidate;
   /** Local actions never share remembered grants with cloud/tool approvals. */
   approvalScope?: "local-computer";
+  /** The bot's change applied without a person (a change to the bot itself,
+   * or Full access): clients show a one-line receipt with Undo instead of
+   * the approval box. */
+  autoApplied?: boolean;
+  /** A person undid that change. */
+  undone?: boolean;
   /** A durable chat-created routine proposal. */
   routineRequest?: RoutineRequestCardData;
   /** A durable profile-change proposal (propose_profile). */
@@ -669,6 +682,9 @@ export interface GroupTask {
   pinnedMessageId?: string;
   /** The person pinned this channel thread above the update-ordered list. */
   pinned?: boolean;
+  /** This conversation's own turn ceiling, in whole minutes. Absent uses
+   * the global group turn limit. Direct chats do not use this ceiling. */
+  turnTimeoutMinutes?: number;
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
   /** The first message already drove a title attempt for this thread, so a
@@ -719,6 +735,9 @@ export interface WireGroup {
   /** True while any member (or hand-off) is mid-turn. Computed at
    * projection time, never persisted. */
   working: boolean;
+  /** A direct-message channel's turn ceiling. Null on the wire means the
+   * global group limit. Channel conversations store theirs on each task. */
+  turnTimeoutMinutes?: number | null;
 }
 
 // ── live wire frames ───────────────────────────────────────────────────

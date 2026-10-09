@@ -381,7 +381,9 @@ describe("start_thread on yourself", () => {
       await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
 
       // An engine that cannot carry the bot's level starts the new thread in
-      // Ask, as switching the parent thread to it did.
+      // Ask, as switching the parent thread to it did. That engine is gone, so
+      // the thread's first turn runs on the bot's model, which the thread
+      // follows from then on, and says so once.
       const fresh = await api("POST", `/api/bots/${pm.id}/tasks`, { title: "From scratch" });
       expect(fresh.body.task).toMatchObject({ modelSelection: sonnet, approvalMode: "edits" });
       const retired = { instanceId: "retired", model: "old-model" };
@@ -390,7 +392,9 @@ describe("start_thread on yourself", () => {
       const elsewhere = await api("POST", "/api/internal/threads", { title: "Retired engine", message: "go" },
         await mintedToken(pm.id, fresh.body.task.threadId));
       expect(elsewhere.status).toBe(201);
-      expect(await taskOf(pm.id, elsewhere.body.threadId)).toMatchObject({ modelSelection: retired, approvalMode: "ask", alwaysAllow: [] });
+      expect(await taskOf(pm.id, elsewhere.body.threadId)).toMatchObject({ modelSelection: sonnet, followsBotModel: true, approvalMode: "ask", alwaysAllow: [] });
+      expect((await messages(elsewhere.body.threadId)).filter((message) => message.tool?.name?.startsWith("notice: This thread's model (old-model)")))
+        .toHaveLength(1);
       expect(await botState(pm.id)).toMatchObject({ modelSelection: sonnet, approvalMode: "edits" });
     } finally {
       await cleanup([pm.id, qa.id]);

@@ -160,6 +160,11 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     const routine = (await api("GET", "/api/routines")).routines.find((item: any) => item.name === "Monthly fixture report");
     expect(routine).toMatchObject({ botId: chief.id, enabled: true, schedule });
     expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills).toEqual(expect.arrayContaining([expect.objectContaining({ name: "monthly-fixture-review", enabled: true })]));
+    // The decision log says Full access applied these, not the self rule.
+    await expect.poll(async () => (await api("GET", "/api/decisions")).decisions
+      .filter((row: any) => row.threadId === chief.activeTaskId && ["schedule_routine", "stage_skill", "update_profile"].includes(row.tool))
+      .map((row: any) => `${row.tool}:${row.decision}:${row.source}`).sort())
+      .toEqual(["schedule_routine:auto-approved:full-access", "stage_skill:auto-approved:full-access", "update_profile:auto-approved:full-access"]);
 
     const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
     const lateToken = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
@@ -196,18 +201,33 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect((await messages(peerTurn.threadId)).some(message => message.kind === "activity" && /^Full access — delegated by Clive, a Chief of Staff on Full access$/.test(message.tool?.name ?? ""))).toBe(true);
     evidence.push({ delegatedFullAccess: { peerThreadId: peerTurn.threadId, permissionMode: peerTurn.permissionMode } });
 
-    const askTurn = await run(chief, ask.threadId, "Prepare a profile change, routine, named skill, and specialist for review in this Ask task.", [
-      step("propose_profile", { title: "Pending Ask title", reason: "Ask task requires review" }),
-      step("propose_routine", { name: "Pending Ask report", instructions: "Wait for review.", schedule }),
-      step("skill_manage", { action: "create", skill_md: skill("pending-ask-review", "Wait for review before using this skill."), source: "conversation" }),
+    // At Ask, the Chief's changes to itself apply at once, each shown as a
+    // one-line receipt with Undo; only the team setup waits for review.
+    const askTurn = await run(chief, ask.threadId, "Change my own profile, routine and named skill, and prepare a specialist for review in this Ask task.", [
+      step("propose_profile", { title: "Applied in Ask", reason: "The bot's own profile applies at any level" }),
+      step("propose_routine", { name: "Own Ask report", instructions: "Report from the Ask task.", schedule }),
+      step("skill_manage", { action: "create", skill_md: skill("own-ask-review", "Applies at once as the bot's own skill."), source: "conversation" }),
       step("propose_team_setup", { reason: "Ask task specialist review", operations: [specialist("Pending specialist", "Operations")] }),
     ], { pending: true, guarded: "ask" });
     expect(askTurn.permissionMode).not.toBe("bypassPermissions");
-    expect(await unanswered(ask.threadId)).toHaveLength(4);
-    expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Monthly reporting Chief");
+    const askCards = await unanswered(ask.threadId);
+    expect(askCards).toHaveLength(1);
+    expect(askCards[0].card.teamSetupRequest).toBeDefined();
+    expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Applied in Ask");
     expect((await bots()).some(bot => bot.name === "Pending specialist")).toBe(false);
+    expect((await api("GET", "/api/routines")).routines).toHaveLength(2);
+    expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "own-ask-review" && item.enabled)).toBe(true);
+    const receipts = (await messages(ask.threadId)).filter(message => message.card?.autoApplied);
+    expect(receipts.map(message => Boolean(message.card.profileRequest || message.card.routineRequest || message.card.skillRequest))).toEqual([true, true, true]);
+    // Undo on each receipt puts the change back, once.
+    for (const receipt of receipts) {
+      expect(await api("POST", `/api/threads/${ask.threadId}/undo`, { requestId: receipt.card.requestId })).toMatchObject({ ok: true, undone: true });
+      expect(await api("POST", `/api/threads/${ask.threadId}/undo`, { requestId: receipt.card.requestId })).toMatchObject({ alreadyUndone: true });
+    }
+    expect((await messages(ask.threadId)).filter(message => message.card?.autoApplied).every(message => message.card.undone)).toBe(true);
+    expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Monthly reporting Chief");
     expect((await api("GET", "/api/routines")).routines).toHaveLength(1);
-    expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "pending-ask-review")).toBe(false);
+    expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "own-ask-review")).toBe(false);
 
     const inverseTurn = await run(inverse, inverse.activeTaskId, "Apply my requested title in this Full Access task even though my bot default is Ask.", [
       step("propose_profile", { title: "Applied from Full task", reason: "User requested this title" }),

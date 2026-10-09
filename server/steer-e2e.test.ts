@@ -275,9 +275,15 @@ posixOnly("mid-turn steering e2e", () => {
   }, 40_000);
 
   it("keeps two queued attachment messages as two native images in one follow-up turn", async () => {
+    // The opener runs on the gated slow instance and cannot settle until the
+    // test drops the gate below, after both sends are queued. On a timed turn
+    // the opener could end before the first send (which then rightly starts
+    // its own turn) or between the two (the first image then rightly runs
+    // alone, and the second waits for a turn of its own).
+    rmSync(steerFinishGate, { force: true });
     const created = (await api("POST", "/api/bots")).body.bot;
     await api("PATCH", `/api/bots/${created.id}`, {
-      modelSelection: { instanceId: "claude", model: "claude-fake" },
+      modelSelection: { instanceId: "claudeSteer", model: "claude-fake" },
     });
     expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first image task" })).status)
       .toBe(202);
@@ -295,20 +301,25 @@ posixOnly("mid-turn steering e2e", () => {
     writeFileSync(secondImagePath, "second png");
     const firstAttachedText = `look at this\n\n<attached-image path="${firstImagePath}" name="first.png" />`;
     const secondAttachedText = `and this\n\n<attached-image path="${secondImagePath}" name="second.png" />`;
-    const firstReceipt = await api("POST", `/api/bots/${created.id}/messages`, { text: firstAttachedText });
-    const secondReceipt = await api("POST", `/api/bots/${created.id}/messages`, { text: secondAttachedText });
+    try {
+      const firstReceipt = await api("POST", `/api/bots/${created.id}/messages`, { text: firstAttachedText });
+      const secondReceipt = await api("POST", `/api/bots/${created.id}/messages`, { text: secondAttachedText });
 
-    expect(firstReceipt.status).toBe(202);
-    expect(firstReceipt.body).toMatchObject({ ok: true, queued: true });
-    expect(firstReceipt.body.steered).toBeUndefined();
-    expect(secondReceipt.status).toBe(202);
-    expect(secondReceipt.body).toMatchObject({ ok: true, queued: true });
-    expect(secondReceipt.body.steered).toBeUndefined();
-    expect(
-      (await getBot(created.id)).messages.some(
-        (message: any) => message.text === firstAttachedText || message.text === secondAttachedText,
-      ),
-    ).toBe(false);
+      expect(firstReceipt.status).toBe(202);
+      expect(firstReceipt.body).toMatchObject({ ok: true, queued: true });
+      expect(firstReceipt.body.steered).toBeUndefined();
+      expect(secondReceipt.status).toBe(202);
+      expect(secondReceipt.body).toMatchObject({ ok: true, queued: true });
+      expect(secondReceipt.body.steered).toBeUndefined();
+      // still held off the transcript: the opener is still running
+      expect(
+        (await getBot(created.id)).messages.some(
+          (message: any) => message.text === firstAttachedText || message.text === secondAttachedText,
+        ),
+      ).toBe(false);
+    } finally {
+      writeFileSync(steerFinishGate, "finish");
+    }
 
     await waitFor(
       async () => {

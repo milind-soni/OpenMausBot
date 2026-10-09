@@ -20,6 +20,7 @@ import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type Ch
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
+import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
 
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -291,6 +292,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       });
       if (!response.ok) {
         const body = await response.text().catch(() => "");
+        if (rejectsKey(response.status, body)) noteKeyRejected(options.apiUrl, options.apiKey);
         const message = `${options.httpErrorLabel} HTTP ${response.status}${body ? `: ${body.slice(0, 200)}` : ""}`;
         if (rejectsToolsParameter(response.status, body)) throw new UnsupportedChatToolsError(message);
         const refusal = refusedToolCall(response.status, body);
@@ -300,6 +302,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         }
         throw new Error(message);
       }
+      noteKeyAccepted(options.apiUrl, options.apiKey);
 
       if (!stream || response.headers.get("content-type")?.includes("application/json")) {
         const json = await response.json() as CompletionJson;
@@ -543,7 +546,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
-        tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse, scope);
+        tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs);
         const questionAllowed = options.tools !== false && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
         let optionalQuestionOnly = questionAllowed && tools.definitions.length === 0;
         // The runtime's one built-in tool rides the same list: ask_user is
@@ -722,16 +725,20 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 }
               } else {
                 tools.validate(call.function.name, args);
+                // A searched server's call_tool is shown as the tool it runs;
+                // its catalog reads ask nothing, as listing tools never did.
+                const shown = tools.view(call.function.name, args as Record<string, unknown>);
+                const shownPreview = shown.input === args ? inputPreview : preview(shown.input);
                 // Full access is the person's explicit grant to answer every
                 // prompt. This runtime has no provider reviewer to hand it to,
                 // so it is honoured here: without it every single tool call on
                 // an OpenAI-compatible engine stops for a card, and a Chief's
                 // delegated Full access cannot help either.
-                const allowed = turn.approvalMode === "full"
-                  || await approval.ask(call.function.name, inputPreview ?? "This tool has no arguments.");
+                const allowed = turn.approvalMode === "full" || !shown.ask
+                  || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.");
                 abort.signal.throwIfAborted();
                 emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
-                  title: call.function.name, ...(inputPreview ? { input: inputPreview } : {}),
+                  title: shown.title, ...(shownPreview ? { input: shownPreview } : {}),
                 });
                 started = true;
                 if (allowed) {
@@ -749,7 +756,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                     }
                   }
                 } else {
-                  denials.push(call.function.name);
+                  denials.push(shown.title);
                   result = { ok: false, text: "Permission denied or expired; the tool was not executed." };
                 }
               }
@@ -789,10 +796,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (failure && (!abort.signal.aborted || cleanupFailed)) {
           emit({ ...base(turn.threadId, turnId), type: "runtime.error", message: failure, terminal: !abort.signal.aborted });
         }
-        // Automatic continuity: a resumable terminal (budget cap or tool
-        // errors) persists a handoff and raises cap.exhausted so the harness
-        // can start a `Continue:` thread. Interruptions and provider config
-        // errors are excluded by classifyContinuable.
+        // Automatic continuity: a resumable terminal (the step or tool-call
+        // cap) persists a handoff and raises cap.exhausted so the harness
+        // can start a `Continue:` thread. Interruptions, tool errors and
+        // provider errors (a rate limit included) are excluded by
+        // classifyContinuable.
         if (!ok && !abort.signal.aborted) {
           const continuable = classifyContinuable(stopReason, failure);
           if (continuable) {
@@ -829,9 +837,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       return options.models();
     },
     ...(options.refreshModels ? { refreshModels: options.refreshModels } : {}),
-    snapshot: async () => options.apiKey
-      ? { state: "available", authenticated: true, version: null, ...(options.billing ? { billing: options.billing } : {}) }
-      : { state: "unavailable", reason: options.unavailableReason },
+    snapshot: async () => {
+      if (!options.apiKey) return { state: "unavailable", reason: options.unavailableReason };
+      if (keyRejected(options.apiUrl, options.apiKey)) return { state: "available", authenticated: false, reason: KEY_REJECTED_REASON, version: null };
+      return { state: "available", authenticated: true, version: null, ...(options.billing ? { billing: options.billing } : {}) };
+    },
     adapter: {
       provider: options.driverKind,
       capabilities: { ...(options.computerUse ? { computerMcp: options.tools !== false,

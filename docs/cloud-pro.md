@@ -14,7 +14,7 @@ platform model gateway.
 
 This page is the OpenMausBot half of a contract with three parties:
 
-- **the home machine**: this repository's `deploy/fly/` image;
+- **the home machine**: this repository's `cloud-home` image (`Dockerfile`, `deploy/fly/`);
 - **the Admin** (openmaus-cloud, `docs/consumer-cloud.md` there): provisions
   the app, holds the machine's signing secret, and answers the desktop's Cloud
   session;
@@ -659,24 +659,28 @@ the `list_shared_computers` and `shared_computer` tools.
 
 ## The image
 
-`deploy/fly/Dockerfile` builds on the published server image
-(`ghcr.io/milind-soni/openmausbot`) and adds:
+The `Dockerfile`'s `cloud-home` target shares the server image's runtime
+layers (Node, Chrome's libraries, agent-browser and its Chrome) and adds:
 
-- the engine CLIs from `ENGINES` (default Claude Code and Codex; the base
-  image already carries agent-browser and its Chrome);
+- Caddy (`deploy/fly/Caddyfile`), as the only listener the network can reach
+  (`0.0.0.0:8080`);
 - Grok Build (`/usr/local/bin/grok`) from xAI's own installer, pinned by
   `GROK_VERSION` to the version the Grok driver is verified against. The
   build fails if the installer cannot be reached, rather than shipping an
   image whose Grok sign-in cannot run; `--build-arg GROK_VERSION=` leaves it
   out on purpose;
-- Caddy, as the only listener the network can reach (`0.0.0.0:8080`);
-- `server/cloud-home-start.ts` (bundled to `dist-server/cloud-home-start.js`)
-  as the entry point.
+- the engine CLIs from `CLOUD_HOME_ENGINES` (default Claude Code and Codex);
+- the app files, root's, with `server/cloud-home-start.ts` (bundled to
+  `dist-server/cloud-home-start.js`) as the entry point. The build fails if
+  any file under `/app`, or Caddy, is not root's or is writable by others.
 
 ```sh
-docker build -t openmausbot .
-docker build -f deploy/fly/Dockerfile --build-arg BASE_IMAGE=openmausbot -t omb-cloud-home .
+docker build --target cloud-home -t omb-cloud-home .
 ```
+
+The app files are the last layers, so an image built from a later commit
+differs from the previous one only in those (a few MB) unless Chrome, an
+engine, Grok's pin, or the Node base image changed in between.
 
 At boot the launcher, running as root, hands the volume's mount point to the
 `maus` user, binds the volume to this machine as `maus`
@@ -1062,7 +1066,7 @@ section is only what the Cloud adds.
 
 Every push to `main` and every release tag publishes the home machine image as
 `ghcr.io/milind-soni/openmausbot-cloud-home`, tagged `latest` (main only), `sha-<commit>` and the release tag.
-It is built from `deploy/fly/Dockerfile` on top of the server image for the same commit, with Claude Code,
-Codex and Grok installed. The Docker workflow's summary prints the digest. Set it in the Admin as
+It is the `Dockerfile`'s `cloud-home` target for the same commit, with Grok and the current Claude Code and
+Codex installed. The Docker workflow's summary prints the digest. Set it in the Admin as
 `OMB_CLOUD_HOME_IMAGE=ghcr.io/milind-soni/openmausbot-cloud-home@sha256:…`; changing it rolls the new image
 out to existing machines one at a time, reverting automatically on a failed health check.

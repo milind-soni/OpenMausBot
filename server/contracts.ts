@@ -231,6 +231,9 @@ export interface SendTurnInput {
    * config.toml and ignores this; the Claude driver drops
    * --strict-mcp-config for the turn. */
   mcpFromUserConfig?: boolean;
+  /** Per-call ceiling (ms) for this turn's MCP tools, from the server config
+   * `mcp.callTimeoutMinutes`. Absent = the driver's default (10 min). */
+  mcpCallTimeoutMs?: number;
 }
 
 /** An MCP server this machine starts and talks to over stdio. */
@@ -529,6 +532,9 @@ export interface ProviderInstance {
   readonly models: ModelCatalog;
   /** Refresh a live catalog without recreating the provider instance. */
   readonly refreshModels?: () => Promise<void>;
+  /** Set on a later start while the catalog served from the last run is
+   * still refreshing. A turn awaits it; listen does not. */
+  readonly startupModelRefresh?: Promise<void>;
   /** Optional first-party runtime installation and account setup. */
   readonly installRuntime?: () => Promise<void>;
   readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;

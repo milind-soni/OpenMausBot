@@ -135,7 +135,9 @@ describe("BotListItem", () => {
           { id: "a1", role: "bot", kind: "activity", at: at(1), requestMessageId: "u1", tool: { name: "Bash", spoken: "running the tests" } },
           record,
         ] as Bot["messages"],
-      }), { query: "atlas" });
+        // a search opens the thread list only when it matches a thread
+        // (MOCA-293), which puts the open thread's row, and its step, on screen
+      }), { query: "current" });
       expect(markup).toContain("Running the tests");
     });
   });

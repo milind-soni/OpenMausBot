@@ -4,8 +4,9 @@ USER root
 ARG ENGINES="@anthropic-ai/claude-code @openai/codex"
 RUN if [ -n "$ENGINES" ]; then npm install -g $ENGINES; fi
 # Grok Build from xAI's own installer, pinned and installed the same way as
-# the Cloud image (deploy/fly/Dockerfile); it signs in from the app with a
-# device code into ~/.grok on the data volume. GROK_VERSION= leaves it out.
+# the Cloud image (the Dockerfile's cloud-home target); it signs in from the
+# app with a device code into ~/.grok on the data volume. GROK_VERSION= leaves
+# it out.
 ARG GROK_VERSION=1.0.41
 RUN if [ -n "$GROK_VERSION" ]; then \
       mkdir -p /tmp/grok-install \
