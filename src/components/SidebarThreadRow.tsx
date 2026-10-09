@@ -15,6 +15,7 @@ type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "a
   pinned?: boolean;
   createdAt?: number;
   updatedAt?: number;
+  lastThreadOrderAt?: number;
 };
 
 /** Local date and time. The runtime's timezone and locale are used on
@@ -63,16 +64,16 @@ export function threadRecency(task: { updatedAt?: number; createdAt?: number }):
   return 0;
 }
 
-/** Pin, then newest update. Equal stamps keep the caller's order. Attention
+/** Pin, then newest person message or completed bot reply. Equal stamps keep the caller's order. Attention
  * state does not move a row — the bell and the activity hatch still use
  * orderedSidebarThreads for that. */
-export function orderedThreadList<T extends { pinned?: boolean; updatedAt?: number; createdAt?: number }>(tasks: T[]): T[] {
+export function orderedThreadList<T extends { pinned?: boolean; lastThreadOrderAt?: number; createdAt?: number }>(tasks: T[]): T[] {
   return tasks
     .map((task, index) => ({ task, index }))
     .sort((a, b) => {
       const pin = Number(b.task.pinned === true) - Number(a.task.pinned === true);
       if (pin) return pin;
-      const recency = threadRecency(b.task) - threadRecency(a.task);
+      const recency = (b.task.lastThreadOrderAt ?? b.task.createdAt ?? 0) - (a.task.lastThreadOrderAt ?? a.task.createdAt ?? 0);
       if (recency) return recency;
       return a.index - b.index;
     })

@@ -577,4 +577,80 @@ describe("independent bot task state", () => {
     const restarted = new Store(selection);
     expect(restarted.taskByThread(bot.id, task.threadId)?.updatedAt).toBe(message.at);
   });
+
+  it("orders terminal completion after newer activity and repairs its persisted stamp", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const task = store.createTask(bot.id, "Running")!;
+    const other = store.createTask(bot.id, "Other")!;
+    const at = task.createdAt;
+    const reply = store.appendMessage(task.threadId, { role: "bot", kind: "text", text: "Working", turnId: "turn", at: at + 10 });
+    store.appendMessage(other.threadId, { role: "user", kind: "text", text: "New", at: at + 20 });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(at + 30);
+    try {
+      const terminal = store.markTerminalAssistantMessage(task.threadId, "turn");
+      expect(terminal?.at).toBe(reply.at);
+      expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 30);
+      expect(new Store(selection).taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 30);
+      clock.mockReturnValue(at + 40);
+      store.markTerminalAssistantMessage(task.threadId, "turn");
+      expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 30);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each(["bot", "group"])("keeps %s completion time separate from its visible update time", (kind) => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const group = store.createGroup("Channel", [bot.id], false);
+    const task = kind === "bot" ? store.createTask(bot.id, "Running")! : store.createGroupTask(group.id, "Running")!;
+    const readTask = (current: Store) => kind === "bot" ? current.taskByThread(bot.id, task.threadId) : current.groupTaskByThread(group.id, task.threadId);
+    const at = task.createdAt;
+    store.appendMessage(task.threadId, { role: "bot", kind: "text", text: "Working", turnId: "turn", at: at + 10 });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(at + 30);
+    try {
+      store.markTerminalAssistantMessage(task.threadId, "turn");
+      expect(readTask(store)).toMatchObject({ updatedAt: at + 10, lastThreadOrderAt: at + 30 });
+      expect(readTask(new Store(selection))).toMatchObject({ updatedAt: at + 10, lastThreadOrderAt: at + 30 });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each(["bot", "group"])("keeps imported %s completion time separate from its visible update time", (kind) => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const group = store.createGroup("Channel", [bot.id], false);
+    const task = kind === "bot" ? store.createTask(bot.id, "Imported")! : store.createGroupTask(group.id, "Imported")!;
+    const readTask = (current: Store) => kind === "bot" ? current.taskByThread(bot.id, task.threadId) : current.groupTaskByThread(group.id, task.threadId);
+    const at = task.createdAt;
+    store.importTranscript(task.threadId, [{ id: "reply", role: "bot", kind: "text", text: "Done", at: at + 10, turnId: "turn", turnTerminal: true, turnCompletedAt: at + 30, parentId: null }], "reply");
+    expect(readTask(store)).toMatchObject({ updatedAt: at + 10, lastThreadOrderAt: at + 30 });
+    expect(readTask(new Store(selection))).toMatchObject({ updatedAt: at + 10, lastThreadOrderAt: at + 30 });
+  });
+
+  it("tracks completed replies and person messages for thread ordering across restarts", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const task = store.createTask(bot.id, "Notes")!;
+    const at = task.createdAt;
+    store.appendMessage(task.threadId, { role: "bot", kind: "text", text: "Thinking", turnId: "turn-1", at: at + 10 });
+    store.appendMessage(task.threadId, { role: "user", kind: "text", text: "Peer", peerAsk: { botId: "peer", name: "Peer" }, at: at + 20 });
+    expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBeUndefined();
+    const reply = store.appendMessage(task.threadId, { role: "bot", kind: "text", text: "Working", turnId: "turn-1", at: at + 25 });
+    expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBeUndefined();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(at + 26);
+    try {
+      expect(store.markTerminalAssistantMessage(task.threadId, "turn-1")?.at).toBe(reply.at);
+      expect(store.taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 26);
+      expect(new Store(selection).taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 26);
+    } finally {
+      clock.mockRestore();
+    }
+    store.appendMessage(task.threadId, { role: "user", kind: "text", text: "Hello", at: at + 30 });
+    store.appendMessage(task.threadId, { role: "bot", kind: "activity", text: "Working", at: at + 40 });
+    expect(store.taskByThread(bot.id, task.threadId)).toMatchObject({ lastThreadOrderAt: at + 30, updatedAt: at + 40 });
+    expect(new Store(selection).taskByThread(bot.id, task.threadId)?.lastThreadOrderAt).toBe(at + 30);
+  });
 });

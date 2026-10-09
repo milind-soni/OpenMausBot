@@ -499,7 +499,7 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
 
 /** Newest message timestamp per thread. One grouped read, chunked under
  * SQLite's variable limit. Threads with no rows are absent. */
-export function latestMessageAts(threadIds: readonly string[]): Map<string, number> {
+export function latestMessageAts(threadIds: readonly string[], forOrdering = false): Map<string, number> {
   const ids = [...new Set(threadIds.filter((id) => id.length > 0))];
   const out = new Map<string, number>();
   const chunk = 400;
@@ -507,7 +507,7 @@ export function latestMessageAts(threadIds: readonly string[]): Map<string, numb
     const slice = ids.slice(i, i + chunk);
     const placeholders = slice.map(() => "?").join(", ");
     const rows = db()
-      .prepare(`SELECT thread_id, MAX(at) AS at FROM messages WHERE thread_id IN (${placeholders}) GROUP BY thread_id`)
+      .prepare(`SELECT thread_id, MAX(${forOrdering ? "COALESCE(json_extract(json, '$.turnCompletedAt'), at)" : "at"}) AS at FROM messages WHERE ${forOrdering ? "((role = 'user' AND json_extract(json, '$.peerAsk') IS NULL) OR (role = 'bot' AND kind = 'text' AND (json_extract(json, '$.turnTerminal') = 1 OR json_extract(json, '$.turnId') IS NULL))) AND " : ""}thread_id IN (${placeholders}) GROUP BY thread_id`)
       .all(...slice) as Array<{ thread_id: string; at: number }>;
     for (const row of rows) {
       if (typeof row.at === "number" && Number.isFinite(row.at)) out.set(row.thread_id, row.at);

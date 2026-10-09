@@ -156,11 +156,11 @@ describe("cross-bot pinned threads", () => {
   it("collects only pinned threads from every bot, newest pin first", () => {
     const alpha = bot("a", "Alpha", "a0", [
       task("a0", "Idle chat", {}),
-      task("a1", "Old pin", { pinned: true, updatedAt: 1 }),
+      task("a1", "Old pin", { pinned: true, updatedAt: 30, lastThreadOrderAt: 1 }),
     ]);
     const beta = bot("b", "Beta", "b0", [
       task("b0", "Unpinned", {}),
-      task("b1", "New pin", { pinned: true, updatedAt: 2 }),
+      task("b1", "New pin", { pinned: true, updatedAt: 20, lastThreadOrderAt: 2 }),
     ]);
     const entries = crossBotPinnedThreads([alpha, beta], [], {});
     expect(entries.map((entry) => entry.task.threadId)).toEqual(["b1", "a1"]);
@@ -174,8 +174,8 @@ describe("cross-bot pinned threads", () => {
   });
 
   it("includes a pinned room thread alongside pinned bot threads", () => {
-    const alpha = bot("a", "Alpha", "a0", [task("a0", "Pinned chat", { pinned: true, updatedAt: 1 })]);
-    const room = group("g", "Crew", "g0", { tasks: [{ threadId: "g0", title: "Crew", createdAt: 0, pinned: true, updatedAt: 2 }] });
+    const alpha = bot("a", "Alpha", "a0", [task("a0", "Pinned chat", { pinned: true, updatedAt: 30, lastThreadOrderAt: 1 })]);
+    const room = group("g", "Crew", "g0", { tasks: [{ threadId: "g0", title: "Crew", createdAt: 0, pinned: true, updatedAt: 20, lastThreadOrderAt: 2 }] });
     const entries = crossBotPinnedThreads([alpha], [room], {});
     expect(entries.map((entry) => `${entry.kind}:${entry.task.threadId}`)).toEqual(["group:g0", "bot:a0"]);
     expect(attentionJumpAction(entries[0])).toEqual({ type: "select", id: "g" });
