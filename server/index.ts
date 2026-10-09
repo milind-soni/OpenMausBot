@@ -24888,6 +24888,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           if (persisted.live?.key !== undefined) persisted.live.key = "";
+          if (persisted.treg?.token !== undefined) persisted.treg.token = "";
           saveConfig(persisted);
           configWriteCommitted = true;
           syncCredentialEnv(patch);

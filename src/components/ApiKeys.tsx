@@ -51,12 +51,20 @@ const SECTIONS: Record<
 };
 
 // Provider keys have no desktop-shell slot yet and go through the server's
-// own 0600 config, the same place they live on a hosted server.
-const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey">> = {
+// own 0600 config, the same place they live on a hosted server. A secret the
+// desktop's boot migration moves into its encrypted store must save here, so
+// that Clear removes the stored copy too (otherwise the next launch restores it).
+const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey" | "tregToken">> = {
   composio: "composioApiKey",
   box: "boxToken",
   opencodeGo: "opencodeGoApiKey",
+  treg: "tregToken",
 };
+
+/** The desktop shell's encrypted slot for a section, if it has one. */
+export function desktopCredentialSlot(section: ConfigSection) {
+  return ELECTRON_CREDENTIAL[section];
+}
 
 const CREDENTIALS: Record<
   ConfigSection,
@@ -327,7 +335,7 @@ export function ApiKeyRow({
     setError(null);
     testGeneration.current++;
     setVerdict(null);
-    const electronSlot = ELECTRON_CREDENTIAL[section];
+    const electronSlot = desktopCredentialSlot(section);
     const request = window.ogb?.setCredential && electronSlot
       ? window.ogb.setCredential(electronSlot, next)
       : api("/api/config", {

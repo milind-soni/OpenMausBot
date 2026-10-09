@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StoreProvider } from "@/state/store";
 import * as store from "@/state/store";
-import { AnthropicEveryClaudeBot, ApiKeyRow, looksLikeKey, OpenAiCompatUrl, OpenCodeProviderKeys } from "./ApiKeys";
+import { AnthropicEveryClaudeBot, ApiKeyRow, desktopCredentialSlot, looksLikeKey, OpenAiCompatUrl, OpenCodeProviderKeys } from "./ApiKeys";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -154,5 +154,13 @@ describe("X research token row", () => {
     expect(html).toContain('type="password"');
     expect(html).toContain("Configured");
     expect(html).toContain(">Test<");
+  });
+});
+
+describe("desktop credential slots", () => {
+  it("saves the treg token in the encrypted store, so Clear removes it there too", () => {
+    expect(desktopCredentialSlot("treg")).toBe("tregToken");
+    expect(desktopCredentialSlot("box")).toBe("boxToken");
+    expect(desktopCredentialSlot("openai")).toBeUndefined();
   });
 });
