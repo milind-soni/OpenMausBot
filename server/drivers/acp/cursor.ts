@@ -405,7 +405,7 @@ const support = (run: typeof execCli): AcpSupport => ({
 
   // Global flags must precede `acp` (cursor.com/docs/cli/reference/parameters).
   // `--force` is the documented auto-approve switch (`--yolo` is an alias);
-  // `--model` is the reliable pin — ACP session/set_model is best-effort below.
+  // ACP sessions use session/set_model below; keep argv for older CLIs.
   spawnArgs: (config, turn) => [
     ...(config.fullAuto ? ["--force"] : turn.approvalMode === "auto" ? ["--auto-review"] : []),
     ...(turn.model ? ["--model", turn.model] : []),

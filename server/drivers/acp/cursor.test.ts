@@ -514,6 +514,32 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
     }
   });
 
+  it("reports the last accepted model when a pooled session rejects a later pin", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    process.env.FAKE_ACP_MODE = "set-model-invalid-after-first";
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,grok-4.7[reasoning_effort=high,fast=true]|Grok";
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-pooled-rejection", displayName: "Cursor", environment: {}, enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      for (const text of ["first", "second"]) {
+        const turn = await instance.adapter.sendTurn({ threadId: "t-cursor-pooled-rejection", text, model: "grok-4.7-high-fast" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId)).toMatchObject({ ok: true });
+      }
+      expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([
+        expect.objectContaining({ message: expect.stringContaining("did not accept grok-4.7-high-fast in this session, so it runs Grok") }),
+      ]);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_MODE;
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+    }
+  });
+
   it("sets the advertised variant for an effort slug and says when it differs", async () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
@@ -545,6 +571,10 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
           message: expect.stringContaining("rather than grok-4.7-medium-fast"),
         }),
       ]);
+      const second = await instance.adapter.sendTurn({ threadId: "t-cursor-effort", text: "again", model: "grok-4.7-medium-fast" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual([...applied, ...applied]);
+      expect(recorder.events.filter((e) => e.type === "runtime.notice")).toHaveLength(1);
     } finally {
       recorder.stop();
       await instance.dispose();
