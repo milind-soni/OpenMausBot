@@ -3369,7 +3369,7 @@ const remoteApprovalClient = createRemoteApprovalClient({
 ipcMain.handle("remote-approvals:status", workspaceOnly(() => remoteApprovalClient.status()));
 ipcMain.handle("remote-approvals:full", workspaceOnly((_event, botId, threadId) => remoteApprovalClient.setFull(botId, threadId)));
 async function manageDesktopApprovalDevices() {
-  if (!app.isPackaged || activeEnvironment(environmentsState)) throw new Error("Open the packaged host's local workspace first");
+  if (!app.isPackaged || activeEnvironment(environmentsState)) throw new Error("Select This computer in the packaged host app first");
   const pending = remoteApprovalAuthority.pending();
   const bindings = remoteApprovalAuthority.bindings();
   const choices = [...pending.map(row => ({ ...row, pending: true })), ...bindings.map(row => ({ ...row, pending: false }))];
