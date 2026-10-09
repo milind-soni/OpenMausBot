@@ -27,6 +27,40 @@ is "The call id and the call row" in
   by call id and reads the whole transcript, so a record lists only its own
   call's work, also the steps that land after the row.
 
+## Live calls need Pro
+
+Starting a call needs an active OMB Cloud plan of any tier (Personal, Pro or
+Max). Without one, `POST /api/live/session` answers
+`402 { "error": "Live calls need a Pro plan.", "needsPro": true }` before it
+would ask for a key (`409 needsKey`) and before anything reaches OpenAI, for
+every client; the companion passes it to the phones unchanged. The desktop then
+shows the Pro card under the call button instead of the key form, with an offer
+only for someone signed out (signing in first) or free. A payment still being
+linked counts as Pro. While the plan cannot be checked (not read yet, signing
+in, OMB Cloud unreachable, or this computer's sign-in ended) the plan last
+verified decides. A Cloud home always counts. The plan is asked only when a
+call starts, so a plan change never ends a running call. The rule is
+`liveCallsAllowed` in `electron/pro-plan.mjs`; the design is "Live calls need
+Pro" in the spec above.
+
+The desktop app hands its server the answer: `OMB_PRO_PLAN` at spawn, then a
+private `openmausbot:pro-plan` message on each Cloud sign-in change. A server it
+did not start (dev, tests, headless or Docker, and this fixture) says Pro with
+`OMB_PRO_PLAN=1`, which the fixture launcher lets cross only as `1`.
+
+```sh
+node --test electron/pro-plan.node-test.mjs
+pnpm exec vitest run server/pro-plan.test.ts server/live-call-controller.test.ts server/routes/live.test.ts companion/test/proxy-response.test.ts scripts/control-omb.test.ts
+pnpm exec vitest run src/lib/live-call-media.test.ts src/components/CallView.live-mode.test.ts src/components/ProIntroduction.test.ts
+```
+
+`server/live-call.e2e.test.ts` boots its main server with `OMB_PRO_PLAN=1`, a
+Cloud home without it (Pro, so only the key is asked for), and a third server
+the way the desktop app starts one (`OMB_PRO_PLAN=0`, then the private message
+over a stand-in parent port): refused with 402 and no session, a call once the
+message says Pro, still live after the message says not Pro, and the next start
+refused.
+
 ## User path
 
 Start a Live call from the call button's menu, say something the bot must act
@@ -67,8 +101,9 @@ standalone fake cannot be scripted from the shell, so nothing is asked on it:
 ```sh
 # terminal 1: the fake GPT-Live prints its base URL
 node --experimental-strip-types server/testing/fake-openai-live.ts
-# terminal 2: the renderer fixture, pointed at it (the key only ever reaches the fake)
-OMB_OPENAI_LIVE_URL=http://127.0.0.1:FAKE_PORT OMB_OPENAI_LIVE_KEY=sk-fake \
+# terminal 2: the renderer fixture, pointed at it (the key only ever reaches
+# the fake), and Pro, which Live calls need
+OMB_OPENAI_LIVE_URL=http://127.0.0.1:FAKE_PORT OMB_OPENAI_LIVE_KEY=sk-fake OMB_PRO_PLAN=1 \
   node --experimental-strip-types scripts/control-omb.ts ui launch
 # terminal 3, with the url, botId and ui handle it prints
 pnpm control:omb messages --bot BOT_ID --url http://127.0.0.1:PORT
@@ -109,6 +144,9 @@ no `title`, because nothing was asked; and the snapshot's transcript has
   End a call a failed run left open, or restart the fixture.
 - `OMB_OPENAI_LIVE_URL` crosses into a fixture only when it is a loopback
   `http://127.0.0.1:PORT`, and `OMB_OPENAI_LIVE_KEY` only with it.
+- Without `OMB_PRO_PLAN=1` the fixture answers every start with `402`
+  `needsPro`, and the desktop shows the Pro card under the call button. That
+  is the way to see the card by hand; the runs recorded below predate the gate.
 
 ## Boundaries
 

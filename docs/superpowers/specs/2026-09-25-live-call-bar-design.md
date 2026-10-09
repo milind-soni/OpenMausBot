@@ -152,7 +152,7 @@ One active call per harness. Responsibilities, moved from today's renderer
 
 | Route | Body | Result |
 |---|---|---|
-| `POST /api/live/session` | `{ botId, threadId?, sdp, client: "desktop" \| "ios" \| "android" }` | `201 { call: LiveCallState, transport: { type: "webrtc", sdp } }` · `409 { error, needsKey: true }` without a key · `409 { error, activeCall }` when a call is running · `404` unknown bot/thread · OpenAI refusals as today (`liveErrorMessage`) |
+| `POST /api/live/session` | `{ botId, threadId?, sdp, client: "desktop" \| "ios" \| "android" }` | `201 { call: LiveCallState, transport: { type: "webrtc", sdp } }` · `402 { error, needsPro: true }` without a Pro plan (see **Live calls need Pro**) · `409 { error, needsKey: true }` without a key · `409 { error, activeCall }` when a call is running · `404` unknown bot/thread · OpenAI refusals as today (`liveErrorMessage`) |
 | `POST /api/live/call/end` | `{ callId }` | `200 { call }` after `session.closed` or 5 s |
 | `GET /api/live/call` | — | `200 { call: LiveCallState \| null }` |
 | `PATCH /api/live/settings` | `{ voice?, readTypedReplies?, idleMinutes? }` | `200 { live: LiveSettings }` — non-secret settings only; the key is never writable from a phone |
@@ -171,6 +171,37 @@ scrubber unchanged. A client that connects mid-call reads `GET /api/live/call`.
 Config (`config.live`): `key` (secret, desktop credential store, unchanged),
 `voice`, `readTypedReplies` (boolean, default true), `idleMinutes` (1–60,
 default 5).
+
+### Live calls need Pro
+
+Starting a Live call needs an active OMB Cloud plan of any tier (Personal, Pro
+or Max): `entitlement.plan === "pro"` and `status === "active"`. One pure
+function decides, `liveCallsAllowed` in `electron/pro-plan.mjs`, with a table
+test of every plan state. A payment received and still being linked counts.
+Signed out, free, or a plan that is not active does not. While the plan cannot
+be checked (not read yet, signing in, OMB Cloud unreachable, or this computer's
+sign-in ended), the plan last verified decides: the account's `lastPlan`, else
+the last answer this side had. A Cloud home is the plan's own machine and
+always counts.
+
+Only the desktop app's Cloud sign-in knows the plan. Main applies the rule and
+hands its server the answer alone, never the account: `OMB_PRO_PLAN` ("1" or
+"0") when it spawns the server, then `{ type: "openmausbot:pro-plan", pro }`
+over the utility process's private parent port on every sign-in change and
+whenever a server it started is ready (`server/pro-plan.ts` holds it). A
+server the desktop app did not start (dev, tests, headless or Docker) says Pro
+with `OMB_PRO_PLAN=1`.
+
+`POST /api/live/session` without Pro answers
+`402 { "error": "Live calls need a Pro plan.", "needsPro": true }`, checked in
+`LiveCallController.start` before the key, so a person without Pro is never
+asked for one. It covers every client (the companion passes the body through
+to the phones unchanged). The plan is asked when a call starts and never
+during one: a running call is not cut off by a plan change. The desktop shows
+the Pro card under the call button where the key form would be: an offer only
+where `buyOfferAllowed` allows it (signed out, signing in first; or free), and
+otherwise the plan and the way to OMB Cloud settings, never an offer. No Try
+again.
 
 ### Message label
 
@@ -486,6 +517,7 @@ spoken line is answered aloud). The docs page says so.
 
 | Situation | Behaviour |
 |---|---|
+| No Pro plan | 402 `needsPro`, before the key. Desktop: the Pro card under the call button. Phones: their own Pro prompt (SupaMaus/mausbot-mobile); no Try again |
 | No key on the computer | Desktop: key popover. Phones: "Set up Live calls on your computer first.", no Try again |
 | Another call running | 409 with the active call; the client says who is on the line, no Try again. Every client hides its Live call button while another device holds the line, so this is only a race |
 | Phone cannot reach the computer | Call button explains; no call starts |
