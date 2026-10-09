@@ -91,7 +91,6 @@ export function vegaConfig(theme: VegaTheme): Record<string, unknown> {
       ramp: { scheme: theme === "dark" ? "viridis" : "blues" },
     },
     mark: { color: VEGA_CATEGORY_RANGE[0] },
-    bar: { cornerRadiusEnd: 1 },
     line: { strokeWidth: 2, strokeJoin: "round", strokeCap: "round" },
     area: { opacity: 0.75, line: false },
     point: { filled: true, size: 36, opacity: 0.8 },
