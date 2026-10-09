@@ -1158,6 +1158,7 @@ export type Action =
       replyToId?: string;
       threadId?: string;
       mode?: "chat" | "goal";
+      steerOnQueue?: boolean;
       onError?: () => void;
     }
   | {
@@ -1186,10 +1187,13 @@ export type Action =
       type: "send";
       botId: string;
       text: string;
+      queueOnly?: boolean;
+      clearQueuedOnSteer?: boolean;
       sendId?: string;
       replyToId?: string;
       threadId?: string;
       onError?: () => void;
+      onQueueCleared?: (count: number) => void;
     }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string; reason?: SteerQueueReason }
   | { type: "consumePendingQueued"; threadId: string; queueId: string }
@@ -3170,11 +3174,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
             .then(() => api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
-                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
+                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, queueOnly: action.queueOnly, clearQueuedOnSteer: action.clearQueuedOnSteer }),
               }))
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {
                 rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
+              }
+              if (Array.isArray(body?.clearedQueueIds) && typeof body.threadId === "string") {
+                for (const queueId of body.clearedQueueIds) {
+                  rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
+                }
+                action.onQueueCleared?.(body.clearedQueueIds.length);
               }
               if (
                 body?.queued &&
@@ -3475,6 +3485,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   queueId: body.queueId,
                   text: action.text,
                 });
+                if (action.steerOnQueue) {
+                  wrapped({ type: "steerGroupQueued", groupId: action.groupId, threadId: body.threadId, queueId: body.queueId });
+                }
               }
             })
             .catch((error) => {

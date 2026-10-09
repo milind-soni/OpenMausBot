@@ -209,6 +209,40 @@ posixOnly("mid-turn steering e2e", () => {
     40_000,
   );
 
+  it("queues a busy direct message when the sender requests the next turn", async () => {
+    rmSync(steerFinishGate, { force: true });
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
+    const queued = await api("POST", `/api/bots/${created.id}/messages`, { text: "next turn", queueOnly: true });
+    expect(queued).toMatchObject({ status: 202, body: { queued: true, threadId: created.threadId } });
+    expect((await getBot(created.id)).messages.some((m: any) => m.text === "next turn")).toBe(false);
+    writeFileSync(steerFinishGate, "finish");
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.text === "next turn"), "the queued turn to start");
+    const bot = await getBot(created.id);
+    expect(bot.messages.find((m: any) => m.text === "next turn").steered).toBeUndefined();
+  });
+
+  it("a composer steer replaces queued messages in the same direct thread", async () => {
+    rmSync(steerFinishGate, { force: true });
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
+    const first = await api("POST", `/api/bots/${created.id}/messages`, { text: "old one", queueOnly: true });
+    const second = await api("POST", `/api/bots/${created.id}/messages`, { text: "old two", queueOnly: true });
+    const steered = await api("POST", `/api/bots/${created.id}/messages`, { text: "new direction", clearQueuedOnSteer: true });
+    expect(steered).toMatchObject({ status: 202, body: { steered: true, clearedQueueIds: [first.body.queueId, second.body.queueId] } });
+    writeFileSync(steerFinishGate, "finish");
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the turn to settle");
+    const bot = await getBot(created.id);
+    const texts = bot.messages.filter((m: any) => m.kind === "text").map((m: any) => m.text);
+    expect(texts).toContain("new direction");
+    expect(texts).not.toContain("old one");
+    expect(texts).not.toContain("old two");
+  });
+
   it("a steer the CLI runs as its next native turn keeps the turn, its busy state and its internal tool pass until that reply lands", async () => {
     rmSync(lateSteerFinishGate, { force: true });
     rmSync(lateSteerContinuationGate, { force: true });
@@ -466,6 +500,27 @@ posixOnly("mid-turn steering e2e", () => {
     expect(rejected.body.error).toMatch(/no such bot/i);
   }, 40_000);
 
+  it("drains a held queue when the turn ends before steer acknowledgement", async () => {
+    rmSync(steerGate, { force: true });
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeRace", model: "claude-fake" } });
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first race turn" })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id))?.messages.some((message: any) => message.kind === "activity"), "the race turn tool chip");
+    const queued = await api("POST", `/api/bots/${created.id}/messages`, { text: "old queued task", queueOnly: true });
+    expect(queued.body.queued).toBe(true);
+    const delayed = api("POST", `/api/bots/${created.id}/messages`, {
+      text: `new direction ${"x".repeat(900_000)}`,
+      threadId: created.threadId,
+      clearQueuedOnSteer: true,
+    });
+    expect(await Promise.race([delayed.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), 100))])).toBe(false);
+    await waitFor(async () => (await getBot(created.id))?.busy === false, "the original turn to settle");
+    writeFileSync(steerGate, "open");
+    await delayed;
+    await waitFor(async () => (await getBot(created.id))?.messages.some((message: any) => message.text === "old queued task"), "the held queue to drain");
+    await api("POST", `/api/bots/${created.id}/interrupt`);
+  }, 40_000);
+
   it("an engine without a live session preserves the message in the server-side queue", async () => {
     const created = (await api("POST", "/api/bots")).body.bot;
     await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "acp", model: "fake-model" } });
@@ -589,13 +644,16 @@ posixOnly("mid-turn steering e2e", () => {
     expect(queued.body).toMatchObject({ ok: true, queued: true });
     expect((await getBot(created.id)).messages.some((m: any) => m.text === "steer these queued words")).toBe(false);
 
+    const refused = await api("POST", `/api/bots/${created.id}/messages`, { text: "new direction", clearQueuedOnSteer: true });
+    expect(refused.body).toMatchObject({ ok: true, queued: true });
+
     rmSync(codexSteerGate, { force: true });
     const steered = await api("POST", `/api/bots/${created.id}/queue/${queued.body.queueId}/steer`, {
       threadId: created.threadId,
     });
     expect(steered.status).toBe(200);
     expect(steered.body.steered).toBe(true);
-    expect(steered.body.queueIds).toEqual([queued.body.queueId]);
+    expect(steered.body.queueIds).toEqual([queued.body.queueId, refused.body.queueId]);
     const folded = (await getBot(created.id)).messages.find((m: any) => m.text === "steer these queued words");
     expect(folded.steered).toBe(true);
     // pressing Steer moves the words, it does not re-author them

@@ -59,6 +59,13 @@ describe("keyboard-shortcuts", () => {
     expect(items.find((item) => item.id === "live-call-hang-up")).toMatchObject({ macKeys: ["⌘", "⇧", "H"], winKeys: ["Ctrl", "Shift", "H"] });
   });
 
+  it("lists queue, steer, and newline composer keys", () => {
+    const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
+    expect(items.find((item) => item.id === "send-message")?.winKeys).toEqual(["Enter"]);
+    expect(items.find((item) => item.id === "steer-message")?.winKeys).toEqual(["Ctrl", "Enter"]);
+    expect(items.find((item) => item.id === "new-line")?.winKeys).toEqual(["Shift", "Enter"]);
+  });
+
   it("lists previous/next in handler order and excludes pointer gestures", () => {
     const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
     const switchBot = items.find((item) => item.id === "switch-bot")!;

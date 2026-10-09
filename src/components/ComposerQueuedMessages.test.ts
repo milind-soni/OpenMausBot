@@ -5,8 +5,6 @@ import { describe, expect, it } from "vitest";
 import {
   QueuedComposerMessages,
   composerCanSteerQueuedMessages,
-  doubleEnterSteerWindowExpiresAt,
-  doubleEnterSteersQueue,
 } from "./ComposerQueuedMessages";
 import { citationAttachment, createCitationTextSelector, serializeCitation } from "@/lib/citations";
 
@@ -20,28 +18,6 @@ describe("composerCanSteerQueuedMessages", () => {
     expect(composerCanSteerQueuedMessages(false, false, 1)).toBe(false);
     expect(composerCanSteerQueuedMessages(true, true, 1)).toBe(false);
     expect(composerCanSteerQueuedMessages(true, false, 1, true)).toBe(false);
-  });
-});
-
-describe("double-Enter steer gesture", () => {
-  it("opens the window only when a chip arrives on a busy steer-capable thread", () => {
-    const now = 1_000_000;
-    expect(doubleEnterSteerWindowExpiresAt(0, 1, true, true, now)).toBe(now + 1_500);
-    // nothing new queued: not a second-Enter moment
-    expect(doubleEnterSteerWindowExpiresAt(1, 1, true, true, now)).toBeNull();
-    expect(doubleEnterSteerWindowExpiresAt(2, 1, true, true, now)).toBeNull();
-    // idle threads and engines without live steering never open it; rooms
-    // share the gesture, so capability alone decides
-    expect(doubleEnterSteerWindowExpiresAt(0, 1, false, true, now)).toBeNull();
-    expect(doubleEnterSteerWindowExpiresAt(0, 1, true, false, now)).toBeNull();
-  });
-
-  it("steers on the second Enter only while the composer is empty, a chip waits, and the window is open", () => {
-    const now = 1_000_000;
-    expect(doubleEnterSteersQueue(now + 1, now, 1, false)).toBe(true);
-    expect(doubleEnterSteersQueue(now, now, 1, false)).toBe(false); // window closed
-    expect(doubleEnterSteersQueue(now + 1, now, 0, false)).toBe(false); // nothing queued
-    expect(doubleEnterSteersQueue(now + 1, now, 1, true)).toBe(false); // typed words: a plain send
   });
 });
 

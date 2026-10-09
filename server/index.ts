@@ -9075,7 +9075,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
 /** What a person's direct message became: a line in the transcript (a new
  * turn, or words steered into the running one), or a place in the queue. */
 type DirectSendReceipt =
-  | { ok: true; threadId: string; message: Message; steered?: true }
+  | { ok: true; threadId: string; message: Message; steered?: true; clearedQueueIds?: string[] }
   | { ok: true; queued: true; queueId: string; threadId: string; reason?: SteerQueueReason };
 
 /** Refusal from acceptDirectSend: the route turns it into its HTTP answer. */
@@ -9123,10 +9123,12 @@ async function acceptDirectSend(
     /** A person is proven present (a paired session, or the desktop's owner
      * capability): steering their words in clears the unattended mark. */
     personPresent: boolean;
+    queueOnly?: boolean;
+    clearQueuedOnSteer?: boolean;
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, personPresent } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, personPresent, queueOnly, clearQueuedOnSteer } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -9180,69 +9182,92 @@ async function acceptDirectSend(
         const carriesImages = extractTurnImages(text).images.length > 0;
         const steerTarget = handoffs.current(threadId);
         const busyAdmission = admit("direct-busy", {
+          queueOnly,
           carriesImages,
           pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
           engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
         });
-        // steer was offered only when a live instance could take it;
-        // the second check carries that fact to the type system.
-        if (busyAdmission.action === "steer" && instance?.adapter.steer) {
-          steered = await instance.adapter
-            .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
-            .catch((): SteerOutcome => "indeterminate");
-        }
-        // steer() is awaited adapter work. The turn can settle, the task can
-        // switch, or the whole bot can be deleted before its acknowledgement
-        // arrives. Re-read every ownership invariant before appending even a
-        // successful steer; otherwise that late acknowledgement writes a user
-        // message into a task the bot no longer owns. A conflict leaves the
-        // text in the client's composer/outbox to resend deliberately.
-        const current = store.projectBotForTask(botId, threadId);
-        if (!current) throw Object.assign(new Error("no such bot"), { status: 404 });
-        if (!store.taskByThread(botId, threadId)) {
-          throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
-        }
-        const delivered = steered !== "refused";
-        if (delivered) {
-          if (steered === "steered" && !current.busy) {
-            throw Object.assign(
-              new Error("the running turn ended before the steered message could be recorded"),
-              { status: 409 },
-            );
+        let held = clearQueuedOnSteer && busyAdmission.action === "steer"
+          ? holdSteeredQueue(botId, threadId)
+          : null;
+        let cleared = false;
+        try {
+          // steer was offered only when a live instance could take it;
+          // the second check carries that fact to the type system.
+          if (busyAdmission.action === "steer" && instance?.adapter.steer) {
+            steered = await instance.adapter
+              .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
+              .catch((): SteerOutcome => "indeterminate");
           }
-          // "indeterminate" falls through to the same record: the words
-          // may already be folded into a turn whose acknowledgement was
-          // lost, and handing them back for a resend could run them
-          // twice. Recording them once is the honest outcome.
-          // A person steering a webhook turn is present, and auto mode may
-          // follow them again; words that do not prove a person never lift it.
-          if (personPresent) clearUnattended(threadId);
-          const message = store.appendMessage(threadId, {
-            role: "user",
-            kind: "text",
-            text,
+          // steer() is awaited adapter work. The turn can settle, the task can
+          // switch, or the whole bot can be deleted before its acknowledgement
+          // arrives. Re-read every ownership invariant before appending even a
+          // successful steer; otherwise that late acknowledgement writes a user
+          // message into a task the bot no longer owns. A conflict leaves the
+          // text in the client's composer/outbox to resend deliberately.
+          const current = store.projectBotForTask(botId, threadId);
+          if (!current) throw Object.assign(new Error("no such bot"), { status: 404 });
+          if (!store.taskByThread(botId, threadId)) {
+            throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
+          }
+          const delivered = steered !== "refused";
+          if (delivered) {
+            if (steered === "steered" && !current.busy) {
+              throw Object.assign(
+                new Error("the running turn ended before the steered message could be recorded"),
+                { status: 409 },
+              );
+            }
+            // "indeterminate" falls through to the same record: the words
+            // may already be folded into a turn whose acknowledgement was
+            // lost, and handing them back for a resend could run them
+            // twice. Recording them once is the honest outcome.
+            // A person steering a webhook turn is present, and auto mode may
+            // follow them again; words that do not prove a person never lift it.
+            if (personPresent) clearUnattended(threadId);
+            const message = store.appendMessage(threadId, {
+              role: "user",
+              kind: "text",
+              text,
+              replyToId: replyTo?.id,
+              sendId,
+              steered: true,
+              sender,
+              ...(via ? { via } : {}),
+            });
+            // Offered to the next turn again unless the person stops this one.
+            handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
+            if (held) {
+              settleHeldSteeredQueue(held, true);
+              cleared = true;
+            }
+            return { ok: true as const, steered: true as const, threadId, message,
+              ...(held ? { clearedQueueIds: held.items.map((item) => item.messageId) } : {}) };
+          }
+          if (!current.busy) {
+            if (held) {
+              restoreHeldSteeredQueue(held);
+              held = null;
+              drainQueuedSends();
+            }
+            return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via);
+          }
+          const queued = queueSteeredMessage(current.id, threadId, text, {
             replyToId: replyTo?.id,
             sendId,
-            steered: true,
+            prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
             sender,
-            ...(via ? { via } : {}),
+            trigger,
+            via,
           });
-          // Offered to the next turn again unless the person stops this one.
-          handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
-          return { ok: true as const, steered: true as const, threadId, message };
+          return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+        } finally {
+          if (held && !cleared) {
+            restoreHeldSteeredQueue(held);
+            const after = store.projectBotForTask(botId, threadId);
+            if (!after?.busy) drainQueuedSends();
+          }
         }
-        if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via);
-        }
-        const queued = queueSteeredMessage(current.id, threadId, text, {
-          replyToId: replyTo?.id,
-          sendId,
-          prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
-          sender,
-          trigger,
-          via,
-        });
-        return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
       return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via);
     },
@@ -22592,6 +22617,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger,
+          queueOnly: !guarded && body.queueOnly === true,
+          clearQueuedOnSteer: !guarded && body.clearQueuedOnSteer === true,
           // A person steering a webhook turn is present, and auto mode may
           // follow them again. But this route is also reachable from the
           // bot's own shell on a headless server (loopback is the owner

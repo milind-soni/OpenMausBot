@@ -320,9 +320,9 @@ export function cancelSteeredMessage(botId: string, messageId: string, expectedT
  * The entry leaves first so a settle that starts draining while the adapter
  * is still thinking can never also dispatch the same words as a follow-up
  * turn. The caller must either restore the held queue or settle its rows. */
-export function holdSteeredQueue(botId: string, threadId: string, queueId: string): HeldSteerQueue | null {
+export function holdSteeredQueue(botId: string, threadId: string, queueId?: string): HeldSteerQueue | null {
   const entry = queues.get(threadId);
-  if (!entry || entry.botId !== botId || !entry.items.some((item) => item.messageId === queueId)) return null;
+  if (!entry || entry.botId !== botId || (queueId && !entry.items.some((item) => item.messageId === queueId))) return null;
   queues.delete(threadId);
   changed();
   return { botId, threadId, items: entry.items };
@@ -340,10 +340,8 @@ export function restoreHeldSteeredQueue(held: HeldSteerQueue): void {
   changed();
 }
 
-/** Mark a held queue's durable rows delivered: the words were folded into the
- * running turn, so a restart must not replay them as a fresh follow-up. */
-export function settleHeldSteeredQueue(held: HeldSteerQueue): void {
-  settleChatFollowups(held.items.map((item) => item.messageId), null);
+export function settleHeldSteeredQueue(held: HeldSteerQueue, cancelled = false): void {
+  settleChatFollowups(held.items.map((item) => item.messageId), cancelled ? "cancelled" : null);
 }
 
 /** Test helper: how many messages remain queued for a thread. */

@@ -68,9 +68,15 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
     items: [
       {
         id: "send-message",
-        description: "Send message",
+        description: "Queue message while a turn is running; otherwise send",
         macKeys: ["Return"],
         winKeys: ["Enter"],
+      },
+      {
+        id: "steer-message",
+        description: "Steer into the running turn when available; otherwise send",
+        macKeys: ["Ctrl", "Return"],
+        winKeys: ["Ctrl", "Enter"],
       },
       {
         id: "new-line",
