@@ -22,7 +22,7 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
   const server = {
     label: "Server",
     submenu: [
-      { label: "Local (this computer)", type: "radio", checked: !active, click: () => onSwitch("local") },
+      { label: "This computer", type: "radio", checked: !active, click: () => onSwitch("local") },
       ...environments.map((e) => ({
         label: `${e.name} — ${new URL(e.origin).host}`,
         type: "radio",

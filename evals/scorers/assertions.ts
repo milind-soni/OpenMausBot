@@ -1,5 +1,6 @@
 import type { Assertion } from "../types.ts";
 import type { WorldSnapshot } from "./snapshot.ts";
+import { TURN_CLOCK_LEAD } from "../../server/turn-clock.ts";
 
 /** Pure scorers: each assertion is evaluated against the world snapshot
  * the runner collected after the scenario steps finished. The snapshot is
@@ -15,6 +16,15 @@ const deepEqual = (left: unknown, right: unknown): boolean => JSON.stringify(lef
 
 const fmt = (value: unknown): string => JSON.stringify(value, null, 2);
 
+/** The per-turn clock line (server/turn-clock.ts) rides between the update
+ * and the person's text. Only that one leading line is dropped. */
+function withoutLeadingTurnClock(suffix: string): string {
+  const lead = "\n\n" + TURN_CLOCK_LEAD;
+  if (!suffix.startsWith(lead)) return suffix;
+  const end = suffix.indexOf("\n\n", lead.length);
+  return end === -1 ? suffix : suffix.slice(end);
+}
+
 /** Only a leading Claude update wrapped around captured raw user input is
  * an instruction surface. User copies and unproven inputs fail closed. */
 function volatileInstructions(prompt: string, messages: WorldSnapshot["threads"][string]): string {
@@ -28,7 +38,7 @@ function volatileInstructions(prompt: string, messages: WorldSnapshot["threads"]
     const closing = "\n</system-reminder>";
     const end = content.indexOf(closing, prefix.length);
     if (end === -1) return "";
-    const suffix = content.slice(end + closing.length);
+    const suffix = withoutLeadingTurnClock(content.slice(end + closing.length));
     if (!messages.some(message => message.role === "user" && typeof message.text === "string" && suffix === "\n\n" + message.text)) return "";
     return content.slice(prefix.length, end);
   } catch {

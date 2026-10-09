@@ -24,7 +24,7 @@ async function ready(snapshot: CloudLendingSnapshot) {
   vi.mocked(bridge.state).mockResolvedValue(snapshot);
   render(); const cleanup = f.effects[0]!(); await flush(); return cleanup;
 }
-const toggle = () => render().nodes.find(node => node.props.role === "switch" || node.props["aria-label"] === "Let my Cloud use this Mac")!;
+const toggle = () => render().nodes.find(node => node.props.role === "switch" || node.props["aria-label"] === "Let My Cloud use this Mac")!;
 beforeEach(() => {
   f.values = []; f.index = 0; f.effects = [];
   bridge = { state: vi.fn(), chooseFolder: vi.fn().mockResolvedValue(folder), save: vi.fn().mockResolvedValue(lent), stop: vi.fn().mockResolvedValue(off) };
@@ -51,12 +51,12 @@ it("shows nothing until the person is signed in to a known Cloud", async () => {
 it("is a switch, off by default; turning it on shows the choices and lends nothing until one is chosen", async () => {
   await ready(off);
   let view = render();
-  expect(view.html).toContain("Let my Cloud use this Mac");
+  expect(view.html).toContain("Let My Cloud use this Mac");
   expect(view.html).not.toContain("Apps and screen");
   toggle().props.onClick!();
   await flush();
   view = render();
-  expect(view.html).toContain("Choose what your Cloud can use.");
+  expect(view.html).toContain("Choose what My Cloud can use.");
   expect(view.html).toContain("If someone else writes in a conversation, it can no longer use your Mac.");
   expect(view.html).toContain("Apps and screen");
   expect(bridge.save).not.toHaveBeenCalled();
@@ -69,7 +69,7 @@ it("is a switch, off by default; turning it on shows the choices and lends nothi
 it("while lent, says so, shows this Mac's activity, and removing the last choice stops lending instead of saving nothing", async () => {
   await ready({ ...lent, state: { ...lent.state!, busy: true }, activity: [{ at: 1_790_000_000_000, server: "My Cloud", origin: "https://c.test", action: "read_file", detail: "Plans/todo.md", ok: true }] });
   const view = render();
-  expect(view.html).toContain("Your Cloud is using this Mac now.");
+  expect(view.html).toContain("My Cloud is using this Mac now.");
   expect(view.html).toContain("Plans/todo.md");
   expect(view.html).toContain("Read a file");
   view.nodes.find(node => node.props["aria-label"] === "Remove Plans")!.props.onClick!();

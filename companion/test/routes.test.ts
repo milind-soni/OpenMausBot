@@ -33,7 +33,7 @@ describe("credentials", () => {
 });
 
 describe("what the app may do", () => {
-  // Every request in ios/Sources/CompanionCore/Client.swift. If one of these
+  // Every request the phone apps make. If one of these
   // fails, a screen on the phone is broken.
   const calls: Array<[string, string]> = [
     ["GET", "/api/health"],

@@ -1,18 +1,20 @@
 // checkpoints.ts contract, exercised against REAL git in mkdtemp folders:
 // snapshots are commits in a shadow repo (idempotent when nothing changed),
+// staged incrementally yet identical to a from-empty rebuild, obsolete
+// objects are collected on a throttle behind the turn's settled diff,
 // excluded/ignored files are never snapshotted, the digest diff names what a
 // turn changed, a user's own git repo in the folder is never touched, and
 // dangerous folders (home) are refused outright.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 // Shadow repos live under DATA_DIR, which server/testing/setup.ts points at a
 // disposable test home before any test module imports config.ts.
-import { CHECKPOINTS_DIR, diffWorkingTree, refusalReason, release, snapshot } from "./checkpoints.ts";
+import { CHECKPOINTS_DIR, GC_EVERY_COMMITS, diffWorkingTree, refusalReason, release, snapshot } from "./checkpoints.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const scratchDirs: string[] = [];
@@ -39,6 +41,26 @@ function snapshotsIn(bot: string, cwd: string): { hash: string; label: string }[
     const [hash, ...label] = line.split("\t");
     return { hash: hash!, label: label.join("\t") };
   });
+}
+
+/** Wait for every operation queued on the folder's shadow repo (release()
+ * queues behind them; releasing a pin never taken is a no-op). */
+async function drain(bot: string, cwd: string): Promise<void> {
+  await release(bot, cwd, "test-drain");
+}
+
+/** Take changed snapshots until the GC throttle has run at least one
+ * collection: GC_EVERY_COMMITS of them make one due, a later snapshot or the
+ * last turn's settled diff releases it. */
+async function churnUntilCollected(bot: string, cwd: string): Promise<void> {
+  let hash: string | null = null;
+  for (let turn = 0; turn < GC_EVERY_COMMITS; turn += 1) {
+    writeFileSync(join(cwd, "churn.txt"), `churn ${turn}`);
+    hash = await snapshot(bot, cwd, `churn ${turn}`);
+    expect(hash).toMatch(/^[0-9a-f]{40}$/);
+  }
+  await diffWorkingTree(bot, cwd, hash!);
+  await drain(bot, cwd);
 }
 
 /** The user's own git, as the user would run it — no shadow env involved. */
@@ -86,22 +108,137 @@ describe("snapshot", () => {
     expect(snapshotsIn(bot, cwd).map((c) => c.label)).toEqual(["turn 33333333"]);
   });
 
-  it("keeps only the newest usable checkpoint and reclaims obsolete content", async () => {
+  it("keeps only the newest usable checkpoint", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "obsolete payload");
+    await snapshot(bot, cwd, "old turn");
+    writeFileSync(join(cwd, "a.txt"), "latest payload");
+    const latest = await snapshot(bot, cwd, "latest turn");
+    expect(snapshotsIn(bot, cwd).map(c => c.hash)).toEqual([latest]);
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("latest payload");
+  });
+
+  it("reclaims obsolete content on the GC throttle, behind the turn's settled diff, never every snapshot", async () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "obsolete payload");
     const first = await snapshot(bot, cwd, "old turn");
     const shadow = shadowOf(bot, cwd);
     const oldBlob = userGit(shadow, "rev-parse", `${first}:a.txt`).trim();
+    writeFileSync(join(cwd, "a.txt"), "payload 2");
+    await snapshot(bot, cwd, "turn 2");
+    await drain(bot, cwd);
+    expect(() => userGit(shadow, "cat-file", "-e", oldBlob)).not.toThrow();
+    expect(GC_EVERY_COMMITS).toBeGreaterThan(3);
+    for (let turn = 3; turn < GC_EVERY_COMMITS; turn += 1) {
+      writeFileSync(join(cwd, "a.txt"), `payload ${turn}`);
+      expect(await snapshot(bot, cwd, `turn ${turn}`)).toMatch(/^[0-9a-f]{40}$/);
+    }
+    await drain(bot, cwd);
+    expect(() => userGit(shadow, "cat-file", "-e", oldBlob)).not.toThrow();
     writeFileSync(join(cwd, "a.txt"), "latest payload");
     const latest = await snapshot(bot, cwd, "latest turn");
+    await drain(bot, cwd);
+    // the due collection waits for the turn's settled diff...
+    expect(() => userGit(shadow, "cat-file", "-e", oldBlob)).not.toThrow();
+    expect(await diffWorkingTree(bot, cwd, latest!)).toEqual({ changed: [], added: [], deleted: [] });
+    // ...and is queued behind it
+    await drain(bot, cwd);
     expect(snapshotsIn(bot, cwd).map(c => c.hash)).toEqual([latest]);
     expect(() => userGit(shadow, "cat-file", "-e", oldBlob)).toThrow();
-    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("latest payload");
+    expect(userGit(shadow, "cat-file", "-p", `${latest}:a.txt`)).toBe("latest payload");
+  });
+
+  // The shadow index persists between snapshots. Each case below is one where
+  // an incremental `add -A` alone would differ from a from-empty rebuild.
+
+  // Case-insensitive volumes (macOS default APFS, Windows NTFS): the shadow
+  // repo gets core.ignorecase=true, so an incremental add keeps old spellings.
+  const caseInsensitiveTmp = (() => {
+    const probe = mkdtempSync(join(tmpdir(), "omb-ckpt-case-"));
+    scratchDirs.push(probe);
+    writeFileSync(join(probe, "probe"), "");
+    return existsSync(join(probe, "PROBE"));
+  })();
+  const treeNames = (shadow: string, hash: string | null) =>
+    userGit(shadow, "ls-tree", "-r", "-z", "--name-only", hash!).split("\0").filter(Boolean).map(name => name.normalize("NFC")).sort();
+
+  it.runIf((process.platform === "darwin" || process.platform === "win32") && caseInsensitiveTmp)(
+    "records a case-only rename of a file, a folder and a dotfile like a from-empty rebuild",
+    async () => {
+      const { bot, cwd } = workspace();
+      writeFileSync(join(cwd, "r0"), "file");
+      mkdirSync(join(cwd, "Docs"));
+      writeFileSync(join(cwd, "Docs", "a.txt"), "in a folder");
+      writeFileSync(join(cwd, ".GITIGNORE"), "# rules\n");
+      const shadow = shadowOf(bot, cwd);
+      const first = await snapshot(bot, cwd, "original spelling");
+      expect(treeNames(shadow, first)).toEqual([".GITIGNORE", "Docs/a.txt", "r0"]);
+      renameSync(join(cwd, "r0"), join(cwd, "R0"));
+      renameSync(join(cwd, "Docs"), join(cwd, "docs"));
+      renameSync(join(cwd, ".GITIGNORE"), join(cwd, ".gitignore"));
+      expect(await diffWorkingTree(bot, cwd, first!)).toEqual({
+        changed: [],
+        added: [".gitignore", "R0", "docs/a.txt"],
+        deleted: [".GITIGNORE", "Docs/a.txt", "r0"],
+      });
+      const renamed = await snapshot(bot, cwd, "new spelling");
+      expect(treeNames(shadow, renamed)).toEqual([".gitignore", "R0", "docs/a.txt"]);
+      expect(await snapshot(bot, cwd, "unchanged")).toBe(renamed);
+    },
+  );
+
+  it.runIf((process.platform === "darwin" || process.platform === "win32") && caseInsensitiveTmp)(
+    "compares decomposed (NFD) names in NFC when looking for a case-only rename",
+    async () => {
+      const { bot, cwd } = workspace();
+      writeFileSync(join(cwd, "École.txt"), "accent");
+      const shadow = shadowOf(bot, cwd);
+      expect(treeNames(shadow, await snapshot(bot, cwd, "upper"))).toEqual(["École.txt"]);
+      renameSync(join(cwd, "École.txt"), join(cwd, "école.txt"));
+      expect(treeNames(shadow, await snapshot(bot, cwd, "lower"))).toEqual(["école.txt"]);
+    },
+  );
+
+  it("drops a newly ignored file from the next snapshot and the settled diff", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "source");
+    writeFileSync(join(cwd, "secret.txt"), "tracked until ignored");
+    const first = await snapshot(bot, cwd, "before ignore");
+    const shadow = shadowOf(bot, cwd);
+    expect(userGit(shadow, "ls-tree", "-r", "--name-only", first!).trim().split("\n")).toEqual(["a.txt", "secret.txt"]);
+    writeFileSync(join(cwd, ".gitignore"), "secret.txt\n");
+    expect(await diffWorkingTree(bot, cwd, first!)).toEqual({ changed: [], added: [".gitignore"], deleted: ["secret.txt"] });
+    const second = await snapshot(bot, cwd, "after ignore");
+    expect(userGit(shadow, "ls-tree", "-r", "--name-only", second!).trim().split("\n")).toEqual([".gitignore", "a.txt"]);
+    // the ignored file itself is left alone
+    expect(readFileSync(join(cwd, "secret.txt"), "utf8")).toBe("tracked until ignored");
+  });
+
+  it("matches a from-empty rebuild when a folder becomes, then stops being, a nested repo", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "outer");
+    mkdirSync(join(cwd, "lib"));
+    writeFileSync(join(cwd, "lib", "b.txt"), "inner");
+    const shadow = shadowOf(bot, cwd);
+    const tree = (hash: string | null) => userGit(shadow, "ls-tree", "-r", hash!).trim().split("\n").map(line => {
+      const [meta, path] = line.split("\t");
+      return `${meta!.split(" ")[0]} ${path}`;
+    });
+    expect(tree(await snapshot(bot, cwd, "plain folder"))).toEqual(["100644 a.txt", "100644 lib/b.txt"]);
+    userGit(join(cwd, "lib"), "init");
+    userGit(join(cwd, "lib"), "add", "-A");
+    userGit(join(cwd, "lib"), "commit", "-m", "inner");
+    expect(tree(await snapshot(bot, cwd, "nested repo"))).toEqual(["100644 a.txt", "160000 lib"]);
+    rmSync(join(cwd, "lib", ".git"), { recursive: true, force: true });
+    expect(tree(await snapshot(bot, cwd, "plain again"))).toEqual(["100644 a.txt", "100644 lib/b.txt"]);
   });
 
   // Two threads of one bot work in one folder at the same time: thread B's
   // snapshot lands while thread A's turn is still running, and A's digest
   // diffs against A's own pre-turn commit when A ends.
+  // This exercises a full 25-commit GC cycle with real Git subprocesses.
+  // Windows runner process startup can exhaust the suite's 20-second limit;
+  // keep every retention/collection assertion, with a bounded Windows budget.
   it("keeps a pinned pre-turn commit through a sibling turn's snapshot until it is released", async () => {
     const { bot, cwd } = workspace();
     const shadow = shadowOf(bot, cwd);
@@ -116,17 +253,17 @@ describe("snapshot", () => {
     // both pinned commits are intact
     expect(() => userGit(shadow, "cat-file", "-e", `${hashA}^{commit}`)).not.toThrow();
     expect(() => userGit(shadow, "cat-file", "-e", `${hashB}^{commit}`)).not.toThrow();
-    // both turns end → the next snapshot's cleanup reclaims A's commit
+    // both turns end → the next collection reclaims both commits (that a
+    // collection keeps pinned commits is in checkpoints-perf.test.ts)
     await release(bot, cwd, "dispatch-A");
     await release(bot, cwd, "dispatch-B");
-    writeFileSync(join(cwd, "a.txt"), "turn C");
-    await snapshot(bot, cwd, "turn C");
+    await churnUntilCollected(bot, cwd);
     expect(() => userGit(shadow, "cat-file", "-e", `${hashA}^{commit}`)).toThrow();
     expect(() => userGit(shadow, "cat-file", "-e", `${hashB}^{commit}`)).toThrow();
     // releasing twice, or a pin never taken, is harmless
     await release(bot, cwd, "dispatch-A");
     await release(bot, cwd, "never-pinned");
-  });
+  }, process.platform === "win32" ? 60_000 : 20_000);
 
   it("sweeps pins a previous process left behind, on first use of the shadow", async () => {
     const { bot, cwd } = workspace();
@@ -142,6 +279,10 @@ describe("snapshot", () => {
     const next = await fresh.snapshot(bot, cwd, "turn Y");
     expect(next).not.toBe(leaked);
     expect(userGit(shadow, "for-each-ref", "refs/omb-live/").trim()).toBe("");
+    // the swept pin makes that turn's collection due; it runs behind the
+    // turn's settled diff
+    expect(await fresh.diffWorkingTree(bot, cwd, next!)).toEqual({ changed: [], added: [], deleted: [] });
+    await fresh.release(bot, cwd, "test-drain");
     expect(() => userGit(shadow, "cat-file", "-e", `${leaked}^{commit}`)).toThrow();
   });
 

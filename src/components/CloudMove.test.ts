@@ -50,7 +50,7 @@ async function ready(component: () => ReactNode, state = overview()) {
 const failed = (error: NonNullable<CloudMoveState["error"]>, destination = CLOUD, extra: Partial<CloudMoveState> = {}) =>
   moveView(null, { phase: "failed", action: "move", error, destination, ...extra });
 
-it("Settings → OMB Cloud: what comes and its size, that sign-ins stay here, and one click that names the Cloud", async () => {
+it("Settings → OpenMausBot Cloud: what comes and its size, that sign-ins stay here, and one click that names the Cloud", async () => {
   await ready(settings());
   const { html } = render(settings());
   expect(bridge.state).toHaveBeenCalledWith("cloud");
@@ -164,7 +164,7 @@ it("every state reads as one sentence and one next step, for the Cloud and any o
   expect(blocked("same_computer")).toMatchObject({ message: { text: "bots.example.test is this computer's own server." }, action: null });
   expect(blocked("outdated", { cloud: { ...emptyCloud, appVersion: "0.1.90" } })).toMatchObject({ message: { text: "bots.example.test runs 0.1.90; this computer runs 0.1.96. Update bots.example.test, then copy again." }, action: { kind: "check", label: "Check again" } });
   expect(blocked("outdated", { cloud: null }).message?.text).toBe("Update OpenMausBot on bots.example.test, then copy again.");
-  expect(view({}, { destination: CLOUD, blocked: "outdated", cloud: null }).message?.text).toBe("Your Cloud has not updated to a version that can receive a move yet. Try again once it has.");
+  expect(view({}, { destination: CLOUD, blocked: "outdated", cloud: null }).message?.text).toBe("My Cloud has not updated to a version that can receive a move yet. Try again once it has.");
   expect(blocked("unreachable")).toMatchObject({ message: { text: "bots.example.test didn't answer. Check that it's running, then try again." }, action: { kind: "check" } });
   expect(blocked("busy_elsewhere", { busyWith: "My Cloud" })).toMatchObject({ message: { text: "A copy to My Cloud is running. Wait for it to finish." }, action: null });
   // Failures: what happened, then the one step that can help.
@@ -205,16 +205,16 @@ it("every state reads as one sentence and one next step, for the Cloud and any o
 it("the Cloud's own limits stay the Cloud's: its plan's disk, and growing it", () => {
   const GB = 1024 ** 3;
   expect(failed({ code: "cloud_grow_unavailable", message: "", maxBytes: 100 * GB }).message?.text)
-    .toBe("Your Cloud's disk grows as it fills, up to 100 GB, but it could not make room for this move just now. Nothing was moved. Try again in a few minutes; if it still can't, tell us through Send Feedback and we'll make room.");
+    .toBe("My Cloud's disk grows as it fills, up to 100 GB, but it could not make room for this move just now. Nothing was moved. Try again in a few minutes; if it still can't, tell us through Send Feedback and we'll make room.");
   expect(failed({ code: "cloud_full", message: "", freeBytes: 9 * GB, neededBytes: 11 * GB, maxBytes: 10 * GB }).message?.text)
-    .toBe("This move needs about 11 GB of room on your Cloud while it installs, and your plan's disk holds 10 GB. Nothing was moved. A plan with a larger disk can take it: see your Cloud dashboard.");
+    .toBe("This move needs about 11 GB of room on My Cloud while it installs, and your plan's disk holds 10 GB. Nothing was moved. A plan with a larger disk can take it: see your Plan page.");
   // The plan's disk would hold it; what is on the Cloud is in the way: make room, never "a larger plan".
   expect(failed({ code: "cloud_full", message: "", freeBytes: 15 * GB, neededBytes: 19.8 * GB, maxBytes: 50 * GB }).message?.text)
     .toBe("My Cloud has 15 GB free and this copy needs about 19.8 GB. Nothing was copied. Make room on My Cloud (for example, remove large files there), then try again.");
   const largest = failed({ code: "cloud_full", message: "", freeBytes: 90 * GB, neededBytes: 120 * GB, maxBytes: 100 * GB, largest: true }).message!.text;
   expect(largest).toContain("the largest there is"); expect(largest).toContain("Send Feedback"); expect(largest).not.toContain("larger disk");
   const unsupported = failed({ code: "cloud_grow_unsupported", message: "", freeBytes: 9 * GB, neededBytes: 20 * GB, maxBytes: 100 * GB }).message!.text;
-  expect(unsupported).toBe("This move needs about 20 GB of room on your Cloud while it installs, more than your Cloud can make room for yet. Nothing was moved. Tell us through Send Feedback and we'll make room.");
+  expect(unsupported).toBe("This move needs about 20 GB of room on My Cloud while it installs, more than My Cloud can make room for yet. Nothing was moved. Tell us through Send Feedback and we'll make room.");
   expect(failed({ code: "cloud_grow_unsupported", message: "" }).message?.text).not.toMatch(/try again/i);
   // Today's Admin (no disk word): more than the Cloud's whole disk is not "remove files"; less is.
   expect(failed({ code: "cloud_full", message: "", freeBytes: 8.9 * GB, neededBytes: 10.5 * GB, volumeBytes: 10 * GB }).message?.text).toBe(unsupported.replace("20 GB", "10.5 GB"));

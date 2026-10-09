@@ -1,7 +1,8 @@
 // bot-attachment.ts: what a bot may hand to the chat, from where, and as what.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // attachments.ts reads DATA_DIR at import time.
@@ -109,6 +110,88 @@ describe("saveBotAttachment", () => {
     await expect(saveBotAttachment({ path: "nope.pdf", roots: [WORK] })).rejects.toMatchObject({ status: 404 });
     await expect(saveBotAttachment({ path: "  ", roots: [WORK] })).rejects.toMatchObject({ status: 400 });
     expect(existsSync(ATTACHMENTS_DIR)).toBe(true);
+  });
+});
+
+describe("saveBotAttachment for a file a turn saved outside its folders", () => {
+  // Where a person might ask for output: outside every root, not hidden.
+  const DESIGNS = join(DATA_ROOT, "Desktop", "designs", "2026-10-08_News");
+  const refuse = [process.env.OMB_DATA_DIR!];
+  const hourAgo = () => new Date(Date.now() - 3_600_000);
+  beforeAll(() => mkdirSync(DESIGNS, { recursive: true }));
+
+  it("copies it into the attachment store and leaves the original where it is", async () => {
+    const since = Date.now();
+    const source = join(DESIGNS, "00_غلاف.jpg");
+    writeFileSync(source, "jpeg-bytes");
+    // Bots on macOS write the URL unencoded; Windows needs a real file URL.
+    const href = process.platform === "win32" ? pathToFileURL(source).href : `file://${source}`;
+    const saved = await saveBotAttachment({ path: href, roots: [WORK], savedThisTurn: { since, refuse } });
+    expect(saved.attachment).toMatchObject({ kind: "image", mime: "image/jpeg" });
+    expect(saved.attachment.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
+    expect(readFileSync(saved.attachment.path, "utf8")).toBe("jpeg-bytes");
+    expect(readFileSync(source, "utf8")).toBe("jpeg-bytes");
+  });
+
+  it("stays roots only without the grant, for a VM turn, and for a relative path", async () => {
+    const since = Date.now();
+    writeFileSync(join(DESIGNS, "fresh.pdf"), "%PDF-fresh");
+    const refusal = { status: 403, code: "outside_workspace" };
+    await expect(saveBotAttachment({ path: join(DESIGNS, "fresh.pdf"), roots: [WORK] })).rejects.toMatchObject(refusal);
+    await expect(saveBotAttachment({
+      path: join(DESIGNS, "fresh.pdf"),
+      roots: [WORK],
+      guest: { root: "/home/cua/workspace", host: VM_HOME },
+      savedThisTurn: { since, refuse },
+    })).rejects.toMatchObject(refusal);
+    await expect(saveBotAttachment({ path: "../Desktop/designs/2026-10-08_News/fresh.pdf", roots: [WORK], savedThisTurn: { since, refuse } }))
+      .rejects.toMatchObject(refusal);
+  });
+
+  it("refuses a file that was not written during this turn", async () => {
+    const old = join(DESIGNS, "last-week.pdf");
+    writeFileSync(old, "%PDF-old");
+    utimesSync(old, hourAgo(), hourAgo());
+    await expect(saveBotAttachment({ path: old, roots: [WORK], savedThisTurn: { since: Date.now(), refuse } }))
+      .rejects.toMatchObject({ status: 403, message: expect.stringContaining("not saved during this turn") });
+  });
+
+  it("refuses hidden folders and the app's data, however fresh", async () => {
+    const since = Date.now();
+    const hidden = join(DATA_ROOT, ".ssh");
+    mkdirSync(hidden, { recursive: true });
+    writeFileSync(join(hidden, "key.pdf"), "%PDF-key");
+    mkdirSync(join(process.env.OMB_DATA_DIR!, "workspaces"), { recursive: true });
+    writeFileSync(join(process.env.OMB_DATA_DIR!, "workspaces", "MEMORY.md"), "# private");
+    for (const path of [join(hidden, "key.pdf"), join(process.env.OMB_DATA_DIR!, "workspaces", "MEMORY.md")]) {
+      await expect(saveBotAttachment({ path, roots: [WORK], savedThisTurn: { since, refuse } }), path)
+        .rejects.toMatchObject({ status: 403, code: "outside_workspace" });
+    }
+  });
+
+  // creating a symlink needs extra rights on windows
+  it.skipIf(process.platform === "win32")("refuses a fresh link into a hidden folder", async () => {
+    const since = Date.now();
+    const hidden = join(DATA_ROOT, ".ssh");
+    mkdirSync(hidden, { recursive: true });
+    writeFileSync(join(hidden, "linked-key.pdf"), "%PDF-key");
+    symlinkSync(join(hidden, "linked-key.pdf"), join(DESIGNS, "innocent.pdf"));
+    await expect(saveBotAttachment({ path: join(DESIGNS, "innocent.pdf"), roots: [WORK], savedThisTurn: { since, refuse } }))
+      .rejects.toMatchObject({ status: 403, code: "outside_workspace" });
+  });
+
+  it("keeps every other check: folders, types, the size cap and a missing file in the roots", async () => {
+    const since = Date.now();
+    const turn = { roots: [WORK], savedThisTurn: { since, refuse } };
+    await expect(saveBotAttachment({ path: DESIGNS, ...turn })).rejects.toMatchObject({ status: 400 });
+    writeFileSync(join(DESIGNS, "bundle.zip"), "PK");
+    await expect(saveBotAttachment({ path: join(DESIGNS, "bundle.zip"), ...turn })).rejects.toMatchObject({ status: 415 });
+    const big = join(DESIGNS, "big.mp4");
+    writeFileSync(big, "x");
+    truncateSync(big, 25 * 1024 * 1024 + 1);
+    await expect(saveBotAttachment({ path: big, ...turn })).rejects.toMatchObject({ status: 413 });
+    await expect(saveBotAttachment({ path: "nope.pdf", ...turn })).rejects.toMatchObject({ status: 404 });
+    await expect(saveBotAttachment({ path: join(DESIGNS, "nope.pdf"), ...turn })).rejects.toMatchObject({ status: 404 });
   });
 });
 

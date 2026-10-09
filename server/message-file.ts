@@ -3,9 +3,9 @@
 // reader: the HTTP route supplies only roots derived from the exact bot
 // message, and this helper keeps the eventual file handle inside one of them.
 import { constants } from "node:fs";
-import { open, realpath, stat, type FileHandle } from "node:fs/promises";
-import { basename, extname, isAbsolute, posix, relative, resolve, sep, win32 } from "node:path";
-import { fileURLToPath } from "node:url";
+import { lstat, open, readdir, realpath, stat, type FileHandle } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { fromMarkdown } from "mdast-util-from-markdown";
 
@@ -35,9 +35,14 @@ export function messageFileRoots(options: {
   ])];
 }
 
-function statusError(status: number, message: string): Error & { status: number } {
-  return Object.assign(new Error(message), { status });
+function statusError(status: number, message: string, code?: string): Error & { status: number; code?: string } {
+  return Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 }
+
+// The client offers "Show in folder" for exactly this refusal, so it carries a
+// stable code instead of being recognised by its English text.
+const outsideWorkspace = () =>
+  statusError(403, "the linked file is outside this conversation's workspace", "outside_workspace");
 
 function decodePathWithSuffixRemoved(href: string): string {
   // Split before decoding so an encoded `?` or `#` remains part of the
@@ -412,13 +417,14 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
       const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
       handle = await open(canonicalBefore, constants.O_RDONLY | noFollow);
       const opened = await handle.stat();
+      if (opened.isDirectory()) throw statusError(400, "the link points to a folder, not a file", "directory");
       if (!opened.isFile()) throw statusError(400, "the link does not point to a regular file");
       if (opened.size > MESSAGE_FILE_MAX_BYTES) {
         throw statusError(413, `file exceeds ${MESSAGE_FILE_MAX_BYTES} bytes`);
       }
 
       const canonicalAfter = await realpath(candidate);
-      if (!containedBy(root, canonicalAfter)) throw statusError(403, "the linked file is outside this conversation's workspace");
+      if (!containedBy(root, canonicalAfter)) throw outsideWorkspace();
       const after = await stat(canonicalAfter);
       if (opened.dev !== after.dev || opened.ino !== after.ino) {
         throw statusError(409, "the linked file changed while it was being opened");
@@ -437,8 +443,156 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
     }
   }
 
-  if (sawOutsideRoot) throw statusError(403, "the linked file is outside this conversation's workspace");
+  if (sawOutsideRoot) throw outsideWorkspace();
   throw statusError(404, "the linked file is unavailable");
+}
+
+/** Filesystems such as HFS+ and FAT keep whole or even seconds, so a file
+ * written in the first moments of a turn can carry a slightly earlier time. */
+const SAVED_SINCE_SLACK_MS = 2_000;
+
+/**
+ * Open one file a turn saved outside every root, for a bot to deliver by copy
+ * (server/bot-attachment.ts). This grants no folder and is never used for a
+ * message link: only an absolute path to a regular file last written at or
+ * after `since`, outside hidden folders and outside `refuse`. The open itself
+ * is openMessageFile with the file's own folder as the root, so the realpath,
+ * O_NOFOLLOW, regular file and size checks are exactly the ones above.
+ */
+export async function openFileSavedSince(
+  href: string,
+  options: { since: number; refuse: readonly string[] },
+): Promise<OpenedMessageFile> {
+  const requested = referencedPath(href, false, false);
+  if (!isAbsolute(requested) || requested.startsWith("\\\\") || requested.startsWith("//")) throw outsideWorkspace();
+  let canonical: string;
+  try {
+    canonical = await realpath(requested);
+  } catch {
+    throw statusError(404, "the linked file is unavailable");
+  }
+  const refused = (await Promise.all(options.refuse.map((root) => realpath(root).catch(() => null))))
+    .filter((root): root is string => Boolean(root));
+  const hidden = canonical.split(/[\\/]/).some((part) => part.startsWith("."));
+  if (hidden || refused.some((root) => containedBy(root, canonical))) {
+    throw statusError(403, "files in hidden folders or in the app's own data can't be attached", "outside_workspace");
+  }
+  const file = await openMessageFile(canonical, [dirname(canonical)]);
+  const opened = await file.handle.stat().catch(async (error: unknown) => {
+    await file.handle.close().catch(() => undefined);
+    throw error;
+  });
+  if (opened.mtimeMs < options.since - SAVED_SINCE_SLACK_MS) {
+    await file.handle.close().catch(() => undefined);
+    throw statusError(403, "that file is outside your working folder and was not saved during this turn, so it can't be attached", "outside_workspace");
+  }
+  return file;
+}
+
+export const MESSAGE_FOLDER_MAX_ENTRIES = 200;
+
+export interface MessageFolderEntry {
+  name: string;
+  bytes: number;
+  mime: string;
+}
+
+export interface MessageFolderListing {
+  name: string;
+  entries: MessageFolderEntry[];
+  truncated: boolean;
+}
+
+/**
+ * List the regular files directly inside a message-linked folder, under the
+ * same roots and canonical containment as openMessageFile. Subfolders,
+ * sockets and any entry that resolves outside the root are left out. Each
+ * entry is then opened by name through openMessageFile, which re-checks it.
+ */
+export async function listMessageFolder(href: string, roots: readonly string[]): Promise<MessageFolderListing> {
+  const { path: _path, ...listing } = await readMessageFolder(href, roots);
+  return listing;
+}
+
+/** Open one file of a listed folder by its plain name, with every file check. */
+export async function openMessageFolderEntry(
+  href: string,
+  entry: string,
+  roots: readonly string[],
+): Promise<OpenedMessageFile> {
+  const folder = await readMessageFolder(href, roots);
+  if (!folder.entries.some((listed) => listed.name === entry)) {
+    throw statusError(404, "the linked file is unavailable");
+  }
+  return openMessageFile(pathToFileURL(join(folder.path, entry)).href, roots);
+}
+
+async function readMessageFolder(
+  href: string,
+  roots: readonly string[],
+): Promise<MessageFolderListing & { path: string }> {
+  const requested = referencedPath(href);
+  const canonicalRoots = (await Promise.all(roots.map(async (root) => {
+    try {
+      const canonical = await realpath(root);
+      return (await stat(canonical)).isDirectory() ? canonical : null;
+    } catch {
+      return null;
+    }
+  }))).filter((root): root is string => Boolean(root));
+  if (canonicalRoots.length === 0) throw statusError(404, "the linked folder is unavailable");
+  const candidates = isAbsolute(requested)
+    ? [resolve(requested)]
+    : canonicalRoots.map((root) => resolve(root, requested));
+
+  let sawOutsideRoot = false;
+  for (const candidate of new Set(candidates)) {
+    let folder: string;
+    try {
+      folder = await realpath(candidate);
+    } catch {
+      continue;
+    }
+    const root = canonicalRoots.find((allowed) => containedBy(allowed, folder));
+    if (!root) {
+      sawOutsideRoot = true;
+      continue;
+    }
+    if (!(await stat(folder)).isDirectory()) throw statusError(400, "the link does not point to a folder");
+
+    const names = (await readdir(folder)).sort((a, b) => a.localeCompare(b));
+    const entries: MessageFolderEntry[] = [];
+    let truncated = false;
+    for (const name of names) {
+      const child = join(folder, name);
+      try {
+        const own = await lstat(child);
+        if (!own.isFile() && !own.isSymbolicLink()) continue;
+        const target = await realpath(child);
+        if (!containedBy(root, target)) continue;
+        const info = await stat(target);
+        if (!info.isFile()) continue;
+        if (entries.length >= MESSAGE_FOLDER_MAX_ENTRIES) {
+          truncated = true;
+          break;
+        }
+        entries.push({ name, bytes: info.size, mime: mimeFor(target) });
+      } catch {
+        continue;
+      }
+    }
+    return { name: basename(folder), entries, truncated, path: folder };
+  }
+
+  if (sawOutsideRoot) throw outsideWorkspace();
+  throw statusError(404, "the linked folder is unavailable");
+}
+
+/** One plain file name inside a listed folder; never a path or a dot entry. */
+export function messageFolderEntryName(value: unknown): string | null {
+  if (typeof value !== "string" || !value || value.length > 255) return null;
+  if (value === "." || value === ".." || /[\\/\0]/.test(value)) return null;
+  return value;
 }
 
 /** A safe attachment header with a readable ASCII fallback and UTF-8 name. */

@@ -6,7 +6,7 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onSt
   let tray = null;
   let shown = { lending: false, busy: false };
   const menu = busy => Menu.buildFromTemplate([
-    { label: busy ? "Your Cloud is using this computer now" : "Your Cloud can use this computer", enabled: false },
+    { label: busy ? "My Cloud is using this computer now" : "My Cloud can use this computer", enabled: false },
     { type: "separator" },
     { label: "Stop lending", click: () => onStop() },
     { label: "Lending settings…", click: () => onOpen() },
@@ -22,7 +22,7 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onSt
         tray = new Tray(nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 }));
         tray.on("click", () => tray?.popUpContextMenu?.());
       }
-      tray.setToolTip(next.busy ? "OpenMaus Bot: your Cloud is using this computer" : "OpenMaus Bot: lent to your Cloud");
+      tray.setToolTip(next.busy ? "OpenMausBot: My Cloud is using this computer" : "OpenMausBot: lent to My Cloud");
       // macOS shows the title beside the icon: visible while in use.
       tray.setTitle?.(next.busy ? "In use" : "");
       tray.setContextMenu(menu(next.busy));

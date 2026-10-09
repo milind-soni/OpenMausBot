@@ -242,8 +242,8 @@ describe("buildBotOverview", () => {
   it("says a Cloud home cannot use this computer or a Local VM, and changes nothing elsewhere", () => {
     const reach = (computer: OverviewFacts["bot"]["computer"], cloudHome?: boolean) =>
       buildBotOverview(baseFacts({ bot: { ...baseFacts().bot, computer }, ...(cloudHome === undefined ? {} : { cloudHome }) })).reaches[0];
-    expect(reach("local", true)).toBe("Computer preference: this computer, which isn't available on OMB Cloud.");
-    expect(reach("vm", true)).toBe("Computer preference: Local VM, which isn't available on OMB Cloud.");
+    expect(reach("local", true)).toBe("Computer preference: this computer, which isn't available on My Cloud.");
+    expect(reach("vm", true)).toBe("Computer preference: Local VM, which isn't available on My Cloud.");
     expect(reach("cloud", true)).toBe("Computer preference: cloud computer.");
     expect(reach("browser", true)).toBe("Computer preference: browser only.");
     expect(reach(undefined, true)).toBe("Computer preference: Auto; availability is checked when a task starts.");

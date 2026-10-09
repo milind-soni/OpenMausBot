@@ -28,6 +28,19 @@ describe("failed turn text", () => {
     expect(activityPreview(loginRow, engine())).toBe("Claude isn't signed in");
   });
 
+  it("says Grok Build is signed out through the same rule, now that its card is the in-app code", () => {
+    const grokRow = { name: "error: Grok is not signed in to your grok.com account — choose Sign in to Grok in engine setup", ok: false, setup: true };
+    const grok = engine({
+      instanceId: "grok", driverKind: "grokAgent", displayName: "Grok", authentication: { method: "device-code" },
+      install: { command: { darwin: "curl -fsSL https://x.ai/cli/install.sh | bash", linux: "curl -fsSL https://x.ai/cli/install.sh | bash" }, signInCommand: "grok login" },
+    } as Partial<InstanceInfo>);
+    expect(signedOutEngine(grokRow, grok)).toBe(grok);
+    expect(activityPreview(grokRow, grok)).toBe("Grok isn't signed in");
+    // no Grok CLI on this server: not a sign-in, so the row keeps the engine's words
+    const missing = { ...grok, snapshot: { state: "unavailable" as const, reason: "`grok` CLI not found" } };
+    expect(signedOutEngine(grokRow, missing)).toBeUndefined();
+  });
+
   it("keeps the engine's words when there is no sign-in to offer", () => {
     // signed in again: the card is gone, so is the promise of one
     expect(activityPreview(loginRow, engine({}, { authenticated: true }))).toBe("Not logged in · Please run /login");

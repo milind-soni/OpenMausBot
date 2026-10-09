@@ -322,7 +322,12 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
     // remains held. The native snapshot includes any committed WAL records.
     if (existsSync(sourceDb)) {
       if (lstatSync(sourceDb).isSymbolicLink()) throw new Error("The message database must not be a symbolic link.");
-      const db = new DatabaseSync(sourceDb, { readOnly: true });
+      // Another connection may still open this database meanwhile: a copy's
+      // status poll counts its chats (cloud-move.ts workspaceContents). Its
+      // open (WAL recovery) and close (checkpoint) keep a new reader out for a
+      // moment, and without a busy timeout the first backup step fails at once
+      // ("database is locked", or Node's "not an error"). Wait that moment out.
+      const db = new DatabaseSync(sourceDb, { readOnly: true, timeout: 5_000 });
       // Node 26's native backup completion can wait for unrelated event-loop
       // activity after an async scrypt. A scoped pulse prevents an idle server
       // from waiting indefinitely; it owns no data and always stops here.

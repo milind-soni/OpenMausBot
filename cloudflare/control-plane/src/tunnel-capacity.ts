@@ -33,6 +33,13 @@ export const RECLAIM_MARK_LIMIT = 20;
 const MAX_SCAN_PAGE = 1_000;
 const SNAPSHOT_STALE_MS = 30 * 60 * 1_000;
 const MANAGED_TUNNEL_NAME = /^omb-c-[0-9a-f]{32}$/;
+/** /healthz is the busiest public path, and its capacity detail is only a
+ * report: allocation gating reads D1 directly. Each data center reuses one
+ * read of the snapshot row for this long instead of a D1 round trip per probe. */
+const CAPACITY_HEALTH_CACHE_SECONDS = 120;
+const CAPACITY_HEALTH_CACHE = "healthz-capacity";
+// Never routed. Bump the version when CapacityRow changes: copies outlive deploys.
+const CAPACITY_HEALTH_CACHE_PATH = "/__internal/healthz-capacity-row/v1";
 
 interface CapacityRow {
   capacity_rejected_at: number | null;
@@ -85,6 +92,40 @@ async function capacityRow(env: Env): Promise<CapacityRow | null> {
   ).first<CapacityRow>();
 }
 
+function capacityCacheKey(config: ControlPlaneConfig): string {
+  return new URL(CAPACITY_HEALTH_CACHE_PATH, config.authBaseURL).toString();
+}
+
+/** Drops the cached row in this data center only; others keep theirs until it
+ * expires. Cron runs land in an arbitrary data center, so this delete is
+ * opportunistic: the cache TTL is the real staleness bound. Best effort, never
+ * throws. */
+export async function forgetCachedCapacity(config: ControlPlaneConfig): Promise<void> {
+  await caches.open(CAPACITY_HEALTH_CACHE)
+    .then((cache) => cache.delete(capacityCacheKey(config)))
+    .catch(() => false);
+}
+
+/** Any cache failure, or a zone without a cache, falls through to D1. */
+async function cachedCapacityRow(
+  env: Env,
+  config: ControlPlaneConfig,
+  ctx: ExecutionContext,
+): Promise<CapacityRow | null> {
+  const key = capacityCacheKey(config);
+  const cache = await caches.open(CAPACITY_HEALTH_CACHE).catch(() => null);
+  const hit = await cache?.match(key).catch(() => undefined);
+  const cached = hit ? await hit.json<CapacityRow>().catch(() => null) : null;
+  if (cached) return cached;
+  const row = await capacityRow(env);
+  if (row && cache) {
+    ctx.waitUntil(cache.put(key, Response.json(row, {
+      headers: { "cache-control": `max-age=${CAPACITY_HEALTH_CACHE_SECONDS}` },
+    })).catch(() => undefined));
+  }
+  return row;
+}
+
 /** True while a recent quota rejection should short-circuit new allocations. */
 export async function capacityRejectionActive(env: Env, now = Date.now()): Promise<boolean> {
   const row = await env.DB.prepare(
@@ -94,22 +135,33 @@ export async function capacityRejectionActive(env: Env, now = Date.now()): Promi
   return rejectedAt !== null && rejectedAt > now - CAPACITY_GATE_MS && rejectedAt <= now;
 }
 
-export async function recordCapacityRejection(env: Env, code: string, now = Date.now()): Promise<void> {
+export async function recordCapacityRejection(
+  env: Env,
+  config: ControlPlaneConfig,
+  code: string,
+  now = Date.now(),
+): Promise<void> {
   await env.DB.prepare(
     `UPDATE managed_endpoint_capacity
         SET capacity_rejected_at = ?, capacity_rejected_code = ?, updated_at = ?
       WHERE id = 1`,
   ).bind(now, code.slice(0, 64), now).run();
+  await forgetCachedCapacity(config);
 }
 
 /** Called after cleanup freed provider resources: the next allocation may
  * succeed, so stop answering it locally. */
-export async function clearCapacityRejection(env: Env, now = Date.now()): Promise<void> {
+export async function clearCapacityRejection(
+  env: Env,
+  config: ControlPlaneConfig,
+  now = Date.now(),
+): Promise<void> {
   await env.DB.prepare(
     `UPDATE managed_endpoint_capacity
         SET capacity_rejected_at = NULL, capacity_rejected_code = NULL, updated_at = ?
       WHERE id = 1 AND capacity_rejected_at IS NOT NULL`,
   ).bind(now).run();
+  await forgetCachedCapacity(config);
 }
 
 // The D1 side of "has been seen recently" lives only here, so the same SQL
@@ -297,6 +349,7 @@ export async function scanTunnelCapacity(
             checked_at = ?, updated_at = ?
       WHERE id = 1`,
   ).bind(nextPage, tunnelCount, dnsRecordCount, reclaimPending, now, now).run();
+  await forgetCachedCapacity(config);
 
   capacityAlert(requestId, "tunnels", tunnelCount, config.capacity.tunnelLimit);
   capacityAlert(requestId, "dns_records", dnsRecordCount, config.capacity.dnsRecordLimit);
@@ -347,9 +400,10 @@ function worstKnownStatus(statuses: CapacityStatus[]): CapacityStatus {
 export async function capacityHealth(
   env: Env,
   config: ControlPlaneConfig,
+  ctx: ExecutionContext,
   now = Date.now(),
 ): Promise<JSONValue | null> {
-  const row = await capacityRow(env);
+  const row = await cachedCapacityRow(env, config, ctx);
   if (!row) return null;
   const stale = row.checked_at === null || row.checked_at < now - SNAPSHOT_STALE_MS;
   const tunnelStatus = stale ? "unknown" : usageStatus(row.tunnel_count, config.capacity.tunnelLimit);

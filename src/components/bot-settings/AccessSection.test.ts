@@ -52,7 +52,6 @@ function makeDerived(overrides: Partial<ReturnType<typeof useBotSettingsDerived>
     engine: undefined,
     canCoordinate: false,
     canUseConnectedApps: true,
-    canUseVps: false,
     connectedAppsConfigured: true,
     connectedAppsEnabled: true,
     canUseBrowser: false,
@@ -170,16 +169,36 @@ describe("AccessSection always-allowed list", () => {
 });
 
 describe("AccessSection Works on", () => {
-  const places = (markup: string) => [...markup.matchAll(/>(Auto|Cloud|Local VM|This computer|Browser|Off)<\/button>/g)].map((match) => match[1]);
+  type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; [key: string]: unknown }>;
+  const nodes = (value: ReactNode): Node[] => {
+    if (!isValidElement(value)) return [];
+    const node = value as Node;
+    return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
+  };
 
-  it("offers this computer and a Local VM on a desktop or self-hosted server", () => {
-    expect(places(render(makeBot()))).toEqual(["Auto", "Cloud", "Local VM", "This computer", "Browser", "Off"]);
-    fixture.config = { cloudHome: false } as Partial<ConfigStatus>;
-    expect(places(render(makeBot()))).toEqual(["Auto", "Cloud", "Local VM", "This computer", "Browser", "Off"]);
+  it("is one line and the way to the Computer panel, where the place is chosen", () => {
+    const markup = render(makeBot());
+    expect(markup).toContain("Where Scout works: Chooses for you");
+    expect(markup).toContain("Open Computer panel");
+    // No second picker here: the six places live in the Computer panel only.
+    expect([...markup.matchAll(/>(Auto|Cloud|Local VM|This computer|Browser|Off)<\/button>/g)]).toEqual([]);
+    expect(render(makeBot({ computer: "off" }))).toContain("Where Scout works: No screen");
+
+    let tree!: ReturnType<typeof AccessSection>;
+    function Capture() { tree = AccessSection({ bot: makeBot(), derived: makeDerived() }); return tree; }
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(Capture)));
+    const open = nodes(tree).find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Open Computer panel"))!;
+    open.props.onClick!();
+    expect(fixture.dispatch.mock.calls).toEqual([
+      [{ type: "toggleSettings", open: false }],
+      [{ type: "toggleComputer", open: true }],
+    ]);
   });
 
-  it("never offers them on an OMB Cloud home", () => {
+  it("hides the Boat or VPS choice on My Cloud, whose cloud computers are the plan's", () => {
+    expect(render(makeBot())).toContain("Cloud backend");
     fixture.config = { cloudHome: true } as Partial<ConfigStatus>;
-    expect(places(render(makeBot()))).toEqual(["Auto", "Cloud", "Browser", "Off"]);
+    expect(render(makeBot())).not.toContain("Cloud backend");
+    expect(render(makeBot({ computer: "cloud" }))).not.toContain("Boat");
   });
 });

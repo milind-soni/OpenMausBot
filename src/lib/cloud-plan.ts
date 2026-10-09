@@ -60,8 +60,8 @@ export function buyOfferAllowed(view: CloudPlanView): boolean {
 export function cloudPlanLine(view: CloudPlanView): string | null {
   switch (view.kind) {
     case "paid": return t("cloudAccount.pro", { plan: view.label });
-    case "attention": return t("cloudAccount.inactive", { plan: view.label ?? "OMB Cloud" });
-    case "purchase": return t("cloudAccount.purchaseReceived", { plan: view.label ?? "OMB Cloud" });
+    case "attention": return t("cloudAccount.inactive", { plan: view.label ?? "OpenMausBot Cloud" });
+    case "purchase": return t("cloudAccount.purchaseReceived", { plan: view.label ?? "OpenMausBot Cloud" });
     case "unverified": return view.label ? t("cloudAccount.lastPlan", { plan: view.label }) : null;
     case "reauth": return view.label ? t("cloudAccount.planName", { plan: view.label }) : null;
     case "free": return t("cloudAccount.free");

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { MAUS_COLORS, type MausColor } from "./mascot";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 
@@ -12,6 +13,27 @@ export function mentionChoicesForQuery<T extends { name: string }>(pool: readonl
   // send instead of selecting the same bot again.
   if (query.endsWith(" ") && pool.some((choice) => choice.name.toLowerCase() === normalized)) return [];
   return pool.filter((choice) => !normalized || choice.name.toLowerCase().includes(normalized));
+}
+
+/** Second line of a mention row. A bot shows its title. @everyone shows how
+ * many bots that tag reaches. Filtering stays on the name alone. */
+export type MentionRowDetail =
+  | { kind: "bot"; title: string }
+  | { kind: "everyone"; count: number };
+
+export function mentionRowDescription(detail: MentionRowDetail): string {
+  switch (detail.kind) {
+    case "bot":
+      return detail.title.trim();
+    case "everyone":
+      return detail.count === 1
+        ? t("composer.mention.everyoneOne")
+        : t("composer.mention.everyoneMany", { count: detail.count });
+    default: {
+      const unreachable: never = detail;
+      return unreachable;
+    }
+  }
 }
 
 /** Display word-start, longest-name matches without coloring Unicode prefixes.

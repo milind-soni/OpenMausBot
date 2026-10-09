@@ -2,6 +2,9 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { afterEach, beforeAll } from "vitest";
 
+import { readConfig } from "../src/config";
+import { forgetCachedCapacity } from "../src/tunnel-capacity";
+
 declare global {
   namespace Cloudflare {
     interface Env {
@@ -15,6 +18,7 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  await forgetCachedCapacity(readConfig(env));
   await env.DB.batch([
     env.DB.prepare("DELETE FROM otp_recipient_rate_limits"),
     env.DB.prepare("DELETE FROM control_action_rate_limits"),

@@ -74,6 +74,16 @@ describe("what a row records", () => {
       .toEqual({ "instances.grok.environment": { KEY: "[hidden]" }, "box.token": "[hidden]", "rooms.maxTokens": 9 });
   });
 
+  it("names each key saved for an OpenCode provider, never its value", () => {
+    const rows = configChangeRows({ opencodeGo: { apiKey: "" } }, {
+      opencodeGo: { apiKey: "", providerKeys: { VENICE_API_KEY: "venice-secret", GROQ_TOKEN: "groq-secret", DEEPSEEK_KEY: "deepseek-secret" } },
+    });
+    expect(rows.map((row) => row.category)).toEqual(["engine"]);
+    expect(rows[0]!.changed).toEqual(["opencodeGo.providerKeys.DEEPSEEK_KEY", "opencodeGo.providerKeys.GROQ_TOKEN", "opencodeGo.providerKeys.VENICE_API_KEY"]);
+    expect(JSON.stringify(auditValues(rows[0]!.after!))).not.toContain("secret");
+    expect(JSON.stringify(auditValues({ "opencodeGo.providerKeys": { VENICE_API_KEY: "venice-secret" } }))).not.toContain("secret");
+  });
+
   it("hides a url server's sign-in app secret, keeps its client id", () => {
     const rows = configChangeRows({ mcpServers: {} }, { mcpServers: {
       corp: { url: "https://mcp.example.test", oauth: { clientId: "corp-app", clientSecret: "app-secret-value", scopes: ["mcp"] } },

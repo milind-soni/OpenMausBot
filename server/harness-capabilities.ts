@@ -17,10 +17,12 @@ export interface DriverCapabilities {
   agentsMcp: boolean;
 }
 
-/** The widest turn the harness can build: every optional integration on and
- * a coordinating (room) turn, where the room-only coordination tools exist.
- * Both sides of a comparison get the same profile; only the driver's own
- * capability can differ. */
+/** The widest turn the harness can build: every optional integration on, a
+ * Chief of Staff (the only role shown the Chief-only tools) and a
+ * coordinating (room) turn, where the room-only coordination tools exist.
+ * So the count is an upper bound, not one bot's catalog. Both sides of a
+ * comparison get the same profile; only the driver's own capability can
+ * differ. */
 const ENVELOPE: CatalogProfile = {
   externalRuntime: false,
   coordinating: true,
@@ -30,6 +32,7 @@ const ENVELOPE: CatalogProfile = {
   voiceNotes: true,
   // Not a tool it adds: a Cloud home only hides its Local VM shell.
   cloudHome: false,
+  chief: true,
   botId: "",
 };
 

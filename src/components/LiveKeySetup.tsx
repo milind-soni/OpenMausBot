@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api, useStore, type ConfigStatus } from "@/state/store";
+import { liveDisclosure } from "@/lib/call-mode";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
 /** The OpenAI key for GPT-Live. `compact` fits it inside a popover (the
  * call bar's gear, the call button's first-call prompt). */
 export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void; compact?: boolean }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +52,7 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
       <div className="text-[13.5px] font-medium text-ink">{t("call.live.keyTitle")}</div>
       <div className="text-[12.5px] leading-[1.45] text-ink-secondary">{t("call.live.keyExplain")}</div>
       {/* where Live is set up: what a call sends to OpenAI */}
-      <div className="text-[12.5px] leading-[1.45] text-ink-secondary">{t("call.live.disclosure")}</div>
+      <div className="text-[12.5px] leading-[1.45] text-ink-secondary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true })}</div>
       <input
         type="password"
         autoComplete="off"

@@ -98,6 +98,8 @@ export interface Routine {
   /** Optional wall-clock safety limit. Missing means the run is unlimited. */
   timeoutMinutes?: number;
   overlap?: "skip" | "queue";
+  /** Each run starts with the previous run's report. */
+  continuity?: boolean;
   skippedRuns?: number;
   lastSkippedAt?: number;
   failureStreak?: number;
@@ -158,7 +160,9 @@ export interface RoutineInput {
   /** `null` explicitly removes the limit; omission preserves it on updates. */
   timeoutMinutes?: number | null;
   overlap?: "skip" | "queue";
+  /** Each run starts with the previous run's report. */
+  continuity?: boolean;
   attachments?: RoutineContextAttachment[];
-  /** Omission preserves routing; null creates a new dedicated results task. */
+  /** Omission preserves routing; null resets it to the bot's main thread. */
   resultsThreadId?: string | null;
 }

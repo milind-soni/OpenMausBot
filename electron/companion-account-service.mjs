@@ -34,6 +34,7 @@ const DEFAULT_FIRST_ENDPOINT_CHECK_MS = 2 * 60_000;
  * needs the user (expired sign-in, computer limit) is never retried. */
 const AUTO_RETRY_CODES = new Set([
   "endpoint_capacity",
+  "endpoint_rate_limited",
   "endpoint_unavailable",
   "endpoint_busy",
   "network_unavailable",
@@ -180,6 +181,7 @@ const FRIENDLY_MESSAGES = Object.freeze({
   installation_limit_reached: "This account has reached its computer limit. Remove an old computer and try again.",
   installation_exists: "This computer is already connected. Try again to recover it.",
   endpoint_busy: "The secure connection is still being prepared. Try again in a moment.",
+  endpoint_rate_limited: "The secure connection service is busy right now. Local Wi-Fi and Tailscale pairing still work; try again in {wait}.",
   endpoint_capacity: "Secure HTTPS links are temporarily full. Pair on this Wi-Fi or with Tailscale for now; we'll retry automatically.",
   endpoint_unavailable: "The secure connection service could not finish setup. Local Wi-Fi and Tailscale pairing still work. If this keeps happening, contact support with the error reference.",
   endpoint_cleanup_pending: "The secure connection is still being removed. Try signing out again shortly.",
@@ -189,9 +191,18 @@ const FRIENDLY_MESSAGES = Object.freeze({
   request_failed: "The secure connection request could not be completed. Local pairing still works; try again.",
 });
 
+/** "45 seconds", "3 minutes", or "a few minutes" when the server gave no hint. */
+function retryWait(retryAfterMs) {
+  const seconds = Math.ceil((retryAfterMs ?? 0) / 1_000);
+  if (!(seconds > 0)) return "a few minutes";
+  if (seconds < 90) return `${seconds} seconds`;
+  return `${Math.round(seconds / 60)} minutes`;
+}
+
 export function friendlyCompanionAccountError(error) {
   const code = error instanceof ControlPlaneError ? error.code : "";
-  const message = FRIENDLY_MESSAGES[code] ?? FRIENDLY_MESSAGES.request_failed;
+  const message = (FRIENDLY_MESSAGES[code] ?? FRIENDLY_MESSAGES.request_failed)
+    .replace("{wait}", () => retryWait(error.retryAfterMs));
   const reference = error instanceof ControlPlaneError && error.requestId
     ? ` Reference: ${error.requestId}.`
     : "";

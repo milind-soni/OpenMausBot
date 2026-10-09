@@ -24,8 +24,6 @@ let stderr = "";
 let boatServer: Server;
 let boatRow: { id: string; name: string; state: string } | null = null;
 let allowBoatCreation = false;
-let holdBoatPrompt = false;
-let boatReply = "Cloud fixture completed";
 const boatCalls: Array<{ method: string; path: string }> = [];
 const boatPrompts: Array<Record<string, unknown>> = [];
 const vmState = (state: Record<string, unknown> = {}) => writeFileAtomic(stateFile, JSON.stringify(state));
@@ -89,20 +87,21 @@ beforeAll(async () => {
     }
     if (path.endsWith("/desktop")) return res.end(JSON.stringify({ desktopUrl: "https://desktop.fixture.invalid/" }));
     if (path.endsWith("/resume") && boatRow) { boatRow.state = "idle"; return res.end("{}"); }
+    // Boat's own agent: no turn may ever be handed to it.
     if (path.endsWith("/prompt") && req.method === "POST") {
       boatPrompts.push(body);
       return res.end(JSON.stringify({ promptRun: { id: "fixture-prompt" } }));
     }
-    if (path.includes("/prompts/")) return res.end(JSON.stringify({ promptRun: holdBoatPrompt
-      ? { status: "running" } : { status: "finished", result: boatReply } }));
     return res.end("{}");
   });
   await new Promise<void>(resolve => boatServer.listen(0, "127.0.0.1", resolve));
   const boatPort = (boatServer.address() as { port: number }).port;
   writeFileSync(join(data, "config.json"), JSON.stringify({ instances: { claude: {
     driver: "claudeAgent", config: { cli: join(ROOT, "server/testing/fake-claude-cli.ts") },
-    environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_DUMP: dumpFile, FAKE_CLAUDE_SLOW_FINISH_GATE: finishFile },
-  }, computer: { driver: "boxAgent", config: { pollMs: 10 } } } }));
+    // A turn on the cloud computer uses it, so its first computer call is
+    // what creates or wakes the Boat, as with a real model.
+    environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_DUMP: dumpFile, FAKE_CLAUDE_SLOW_FINISH_GATE: finishFile, FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1" },
+  } } }));
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
   startServer = async (computerWaitMaxMs) => {
@@ -446,64 +445,17 @@ describe("Group Local VM ownership on the real isolated server", () => {
     }
   });
 
-  it("holds a Computer engine turn for a marked output question and resumes after the person's reply", async () => {
-    // The Computer engine runs its whole turn on the Boat; every other engine
-    // keeps its own model there, so this protocol is the Computer engine's.
-    const { bot } = await api("POST", "/api/bots", { name: "Cloud question fixture", modelSelection: { instanceId: "computer", model: "claude-fable-5" } });
-    try {
-      await api("PUT", "/api/config", { box: { token: "box_fixture" } });
-      await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" });
-      const environmentId = readFileSync(join(fixtureHome, "data", "environment-id"), "utf8").trim();
-      const scope = createHash("sha256").update(environmentId).digest("hex").slice(0, 12);
-      const prefix = bot.id.slice(0, 8).replace(/[^a-z0-9]/g, "");
-      const suffix = createHash("sha256").update(bot.id).digest("hex").slice(0, 6);
-      boatRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "idle" };
-      boatReply = 'Choose a color.\n```omb-ask\n{"questions":[{"question":"Which color?","options":["Blue","Green"]}]}\n```';
-      const count = boatPrompts.length;
-      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Ask before choosing the color" });
-      const transcript = () => api("GET", `/api/threads/${bot.threadId}/messages?limit=50`);
-      const shown = await until(transcript, value => value.messages.some((message: any) => message.card?.questionRequest));
-      const card = shown.messages.find((message: any) => message.card?.questionRequest).card;
-      expect(card.questionRequest).toMatchObject({ origin: "output", questions: [{ question: "Which color?" }] });
-      expect(card.answered).toBeFalsy();
-      expect(boatPrompts.length).toBe(count + 1);
-      const state = await api("GET", "/api/bots?messages=0");
-      expect(state.bots.find((candidate: any) => candidate.id === bot.id).busy).toBe(true);
-      // Cards reach the transcript before the asynchronous audit log reaches disk.
-      const decisions = await until(() => api("GET", "/api/decisions"), value =>
-        value.decisions.some((row: any) => row.requestId === card.requestId && row.decision === "card-shown"));
-      expect(decisions.decisions).toContainEqual(expect.objectContaining({ botId: bot.id, source: "question", origin: "output" }));
-
-      boatReply = "Cloud fixture completed";
-      const message = "The user answered your questions.\n\nQ: Which color?\nA: Green";
-      expect(await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.requestId, behavior: "answer", message }))
-        .toMatchObject({ outcome: "answered" });
-      await idle(bot.id);
-      expect(boatPrompts.length).toBe(count + 2);
-      expect(JSON.stringify(boatPrompts.at(-1))).toContain("A: Green");
-      expect(JSON.stringify(await transcript())).toContain("Cloud fixture completed");
-    } finally {
-      boatReply = "Cloud fixture completed";
-      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
-      await idle(bot.id);
-      await api("DELETE", `/api/bots/${bot.id}`);
-      boatRow = null;
-      await api("PUT", "/api/config", { box: { token: "" } });
-    }
-  });
-
   it("does not stall an admitted turn waiting for another turn's shared computer", async () => {
     const section = `Watchdog fixture ${randomUUID()}`;
     const bots: any[] = [];
     try {
-      vmState();
-      holdBoatPrompt = true;
+      vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
       allowBoatCreation = true;
       await api("PUT", "/api/config", { box: { token: "box_fixture" } });
-      // The Computer engine holds the shared Boat for as long as its Boat
-      // prompt runs, which is the gated provider this check needs.
+      // A team's shared computer is held for the whole turn, so the slow
+      // fake engine (gated on the finish file) is the holder this check needs.
       for (const name of ["Computer holder", "Computer waiter"]) {
-        const { bot } = await api("POST", "/api/bots", { name, section, modelSelection: { instanceId: "computer", model: "claude-fable-5" } });
+        const { bot } = await api("POST", "/api/bots", { name, section });
         bots.push(bot);
       }
       const requestId = randomUUID();
@@ -511,7 +463,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       await api("PATCH", `/api/team-computers/${requestId}`, { section, acknowledgeSharedAccess: true });
       const count = boatPrompts.length;
       await api("POST", `/api/bots/${bots[0].id}/messages`, { text: "Hold the shared computer" });
-      await until(() => boatPrompts.length, length => length > count);
+      await dump();
       await api("POST", `/api/bots/${bots[1].id}/messages`, { text: "Wait for the shared computer" });
       const transcript = () => api("GET", `/api/threads/${bots[1].threadId}/messages?limit=50`);
       await until(transcript, value => JSON.stringify(value).includes("Waiting for"));
@@ -523,14 +475,17 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const state = await api("GET", "/api/bots?messages=0");
       expect(state.bots.find((bot: any) => bot.id === bots[1].id).busy).toBe(true);
       vmState();
-      holdBoatPrompt = false;
+      writeFileSync(finishFile, "finish");
       await idle(bots[0].id);
       await idle(bots[1].id);
-      expect(boatPrompts.length).toBe(count + 2);
-      expect(JSON.stringify(await transcript())).toContain("Cloud fixture completed");
+      // Both turns ran on the bots' own engine; Boat's own agent was never asked.
+      expect(boatPrompts.length).toBe(count);
+      const settled = await transcript();
+      expect(JSON.stringify(settled)).not.toContain("the turn was stopped");
+      expect(JSON.stringify(settled)).toContain("reply to:");
     } finally {
       vmState();
-      holdBoatPrompt = false;
+      writeFileSync(finishFile, "finish");
       allowBoatCreation = false;
       for (const bot of bots) {
         await api("POST", `/api/bots/${bot.id}/interrupt`, {});
@@ -597,7 +552,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
       await api("DELETE", `/api/bots/${bot.id}`);
       await api("PUT", "/api/config", { box: { token: "" } });
     }
-  });
+  }, 45_000);
 
   it("lets a chat tool select Auto, replaces tools after completion, and continues the same user message once", async () => {
     vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
@@ -879,13 +834,14 @@ describe("Group Local VM ownership on the real isolated server", () => {
       await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "vm" });
       await api("PUT", "/api/config", { box: { token: "" } });
     }
-  });
+  }, 45_000);
 
   it("releases a failed readiness claim so the bot and room can run again", async () => {
     const { bots, group } = await room();
     vmState({ failed: true });
     await send(group.id);
-    await until(() => api("GET", "/api/bots?messages=30"), r => JSON.stringify(r).includes("fixture desktop unavailable"));
+    // The failed place is one sentence now (shared/place-view.ts), its cause capitalized.
+    await until(() => api("GET", "/api/bots?messages=30"), r => JSON.stringify(r).includes("Fixture desktop unavailable."));
     await idle(bots[0].id);
     vmState();
     await send(group.id);

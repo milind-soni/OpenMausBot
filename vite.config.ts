@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { DurationSequencer } from "./scripts/testing/duration-sequencer.ts";
+import { hostTimeout } from "./server/testing/host-timeout.ts";
 
 // The About dialog shows the shipped version; package.json is the one place
 // it is already maintained, so it is inlined at build time rather than
@@ -33,8 +35,15 @@ export default defineConfig({
     // the suite spawns fake provider CLIs and a real harness server;
     // parallel files introduce load-sensitive flakes for no win
     fileParallelism: false,
-    testTimeout: 20_000,
-    hookTimeout: 30_000,
+    // --shard splits the files by recorded CI seconds, not count (docs/ci.md)
+    sequence: { sequencer: DurationSequencer },
+    // Known flakes in scripts/testing/ci-retry-list.json get two retries in
+    // CI only, and each retry is reported (docs/ci.md, "Flaky tests").
+    runner: "./scripts/testing/ci-retry-runner.ts",
+    // Doubled on Windows, whose runners are about 1.45x slower
+    // (server/testing/host-timeout.ts).
+    testTimeout: hostTimeout(20_000),
+    hookTimeout: hostTimeout(30_000),
   },
   resolve: {
     alias: {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "@/state/store";
 import {
   announcerBaseline,
+  latestFailure,
   latestReply,
   nextAnnouncement,
   replySummary,
@@ -87,6 +88,33 @@ describe("nextAnnouncement", () => {
     const approval = { id: "ask-1", name: "Pepper" };
     expect(play([{ busy: true, approval }, { busy: true, approval }])).toEqual([]);
   });
+
+  it("announces a failed turn once, and stays quiet when the person stopped it", () => {
+    expect(play([
+      { busy: false },
+      { busy: true },
+      { busy: false, failure: { id: "f1", name: "Pepper", cause: "The model timed out." } },
+      { busy: false, failure: { id: "f1", name: "Pepper", cause: "The model timed out." } },
+    ])).toEqual(["Pepper failed: The model timed out."]);
+
+    expect(play([
+      { busy: false },
+      { busy: true },
+      {
+        busy: false,
+        reply: { id: "c", name: "Pepper", text: "The request was cancelled by the client." },
+        failure: { id: "f2", name: "Pepper", cause: "The request was cancelled by the client." },
+      },
+    ])).toEqual([]);
+  });
+
+  it("prefers a finished reply over an older failure", () => {
+    expect(play([
+      { busy: false, failure: { id: "old", name: "Pepper", cause: "Earlier." } },
+      { busy: true, failure: { id: "old", name: "Pepper", cause: "Earlier." } },
+      { busy: false, reply: reply("new"), failure: { id: "old", name: "Pepper", cause: "Earlier." } },
+    ])).toEqual(["Pepper replied: Here is the plan."]);
+  });
 });
 
 describe("latestReply", () => {
@@ -106,10 +134,24 @@ describe("latestReply", () => {
   });
 });
 
+describe("latestFailure", () => {
+  it("reads the newest error row and skips a stop stored under another name", () => {
+    const messages: Message[] = [
+      text("a", "bot", "Earlier."),
+      { id: "fail", role: "bot", kind: "activity", at: 2, tool: { name: "error: The model timed out.", ok: false } },
+      { id: "stop", role: "bot", kind: "activity", at: 3, tool: { name: "stopped: Stopped", ok: false } },
+    ];
+    expect(latestFailure(messages, () => "Pepper")).toEqual({ id: "fail", name: "Pepper", cause: "The model timed out." });
+  });
+});
+
 describe("replySummary", () => {
   it("keeps only the first sentence, without markdown", () => {
     expect(replySummary("**Done.** I updated `README.md` and ran the tests.")).toBe("Done.");
     expect(replySummary("## Summary\n\nSee [the docs](https://x.test) for more. Then rest.")).toBe("Summary See the docs for more.");
+    expect(replySummary("تم الأمر؟ ثم تفاصيل")).toBe("تم الأمر؟");
+    expect(replySummary("完了。次はテストです。")).toBe("完了。");
+    expect(replySummary("结束！后面还有。")).toBe("结束！");
   });
 
   it("drops code blocks and caps a long first sentence at a word", () => {

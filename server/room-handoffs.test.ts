@@ -244,6 +244,27 @@ describe("addressed room request tree", () => {
     for (let i = 0; i < 3; i++) { engine.tick(); await flush(); }
     expect(engine.assignerOf("lead-task")).toBeUndefined();
   }));
+  it("lists unsettled teammate work as id-only edges for the Team map", () => fixture(async (engine, hooks) => {
+    const source = { botId: "chief", threadId: "chief-chat" };
+    let finish!: (result: { ok: boolean; text: string }) => void;
+    hooks.busy = node => node.botId === "reviewer";
+    hooks.run = () => new Promise(resolve => { finish = resolve; });
+    engine.enqueue(source, "turn", undefined, { botId: "lead", threadId: "lead-task" }, "build", "Build the secret CSV export");
+    engine.enqueue(source, "turn", undefined, { ...addr("R"), botId: "reviewer" }, "review", "Review the secret CSV export");
+    engine.sourceSettled("turn", true);
+    engine.tick(); await flush();
+    const edges = engine.liveEdges();
+    expect(edges).toEqual([
+      { sourceBotId: "chief", targetBotId: "lead", state: "running", threadId: "lead-task" },
+      { sourceBotId: "chief", targetBotId: "reviewer", state: "queued", threadId: "R-thread", groupId: "R" },
+    ]);
+    expect(JSON.stringify(edges)).not.toContain("secret");
+
+    finish({ ok: true, text: "done" });
+    await flush();
+    for (let i = 0; i < 3; i++) { engine.tick(); await flush(); }
+    expect(engine.liveEdges().map(edge => edge.targetBotId)).toEqual(["reviewer"]);
+  }));
   it("stops a conversation without aborting the teammate already working, and drops only what had not started", () => fixture(async (engine, hooks) => {
     const source = { botId: "clive", threadId: "clive-chat" };
     const runs: Array<{ id: string; resumed: boolean }> = [];

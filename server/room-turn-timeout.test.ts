@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   RoomTurnDeadline,
   RoomTurnStallRegistry,
+  effectiveRoomTurnTimeoutMinutes,
+  parseConversationTurnTimeout,
   roomTurnTimeoutMessage,
   roomTurnTimeoutMs,
 } from "./room-turn-timeout.ts";
@@ -179,6 +181,18 @@ describe("room turn timeout", () => {
     stalls.register("room-thread", nextTurn);
     expect(stalls.stall("room-thread")).toBe(true);
     expect(nextTurn).toHaveBeenCalledOnce();
+  });
+
+  it("lets one conversation replace the group ceiling and clears back to it", () => {
+    expect(effectiveRoomTurnTimeoutMinutes(10, undefined)).toBe(10);
+    expect(effectiveRoomTurnTimeoutMinutes(10, null)).toBe(10);
+    expect(effectiveRoomTurnTimeoutMinutes(10, 30)).toBe(30);
+    expect(effectiveRoomTurnTimeoutMinutes(10, 0)).toBe(10);
+    expect(effectiveRoomTurnTimeoutMinutes(10, 1.5)).toBe(10);
+    expect(parseConversationTurnTimeout(30)).toEqual({ ok: true, minutes: 30 });
+    expect(parseConversationTurnTimeout(null)).toEqual({ ok: true, minutes: null });
+    expect(parseConversationTurnTimeout(1441).ok).toBe(false);
+    expect(parseConversationTurnTimeout("30").ok).toBe(false);
   });
 
   it("formats singular and plural timeout messages", () => {

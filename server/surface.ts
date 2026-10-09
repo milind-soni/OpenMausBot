@@ -10,7 +10,9 @@
  * from the person's seat they are the same "cloud computer" panel. */
 import type { Surface } from "../shared/wire.ts";
 import { canWorkOnCloud, type CloudEngine } from "../shared/cloud-computer.ts";
-export type { Surface };
+import { canUseMcpServer } from "../shared/tool-scope.ts";
+import { placeRowText, type PlaceRow, type PlaceSource } from "../shared/place-view.ts";
+export type { Surface, PlaceSource };
 
 /** The bot's "Works on" setting; undefined = Auto. */
 export type Destination = Surface | "off" | undefined;
@@ -106,76 +108,44 @@ export function resolveSurface(input: {
   return { computer: undefined, browser: browserOn, pinned: null, note: "" };
 }
 
-/** Where a turn's place came from: the one control a person changes when that
- * place cannot be used. Auto (no choice anywhere) and a team's shared
- * computer are not wrapped; their failures already say what to do. */
-export type PlaceSource = "pin" | "auto-pin" | "works-on" | "routine";
-
-/** The next action per source: the full sentence after a failed attach, and
- * the clause after "Choose another model, or" when the engine is the cause. */
-const PLACE_ACTION: Record<PlaceSource, { sentence: string; clause: string }> = {
-  pin: {
-    sentence: "Clear this conversation's place in the composer to continue.",
-    clause: "clear this conversation's place in the composer",
-  },
-  // The dispatch clears an Auto-recorded pin that failed, so the next
-  // message runs on Auto: that pin was the machine's memory, not a choice.
-  "auto-pin": {
-    sentence: "This conversation is back on Auto; send your message again.",
-    clause: "send your message again; this conversation is back on Auto",
-  },
-  "works-on": {
-    sentence: "Set Works on to Auto in this bot's settings to continue.",
-    clause: "set Works on to Auto",
-  },
-  routine: {
-    sentence: "Change where this routine runs.",
-    clause: "change where this routine runs",
-  },
-};
-
-/** Why this engine can't work on the cloud computer, in the words of the
- * place's source, or null when it can (shared/cloud-computer.ts holds the
- * rule). Checked before anything is provisioned, so a turn that cannot run
- * never creates or wakes a machine. */
-export function cloudPlaceDriverError(
-  engine: CloudEngine,
-  backend: "box" | "vps",
-  source: PlaceSource = "works-on",
-): string | null {
-  if (canWorkOnCloud(engine, backend)) return null;
-  const next = `Choose another model, or ${PLACE_ACTION[source].clause}.`;
-  return engine.driverKind === "boxAgent"
-    ? `The Computer engine runs on Boat and can't use a self-hosted VPS. ${next}`
-    : `This model can't use a computer. ${next}`;
+/** Why this engine can't work on the cloud computer, as a failed place, or
+ * null when it can (shared/cloud-computer.ts holds the rule). Checked before
+ * anything is provisioned, so a turn that cannot run never creates or wakes
+ * a machine. */
+export function cloudPlaceRefusal(engine: CloudEngine & { name: string }, source: PlaceSource, bot: string): PlaceUnavailableError | null {
+  if (canWorkOnCloud(engine)) return null;
+  return placeUnavailable("cloud", { state: "cc-cannot", params: { bot, model: engine.name }, source });
 }
 
-/** One line, cause then next action. A bot thread's transcript row keeps
- * 160 characters, so the cause is shortened there, never the action; the
- * cause keeps its own words otherwise. */
-export function placeFailureMessage(cause: string, source: PlaceSource, limit = 160): string {
-  const action = PLACE_ACTION[source].sentence;
-  const body = cause.trim().replace(/[\s.]+$/, "");
-  const room = limit - action.length - 2;
-  if (body.length <= room) return `${body}. ${action}`;
-  return `${body.slice(0, Math.max(0, room - 1)).trimEnd()}… ${action}`;
+/** Why this bot's Tool selection keeps it off a computer, as a failed place,
+ * or null: one line and the one setting that changes it, the same whatever
+ * chose the place (a turn's refusal and select_computer's reason alike).
+ * Engines reach every desktop through the "computer" MCP server, so a
+ * selection without it has nothing to work with there. Checked with the
+ * engine rule, before anything is created or woken. */
+export function computerToolsRefusal(toolScope: unknown, source: PlaceSource, bot: string): PlaceUnavailableError | null {
+  if (canUseMcpServer(toolScope, "computer")) return null;
+  return placeUnavailable("cloud", { state: "cc-tools-off", params: { bot }, source });
 }
 
-/** A place the turn was told to use could not be used. The message already
- * ends with the one next action; the place lets the dispatch clear a failed
+/** A place the turn was told to use could not be used. Its message is the
+ * row's English words: one line and the one next action as a sentence
+ * (shared/place-view.ts), uncut. `row` lets the app word it again in the
+ * reader's language, and `place` lets the dispatch clear a failed
  * Auto-recorded pin to it, so a failed place never sticks. */
 export class PlaceUnavailableError extends Error {
   readonly place: Surface;
-  constructor(place: Surface, message: string) {
-    super(message);
+  readonly row: PlaceRow;
+  constructor(place: Surface, row: PlaceRow, cloudHome = false) {
+    super(placeRowText(row, cloudHome ? "my-cloud" : undefined));
     this.name = "PlaceUnavailableError";
     this.place = place;
+    this.row = row;
   }
 }
 
-/** A failed attach: the attach's own words as the cause, plus the action. */
-export function placeUnavailable(place: Surface, source: PlaceSource, cause: string, limit = 160): PlaceUnavailableError {
-  return new PlaceUnavailableError(place, placeFailureMessage(cause, source, limit));
+export function placeUnavailable(place: Surface, row: PlaceRow, cloudHome = false): PlaceUnavailableError {
+  return new PlaceUnavailableError(place, row, cloudHome);
 }
 
 /** How the prompt and the app name a surface. Deliberately the same words

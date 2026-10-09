@@ -27,11 +27,11 @@ export function pairsAutomatically(initialCode: string | null, desktop = typeof 
   return Boolean(initialCode) && desktop;
 }
 
-/** What the page says above the form. An OMB Cloud has no server screen to
+/** What the page says above the form. My Cloud has no server screen to
  * read a code from: it says where its connection starts instead. */
 export function pairIntro({ mode, sent, email, cloudHome }: { mode: "email" | "code" | null; sent: boolean; email: string; cloudHome: boolean }): string {
   if (mode === "email") return sent ? `We emailed an 8-digit code to ${email}. It works once and expires in ten minutes.` : "Enter your email and we will send you a one-time code.";
-  if (cloudHome) return "To open your Cloud, choose Connect to my Cloud in the OpenMausBot app on your computer (Settings → OMB Cloud), or Use in your browser on your Cloud dashboard. Have a pairing code? Enter it below.";
+  if (cloudHome) return "To open My Cloud, choose Open My Cloud in the OpenMausBot app on your computer (Settings → OpenMausBot Cloud), or Use in your browser on your Plan page. Have a pairing code? Enter it below.";
   return "Enter the pairing code shown on the server. Codes work once and expire after five minutes.";
 }
 
@@ -126,16 +126,16 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
       <div className="absolute left-3 top-12 max-w-[280px]"><DesktopWorkspaceSwitcher /></div>
       <div className="w-full max-w-[420px]">
         {opening ? (
-          <p role="status" className="text-[20px] font-semibold">{cloudHome ? "Opening your Cloud…" : `Connecting to ${environment?.label ?? "this OpenMausBot"}…`}</p>
+          <p role="status" className="text-[20px] font-semibold">{cloudHome ? "Opening My Cloud…" : `Connecting to ${environment?.label ?? "this OpenMausBot"}…`}</p>
         ) : <>
-        <h1 className="text-[20px] font-semibold">{cloudHome ? "Your Cloud" : `${mode === "email" ? "Sign in to" : "Connect to"} ${environment?.label ?? "this OpenMausBot"}`}</h1>
+        <h1 className="text-[20px] font-semibold">{cloudHome ? "My Cloud" : `${mode === "email" ? "Sign in to" : "Connect to"} ${environment?.label ?? "this OpenMausBot"}`}</h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-secondary">
           {environment && !cloudHome ? `Version ${environment.version} on ${environment.platform}. ` : ""}
           {pairIntro({ mode, sent, email, cloudHome })}
         </p>
         {reasonWorthShowing(reason) && !connected ? <p className="mt-3 text-[13px] text-ink-secondary">{reasonWorthShowing(reason)}</p> : null}
         {/* An expired or used code on a Cloud: the app starts a fresh one. */}
-        {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">This link has expired or was already used. In the OpenMausBot app on your computer, open Settings → OMB Cloud and choose Connect to my Cloud.</p> : null}
+        {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">This link has expired or was already used. In the OpenMausBot app on your computer, open Settings → OpenMausBot Cloud and choose Open My Cloud.</p> : null}
         </>}
         {opening ? null : connected ? (
           <p className="mt-4 text-[13.5px]">

@@ -30,12 +30,13 @@ const fixture = vi.hoisted(() => {
     dispatch: (() => {}) as (...args: unknown[]) => void,
     api: (() => Promise.resolve({})) as (...args: unknown[]) => Promise<unknown>,
     setAdvancedMode: (() => {}) as (enabled: boolean) => void,
+    ownerOrAdmin: null as boolean | null,
   };
 });
 
 // The panel's useState calls in source order, counted from `phase` (the only
 // one that starts as "checking"). Keep in step with ComputerPanel.tsx.
-const PHASE_OFFSETS = { phase: 0, resolved: 2, vmViewerUrl: 10, vmStatus: 11 } as const;
+const PHASE_OFFSETS = { phase: 0, resolved: 2, vmViewerUrl: 10, vmStatus: 11, error: 17 } as const;
 let phaseIndex = -1;
 
 vi.mock("react", async (original) => ({
@@ -60,6 +61,7 @@ vi.mock("@/lib/interface-mode", () => ({
   useAdvancedMode: () => fixture.advanced,
   setAdvancedMode: (enabled: boolean) => fixture.setAdvancedMode(enabled),
 }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.ownerOrAdmin }));
 vi.mock("./DesktopCapabilities", () => ({
   useCaptionChrome: () => ({ padClass: undefined }),
   useDesktopCapabilities: () => ({
@@ -159,6 +161,8 @@ const tabs = (rendered: ReturnType<typeof render>) => {
   const bar = rendered.nodes.find((node) => node.props["data-testid"] === "computer-tabs")!;
   return nodes(bar.props.children).filter((node) => node.type === "button").map((node) => text(node.props.children));
 };
+const placeLine = (rendered: ReturnType<typeof render>) =>
+  text(rendered.nodes.find((node) => node.props["data-testid"] === "place-line")!.props.children).replace(/&#x27;/g, "'");
 const grid = (rendered: ReturnType<typeof render>) => {
   const card = rendered.nodes.find((node) => node.props["data-testid"] === "where-works");
   if (!card) return [];
@@ -180,6 +184,7 @@ beforeEach(() => {
   fixture.dispatch = vi.fn();
   fixture.api = vi.fn(() => Promise.resolve({ features: { browser: true } }));
   fixture.setAdvancedMode = vi.fn();
+  fixture.ownerOrAdmin = null;
   for (const key of Object.keys(fixture.ogb)) delete fixture.ogb[key];
 });
 
@@ -306,15 +311,70 @@ describe("Where the bot works", () => {
     const card = rendered.nodes.find((node) => node.props["data-testid"] === "where-works")!;
     expect(rendered.html).toContain("Where Scout works");
     expect(nodes(card.props.children).find((node) => node.props.role === "group")!.props.className).toContain("grid-cols-3");
-    expect(grid(rendered).map((node) => text(node.props.children))).toEqual(["Auto", "Cloud box", "Local VM", "This Mac", "Browser", "Off"]);
-    expect(rendered.html).toContain("Auto picks the cloud box, local VM, this Mac or just the browser for each task.");
+    expect(grid(rendered).map((node) => text(node.props.children))).toEqual(["Auto", "Cloud computer", "Local VM", "This Mac", "Browser", "Off"]);
+    // The chosen place's one line, the same words the Advanced cards use.
+    expect(placeLine(rendered)).toBe("Uses the built-in browser, a private desktop on this computer, or this computer's screen, whichever the task needs.");
   });
 
-  it("says This PC off a Mac", () => {
+  it("says This PC off a Mac, and never names a Local VM in Auto's line there", () => {
     fixture.platform = "win32";
     const rendered = render(makeBot());
     expect(grid(rendered).map((node) => text(node.props.children))).toContain("This PC");
-    expect(rendered.html).toContain("this PC or just the browser");
+    expect(placeLine(rendered)).not.toMatch(/Local VM|Boat|cloud box/i);
+  });
+
+  it("says what Auto does on My Cloud, where it starts a cloud computer by itself", () => {
+    fixture.config = { ...fixture.config, cloudHome: true };
+    expect(placeLine(render(makeBot()))).toBe("Uses the built-in browser. In a chat, it starts its cloud computer by itself when a task needs desktop apps.");
+  });
+
+  it("J11: the Advanced cards and the Simple grid name the same problem in the same words", () => {
+    fixture.instances = [{ ...engine(), displayName: "Plain", capabilities: { computerMcp: false, browserMcp: true } } as InstanceInfo];
+    const simple = render(makeBot());
+    const tile = grid(simple).find((node) => text(node.props.children).startsWith("Cloud computer"))!;
+    expect(tile.props.disabled).toBe(true);
+    expect(text(tile.props.children)).toBe("Cloud computerNot with this model");
+    expect(tile.props.title).toBe("M can't use a computer. Choose a model that can, such as Claude or ChatGPT.");
+
+    fixture.advanced = true;
+    fixture.values = [];
+    phaseIndex = -1;
+    const advanced = render(makeBot());
+    const group = advanced.nodes.find((node) => node.props.role === "group" && node.props["aria-label"] === "Computer destination")!;
+    const card = nodes(group.props.children).filter((node) => node.type === "button")[1]!;
+    expect(card.props.disabled).toBe(true);
+    expect(text(card.props.children)).toBe("Cloud computerNot with this model");
+    expect(card.props.title).toBe(tile.props.title);
+  });
+
+  it("reads a refused start as the same state a failed row does, never the relay's words", () => {
+    fixture.seed = {
+      phase: "error",
+      resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "box" },
+      error: "Your Personal plan includes 1 cloud computer at once. Delete one to start another.",
+    };
+    const rendered = render(makeBot({ computer: "cloud" }));
+    expect(rendered.html).toContain("All the cloud computers your plan includes are in use.");
+    expect(rendered.html).not.toContain("Delete one to start another");
+    const actions = rendered.nodes.filter((node) => node.props["data-testid"] === "place-action").map((node) => text(node.props.children));
+    expect(actions).toContain("Manage cloud computers");
+    (rendered.nodes.find((node) => node.props["data-testid"] === "place-action")!.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "computer" });
+  });
+
+  it("offers the one next action for the chosen place, and a User is told to ask an Admin", () => {
+    fixture.config = { ...fixture.config, box: { configured: false } };
+    const rendered = render(makeBot({ computer: "cloud" }));
+    expect(placeLine(rendered)).toBe("A cloud computer here needs your own Boat key, a paid service.Add Boat key");
+    (rendered.nodes.find((node) => node.props["data-testid"] === "place-action")!.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
+
+    fixture.ownerOrAdmin = false;
+    fixture.values = [];
+    phaseIndex = -1;
+    const user = render(makeBot({ computer: "cloud" }));
+    expect(placeLine(user)).toBe("A cloud computer here needs your own Boat key, a paid service. Ask an Admin to change it.");
+    expect(user.nodes.some((node) => node.props["data-testid"] === "place-action")).toBe(false);
   });
 
   it("dispatches exactly what the Advanced picker dispatches for each place", () => {
@@ -364,7 +424,7 @@ describe("A chat pinned to a place", () => {
     text(rendered.nodes.find((node) => node.props["data-testid"] === "place-pinned-note")!.props.children);
 
   it("names the place in the grid's words, without pointing Simple at a composer chip it no longer has", () => {
-    expect(note(render(pinned()))).toBe("This chat is pinned to “Cloud box”.");
+    expect(note(render(pinned()))).toBe("This chat is pinned to “Cloud computer”.");
 
     fixture.advanced = true;
     fixture.values = [];

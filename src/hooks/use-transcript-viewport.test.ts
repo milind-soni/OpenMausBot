@@ -419,17 +419,24 @@ describe("transcript viewport", () => {
     scroller.scrollTop = 300;
     view.act(() => view.current.loadOlder());
     view.rerender({ threadId: "other", messages: rows(80, 500) });
-    expect(scroller.scrollTop).toBe(300);
+    // the old thread's prepend is not applied; the new thread is followed
+    expect(view.current.following).toBe(true);
+    expect(scroller.scrollTop).toBe(scroller.bottom);
+    expect(scroller.scrollTop).not.toBe(300);
   });
 
   it("drops the capture on a switch even when the next thread opens on the same first row", () => {
     const view = mount({ messages: rows(50, 100) });
     scroller.scrollTop = 300;
     view.act(() => view.current.loadOlder());
-    // same window start and first row, so only the thread change runs the hold
+    // Same window and first row: the thread change still drops the old
+    // capture and follows the new transcript to its bottom.
     view.rerender({ threadId: "other" });
+    expect(scroller.scrollTop).toBe(scroller.bottom);
+    expect(view.current.following).toBe(true);
     view.rerender({ threadId: "thread", messages: [...rows(50, 50), ...rows(50, 100)] });
-    expect(scroller.scrollTop).toBe(300);
+    expect(view.current.following).toBe(true);
+    expect(scroller.scrollTop).toBe(scroller.bottom);
   });
 
   it("opens a bounded window around a search result and pages forward from it", () => {
@@ -474,6 +481,30 @@ describe("transcript viewport", () => {
     expect(view.current.following).toBe(false);
     view.rerender({ ownerId: "other-bot", threadId: "other", messages: rows(30, 100) });
     expect(view.current.following).toBe(true);
+  });
+
+  it("re-arms following when the same bot opens another thread", () => {
+    const view = mount({ messages: rows(30) });
+    view.act(() => press("PageUp"));
+    scroller.scrollTop = 200;
+    scroller.calls = [];
+    expect(view.current.following).toBe(false);
+    view.rerender({ threadId: "other", messages: rows(30, 100) });
+    expect(view.current.transcriptKey).toBe("bot:other");
+    expect(view.current.following).toBe(true);
+    expect(scroller.scrollTop).toBe(scroller.bottom);
+    expect(scroller.calls).toHaveLength(1);
+  });
+
+  it("still stops following when a search jump lands in the thread just opened", () => {
+    const view = mount({ messages: rows(300) });
+    view.act(() => press("PageUp"));
+    scroller.calls = [];
+    store.state.focusMessage = { threadId: "other", messageId: "m10", nonce: 1, consumed: false };
+    view.rerender({ threadId: "other", messages: rows(300) });
+    expect(view.current.following).toBe(false);
+    expect(view.current.windowedMessages.map((row) => row.id)).toContain("m10");
+    expect(scroller.calls).toHaveLength(0);
   });
 
   it("watches the transcript for growth only while it is on screen", () => {

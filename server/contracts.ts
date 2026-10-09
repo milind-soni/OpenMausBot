@@ -183,16 +183,9 @@ export interface SendTurnInput {
      * bridge harness-controlled lets it turn connection requests into trusted
      * chat cards consistently across provider CLIs. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
-    /** The Boat the Computer engine (remoteAgent) runs its turn on. Every
-     * other engine reaches a cloud computer through `localComputer`, as one
-     * more stdio computer server the harness serves. */
-    computer?: {
-      // kind "box" and field boxId keep their historical names (wire contract).
-      kind?: "box";
-      boxId: string;
-    };
     /** Direct stdio connection to a computer MCP server: Cua Driver (host,
      * sandbox, or VPS) or the harness's own cloud computer server (a Boat).
+     * Every engine reaches every computer this way, on its own model.
      * `scope` is set only for the user's host desktop; isolated and
      * remote computers intentionally omit it so host-only approval rules
      * cannot change their semantics. */
@@ -238,6 +231,9 @@ export interface SendTurnInput {
    * config.toml and ignores this; the Claude driver drops
    * --strict-mcp-config for the turn. */
   mcpFromUserConfig?: boolean;
+  /** Per-call ceiling (ms) for this turn's MCP tools, from the server config
+   * `mcp.callTimeoutMinutes`. Absent = the driver's default (10 min). */
+  mcpCallTimeoutMs?: number;
 }
 
 /** An MCP server this machine starts and talks to over stdio. */
@@ -275,13 +271,6 @@ export interface ProviderAdapter {
      * told it has a computer whose tools its driver cannot mount — it
      * burns turns hunting for tools that aren't there. */
     computerMcp?: boolean;
-    /** True when the whole turn executes on the cloud computer (the Boat native
-     * agent — POST /boxes/{id}/prompt) instead of in the host harness. Such a
-     * driver claims the boat exclusively, cannot use host or Local VM surfaces,
-     * and every tool call acts on that machine's screen (screen pollers start
-     * with screenIsTheWork). Implies a cloud-computer turn even though the
-     * driver mounts no computer tools. */
-    remoteAgent?: boolean;
     /** True when the driver mounts turn.integrations.composio (the user's
      * connected apps). Same rule again: a key in the config says the user
      * HAS those connections, not that this driver can reach them. */
@@ -416,7 +405,9 @@ export interface ProviderSnapshot {
 //
 // Installing is rarely the whole job — most CLIs then need an interactive
 // sign-in, which is why signInCommand exists and why the UI sends people to a
-// terminal rather than trying to shell out silently.
+// terminal rather than trying to shell out silently. A CLI with a device-code
+// login (Codex, Grok) signs in from the app instead (drivers/device-auth.ts),
+// and signInCommand stays its terminal route.
 export interface EngineInstall {
   /** One-liner per platform. Omit a platform that has no such command —
    * the UI falls back to docsUrl rather than offering something that
@@ -541,6 +532,9 @@ export interface ProviderInstance {
   readonly models: ModelCatalog;
   /** Refresh a live catalog without recreating the provider instance. */
   readonly refreshModels?: () => Promise<void>;
+  /** Set on a later start while the catalog served from the last run is
+   * still refreshing. A turn awaits it; listen does not. */
+  readonly startupModelRefresh?: Promise<void>;
   /** Optional first-party runtime installation and account setup. */
   readonly installRuntime?: () => Promise<void>;
   readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;

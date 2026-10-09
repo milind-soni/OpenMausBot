@@ -1,4 +1,4 @@
-// Entry point of the OMB Cloud Pro home image (deploy/fly/Dockerfile).
+// Entry point of the OMB Cloud Pro home image (the Dockerfile's cloud-home target).
 //
 // Starts as root, hands a fresh Fly volume (mounted root-owned at /data) to
 // the unprivileged `maus` user, and stays a small root supervisor of two
@@ -84,7 +84,7 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
 /** Why the root supervisor must not run or trust `files`, or null: each
  * must be root's and not writable by anyone else (nor any folder above it),
  * and none may live on the volume `home`, which `maus` owns. The image makes its code
- * root's (deploy/fly/Dockerfile); a file `maus` could rewrite would run as
+ * root's (the Dockerfile's cloud-home target); a file `maus` could rewrite would run as
  * root at the next start, or be handed the secrets. */
 export function codeTrustProblem(files: readonly string[], home: string, stat: (path: string) => Pick<Stats, "uid" | "mode"> = statSync): string | null {
   const volume = posix.join(home, "/");
@@ -104,10 +104,13 @@ export function codeTrustProblem(files: readonly string[], home: string, stat: (
 
 /** Start the server with its secrets on an inherited pipe (never its
  * environment), as `ids` when given. The pipe is written and closed at once;
- * nothing else is ever sent on it. */
+ * nothing else is ever sent on it. With `capture`, its stdout and stderr are
+ * pipes the caller reads instead of this process's inherited descriptors. */
 export function spawnWithSecrets(command: string, args: string[], env: NodeJS.ProcessEnv, secrets: Record<string, string>,
-  ids?: { uid: number; gid: number } | null): ChildProcess {
-  const child = spawn(command, args, { env, stdio: ["inherit", "inherit", "inherit", "pipe"], ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) });
+  ids?: { uid: number; gid: number } | null, capture = false): ChildProcess {
+  const child = spawn(command, args, { env,
+    stdio: capture ? ["inherit", "pipe", "pipe", "pipe"] : ["inherit", "inherit", "inherit", "pipe"],
+    ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) });
   const pipe = child.stdio[SECRETS_FD] as NodeJS.WritableStream | null;
   pipe?.on("error", () => { /* the child is gone; its exit is handled by the caller */ });
   pipe?.end(JSON.stringify(secrets));
@@ -117,7 +120,7 @@ export function spawnWithSecrets(command: string, args: string[], env: NodeJS.Pr
 export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   process.umask(0o077);
   const config = cloudHomeConfiguration(env);
-  if (!config) throw new Error("This image runs an OMB Cloud home machine; set its boot contract (docs/cloud-pro.md).");
+  if (!config) throw new Error("This image runs a My Cloud machine for OpenMausBot Cloud; set its boot contract (docs/cloud-pro.md).");
   // Logged here once: the server child never sees what they are about.
   for (const warning of config.warnings) console.warn(`cloud home: ${warning}`);
   const home = env.HOME || "/data";
@@ -147,7 +150,7 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   const edgeConfig = env.OMB_CLOUD_EDGE_CONFIG || "/app/cloud/Caddyfile";
   if (ids) {
     const problem = codeTrustProblem([process.execPath, fileURLToPath(import.meta.url), join(here, "index.js"), edgeBin, edgeConfig], home);
-    if (problem) throw new Error(`This image's code is not safe to run as root: ${problem}. Rebuild it from deploy/fly/Dockerfile.`);
+    if (problem) throw new Error(`This image's code is not safe to run as root: ${problem}. Rebuild it with docker build --target cloud-home.`);
   }
   const { server, edge, secrets, dropped } = cloudHomeChildEnvironments(config, env, home);
   // Names only, never values: what the server does not get from here.

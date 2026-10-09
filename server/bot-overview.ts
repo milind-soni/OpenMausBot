@@ -233,7 +233,7 @@ export function grantsSummary(connectorTools: BotRecord["connectorTools"]): BotO
 function computerReach(computer: BotRecord["computer"], cloudHome = false): string | null {
   // A Cloud home never offers either; say so rather than list a preference
   // that every task there refuses.
-  const unavailable = cloudHome ? ", which isn't available on OMB Cloud" : "";
+  const unavailable = cloudHome ? ", which isn't available on My Cloud" : "";
   switch (computer) {
     case "cloud":
       return "Computer preference: cloud computer.";

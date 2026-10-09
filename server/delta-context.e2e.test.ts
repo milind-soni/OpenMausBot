@@ -11,6 +11,8 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
+import { withoutTurnClock } from "./testing/turn-clock-text.ts";
 
 const count = (text: string, needle: string) => text.split(needle).length - 1;
 const jsonl = (path: string) => existsSync(path)
@@ -200,7 +202,7 @@ it("resumes the source session and gives it each of three results exactly once, 
   // The session already holds the earlier chat.
   expect(text).not.toContain("ORCHID_7Q");
   expect(text).not.toMatch(/^Assistant: @/m);
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("gives the return turn a result that landed while a newer message was running, exactly once", () => fixture(async (f) => {
   await warmUp(f);
@@ -218,7 +220,7 @@ it("gives the return turn a result that landed while a newer message was running
   expect(returned.resumed).toBe(true);
   expect(count(f.prompt(returned), "LEAD_RESULT_TOKEN")).toBe(1);
   expect(f.launches().at(-1).resume).not.toBeNull();
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("offers a result that lands mid-turn after its source was stopped to the next turn, once, labelled", () => fixture(async (f) => {
   await warmUp(f);
@@ -249,7 +251,7 @@ it("offers a result that lands mid-turn after its source was stopped to the next
   await f.send("Anything else?");
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "STOPPED_SOURCE_RESULT")).toBe(0);
-}), 90_000);
+}), hostTimeout(90_000));
 
 // No provider reports that it read a message steered into a running turn, so
 // the next turn offers it once more, saying the session may already have it.
@@ -273,7 +275,7 @@ it("offers a message steered into a running turn to the next turn once, marked a
   await f.send("Anything else?");
   await f.wait();
   expect(f.prompt(f.turns().at(-1))).not.toContain("STEERED_MID_TURN");
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("offers the results again when the return turn fails before the provider acts on it", () => fixture(async (f) => {
   await warmUp(f);
@@ -289,7 +291,7 @@ it("offers the results again when the return turn fails before the provider acts
   const next = f.prompt(f.turns().at(-1));
   expect(count(next, "UNACCEPTED_RESULT")).toBe(1);
   expect(JSON.stringify(f.handed())).not.toContain("card-");
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("offers the results again when the person stops the return turn before the provider acts on it", () => fixture(async (f) => {
   await warmUp(f);
@@ -316,7 +318,7 @@ it("offers the results again when the person stops the return turn before the pr
   const replies = (await f.messages()).map((message: any) => message.text);
   expect(replies).toContain("Recovered");
   expect(replies).not.toContain("never sent");
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("rebuilds a rejected resume with each result exactly once", () => fixture(async (f) => {
   await warmUp(f);
@@ -330,7 +332,7 @@ it("rebuilds a rejected resume with each result exactly once", () => fixture(asy
   expect(recovered).toContain("ORCHID_7Q");
   expect(count(recovered, "RECOVERY_RESULT_START")).toBe(1);
   expect(count(recovered, "RECOVERY_RESULT_END")).toBe(1);
-}, { env: { FAKE_CLAUDE_MODE: "dead-session" } }), 60_000);
+}, { env: { FAKE_CLAUDE_MODE: "dead-session" } }), hostTimeout(60_000));
 
 it("keeps provenance and exactly-once delivery across rework rounds to the same teammate", () => fixture(async (f) => {
   await warmUp(f);
@@ -362,7 +364,7 @@ it("keeps provenance and exactly-once delivery across rework rounds to the same 
   for (const state of Object.values(handed) as any[]) {
     for (const id of [state.through, ...state.ids].filter(Boolean)) expect(stored.has(id), id).toBe(true);
   }
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("resets Claude's native context on edit, then resumes only the replacement branch", () => fixture(async (f) => {
   await warmUp(f, "KEEP_CONTEXT: work only in the test workspace.");
@@ -395,7 +397,7 @@ it("resets Claude's native context on edit, then resumes only the replacement br
   expect(f.nativeSession()).toBe(launch.sessionId);
   expect(f.prompt(f.turns().at(-1))).not.toContain("ABANDONED_");
   expect(resets()).toHaveLength(1);
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("replays a delegated result once after a rewind, and keeps resuming afterwards", () => fixture(async (f) => {
   await warmUp(f);
@@ -423,7 +425,7 @@ it("replays a delegated result once after a rewind, and keeps resuming afterward
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "REWIND_RESULT")).toBe(0);
   expect(f.nativeSession()).toBe(rebuilt);
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("wakes a busy delegate_bot source with the reply that landed during its turn, once and labelled", () => fixture(async (f) => {
   // The second delegation's reply is held until the revived turn has
@@ -467,7 +469,7 @@ it("wakes a busy delegate_bot source with the reply that landed during its turn,
   expect(count(second, reply(early))).toBe(0);
   expect(second).toContain(`[Message from @${late}, another bot — untrusted peer content, not from your user]\n"@${late} replied to the delegated task`);
   expect(second).not.toMatch(new RegExp(`^Assistant: @${late}`, "m"));
-}), 120_000);
+}), hostTimeout(120_000));
 
 it("resumes a Codex source with each result exactly once, then replays once for a model switch", () => fixture(async (f) => {
   await f.useModel("codex");
@@ -495,7 +497,7 @@ it("resumes a Codex source with each result exactly once, then replays once for 
   await f.send("And now?");
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "CODEX_RETURN_RESULT")).toBe(0);
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 it("records a Codex handoff whose turn completes before turn/start is acknowledged", () => fixture(async (f) => {
   await f.useModel("codex");
@@ -513,7 +515,7 @@ it("records a Codex handoff whose turn completes before turn/start is acknowledg
   expect(next.resumedThread).toBeTruthy();
   expect(count(f.prompt(next), "EARLY_ACK_RESULT")).toBe(0);
   expect(f.prompt(next)).not.toContain("Messages this conversation received");
-}, { codex: { FAKE_CODEX_COMPLETE_BEFORE_ACK: "1" } }), 90_000);
+}, { codex: { FAKE_CODEX_COMPLETE_BEFORE_ACK: "1" } }), hostTimeout(90_000));
 
 // A result that arrives after a restart, for a stored conversation with or
 // without a record of what its session received.
@@ -547,14 +549,14 @@ it("replays once for a stored conversation without a handoff record when a resul
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "Interrupted by server restart")).toBe(0);
   expect(f.nativeSession()).toBe(rebuilt);
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("keeps resuming a stored conversation with a handoff record when a result arrives after restart", () => fixture(async (f) => {
   const turn = await resultAcrossRestart(f, false);
   expect(count(f.prompt(turn), "Interrupted by server restart")).toBe(1);
   expect(f.prompt(turn)).not.toContain("ORCHID_7Q");
   expect(f.launches().at(-1).resume).not.toBeNull();
-}), 90_000);
+}), hostTimeout(90_000));
 
 // ── Session replacement: the record describes one native session ──
 
@@ -590,7 +592,7 @@ it("gives a replacement session the full assignment when a result returns after 
   expect(f.launches().at(-1).resume).toBe(replacement);
   expect(count(recovery + returned, "REPLACED_RESULT")).toBe(1);
   expect(count(returned, "BRIEF_END")).toBeGreaterThanOrEqual(1);
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("gives a replacement session an earlier round's result that its rebuild could not replay, and credits it only with that rebuild", () => fixture(async (f) => {
   await warmUp(f, "Warm up.");
@@ -659,7 +661,7 @@ it("gives a replacement session an earlier round's result that its rebuild could
   expect(count(returned, "ROUND_TWO_RESULT")).toBe(1);
   expect(count(returned, "ROUND_ONE_RESULT_TOKEN")).toBe(1);
   expect(returned).not.toContain("already delivered");
-}), 240_000);
+}), hostTimeout(240_000));
 
 it("does not send a message again that a recovery replay carried, including one the unseen limit had deferred", () => fixture(async (f) => {
   await warmUp(f);
@@ -686,7 +688,7 @@ it("does not send a message again that a recovery replay carried, including one 
   expect(f.launches().at(-1).resume).toBe(cursor(f));
   for (const mark of marks) expect(count(next, mark), mark).toBe(0);
   expect(next).not.toContain("not seen yet");
-}), 120_000);
+}), hostTimeout(120_000));
 
 it("replays again when a replacement session fails before the provider acts on it", () => fixture(async (f) => {
   await warmUp(f);
@@ -702,7 +704,7 @@ it("replays again when a replacement session fails before the provider acts on i
   expect(f.launches().at(-1).resume).toBeNull();
   expect(next).toContain("ORCHID_7Q");
   expect(count(next, "REPLACEMENT_FAILS")).toBe(1);
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("gives an engine switched in while a teammate works the full assignment when the result returns", () => fixture(async (f) => {
   await warmUp(f);
@@ -722,7 +724,7 @@ it("gives an engine switched in while a teammate works the full assignment when 
   expect(returned.resumedThread).toBeTruthy();
   expect(count(f.prompt(returned), "SWITCH_RESULT")).toBe(1);
   expect(f.prompt(returned)).toContain("MUST_KEEP_CONSTRAINT");
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 // ── Acceptance: what counts as the provider having the message ──
 
@@ -742,7 +744,7 @@ it("does not offer a message or steer the person stopped before any reply again"
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(next).not.toContain("STOPPED_ASK");
   expect(next).not.toContain("STOPPED_STEER");
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("does not offer a message the person stopped before any reply again on Codex", () => fixture(async (f) => {
   await f.useModel("codex");
@@ -759,7 +761,7 @@ it("does not offer a message the person stopped before any reply again on Codex"
   const next = f.turns().at(-1);
   expect(next.resumedThread).toBeTruthy();
   expect(f.prompt(next)).not.toContain("CODEX_STOPPED_ASK");
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 it("offers a steered message again when the turn fails before the provider used it", () => fixture(async (f) => {
   f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { progress: "Looking into it", gateFile: f.gate("turn"), fail: true }, { reply: "Covered" }] };
@@ -775,7 +777,7 @@ it("offers a steered message again when the turn fails before the provider used 
   const next = f.prompt(f.turns().at(-1));
   expect(count(next, "UNUSED_STEER")).toBe(1);
   expect(next).not.toContain("Start on the report.");
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("does not offer a steered message again after the person stops the turn it went into", () => fixture(async (f) => {
   f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { progress: "Looking into it", reply: "never shown", gateFile: f.gate("turn") }, { reply: "Covered" }] };
@@ -790,7 +792,7 @@ it("does not offer a steered message again after the person stops the turn it we
   await f.send("Is it done?");
   await f.wait();
   expect(f.prompt(f.turns().at(-1))).not.toContain("STOPPED_TURN_STEER");
-}), 60_000);
+}), hostTimeout(60_000));
 
 // The same withdrawal, for a message the person steered out of the server-side
 // queue instead of straight into the turn: a different route, one running turn.
@@ -820,7 +822,7 @@ it("does not offer a message again that the person steered out of the queue into
     await f.wait();
     expect(f.prompt(f.turns().at(-1))).not.toContain("QUEUED_STEER");
   }, { codex: { FAKE_CODEX_STEER_ERROR_FILE: refuseLiveSteers } });
-}, 90_000);
+}, hostTimeout(90_000));
 
 it("offers the results again when the provider reports an API error instead of answering", () => fixture(async (f) => {
   await warmUp(f);
@@ -837,7 +839,7 @@ it("offers the results again when the provider reports an API error instead of a
   await f.send("What did Engineering find?");
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "API_ERROR_RESULT")).toBe(1);
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("does not hand the model a queued follow-up that a restart recovered with an unknown outcome", () => fixture(async (f) => {
   await f.api("/api/config", { threads: { maxConcurrentPerBot: 1 } }, "PATCH");
@@ -867,7 +869,7 @@ it("does not hand the model a queued follow-up that a restart recovered with an 
   expect(next).toBeDefined();
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(f.prompt(next)).not.toContain("RECOVERED_FOLLOWUP");
-}), 90_000);
+}), hostTimeout(90_000));
 
 // ── Session configuration: what a resume cannot change ──
 
@@ -893,7 +895,7 @@ it("gives a delegated return the fresh session and replay it always had when the
   await f.wait();
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(count(f.prompt(f.turns().at(-1)), "SOUL_CHANGE_RESULT")).toBe(0);
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("keeps resuming an ordinary turn after a soul change, as before", () => fixture(async (f) => {
   await warmUp(f);
@@ -902,8 +904,8 @@ it("keeps resuming an ordinary turn after a soul change, as before", () => fixtu
   await f.send("Second message.");
   await f.wait();
   expect(f.launches().at(-1).resume).not.toBeNull();
-  expect(f.prompt(f.turns().at(-1))).toBe("Second message.");
-}), 60_000);
+  expect(withoutTurnClock(f.prompt(f.turns().at(-1)))).toBe("Second message.");
+}), hostTimeout(60_000));
 
 // ── Steers: never counted as received on output alone ──
 
@@ -925,7 +927,7 @@ it("offers a steer written into a resume the provider then rejected on the next 
   await f.wait();
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(count(f.prompt(f.turns().at(-1)), "LOST_STEER_MARK")).toBe(1);
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("offers a steered message again when only output of the model call already running follows it before the turn fails", () => fixture(async (f) => {
   f.plan[f.chief.id] = { turns: [
@@ -944,7 +946,7 @@ it("offers a steered message again when only output of the model call already ru
   await f.send("Is it done?");
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "BUFFERED_STEER")).toBe(1);
-}), 60_000);
+}), hostTimeout(60_000));
 
 // ── Fallbacks that must send what today's build sends ──
 
@@ -973,7 +975,7 @@ it("rebuilds a delegated return whose Codex thread is gone into a new thread wit
   const next = f.turns().at(-1);
   expect(next.resumedThread).toBeTruthy();
   expect(count(f.prompt(next), "MISSING_THREAD_RESULT")).toBe(0);
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 it("replays a result that reaches an engine switched in before it arrived with today's update preamble", () => fixture(async (f) => {
   await warmUp(f);
@@ -991,7 +993,7 @@ it("replays a result that reaches an engine switched in before it arrived with t
   expect(returned).not.toContain("switched this bot over to you");
   expect(returned).toContain("ORCHID_7Q");
   expect(count(returned, "EARLY_SWITCH_RESULT")).toBe(1);
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 // A `git` on the server's PATH that holds its first command while `hold` exists,
 // then runs the real git: a turn's checkpoint then waits inside turn setup.
@@ -1054,7 +1056,7 @@ it.skipIf(process.platform === "win32")("gives a delegated return today's fresh 
   await f.wait();
   expect(f.launches().at(-1).resume).toBe(Object.values(f.task().resumeCursors)[0]);
   expect(count(f.prompt(f.turns().at(-1)), "SETUP_SOUL_RESULT")).toBe(0);
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("gives a delegate_bot source today's fresh session and replay when its soul changed since the session started", () => fixture(async (f) => {
   // Ops's reply is held until the revived turn has launched: under load the
@@ -1100,7 +1102,7 @@ it("gives a delegate_bot source today's fresh session and replay when its soul c
   await expect.poll(() => f.launches().at(-1)?.resume, { timeout: 10_000 }).toBe(null);
   expect(f.prompt(third)).toContain("received an update outside your provider session");
   expect(count(f.prompt(third), late)).toBe(1);
-}), 120_000);
+}), hostTimeout(120_000));
 
 // ── Settings a resumed session cannot take on ──
 
@@ -1124,7 +1126,7 @@ it("gives a Codex return the model chosen while its teammate worked", () => fixt
   const returned = f.prompt(f.turns().at(-1));
   expect(returned).toContain("received an update outside your provider session");
   expect(count(returned, "CODEX_MODEL_RESULT")).toBe(1);
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 it("gives a Codex return today's fresh thread when explicit effort is cleared while its teammate worked", () => fixture(async (f) => {
   await f.useModel("codex");
@@ -1146,7 +1148,39 @@ it("gives a Codex return today's fresh thread when explicit effort is cleared wh
   expect(f.codexCalls().filter((call: any) => call.method === "thread/start")).toHaveLength(1);
   expect(f.codexCalls().find((call: any) => call.method === "turn/start")?.params.effort).toBeUndefined();
   expect(count(f.prompt(f.turns().at(-1)), "CODEX_EFFORT_RESULT")).toBe(1);
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
+
+it("moves a Codex chat to a new thread with its history when the person clears an effort its thread holds", () => fixture(async (f) => {
+  await f.useModel("codex");
+  const [model] = await f.codexModels();
+  await f.selectModel(model);
+  await warmUp(f);
+  // A level picked mid-chat reaches the thread it resumes.
+  await f.selectModel(model, { effort: "high" });
+  f.plan[f.chief.id] = { reply: "On high effort" };
+  await f.send("Think harder about this one.");
+  await f.wait();
+  expect(f.codexCalls().filter((call: any) => call.method === "thread/resume")).toHaveLength(1);
+  expect(f.codexCalls().find((call: any) => call.method === "turn/start")?.params.effort).toBe("high");
+
+  // turn/start cannot clear it: resuming would keep the thread on "high".
+  await f.selectModel(model);
+  f.plan[f.chief.id] = { reply: "On default effort" };
+  await f.send("What is the codename?");
+  await f.wait();
+  expect(f.codexCalls().filter((call: any) => call.method === "thread/resume")).toHaveLength(0);
+  expect(f.codexCalls().filter((call: any) => call.method === "thread/start")).toHaveLength(1);
+  expect(f.codexCalls().find((call: any) => call.method === "turn/start")?.params.effort).toBeUndefined();
+  expect(count(f.prompt(f.turns().at(-1)), "ORCHID_7Q")).toBe(1);
+
+  // That thread runs on the default effort: the next turn resumes it.
+  f.plan[f.chief.id] = { reply: "Still on default effort" };
+  await f.send("And now?");
+  await f.wait();
+  const next = f.turns().at(-1);
+  expect(next.resumedThread).toBeTruthy();
+  expect(f.prompt(next)).not.toContain("ORCHID_7Q");
+}, { codex: {} }), hostTimeout(90_000));
 
 it("keeps today's fresh return on a Claude CLI that cannot refresh a resumed system prompt", () => fixture(async (f) => {
   await warmUp(f);
@@ -1164,4 +1198,4 @@ it("keeps today's fresh return on a Claude CLI that cannot refresh a resumed sys
   expect(count(returned, "OLD_CLI_RESULT")).toBe(1);
   // nothing recorded: this engine cannot be given only what it has not seen
   expect(f.handed()).toBeUndefined();
-}, { env: { FAKE_CLAUDE_VERSION: "2.1.200" } }), 90_000);
+}, { env: { FAKE_CLAUDE_VERSION: "2.1.200" } }), hostTimeout(90_000));

@@ -11,6 +11,7 @@ import {
   COMPANION_INSTALLATION_EXPIRY_FIELD,
   COMPANION_INSTALLATION_ID_FIELD,
   createCompanionAccountService,
+  friendlyCompanionAccountError,
   resolveCompanionControlPlaneURL,
 } from "./companion-account-service.mjs";
 import {
@@ -899,6 +900,48 @@ describe("Companion account background recovery", () => {
     expect(client.verifyOTP).toHaveBeenCalledOnce();
     expect(client.revokeInstallation).not.toHaveBeenCalled();
     await expect(service.state()).resolves.toMatchObject({ status: "ready", endpoint: ENDPOINT });
+  });
+
+  it("says a provider rate limit is temporary, how long to wait, and retries no sooner than asked", async () => {
+    const requestId = "66666666-6666-4666-8666-666666666666";
+    const timers = manualTimers();
+    const ensureEndpoint = vi
+      .fn()
+      .mockRejectedValueOnce(new ControlPlaneError("endpoint_rate_limited", 503, requestId, 120_000))
+      .mockResolvedValueOnce({ endpoint: { url: ENDPOINT }, connectorToken: CONNECTOR_TOKEN });
+    const client = readyClient({ ensureEndpoint });
+    const { service, store } = serviceFixture({
+      client,
+      autoRecover: true,
+      autoRetryBaseMs: 1_000,
+      autoRetryMaxMs: 1_000_000,
+      random: () => 0.5,
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+    });
+
+    const failed = await service.verifyCode("ada@example.com", "12345678");
+    expect(failed).toMatchObject({
+      status: "error",
+      message: `The secure connection service is busy right now. Local Wi-Fi and Tailscale pairing still work; try again in 2 minutes. Reference: ${requestId}.`,
+    });
+    expect(failed.message).not.toContain("could not finish setup");
+    // One timer at the server's delay, not an immediate retry.
+    expect(timers.delays()).toEqual([120_000]);
+
+    timers.fire();
+    await vi.waitFor(() => expect(store.read()[MANAGED_COMPANION_TOKEN_FIELD]).toBe(CONNECTOR_TOKEN));
+    expect(ensureEndpoint).toHaveBeenCalledTimes(2);
+    expect(timers.delays()).toEqual([]);
+  });
+
+  it("phrases the rate-limit wait from the Retry-After it was given", () => {
+    const message = (retryAfterMs) =>
+      friendlyCompanionAccountError(new ControlPlaneError("endpoint_rate_limited", 503, "", retryAfterMs));
+    expect(message(60_000)).toMatch(/try again in 60 seconds\.$/);
+    expect(message(30_000)).toMatch(/try again in 30 seconds\.$/);
+    expect(message(300_000)).toMatch(/try again in 5 minutes\.$/);
+    expect(message(0)).toMatch(/try again in a few minutes\.$/);
   });
 
   it("logs each failed setup step with its code and support reference, and nothing secret", async () => {

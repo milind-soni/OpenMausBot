@@ -26,11 +26,11 @@ const sessionBody = z.object({
   threadId: id.optional(),
   // Not trimmed: the SDP offer goes to OpenAI byte for byte.
   sdp: z.string().min(1).refine((sdp) => Buffer.byteLength(sdp) <= MAX_SDP_BYTES),
-  client: z.enum(["desktop", "ios", "android"]),
+  client: z.enum(["desktop", "web", "ios", "android"]),
 }).strict();
 const endBody = z.object({ callId: z.string().min(1).max(120) }).strict();
 // Strict, so `key` (or anything else) is refused rather than ignored: the key
-// is only ever set on the computer that runs the harness.
+// is saved through the desktop's credential store or PUT /api/config, never here.
 const settingsBody = z.object({
   voice: z.string().trim().max(40).regex(/^[a-z]*$/).optional(),
   readTypedReplies: z.boolean().optional(),
@@ -102,7 +102,7 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
     if (method === "PATCH" && path === "/api/live/settings") {
       const parsed = settingsBody.safeParse(await bodyOf(req, readBody));
       if (!parsed.success) {
-        return json(res, 400, { error: "Those Live settings are not valid. The OpenAI key can only be changed on the computer that runs OpenMausBot." });
+        return json(res, 400, { error: "Those Live settings are not valid." });
       }
       // as PUT /api/config: an empty patch is not saved (or broadcast)
       if (!Object.keys(parsed.data).length) return json(res, 400, { error: "nothing to save" });

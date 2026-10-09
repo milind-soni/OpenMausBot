@@ -33,6 +33,9 @@ const socketPath = process.argv[2] ?? "";
 
 const waiting = new Map<string, (msg: any) => void>();
 const conn = connect(socketPath);
+// Both streams below carry JSON lines that can be larger than one read.
+// Decoding as a stream keeps a character split across two reads whole.
+conn.setEncoding("utf8");
 
 interface AllowPermissionResult {
   behavior: "allow";
@@ -237,6 +240,7 @@ async function handle(msg: any) {
 }
 
 let inBuf = "";
+process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
   inBuf += chunk;
   let nl;

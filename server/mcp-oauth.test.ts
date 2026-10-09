@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { McpOAuthError, McpOAuthManager, mcpOAuthRedirectUri, type McpSignInStatus, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
+import { McpOAuthError, McpOAuthManager, mcpCallbackOrigin, mcpOAuthRedirectUri, type McpSignInStatus, withMcpSignIn, withoutPendingSignIn } from "./mcp-oauth.ts";
 import type { McpOAuthClientConfig } from "./mcp-registry.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth, type FakeOAuth, type FakeOAuthOptions } from "./testing/fake-oauth-server.ts";
+import { withFreeSignInPort } from "./testing/ports.ts";
 
 let dir: string;
 let oauth: FakeOAuth;
@@ -19,6 +20,8 @@ let registered: McpOAuthClientConfig | undefined;
 async function setup(options: FakeOAuthOptions = {}, lifetimeMs?: number) {
   oauth = await startFakeOAuth(options);
   mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+  // a pre-registered app returns to the port derived from the URL: make it a free one
+  if (options.preRegistered) mcp = { ...mcp, url: await withFreeSignInPort(mcp.url) };
   manager = new McpOAuthManager({
     file: join(dir, "mcp-oauth.json"),
     ...(lifetimeMs ? { lifetimeMs } : {}),
@@ -537,5 +540,127 @@ describe("MCP sign-in from another computer", () => {
     expect(oauth.counts.token).toBe(1);
     expect(manager.authState("docs", mcp.url)).toBe("none");
     await expect.poll(() => oauth.counts.revoke).toBe(1);
+  });
+});
+
+describe("McpOAuthManager sign-in from a browser on another computer", () => {
+  const elsewhere = { remote: true, origin: "https://cloud.example" };
+
+  /** Where the approval sends the browser, without following it. */
+  async function returnAddress(status: McpSignInStatus): Promise<URL> {
+    return new URL((await fetch(status.authorizationUrl!, { redirect: "manual" })).headers.get("location")!);
+  }
+
+  const portFree = (port: number) => new Promise<boolean>((resolve) => {
+    const probe = createServer();
+    probe.once("error", () => resolve(false));
+    probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
+  });
+
+  it("registers for this server's https address and listens on no loopback port", async () => {
+    await setup();
+    mcp = { ...mcp, url: await withFreeSignInPort(mcp.url) };
+    const started = await manager.start("docs", mcp.url, undefined, "alice", elsewhere);
+    const link = new URL(started.authorizationUrl!);
+    expect(link.searchParams.get("redirect_uri")).toBe("https://cloud.example/mcp-oauth/callback");
+    expect(started.pasteBack).toBeUndefined();
+    expect(await portFree(Number(new URL(mcpOAuthRedirectUri(mcp.url)).port))).toBe(true);
+
+    const callback = await returnAddress(started);
+    expect(callback.origin + callback.pathname).toBe("https://cloud.example/mcp-oauth/callback");
+    const page = await manager.publicCallback("cloud.example", callback.search);
+    expect(page).toEqual({ status: 200, text: "Signed in. You can close this tab and return to OpenMausBot." });
+    expect(manager.status("docs", started.flowId, "alice")?.phase).toBe("succeeded");
+    expect(oauth.isValid(`Bearer ${await manager.accessToken("docs", mcp.url)}`)).toBe(true);
+
+    // the same address again: the code is spent, and never echoed
+    const replay = await manager.publicCallback("cloud.example", callback.search);
+    expect(replay.status).toBe(409);
+    expect(replay.text).not.toContain(callback.searchParams.get("code"));
+    expect(oauth.counts.token).toBe(1);
+  });
+
+  it("answers a wrong state or another address with a plain 400 and keeps waiting", async () => {
+    await setup();
+    const started = await manager.start("docs", mcp.url, undefined, "alice", elsewhere);
+    const callback = await returnAddress(started);
+    const forged = new URLSearchParams(callback.search);
+    forged.set("state", "forged");
+    for (const [host, search] of [["cloud.example", `?${forged}`], ["attacker.example", callback.search], [undefined, callback.search], ["cloud.example", ""]] as const) {
+      expect(await manager.publicCallback(host, search)).toEqual({ status: 400, text: "Invalid sign-in callback. Return to OpenMausBot and try again." });
+    }
+    expect(manager.status("docs", started.flowId, "alice")?.phase).toBe("waiting");
+    expect(oauth.counts.token).toBe(0);
+    expect((await manager.publicCallback("CLOUD.example", callback.search)).status).toBe(200);
+  });
+
+  it("refuses a callback after the sign-in expired", async () => {
+    await setup({}, 100);
+    const started = await manager.start("docs", mcp.url, undefined, "alice", elsewhere);
+    const callback = await returnAddress(started);
+    await expect.poll(() => manager.status("docs", started.flowId, "alice")?.phase).toBe("expired");
+    expect((await manager.publicCallback("cloud.example", callback.search)).status).toBe(409);
+    expect(oauth.counts.token).toBe(0);
+  });
+
+  it("reports a denied approval on the page without the server's own words", async () => {
+    await setup({ deny: true });
+    const started = await manager.start("docs", mcp.url, undefined, "alice", elsewhere);
+    const callback = await returnAddress(started);
+    const page = await manager.publicCallback("cloud.example", `${callback.search}&error_description=private`);
+    expect(page).toEqual({ status: 400, text: "Sign-in was not approved. You can close this tab." });
+    expect(manager.status("docs", started.flowId, "alice")?.phase).toBe("failed");
+  });
+
+  it("never completes a loopback sign-in through the public address", async () => {
+    await setup();
+    const started = await manager.start("docs", mcp.url, undefined, "alice");
+    const callback = await returnAddress(started);
+    expect((await manager.publicCallback(callback.host, callback.search)).status).toBe(400);
+    expect(manager.status("docs", started.flowId, "alice")?.phase).toBe("waiting");
+  });
+
+  it("falls back to the loopback callback, pasted, when the server refuses the https address", async () => {
+    await setup({ refuseRedirect: (uri) => uri.startsWith("https:") });
+    const started = await manager.start("docs", mcp.url, undefined, "alice", elsewhere);
+    expect(new URL(started.authorizationUrl!).searchParams.get("redirect_uri")).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp-oauth\/callback$/);
+    expect(started.pasteBack).toBe(true);
+    expect(oauth.counts.register).toBe(2);
+    const callback = await returnAddress(started);
+    expect((await manager.completeCallback("docs", started.flowId, callback.href, "alice")).phase).toBe("succeeded");
+  });
+
+  it("keeps an app registered in advance on its loopback redirect, pasted", async () => {
+    await setup({ noRegistration: true, preRegistered: { corp: null } });
+    registered = { clientId: "corp" };
+    const started = await manager.start("docs", mcp.url, undefined, "alice", elsewhere);
+    expect(new URL(started.authorizationUrl!).searchParams.get("redirect_uri")).toBe(mcpOAuthRedirectUri(mcp.url));
+    expect(started.pasteBack).toBe(true);
+    expect(oauth.counts.register).toBe(0);
+  });
+
+  it("asks a browser on this machine to paste nothing", async () => {
+    await setup();
+    const started = await manager.start("docs", mcp.url, undefined, "loopback", { remote: false, origin: "https://cloud.example" });
+    expect(new URL(started.authorizationUrl!).searchParams.get("redirect_uri")).toMatch(/^http:\/\/127\.0\.0\.1:/);
+    expect(started.pasteBack).toBeUndefined();
+  });
+});
+
+describe("mcpCallbackOrigin", () => {
+  it("uses the origin the browser proved when nothing is configured or it is configured", () => {
+    expect(mcpCallbackOrigin("https://me.fly.dev", [])).toBe("https://me.fly.dev");
+    expect(mcpCallbackOrigin("https://bots.acme.com", ["https://me.fly.dev", "https://bots.acme.com"])).toBe("https://bots.acme.com");
+  });
+
+  it("prefers a configured address over one nobody vouched for", () => {
+    expect(mcpCallbackOrigin("https://elsewhere.example", ["https://me.fly.dev"])).toBe("https://me.fly.dev");
+    expect(mcpCallbackOrigin(null, [null, undefined, "https://me.fly.dev/"])).toBe("https://me.fly.dev");
+  });
+
+  it("returns null for plain http, a path or credentials", () => {
+    expect(mcpCallbackOrigin("http://192.168.1.5:3000", [])).toBeNull();
+    expect(mcpCallbackOrigin(null, ["http://me.example", "https://me.example/omb", "https://user:pw@me.example", "not a url"])).toBeNull();
+    expect(mcpCallbackOrigin(null, [])).toBeNull();
   });
 });

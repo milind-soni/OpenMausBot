@@ -19,7 +19,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
-import { canonicalPath } from "./codex-device-auth.ts";
+import { canonicalPath } from "./device-auth.ts";
 
 const MAX_OUTPUT = 32_768;
 /** Where Anthropic's sign-in lives. Anything else in the CLI's output is not a link we show. */

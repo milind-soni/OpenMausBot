@@ -240,8 +240,7 @@ posixOnly("authorization decisions are logged", () => {
     async () => {
       // the same fake ACP CLI in question mode: the request is an ask, not a
       // permission, so the card must arrive structured and the row must say
-      // a person owes the answer. A tool-call ask has no origin to record —
-      // only the BoatAgent transport ever sets one.
+      // a person owes the answer. A tool-call ask has no origin to record.
       const created = await api("POST", "/api/bots");
       expect(created.status).toBe(201);
       const patched = await api("PATCH", `/api/bots/${created.body.bot.id}`, {

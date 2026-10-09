@@ -30,11 +30,18 @@ import { StatusActivityRow } from "@/components/StatusActivityRow";
 import { normalizeState } from "@/lib/mascot";
 import { defaultResponderName, effectiveDefaultResponder, groupResponseHint, jevRoomRoutingOn } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
-import { FailedTurnRow } from "./ChatView";
+import { CopyButton, FailedTurnRow, MessageBoundary } from "./ChatView";
+import { MessageActions, messageActionClass } from "./MessageActions";
+import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
+import { SpeakButton } from "./SpeakButton";
+import { useSpeech } from "@/lib/tts/useSpeech";
+import { localSystemVoiceActive } from "@/lib/local-voice";
 import { botEngine, failedTurnCause } from "@/lib/failed-turn";
 import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
 import { Composer } from "./Composer";
+import { ChatErrorBanner } from "./ChatErrorBanner";
 import { ChatFindBar } from "./ChatFindBar";
+import { ConversationTurnLimit } from "./ConversationTurnLimit";
 import { GroupTaskPicker } from "./TaskPicker";
 import { GroupUsageChip } from "./GroupUsageChip";
 import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
@@ -63,10 +70,13 @@ import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
+import { useUnreadDivider } from "@/hooks/use-unread-divider";
+import { unreadMessageIds } from "@/lib/unread-divider";
+import { NewMessagesDivider } from "./NewMessagesDivider";
 import { appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
 import { citationPreviewText, splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
-import { latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
+import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 import { dayLabel, localDay } from "@/lib/transcript-derivations";
@@ -86,7 +96,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
   if (!tool) return null;
   if (message.threadRef) return <ThreadChip message={message} />;
   if (failedTurnCause(tool.name) !== null) {
-    return <FailedTurnRow tool={tool} engine={botEngine(state.bots.find((b) => b.id === message.from?.botId), state.instances)} />;
+    return <FailedTurnRow tool={tool} engine={botEngine(state.bots.find((b) => b.id === message.from?.botId), state.instances)} botId={message.from?.botId} />;
   }
   const comm = message.comm;
   if (comm && comm.groupId !== roomId) {
@@ -105,7 +115,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
           title={t("room.openBot", { name: comm.withName })}
           className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
         >
-          <BotAvatar bot={withBot ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} />
+          <BotAvatar bot={withBot ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} animated={false} />
           <span className="max-w-[480px] truncate">{tool.name}</span>
           <ChevronRight size={13} />
         </button>
@@ -121,7 +131,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
           tool.ok === false ? "text-danger" : "text-ink-secondary",
         )}
       >
-        {comm && <BotAvatar bot={state.bots.find(b => b.id === comm.withBotId) ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} />}
+        {comm && <BotAvatar bot={state.bots.find(b => b.id === comm.withBotId) ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} animated={false} />}
         <span className={cn("max-w-[480px] truncate", !comm && "font-mono")}>{tool.name}</span>
       </div>
     </div>
@@ -160,11 +170,175 @@ function PinToggle({ group, message }: { group: Group; message: Message }) {
         })
       }
       aria-label={pinned ? t("chat.unpinMessage") : t("chat.pinMessage")}
-      className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-70"
+      className={messageActionClass}
       title={pinned ? t("chat.unpinHint") : t("room.pinHint")}
     >
       {pinned ? <PinOff size={14} /> : <Pin size={14} />}
     </button>
+  );
+}
+
+/** Same limits as a 1:1 user bubble (ChatView). */
+const USER_COLLAPSE_CHARS = 600;
+const USER_COLLAPSE_LINES = 8;
+
+/** One room text message: the same actions as a 1:1 bubble, and a boundary
+ * so a bad markdown node stays inside this row. */
+function RoomTextMessage({
+  group,
+  message: m,
+  members,
+  transcript,
+  emerging,
+  eager,
+  onReply,
+}: {
+  group: Group;
+  message: Message;
+  members: Bot[];
+  transcript: Message[];
+  emerging: boolean;
+  eager: boolean;
+  onReply: (message: Message) => void;
+}) {
+  const { state, dispatch } = useStore();
+  const user = m.role === "user";
+  const cited = user && m.text ? splitTranscriptCitations(m.text) : null;
+  const attachments = user && m.text ? splitTranscriptAttachments(cited?.display ?? m.text) : null;
+  const display = attachments?.display ?? m.text ?? "";
+  const [expanded, setExpanded] = useState(false);
+  const [viewRaw, setViewRaw] = useState(false);
+  const speech = useSpeech();
+  const speaking = speech.messageId === m.id && speech.status !== "idle";
+  const focus = state.focusMessage;
+  const focusedSearch = focus?.messageId === m.id && Boolean(focus.matchText) && focus.threadId === group.threadId;
+  const collapsible = user && !expanded && (display.length > USER_COLLAPSE_CHARS || display.split("\n").length > USER_COLLAPSE_LINES);
+  useEffect(() => {
+    if (focusedSearch && collapsible) setExpanded(true);
+  }, [focusedSearch, collapsible, focus?.nonce]);
+  const speakerBot = members.find((member) => member.id === m.from?.botId);
+  const botText = m.text ?? "";
+  return (
+    <div className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
+      <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
+        {user && (
+          <MessageActions side="user">
+            {Boolean(display.trim()) && <CopyButton text={display} className="opacity-100" />}
+            <button
+              type="button"
+              onClick={() => onReply(m)}
+              aria-label={t("chat.replyToMessage")}
+              title={t("chat.reply")}
+              className={messageActionClass}
+            >
+              <MessageSquareReply size={14} />
+            </button>
+            <PinToggle group={group} message={m} />
+          </MessageActions>
+        )}
+        <div
+          data-chat-bubble
+          className={cn(
+            "w-fit max-w-[min(42rem,78%)] rounded-2xl text-[15px] leading-relaxed",
+            !user && emerging && "turn-answer",
+            !user && !m.text?.trim() && !m.replyToId && m.attachments?.length
+              ? "text-ink"
+              : user ? "chat-text whitespace-pre-wrap bg-bubble-user px-4 py-2.5 text-ink" : "bg-card px-4 py-2.5 text-ink",
+          )}
+          title={new Date(m.at).toLocaleString()}
+        >
+          {m.replyToId && (() => {
+            const target = transcript.find((candidate) => candidate.id === m.replyToId);
+            return target ? (
+              <div className="mb-2">
+                <ReplyQuote
+                  message={target}
+                  fallbackName={t("room.fallbackBot")}
+                  compact
+                  onJump={() =>
+                    dispatch({ type: "focusMessage", threadId: group.threadId, messageId: target.id })
+                  }
+                />
+              </div>
+            ) : null;
+          })()}
+          {user ? (
+            <>
+              {attachments && <AttachmentGallery images={attachments.images} files={attachments.files} message={{ threadId: group.threadId, messageId: m.id }} eager={eager} className={!attachments.display ? "mb-0" : undefined} />}
+              <div
+                className={cn(collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
+                data-citation-source={m.id}
+                data-citation-owner-type="group"
+                data-citation-owner={group.id}
+                data-citation-thread={group.threadId}
+              >
+                <ThreadRefText text={display} peers={members} everyone={!group.dm} />
+              </div>
+              {cited && <SentCitations
+                citations={cited.citations}
+                onNavigate={async (citation: CitationAttachment) => {
+                  if (citation.source.ownerType !== "group" || !group.messages.some((candidate) => candidate.id === citation.source.messageId)) return false;
+                  dispatch({ type: "focusMessage", threadId: group.threadId, messageId: citation.source.messageId });
+                  return highlightCitationSource(citation);
+                }}
+              />}
+              {m.via === "api" && (
+                <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
+              )}
+              {collapsible && (
+                <button type="button" onClick={() => setExpanded(true)} className="mt-1 text-[12.5px] text-ink-secondary hover:text-ink">
+                  {t("chat.showFull")}
+                </button>
+              )}
+              {expanded && (
+                <button type="button" onClick={() => setExpanded(false)} className="mt-1 text-[12.5px] text-ink-secondary hover:text-ink">
+                  {t("chat.showLess")}
+                </button>
+              )}
+            </>
+          ) : (
+            <MessageBoundary key={viewRaw ? "raw" : "rendered"} fallbackText={botText || t("chat.generatedImage")}>
+              {(m.attachments ?? []).some((attachment) => attachment.kind === "audio") && (
+                <div className={cn("flex flex-col", (m.text || (m.attachments ?? []).some((attachment) => attachment.kind === "image")) && "mb-2")}>
+                  {m.attachments!.filter((attachment): attachment is VoiceNoteAttachment => attachment.kind === "audio").map((note) => (
+                    <VoiceNoteBubble key={note.path} attachment={note} />
+                  ))}
+                </div>
+              )}
+              <MessageAttachmentGallery text={botText} attachments={m.attachments} message={{ threadId: group.threadId, messageId: m.id }} className={m.text ? undefined : "mb-0"} eager={eager} />
+              {viewRaw && botText ? (
+                <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><RawMarkdownView text={botText} /></div>
+              ) : botText ? (
+                <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={botText} mentionPeers={members} everyone={!group.dm} message={{ threadId: group.threadId, messageId: m.id }} /></div>
+              ) : null}
+            </MessageBoundary>
+          )}
+        </div>
+        {!user && (
+          <MessageActions side="bot" forceOpen={viewRaw || speaking}>
+            {botText && <CopyButton text={botText} className="opacity-100" />}
+            {botText && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((raw) => !raw)} className="opacity-100" />}
+            {botText && (
+              <SpeakButton text={botText} botId={speakerBot?.id} messageId={m.id} voiceId={speakerBot?.voice} tts={state.config?.tts} localVoice={localSystemVoiceActive()} className="opacity-100" />
+            )}
+            <button
+              type="button"
+              onClick={() => onReply(m)}
+              aria-label={t("chat.replyToMessage")}
+              title={t("chat.reply")}
+              className={messageActionClass}
+            >
+              <MessageSquareReply size={14} />
+            </button>
+            <PinToggle group={group} message={m} />
+          </MessageActions>
+        )}
+        <span className="self-end pb-1 text-[11px] tabular-nums text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
+          {formatTime(m.at)}
+        </span>
+      </div>
+      {!user && m.routedBy && <RoutedByLine routedBy={m.routedBy} />}
+    </div>
   );
 }
 
@@ -174,6 +348,8 @@ export const Transcript = memo(function Transcript({
   messages,
   transcript,
   emergingId,
+  unreadDividerId = null,
+  unreadDividerFading = false,
   onReply,
 }: {
   group: Group;
@@ -185,6 +361,9 @@ export const Transcript = memo(function Transcript({
   /** Full room transcript, used to resolve quoted messages outside the mounted window. */
   transcript: Message[];
   emergingId?: string | null;
+  /** The New divider goes above the row holding this message. */
+  unreadDividerId?: string | null;
+  unreadDividerFading?: boolean;
   onReply: (message: Message) => void;
 }) {
   const { state, dispatch } = useStore();
@@ -198,6 +377,15 @@ export const Transcript = memo(function Transcript({
   const newestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id;
   const focus = state.focusMessage;
   const focusedId = focus && !focus.consumed && focus.threadId === group.threadId ? focus.messageId : null;
+  // The divider sits above the first drawn row from its message on; hidden
+  // tool lines are not items here.
+  const unreadIds = useMemo(() => unreadMessageIds(messages, unreadDividerId), [messages, unreadDividerId]);
+  let dividerPlaced = false;
+  const dividerAbove = (rows: readonly Message[]) => {
+    if (!unreadIds || dividerPlaced || !rows.some((row) => unreadIds.has(row.id))) return null;
+    dividerPlaced = true;
+    return <NewMessagesDivider fading={unreadDividerFading} />;
+  };
   return (
     <>
       {items.map((item, i) => {
@@ -205,8 +393,9 @@ export const Transcript = memo(function Transcript({
         const prev = previous && (previous.kind === "run" ? previous.messages.at(-1) : previous.message);
         const first = item.kind === "run" ? item.messages[0] : item.message;
         const newDay = !prev || localDay(prev.at) !== localDay(first.at);
+        const divider = dividerAbove(item.kind === "run" ? item.messages : [item.message]);
         if (item.kind === "run") {
-          if (!showToolCalls) return null;
+          if (!showToolCalls) return divider && <div key={item.id} className="contents">{divider}</div>;
           const cluster = !prev || prev.role !== first.role || prev.from?.botId !== first.from?.botId || newDay;
           return (
             <div key={item.id} className="contents">
@@ -215,6 +404,7 @@ export const Transcript = memo(function Transcript({
                   {dayLabel(first.at)} {formatTime(first.at)}
                 </div>
               )}
+              {divider}
               {first.from && cluster && (
                 <ClusterLabel bot={memberOf(first.from.botId)} name={first.from.name} color={first.from.color} />
               )}
@@ -230,8 +420,6 @@ export const Transcript = memo(function Transcript({
         }
         const m = item.message;
         const user = m.role === "user";
-        const cited = user && m.text ? splitTranscriptCitations(m.text) : null;
-        const attachments = user && m.text ? splitTranscriptAttachments(cited?.display ?? m.text) : null;
         const newCluster = !prev || prev.role !== m.role || prev.from?.botId !== m.from?.botId || Boolean(prev.comm) || newDay;
         const routineOwner = m.kind === "routine.run" ? memberOf(m.from?.botId) : undefined;
         const routineExecutionThreadId = m.routineRun?.executionThreadId;
@@ -251,18 +439,24 @@ export const Transcript = memo(function Transcript({
             <ConnectorCard botId={m.from.botId} threadId={group.threadId} message={m} />
           ) : m.kind === "options" && m.card?.requestId && m.card.questionRequest ? (
             <div className="flex justify-start">
-              <QuestionCard threadId={group.threadId} bot={memberOf(m.from?.botId)} message={m} />
+              <MessageBoundary fallbackText={m.card.subtitle || m.card.title || ""}>
+                <QuestionCard threadId={group.threadId} bot={memberOf(m.from?.botId)} message={m} />
+              </MessageBoundary>
             </div>
           ) : m.kind === "options" && m.card?.requestId && m.card.tool ? (
             <div className="flex justify-start">
-              <ApprovalCard bot={memberOf(m.from?.botId)} message={m} />
+              <MessageBoundary fallbackText={m.card.subtitle || m.card.title || ""}>
+                <ApprovalCard bot={memberOf(m.from?.botId)} message={m} threadId={group.threadId} />
+              </MessageBoundary>
             </div>
           ) : m.kind === "options" && m.card && m.from?.botId ? (
             // a QUESTION from a member. Without this branch the card fell
             // through to null: invisible on screen, and the asking bot sat
             // there until its 15-minute timeout answered for you
             <div className="flex justify-start">
-              <OptionCard botId={m.from.botId} threadId={group.threadId} groupId={group.id} message={m} />
+              <MessageBoundary fallbackText={m.card.subtitle || m.card.title || ""}>
+                <OptionCard botId={m.from.botId} threadId={group.threadId} groupId={group.id} message={m} />
+              </MessageBoundary>
             </div>
           ) : m.kind === "goal.run" ? (
             <div className="flex justify-start">
@@ -288,108 +482,17 @@ export const Transcript = memo(function Transcript({
           ) : m.kind === "digest" ? (
             showToolCalls ? <DigestChip message={m} /> : null
           ) : m.kind === "text" && (m.text || m.attachments?.length) ? (
-            <div className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
-              <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
-                {user && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => onReply(m)}
-                      aria-label={t("chat.replyToMessage")}
-                      title={t("chat.reply")}
-                      className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-70"
-                    >
-                      <MessageSquareReply size={14} />
-                    </button>
-                    <PinToggle group={group} message={m} />
-                  </>
-                )}
-                <div
-                  data-chat-bubble
-                  className={cn(
-                    "w-fit max-w-[min(42rem,78%)] rounded-2xl text-[15px] leading-relaxed",
-                    !user && m.id === emergingId && "turn-answer",
-                    // A bot message that is only attachments is just the files: no bubble.
-                    !user && !m.text?.trim() && !m.replyToId && m.attachments?.length
-                      ? "text-ink"
-                      : user ? "chat-text whitespace-pre-wrap bg-bubble-user px-4 py-2.5 text-ink" : "bg-card px-4 py-2.5 text-ink",
-                  )}
-                  title={new Date(m.at).toLocaleString()}
-                >
-                  {m.replyToId && (() => {
-                    const target = transcript.find((candidate) => candidate.id === m.replyToId);
-                    return target ? (
-                      <div className="mb-2">
-                        <ReplyQuote
-                          message={target}
-                          fallbackName={t("room.fallbackBot")}
-                          compact
-                          onJump={() =>
-                            dispatch({ type: "focusMessage", threadId: group.threadId, messageId: target.id })
-                          }
-                        />
-                      </div>
-                    ) : null;
-                  })()}
-                  {user ? (
-                    <>
-                      {attachments && <AttachmentGallery images={attachments.images} files={attachments.files} message={{ threadId: group.threadId, messageId: m.id }} eager={m.id === newestMessageId || m.id === newestUserMessageId} className={!attachments.display ? "mb-0" : undefined} />}
-                      <div
-                        data-citation-source={m.id}
-                        data-citation-owner-type="group"
-                        data-citation-owner={group.id}
-                        data-citation-thread={group.threadId}
-                      >
-                        <ThreadRefText text={attachments?.display ?? m.text ?? ""} peers={members} everyone={!group.dm} />
-                      </div>
-                      {cited && <SentCitations
-                        citations={cited.citations}
-                        onNavigate={async (citation: CitationAttachment) => {
-                          if (citation.source.ownerType !== "group" || !group.messages.some((candidate) => candidate.id === citation.source.messageId)) return false;
-                          dispatch({ type: "focusMessage", threadId: group.threadId, messageId: citation.source.messageId });
-                          return highlightCitationSource(citation);
-                        }}
-                      />}
-                      {m.via === "api" && (
-                        <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      {(m.attachments ?? []).some((attachment) => attachment.kind === "audio") && (
-                        <div className={cn("flex flex-col", (m.text || (m.attachments ?? []).some((attachment) => attachment.kind === "image")) && "mb-2")}>
-                          {m.attachments!.filter((attachment): attachment is VoiceNoteAttachment => attachment.kind === "audio").map((note) => (
-                            <VoiceNoteBubble key={note.path} attachment={note} />
-                          ))}
-                        </div>
-                      )}
-                      <MessageAttachmentGallery text={m.text ?? ""} attachments={m.attachments} message={{ threadId: group.threadId, messageId: m.id }} className={m.text ? undefined : "mb-0"} eager={m.id === newestMessageId || m.id === newestUserMessageId} />
-                      {m.text ? <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={m.text} mentionPeers={members} everyone={!group.dm} message={{ threadId: group.threadId, messageId: m.id }} /></div> : null}
-                    </>
-                  )}
-                </div>
-                {!user && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => onReply(m)}
-                      aria-label={t("chat.replyToMessage")}
-                      title={t("chat.reply")}
-                      className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-70"
-                    >
-                      <MessageSquareReply size={14} />
-                    </button>
-                    <PinToggle group={group} message={m} />
-                  </>
-                )}
-                <span className="self-end pb-1 text-[11px] tabular-nums text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
-                  {formatTime(m.at)}
-                </span>
-              </div>
-              {!user && m.routedBy && <RoutedByLine routedBy={m.routedBy} />}
-            </div>
+            <RoomTextMessage
+              group={group}
+              message={m}
+              members={members}
+              transcript={transcript}
+              emerging={m.id === emergingId}
+              eager={m.id === newestMessageId || m.id === newestUserMessageId}
+              onReply={onReply}
+            />
           ) : null;
-        if (!row) return null;
+        if (!row) return divider && <div key={m.id} className="contents">{divider}</div>;
         return (
           <div key={m.id} className="contents" data-mid={m.id}>
             {newDay && (
@@ -397,6 +500,7 @@ export const Transcript = memo(function Transcript({
                 {dayLabel(m.at)} {formatTime(m.at)}
               </div>
             )}
+            {divider}
             {!user && m.from && newCluster && !(m.kind === "activity" && m.comm) && (
               <ClusterLabel bot={memberOf(m.from.botId)} name={m.from.name} color={m.from.color} />
             )}
@@ -1068,6 +1172,7 @@ export function GroupView({ group }: { group: Group }) {
     return {
       busy: Boolean(group.working || group.busyBotId),
       reply: latestReply(group.messages, (m) => m.from?.name ?? group.name),
+      failure: latestFailure(group.messages, (m) => m.from?.name ?? group.name),
       approval: approval
         ? { id: approval.requestId, name: approval.message.from?.name ?? speaker?.name ?? group.name }
         : undefined,
@@ -1098,6 +1203,7 @@ export function GroupView({ group }: { group: Group }) {
     pinOn: [group.busyBotId, group.working, composerDock.pad],
     transcriptShown: !setupPending,
   });
+  const unreadDivider = useUnreadDivider({ threadId: group.threadId, messages: group.messages, following });
 
   useEffect(() => setBulletinDraft(group.bulletin), [group.id, group.bulletin]);
   // an open folder editor belongs to the room it was opened in
@@ -1206,6 +1312,7 @@ export function GroupView({ group }: { group: Group }) {
             messages={group.messages}
             isGroup
           />
+          {!setupPending && <ConversationTurnLimit group={group} />}
           <GroupCallButton group={group} members={members} />
           <GroupUsageChip usage={group.usage} />
           {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
@@ -1238,6 +1345,7 @@ export function GroupView({ group }: { group: Group }) {
       </div>
 
       {findOpen && <ChatFindBar threadId={group.threadId} onClose={() => setFindOpen(false)} />}
+      <ChatErrorBanner message={state.error} onDismiss={() => dispatch({ type: "error", message: null })} />
 
       {/* An Auto room answers like lead mode while the decision model is off: say so, once. */}
       {!setupPending && !group.dm && !remoteClient && state.config && group.defaultResponder.kind === "auto" && !jevRoomRoutingOn(state.config) && (
@@ -1261,6 +1369,7 @@ export function GroupView({ group }: { group: Group }) {
           <div className="mb-1 rounded-lg border border-hairline/40 bg-panel p-2">
             <textarea
               autoFocus
+              dir="auto"
               value={bulletinDraft}
               onChange={(e) => setBulletinDraft(e.target.value)}
               onBlur={saveBulletin}
@@ -1284,7 +1393,7 @@ export function GroupView({ group }: { group: Group }) {
             title={t("room.bulletin.title")}
           >
             <Pin size={12} className="shrink-0 text-ink-secondary" />
-            <span className={cn("truncate text-[12.5px]", group.bulletin ? "text-ink-secondary" : "text-ink-tertiary")}>
+            <span dir="auto" className={cn("truncate text-[12.5px]", group.bulletin ? "text-ink-secondary" : "text-ink-tertiary")}>
               {group.bulletin.split("\n")[0] || (remoteClient ? t("room.bulletin.none") : t("room.bulletin.add"))}
             </span>
           </button>
@@ -1316,7 +1425,7 @@ export function GroupView({ group }: { group: Group }) {
                 title={t("chat.pinnedJump")}
               >
                 <span className="shrink-0 text-[11.5px] font-medium text-accent">{sender}</span>
-                <span className="truncate text-[12.5px] text-ink-secondary">{text}</span>
+                <span dir="auto" className="truncate text-[12.5px] text-ink-secondary">{text}</span>
               </button>
               <button
                 onClick={() => dispatch({ type: "patchGroup", groupId: group.id, patch: { pinnedMessageId: "" } })}
@@ -1399,6 +1508,8 @@ export function GroupView({ group }: { group: Group }) {
             messages={windowedMessages}
             transcript={group.messages}
             emergingId={popping?.id}
+            unreadDividerId={unreadDivider.messageId}
+            unreadDividerFading={unreadDivider.fading}
             onReply={selectReply}
           />
           {laterCount > 0 && (

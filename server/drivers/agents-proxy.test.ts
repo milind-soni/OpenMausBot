@@ -459,6 +459,8 @@ beforeAll(async () => {
       OMB_TURN_DEPTH: "0",
       OMB_SKILL_AUTHORING_ENABLED: "1",
       OMB_SHARED_COMPUTERS_ENABLED: "1",
+      // A Chief's turn, so the Chief-only team tools are mounted too.
+      OMB_CHIEF_OF_STAFF: "1",
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -487,10 +489,18 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     for (const tool of new Set(proposalCases.map(entry => entry.tool))) {
       const description = list.result.tools.find((entry: { name: string }) => entry.name === tool).description;
-      expect(description).toContain("granted Full Access may apply the change immediately");
+      // Team setup applies only at Full access; a bot's own routines,
+      // skills and profile apply at any level.
+      if (tool === "propose_team_setup" || tool === "propose_bot_deletion") {
+        expect(description).toContain("granted Full Access may apply the change immediately");
+        expect(description).toContain("Never claim success from the permission mode alone");
+      } else {
+        expect(description).toContain("a change to your own routines, skills, profile or model applies immediately");
+        expect(description).toContain("a change for another bot may wait for the person's confirmation");
+        expect(description).toContain("Never claim success without an applied result");
+      }
       expect(description).toContain("If applied, continue the requested work without another confirmation");
       expect(description).toContain("Only a pending result requires ending the turn");
-      expect(description).toContain("Never claim success from the permission mode alone");
       expect(description).toContain("does not elevate another bot's execution permissions");
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
@@ -2145,9 +2155,10 @@ describe("standing external runtime", () => {
   });
 });
 
-// Opt-in computer sharing is off unless the harness turns it on. A separate
-// child is the only honest check: the tool list is frozen at module load.
-describe("with computer sharing off (the default)", () => {
+// Opt-in computer sharing is off unless the harness turns it on, and so are
+// the Chief-only tools. A separate child is the only honest check: the tool
+// list is frozen at module load.
+describe("with computer sharing off and no Chief of Staff (the defaults)", () => {
   let gated: ChildProcess;
   const gatedPending = new Map<number, (msg: any) => void>();
   let gatedId = 500;
@@ -2171,7 +2182,7 @@ describe("with computer sharing off (the default)", () => {
         OMB_COMMS_TOKEN: TOKEN,
         OMB_TURN_DEPTH: "0",
         OMB_SKILL_AUTHORING_ENABLED: "1",
-        // deliberately no OMB_SHARED_COMPUTERS_ENABLED
+        // deliberately no OMB_SHARED_COMPUTERS_ENABLED or OMB_CHIEF_OF_STAFF
       },
       stdio: ["pipe", "pipe", "inherit"],
     });
@@ -2210,6 +2221,31 @@ describe("with computer sharing off (the default)", () => {
       const refused = await gatedRpc("tools/call", { name, arguments: { computer_id: "x", action: "list_files" } });
       expect(refused.error?.message ?? refused.result?.content?.[0]?.text).toMatch(/unknown tool|turned off/i);
     }
+  });
+
+  it("shows a bot that is not a Chief none of the Chief-only tools or parameters", async () => {
+    type ListedTool = { name: string; description: string; inputSchema: { properties: Record<string, unknown> } };
+    const tools = new Map(((await gatedRpc("tools/list")).result.tools as ListedTool[]).map((tool) => [tool.name, tool]));
+    for (const name of ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"]) {
+      expect(tools.has(name), name).toBe(false);
+    }
+    for (const name of ["propose_profile", "propose_model"]) {
+      expect(tools.get(name)!.inputSchema.properties).not.toHaveProperty("for_bot_id");
+      expect(tools.get(name)!.description).not.toContain("for_bot_id");
+    }
+    // A routine change may still target a reachable section peer.
+    expect(tools.get("propose_routine_action")!.inputSchema.properties).toHaveProperty("for_bot_id");
+  });
+
+  it("refuses a Chief-only tool called by name without reaching the harness", async () => {
+    lastCreateBody = null;
+    lastCreateRoomBody = null;
+    const created = await gatedRpc("tools/call", { name: "create_bot", arguments: { name: "Scout", role: "Ops", instructions: "Work." } });
+    expect(created.error).toMatchObject({ code: -32602, message: "Unknown tool: create_bot" });
+    const room = await gatedRpc("tools/call", { name: "create_room", arguments: { name: "Ops", member_bot_ids: ["bot-helper"] } });
+    expect(room.error).toMatchObject({ code: -32602, message: "Unknown tool: create_room" });
+    expect(lastCreateBody).toBeNull();
+    expect(lastCreateRoomBody).toBeNull();
   });
 });
 

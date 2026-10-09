@@ -20,6 +20,7 @@ import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-even
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
+import { sameModelSelection } from "../../shared/thread-model";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { QuestionRequestCardData } from "../../shared/ask-question";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
@@ -27,6 +28,7 @@ import type { ModelRequestCardData } from "../../shared/model-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
+import type { PlaceRow } from "../../shared/place-view";
 import {
   reviewedSkillSha256,
   skillRequestBehavior,
@@ -35,6 +37,8 @@ import {
 import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { botShowsUnread } from "@/lib/bot-unread";
+import { firstUnreadMessageId, threadOpensUnread, threadReadCursor } from "@/lib/unread-divider";
+import type { ComputerStart } from "@/lib/computer-start";
 import { answerResponse, dismissResponse } from "@/lib/card-answer";
 import { currentCall } from "@/lib/call";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
@@ -42,6 +46,7 @@ import { speaker } from "@/lib/tts";
 import { roleProfilePatch, type BotRole } from "@/lib/bot-roles";
 import { t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
+import { useChatErrorClear } from "./chat-error";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
 
@@ -108,11 +113,18 @@ export interface OptionCardData {
   /** Exact provider command eligible for a durable, folder-scoped allow. */
   commandAllowlist?: { command: string; cwd: string; providerInstanceId: string };
   approvalScope?: "local-computer";
+  /** The bot's change applied without a person (a change to itself, or Full
+   * access): shown as one line with Undo instead of the approval box. */
+  autoApplied?: boolean;
+  /** A person undid that change. */
+  undone?: boolean;
   /** Persisted proposal used by the server when the user confirms it. */
   routineRequest?: RoutineRequestCardData;
   /** Staged learned-skill change; applied only after the user confirms this card. */
   skillRequest?: SkillRequestCardData;
-  outboundRequest?: { tool: string; app: string | null };
+  /** calls: one per outbound call the card covers, in subtitle order. Absent
+   * on cards from older computers. */
+  outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
   teamMemoryRequest?: { section: string; entryId: string; kind: string };
   /** Persisted profile proposal used by the server when the user confirms it. */
   profileRequest?: ProfileRequestCardData;
@@ -176,7 +188,7 @@ export interface Message {
    * narration of the same chip ("reading a file"), used by call mode. */
   /** `setup` marks an error fixed by installing something, not by retrying.
    * `summary` is the call's input on one redacted line (the shell command). */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; claudeUpdate?: boolean; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean };
+  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; claudeUpdate?: boolean; place?: PlaceRow; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean };
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
   /** a user message that did not come from typing here: through the
@@ -207,6 +219,9 @@ export interface Message {
    * (ask_bot, delegate_bot, start_thread): the words are that bot's, not
    * the person's. Rendered as the peer speaking — see lib/peer-message. */
   peerAsk?: { botId: string; name: string; unattended?: boolean };
+  /** coordinate_bots delivery identity, as stored: the request a teammate
+   * sent into this thread, or the result it reported back. */
+  roomRequest?: { id: string; phase: "request" | "result" };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" linking to the bot⇄bot channel. */
@@ -236,6 +251,9 @@ export interface Group {
   defaultResponder: GroupDefaultResponder;
   bulletin: string;
   unread: boolean;
+  /** The newest message on screen the last time the person read this
+   * conversation. The New divider goes after it. */
+  lastReadMessageId?: string;
   createdAt: number;
   /** auto-created bot⇄bot channel (ask_bot exchanges mirror here) */
   dm?: boolean;
@@ -258,6 +276,9 @@ export interface Group {
   /** New user-created rooms remain in setup until Save or Skip. */
   setupCompletedAt?: number | null;
   setupSkippedAt?: number | null;
+  /** A direct-message conversation's turn ceiling. Null or absent uses the
+   * global group limit. Channel conversations store theirs on each task. */
+  turnTimeoutMinutes?: number | null;
   /** Separate conversations in this channel. DMs deliberately stay on one
    * thread and omit this collection. */
   tasks?: GroupTask[];
@@ -279,6 +300,9 @@ export interface GroupTask {
   pinned?: boolean;
   /** Newest message time, or createdAt. Server-derived. */
   updatedAt?: number;
+  /** This conversation's turn ceiling, in whole minutes. Absent uses the
+   * global group limit. */
+  turnTimeoutMinutes?: number;
 }
 
 export interface ModelSelection {
@@ -307,7 +331,12 @@ export interface Task {
   /** folder this task's turns run in, pinned on its first turn; null =
    * legacy home-folder session; absent = not pinned yet */
   cwd?: string | null;
+  /** The model this thread runs on: its own when a person picked one here,
+   * else its bot's (followsBotModel). */
   modelSelection?: ModelSelection;
+  /** true: runs on its bot's model and moves with it; false: a model a person
+   * picked in this thread. Absent from servers older than the field. */
+  followsBotModel?: boolean;
   approvalMode?: ApprovalMode;
   autoApprove?: boolean;
   alwaysAllow?: string[];
@@ -317,6 +346,9 @@ export interface Task {
    * readout anchors here so it survives thread switches. Absent while idle. */
   turnStartedAt?: number;
   unread?: boolean;
+  /** The newest message on screen the last time the person read this
+   * conversation. The New divider goes after it. */
+  lastReadMessageId?: string;
   pinnedMessageId?: string;
   /** where this conversation works, when pinned: by the person from the
    * composer, or by its first Auto turn to the place it reached. Wins over
@@ -588,6 +620,15 @@ function rewindThreadUpdatedAt(state: AppState, threadId: string, messages: { at
   };
 }
 
+/** The New divider for a conversation being opened. One that opens unread
+ * gets a fresh one; opening the same conversation again keeps its divider,
+ * and any other conversation has none. */
+function openedUnreadDivider(state: AppState, threadId: string, unread: boolean, messages: readonly Message[], lastReadMessageId?: string): AppState["unreadDivider"] {
+  if (!unread) return state.unreadDivider?.threadId === threadId ? state.unreadDivider : null;
+  const messageId = firstUnreadMessageId(messages, lastReadMessageId);
+  return messageId ? { threadId, messageId } : null;
+}
+
 /** The visible conversation: walk parentId links from the active leaf back
  * to the root. Falls back to the flat list for pre-branching payloads. */
 export function visibleMessages(bot: Pick<Bot, "messages" | "activeLeafId">): Message[] {
@@ -631,12 +672,17 @@ export interface ConfigStatus {
   box: { configured: boolean; included?: boolean };
   vps: { configured: boolean; sshAlias: string };
   rooms: { turnTimeoutMinutes: number };
+  /** Per-call ceiling (minutes) for a bot's MCP tools. Absent from servers
+   * older than the setting; read it with mcpCallTimeoutMinutes(). */
+  mcp?: { callTimeoutMinutes: number };
   /** Workspace defaults for new bots; absent effort = no level is sent. */
   newBots?: { effort?: EffortLevel };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number };
-  opencodeGo?: { configured: boolean };
+  /** `providerKeys`: names of the keys saved for OpenCode's other
+   * providers, never the keys. */
+  opencodeGo?: { configured: boolean; providerKeys?: string[] };
   /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
    * Fish Audio key, or a Chatterbox server address); `ready` = that AND a voice, which is
    * what it takes to actually speak. The key itself is never echoed back;
@@ -732,7 +778,7 @@ export interface BrowserProfile {
 // Settings shows (a saved key's Test button used to vanish that way).
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "mistral" | "cerebras" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "live" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
+  "xai" | "mistral" | "cerebras" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "live" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -749,6 +795,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     box: frame.box,
     vps: frame.vps,
     rooms: frame.rooms,
+    mcp: frame.mcp,
     threads: frame.threads,
     automaticRecovery: frame.automaticRecovery,
     localVm: frame.localVm,
@@ -966,8 +1013,8 @@ export interface AppState {
   botSettingsSection: BotSettingsSection;
   /** True only when the open action named a section — accordion expands that row. */
   botSettingsExpandAccordion: boolean;
-  /** bots whose cloud computer is being provisioned */
-  provisioning: Record<string, boolean>;
+  /** bots whose computer is starting for a turn (src/lib/computer-start.ts) */
+  computerStarts: Record<string, ComputerStart>;
   /** Bot removals waiting for the server to verify that no persistent
    * computer would be orphaned. The bot stays visible until that succeeds. */
   deletingBots: Record<string, true>;
@@ -978,6 +1025,10 @@ export interface AppState {
   /** a search hit to scroll to once its thread is on screen; nonce lets the
    * same message be focused twice in a row */
   focusMessage: { threadId: string; messageId: string; matchText?: string; nonce: number; consumed: boolean } | null;
+  /** The New divider: the first message of the open conversation that came
+   * in while the person was away. Taken from its unread flag when it opens,
+   * so it holds still while that conversation stays open. */
+  unreadDivider: { threadId: string; messageId: string } | null;
   connected: boolean;
   error: string | null;
   /** a quiet, non-error line above the transcript; clears itself */
@@ -1139,6 +1190,7 @@ export type Action =
   | { type: "switchGroupTask"; groupId: string; threadId: string }
   | { type: "renameGroupTask"; groupId: string; threadId: string; title: string }
   | { type: "pinGroupTask"; groupId: string; threadId: string; pinned: boolean; title: string }
+  | { type: "setConversationTurnLimit"; groupId: string; threadId: string; minutes: number | null; dm: boolean }
   | { type: "deleteGroupTask"; groupId: string; threadId: string }
   | { type: "interruptGroup"; groupId: string; threadId?: string; onError?: () => void }
   | { type: "instances"; instances: InstanceInfo[] }
@@ -1206,6 +1258,8 @@ export type Action =
   | { type: "botCreationPending"; on: boolean }
   | { type: "updateTask"; botId: string; threadId: string; patch: TaskUpdatePatch }
   | { type: "refreshTaskPermissions"; botId: string; threadId: string; acknowledgeLocalAuto?: boolean }
+  /** "Switch them too": every thread of this bot on a model of its own follows the bot's. */
+  | { type: "followBotModel"; botId: string }
   | { type: "createProject"; botId: string; name: string; emoji?: string | null; onCreated?: (project: BotProject) => void; onError?: (message: string) => void }
   | { type: "updateProject"; botId: string; projectId: string; patch: ProjectUpdatePatch; onSaved?: () => void; onError?: (message: string) => void }
   | { type: "deleteProject"; botId: string; projectId: string; onDeleted?: () => void; onError?: (message: string) => void }
@@ -1221,7 +1275,7 @@ export type Action =
   /** `restoreLeafId` puts back the branch an optimistic edit replaced; a
    * plain send falls back to the removed row's parent. */
   | { type: "optimisticMessageRemoved"; threadId: string; sendId: string; restoreLeafId?: string | null }
-  | { type: "provisioning"; botId: string; on: boolean }
+  | { type: "computerStart"; botId: string; start: ComputerStart | null }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
   | { type: "modelVariantRuntime"; event: RuntimeEvent }
   | { type: "setModel"; botId: string; selection: ModelSelection; threadId?: string; updateBotDefault?: boolean; resetApprovalToAsk?: boolean }
@@ -1239,6 +1293,7 @@ export type Action =
   | { type: "toggleActivity"; open?: boolean }
   | { type: "focusMessage"; threadId: string; messageId: string; matchText?: string }
   | { type: "focusMessageConsumed"; nonce: number }
+  | { type: "unreadDividerDone"; threadId: string }
   | { type: "toggleAppSettings"; open?: boolean; section?: AppSettingsSection; cloudLink?: boolean; phonePairing?: boolean }
   | { type: "toggleShortcuts"; open?: boolean }
   | { type: "toggleWelcome"; open?: boolean }
@@ -1614,6 +1669,9 @@ export function reducer(state: AppState, action: Action): AppState {
             ...g, ...action.group,
             section: typeof action.group.threadId === "string" || Object.hasOwn(action.group, "section") ? action.group.section : g.section,
             tasks: action.group.tasks ? mergeTaskStamps(g.tasks, action.group.tasks) : g.tasks,
+            turnTimeoutMinutes: Object.hasOwn(action.group, "turnTimeoutMinutes")
+              ? (action.group.turnTimeoutMinutes ?? undefined)
+              : g.turnTimeoutMinutes,
             messages: action.group.messages ?? g.messages,
             // A payload that carries a transcript answers the scrollback
             // question with it: a bounded page says so, and a frame sent
@@ -1644,19 +1702,25 @@ export function reducer(state: AppState, action: Action): AppState {
         config: { ...state.config, profile: { name: "", email: "", ...state.config.profile, ...action.profile } },
       } : state;
     case "select": {
-      if (state.groups.some((g) => g.id === action.id)) {
+      const room = state.groups.find((g) => g.id === action.id);
+      if (room) {
         return {
           ...state,
+          unreadDivider: openedUnreadDivider(state, room.threadId, room.unread, room.messages, room.lastReadMessageId),
           activeView: "chat",
           selectedId: action.id,
           botSettingsSection: action.id !== state.selectedId ? "overview" : state.botSettingsSection,
           groups: state.groups.map((g) => (g.id === action.id ? { ...g, unread: false } : g)),
         };
       }
+      const opened = state.bots.find((b) => b.id === action.id);
       return updateBot(
         withMascotMotion(
           {
             ...state,
+            unreadDivider: opened
+              ? openedUnreadDivider(state, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened))
+              : state.unreadDivider,
             activeView: "chat",
             selectedId: action.id,
             botSettingsSection: action.id !== state.selectedId ? "overview" : state.botSettingsSection,
@@ -1735,7 +1799,10 @@ export function reducer(state: AppState, action: Action): AppState {
             : action.bot.busy === false && before?.busy
               ? "celebrate"
               : null;
-      const animated = kind ? withMascotMotion(state, action.bot.id, kind) : state;
+      const motioned = kind ? withMascotMotion(state, action.bot.id, kind) : state;
+      // A start that failed never sends a first frame: its line ends with the turn.
+      const animated = action.bot.busy === false && before?.busy && motioned.computerStarts[action.bot.id]
+        ? reducer(motioned, { type: "computerStart", botId: action.bot.id, start: null }) : motioned;
       const next = action.bot.chiefOfStaff
         ? {
             ...animated,
@@ -1930,11 +1997,13 @@ export function reducer(state: AppState, action: Action): AppState {
         messages: b.messages.map((m) => (m.id === action.message.id ? action.message : m)),
       }));
     }
-    case "provisioning":
+    case "computerStart": {
+      const { [action.botId]: _ended, ...others } = state.computerStarts;
       return {
-        ...(action.on ? withMascotMotion(state, action.botId, "launch") : state),
-        provisioning: { ...state.provisioning, [action.botId]: action.on },
+        ...(action.start ? withMascotMotion(state, action.botId, "launch") : state),
+        computerStarts: action.start ? { ...others, [action.botId]: action.start } : others,
       };
+    }
     case "computerControl":
       return {
         ...state,
@@ -1968,8 +2037,13 @@ export function reducer(state: AppState, action: Action): AppState {
       return state;
     }
     case "setModel":
-      if (action.threadId) return reducer(state, { type: "updateTask", botId: action.botId, threadId: action.threadId,
-        patch: { modelSelection: action.selection, resetApprovalToAsk: action.resetApprovalToAsk } });
+      if (action.threadId) {
+        const picked = reducer(state, { type: "updateTask", botId: action.botId, threadId: action.threadId,
+          patch: { modelSelection: action.selection, resetApprovalToAsk: action.resetApprovalToAsk } });
+        // Picking the bot's model, or making the pick the bot's, is following it.
+        return updateBot(picked, action.botId, (bot) => ({ ...bot, tasks: bot.tasks?.map((task) => task.threadId !== action.threadId ? task
+          : { ...task, followsBotModel: Boolean(action.updateBotDefault) || sameModelSelection(action.selection, bot.modelSelection) }) }));
+      }
       return reconcileModelVariantSessions(updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection })));
     case "updateTask": {
       const patch = taskPatchFields(action.patch);
@@ -2053,6 +2127,8 @@ export function reducer(state: AppState, action: Action): AppState {
     case "focusMessageConsumed":
       if (!state.focusMessage || state.focusMessage.nonce !== action.nonce) return state;
       return { ...state, focusMessage: { ...state.focusMessage, consumed: true } };
+    case "unreadDividerDone":
+      return state.unreadDivider?.threadId === action.threadId ? { ...state, unreadDivider: null } : state;
     case "toggleComputer": {
       const open = action.open ?? !state.computerOpen;
       return {
@@ -2343,6 +2419,22 @@ export function reducer(state: AppState, action: Action): AppState {
             : group,
         ),
       };
+    case "setConversationTurnLimit":
+      return {
+        ...state,
+        groups: state.groups.map((group) => {
+          if (group.id !== action.groupId) return group;
+          if (action.dm) return { ...group, turnTimeoutMinutes: action.minutes ?? undefined };
+          return {
+            ...group,
+            tasks: (group.tasks ?? []).map((task) =>
+              task.threadId === action.threadId
+                ? { ...task, turnTimeoutMinutes: action.minutes ?? undefined }
+                : task,
+            ),
+          };
+        }),
+      };
     case "taskSwitched": {
       let switched = updateBot(bumpTranscriptGeneration(state, action.bot.threadId), action.bot.id, (bot) => ({
         ...bot,
@@ -2358,6 +2450,12 @@ export function reducer(state: AppState, action: Action): AppState {
       for (const frame of state.backgroundThreadEvents[action.bot.threadId] ?? []) switched = reducer(switched, frame);
       const { [action.bot.threadId]: _settled, ...backgroundThreadEvents } = switched.backgroundThreadEvents;
       switched = { ...switched, backgroundThreadEvents };
+      // Only the conversation on screen draws a divider; a bot in the
+      // background moving to another thread leaves it alone.
+      const opened = switched.bots.find((bot) => bot.id === action.bot.id);
+      if (opened && opened.id === switched.selectedId) {
+        switched = { ...switched, unreadDivider: openedUnreadDivider(switched, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened)) };
+      }
       return reconcileModelVariantSessions(reconcileSnapshotQueues(switched, [action.bot]));
     }
     case "newBot":
@@ -2379,6 +2477,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "markRoutineRunSeen":
     case "markAllRoutineRunsSeen":
     case "refreshTaskPermissions":
+    case "followBotModel":
       return state;
     case "sendGroup": {
       if (!action.sendId) return state;
@@ -2443,10 +2542,11 @@ export const initialState: AppState = {
   tourOpen: false,
   botSettingsSection: "overview",
   botSettingsExpandAccordion: false,
-  provisioning: {},
+  computerStarts: {},
   deletingBots: {},
   computerControl: {},
   focusMessage: null,
+  unreadDivider: null,
   connected: false,
   error: null,
   notice: null,
@@ -2755,6 +2855,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, rawDispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const clearChatError = useCallback(() => {
+    rawDispatch({ type: "error", message: null });
+  }, []);
+  useChatErrorClear(state.error, clearChatError);
   const botPatchQueue = useMemo(
     () =>
       createBotPatchQueue({
@@ -2769,7 +2873,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         },
         onError: (error) => {
           rawDispatch({ type: "error", message: error.message });
-          setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
         },
       }),
     [],
@@ -2788,7 +2891,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let creatingBot = false;
     const showError = (e: unknown) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
-      setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
     };
     /** Where a card action's message lives, and the card on it. A card asked
      * inside a room belongs to the room's list, never to one member's. */
@@ -3477,6 +3579,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }).catch(showError);
           break;
         }
+        case "followBotModel":
+          void api<{ bot: BotAnnouncement }>(`/api/bots/${action.botId}/threads/follow-model`, { method: "POST", body: "{}" })
+            .then(({ bot }) => rawDispatch({ type: "botPatched", bot: withTaskWrites(bot) }))
+            .catch(showError);
+          break;
         case "createProject":
           api(`/api/bots/${action.botId}/projects`, { method: "POST", body: JSON.stringify({ name: action.name, emoji: action.emoji }) })
             .then(({ bot, project }) => {
@@ -3568,6 +3675,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
             method: "PATCH",
             body: JSON.stringify({ pinned: action.pinned, title: action.title }),
+          }).catch(showError);
+          break;
+        case "setConversationTurnLimit":
+          api(action.dm ? `/api/groups/${action.groupId}` : `/api/groups/${action.groupId}/tasks/${action.threadId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ turnTimeoutMinutes: action.minutes }),
           }).catch(showError);
           break;
         case "deleteGroupTask":
@@ -3903,12 +4016,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "screen":
           // The picture went to the Computer panel (publishLiveFrame). For
           // the store, a first frame only means the computer is set up.
-          if (stateRef.current.provisioning[frame.botId]) {
-            rawDispatch({ type: "provisioning", botId: frame.botId, on: false });
+          if (stateRef.current.computerStarts[frame.botId]) {
+            rawDispatch({ type: "computerStart", botId: frame.botId, start: null });
           }
           break;
         case "computer":
-          rawDispatch({ type: "provisioning", botId: frame.botId, on: frame.state === "provisioning" });
+          rawDispatch({ type: "computerStart", botId: frame.botId,
+            start: { state: frame.state, ...(frame.place ? { place: frame.place } : {}) } });
           break;
         case "computer-control":
           rawDispatch({

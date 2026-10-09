@@ -210,14 +210,13 @@ describe("coverageForDriver", () => {
     expect(coverageForDriver("openai-compat", false, true)).toBe("preview");
     expect(coverageForDriver("grok", false, true)).toBe("preview");
     expect(coverageForDriver("minimax", false, true)).toBe("preview");
-    expect(coverageForDriver("boxAgent")).toBe("none");
+    expect(coverageForDriver("claudeAgent")).toBe("none");
     expect(coverageForDriver("claudeAgent", false, true)).toBe("preview");
     expect(coverageForDriver("codex", false, true)).toBe("preview");
     expect(coverageForDriver("grokAgent", false, true)).toBe("preview");
     expect(coverageForDriver("piAgent", false, true)).toBe("preview");
     expect(coverageForDriver("claudeAgent", true)).toBe("full");
     expect(coverageForDriver("grok", true)).toBe("full");
-    expect(coverageForDriver("boxAgent", false, true)).toBe("preview");
     expect(coverageForDriver(undefined)).toBe("none");
   });
 });

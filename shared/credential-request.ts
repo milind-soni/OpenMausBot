@@ -18,7 +18,7 @@ export const CREDENTIAL_TARGETS = {
   },
   opencodeGoApiKey: {
     label: "OpenCode API key",
-    description: "Used for OpenCode Go and other key-backed OpenCode providers.",
+    description: "Used for OpenCode Zen and Go.",
     placeholder: "Paste your OpenCode API key",
     helpUrl: "https://opencode.ai/docs/providers/",
   },

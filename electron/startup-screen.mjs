@@ -52,18 +52,29 @@ export function createStartupScreen({
   splash.webContents.on("ipc-message", (_event, channel) => {
     if (channel === "startup-screen:close" && !disposed) splash.close();
   });
-  splash.once("ready-to-show", () => {
-    if (!disposed && !isQuitting()) { clearTimeout(fallback); splash.show(); resolveReady(); }
+  let shown = false;
+  const showSplash = () => {
+    if (shown || disposed || isQuitting()) return;
+    shown = true; splash.show(); resolveReady();
+  };
+  splash.once("ready-to-show", showSplash);
+  // Some Wayland compositors (COSMIC) never paint a hidden window, so
+  // ready-to-show never comes. Show the loaded page after a short grace.
+  splash.webContents.once("did-finish-load", () => {
+    const grace = setTimeout(showSplash, 500);
+    grace.unref?.();
   });
   splash.on("show", () => onShow?.(splash));
   splash.once("closed", resolveReady);
   // Server startup waits on ready. A failed loading renderer must not keep
-  // it from ever reaching the main window's own bounded recovery path.
-  splash.webContents.once("render-process-gone", dispose);
-  fallback = setTimeout(dispose, 10_000);
-  fallback.unref?.();
+  // it from ever reaching the main window's own bounded recovery path. The
+  // splash stays until that window replaces it: it can be the app's only
+  // window, and destroying it then quits the app (window-all-closed).
+  splash.webContents.once("render-process-gone", resolveReady);
+  const startupFallback = setTimeout(resolveReady, 10_000);
+  startupFallback.unref?.();
   void splash.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(startupScreenHtml(iconPath)))
-    .catch(dispose);
+    .catch(resolveReady);
   const attach = (win, { maximized = false } = {}) => {
     const reveal = () => {
       if (revealed || win.isDestroyed() || isQuitting()) return;

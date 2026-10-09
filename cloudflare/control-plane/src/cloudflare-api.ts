@@ -108,6 +108,8 @@ export class CloudflareAPIError extends Error {
   constructor(
     public readonly code: string,
     public readonly status: number | null = null,
+    /** Cloudflare's Retry-After (delay-seconds form only) on a 429, else null. */
+    public readonly retryAfterSeconds: number | null = null,
   ) {
     super(code);
     this.name = "CloudflareAPIError";
@@ -226,8 +228,13 @@ export class CloudflareAPI {
     if (response.status === 429) {
       // Cloudflare API limits are per user token and shared by every request
       // this Worker makes. A distinct code lets the cron stop early.
+      const retryAfter = response.headers.get("retry-after")?.trim() ?? "";
       await response.body?.cancel();
-      throw new CloudflareAPIError("cf_rate_limited", 429);
+      throw new CloudflareAPIError(
+        "cf_rate_limited",
+        429,
+        /^[0-9]{1,6}$/.test(retryAfter) ? Number(retryAfter) : null,
+      );
     }
 
     const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();

@@ -185,6 +185,12 @@ it("shows each outbound batch recipient and amount with explicit preview truncat
   expect(card.card.subtitle).toContain("second@fixture.test");
   expect(card.card.subtitle).toContain('"amount":42');
   expect(card.card.subtitle).toContain("[arguments truncated]");
+  // The short form phones lead with: one entry per call, no arguments.
+  expect(card.card.outboundRequest).toEqual({
+    tool: "GMAIL_SEND_EMAIL",
+    app: "Gmail",
+    calls: [{ app: "Gmail", label: "Send email" }, { app: "Stripe", label: "Create refund" }],
+  });
   await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
   expect((await held).body.result.isError).toBe(true);
   expect(relayed).toHaveLength(before);

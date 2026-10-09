@@ -41,7 +41,7 @@ const rpc = (request: unknown, gate: { held: boolean; blockedReason?: string } =
   let gated = 0;
   let checks = 0;
   const done = tools.cloudComputerRpc(request as never, {
-    cfg, boxId: "bx_23456789", signal,
+    cfg, boxId: () => "bx_23456789", signal,
     gate: async () => { gated++; return gate; },
     assertActive: () => { checks++; },
   });
@@ -121,13 +121,33 @@ describe("cloud computer tools", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("acts on the Boat the gate started, read only once the gate let the call through", async () => {
+    // A cloud computer mounted before it existed: the gate's claim creates
+    // it, and only then is there a Boat to act on.
+    let started: string | undefined;
+    const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "get_screen_size", arguments: {} } }, {
+      cfg, boxId: () => started, signal: new AbortController().signal,
+      gate: async () => { started = "bx_3456789a"; return { held: false }; }, assertActive: () => {},
+    }) as { isError?: boolean };
+    expect(result.isError).not.toBe(true);
+    expect(calls.map(entry => entry.path)).toEqual(["/boxes/bx_3456789a/commands"]);
+  });
+
+  it("performs nothing when the gate let a call through and no Boat landed", async () => {
+    const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "true" } } }, {
+      cfg, boxId: () => null, signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: () => {},
+    }) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(result).toEqual({ isError: true, content: [{ type: "text", text: tools.CLOUD_COMPUTER_NOT_READY }] });
+    expect(calls).toHaveLength(0);
+  });
+
   it("stops when the turn's capability is gone, before and after the Boat acts", async () => {
     const expired = () => { throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 }); };
     await expect(tools.cloudComputerRpc({ method: "tools/list" }, {
-      cfg, boxId: "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: expired,
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: expired,
     })).rejects.toThrow("expired");
     await expect(tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "true" } } }, {
-      cfg, boxId: "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: expired,
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: expired,
     })).rejects.toThrow("expired");
     expect(calls).toHaveLength(0);
     await expect(rpc({ method: "resources/read" }).done).rejects.toMatchObject({ status: 400 });

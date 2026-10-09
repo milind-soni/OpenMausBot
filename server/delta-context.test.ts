@@ -255,6 +255,24 @@ describe("Handoffs", () => {
     expect(f.records.get("claude")).toMatchObject({ session: "new", config: "c2", through: "m4" });
   });
 
+  it("keeps the last effort a session's thread was sent until a turn sends another", () => {
+    const f = setup(ids(3));
+    f.start({ effort: null, carried: ["m0"], started: { sent: ["m0"] } });
+    f.event({ type: "session.started", sessionId: "s" });
+    f.event(output);
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", config: "c", effort: null, through: "m0", ids: [] });
+    f.start({ resumeCursor: "s", effort: "high", carried: ["m1"] });
+    f.event(output);
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", config: "c", effort: "high", through: "m1", ids: [] });
+    // a turn that sends none leaves the thread on its last level
+    f.start({ resumeCursor: "s", effort: null, carried: ["m2"] });
+    f.event(output);
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", config: "c", effort: "high", through: "m2", ids: [] });
+  });
+
   it("does not credit a steer written before a replacement session to that session", () => {
     // m6 = the turn's message, m7 = the steer, stored after the rebuild was built
     const order = ids(8);
