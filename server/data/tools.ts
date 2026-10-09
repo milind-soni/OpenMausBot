@@ -854,7 +854,9 @@ export async function showCard(context: DataContext, input: ShowInput, onCardRea
     const ready = ctx.sheet.updateCard(card.id, { ...patch, kind, title: input.title ?? ctx.sheet.card(card.id)?.title ?? title, sql: cardSql, by: ctx.by, status: "ready", error: undefined, elapsedMs: Date.now() - started })!;
     committed = true;
     onCardReady?.(ready);
-    if (previousResult && previousResult !== resultName) await ctx.database.dropResult(previousResult).catch(() => undefined);
+    // On the caller's own connection: the bot's lane may be mid-query, and
+    // a panel edit's response must not wait behind it.
+    if (previousResult && previousResult !== resultName) await ctx.database.dropResult(previousResult, ctx.connection).catch(() => undefined);
     return {
       id: ready.id,
       sheet: ctx.sheet.outline(),
@@ -870,7 +872,7 @@ export async function showCard(context: DataContext, input: ShowInput, onCardRea
     throw new DataFailure(dataError);
   } finally {
     if (card && runs.get(card.id)?.controller === controller) runs.delete(card.id);
-    if (resultName && !committed) await ctx.database.dropResult(resultName).catch(() => undefined);
+    if (resultName && !committed) await ctx.database.dropResult(resultName, ctx.connection).catch(() => undefined);
   }
 }
 

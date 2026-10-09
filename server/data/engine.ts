@@ -414,10 +414,10 @@ class BotDb implements BotDatabase {
     });
   }
 
-  async dropResult(name: string): Promise<void> {
+  async dropResult(name: string, connection: DataConnection = "bot"): Promise<void> {
     if (!RESULT_NAME.test(name)) throw new DataFailure({ code: "invalid_input", message: `Result name "${name}" must be a plain identifier (letters, digits, underscore).` });
     const sql = `DROP TABLE IF EXISTS ${DATA_RESULTS_SCHEMA}.${name}`;
-    await this.statement("bot", sql, {}, (open, conn) => this.read(open, conn, sql));
+    await this.statement(connection, sql, {}, (open, conn) => this.read(open, conn, sql));
   }
 
   private async catalog(connection: DataConnection = "panel"): Promise<CatalogEntry[]> {

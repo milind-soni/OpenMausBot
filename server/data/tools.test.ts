@@ -459,6 +459,18 @@ describe("data_show", () => {
     expect(await failure(showCard(ctx, { id: "c_9", kind: "table", sql: "SELECT 1" }))).toMatchObject({ code: "card_not_found" });
   });
 
+  it("drops a replaced or abandoned result on the caller's connection, never behind the bot's", async () => {
+    const { ctx, database } = context({ by: "person", connection: "panel" });
+    await showCard(ctx, { kind: "table", sql: "SELECT 1" });
+    await showCard(ctx, { id: "c_1", kind: "table", sql: "SELECT 2", live: true });
+    database.failNext = new Error("Parser Error: syntax error at or near \"FORM\"");
+    await failure(showCard(ctx, { id: "c_1", kind: "table", sql: "SELECT 3 FORM t", live: true }));
+    const drops = database.calls.filter((call) => call.method === "dropResult");
+    expect(drops.map((call) => call.connection)).toEqual(["panel", "panel"]);
+    expect(drops[0]!.name).toBe("c_1");
+    expect(drops[1]!.name).toMatch(/^c_1_/);
+  });
+
   it("publishes only the latest live edit even when older materialisation ignores cancellation", async () => {
     const { ctx, database, sheet } = context({ by: "person", connection: "panel" });
     await showCard(ctx, { kind: "table", sql: "SELECT 1" });

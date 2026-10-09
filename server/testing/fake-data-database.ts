@@ -105,8 +105,8 @@ export class FakeDataDatabase implements BotDatabase {
     return { table: `omb_results.${name}`, columns: next.columns, rowCount: next.rowCount, elapsedMs: 2 };
   }
 
-  async dropResult(name: string): Promise<void> {
-    this.calls.push({ method: "dropResult", name });
+  async dropResult(name: string, connection?: DataConnection): Promise<void> {
+    this.calls.push({ method: "dropResult", name, ...(connection ? { connection } : {}) });
     this.results.delete(name);
   }
 

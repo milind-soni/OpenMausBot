@@ -74,8 +74,10 @@ export interface BotDatabase {
   run(sql: string, options: RunOptions): Promise<RunResult>;
   /** `CREATE OR REPLACE TABLE omb_results.<name> AS <sql>`, with its count. */
   materialise(sql: string, name: string, options: RunOptions): Promise<MaterialiseResult>;
-  /** Drops a result table; a missing one is not an error. */
-  dropResult(name: string): Promise<void>;
+  /** Drops a result table; a missing one is not an error. Runs on
+   * `connection` (default the bot's), so a panel edit never waits behind
+   * whatever the bot is running. */
+  dropResult(name: string, connection?: DataConnection): Promise<void>;
   /** Pages a source table or a result table with the panel's connection. */
   page(target: string, options: { offset: number; limit: number; sort?: { column: string; direction: "asc" | "desc" }; filter?: string; filterColumn?: string; signal?: AbortSignal }): Promise<DataPage>;
   /** Column types, null %, approx distinct, min/max and up to 3 samples. */

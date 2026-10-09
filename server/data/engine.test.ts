@@ -206,6 +206,18 @@ describe("a bot's database", () => {
     expect((await failure(db.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.gone`, bot))).error.code).toBe("table_not_found");
   });
 
+  it("drops a result on the panel's connection without waiting behind the bot's statement", async () => {
+    await ready;
+    await db.materialise("SELECT 1 AS one", "aside", bot);
+    const long = db.run(LONG_QUERY, bot);
+    const started = Date.now();
+    await db.dropResult("aside", "panel");
+    expect(Date.now() - started).toBeLessThan(2_000);
+    db.interrupt("bot");
+    expect((await failure(long)).error.code).toBe("cancelled");
+    expect((await failure(db.run(`SELECT * FROM ${DATA_RESULTS_SCHEMA}.aside`, panel))).error.code).toBe("table_not_found");
+  });
+
   it("pages with a stable order, sorts, and filters by text across every column", async () => {
     await ready;
     const asc = await db.page("sales", { offset: 10, limit: 5, sort: { column: "id", direction: "asc" } });
