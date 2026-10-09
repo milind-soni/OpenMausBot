@@ -41,7 +41,7 @@ export async function fetchChartRows(botId: string, cardId: string, rowCount: nu
  * data keeps that; one without any gets the table. Concat and repeat specs
  * size their own children, so only unit and layer specs get the width. */
 export function bindChartRows(spec: Record<string, unknown>, rows: Array<Record<string, Cell>>): Record<string, unknown> {
-  const datasets = { ...((spec.datasets as Record<string, unknown> | undefined) ?? {}), table: rows };
+  const datasets = { ...(spec.datasets as Record<string, unknown> | undefined), table: rows };
   const unit = "mark" in spec || "layer" in spec;
   return {
     ...spec,

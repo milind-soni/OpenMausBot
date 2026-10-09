@@ -22,7 +22,10 @@ type EditorModules = { cm: typeof import("codemirror"); sql: typeof import("@cod
 /** One load per window: the chunk is shared by every editor after the first. */
 let editorModules: Promise<EditorModules> | null = null;
 export function loadEditor(): Promise<EditorModules> {
-  editorModules ??= Promise.all([import("codemirror"), import("@codemirror/lang-sql")]).then(([cm, sql]) => ({ cm, sql }));
+  editorModules ??= Promise.all([import("codemirror"), import("@codemirror/lang-sql")])
+    .then(([cm, sql]) => ({ cm, sql }))
+    // A failed chunk is not remembered: the next mount tries again.
+    .catch((cause: unknown) => { editorModules = null; throw cause; });
   return editorModules;
 }
 

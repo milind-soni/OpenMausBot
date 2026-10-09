@@ -76,12 +76,6 @@ export function DataGrid({ botId, target, columns, rowCount, name, handle }: Dat
     const timer = setTimeout(() => setCopyState("idle"), 1500);
     return () => clearTimeout(timer);
   }, [copyState]);
-  // A new sort or filter: back to the top, selection gone, and no page of
-  // the old order may land in the new cache (checked by key below).
-  useEffect(() => {
-    setSelection(null);
-    if (scroll.current) scroll.current.scrollTop = 0;
-  }, [key]);
 
   const load = useCallback(async (page: number) => {
     const requestKey = key;
@@ -117,12 +111,23 @@ export function DataGrid({ botId, target, columns, rowCount, name, handle }: Dat
   const items = virtualizer.getVirtualItems();
   const firstIndex = items[0]?.index ?? 0;
   const lastIndex = items.at(-1)?.index ?? Math.min(total - 1, 16);
+  const lastKey = useRef(key);
   useEffect(() => {
-    // The cache for this key starts empty; make sure it exists before pages
-    // land, so a stale cache of another key is never read.
+    // A new sort or filter: an empty cache for this key (so no page of the
+    // old order can land in it), selection gone, and back to the top. The
+    // virtualizer hears of the scroll only through its scroll event, so the
+    // first pages are asked for here as a window at the top, not where the
+    // old rows were; the event then finds them loading already.
+    const changed = lastKey.current !== key;
+    if (changed) {
+      lastKey.current = key;
+      setSelection(null);
+      if (scroll.current) scroll.current.scrollTop = 0;
+    }
     setCache((previous) => previous.key === key ? previous : emptyCache(key));
     if (total <= 0 && live.total !== null) return;
-    for (const page of pagesCovering(firstIndex, Math.max(firstIndex, lastIndex))) void load(page);
+    const [first, last] = changed ? [0, Math.max(0, lastIndex - firstIndex)] : [firstIndex, Math.max(firstIndex, lastIndex)];
+    for (const page of pagesCovering(first, last)) void load(page);
   }, [key, firstIndex, lastIndex, total, live.total, load]);
 
   const rowAt = (index: number): Cell[] | undefined => live.pages.get(Math.floor(index / PAGE))?.[index % PAGE];
