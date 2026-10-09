@@ -224,10 +224,11 @@ Added 2026-10-06 (the harness half of SupaMaus/mausbot-mobile
   typed line steered into it included), and not when it began with a typed line
   or another call's. Only what the server ties to a turn carries
   `requestMessageId`: provider permission cards do, but cards the server
-  appends itself (skill proposals, team memory, "Send on your behalf?") never
-  do, so a record never lists them, and question cards are left out. A turn
-  still running at hang-up keeps adding steps after the row, and the record
-  keeps listing them.
+  appends itself never do (skill proposals, team memory, "Send on your
+  behalf?", and the receipt with Undo of a change a bot made to its own
+  profile, model, routines or skills without a card), so a record never lists
+  them, and question cards are left out. A turn still running at hang-up keeps
+  adding steps after the row, and the record keeps listing them.
 - **Never context.** The row is not conversation context for the bot
   (`isContextMessage` keeps text, digest, compaction and room-result
   messages, and the row is none of those), and not startup history for the
