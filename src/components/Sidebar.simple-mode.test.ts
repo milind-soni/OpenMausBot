@@ -100,6 +100,24 @@ describe("bot-first sidebar", () => {
     });
   }
 
+  it("keeps the queued dot small", () => {
+    const queuedBot: Bot = {
+      ...bot,
+      unread: false,
+      projects: [],
+      tasks: [{ threadId: "queued", title: "Next job", createdAt: 5 }],
+    };
+    const markup = renderToStaticMarkup(createElement(BotListItem, { bot: queuedBot, density: "comfortable", onMenu: vi.fn() }));
+    const queuedDot = markup.match(/<span[^>]*data-testid="queued-dot"[^>]*>/)?.[0] ?? "";
+    expect(queuedDot).toContain("size-2.5");
+    expect(queuedDot).toContain("bg-ink-secondary");
+    expect(queuedDot).not.toContain("size-4");
+    expect(queuedDot).not.toContain("size-5");
+    expect(markup).toContain('<span class="truncate">Queued</span>');
+    expect(markup).not.toContain("text-warning font-semibold text-[13px]");
+    expect(markup).not.toContain("waiting-dot");
+  });
+
   it.each(densities)("keeps selection separate from expansion in %s density", (density) => {
     fixture.state.selectedId = bot.id;
     const markup = renderToStaticMarkup(createElement(BotListItem, rowProps(density)));

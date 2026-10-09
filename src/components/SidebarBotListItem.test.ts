@@ -44,6 +44,55 @@ afterEach(() => {
 });
 
 describe("BotListItem", () => {
+  it("makes a bot waiting for you louder than a preview", () => {
+    const opening = (markup: string, testId: string) => {
+      const tag = markup.match(new RegExp(`<span[^>]*data-testid="${testId}"[^>]*>`))?.[0];
+      expect(tag, testId).toBeTruthy();
+      return tag ?? "";
+    };
+    const waiting = renderRow(bot({ activity: "waiting-on-you" }));
+    const badge = opening(waiting, "waiting-dot");
+    expect(badge).toContain('role="status"');
+    expect(badge).toContain('aria-label="Waiting for you…"');
+    expect(badge).toContain('title="Waiting for you…"');
+    expect(badge).toContain("size-4");
+    expect(badge).toContain("bg-warning");
+    expect(badge).toContain("border-2");
+    expect(badge).toContain("border-panel");
+    expect(badge).not.toContain("size-2.5");
+    expect(badge).not.toContain("size-3");
+    expect(waiting).toContain('aria-hidden="true">!</span>');
+    expect(waiting).toContain('class="flex min-w-0 items-center gap-1.5 truncate text-warning font-semibold text-[13px]"');
+    expect(waiting).toContain('<span class="truncate">Waiting for you…</span>');
+
+    const icons = opening(renderRow(bot({ activity: "waiting-on-you" }), false, "icons"), "waiting-dot");
+    expect(icons).toContain("size-5");
+    expect(icons).toContain("bg-warning");
+    expect(icons).not.toContain("size-4");
+    expect(icons).not.toContain("size-2.5");
+
+    const teammate = renderRow(bot({ waitingForTeammates: true }));
+    const teammateDot = opening(teammate, "teammate-wait-dot");
+    expect(teammateDot).toContain("size-2.5");
+    expect(teammateDot).not.toContain("size-4");
+    expect(teammate).toContain('<span class="truncate">Waiting on a teammate…</span>');
+    expect(teammate).toContain("text-[11px] text-ink-secondary");
+    expect(teammate).not.toContain("text-warning font-semibold text-[13px]");
+
+    const working = renderRow(bot({ busy: true }));
+    expect(opening(working, "working-dot")).toContain("size-2.5");
+    expect(working).not.toContain("waiting-dot");
+    expect(working).not.toContain("text-warning font-semibold text-[13px]");
+
+    const preview = renderRow(bot({
+      messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt", at: 2 }] as Bot["messages"],
+    }));
+    expect(preview).toContain('<span class="truncate">Created notes.txt</span>');
+    expect(preview).toContain("text-[11px] text-ink-secondary");
+    expect(preview).not.toContain("text-warning");
+    expect(preview).not.toContain("waiting-dot");
+  });
+
   it("offers direct New thread and New folder icons and a keyboard-accessible bot menu", () => {
     const markup = renderRow(bot());
     expect(markup).toContain('aria-label="New thread"');

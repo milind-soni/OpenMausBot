@@ -1460,8 +1460,22 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
             )}
           />
         )}
-        {waiting && <span data-testid="waiting-dot" role="status" aria-label={t("sidebar.preview.waiting")} title={t("sidebar.preview.waiting")}
-          className={cn("absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-warning", iconOnly ? "size-3" : "size-2.5")} />}
+        {waiting && (
+          // text-panel stays readable on the bright warning fill and on the
+          // darkened warning the light skins use for the same token
+          <span
+            data-testid="waiting-dot"
+            role="status"
+            aria-label={t("sidebar.preview.waiting")}
+            title={t("sidebar.preview.waiting")}
+            className={cn(
+              "absolute -right-0.5 -bottom-0.5 flex items-center justify-center overflow-hidden rounded-full border-2 border-panel bg-warning font-black leading-none text-panel",
+              iconOnly ? "size-5 text-[14px]" : "size-4 text-[12px]",
+            )}
+          >
+            <span aria-hidden="true">!</span>
+          </span>
+        )}
         {teammateWait && <span data-testid="teammate-wait-dot" role="status" aria-label={t("sidebar.preview.waitingOnTeammate")} title={t("sidebar.preview.waitingOnTeammate")}
           className={cn("absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-accent", iconOnly ? "size-3" : "size-2.5")} />}
         {!teammateWait && !waiting && !working && queued && <span data-testid="queued-dot" role="status" aria-label={t("task.queued")} title={t("task.queued")}
@@ -1538,7 +1552,10 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               {t("sidebar.bot.deletingRow")}
             </span>
           ) : (
-            <span className="flex min-w-0 items-center gap-1.5 truncate text-[11px] text-ink-secondary">
+            <span className={cn(
+              "flex min-w-0 items-center gap-1.5 truncate",
+              waiting ? "text-warning font-semibold text-[13px]" : "text-[11px] text-ink-secondary",
+            )}>
               {working ? (
                 // the same typing dots as the chat header; sized to the text's
                 // line box so the row does not jump when work starts or ends
