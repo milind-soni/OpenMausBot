@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from "react";
+import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from "react";
 import { ChevronDown, Columns3, Download, Loader2, MessageSquarePlus, Pencil, Pin, PinOff, Trash2, X } from "lucide-react";
 import { DATA_ROUTES, type DataCard as DataCardModel, type DataColumn, type DataExportFormat, type DataExportRequest, type DataReduction } from "../../../shared/data-surface";
 import { api, useStore, type Bot } from "@/state/store";
@@ -101,7 +101,9 @@ export function ExportMenu({ formats, busy, onExport, onCopyMarkdown }: { format
 export function DataCard({ bot, card, theme, onExplore, onEdit }: DataCardProps) {
   const { dispatch } = useStore();
   const grid = useRef<DataGridHandle | null>(null);
-  const exporter = useExportMenu(bot.id, { cardId: card.id }, grid);
+  // One identity per card: the grid's paging keys off it.
+  const target = useMemo(() => ({ cardId: card.id }), [card.id]);
+  const exporter = useExportMenu(bot.id, target, grid);
   const resultTable = cardResultTable(card);
   const columns: DataColumn[] = card.columns ?? [];
   const askToChange = () => appendComposerDraft(`bot:${bot.id}:${bot.threadId}`, t("data.card.askToChangeText", { id: card.id }));
@@ -137,7 +139,7 @@ export function DataCard({ bot, card, theme, onExplore, onEdit }: DataCardProps)
           </>
         : card.kind === "text"
           ? <div className="chat-md text-[13px]"><ChatMarkdown text={card.text ?? ""} /></div>
-          : <DataGrid botId={bot.id} target={{ cardId: card.id }} columns={columns} rowCount={card.rowCount ?? 0} name={card.title} handle={grid} />;
+          : <DataGrid botId={bot.id} target={target} columns={columns} rowCount={card.rowCount ?? 0} name={card.title} handle={grid} />;
 
   const footer = <>
     {card.sql && (
@@ -180,10 +182,11 @@ export function DataCard({ bot, card, theme, onExplore, onEdit }: DataCardProps)
  * card on the sheet. Closing it forgets nothing; the table stays loaded. */
 export function SourceView({ bot, name, columns, rowCount, onClose }: { bot: Bot; name: string; columns: DataColumn[]; rowCount: number; onClose: () => void }) {
   const grid = useRef<DataGridHandle | null>(null);
-  const exporter = useExportMenu(bot.id, { table: name }, grid);
+  const target = useMemo(() => ({ table: name }), [name]);
+  const exporter = useExportMenu(bot.id, target, grid);
   return <CardFrame testId="data-source-view" title={name}
     status={<button type="button" onClick={onClose} aria-label={t("data.source.close")} className="rounded-md p-1 text-ink-secondary hover:bg-inset hover:text-ink"><X size={14} /></button>}
-    body={<DataGrid botId={bot.id} target={{ table: name }} columns={columns} rowCount={rowCount} name={name} handle={grid} />}
+    body={<DataGrid botId={bot.id} target={target} columns={columns} rowCount={rowCount} name={name} handle={grid} />}
     footer={<>
       <ExportMenu busy={exporter.busy} formats={["csv", "parquet", "xlsx"]} onExport={(format) => void exporter.exportAs(format)} onCopyMarkdown={() => void exporter.copyMarkdown()} />
       {exporter.notice && <span role={exporter.notice.kind} className={cn("ml-auto max-w-64 truncate text-[11px]", exporter.notice.kind === "alert" ? "text-danger" : "text-ink-secondary")}>{exporter.notice.text}</span>}
