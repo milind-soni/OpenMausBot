@@ -128,8 +128,9 @@ export function levenshtein(a: string, b: string): number {
   return previous[b.length];
 }
 
-/** Up to five names a bot could have meant: a prefix or substring match, or
- * a few edits away, nearest first. */
+/** Up to five names a bot could have meant: what the wanted name is a
+ * prefix of comes first, then substring matches and names a few edits away,
+ * nearest first. */
 export function closeNames(wanted: string, names: readonly string[], max = 5): string[] {
   const target = wanted.toLowerCase();
   const budget = Math.max(2, Math.floor(target.length / 3));
@@ -137,11 +138,12 @@ export function closeNames(wanted: string, names: readonly string[], max = 5): s
     .map((name) => {
       const folded = name.toLowerCase();
       const distance = levenshtein(target, folded);
-      const related = folded.startsWith(target) || target.startsWith(folded) || folded.includes(target);
-      return { name, distance: related ? Math.min(distance, 1) : distance, related };
+      const prefix = folded.startsWith(target) || target.startsWith(folded);
+      const related = prefix || folded.includes(target);
+      return { name, distance, prefix, related };
     })
     .filter((entry) => entry.related || entry.distance <= budget)
-    .sort((x, y) => x.distance - y.distance || x.name.localeCompare(y.name))
+    .sort((x, y) => Number(y.prefix) - Number(x.prefix) || x.distance - y.distance || x.name.localeCompare(y.name))
     .slice(0, max)
     .map((entry) => entry.name);
 }
@@ -448,7 +450,8 @@ class BotDb implements BotDatabase {
   }
 
   private async columnsOf(connection: DataConnection, from: string, options: { timeoutMs?: number; signal?: AbortSignal }): Promise<DataColumn[]> {
-    const sql = `DESCRIBE ${from}`;
+    // DESCRIBE takes a table name or a query, not a parenthesised subquery.
+    const sql = from.startsWith("(") ? `DESCRIBE SELECT * FROM ${from}` : `DESCRIBE ${from}`;
     const result = await this.statement(connection, sql, options, (open, conn) => this.read(open, conn, sql));
     return result.rows.map((row) => ({ name: String(row[0]), type: String(row[1]) }));
   }
