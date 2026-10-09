@@ -448,7 +448,11 @@ Tailscale still work).
 5. `wrangler secret put CLOUDFLARE_API_TOKEN_MAUSBOT_SI` (or the name you
    chose). Never put a token in `vars`, `.dev.vars.example`, logs, or CI output.
 6. Set `CLOUDFLARE_ENDPOINT_ACCOUNTS` with `dnsRecordLimit` equal to the
-   zone's real quota and `minAppVersion` as above, then deploy.
+   zone's real quota and `minAppVersion` as above. Add the token's secret name
+   (and `CLOUDFLARE_ENDPOINT_ACCOUNTS`, when it is a secret) to
+   `secrets.required` in `wrangler.jsonc`, then deploy. A deploy explicitly
+   keeps only the secrets listed there, and refuses to run while one of them
+   is missing, so a listed token can never be dropped or forgotten.
 7. After the next cron run, `/healthz` lists the new suffix in
    `capacity.accounts` with a fresh `checkedAt` and both `tunnels.used` and
    `dnsRecords.used` filled in (a `null` DNS count means the token cannot read

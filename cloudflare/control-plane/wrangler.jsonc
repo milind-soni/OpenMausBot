@@ -26,9 +26,10 @@
     // accountId, zoneId or companionHostSuffix once it holds endpoints (add a
     // new entry instead). The same JSON may be a secret to keep the IDs out of
     // this file. Each entry's token is the secret named by apiTokenSecret
-    // (wrangler secret put CLOUDFLARE_API_TOKEN_MAUSBOT_SI), never a var. To
-    // stop new endpoints going to an account and keep its own, set its
-    // "newEndpoints": false.
+    // (wrangler secret put CLOUDFLARE_API_TOKEN_MAUSBOT_SI), never a var, and
+    // is listed in secrets.required below (as is this JSON when it is a
+    // secret) so every deploy keeps it. To stop new endpoints going to an
+    // account and keep its own, set its "newEndpoints": false.
     // "CLOUDFLARE_ENDPOINT_ACCOUNTS": [
     //   {
     //     "accountId": "<32-hex account ID>",
