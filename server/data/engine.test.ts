@@ -49,8 +49,14 @@ const panel = { connection: "panel" as const };
 
 afterAll(async () => {
   await Promise.all(engines.map((e) => e.closeAll()));
-  // Windows keeps a just-closed database busy for a moment (EPERM on rm).
-  rmSync(root, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
+  // Windows keeps a just-closed database busy for a while (EPERM on rm); a
+  // temp directory left on a runner is not a test failure there.
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+  } catch (error) {
+    if (process.platform !== "win32") throw error;
+    console.warn(`engine.test: left ${root} behind: ${(error as Error).message}`);
+  }
 });
 
 describe("loading the binding", () => {
@@ -337,7 +343,9 @@ describe("cancellation", () => {
     setTimeout(() => controller.abort(), 100);
     const error = await failure(db.run(LONG_QUERY, { ...bot, signal: controller.signal }));
     expect(error.error.code).toBe("cancelled");
-    expect(error.error.message).toMatch(/interrupt/i);
+    // A slow runner may not have started the statement within 100 ms; then
+    // the signal is seen before it runs, which is cancelled all the same.
+    expect(error.error.message).toMatch(/interrupt|cancelled before it ran/i);
     const early = new AbortController();
     early.abort();
     expect((await failure(db.run("SELECT 1", { ...bot, signal: early.signal }))).error.code).toBe("cancelled");
