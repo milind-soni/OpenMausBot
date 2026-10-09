@@ -58,7 +58,7 @@ function mainRule() {
     app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin" },
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
     createCloudAccountStore: () => ({}), rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null,
-    sendUpdaterState: () => {},
+    sendUpdaterState: () => {}, refreshCloudMenus: () => {}, announceCloudReady: () => {},
     createCloudAccountClient: (options) => {
       signIn.options = options;
       return {

@@ -122,8 +122,10 @@ describe("the credit's engine on a Cloud home", () => {
     const saved = readFileSync(join(data, "providers", "trial-credit", "state.json"), "utf8");
     expect(saved).not.toContain(TOKEN);
     expect(JSON.parse(saved)).toMatchObject({ models: [{ id: "claude-haiku-4-5" }, { id: "claude-sonnet-5" }] });
-    expect(statSync(join(data, "providers", "trial-credit")).mode & 0o777).toBe(0o700);
-    expect(statSync(join(data, "providers", "trial-credit", "state.json")).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(statSync(join(data, "providers", "trial-credit")).mode & 0o777).toBe(0o700);
+      expect(statSync(join(data, "providers", "trial-credit", "state.json")).mode & 0o777).toBe(0o600);
+    }
     expect(JSON.stringify(log.mock.calls)).not.toContain(TOKEN);
   });
 
