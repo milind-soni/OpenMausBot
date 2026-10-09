@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DATA_LIMITS, type DataError, type DataErrorCode } from "../../shared/data-surface.ts";
 import { PASS, type RouteContext, type RouteHandler } from "../routes/table.ts";
 import type { DataSheetRegistry } from "./sheet.ts";
-import { exportData, renderCard, resultRelation, showCard, toDataError, type DataContext } from "./tools.ts";
+import { cancelCardRun, exportData, renderCard, resultRelation, showCard, toDataError, type DataContext } from "./tools.ts";
 import { DataFailure, type ChartCompiler, type ChartRenderer, type DataEngine, type VegaLiteValidator } from "./types.ts";
 
 export interface DataRouteDeps {
@@ -49,12 +49,15 @@ const pageBody = z.object({
   limit: z.number().int().min(1).max(DATA_LIMITS.pageSize),
   sort: z.object({ column: z.string().max(300), direction: z.enum(["asc", "desc"]) }).strict().optional(),
   filter: z.string().max(200).optional(),
+  filterColumn: identifier.optional(),
 }).strict();
 const runBody = z.object({
-  sql: z.string().min(1).max(100_000),
+  sql: z.string().max(100_000),
   cardId: cardId.optional(),
   title: z.string().max(200).optional(),
   chart: chartSpec.optional(),
+  vegaLite: z.record(z.string(), z.unknown()).optional(),
+  live: z.boolean().optional(),
 }).strict();
 const cancelBody = z.object({ cardId }).strict();
 const cardPatch = z.object({ title: z.string().min(1).max(200).optional(), pinned: z.boolean().optional() }).strict();
@@ -118,7 +121,9 @@ export function createDataRoutes(deps: DataRouteDeps): RouteHandler {
     };
     try {
       if (rest === "" && method === "GET") {
-        return ctx.json(res, 200, { sheet: sheet.sheet(), tables: await database.listTables() });
+        const tables = await database.listTables();
+        sheet.recordTables(tables);
+        return ctx.json(res, 200, { sheet: sheet.sheet(), tables });
       }
       if (rest === "page" && method === "POST") {
         const input = await body(ctx, pageBody);
@@ -133,12 +138,15 @@ export function createDataRoutes(deps: DataRouteDeps): RouteHandler {
         } else {
           target = await database.resolveTable(input.table!);
         }
-        return ctx.json(res, 200, await database.page(target, { offset: input.offset, limit: input.limit, sort: input.sort, filter: input.filter, signal: abort.signal }));
+        return ctx.json(res, 200, await database.page(target, { offset: input.offset, limit: input.limit, sort: input.sort, filter: input.filter, filterColumn: input.filterColumn, signal: abort.signal }));
       }
       if (rest === "run" && method === "POST") {
         const input = await body(ctx, runBody);
         if (!input) return;
-        const result = await showCard(context, { id: input.cardId, title: input.title, sql: input.sql, kind: input.chart ? "chart" : "table", chart: input.chart });
+        const existing = input.cardId ? sheet.card(input.cardId) : undefined;
+        const chart = input.chart ?? (input.vegaLite ? undefined : existing?.chart);
+        const vegaLite = input.vegaLite ?? (chart ? undefined : existing?.vegaLite);
+        const result = await showCard(context, { id: input.cardId, title: input.title, sql: input.sql, kind: chart || vegaLite ? "chart" : "table", chart, vegaLite, live: input.live });
         return ctx.json(res, 200, { card: sheet.card(result.id), result });
       }
       if (rest === "cancel" && method === "POST") {
@@ -146,7 +154,7 @@ export function createDataRoutes(deps: DataRouteDeps): RouteHandler {
         if (!input) return;
         const card = sheet.card(input.cardId);
         if (!card) return replyError(ctx, { code: "card_not_found", message: `No card ${input.cardId} on the sheet.` });
-        database.interrupt("panel");
+        cancelCardRun(sheet, card.id);
         const cancelled = card.status === "running"
           ? sheet.updateCard(card.id, { status: "failed", error: { code: "cancelled", message: "Cancelled from the Data tab." } })
           : card;
@@ -161,6 +169,7 @@ export function createDataRoutes(deps: DataRouteDeps): RouteHandler {
           return ctx.json(res, 200, { card: sheet.updateCard(card.id, patch) });
         }
         if (!third && method === "DELETE") {
+          cancelCardRun(sheet, card.id);
           await sheet.removeCard(card.id);
           return ctx.json(res, 200, { ok: true });
         }

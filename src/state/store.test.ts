@@ -43,6 +43,27 @@ describe("api refusals", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ message: refusal.error, status: 400, body: refusal });
   });
+
+  it("shows a structured Data error's message without losing its details", async () => {
+    const refusal = { error: { code: "sql_error", message: "Parser Error: syntax error at end of input", sql: "SELECT" } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(refusal), { status: 400 })));
+    await expect(api("/api/bots/fixture/data/run")).rejects.toMatchObject({ message: refusal.error.message, status: 400, body: refusal });
+  });
+
+  it.each([null, {}, { error: { code: "unavailable" } }, { error: 123 }])("falls back to the HTTP status for a malformed error body: %j", async body => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 503, statusText: "Service Unavailable" })));
+    await expect(api("/api/bots/fixture/data")).rejects.toThrow("503 Service Unavailable");
+  });
+});
+
+describe("mounted Data view context", () => {
+  it("stores and clears the active view independently from one-shot result navigation", () => {
+    const view = { botId: "pepper", threadId: "task", cardId: "c_1", draftSql: "select incomplete" };
+    const opened = reducer(initialState, { type: "dataView", view });
+    expect(opened.dataView).toEqual(view);
+    expect(opened.dataResultFocus).toBeNull();
+    expect(reducer(opened, { type: "dataView", view: null }).dataView).toBeNull();
+  });
 });
 
 describe("partial profile save responses", () => {

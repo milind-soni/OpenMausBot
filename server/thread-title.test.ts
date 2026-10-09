@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Message } from "./store.ts";
 import { threadTitlePrompt, titleConversationExcerpt, TITLE_INPUT_MAX_CHARS } from "./thread-title.ts";
+import { withDataContext } from "../shared/data-context.ts";
 
 let next = 0;
 const message = (role: Message["role"], text: string, extra: Partial<Message> = {}): Message => ({
@@ -54,6 +55,16 @@ describe("titleConversationExcerpt", () => {
 });
 
 describe("threadTitlePrompt", () => {
+  it("uses the person's words rather than hidden SQL context for initial and regenerated titles", () => {
+    const recipient = { botId: "bot-1", threadId: "thread-1" };
+    const sent = withDataContext("Compare monthly sales", { ...recipient, cardId: "c_1", draftSql: "SELECT private_draft".repeat(200) }, recipient);
+    expect(threadTitlePrompt(sent)).toBe(threadTitlePrompt("Compare monthly sales"));
+    expect(titleConversationExcerpt([message("user", sent), message("bot", "Sales increased.")])).toBe("User: Compare monthly sales\nBot: Sales increased.");
+    expect(sent).toContain("SELECT private_draft");
+    const example = `\`\`\`xml\n${sent}\n\`\`\``;
+    expect(threadTitlePrompt(example)).toContain("<data-context>");
+  });
+
   it("asks for a short title from the first message, or from the conversation so far", () => {
     expect(threadTitlePrompt("fix the login", "first-message")).toContain("begins with the message below");
     const prompt = threadTitlePrompt(`User: fix the login\n${"x".repeat(5_000)}`, "conversation");

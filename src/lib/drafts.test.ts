@@ -25,6 +25,7 @@ import {
   recoverFailedComposerSend,
   replaceDraftAttachment,
   restoredSendId,
+  restoredRequestText,
   setDraft,
   setDraftAttachments,
   setDraftChannelMode,
@@ -32,7 +33,7 @@ import {
   useDraft,
 } from "./drafts";
 import { citationAttachment, createCitationTextSelector } from "./citations";
-import { composeMessage } from "./composer-attachments";
+import { composeMessage, withDataContext } from "./composer-attachments";
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -78,6 +79,38 @@ function renderedChannelMode(id: string): string {
 }
 
 describe("channel draft delivery mode", () => {
+  it("keeps the selected Data snapshot paired with a failed send until the person edits", () => {
+    const store = memoryStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });
+    const draftId = "bot:data-retry:task";
+    const requestText = withDataContext("Fix this", { botId: "b", threadId: "task", cardId: "c_1", draftSql: "select broken" }, { botId: "b", threadId: "task" });
+    const sent = { draftId, revision: draftRevision(draftId), sendId: "data-retry-send", threadId: "task", text: "Fix this", requestText, attachments: [] };
+    expect(recoverFailedComposerSend(sent)).toBe("restored");
+    expect(restoredSendId(draftId)).toBe(sent.sendId);
+    expect(restoredRequestText(draftId)).toBe(requestText);
+    const changedView = withDataContext("Fix this", { botId: "b", threadId: "task", cardId: "c_2" }, { botId: "b", threadId: "task" });
+    expect(restoredRequestText(draftId) ?? changedView).toBe(requestText);
+    // The same persisted record survives a remount/restart, not just the local input state.
+    const persisted = JSON.parse(store.getItem("omb-draft-send-ids")!)[draftId];
+    expect(persisted).toEqual({ sendId: sent.sendId, requestText });
+    store.setItem("omb-draft-send-ids", JSON.stringify({ "bot:restarted:task": persisted, "bot:legacy:task": "legacy-id" }));
+    expect(restoredRequestText("bot:restarted:task")).toBe(requestText);
+    expect(restoredSendId("bot:legacy:task")).toBe("legacy-id");
+    expect(restoredRequestText("bot:legacy:task")).toBeUndefined();
+    markDraftEdited(draftId);
+    expect(restoredSendId(draftId)).toBeUndefined();
+    expect(restoredRequestText(draftId) ?? changedView).toBe(changedView);
+  });
+
+  it("keeps a failed outbox send's original Data context when a newer draft exists", () => {
+    const draftId = "bot:data-outbox:task";
+    const revision = draftRevision(draftId);
+    const requestText = withDataContext("Fix this", { botId: "b", threadId: "task", cardId: "c_1" }, { botId: "b", threadId: "task" });
+    markDraftEdited(draftId);
+    expect(recoverFailedComposerSend({ draftId, revision, sendId: "data-outbox-send", threadId: "task", text: "Fix this", requestText, attachments: [] })).toBe("outbox");
+    expect(failedComposerSends(draftId)[0]?.requestText).toBe(requestText);
+  });
+
   it("restores goal intent on remount and from persisted storage after restart", () => {
     const store = memoryStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });

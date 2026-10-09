@@ -1996,10 +1996,15 @@ describe("Store redacts bot-authored secrets on write", () => {
       role: "bot",
       kind: "activity",
       tool: { name: `Bash: export TOKEN=${key}`, ok: true, summary: `export TOKEN=${key}` },
+      dataResult: { botId: bot.id, cardId: "c_1", title: `Revenue ${key}`, kind: "table", sql: `SELECT '${key}' AS token` },
     });
     expect(chip.tool?.name).not.toContain(key);
     expect(chip.tool?.summary).not.toContain(key);
     expect(chip.tool?.summary).toContain("«redacted");
+    expect(chip.dataResult?.title).not.toContain(key);
+    expect(chip.dataResult?.title).toContain("«redacted");
+    expect(chip.dataResult?.sql).not.toContain(key);
+    expect(chip.dataResult?.sql).toContain("«redacted");
     const card = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "options",

@@ -229,6 +229,7 @@ export interface Message {
   comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: MausColor };
   /** thread chips: "Opened thread #Title on Bot" linking to that thread */
   threadRef?: { botId: string; threadId: string; title: string };
+  dataResult?: import("../../shared/wire").WireMessage["dataResult"];
   /** sent while the bot was mid-turn; auto-sends when the turn settles.
    * Rendered only while the bot is busy, so a flag stranded by a server
    * restart never shows a promise nothing will keep. */
@@ -1035,6 +1036,9 @@ export interface AppState {
    * when its Data tab first opens and replaced whole by every `data` frame.
    * The grid pages rows itself, so a sheet stays small. */
   dataSheets: Record<string, DataSheet>;
+  dataResultFocus: { botId: string; id: string; requestId: number; consumed: boolean } | null;
+  /** Only the currently mounted Data view, not the last Open in Data request. */
+  dataView: import("@/lib/composer-attachments").DataViewContext | null;
   /** a search hit to scroll to once its thread is on screen; nonce lets the
    * same message be focused twice in a row */
   focusMessage: { threadId: string; messageId: string; matchText?: string; nonce: number; consumed: boolean } | null;
@@ -1292,6 +1296,7 @@ export type Action =
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
   /** A whole sheet from the server: a `data` frame or the first GET. */
   | { type: "dataSheet"; sheet: DataSheet }
+  | { type: "dataView"; view: AppState["dataView"] }
   | { type: "loadDataSheet"; botId: string; onError?: (message: string) => void }
   /** The person's SQL, as a new card or (with `cardId`) over an existing one. */
   | { type: "runDataSql"; botId: string; request: DataRunRequest; onError?: (message: string) => void }
@@ -1310,6 +1315,8 @@ export type Action =
   | { type: "toggleTriggers"; open?: boolean }
   | { type: "toggleNewBot"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
+  | { type: "openDataResult"; botId: string; cardId: string }
+  | { type: "dataResultFocusConsumed"; requestId: number }
   | { type: "toggleInspector"; open?: boolean }
   | { type: "toggleActivity"; open?: boolean }
   | { type: "focusMessage"; threadId: string; messageId: string; matchText?: string }
@@ -2153,6 +2160,15 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, focusMessage: { ...state.focusMessage, consumed: true } };
     case "unreadDividerDone":
       return state.unreadDivider?.threadId === action.threadId ? { ...state, unreadDivider: null } : state;
+    case "openDataResult": {
+      if (!state.bots.some((bot) => bot.id === action.botId)) return state;
+      return { ...state, selectedId: action.botId, activeView: "chat", computerOpen: true,
+        settingsOpen: false, inspectorOpen: false, activityOpen: false, appSettingsOpen: false,
+        dataResultFocus: { botId: action.botId, id: action.cardId, requestId: (state.dataResultFocus?.requestId ?? 0) + 1, consumed: false } };
+    }
+    case "dataResultFocusConsumed":
+      return state.dataResultFocus?.requestId === action.requestId
+        ? { ...state, dataResultFocus: { ...state.dataResultFocus, consumed: true } } : state;
     case "toggleComputer": {
       const open = action.open ?? !state.computerOpen;
       return {
@@ -2517,6 +2533,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return state;
     case "dataSheet":
       return { ...state, dataSheets: { ...state.dataSheets, [action.sheet.botId]: action.sheet } };
+    case "dataView":
+      return { ...state, dataView: action.view };
     case "sendGroup": {
       if (!action.sendId) return state;
       const group = state.groups.find((candidate) => candidate.id === action.groupId);
@@ -2597,6 +2615,8 @@ export const initialState: AppState = {
   deletingBots: {},
   computerControl: {},
   dataSheets: {},
+  dataResultFocus: null,
+  dataView: null,
   focusMessage: null,
   unreadDivider: null,
   connected: false,
@@ -2692,7 +2712,11 @@ export async function api<T = any>(path: string, init?: RequestInit & { timeoutM
         : AbortSignal.timeout(timeoutMs),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error ?? `${res.status} ${res.statusText}`, res.status, body);
+  if (!res.ok) {
+    const error = body?.error;
+    const message = typeof error === "string" ? error : typeof error?.message === "string" ? error.message : `${res.status} ${res.statusText}`;
+    throw new ApiError(message, res.status, body);
+  }
   return body;
 }
 

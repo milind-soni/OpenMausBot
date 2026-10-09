@@ -852,6 +852,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         localComputerMcp: options.tools !== false,
         browserMcp: options.tools !== false, nativeImageInput: true, images: true } : {}),
         sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false,
+        dataMcp: options.tools !== false,
         // The runtime owns the whole tool loop, so it can always take a
         // user message mid-turn: park it, deliver before the next completion.
         queueing: true,

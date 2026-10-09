@@ -48,7 +48,7 @@ export function isStatusActivity(message: Message): boolean {
 function foldable(message: Message): boolean {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool) return false;
-  if (message.comm || message.threadRef || isStatusActivity(message)) return false;
+  if (message.comm || message.threadRef || message.dataResult || isStatusActivity(message)) return false;
   if (tool.ok !== true) return false;
   return failedTurnCause(tool.name) === null;
 }

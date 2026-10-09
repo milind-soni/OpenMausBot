@@ -6,10 +6,11 @@ import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { cpus, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import type { DuckDBConnection } from "@duckdb/node-api";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
-import { closeNames, createDataEngine, dataEngine, duckdbDirectory, instanceSettings, levenshtein, likePattern, type DataEngineOptions } from "./engine.ts";
+import { closeNames, createDataEngine, dataEngine, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
 import { DataFailure, type BotDatabase, type DataEngine } from "./types.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-data-engine-"));
@@ -137,6 +138,25 @@ describe("instance settings", () => {
   });
 });
 
+describe("extensions", () => {
+  it("installs supported extensions from the official core repository before loading them", async () => {
+    const run = vi.fn<DuckDBConnection["run"]>();
+    await loadExtensions({ run }, ["httpfs", "excel"]);
+    expect(run.mock.calls.map(([sql]) => sql)).toEqual([
+      "INSTALL httpfs FROM core", "LOAD httpfs",
+      "INSTALL excel FROM core", "LOAD excel",
+    ]);
+  });
+
+  it("keeps an offline failure actionable and does not proceed to load", async () => {
+    const run = vi.fn<DuckDBConnection["run"]>().mockRejectedValue(new Error("Could not connect"));
+    const error = await failure(loadExtensions({ run }, ["excel"]));
+    expect(error.error).toMatchObject({ code: "sql_error", message: "Could not connect", retryable: true, hint: expect.stringContaining("excel extension") });
+    expect(error.error.hint).toContain("http://extensions.duckdb.org");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("a bot's database", () => {
   const e = engine();
   let db: BotDatabase;
@@ -214,6 +234,35 @@ describe("a bot's database", () => {
     expect(bad.error.code).toBe("invalid_input");
   });
 
+  it("filters only the exact selected column before counting, sorting and paging", async () => {
+    const database = await e.forBot("column-filter");
+    await database.run(`CREATE TABLE entries AS SELECT range AS "order.id", CASE WHEN range % 2 = 0 THEN 'needle' ELSE 'other' END AS "customer ""label""", CASE WHEN range % 2 = 1 THEN 'needle' ELSE 'other' END AS notes FROM range(100)`, bot);
+    const query = { offset: 20, limit: 3, filter: "NEEDLE", sort: { column: "order.id", direction: "desc" as const } };
+    expect((await database.page("entries", query)).rowCount).toBe(100);
+    const scoped = await database.page("entries", { ...query, filterColumn: 'customer "label"' });
+    expect(scoped).toMatchObject({ rowCount: 50, offset: 20 });
+    expect(scoped.rows.map(row => row[0])).toEqual(["58", "56", "54"]);
+    const numeric = await database.page("entries", { offset: 9, limit: 3, filter: "9", filterColumn: "order.id", sort: { column: "order.id", direction: "asc" } });
+    expect(numeric.rowCount).toBe(19);
+    expect(numeric.rows.map(row => row[0])).toEqual(["90", "91", "92"]);
+    expect((await database.page("entries", { ...query, filterColumn: "notes", filter: "" })).rowCount).toBe(100);
+    for (const filter of [undefined, "", "needle"]) {
+      for (const filterColumn of ["missing", "NOTES", 'notes" OR true --']) {
+        expect((await failure(database.page("entries", { offset: 0, limit: 1, filter, filterColumn }))).error.code).toBe("invalid_input");
+      }
+    }
+  });
+
+  it("treats wildcards, backslashes and quotes literally within a selected column", async () => {
+    const database = await e.forBot("literal-column-filter");
+    await database.run(`CREATE TABLE entries AS SELECT * FROM (VALUES (1, '100%_done\\file''s'), (2, '100xxdone/fileXs'), (3, NULL)) AS t(id, "odd.column")`, bot);
+    for (const filter of ["%_", "\\file", "'s"]) {
+      expect(await database.page("entries", { offset: 0, limit: 5, filterColumn: "odd.column", filter })).toMatchObject({ rowCount: 1, rows: [[1, "100%_done\\file's"]] });
+    }
+    expect((await database.page("entries", { offset: 0, limit: 5, filterColumn: "odd.column", filter: "'; DROP TABLE entries; --" })).rowCount).toBe(0);
+    expect((await database.page("entries", { offset: 0, limit: 5 })).rowCount).toBe(3);
+  });
+
   it("describes a table or a query: types, null %, approx distinct, min/max as text, three samples", async () => {
     await ready;
     const described = await db.describe("sales", bot);
@@ -243,7 +292,7 @@ describe("a bot's database", () => {
     expect(described.columns[DATA_LIMITS.describeColumnsMax]).toEqual({ name: `c${DATA_LIMITS.describeColumnsMax}`, type: "INTEGER" });
   });
 
-  it("caches column stats by table and row count", async () => {
+  it("caches column stats until a write, including a same-size replacement or update", async () => {
     await ready;
     await db.run("CREATE OR REPLACE TABLE counted AS SELECT range AS n FROM range(10)", bot);
     const first = await db.stats("counted");
@@ -255,6 +304,16 @@ describe("a bot's database", () => {
     expect(second).not.toBe(first);
     expect(second.rowCount).toBe(11);
     expect(second.columns[0].max).toBe("10");
+    await db.run("CREATE OR REPLACE TABLE counted AS SELECT (range + 100)::INTEGER AS replacement FROM range(11)", bot);
+    const replaced = await db.stats("counted");
+    expect(replaced).not.toBe(second);
+    expect(replaced.columns[0]).toMatchObject({ name: "replacement", type: "INTEGER", min: "100", max: "110" });
+    await db.run("UPDATE counted SET replacement = 9", panel);
+    expect((await db.stats("counted")).columns[0]).toMatchObject({ min: "9", max: "9", approxUnique: 1 });
+    await db.materialise("SELECT 1 AS before", "cached", bot);
+    await db.stats("omb_results.cached");
+    await db.materialise("SELECT 2 AS after", "cached", bot);
+    expect((await db.stats("omb_results.cached")).columns[0]).toMatchObject({ name: "after", min: "2", max: "2" });
   });
 
   it("bins numbers and dates into twenty equal widths and counts the top text values", async () => {
@@ -310,6 +369,25 @@ describe("a bot's database", () => {
     expect(missing.error.code).toBe("table_not_found");
     expect(missing.error.candidates).toContain("sales");
     expect(missing.error.candidates!.length).toBeLessThanOrEqual(5);
+  });
+
+  it("supplies query-ready table names without changing catalog identities", async () => {
+    const names = await engine().forBot("query-names");
+    await names.run('CREATE TABLE "order" AS SELECT 1 AS n', bot);
+    await names.run('CREATE TABLE "My Table" AS SELECT 2 AS n', bot);
+    await names.run('CREATE TABLE "has.dot" AS SELECT 3 AS n', bot);
+    await names.run('CREATE SCHEMA "Other Schema"', bot);
+    await names.run('CREATE TABLE "Other Schema"."select" AS SELECT 4 AS n', bot);
+    const tables = await names.listTables();
+    expect(tables.map(({ name, sqlName }) => ({ name, sqlName }))).toEqual([
+      { name: "Other Schema.select", sqlName: '"Other Schema"."select"' },
+      { name: "My Table", sqlName: '"My Table"' },
+      { name: "has.dot", sqlName: '"has.dot"' },
+      { name: "order", sqlName: '"order"' },
+    ]);
+    for (const table of tables) {
+      expect((await names.run(`SELECT * FROM ${table.sqlName}`, panel)).rowCount).toBe(1);
+    }
   });
 
   it("maps DuckDB errors to codes without rewording them", async () => {

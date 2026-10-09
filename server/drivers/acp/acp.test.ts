@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../../config.ts";
+import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../../data/instructions.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { TurnNotStartedError } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
@@ -806,6 +807,25 @@ describe("ACP turns (fake CLI)", () => {
       args: ["/tmp/connector-proxy.js"],
       env: [{ name: "OMB_CONNECTOR_UPSTREAM_URL", value: "http://127.0.0.1:8799/api/internal/connectors/mcp" }],
     });
+  });
+
+  it.each([false, true])("mounts Data through the existing stdio transport unless excluded (excluded=%s)", async (excluded) => {
+    await create();
+    const dump = join(scratch, "data.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    const data = { command: process.execPath, args: [join(scratch, "data-proxy.mjs")], env: { OMB_DATA_TOKEN: "synthetic-turn-capability" } };
+    expect(instance.adapter.capabilities.dataMcp).toBe(true);
+    await instance.adapter.sendTurn({
+      threadId: "t-data", text: "Update the existing result.", system: BUILT_IN_DATA_SYSTEM_PROMPT,
+      integrations: { data }, ...(excluded ? { toolScope: { allow: ["native:*"] } } : {}),
+    });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"))).toEqual(excluded ? [] : [{
+      name: "data", ...data, env: [{ name: "OMB_DATA_TOKEN", value: "synthetic-turn-capability" }],
+    }]);
+    const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8")) as Array<{ type: string; text?: string }>;
+    expect(prompt.find(block => block.type === "text")?.text).toContain(BUILT_IN_DATA_SYSTEM_PROMPT.trim());
   });
 
   it("droid takes model and autonomy over the wire, never through argv", async () => {

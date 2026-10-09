@@ -31,6 +31,11 @@ import {
 import { DataFailure } from "./types.ts";
 
 const dirs: string[] = [];
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 function freshDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "omb-data-tools-"));
   dirs.push(dir);
@@ -84,6 +89,9 @@ describe("the catalog", () => {
     expect(dataToolCallProblem("data_show", { kind: "table", sql: "SELECT 1", extra: 1 })).toContain("extra");
     expect(dataToolCallProblem("data_drop", {})).toContain("Unknown Data tool");
     expect(dataToolCallProblem("data_load", { source: "a.csv", options: { delimiter: "" } })).toContain("delimiter");
+    expect(dataToolCallProblem("data_describe", {})).toBeNull();
+    expect(dataToolCallProblem("data_describe", { id: "c_1" })).toBeNull();
+    expect(dataToolCallProblem("data_show", { id: "c_1", sql: "SELECT 2" })).toBeNull();
   });
 });
 
@@ -224,9 +232,31 @@ describe("sources", () => {
     expect(() => planLoad({ source: join(dir, "notes.foo") })).toThrow(expect.objectContaining({ error: expect.objectContaining({ code: "source_unsupported" }) }));
     expect(planLoad({ source: join(dir, "notes.foo"), kind: "csv" })[0]!.kind).toBe("csv");
   });
+
+  it("names the remote filesystem and workbook extensions the reader needs", () => {
+    expect(planLoad({ source: "https://example.com/data.csv" })[0]!.extensions).toEqual(["httpfs"]);
+    expect(planLoad({ source: "s3://bucket/data.parquet" })[0]!.extensions).toEqual(["httpfs"]);
+    expect(planLoad({ source: "az://container/data.parquet" })[0]!.extensions).toEqual(["azure"]);
+    expect(planLoad({ source: "https://example.com/book.xlsx" })[0]!.extensions).toEqual(["httpfs", "excel"]);
+    expect(planLoad({ source: "https://docs.google.com/spreadsheets/d/book/edit" })[0]!.extensions).toEqual(["httpfs"]);
+    const path = join(freshDir(), "book.xlsx");
+    writeFileSync(path, "");
+    expect(planLoad({ source: path })[0]!.extensions).toEqual(["excel"]);
+  });
 });
 
 describe("data_load", () => {
+  it("passes required extensions to the engine for load, attachment, and export", async () => {
+    const { ctx, database } = context();
+    const requirements: unknown[] = [];
+    database.onRun = (_sql, options) => { if (options.extensions?.length) requirements.push(options.extensions); return undefined; };
+    await loadData(ctx, { source: "https://example.com/data.csv" });
+    await loadData(ctx, { source: "https://example.com/book.xlsx" });
+    await loadData(ctx, { source: "postgres://db/shop", sheet: "orders" });
+    await exportData(ctx, { sql: "SELECT 1", format: "xlsx" });
+    expect(requirements).toEqual([["httpfs"], ["httpfs", "excel"], ["postgres"], ["excel"]]);
+  });
+
   it("creates the table, describes it and records the source", async () => {
     const { ctx, database, sheet } = context();
     const dir = freshDir();
@@ -265,6 +295,64 @@ describe("data_load", () => {
     const after = database.calls.filter((call) => call.method === "run").map((call) => call.sql!);
     expect(after.map((sql) => sql.split(" ")[0])).toEqual(["ATTACH", "CREATE", "DETACH"]);
     expect(after[1]).toMatch(/^CREATE OR REPLACE TABLE "n" AS SELECT \* FROM "omb_src_\w+"\."public"\."nope"$/);
+  });
+});
+
+describe("data_describe saved results", () => {
+  it("reads the latest saved SQL after a person edits it, without rerunning queries", async () => {
+    const { ctx, database, sheet } = context();
+    await showCard(ctx, { kind: "table", sql: "SELECT 1", title: "First" });
+    await showCard(ctx, { kind: "table", sql: "SELECT 2", title: "Second" });
+    sheet.card("c_2")!.updatedAt = "2020-01-01T00:00:00.000Z";
+    await showCard({ ...ctx, by: "person", connection: "panel" }, { id: "c_1", sql: "SELECT 3 AS edited", live: true });
+    sheet.recordTable({ name: "Order Details", sqlName: '"Order Details"', rowCount: 3, columns: [] });
+    database.calls.length = 0;
+    const read = await runDataTool(ctx, "data_describe", {});
+    expect(read.structuredContent).toMatchObject({
+      card: { id: "c_1", title: "First", kind: "table", sql: "SELECT 3 AS edited", by: "person", status: "ready" },
+      cards: [{ id: "c_1" }, { id: "c_2" }], tables: [{ name: "Order Details", sqlName: '"Order Details"', rowCount: 3 }],
+      truncated: false, omitted: [],
+    });
+    expect(database.calls).toEqual([]);
+    const explicit = await runDataTool(ctx, "data_describe", { id: "c_2" });
+    expect(explicit.structuredContent).toMatchObject({ card: { id: "c_2", sql: "SELECT 2" } });
+  });
+
+  it("reads the original chart or raw Vega-Lite spec needed for an edit", async () => {
+    const { ctx } = context();
+    const chart = { type: "bar" as const, x: "region" };
+    await showCard(ctx, { kind: "chart", sql: "SELECT region FROM orders", chart });
+    const simple = (await runDataTool(ctx, "data_describe", { id: "c_1" })).structuredContent!.card;
+    expect(simple).toMatchObject({ kind: "chart", sql: "SELECT region FROM orders", chart });
+    expect(simple).not.toHaveProperty("vegaLite");
+    await showCard(ctx, { kind: "chart", sql: "SELECT 2", vegaLite: { mark: "line" } });
+    const raw = (await runDataTool(ctx, "data_describe", { id: "c_2" })).structuredContent!.card;
+    expect(raw).toMatchObject({ kind: "chart", vegaLite: { mark: "line", validated: true } });
+    expect(raw).not.toHaveProperty("chart");
+  });
+
+  it("keeps saved-state output byte bounded and never returns partial SQL or source credentials", async () => {
+    const { ctx, sheet, database } = context();
+    const sql = `SELECT '${"private-long-value".repeat(3000)}'`;
+    await sheet.addCard({ kind: "chart", title: "Large", sql, vegaLite: { description: "x".repeat(20_000) }, by: "person" });
+    for (let index = 0; index < 100; index++) sheet.recordSource({ name: `table_${index}_${"x".repeat(180)}`, kind: "postgres", source: "postgres://user:source-secret@host/db", rowCount: 1, columns: [], loadedAt: "2026-01-01" });
+    const result = await runDataTool(ctx, "data_describe", { id: "c_1" });
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ truncated: true, omitted: ["sql", "vegaLite"] });
+    expect(result.structuredContent!.card).not.toHaveProperty("sql");
+    expect(Buffer.byteLength(result.content[0]!.text)).toBeLessThanOrEqual(DATA_LIMITS.describeBytesMax);
+    expect(result.content[0]!.text).not.toContain("source-secret");
+    expect(database.calls).toEqual([]);
+  });
+
+  it("handles empty state and refuses unknown or conflicting targets without leaking input", async () => {
+    const { ctx, database } = context();
+    expect((await runDataTool(ctx, "data_describe", {})).structuredContent).toMatchObject({ card: null, cards: [], tables: [] });
+    expect((await runDataTool(ctx, "data_describe", { id: "c_999" })).structuredContent).toMatchObject({ code: "card_not_found" });
+    const conflicting = await runDataTool(ctx, "data_describe", { id: "c_1", target: "SELECT 'secret-target'" });
+    expect(conflicting.structuredContent).toMatchObject({ code: "invalid_input" });
+    expect(conflicting.content[0]!.text).not.toContain("secret-target");
+    expect(database.calls).toEqual([]);
   });
 });
 
@@ -361,12 +449,86 @@ describe("data_show", () => {
     expect(out.id).toBe("c_1");
     expect(sheet.cards().map((card) => card.id)).toEqual(["c_1", "c_2"]);
     expect(sheet.card("c_1")).toMatchObject({ title: "First", sql: "SELECT 1 WHERE true", rowCount: 7, status: "ready" });
+    const goodResult = sheet.card("c_1")!.result;
 
     database.failNext = new Error("Parser Error: syntax error at or near \"FORM\"");
-    const failed = await failure(showCard(ctx, { id: "c_1", kind: "table", sql: "SELECT 1 FORM t", by: "person" } as never));
+    const failed = await failure(showCard(ctx, { id: "c_1", kind: "table", sql: "SELECT 1 FORM t" }));
     expect(failed).toMatchObject({ code: "sql_error", sql: "SELECT 1 FORM t" });
-    expect(sheet.card("c_1")).toMatchObject({ status: "failed", error: { code: "sql_error" }, result: "c_1", rowCount: 7 });
+    expect(sheet.card("c_1")).toMatchObject({ status: "ready", result: goodResult, rowCount: 7, sql: "SELECT 1 WHERE true" });
+    expect(sheet.card("c_1")?.error).toBeUndefined();
     expect(await failure(showCard(ctx, { id: "c_9", kind: "table", sql: "SELECT 1" }))).toMatchObject({ code: "card_not_found" });
+  });
+
+  it("publishes only the latest live edit even when older materialisation ignores cancellation", async () => {
+    const { ctx, database, sheet } = context({ by: "person", connection: "panel" });
+    await showCard(ctx, { kind: "table", sql: "SELECT 1" });
+    const original = database.materialise.bind(database);
+    const started = deferred();
+    const release = deferred();
+    let oldSignal: AbortSignal | undefined;
+    database.materialise = async (sql, name, options) => {
+      if (sql.includes("SELECT 2")) {
+        oldSignal = options.signal;
+        started.resolve();
+        await release.promise;
+        database.next = { rows: [[2]] };
+        return original(sql, name, { ...options, signal: undefined });
+      }
+      database.next = { rows: [[3]] };
+      return original(sql, name, options);
+    };
+    const stale = failure(showCard(ctx, { id: "c_1", kind: "table", sql: "SELECT 2", live: true }));
+    await started.promise;
+    expect(sheet.card("c_1")).toMatchObject({ sql: "SELECT 1", result: "c_1", status: "ready" });
+    await showCard(ctx, { id: "c_1", kind: "table", sql: "SELECT 3", live: true });
+    const latest = sheet.card("c_1")!;
+    expect(oldSignal?.aborted).toBe(true);
+    expect(latest).toMatchObject({ sql: "SELECT 3", status: "ready" });
+    release.resolve();
+    expect(await stale).toMatchObject({ code: "cancelled" });
+    expect(sheet.card("c_1")).toBe(latest);
+    expect([...database.results.keys()]).toEqual([latest.result]);
+    expect(database.results.get(latest.result!)!.rows).toEqual([[3]]);
+  });
+
+  it("an empty live edit cancels the prior query without changing the last good card", async () => {
+    const { ctx, database, sheet } = context({ by: "person", connection: "panel" });
+    await showCard(ctx, { kind: "table", sql: "SELECT 1" });
+    const good = sheet.card("c_1");
+    database.delayMs = 30;
+    const previous = failure(showCard(ctx, { id: "c_1", kind: "table", sql: "SELECT 2", live: true }));
+    expect(await failure(showCard(ctx, { id: "c_1", kind: "table", sql: "", live: true }))).toMatchObject({ code: "invalid_input" });
+    expect(await previous).toMatchObject({ code: "cancelled" });
+    expect(sheet.card("c_1")).toBe(good);
+    expect([...database.results.keys()]).toEqual(["c_1"]);
+  });
+
+  it("restores the last good status when a live draft supersedes a non-live rerun", async () => {
+    const { ctx, database, sheet } = context({ by: "person", connection: "panel" });
+    await showCard(ctx, { kind: "table", sql: "SELECT 1" });
+    const good = sheet.card("c_1")!;
+    database.delayMs = 30;
+    const previous = failure(showCard(ctx, { id: "c_1", kind: "table", sql: "SELECT 2" }));
+    expect(sheet.card("c_1")?.status).toBe("running");
+    expect(await failure(showCard({ ...ctx, by: "person" }, { id: "c_1", kind: "table", sql: "", live: true }))).toMatchObject({ code: "invalid_input" });
+    expect(await previous).toMatchObject({ code: "cancelled" });
+    expect(sheet.card("c_1")).toMatchObject({ status: "ready", sql: good.sql, result: good.result, by: good.by });
+    expect(sheet.card("c_1")?.error).toBeUndefined();
+    expect([...database.results.keys()]).toEqual([good.result]);
+  });
+
+  it("keeps the last good chart when validation fails after a replacement table was built", async () => {
+    const { ctx, database, sheet } = context({ by: "person", connection: "panel" });
+    const chart = { type: "scatter" as const, x: "id", y: "name" };
+    await showCard(ctx, { kind: "chart", sql: "SELECT * FROM orders", chart });
+    const good = sheet.card("c_1")!;
+    const rows = database.results.get(good.result!)!.rows;
+    database.next = { rowCount: DATA_LIMITS.chartMaxMarks + 1, rows: [["oversized"]] };
+    const failed = await failure(showCard(ctx, { id: "c_1", kind: "chart", sql: "SELECT * FROM too_many", chart, live: true }));
+    expect(failed).toMatchObject({ code: "output_too_large" });
+    expect(sheet.card("c_1")).toBe(good);
+    expect(database.results.get(good.result!)!.rows).toBe(rows);
+    expect([...database.results.keys()]).toEqual([good.result]);
   });
 
   it("compiles a chart spec, materialises the reduction and records it on the card", async () => {
@@ -383,6 +545,35 @@ describe("data_show", () => {
     database.onRun = (sql) => (sql.startsWith("SELECT count(*)") ? { columns: [{ name: "n", type: "BIGINT" }], rows: [[3]], rowCount: 1, truncated: false, elapsedMs: 1 } : undefined);
     const whole = await showCard(ctx, { kind: "chart", sql: "SELECT * FROM small", chart: { type: "scatter", x: "a", y: "b" } });
     expect(whole.reduction).toEqual({ method: "none", inputRows: 3, outputRows: 3 });
+  });
+
+  it("updates existing SQL while inheriting chart settings, or switches kind explicitly", async () => {
+    const { ctx, sheet } = context();
+    const chart = { type: "bar" as const, x: "region" };
+    await showCard(ctx, { kind: "chart", sql: "SELECT region FROM orders", chart, title: "Regions" });
+    const updated = await runDataTool(ctx, "data_show", { id: "c_1", sql: "SELECT region FROM orders WHERE paid" });
+    expect(updated.isError).toBeUndefined();
+    expect(sheet.card("c_1")).toMatchObject({ kind: "chart", title: "Regions", sql: "SELECT region FROM orders WHERE paid", chart, status: "ready" });
+    expect(sheet.cards()).toHaveLength(1);
+    await runDataTool(ctx, "data_show", { id: "c_1", kind: "table", sql: "SELECT 1" });
+    expect(sheet.card("c_1")).toMatchObject({ kind: "table", sql: "SELECT 1", status: "ready" });
+    expect(sheet.card("c_1")?.chart).toBeUndefined();
+    expect(sheet.card("c_1")?.vegaLite).toBeUndefined();
+    await runDataTool(ctx, "data_show", { id: "c_1", kind: "chart", sql: "SELECT region FROM orders", chart });
+    expect(sheet.card("c_1")).toMatchObject({ kind: "chart", chart });
+  });
+
+  it("inherits raw Vega-Lite and preserves the ready chart when a bot edit fails", async () => {
+    const { ctx, database, sheet } = context();
+    await showCard(ctx, { kind: "chart", sql: "SELECT 1", vegaLite: { mark: "line" } });
+    await runDataTool(ctx, "data_show", { id: "c_1", sql: "SELECT 2" });
+    const good = sheet.card("c_1");
+    expect(good).toMatchObject({ kind: "chart", sql: "SELECT 2", vegaLite: { mark: "line" }, status: "ready" });
+    database.failNext = new Error("Parser Error: invalid edited SQL");
+    expect((await runDataTool(ctx, "data_show", { id: "c_1", sql: "SELECT broken" })).isError).toBe(true);
+    expect(sheet.card("c_1")).toBe(good);
+    expect((await runDataTool(ctx, "data_show", { id: "c_1", sql: "SELECT 3", chart: { type: "bar", x: "region" }, vegaLite: { mark: "line" } })).isError).toBe(true);
+    expect(sheet.card("c_1")).toBe(good);
   });
 
   it("refuses a chart over the mark cap with the aggregate hint, and leaves the card failed", async () => {
@@ -405,6 +596,7 @@ describe("data_show", () => {
 
   it("refuses contradictory inputs before touching the database", async () => {
     const { ctx, database } = context();
+    expect(await failure(showCard(ctx, { sql: "SELECT 1" }))).toMatchObject({ code: "invalid_input" });
     expect(await failure(showCard(ctx, { kind: "table", sql: "SELECT 1", table: "t" }))).toMatchObject({ code: "invalid_input" });
     expect(await failure(showCard(ctx, { kind: "chart", sql: "SELECT 1" }))).toMatchObject({ code: "invalid_input" });
     expect(await failure(showCard(ctx, { kind: "chart", sql: "SELECT 1", chart: { type: "bar", x: "a" }, vegaLite: { mark: "bar" } }))).toMatchObject({ code: "invalid_input" });

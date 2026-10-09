@@ -252,6 +252,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   if (computerUse && integrations?.browser && eligible("browser")) servers.push(["browser", integrations.browser]);
   if (integrations?.agents && eligible("agents")) servers.push(["agents", integrations.agents]);
   if (integrations?.composio && eligible("composio")) servers.push(["composio", integrations.composio]);
+  if (integrations?.data && eligible("data")) servers.push(["data", integrations.data]);
   for (const [name, server] of Object.entries(integrations?.custom ?? {})) {
     if (!eligible(name)) continue;
     const remote = remoteMcpSpec(server) !== undefined;

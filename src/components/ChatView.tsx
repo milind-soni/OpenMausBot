@@ -75,6 +75,7 @@ import { VerifyCard } from "./VerifyCard";
 import { askText, runSkill, runSteps, runSummary, showRun, skillPrompt } from "@/lib/verify-steps";
 import { useShowRunCard } from "@/lib/run-card-preferences";
 import { ToolActivity } from "./ToolActivity";
+import { DataResultChip } from "./DataResultChip";
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
@@ -794,6 +795,7 @@ const ActivityChip = memo(function ActivityChip({ message, place = "auto" }: { m
   const tool = message.tool;
   if (!tool) return null;
   if (message.threadRef) return <ThreadChip message={message} />;
+  if (message.dataResult) return <DataResultChip message={message} />;
   // bot⇄bot comm chip: opens the channel where the exchange lives
   const comm = message.comm;
   if (comm) {
@@ -1038,7 +1040,7 @@ const MessagesList = memo(function MessagesList({
                   />
                 );
               }
-              if (!showToolCalls && !m.comm && !m.threadRef) return null;
+              if (!showToolCalls && !m.comm && !m.threadRef && !m.dataResult) return null;
               return <ActivityChip message={m} place={place} />;
             }
             case "digest":

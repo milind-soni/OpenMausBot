@@ -7,6 +7,7 @@
 // bounded by rows and bytes before it leaves (the gate's trimming is only the
 // backstop). Failures are structured DataErrors the model can act on.
 import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ValidateFunction } from "ajv";
@@ -25,7 +26,7 @@ import {
 } from "../../shared/data-surface.ts";
 import { compileToolSchema, schemaProblems } from "../mcp-schema-validator.ts";
 import type { DataSheetStore } from "./sheet.ts";
-import { DataFailure, type BotDatabase, type ChartCompiler, type ChartRenderer, type DataConnection, type RunOptions, type RunResult, type VegaLiteValidator } from "./types.ts";
+import { DataFailure, type BotDatabase, type ChartCompiler, type ChartRenderer, type DataConnection, type DataExtension, type RunOptions, type RunResult, type VegaLiteValidator } from "./types.ts";
 
 // ── the catalog ──
 
@@ -80,9 +81,11 @@ export const DATA_TOOLS = [
   ),
   tool(
     "data_describe",
-    "Columns of a table or of a SELECT's result: type, null %, approximate distinct count, min, max and up to three sample values. Call it before writing SQL against a table you have not seen.",
-    { target: { type: "string", minLength: 1, maxLength: 20000, description: "A table name, or a SELECT statement." } },
-    ["target"],
+    "Read the latest saved Data result with no arguments, or one saved result by id: returns its SQL and chart settings plus a compact result/table catalog. Latest means most recently updated, not necessarily the result selected in the person's viewer. Give target instead for a table or SELECT's columns, null %, approximate distinct count, min, max and sample values. Read the existing result before changing it; inspect an unfamiliar table before writing SQL.",
+    {
+      target: { type: "string", minLength: 1, maxLength: 20000, description: "A table name or SELECT. Do not combine with id." },
+      id: { type: "string", pattern: "^c_[0-9]+$", description: "Saved result to read; omit both id and target for the latest saved result." },
+    },
   ),
   tool(
     "data_sql",
@@ -96,7 +99,7 @@ export const DATA_TOOLS = [
   ),
   tool(
     "data_show",
-    "Put a table or a chart on the Data tab the person sees. Give sql (a SELECT) or table (a loaded table); kind \"chart\" also takes chart (the small spec: type, x, y, color, agg, …) or, rarely, vegaLite (a data-free Vega-Lite spec). For a line of daily/weekly totals pass agg and/or timeUnit; a line with only y draws the raw series. Pass an existing id to change that card in place; otherwise a new card is added at the bottom. Aggregate or filter in SQL first: a chart may draw at most 10,000 marks.",
+    "Put a table or chart in Data and an Open in Data link in chat. Give sql (a SELECT) or table (a loaded table). To update an existing result, read it with data_describe then pass its id and new sql; omitted kind and chart settings stay unchanged. For a new result, kind is required; kind \"chart\" also needs chart (the small spec) or vegaLite (a data-free spec). Set kind explicitly to switch between table and chart. For daily/weekly line totals pass agg and/or timeUnit; a line with only y draws the raw series. Aggregate or filter in SQL first: a chart may draw at most 10,000 marks.",
     {
       id: { type: "string", pattern: "^c_[0-9]+$" },
       title: { type: "string", maxLength: 200 },
@@ -107,7 +110,6 @@ export const DATA_TOOLS = [
       vegaLite: { type: "object", description: "Escape hatch: a Vega-Lite spec without data; the rows bind as the dataset named \"table\"." },
       limit: { type: "integer", minimum: 1, maximum: DATA_LIMITS.showTableRowsMax, description: "Rows a table card keeps (default all, up to 1,000,000) or rows handed to a raw vegaLite spec (default 10,000)." },
     },
-    ["kind"],
   ),
   tool(
     "data_export",
@@ -403,6 +405,7 @@ export interface LoadPlan {
   stem: string;
   /** A relation expression (`read_csv(…)`) for file-like sources. */
   reader?: string;
+  extensions?: DataExtension[];
   /** For databases: ATTACH options and which tables to snapshot. */
   attach?: { type: "postgres" | "mysql" | "sqlite"; connection: string; table?: string };
   warnings: string[];
@@ -499,7 +502,7 @@ export function planLoad(input: LoadInput): LoadPlan[] {
     const gid = /[?#&]gid=(\d+)/.exec(source)?.[1] ?? (input.sheet && /^\d+$/.test(input.sheet) ? input.sheet : undefined);
     const exportUrl = `https://docs.google.com/spreadsheets/d/${gsheet[1]}/export?format=csv${gid ? `&gid=${gid}` : ""}`;
     warnings.push("Loaded through the sheet's public CSV export; the sheet must be shared with anyone who has the link.");
-    return [{ kind: "gsheet", source: stripCredentials(source), stem: input.name ?? "sheet", reader: `read_csv(${quoteLiteral(exportUrl)}${csvOptions(input.options)})`, warnings }];
+    return [{ kind: "gsheet", source: stripCredentials(source), stem: input.name ?? "sheet", reader: `read_csv(${quoteLiteral(exportUrl)}${csvOptions(input.options)})`, extensions: ["httpfs"], warnings }];
   }
   const database = /^(postgres(ql)?|mysql):\/\//i.exec(source);
   if (kind === "postgres" || kind === "mysql" || (kind === "auto" && database)) {
@@ -510,7 +513,9 @@ export function planLoad(input: LoadInput): LoadPlan[] {
     const pathname = (() => { try { return new URL(source).pathname; } catch { return source; } })();
     const reader = readerFor(extensionOf(pathname), kind === "url" ? undefined : kind);
     if (!reader || reader === "sqlite") throw fail("source_unsupported", `No reader for ${extensionOf(pathname) || "a URL without a file extension"}.`, { hint: "Pass kind: csv, tsv, json, parquet or xlsx." });
-    return [{ kind: "url", source: stripCredentials(source), stem: input.name ?? (stemOf(pathname) || "download"), reader: readerExpression(reader, source, input, false), warnings }];
+    const extensions: DataExtension[] = [/^(az|azure):\/\//i.test(source) ? "azure" : "httpfs"];
+    if (reader === "xlsx") extensions.push("excel");
+    return [{ kind: "url", source: stripCredentials(source), stem: input.name ?? (stemOf(pathname) || "download"), reader: readerExpression(reader, source, input, false), extensions, warnings }];
   }
   const local = source.startsWith("~/") || source === "~" ? join(homedir(), source.slice(1)) : source;
   if (GLOB_CHARS.test(local) || (kind === "folder" && !existsSync(local))) {
@@ -543,7 +548,7 @@ export function planLoad(input: LoadInput): LoadPlan[] {
   if (reader === "sqlite") return [{ kind: "sqlite", source: local, stem: input.name ?? stemOf(local), attach: { type: "sqlite", connection: local, table: input.sheet }, warnings }];
   if (reader === "xlsx" && !input.sheet) warnings.push("Loaded the workbook's first sheet; pass sheet to load another.");
   if (extensionOf(local).toLowerCase() === ".txt") warnings.push("Read as CSV; pass options.delimiter if the columns did not split.");
-  return [{ kind: reader === "tsv" ? "csv" : reader, source: local, stem: input.name ?? (input.sheet ? `${stemOf(local)}_${input.sheet}` : stemOf(local)), reader: readerExpression(reader, local, input, false), warnings }];
+  return [{ kind: reader === "tsv" ? "csv" : reader, source: local, stem: input.name ?? (input.sheet ? `${stemOf(local)}_${input.sheet}` : stemOf(local)), reader: readerExpression(reader, local, input, false), ...(reader === "xlsx" ? { extensions: ["excel" as const] } : {}), warnings }];
 }
 
 const DATABASE_TABLES_MAX = 25;
@@ -569,10 +574,10 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const warnings: string[] = [];
   const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>) => {
     const sql = `CREATE ${replace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${relation}`;
-    await ctx.database.run(sql, runOptions(ctx));
+    await ctx.database.run(sql, runOptions(ctx, { extensions: plan.extensions }));
     const described = await ctx.database.describe(quoteIdent(name), runOptions(ctx));
     const columns = boundColumns(described.columns, DATA_LIMITS.describeBytesMax, 200).columns;
-    ctx.sheet.recordSource({ name, kind: plan.kind, source: plan.source, options, rowCount: described.rowCount, columns, loadedAt: new Date().toISOString() });
+    ctx.sheet.recordSource({ name, sqlName: quoteIdent(name), kind: plan.kind, source: plan.source, options, rowCount: described.rowCount, columns, loadedAt: new Date().toISOString() });
     tables.push({ name, rowCount: described.rowCount, columns, source: plan.source });
   };
   const recordedOptions = (plan: LoadPlan): Record<string, string | number | boolean> => ({
@@ -590,7 +595,7 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
     // A foreign database is attached read-only for the snapshot and detached
     // again whatever happens: the connection string never persists.
     const alias = `omb_src_${Date.now().toString(36)}`;
-    await ctx.database.run(`ATTACH ${quoteLiteral(attach.connection)} AS ${quoteIdent(alias)} (TYPE ${attach.type}, READ_ONLY)`, runOptions(ctx));
+    await ctx.database.run(`ATTACH ${quoteLiteral(attach.connection)} AS ${quoteIdent(alias)} (TYPE ${attach.type}, READ_ONLY)`, runOptions(ctx, { extensions: [attach.type] }));
     try {
       let chosen: Array<{ schema: string; table: string }>;
       if (attach.table) {
@@ -647,6 +652,35 @@ export async function describeTarget(ctx: DataContext, target: string): Promise<
   return { ...(name ? { name } : {}), ...(sql ? { sql } : {}), rowCount: described.rowCount, columns, ...(truncated ? { truncated } : {}), elapsedMs: Date.now() - started };
 }
 
+/** Read saved state, not a rerun: a person's SQL edits are visible to the next bot turn. */
+function describeSavedResult(ctx: DataContext, id?: string): Record<string, unknown> {
+  const sheet = ctx.sheet.sheet();
+  const cards = [...sheet.cards].reverse().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const selected = id ? cards.find((card) => card.id === id) : cards[0];
+  if (id && !selected) throw fail("card_not_found", `No card ${id} on the sheet.`);
+  const summary = ({ id, title, kind, status, rowCount, updatedAt, by }: DataCard) => ({ id, title, kind, status, rowCount, updatedAt, by });
+  const card: Record<string, unknown> | null = selected ? summary(selected) : null;
+  const result = { card, cards: [] as ReturnType<typeof summary>[], tables: [] as Array<{ name: string; sqlName?: string; rowCount: number }>, truncated: false, omitted: [] as string[] };
+  const fits = () => Buffer.byteLength(JSON.stringify(result)) <= DATA_LIMITS.describeBytesMax;
+  if (selected && card) {
+    // Never hand the model partial SQL/specs that it could accidentally save over the original.
+    for (const field of ["sql", selected.chart ? "chart" : "vegaLite"] as const) {
+      if (selected[field] === undefined) continue;
+      card[field] = selected[field];
+      if (!fits()) { delete card[field]; result.omitted.push(field); result.truncated = true; }
+    }
+  }
+  for (const entry of cards) {
+    result.cards.push(summary(entry));
+    if (!fits()) { result.cards.pop(); result.truncated = true; break; }
+  }
+  for (const { name, sqlName, rowCount } of sheet.tables ?? sheet.sources) {
+    result.tables.push({ name, ...(sqlName ? { sqlName } : {}), rowCount });
+    if (!fits()) { result.tables.pop(); result.truncated = true; break; }
+  }
+  return result;
+}
+
 // ── data_sql ──
 
 export interface SqlInput { sql: string; limit?: number; name?: string }
@@ -667,6 +701,7 @@ export async function runSql(ctx: DataContext, input: SqlInput): Promise<SqlOutp
   if (kind.kind === "create") {
     await ctx.database.run(input.sql, runOptions(ctx));
     const described = await ctx.database.describe(kind.target, runOptions(ctx));
+    ctx.sheet.recordTable({ name: kind.target, sqlName: kind.target, rowCount: described.rowCount, columns: described.columns });
     return { table: kind.target, columns: boundColumns(described.columns, DATA_LIMITS.describeBytesMax).columns, rowCount: described.rowCount, rows: [], truncated: false, elapsedMs: Date.now() - started };
   }
   if (!kind.materialisable) {
@@ -695,10 +730,12 @@ export interface ShowInput {
   title?: string;
   sql?: string;
   table?: string;
-  kind: "table" | "chart";
+  kind?: "table" | "chart";
   chart?: OmbChartSpec;
   vegaLite?: Record<string, unknown>;
   limit?: number;
+  /** Live panel edits keep the last successful card unchanged until a replacement is ready. */
+  live?: boolean;
 }
 export interface ShowOutput {
   id: string;
@@ -711,51 +748,87 @@ export interface ShowOutput {
 }
 
 const OUTPUT_TOO_LARGE_HINT = "Aggregate or filter in SQL (GROUP BY, date_trunc, LIMIT) so the chart draws fewer marks.";
+const cardRuns = new WeakMap<DataSheetStore, Map<string, { controller: AbortController; previous?: DataCard }>>();
+
+/** Cancel this card's exact invocation, including work queued behind another query. */
+export function cancelCardRun(sheet: DataSheetStore, id: string): void {
+  cardRuns.get(sheet)?.get(id)?.controller.abort();
+}
 
 /** One tool call = one card. A new card appears "running" at once so the
  * person sees the work; an existing id changes in place and keeps its last
  * good result when the new query fails. Throws DataFailure. */
-export async function showCard(ctx: DataContext, input: ShowInput): Promise<ShowOutput> {
+export async function showCard(context: DataContext, input: ShowInput, onCardReady?: (card: DataCard) => void): Promise<ShowOutput> {
   const started = Date.now();
-  if (Boolean(input.sql) === Boolean(input.table)) throw fail("invalid_input", "Give exactly one of sql or table.");
-  if (input.kind === "chart" && Boolean(input.chart) === Boolean(input.vegaLite)) throw fail("invalid_input", "A chart card takes chart (the small spec) or vegaLite, not both and not neither.");
-  if (input.kind === "table" && (input.chart || input.vegaLite)) throw fail("invalid_input", "A table card takes no chart spec; use kind \"chart\".");
-  let from: string;
-  let cardSql: string;
-  if (input.sql) {
-    const kind = gateSql(input.sql);
-    if (kind.kind !== "read" || !kind.materialisable) throw fail("invalid_input", "A card shows a SELECT's result.", { sql: input.sql });
-    from = `(${input.sql})`;
-    cardSql = input.sql;
-  } else {
-    // resolveTable returns the identifier as the engine spells it for SQL.
-    const resolved = await ctx.database.resolveTable(input.table!);
-    from = resolved;
-    cardSql = `SELECT * FROM ${resolved}`;
+  const controller = new AbortController();
+  const ctx = { ...context, signal: AbortSignal.any([context.signal, controller.signal]) };
+  ctx.signal.throwIfAborted();
+  const runs = cardRuns.get(ctx.sheet) ?? new Map<string, { controller: AbortController; previous?: DataCard }>();
+  cardRuns.set(ctx.sheet, runs);
+  let card = input.id ? ctx.sheet.card(input.id) : undefined;
+  if (input.id && !card) throw fail("card_not_found", `No card ${input.id} on the sheet.`);
+  const kind = input.kind ?? card?.kind;
+  const chart = input.chart ?? (kind === "chart" && !input.vegaLite ? card?.chart : undefined);
+  const vegaLite = input.vegaLite ?? (kind === "chart" && !chart ? card?.vegaLite : undefined);
+  input = { ...input, chart, vegaLite, live: input.live || Boolean(card?.result && ctx.by === "bot") };
+  if (input.live && card?.status === "running" && !card.result) throw fail("invalid_input", "Wait for this card's first result before editing its SQL.");
+  const claim = (id: string) => {
+    const previous = runs.get(id);
+    previous?.controller.abort();
+    runs.set(id, { controller, previous: previous?.previous ?? card });
+  };
+  if (card) claim(card.id);
+  if (input.live && card?.status === "running") {
+    const previous = runs.get(card.id)?.previous;
+    card = ctx.sheet.updateCard(card.id, { status: previous?.status === "failed" ? "failed" : "ready", error: previous?.error, by: previous?.by ?? card.by });
   }
-  const title = input.title ?? (input.table ? input.table : input.chart ? `${input.chart.type} of ${input.chart.y ?? "count"} by ${input.chart.x}` : input.kind === "chart" ? "Chart" : "Query");
-  let card: DataCard;
-  if (input.id) {
-    const existing = ctx.sheet.card(input.id);
-    if (!existing) throw fail("card_not_found", `No card ${input.id} on the sheet.`, { hint: ctx.sheet.outline().length ? `Cards: ${ctx.sheet.outline().map((entry) => `${entry.id} ${entry.title}`).join(", ")}.` : "The sheet is empty; omit id to add a card." });
-    card = ctx.sheet.updateCard(input.id, { kind: input.kind, title: input.title ?? existing.title, sql: cardSql, chart: input.chart, status: "running", error: undefined, by: ctx.by })!;
-  } else {
-    card = await ctx.sheet.addCard({ kind: input.kind, title, sql: cardSql, chart: input.chart, by: ctx.by });
-  }
+  const current = () => card !== undefined && runs.get(card.id)?.controller === controller && ctx.sheet.card(card.id) !== undefined;
+  const assertCurrent = () => {
+    ctx.signal.throwIfAborted();
+    if (!current()) throw fail("cancelled", "A newer edit replaced this query.");
+  };
+  let resultName: string | undefined;
+  let committed = false;
+  let cardSql = input.sql;
   const warnings: string[] = [];
   try {
+    if (kind !== "table" && kind !== "chart") throw fail("invalid_input", "A new result needs kind \"table\" or \"chart\".");
+    if (input.live && !input.id) throw fail("invalid_input", "A live edit needs an existing card.");
+    if (Boolean(input.sql) === Boolean(input.table)) throw fail("invalid_input", "Give exactly one of sql or table.");
+    if (kind === "chart" && Boolean(input.chart) === Boolean(input.vegaLite)) throw fail("invalid_input", "A chart card takes chart (the small spec) or vegaLite, not both and not neither.");
+    if (kind === "table" && (input.chart || input.vegaLite)) throw fail("invalid_input", "A table card takes no chart spec; use kind \"chart\".");
+    let from: string;
+    if (input.sql) {
+      const kind = gateSql(input.sql);
+      if (kind.kind !== "read" || !kind.materialisable) throw fail("invalid_input", "A card shows a SELECT's result.", { sql: input.sql });
+      from = `(${input.sql})`;
+    } else {
+      from = await ctx.database.resolveTable(input.table!);
+      cardSql = `SELECT * FROM ${from}`;
+    }
+    ctx.signal.throwIfAborted();
+    const title = input.title ?? card?.title ?? (input.table ? input.table : input.chart ? `${input.chart.type} of ${input.chart.y ?? "count"} by ${input.chart.x}` : kind === "chart" ? "Chart" : "Query");
+    if (card) {
+      if (!input.live) ctx.sheet.updateCard(card.id, { status: "running", error: undefined, by: ctx.by });
+    } else {
+      card = await ctx.sheet.addCard({ kind, title, sql: cardSql, chart: input.chart, by: ctx.by });
+      claim(card.id);
+    }
+    assertCurrent();
+    // A query never overwrites the displayed table before its validation and ownership checks finish.
+    resultName = input.id ? `${card.id}_${randomUUID().replaceAll("-", "")}` : card.id;
     let patch: Partial<DataCard>;
-    if (input.kind === "table") {
+    if (kind === "table") {
       const limit = Math.min(Math.max(1, Math.trunc(input.limit ?? DATA_LIMITS.showTableRowsMax)), DATA_LIMITS.showTableRowsMax);
-      const materialised = await ctx.database.materialise(`SELECT * FROM ${from} LIMIT ${limit}`, card.id, runOptions(ctx));
+      const materialised = await ctx.database.materialise(`SELECT * FROM ${from} LIMIT ${limit}`, resultName, runOptions(ctx));
       // Exactly `limit` rows kept means the source may hold more.
       const truncated = materialised.rowCount >= limit;
       if (truncated) warnings.push(`The card keeps the first ${limit.toLocaleString("en-US")} rows.`);
-      patch = { result: card.id, columns: materialised.columns, rowCount: materialised.rowCount, truncated, chart: undefined, vegaLite: undefined, reduction: undefined };
+      patch = { result: resultName, columns: materialised.columns, rowCount: materialised.rowCount, truncated, chart: undefined, vegaLite: undefined, reduction: undefined };
     } else if (input.chart) {
       const probe = await ctx.database.run(`SELECT * FROM ${from} LIMIT 0`, runOptions(ctx, { maxRows: 0 }));
       const compiled = ctx.compileChart(input.chart, probe.columns, from);
-      const materialised = await ctx.database.materialise(compiled.sql, card.id, runOptions(ctx));
+      const materialised = await ctx.database.materialise(compiled.sql, resultName, runOptions(ctx));
       if (materialised.rowCount > DATA_LIMITS.chartMaxMarks) {
         throw fail("output_too_large", `The chart would draw ${materialised.rowCount.toLocaleString("en-US")} marks; the limit is ${DATA_LIMITS.chartMaxMarks.toLocaleString("en-US")}.`, { sql: compiled.sql, hint: OUTPUT_TOO_LARGE_HINT });
       }
@@ -764,19 +837,24 @@ export async function showCard(ctx: DataContext, input: ShowInput): Promise<Show
       // The compiler never sees counts: a top-N or sample that kept every row reduced nothing.
       const method = inputRows === materialised.rowCount ? "none" : compiled.reduction.method;
       const reduction: DataReduction = { ...compiled.reduction, method, inputRows, outputRows: materialised.rowCount };
-      patch = { result: card.id, columns: materialised.columns, rowCount: materialised.rowCount, truncated: false, chart: input.chart, vegaLite: compiled.vegaLite, reduction };
+      patch = { result: resultName, columns: materialised.columns, rowCount: materialised.rowCount, truncated: false, chart: input.chart, vegaLite: compiled.vegaLite, reduction };
     } else {
       const vegaLite = await ctx.validateVegaLite(input.vegaLite);
       const limit = Math.min(Math.max(1, Math.trunc(input.limit ?? DATA_LIMITS.chartMaxMarks)), DATA_LIMITS.chartMaxMarks);
-      const materialised = await ctx.database.materialise(`SELECT * FROM ${from} LIMIT ${limit + 1}`, card.id, runOptions(ctx));
+      const materialised = await ctx.database.materialise(`SELECT * FROM ${from} LIMIT ${limit + 1}`, resultName, runOptions(ctx));
       if (materialised.rowCount > limit) {
         throw fail("output_too_large", `The chart would bind more than ${limit.toLocaleString("en-US")} rows.`, { sql: cardSql, hint: OUTPUT_TOO_LARGE_HINT });
       }
       const counted = await ctx.database.run(`SELECT count(*) FROM ${from}`, runOptions(ctx, { maxRows: 1 }));
       const reduction: DataReduction = { method: "none", inputRows: Number(counted.rows[0]?.[0] ?? 0), outputRows: materialised.rowCount };
-      patch = { result: card.id, columns: materialised.columns, rowCount: materialised.rowCount, truncated: false, chart: undefined, vegaLite, reduction };
+      patch = { result: resultName, columns: materialised.columns, rowCount: materialised.rowCount, truncated: false, chart: undefined, vegaLite, reduction };
     }
-    const ready = ctx.sheet.updateCard(card.id, { ...patch, status: "ready", error: undefined, elapsedMs: Date.now() - started })!;
+    assertCurrent();
+    const previousResult = ctx.sheet.card(card.id)?.result;
+    const ready = ctx.sheet.updateCard(card.id, { ...patch, kind, title: input.title ?? ctx.sheet.card(card.id)?.title ?? title, sql: cardSql, by: ctx.by, status: "ready", error: undefined, elapsedMs: Date.now() - started })!;
+    committed = true;
+    onCardReady?.(ready);
+    if (previousResult && previousResult !== resultName) await ctx.database.dropResult(previousResult).catch(() => undefined);
     return {
       id: ready.id,
       sheet: ctx.sheet.outline(),
@@ -788,8 +866,11 @@ export async function showCard(ctx: DataContext, input: ShowInput): Promise<Show
     };
   } catch (error) {
     const dataError = toDataError(error, cardSql, ctx.signal);
-    ctx.sheet.updateCard(card.id, { status: "failed", error: dataError, elapsedMs: Date.now() - started });
+    if (card && current() && !input.live) ctx.sheet.updateCard(card.id, { status: "failed", error: dataError, elapsedMs: Date.now() - started });
     throw new DataFailure(dataError);
+  } finally {
+    if (card && runs.get(card.id)?.controller === controller) runs.delete(card.id);
+    if (resultName && !committed) await ctx.database.dropResult(resultName).catch(() => undefined);
   }
 }
 
@@ -886,7 +967,7 @@ export async function exportData(ctx: DataContext, input: ExportInput): Promise<
   }
   const path = resolveExportPath(ctx.exportRoots(), input.path, stem, input.format);
   const format = input.format === "csv" ? "FORMAT csv, HEADER true" : input.format === "xlsx" ? "FORMAT xlsx, HEADER true" : "FORMAT parquet";
-  const copied = await ctx.database.run(`COPY (SELECT * FROM ${relation}) TO ${quoteLiteral(path)} (${format})`, runOptions(ctx, { maxRows: 1 }));
+  const copied = await ctx.database.run(`COPY (SELECT * FROM ${relation}) TO ${quoteLiteral(path)} (${format})`, runOptions(ctx, { maxRows: 1, extensions: input.format === "xlsx" ? ["excel"] : [] }));
   const count = Number(copied.rows[0]?.[0]);
   return { path, bytes: statSync(path).size, ...(Number.isFinite(count) ? { rowCount: count } : {}) };
 }
@@ -909,16 +990,20 @@ const ok = (structured: Record<string, unknown>): DataToolResult =>
 
 /** One tool call. Arguments are checked against the advertised schema first;
  * every failure after that is a structured DataError the model can act on. */
-export async function runDataTool(ctx: DataContext, name: string, args: Record<string, unknown>): Promise<DataToolResult> {
+export async function runDataTool(ctx: DataContext, name: string, args: Record<string, unknown>, onCardReady?: (card: DataCard) => void): Promise<DataToolResult> {
   const problem = dataToolCallProblem(name, args);
   if (problem) return dataErrorResult({ code: "invalid_input", message: problem });
   try {
     ctx.signal.throwIfAborted();
     switch (name) {
       case "data_load": return ok({ ...(await loadData(ctx, args as unknown as LoadInput)) });
-      case "data_describe": return ok({ ...(await describeTarget(ctx, (args as { target: string }).target)) });
+      case "data_describe": {
+        const { target, id } = args as { target?: string; id?: string };
+        if (target && id) throw fail("invalid_input", "Give target or id, not both.");
+        return ok(target ? { ...(await describeTarget(ctx, target)) } : describeSavedResult(ctx, id));
+      }
       case "data_sql": return ok({ ...(await runSql(ctx, args as unknown as SqlInput)) });
-      case "data_show": return ok({ ...(await showCard(ctx, args as unknown as ShowInput)) });
+      case "data_show": return ok({ ...(await showCard(ctx, args as unknown as ShowInput, onCardReady)) });
       case "data_export": return ok({ ...(await exportData(ctx, args as unknown as ExportInput)) });
       default: return dataErrorResult({ code: "invalid_input", message: "Unknown Data tool." });
     }

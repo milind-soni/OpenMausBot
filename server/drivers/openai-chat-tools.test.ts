@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
+import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../data/instructions.ts";
 import type { ProviderInstance, SendTurnInput } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
@@ -181,6 +182,24 @@ describe("a searched MCP catalog", () => {
     const names = f.requests[0].tools!.map((tool) => tool.function.name);
     expect(names.filter((name) => name.startsWith("whop_"))).toEqual(["whop_search_tools", "whop_describe_tool", "whop_call_tool"]);
     expect(f.requests[1].messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_search", content: expect.stringContaining("payments_list") });
+  });
+});
+
+describe("built-in Data provider parity", () => {
+  it.each(["openai-compat", "grok", "minimax", "cerebras"] as const)("mounts and executes Data through %s with the shared instructions", async (provider) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [toolCall("data_write")] }, "tool_calls")]);
+      else answer(response);
+    }, provider);
+    const data = f.integrations!.custom!.audit as NonNullable<SendTurnInput["integrations"]>["data"];
+    expect(f.instance.adapter.capabilities.dataMcp).toBe(true);
+    await f.start({ integrations: { data }, system: BUILT_IN_DATA_SYSTEM_PROMPT });
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests[0].tools?.map(tool => tool.function.name)).toContain("data_write");
+    expect(f.requests[0].messages).toContainEqual({ role: "system", content: BUILT_IN_DATA_SYSTEM_PROMPT });
+    expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
+    expect(f.requests[1].messages).toContainEqual(expect.objectContaining({ role: "tool", tool_call_id: "call_write", content: expect.stringContaining("Stored receipt=done") }));
   });
 });
 

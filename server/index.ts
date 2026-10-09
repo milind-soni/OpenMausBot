@@ -17070,6 +17070,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           compileChart, validateVegaLite, renderer: chartRenderer,
           exportRoots: () => dataExportRoots(internalSender),
           signal: abort.signal, assertActive: requireActiveInternalCapability,
+          onShow: (card) => {
+            store.appendMessage(internalCapability.threadId, {
+              role: "bot", kind: "activity", tool: { name: card.title, ok: true },
+              dataResult: { botId: internalSender.id, cardId: card.id, title: card.title, kind: card.kind, sql: card.sql },
+              ...(store.groupByThread(internalCapability.threadId)
+                ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}),
+            });
+          },
         }) });
       }
       if (method === "POST" && path === "/api/internal/phone/claim") {

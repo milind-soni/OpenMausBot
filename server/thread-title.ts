@@ -6,6 +6,7 @@
 // one-shot stays as cheap as the first-message one.
 import { redactSecretsInText } from "./redact.ts";
 import type { Message } from "./store.ts";
+import { withoutDataContext } from "../shared/data-context.ts";
 
 /** The most text either kind of title one-shot ever sees. */
 export const TITLE_INPUT_MAX_CHARS = 1_500;
@@ -22,7 +23,7 @@ export function threadTitlePrompt(text: string, source: ThreadTitleSource = "fir
       : "Name the conversation that begins with the message below.",
     "Reply with only a short title: 3 to 6 words, plain text, no quotes, no trailing period.",
     source === "conversation" ? "Conversation:" : "Message:",
-    text.trim().slice(0, TITLE_INPUT_MAX_CHARS),
+    withoutDataContext(text).trim().slice(0, TITLE_INPUT_MAX_CHARS),
   ].join("\n");
 }
 
@@ -37,7 +38,7 @@ export function titleConversationExcerpt(messages: readonly Message[]): string {
     const message = messages[index]!;
     // peer asides and still-queued lines are not the conversation yet
     if (message.kind !== "text" || !message.text || message.aside || message.queued) continue;
-    const text = redactSecretsInText(message.text.replace(ATTACHMENT_TAG, " ")).replace(/\s+/g, " ").trim();
+    const text = redactSecretsInText(withoutDataContext(message.text).replace(ATTACHMENT_TAG, " ")).replace(/\s+/g, " ").trim();
     if (!text) continue;
     const clipped = text.length > EXCERPT_LINE_MAX_CHARS ? `${text.slice(0, EXCERPT_LINE_MAX_CHARS - 1)}…` : text;
     const line = `${message.role === "user" ? "User" : "Bot"}: ${clipped}`;

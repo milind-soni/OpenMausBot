@@ -4,8 +4,10 @@ import type { SteerQueueReason } from "../../shared/wire";
 import { t } from "@/lib/i18n";
 import { replySnippet } from "@/lib/replies";
 import { splitTranscriptCitations } from "@/lib/citations";
+import { withoutDataContext } from "@/lib/composer-attachments";
 
 function queuedMessageLabel(text: string): string {
+  text = withoutDataContext(text);
   return splitTranscriptCitations(text).citations.length ? replySnippet(text, 500) : text;
 }
 

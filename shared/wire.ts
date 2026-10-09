@@ -512,6 +512,8 @@ export interface WireMessage {
   comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: string };
   /** thread chips: "Opened thread #Title on @X". */
   threadRef?: { botId: string; threadId: string; title: string };
+  /** A published Data result, linked to its bot's main viewer. */
+  dataResult?: { botId: string; cardId: string; title: string; kind: "table" | "chart" | "text"; sql?: string };
   /** user messages waiting in the steer-queue while the bot is mid-turn. */
   queued?: boolean;
   /** steer-queue entry this drained user line came from. */

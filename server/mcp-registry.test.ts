@@ -25,6 +25,8 @@ describe("custom MCP registry", () => {
   it("refuses unsafe and reserved routing names", () => {
     expect(mcpServerNameError("Bad.Name")).toMatch(/lowercase/);
     expect(mcpServerNameError("computer")).toMatch(/reserved/);
+    expect(mcpServerNameError("data")).toMatch(/reserved/);
+    expect(parseStoredMcpServer("data", { command: "custom-data" })).toMatchObject({ ok: false, error: expect.stringMatching(/reserved/) });
     expect(mcpServerNameError("safe-notes")).toBeNull();
   });
 

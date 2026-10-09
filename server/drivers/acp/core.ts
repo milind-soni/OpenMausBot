@@ -884,6 +884,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (browser) {
           servers.push({ name: "browser", command: browser.command, args: browser.args, env: acpEnv(browser.env) });
         }
+        const data = turn.integrations?.data;
+        if (data) {
+          servers.push({ name: "data", command: data.command, args: data.args, env: acpEnv(data.env) });
+        }
         // The bot's computer, mounted exactly like the Claude driver does:
         // host and sandbox Cua connections expose Cua Driver's own MCP server.
         // (A cloud boat is not mounted here at all: a cloud turn runs ON the boat.)
@@ -2326,6 +2330,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             computerMcp: true,
             composioMcp: true,
             browserMcp: true,
+            dataMcp: true,
             images: support.images !== false,
             nativeImageInput: support.images === true,
             effortLevels: support.effortLevels,

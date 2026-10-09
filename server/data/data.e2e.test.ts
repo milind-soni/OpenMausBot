@@ -6,6 +6,7 @@
 // uses the owner's routes. Nothing here asks anyone for approval.
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
@@ -55,10 +56,10 @@ it("loads, queries, shows, pages, renders and exports through the real server", 
     mkdirSync(join(dataDir, "Downloads"), { recursive: true });
 
     const minted = await api("POST", "/api/testing/internal-capability", { botId: bot.id, threadId, kind: "data" }, 201, { "x-openmausbot-test-capability": CAPABILITY_KEY });
-    const mcp = async (method: string, params?: unknown) =>
-      (await api("POST", "/api/internal/data/mcp", { method, params }, 200, { authorization: `Bearer ${minted.token}` })).result;
-    const call = async (name: string, args: Record<string, unknown>) => {
-      const result = await mcp("tools/call", { name, arguments: args });
+    const mcp = async (method: string, params?: unknown, token: string = minted.token) =>
+      (await api("POST", "/api/internal/data/mcp", { method, params }, 200, { authorization: `Bearer ${token}` })).result;
+    const call = async (name: string, args: Record<string, unknown>, token?: string) => {
+      const result = await mcp("tools/call", { name, arguments: args }, token);
       return { isError: result.isError === true, data: result.structuredContent as Record<string, any>, text: result.content?.[0]?.text as string };
     };
 
@@ -135,6 +136,56 @@ it("loads, queries, shows, pages, renders and exports through the real server", 
     await api("DELETE", DATA_ROUTES.card(bot.id, afterRun.cards[2]!.id));
     const final = (await api("GET", DATA_ROUTES.sheet(bot.id))).sheet as DataSheet;
     expect(final.cards.map((card) => card.title)).toEqual(["Totals by region", "By region"]);
+
+    // Opt-in: downloads the real signed extensions into this fixture's empty cache.
+    if (process.env.OMB_TEST_DUCKDB_EXTENSIONS === "1") {
+      expect(existsSync(join(dataDir, "duckdb-extensions"))).toBe(false);
+      const workbook = await call("data_export", { table: "sales", format: "xlsx" });
+      expect(workbook.isError, workbook.text).toBe(false);
+      expect(readFileSync(workbook.data.path).subarray(0, 2).toString()).toBe("PK");
+      // A second instance proves cached extensions load again, without relying on the exporter's LOAD.
+      const { bot: reader } = await runControlOmb(["new-bot", "--name", "Workbook reader", "--url", url]) as { bot: { id: string; activeTaskId: string } };
+      const readerToken = await api("POST", "/api/testing/internal-capability", { botId: reader.id, threadId: reader.activeTaskId, kind: "data" }, 201, { "x-openmausbot-test-capability": CAPABILITY_KEY });
+      const reloaded = await call("data_load", { source: workbook.data.path, name: "workbook_sales" }, readerToken.token);
+      expect(reloaded.isError, reloaded.text).toBe(false);
+      expect(reloaded.data.tables[0].rowCount).toBe(300);
+
+      const parquet = await call("data_export", { table: "sales", format: "parquet" });
+      expect(parquet.isError, parquet.text).toBe(false);
+      const files = new Map([["/sales.csv", readFileSync(csv)], ["/sales.parquet", readFileSync(parquet.data.path)], ["/sales.xlsx", readFileSync(workbook.data.path)]]);
+      const source = createServer((request, response) => {
+        const bytes = files.get(request.url ?? "");
+        if (!bytes) { response.writeHead(404).end(); return; }
+        const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
+        const start = range ? Number(range[1]) : 0;
+        const end = range?.[2] ? Math.min(Number(range[2]), bytes.length - 1) : bytes.length - 1;
+        response.writeHead(range ? 206 : 200, {
+          "content-length": end - start + 1, "accept-ranges": "bytes",
+          ...(range ? { "content-range": `bytes ${start}-${end}/${bytes.length}` } : {}),
+        });
+        response.end(request.method === "HEAD" ? undefined : bytes.subarray(start, end + 1));
+      });
+      await new Promise<void>((resolve) => source.listen(0, "127.0.0.1", resolve));
+      try {
+        const address = source.address() as { port: number };
+        for (const format of ["csv", "parquet", "xlsx"]) {
+          const remote = await call("data_load", { source: `http://127.0.0.1:${address.port}/sales.${format}`, name: `remote_${format}` });
+          expect(remote.isError, remote.text).toBe(false);
+          expect(remote.data.tables[0]).toMatchObject({ name: `remote_${format}`, rowCount: 300 });
+        }
+      } finally {
+        source.closeAllConnections();
+        await new Promise<void>((resolve, reject) => source.close((error) => error ? reject(error) : resolve()));
+      }
+      const evidencePath = `${logPath}.data-extensions.json`;
+      writeFileSync(evidencePath, JSON.stringify({
+        fixtureUrl: url, logPath, freshExtensionCache: true,
+        excelExport: { bytes: workbook.data.bytes, rowCount: workbook.data.rowCount },
+        excelImportInNewInstance: { rowCount: reloaded.data.tables[0].rowCount },
+        remoteLoads: ["csv", "parquet", "xlsx"].map((format) => ({ format, rowCount: 300 })),
+      }, null, 2));
+      console.info(`Data extension evidence: ${evidencePath}`);
+    }
   } finally {
     if (server) await waitForExit(server, { signal: "SIGTERM" });
     rmSync(dataDir, { recursive: true, force: true });

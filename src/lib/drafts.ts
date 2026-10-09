@@ -41,7 +41,8 @@ export interface ComposerSendSnapshot extends FailedComposerSendInput {
 }
 const failedSends = new Map<string, FailedComposerSend[]>();
 const failedSendListeners = new Map<string, Set<(sends: FailedComposerSend[]) => void>>();
-const restoredSendIds = new Map<string, string>();
+type RestoredSend = { sendId: string; requestText?: string };
+const restoredSends = new Map<string, RestoredSend>();
 let failedSendSequence = 0;
 
 type Values = Record<string, unknown>;
@@ -288,23 +289,34 @@ export function draftRevision(draftId: string): number {
 }
 
 export function markDraftEdited(draftId: string): void {
-  restoredSendIds.delete(draftId);
+  restoredSends.delete(draftId);
   setStoredSendId(getStore(), draftId, undefined);
   draftRevisions.set(draftId, draftRevision(draftId) + 1);
 }
 
 export function restoredSendId(draftId: string): string | undefined {
-  const memory = restoredSendIds.get(draftId);
-  if (memory) return memory;
-  const stored = read(getStore(), SEND_IDS_KEY)[draftId];
-  if (typeof stored !== "string") return undefined;
-  restoredSendIds.set(draftId, stored);
-  return stored;
+  return restoredSend(draftId)?.sendId;
 }
 
-function setStoredSendId(store: Store, draftId: string, sendId: string | undefined): void {
+export function restoredRequestText(draftId: string): string | undefined {
+  return restoredSend(draftId)?.requestText;
+}
+
+function restoredSend(draftId: string): RestoredSend | undefined {
+  const memory = restoredSends.get(draftId);
+  if (memory) return memory;
+  const stored = read(getStore(), SEND_IDS_KEY)[draftId];
+  if (!stored || (typeof stored !== "string" && typeof stored !== "object")) return undefined;
+  const value = typeof stored === "string" ? { sendId: stored } : stored as Record<string, unknown>;
+  if (typeof value.sendId !== "string" || (value.requestText !== undefined && typeof value.requestText !== "string")) return undefined;
+  const send = { sendId: value.sendId, requestText: value.requestText };
+  restoredSends.set(draftId, send);
+  return send;
+}
+
+function setStoredSendId(store: Store, draftId: string, send: RestoredSend | undefined): void {
   const ids = read(store, SEND_IDS_KEY);
-  if (sendId) ids[draftId] = sendId;
+  if (send) ids[draftId] = send;
   else delete ids[draftId];
   try {
     store?.setItem(SEND_IDS_KEY, JSON.stringify(ids));
@@ -471,8 +483,9 @@ export function recoverFailedComposerSend(sent: ComposerSendSnapshot): "restored
   });
   // If the response vanished after server acceptance, the next Send must
   // reuse this identity instead of starting a duplicate turn.
-  restoredSendIds.set(sent.draftId, sent.sendId);
-  setStoredSendId(getStore(), sent.draftId, sent.sendId);
+  const retry = { sendId: sent.sendId, requestText: sent.requestText };
+  restoredSends.set(sent.draftId, retry);
+  setStoredSendId(getStore(), sent.draftId, retry);
   return "restored";
 }
 

@@ -30,6 +30,16 @@ function store(dir: string, extra: Partial<ConstructorParameters<typeof DataShee
 }
 
 describe("DataSheetStore", () => {
+  it("persists and broadcasts derived-table discovery without repeating unchanged catalogs", () => {
+    const dir = freshDir();
+    const { sheet, frames } = store(dir);
+    const tables = [{ name: "derived", rowCount: 3, columns: [{ name: "total", type: "DOUBLE" }] }];
+    sheet.recordTables(tables);
+    sheet.recordTables(tables);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].sheet.tables).toEqual(tables);
+    expect(store(dir).sheet.sheet().tables).toEqual(tables);
+  });
   it("appends cards with increasing ids, updates in place and never reuses an id", async () => {
     const dir = freshDir();
     const { sheet, frames } = store(dir);

@@ -38,6 +38,7 @@ import type {
 } from "../shared/wire.ts";
 import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN } from "../shared/wire.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
+import { withoutDataContext } from "../shared/data-context.ts";
 // Re-exported under their historical names so server-side importers keep working.
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
@@ -158,6 +159,11 @@ function persistedPin<T extends { pinned?: boolean }>(task: T): T {
 function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number }>(message: T): T {
   if (message.role !== "bot") return message;
   const out = { ...message };
+  if (out.dataResult) out.dataResult = {
+    ...out.dataResult,
+    title: redactSecretsInText(out.dataResult.title),
+    ...(out.dataResult.sql === undefined ? {} : { sql: redactSecretsInText(out.dataResult.sql) }),
+  };
   if (typeof out.text === "string") out.text = redactSecretsInText(out.text);
   if (out.compaction) out.compaction = { ...out.compaction, summary: redactSecretsInText(out.compaction.summary) };
   if (out.tool?.name) {
@@ -347,7 +353,7 @@ export function threadTitleFrom(title?: string): string {
 
 /** A task's name, taken from the first thing you asked it to do. */
 export function titleFromMessage(text: string): string {
-  const line = text.trim().split("\n")[0]!.trim();
+  const line = withoutDataContext(text).trim().split("\n")[0]!.trim();
   return line.length > 48 ? `${line.slice(0, 47)}…` : line || UNTITLED_TASK;
 }
 

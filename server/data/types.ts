@@ -29,6 +29,7 @@ export class DataFailure extends Error {
  * person's panel actions never block each other, and each can be cancelled
  * without touching the other. */
 export type DataConnection = "bot" | "panel";
+export type DataExtension = "httpfs" | "excel" | "azure" | "postgres" | "mysql" | "sqlite";
 
 export interface RunOptions {
   connection: DataConnection;
@@ -38,6 +39,8 @@ export interface RunOptions {
   signal?: AbortSignal;
   /** Rows to return. Default: all (callers bound their own SQL). */
   maxRows?: number;
+  /** Supported extensions this operation needs, installed and loaded before it runs. */
+  extensions?: DataExtension[];
 }
 
 export interface RunResult {
@@ -74,14 +77,14 @@ export interface BotDatabase {
   /** Drops a result table; a missing one is not an error. */
   dropResult(name: string): Promise<void>;
   /** Pages a source table or a result table with the panel's connection. */
-  page(target: string, options: { offset: number; limit: number; sort?: { column: string; direction: "asc" | "desc" }; filter?: string; signal?: AbortSignal }): Promise<DataPage>;
+  page(target: string, options: { offset: number; limit: number; sort?: { column: string; direction: "asc" | "desc" }; filter?: string; filterColumn?: string; signal?: AbortSignal }): Promise<DataPage>;
   /** Column types, null %, approx distinct, min/max and up to 3 samples. */
   describe(target: string, options: RunOptions): Promise<DescribeResult>;
-  /** The explorer's single-pass stats, cached by (table, rowCount). */
+  /** The explorer's single-pass stats, cached until the database changes. */
   stats(table: string, options?: { signal?: AbortSignal }): Promise<DataColumnStats>;
   histogram(table: string, column: string, options?: { bins?: number; signal?: AbortSignal }): Promise<DataHistogram>;
   /** Tables and views outside DATA_RESULTS_SCHEMA, with counts. */
-  listTables(): Promise<Array<{ name: string; rowCount: number; columns: DataColumn[] }>>;
+  listTables(): Promise<Array<{ name: string; sqlName?: string; rowCount: number; columns: DataColumn[] }>>;
   /** Cancels whatever runs on that connection right now. */
   interrupt(connection: DataConnection): void;
   /** Resolves a bare or qualified identifier; `table_not_found` with candidates otherwise. */

@@ -29,6 +29,7 @@ import {
   type DataColumnStats,
   type DataConnection,
   type DataEngine,
+  type DataExtension,
   type DataHistogram,
   type DataPage,
   type DescribeResult,
@@ -114,6 +115,24 @@ function quoteLiteral(text: string): string {
   return `'${text.replaceAll("'", "''")}'`;
 }
 
+/** INSTALL is a local no-op once cached; extension names come only from our tools. */
+export async function loadExtensions(connection: Pick<DuckDB.DuckDBConnection, "run">, extensions: DataExtension[]): Promise<void> {
+  for (const extension of extensions) {
+    try {
+      // The core repository bootstraps without httpfs; HTTPS repositories need it first.
+      await connection.run(`INSTALL ${extension} FROM core`);
+      await connection.run(`LOAD ${extension}`);
+    } catch (error) {
+      throw new DataFailure({
+        code: "sql_error",
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
+        hint: `DuckDB needs the ${extension} extension. Connect to the internet and retry; allow access to http://extensions.duckdb.org. Once installed, the extension is cached for offline use.`,
+      });
+    }
+  }
+}
+
 /** The text a person typed in the grid's filter box, as a LIKE pattern that
  * matches it literally. */
 export function likePattern(filter: string): string {
@@ -173,12 +192,12 @@ type InterruptCause = "timeout" | "cancelled";
 
 /** DuckDB's text travels verbatim; only the code and the position are ours. */
 function failureFrom(error: unknown, sql: string, interrupted: InterruptCause | null, timeoutMs: number): DataFailure {
-  if (error instanceof DataFailure) return error;
   const message = error instanceof Error ? error.message : String(error);
   if (interrupted === "timeout") {
     return new DataFailure({ code: "timeout", message, sql, retryable: true, hint: `Stopped after ${timeoutMs} ms. Narrow the query or aggregate first.` });
   }
   if (interrupted === "cancelled") return new DataFailure({ code: "cancelled", message, sql });
+  if (error instanceof DataFailure) return error;
   const line = parseLine(message);
   if (missingTableName(message)) return new DataFailure({ code: "table_not_found", message, sql, line });
   return new DataFailure({ code: "sql_error", message, sql, line });
@@ -261,6 +280,7 @@ class BotDb implements BotDatabase {
   private idleTimer: NodeJS.Timeout | null = null;
   private inFlight = 0;
   private readonly statsCache = new Map<string, DataColumnStats>();
+  private statsRevision = 0;
 
   readonly botId: string;
   private readonly engine: Engine;
@@ -354,6 +374,10 @@ class BotDb implements BotDatabase {
   private async read(open: Open, conn: DuckDB.DuckDBConnection, sql: string, maxRows = Infinity): Promise<RunResult> {
     const started = performance.now();
     const result = await conn.run(sql);
+    if (result.statementType !== open.binding.StatementType.SELECT && result.statementType !== open.binding.StatementType.EXPLAIN) {
+      this.statsCache.clear();
+      this.statsRevision++;
+    }
     const rows: Cell[][] = [];
     for (let i = 0; i < result.chunkCount && rows.length < maxRows; i++) {
       for (const row of this.cells(open.binding, result.getChunk(i))) {
@@ -366,7 +390,10 @@ class BotDb implements BotDatabase {
 
   async run(sql: string, options: RunOptions): Promise<RunResult> {
     const maxRows = options.maxRows === undefined ? Infinity : Math.max(0, options.maxRows);
-    return this.statement(options.connection, sql, options, (open, conn) => this.read(open, conn, sql, maxRows));
+    return this.statement(options.connection, sql, options, async (open, conn) => {
+      await loadExtensions(conn, options.extensions ?? []);
+      return this.read(open, conn, sql, maxRows);
+    });
   }
 
   async materialise(sql: string, name: string, options: RunOptions): Promise<MaterialiseResult> {
@@ -528,6 +555,7 @@ class BotDb implements BotDatabase {
   }
 
   async stats(table: string, options: { signal?: AbortSignal } = {}): Promise<DataColumnStats> {
+    const revision = this.statsRevision;
     const entry = await this.lookup(table);
     const open = await this.open();
     const from = this.qualified(entry, open.reserved);
@@ -541,7 +569,7 @@ class BotDb implements BotDatabase {
     const aggregated = await this.aggregate("panel", from, columns, options);
     const stats: DataColumnStats = { table: this.displayName(entry), rowCount: aggregated.rowCount, columns: aggregated.columns };
     if (this.statsCache.size >= STATS_CACHE_MAX) this.statsCache.clear();
-    this.statsCache.set(key, stats);
+    if (revision === this.statsRevision) this.statsCache.set(key, stats);
     return stats;
   }
 
@@ -585,7 +613,7 @@ FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
     return result;
   }
 
-  async page(target: string, options: { offset: number; limit: number; sort?: { column: string; direction: "asc" | "desc" }; filter?: string; signal?: AbortSignal }): Promise<DataPage> {
+  async page(target: string, options: { offset: number; limit: number; sort?: { column: string; direction: "asc" | "desc" }; filter?: string; filterColumn?: string; signal?: AbortSignal }): Promise<DataPage> {
     const entry = await this.lookup(target);
     const open = await this.open();
     const from = this.qualified(entry, open.reserved);
@@ -593,9 +621,11 @@ FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
     const offset = Math.max(0, Math.floor(options.offset) || 0);
     const limit = Math.max(1, Math.min(PAGE_LIMIT_MAX, Math.floor(options.limit) || DATA_LIMITS.pageSize));
 
+    const filterColumns = options.filterColumn === undefined ? columns : columns.filter((column) => column.name === options.filterColumn);
+    if (options.filterColumn !== undefined && !filterColumns.length) throw new DataFailure({ code: "invalid_input", message: `Cannot filter by "${options.filterColumn}": not a column of ${this.displayName(entry)}.`, candidates: closeNames(options.filterColumn, columns.map((column) => column.name)) });
     const filter = options.filter?.trim();
     const where = filter
-      ? ` WHERE ${columns.map((column) => `CAST(${quoteIdentifier(column.name)} AS VARCHAR) ILIKE ${quoteLiteral(likePattern(filter))} ESCAPE '\\'`).join(" OR ")}`
+      ? ` WHERE ${filterColumns.map((column) => `CAST(${quoteIdentifier(column.name)} AS VARCHAR) ILIKE ${quoteLiteral(likePattern(filter))} ESCAPE '\\'`).join(" OR ")}`
       : "";
 
     // With preserve_insertion_order off a scan's order is not fixed, so every
@@ -621,7 +651,7 @@ FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
     });
   }
 
-  async listTables(): Promise<Array<{ name: string; rowCount: number; columns: DataColumn[] }>> {
+  async listTables(): Promise<Array<{ name: string; sqlName?: string; rowCount: number; columns: DataColumn[] }>> {
     const entries = (await this.catalog()).filter((entry) => entry.schema !== DATA_RESULTS_SCHEMA);
     if (!entries.length) return [];
     const open = await this.open();
@@ -638,11 +668,15 @@ FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
     const countSql = `SELECT ${entries.map((entry) => `(SELECT count(*) FROM ${this.qualified(entry, open.reserved)})`).join(", ")}`;
     const counts = await this.statement("panel", countSql, {}, (o, conn) => this.read(o, conn, countSql));
     const countRow = counts.rows[0] ?? [];
-    return entries.map((entry, i) => ({
-      name: this.displayName(entry),
-      rowCount: toCount(countRow[i] ?? 0),
-      columns: columnsByTable.get(`${entry.schema}\u0000${entry.name}`) ?? [],
-    }));
+    return entries.map((entry, i) => {
+      const qualified = this.qualified(entry, open.reserved);
+      return {
+        name: this.displayName(entry),
+        sqlName: entry.schema === "main" ? qualified.slice("main.".length) : qualified,
+        rowCount: toCount(countRow[i] ?? 0),
+        columns: columnsByTable.get(`${entry.schema}\u0000${entry.name}`) ?? [],
+      };
+    });
   }
 
   interrupt(connection: DataConnection): void {

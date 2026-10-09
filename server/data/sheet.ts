@@ -85,6 +85,7 @@ export class DataSheetStore {
       botId: this.botId,
       cards,
       sources: sheet.sources.filter((source): source is DataSource => !!source && typeof source === "object" && typeof source.name === "string"),
+      ...(Array.isArray(sheet.tables) ? { tables: sheet.tables } : {}),
       updatedAt: typeof sheet.updatedAt === "string" ? sheet.updatedAt : now,
       seq: Math.max(Number.isSafeInteger(sheet.seq) ? (sheet.seq as number) : 0, highest),
     };
@@ -101,8 +102,8 @@ export class DataSheetStore {
 
   /** The sheet as clients and tools see it (no counter). */
   sheet(): DataSheet {
-    const { version, botId, cards, sources, updatedAt } = this.load();
-    return { version, botId, cards, sources, updatedAt };
+    const { version, botId, cards, sources, tables, updatedAt } = this.load();
+    return { version, botId, cards, sources, ...(tables ? { tables } : {}), updatedAt };
   }
 
   cards(): DataCard[] {
@@ -164,6 +165,21 @@ export class DataSheetStore {
     const index = stored.sources.findIndex((entry) => entry.name === source.name);
     if (index === -1) stored.sources.push(source);
     else stored.sources[index] = source;
+    this.recordTable({ name: source.name, ...(source.sqlName ? { sqlName: source.sqlName } : {}), rowCount: source.rowCount, columns: source.columns });
+  }
+
+  recordTable(table: NonNullable<DataSheet["tables"]>[number]): void {
+    const stored = this.load();
+    const tables = (stored.tables ?? stored.sources.map(({ name, sqlName, rowCount, columns }) => ({ name, ...(sqlName ? { sqlName } : {}), rowCount, columns })))
+      .filter((entry) => entry.name !== table.name);
+    stored.tables = [...tables, table];
+    this.save();
+  }
+
+  recordTables(tables: NonNullable<DataSheet["tables"]>): void {
+    const stored = this.load();
+    if (JSON.stringify(stored.tables) === JSON.stringify(tables)) return;
+    stored.tables = tables;
     this.save();
   }
 

@@ -1,257 +1,215 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDown, ArrowUp, Check, Copy, Search } from "lucide-react";
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { AgGridReact } from "ag-grid-react";
+import { CellStyleModule, InfiniteRowModelModule, RenderApiModule, RowApiModule, RowSelectionModule, ScrollApiModule, TooltipModule, themeQuartz, type ColDef, type GridApi, type IDatasource, type IRowNode } from "ag-grid-community";
 import { DATA_LIMITS, DATA_ROUTES, type DataColumn, type DataPage, type DataPageRequest } from "../../../shared/data-surface";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { cn } from "@/lib/cn";
 import { copyText } from "@/lib/copy-text";
-import { cellText, defaultColumnWidth, formatCount, isNumericType, pagesCovering, pageWindow, tsv, type Cell } from "./data-format";
+import { cellText, defaultColumnWidth, formatCount, isNumericType, tsv, type Cell } from "./data-format";
+import { DataFilter, type DataFilterValue } from "./DataFilter";
 
-/** What the card reads off the grid without re-rendering for every scroll:
- * the rows currently on screen, for "Copy page as Markdown". */
 export interface DataGridHandle {
   visibleRows(): { columns: string[]; rows: Cell[][] };
 }
 
 export interface DataGridProps {
   botId: string;
-  /** A card's result table or a loaded table; the server pages either. */
   target: { cardId: string } | { table: string };
   columns: DataColumn[];
-  /** The result's size as the sheet knows it; a filter narrows it server-side. */
   rowCount: number;
   name: string;
+  /** A result can be replaced without changing its id or row count. */
+  revision?: string;
   handle?: RefObject<DataGridHandle | null>;
+  footerControls?: ReactNode;
 }
 
-const ROW_HEIGHT = 32;
-const HEADER_HEIGHT = 36;
-const MAX_HEIGHT = 360;
-const PAGE = DATA_LIMITS.pageSize;
-const FILTER_DELAY_MS = 250;
+export interface DataGridRow { index: number; cells: Cell[] }
+export interface DataGridDatasource extends IDatasource { invalidate(): void }
 
-type Sort = NonNullable<DataPageRequest["sort"]>;
-interface Cache {
-  /** sort + filter the pages belong to; a change starts an empty cache. */
-  key: string;
-  pages: Map<number, Cell[][]>;
-  /** The server's count for this sort + filter; null until the first page lands. */
-  total: number | null;
-  error: string | null;
+/** Each datasource owns only its in-flight requests; AG Grid owns a bounded block cache. */
+export function createDataGridDatasource({ botId, target, columns, rowCount, filter, filterColumn, isCurrent = () => true, onPage, onError }: {
+  botId: string;
+  target: DataGridProps["target"];
+  columns: DataColumn[];
+  rowCount: number;
+  filter: string;
+  filterColumn?: string;
+  isCurrent?: () => boolean;
+  onPage: (page: DataPage) => void;
+  onError: (message: string) => void;
+}): DataGridDatasource {
+  let destroyed = false;
+  let generation = 0;
+  let sortKey = "";
+  const pending = new Map<AbortController, () => void>();
+  const invalidate = () => {
+    generation++;
+    for (const [controller, fail] of pending) { controller.abort(); fail(); }
+    pending.clear();
+  };
+  return {
+    rowCount: filter ? undefined : rowCount,
+    invalidate,
+    destroy() { destroyed = true; invalidate(); },
+    getRows(params) {
+      if (destroyed || !isCurrent()) { params.failCallback(); return; }
+      const selectedSort = params.sortModel.find((item) => columns.some((column) => column.name === item.colId));
+      const sort: DataPageRequest["sort"] = selectedSort ? { column: selectedSort.colId, direction: selectedSort.sort } : undefined;
+      const nextSortKey = JSON.stringify(sort ?? null);
+      if (sortKey !== nextSortKey) { invalidate(); sortKey = nextSortKey; }
+      if (params.startRow >= rowCount) { params.successCallback([], rowCount); return; }
+      const controller = new AbortController();
+      const requestGeneration = generation;
+      let settled = false;
+      // Even cancelled blocks must finish: AG Grid releases a loader slot only on a callback.
+      const fail = () => {
+        if (settled) return;
+        settled = true;
+        pending.delete(controller);
+        params.failCallback();
+      };
+      pending.set(controller, fail);
+      const current = () => !destroyed && !controller.signal.aborted && generation === requestGeneration && isCurrent();
+      const request: DataPageRequest = {
+        ...target,
+        offset: params.startRow,
+        limit: Math.min(DATA_LIMITS.pageSize, params.endRow - params.startRow, rowCount - params.startRow),
+        ...(sort ? { sort } : {}), ...(filter ? { filter, ...(filterColumn !== undefined ? { filterColumn } : {}) } : {}),
+      };
+      void api<DataPage>(DATA_ROUTES.page(botId), { method: "POST", body: JSON.stringify(request), signal: controller.signal }).then((page) => {
+        if (settled) return;
+        if (!current()) { fail(); return; }
+        settled = true;
+        pending.delete(controller);
+        onPage(page);
+        params.successCallback(page.rows.map((cells, index): DataGridRow => ({ index: page.offset + index, cells })), page.rowCount);
+      }).catch((cause) => {
+        if (settled) return;
+        if (current()) onError(cause instanceof Error ? cause.message : String(cause));
+        fail();
+      });
+    },
+  };
 }
 
-const emptyCache = (key: string): Cache => ({ key, pages: new Map(), total: null, error: null });
-const cacheKey = (sort: Sort | undefined, filter: string) => JSON.stringify([sort ?? null, filter]);
+const modules = [InfiniteRowModelModule, RowSelectionModule, RowApiModule, RenderApiModule, ScrollApiModule, CellStyleModule, TooltipModule];
+const gridTheme = themeQuartz.withParams({
+  browserColorScheme: "var(--code-color-scheme)",
+  fontFamily: "var(--font-sans)", fontSize: 12.5, headerFontWeight: 500,
+  backgroundColor: "var(--color-panel)", foregroundColor: "var(--color-ink)",
+  headerBackgroundColor: "var(--color-raised)", headerTextColor: "var(--color-ink)",
+  borderColor: "color-mix(in srgb, var(--color-hairline) 40%, transparent)",
+  rowBorder: { color: "color-mix(in srgb, var(--color-hairline) 20%, transparent)" },
+  rowHoverColor: "var(--color-raised-hover)",
+  selectedRowBackgroundColor: "color-mix(in srgb, var(--color-accent) 15%, transparent)",
+  accentColor: "var(--color-accent)", wrapperBorder: false, wrapperBorderRadius: 0,
+  cellHorizontalPadding: 10,
+});
+const rowSelection = { mode: "multiRow", checkboxes: false, headerCheckbox: false, enableClickSelection: true } as const;
+const defaultColDef: ColDef<DataGridRow> = { sortable: true, resizable: true, cellDataType: false, filter: false, suppressMovable: true };
+const rowsFromNodes = (nodes: IRowNode<DataGridRow>[]) => nodes.filter((node) => node.data).sort((left, right) => (left.rowIndex ?? 0) - (right.rowIndex ?? 0)).map((node) => node.data!.cells);
 
-/** A server-paged grid: rows live on the server and arrive in pageSize
- * windows around what is on screen. Sort and filter are sent with every
- * page, so the server orders and narrows; the cache belongs to one
- * (sort, filter) pair and starts over when either changes. */
-export function DataGrid({ botId, target, columns, rowCount, name, handle }: DataGridProps) {
-  const [sort, setSort] = useState<Sort | undefined>(undefined);
-  const [filterText, setFilterText] = useState("");
-  const [filter, setFilter] = useState("");
-  const [widths, setWidths] = useState<number[]>(() => columns.map(defaultColumnWidth));
-  const [selection, setSelection] = useState<{ anchor: number; focus: number } | null>(null);
+export function DataResultFooter({ children, controls }: { children?: ReactNode; controls?: ReactNode }) {
+  return <footer className="relative flex h-11 shrink-0 items-center gap-2 border-t border-hairline/40 px-3 text-[11px] text-ink-secondary" data-testid="data-result-footer">
+    <div className="min-w-0 flex-1 truncate">{children}</div>
+    <div className="flex shrink-0 items-center gap-1">{controls}</div>
+  </footer>;
+}
+
+/** Community's infinite model pages the existing SQL result; no browser-side load-all or sort. */
+export function DataGrid({ botId, target, columns, rowCount, name, revision, handle, footerControls }: DataGridProps) {
+  const grid = useRef<GridApi<DataGridRow> | null>(null);
+  const [readyGrid, setReadyGrid] = useState<GridApi<DataGridRow> | null>(null);
+  const source = useRef<DataGridDatasource | null>(null);
+  const [filterInput, setFilterInput] = useState<DataFilterValue>({ text: "" });
+  const [appliedFilter, setAppliedFilter] = useState<DataFilterValue>({ text: "" });
+  const validFilter = (value: DataFilterValue) => value.column === undefined || columns.some((column) => column.name === value.column);
+  const filterValue = validFilter(filterInput) ? filterInput : { text: "" };
+  const filter = validFilter(appliedFilter) ? appliedFilter.text : "";
+  const filterColumn = filter ? appliedFilter.column : undefined;
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
-  const key = cacheKey(sort, filter);
-  const [cache, setCache] = useState<Cache>(() => emptyCache(key));
-  const live = cache.key === key ? cache : emptyCache(key);
-  const total = live.total ?? rowCount;
-  const scroll = useRef<HTMLDivElement>(null);
-  const inflight = useRef(new Set<string>());
-  const liveRef = useRef(live);
-  liveRef.current = live;
-
-  useEffect(() => { setWidths(columns.map(defaultColumnWidth)); }, [columns]);
-  // Typing filters after a short pause, not per keystroke: each filter is a
-  // server query over the whole result.
+  const schemaKey = JSON.stringify(columns.map(({ name, type }) => ({ name, type })));
+  const key = JSON.stringify([botId, target, revision, rowCount, filter, filterColumn, schemaKey]);
+  const currentKey = useRef(key);
+  currentKey.current = key;
+  const [status, setStatus] = useState<{ key: string; total: number; error: string | null }>({ key, total: rowCount, error: null });
+  const total = status.key === key ? status.total : rowCount;
+  const error = status.key === key ? status.error : null;
+  const columnDefs = useMemo<ColDef<DataGridRow>[]>(() => columns.map((column, index) => ({
+    colId: column.name, headerName: column.name, headerTooltip: column.type, minWidth: defaultColumnWidth(column), initialFlex: 1,
+    // Keep dotted/quoted names and exact BIGINT/DECIMAL strings out of object field coercion.
+    valueGetter: (params) => params.data?.cells[index],
+    valueFormatter: ({ value, data }) => !data ? "" : value === null || value === undefined ? t("data.grid.null") : cellText(value),
+    tooltipValueGetter: ({ value }) => value === null || value === undefined ? t("data.grid.null") : cellText(value),
+    cellStyle: { textAlign: isNumericType(column.type) ? "right" : "left", fontVariantNumeric: "tabular-nums" },
+    cellClass: ({ value, data }) => data && (value === null || value === undefined) ? "text-ink-tertiary" : "",
+  })), [schemaKey]);
   useEffect(() => {
-    const timer = setTimeout(() => setFilter(filterText.trim()), FILTER_DELAY_MS);
+    if (!readyGrid || readyGrid.isDestroyed()) return;
+    // A fresh source belongs to this actual grid lifetime, including StrictMode remounts.
+    const datasource = createDataGridDatasource({
+      botId, target, columns, rowCount, filter, filterColumn,
+      isCurrent: () => currentKey.current === key && grid.current === readyGrid && !readyGrid.isDestroyed(),
+      onPage: (page) => setStatus({ key, total: page.rowCount, error: null }),
+      onError: (message) => setStatus((current) => ({ key, total: current.key === key ? current.total : rowCount, error: message })),
+    });
+    source.current = datasource;
+    readyGrid.deselectAll();
+    readyGrid.setGridOption("datasource", datasource);
+    if (rowCount > 0) readyGrid.ensureIndexVisible(0, "top");
+    return () => { datasource.destroy?.(); if (source.current === datasource) source.current = null; };
+  }, [readyGrid, key]);
+  useEffect(() => {
+    if (!validFilter(filterInput)) { setFilterInput({ text: "" }); setAppliedFilter({ text: "" }); return; }
+    const timer = setTimeout(() => setAppliedFilter({ ...filterInput, text: filterInput.text.trim() }), 250);
     return () => clearTimeout(timer);
-  }, [filterText]);
+  }, [filterInput, schemaKey]);
   useEffect(() => {
     if (copyState === "idle") return;
     const timer = setTimeout(() => setCopyState("idle"), 1500);
     return () => clearTimeout(timer);
   }, [copyState]);
 
-  const load = useCallback(async (page: number) => {
-    const requestKey = key;
-    const mark = `${requestKey}:${page}`;
-    if (inflight.current.has(mark) || liveRef.current.pages.has(page)) return;
-    inflight.current.add(mark);
-    const known = liveRef.current.total ?? rowCount;
-    const body: DataPageRequest = { ...target, ...pageWindow(page, known), ...(sort ? { sort } : {}), ...(filter ? { filter } : {}) };
-    try {
-      const result = await api<DataPage>(DATA_ROUTES.page(botId), { method: "POST", body: JSON.stringify(body) });
-      setCache((previous) => {
-        if (previous.key !== requestKey) return previous;
-        const pages = new Map(previous.pages);
-        pages.set(page, result.rows);
-        return { ...previous, pages, total: result.rowCount, error: null };
-      });
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      setCache((previous) => previous.key !== requestKey ? previous : { ...previous, error: message });
-    } finally {
-      inflight.current.delete(mark);
-    }
-  }, [botId, target, key, sort, filter, rowCount]);
-
-  const virtualizer = useVirtualizer({
-    count: total,
-    getScrollElement: () => scroll.current,
-    estimateSize: () => ROW_HEIGHT,
-    overscan: 8,
-    initialRect: { width: 800, height: MAX_HEIGHT },
-    scrollMargin: HEADER_HEIGHT,
-  });
-  const items = virtualizer.getVirtualItems();
-  const firstIndex = items[0]?.index ?? 0;
-  const lastIndex = items.at(-1)?.index ?? Math.min(total - 1, 16);
-  const lastKey = useRef(key);
-  useEffect(() => {
-    // A new sort or filter: an empty cache for this key (so no page of the
-    // old order can land in it), selection gone, and back to the top. The
-    // virtualizer hears of the scroll only through its scroll event, so the
-    // first pages are asked for here as a window at the top, not where the
-    // old rows were; the event then finds them loading already.
-    const changed = lastKey.current !== key;
-    if (changed) {
-      lastKey.current = key;
-      setSelection(null);
-      if (scroll.current) scroll.current.scrollTop = 0;
-    }
-    setCache((previous) => previous.key === key ? previous : emptyCache(key));
-    if (total <= 0 && live.total !== null) return;
-    const [first, last] = changed ? [0, Math.max(0, lastIndex - firstIndex)] : [firstIndex, Math.max(firstIndex, lastIndex)];
-    for (const page of pagesCovering(first, last)) void load(page);
-  }, [key, firstIndex, lastIndex, total, live.total, load]);
-
-  const rowAt = (index: number): Cell[] | undefined => live.pages.get(Math.floor(index / PAGE))?.[index % PAGE];
-  const names = useMemo(() => columns.map((column) => column.name), [columns]);
-  const numeric = useMemo(() => columns.map((column) => isNumericType(column.type)), [columns]);
-  const loadedRows = (from: number, to: number): Cell[][] => {
-    const rows: Cell[][] = [];
-    for (let index = Math.max(0, from); index <= Math.min(total - 1, to); index++) {
-      const row = rowAt(index);
-      if (row) rows.push(row);
-    }
-    return rows;
-  };
-  const visibleRows = () => ({ columns: names, rows: loadedRows(firstIndex, lastIndex) });
+  const names = columns.map((column) => column.name);
+  const visibleRows = () => ({ columns: names, rows: rowsFromNodes(grid.current?.getRenderedNodes() ?? []) });
   useImperativeHandle(handle, () => ({ visibleRows }));
-
   const copy = async () => {
-    const rows = selection ? loadedRows(Math.min(selection.anchor, selection.focus), Math.max(selection.anchor, selection.focus)) : visibleRows().rows;
+    const selected = rowsFromNodes(grid.current?.getSelectedNodes() ?? []);
+    const rows = selected.length ? selected : visibleRows().rows;
+    if (!rows.length) return;
     const result = await copyText(tsv(names, rows));
     if (result !== "empty") setCopyState(result);
   };
-  const cycleSort = (column: string) => setSort((current) =>
-    current?.column !== column ? { column, direction: "asc" } : current.direction === "asc" ? { column, direction: "desc" } : undefined);
-  const select = (index: number, extend: boolean) => setSelection((current) =>
-    extend && current ? { anchor: current.anchor, focus: index } : { anchor: index, focus: index });
-  const selected = (index: number) => Boolean(selection) && index >= Math.min(selection!.anchor, selection!.focus) && index <= Math.max(selection!.anchor, selection!.focus);
-  // Dragging a header's right edge sets that column's width; pointer capture
-  // keeps the drag alive when the pointer leaves the handle.
-  const startResize = (index: number, event: ReactPointerEvent<HTMLSpanElement>) => {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = widths[index] ?? 160;
-    const handleEl = event.currentTarget;
-    handleEl.setPointerCapture(event.pointerId);
-    const move = (moveEvent: PointerEvent) => {
-      const next = Math.max(60, Math.min(800, startWidth + moveEvent.clientX - startX));
-      setWidths((current) => current.map((width, column) => column === index ? next : width));
-    };
-    const stop = () => {
-      handleEl.removeEventListener("pointermove", move);
-      handleEl.removeEventListener("pointerup", stop);
-      handleEl.removeEventListener("pointercancel", stop);
-    };
-    handleEl.addEventListener("pointermove", move);
-    handleEl.addEventListener("pointerup", stop);
-    handleEl.addEventListener("pointercancel", stop);
-  };
-
-  const height = Math.min(MAX_HEIGHT, HEADER_HEIGHT + Math.max(1, total) * ROW_HEIGHT + 2);
-  const before = items.length ? Math.max(0, items[0]!.start - HEADER_HEIGHT) : 0;
-  const after = items.length ? Math.max(0, virtualizer.getTotalSize() - items.at(-1)!.end + HEADER_HEIGHT) : 0;
-  const tableWidth = widths.reduce((sum, width) => sum + width, 0);
-  const filtered = live.total !== null && filter !== "";
 
   return (
-    <div className="data-grid min-w-0 overflow-hidden rounded-xl border border-hairline/50 bg-panel text-ink">
-      <div className="flex items-center gap-1 border-b border-hairline/40 px-2 py-1">
-        <label className="flex min-w-24 flex-1 items-center gap-2 px-1 text-ink-secondary">
-          <Search size={13} aria-hidden="true" />
-          <input value={filterText} onChange={(event) => setFilterText(event.target.value)} aria-label={t("data.grid.filter")} placeholder={t("data.grid.filter")}
-            className="w-full min-w-0 bg-transparent py-1 text-xs text-ink outline-none placeholder:text-ink-tertiary focus-visible:ring-1 focus-visible:ring-accent" />
-        </label>
-        <button type="button" className="table-action" aria-label={t("data.grid.copy")} title={t("data.grid.copyHint")} onClick={() => void copy()}>
-          {copyState === "copied" ? <Check size={14} /> : <Copy size={14} />}
-        </button>
+    <div className="data-grid flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-panel text-ink" data-row-count={total}>
+      <div className="flex shrink-0 items-center border-b border-hairline/40 px-2 py-1">
+        <DataFilter columns={columns} value={filterValue} onChange={(value) => {
+          setFilterInput(value);
+          if (!value.text.trim() || value.column !== filterInput.column) setAppliedFilter({ ...value, text: value.text.trim() });
+        }} />
       </div>
-      <div ref={scroll} tabIndex={0} role="region" aria-label={t("data.grid.label", { name })} style={{ height }}
-        onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "c" && selection) { event.preventDefault(); void copy(); } }}
-        className="overflow-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60">
-        <table aria-rowcount={total + 1} className="table-fixed border-separate border-spacing-0 text-[12.5px]" style={{ width: tableWidth, minWidth: "100%" }}>
-          <colgroup>{widths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
-          <thead className="sticky top-0 z-10 bg-raised"><tr aria-rowindex={1} style={{ height: HEADER_HEIGHT }}>
-            {columns.map((column, index) => (
-              <th key={column.name} scope="col" aria-sort={sort?.column === column.name ? sort.direction === "desc" ? "descending" : "ascending" : "none"}
-                className="relative border-b border-hairline/60 px-0 font-medium" style={{ textAlign: numeric[index] ? "right" : "left" }}>
-                <button type="button" onClick={() => cycleSort(column.name)} aria-label={t("data.grid.sort", { column: column.name })} title={column.type}
-                  className={cn("flex h-full w-full items-center gap-1 px-2.5 py-1.5 hover:bg-raised-hover", numeric[index] && "flex-row-reverse")}>
-                  <span className="min-w-0 truncate">{column.name}</span>
-                  {sort?.column === column.name
-                    ? sort.direction === "desc" ? <ArrowDown size={12} className="shrink-0" /> : <ArrowUp size={12} className="shrink-0" />
-                    : <span className="shrink-0 text-[10px] font-normal text-ink-tertiary">{column.type.toLowerCase()}</span>}
-                </button>
-                <span role="separator" aria-label={t("data.grid.resize", { column: column.name })} onPointerDown={(event) => startResize(index, event)}
-                  className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize touch-none hover:bg-accent/40" />
-              </th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {before > 0 && <tr aria-hidden="true"><td colSpan={columns.length} style={{ height: before, padding: 0 }} /></tr>}
-            {items.map((item) => {
-              const row = rowAt(item.index);
-              return (
-                <tr key={item.key} data-index={item.index} aria-rowindex={item.index + 2} aria-selected={selected(item.index)}
-                  onClick={(event) => select(item.index, event.shiftKey)} style={{ height: ROW_HEIGHT }}
-                  className={cn("cursor-default", selected(item.index) ? "bg-accent/15" : item.index % 2 ? "bg-inset/35 hover:bg-raised/70" : "hover:bg-raised/70")}>
-                  {columns.map((column, index) => {
-                    const cell = row?.[index];
-                    return (
-                      <td key={column.name} className="border-b border-hairline/20 px-2.5 align-middle tabular-nums" style={{ textAlign: numeric[index] ? "right" : "left" }}>
-                        {row === undefined
-                          ? <span className="block h-3 w-2/3 animate-pulse rounded bg-inset" aria-hidden="true" />
-                          : cell === null || cell === undefined
-                            ? <span className="text-ink-tertiary">{t("data.grid.null")}</span>
-                            : <span className="block truncate" title={cellText(cell)}>{cellText(cell)}</span>}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-            {after > 0 && <tr aria-hidden="true"><td colSpan={columns.length} style={{ height: after, padding: 0 }} /></tr>}
-          </tbody>
-        </table>
-        {total === 0 && live.total !== null && <p className="p-6 text-center text-[12px] text-ink-secondary">{t("data.grid.empty")}</p>}
+      <div role="region" aria-label={t("data.grid.label", { name })} className="min-h-0 flex-1" data-testid="data-grid-viewport"
+        onKeyDownCapture={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c" && !window.getSelection()?.toString()) {
+            event.preventDefault(); event.stopPropagation(); void copy();
+          }
+        }}>
+        <AgGridReact<DataGridRow> modules={modules} theme={gridTheme} loadThemeGoogleFonts={false}
+          columnDefs={columnDefs} defaultColDef={defaultColDef} rowModelType="infinite"
+          cacheBlockSize={DATA_LIMITS.pageSize} maxBlocksInCache={4} maxConcurrentDatasourceRequests={2} infiniteInitialRowCount={rowCount}
+          rowHeight={36} headerHeight={40} rowBuffer={8} animateRows={false} suppressMultiSort={true}
+          rowSelection={rowSelection} enableCellTextSelection={true} ensureDomOrder={true}
+          onGridReady={({ api: gridApi }) => { grid.current = gridApi; setReadyGrid(gridApi); gridApi.setGridAriaProperty("label", t("data.grid.label", { name })); }}
+          onGridPreDestroyed={({ api: gridApi }) => { if (grid.current === gridApi) { grid.current = null; source.current?.destroy?.(); } }}
+          onSortChanged={({ api: gridApi }) => { source.current?.invalidate(); gridApi.deselectAll(); }} />
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline/40 px-3 py-1.5 text-[11px] text-ink-secondary">
-        <span role="status">
-          {filtered
-            ? t("data.grid.countFiltered", { shown: formatCount(total), total: formatCount(rowCount), columns: columns.length })
-            : t("data.grid.count", { count: formatCount(total), columns: columns.length })}
-        </span>
-        {live.error && <span role="alert" className="text-danger">{t("data.grid.loadFailed", { reason: live.error })}</span>}
+      <DataResultFooter controls={footerControls}>
+        <span role="status">{t(filter ? "data.grid.countFiltered" : "data.grid.count", { shown: formatCount(total), total: formatCount(rowCount), count: formatCount(total), columns: columns.length })}</span>
+        {error && <span role="alert" className="ml-2 text-danger" title={error}>{t("data.grid.loadFailed", { reason: error })}</span>}
         {copyState !== "idle" && <span role={copyState === "failed" ? "alert" : "status"}>{t(copyState === "failed" ? "data.card.copyFailed" : "data.card.copied")}</span>}
-      </footer>
+      </DataResultFooter>
     </div>
   );
 }

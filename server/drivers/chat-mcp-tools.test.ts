@@ -78,6 +78,23 @@ describe("Chat MCP session", () => {
     expect(existsSync(f.receipt)).toBe(false);
   });
 
+  it.each([undefined, { allow: ["mcp:data:write"] }])("mounts Data without computer access and preserves selected tool arguments (%j)", async (scope) => {
+    const f = fixture();
+    const session = await mountChatTools({ data: f.server }, f.controller.signal, false, scope);
+    sessions.push(session);
+    expect(session.definitions).toEqual([{ type: "function", function: { name: "data_write", description: "Fixture write", parameters: schema } }]);
+    await expect(session.execute("data_write", { value: "query receipt" }, f.controller.signal)).resolves.toEqual({ text: "recorded:query receipt", ok: true });
+    expect(f.read().calls.at(-1)).toMatchObject({ method: "tools/call", params: { name: "write", arguments: { value: "query receipt" } } });
+  });
+
+  it("does not start Data when the owner's tool selection excludes it", async () => {
+    const f = fixture();
+    const session = await mountChatTools({ data: f.server }, f.controller.signal, false, { allow: ["native:ask_user"] });
+    sessions.push(session);
+    expect(session.definitions).toEqual([]);
+    expect(existsSync(f.receipt)).toBe(false);
+  });
+
   it("filters original identities before catalog limits, alias conversion and schema compilation", async () => {
     const f = fixture(`if (message.method === "tools/list") {
       reply(message, {tools:[

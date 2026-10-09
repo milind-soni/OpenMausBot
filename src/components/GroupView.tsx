@@ -81,6 +81,7 @@ import { citationPreviewText, splitTranscriptCitations, type CitationAttachment 
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
+import { DataResultChip } from "./DataResultChip";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 import { dayLabel, localDay } from "@/lib/transcript-derivations";
 
@@ -98,6 +99,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
   const tool = message.tool;
   if (!tool) return null;
   if (message.threadRef) return <ThreadChip message={message} />;
+  if (message.dataResult) return <DataResultChip message={message} />;
   if (failedTurnCause(tool.name) !== null) {
     return <FailedTurnRow tool={tool} engine={botEngine(state.bots.find((b) => b.id === message.from?.botId), state.instances)} botId={message.from?.botId} />;
   }

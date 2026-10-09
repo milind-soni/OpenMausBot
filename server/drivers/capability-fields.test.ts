@@ -38,6 +38,7 @@ describe("typed capability fields for the cloud computer", () => {
       config: OpenAICompatDriver.defaultConfig(),
     }));
     expect(mounted.adapter.capabilities.computerMcp).toBe(true);
+    expect(mounted.adapter.capabilities.dataMcp).toBe(true);
     expect(onBoat(mounted)).toBe(true);
     // Tools off means the runtime has no computer tools to mount the cloud
     // computer into, so both gates must fall together.
@@ -46,6 +47,7 @@ describe("typed capability fields for the cloud computer", () => {
       config: { ...OpenAICompatDriver.defaultConfig(), tools: false },
     }));
     expect(bare.adapter.capabilities.computerMcp).toBe(false);
+    expect(bare.adapter.capabilities.dataMcp).toBe(false);
     expect(onBoat(bare)).toBe(false);
     // What a turn set to Cloud then gets: refused before anything starts, in
     // one plain line with the next step, not handed to some other engine.

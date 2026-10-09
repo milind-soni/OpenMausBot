@@ -18,6 +18,7 @@ import {
   rememberFailedComposerSend,
   replaceDraftAttachment,
   restoredSendId,
+  restoredRequestText,
   useComposerDraft,
   useComposerChannelMode,
   useDraftAttachmentPending,
@@ -42,6 +43,8 @@ import {
   clipboardHasImages,
   clipboardImageFiles,
   composeMessage,
+  withDataContext,
+  withoutDataContext,
   composerShouldRefocus,
   composerTakesFocusOnOpen,
   imageAttachmentFromFile,
@@ -460,7 +463,7 @@ export function Composer({
     if (!queued) return;
     const targetDraftId = draftId;
     const onCancelled = () => {
-      const cited = splitTranscriptCitations(queued.text);
+      const cited = splitTranscriptCitations(withoutDataContext(queued.text));
       if (cited.display) prependComposerDraft(targetDraftId, cited.display);
       appendDraftAttachments(targetDraftId, cited.citations);
       if (targetDraftId !== draftIdRef.current) return;
@@ -617,8 +620,13 @@ export function Composer({
     // named `body`, not `t` — that name belongs to the catalog lookup now
     // resolvable "#Title" runs leave as canonical links, so the thread id
     // stays machine-readable in the stored send and the model's context
-    const body = composeMessage(serializeThreadRefs(effectiveText, threads, currentBotId), attachments);
-    if (!body) return;
+    const composed = composeMessage(serializeThreadRefs(effectiveText, threads, currentBotId), attachments);
+    if (!composed) return;
+    const body = restoredRequestText(draftId) ?? withDataContext(
+      composed,
+      state.computerOpen ? state.dataView : null,
+      !group && bot ? { botId: bot.id, threadId } : undefined,
+    );
     const sentDraft: ComposerDraftSnapshot = {
       draftId,
       revision: draftRevision(draftId),
