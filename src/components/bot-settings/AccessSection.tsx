@@ -517,7 +517,7 @@ function ConnectorToolsGrants({
 function XResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: boolean }) => void }) {
   const { state, dispatch } = useStore();
   const action = xResearchAction(useCloudPlan());
-  const included = state.config?.xResearch?.included === true;
+  const included = state.config?.xResearch?.included === true, unavailable = state.config?.xResearch?.unavailable === true;
   const on = bot.xResearch === true;
   return (
     <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4" data-testid="access-x-research">
@@ -528,9 +528,9 @@ function XResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: b
         </div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">
           {included ? t(on ? "xResearch.includedOn" : "xResearch.includedOff")
-            : t(action === "connecting" ? "xResearch.connecting" : "xResearch.locked")}
+            : t(unavailable ? "xResearch.unavailable" : action === "connecting" ? "xResearch.connecting" : "xResearch.locked")}
         </div>
-        {!included && (action === "sign-in" || action === "get-pro") && (
+        {!included && !unavailable && (action === "sign-in" || action === "get-pro") && (
           <div className="mt-2 flex items-center gap-3">
             {action === "sign-in" && (
               <button type="button" className="text-[12.5px] font-medium text-accent underline underline-offset-2 hover:text-ink" onClick={() => dispatch(CLOUD_LINK_SETTINGS)}>

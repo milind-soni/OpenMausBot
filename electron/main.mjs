@@ -302,9 +302,9 @@ let cloudAccount = null;
 // posted again whenever that server restarts.
 const includedX = createIncludedXSync({
   fetchAccess: () => cloudAccount ? cloudAccount.xResearchAccess() : Promise.resolve(null),
-  send: access => {
+  send: (access, note) => {
     if (!serverProc) return;
-    try { serverProc.postMessage({ type: "openmausbot:included-x", access }); }
+    try { serverProc.postMessage({ type: "openmausbot:included-x", access, ...(note?.offered === false ? { offered: false } : {}) }); }
     catch (error) { slog(`X research access sync failed: ${error?.message ?? error}`); }
   },
 });

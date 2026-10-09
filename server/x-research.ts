@@ -22,7 +22,9 @@ const MAX_PAGES = 3;
 const TEXT_LIMIT = 1_500;
 const QUOTE_LIMIT = 300;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
-const TIMEOUT_MS = 30_000;
+/** Longer than the relay's own 30 s with treg (openmaus-cloud X_TIMEOUT_MS): the relay's answer, counted or given
+ * back, arrives before this side gives up and falls back to a second, also counted, call. */
+export const X_CLIENT_TIMEOUT_MS = 35_000;
 /** Characters an answer may take: under the agents server's 24,000-character
  * cap (server/tool-results.ts), so the bot never needs tool_result_read for
  * it. Long posts can push 50 of them past that, so trailing ones are dropped
@@ -295,6 +297,9 @@ export function errorFor(status: number, body: unknown): XResearchError {
     const said = at(body, "message");
     return new XResearchError("rate_limited", at(body, "error") === "quota_exceeded" && typeof said === "string" && said.length <= 300 ? said : X_MESSAGES.rateLimited);
   }
+  // treg itself is rate-limiting (the relay keeps the call counted): another scraper through the same account would
+  // only count against the plan again, so this is no outage to fall back from.
+  if (status === 503 && at(body, "error") === "overloaded") return new XResearchError("rate_limited", X_MESSAGES.rateLimited);
   return new XResearchError("unavailable", X_MESSAGES.unavailable);
 }
 
@@ -351,7 +356,7 @@ interface ListOptions {
 export function createXRelayClient(options: { url: string; token: string; fetcher?: typeof fetch; timeoutMs?: number }): XResearchClient {
   const fetcher = options.fetcher ?? fetch;
   const base = options.url.replace(/\/+$/, "");
-  const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? X_CLIENT_TIMEOUT_MS;
 
   async function send(path: string, body: Row): Promise<Row> {
     let status: number;

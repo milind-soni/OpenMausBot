@@ -323,7 +323,7 @@ import {
 import { CLOUD_PERSONAL_REFUSAL, settleCloudOwnership, type CloudOwnership } from "./cloud-owner.ts";
 import { createCloudMoveRoutes, workspaceShared } from "./cloud-move-http.ts";
 import { RESTART_EXIT_CODE } from "./restart.ts";
-import { applyIncludedXMessage, holdIncludedServices, xCredential } from "./included-services.ts";
+import { applyIncludedXMessage, holdIncludedServices, xCredential, xResearchStatus } from "./included-services.ts";
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
@@ -15468,7 +15468,7 @@ function configStatus() {
     cerebras: { configured: Boolean(cfg.cerebras?.key) },
     // configured flag only: the token itself never leaves the server
     // X research comes with OpenMausBot Cloud plans: a Cloud home's included token, or a paying desktop's (included-services.ts).
-    xResearch: { included: Boolean(xCredential()) },
+    xResearch: xResearchStatus(),
     anthropic: { configured: Boolean(cfg.anthropic?.key), everyClaudeBot: cfg.anthropic?.everyClaudeBot !== false },
     openai: { configured: Boolean(cfg.openai?.key) },
     openrouter: { configured: Boolean(cfg.openrouter?.key) },

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createXRelayClient, errorFor, normalizeHandle, parsePostRef, toPost, X_MESSAGES, XResearchError } from "./x-research.ts";
+import { createXRelayClient, errorFor, X_CLIENT_TIMEOUT_MS, normalizeHandle, parsePostRef, toPost, X_MESSAGES, XResearchError } from "./x-research.ts";
 
 /** 2026-10-08T00:12:34Z */
 const CREATED = 1791418354;
@@ -431,6 +431,17 @@ describe("errors", () => {
     const error = await failure(clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 20 }));
     expect(error).toMatchObject({ code: "bad_key", message: X_MESSAGES.badKey });
     expect(calls).toHaveLength(1);
+  });
+
+  it("does not fall back while the relay says treg is rate-limiting: a second call would only count against the plan too", async () => {
+    const { fetcher, calls } = fakeFetch({ status: 503, body: { error: "overloaded", message: "X research is busy right now. Try again in a moment." } });
+    const error = await failure(clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 20 }));
+    expect(error).toMatchObject({ code: "rate_limited", message: X_MESSAGES.rateLimited });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("waits longer than the relay's own 30 s, so the relay's answer arrives before this side gives up and falls back", () => {
+    expect(X_CLIENT_TIMEOUT_MS).toBeGreaterThan(30_000);
   });
 
   it("passes on the relay's own sentence when this month's allowance is used up", async () => {

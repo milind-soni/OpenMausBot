@@ -633,8 +633,9 @@ export interface ConfigStatus {
   xai?: { configured: boolean };
   mistral?: { configured: boolean };
   cerebras?: { configured: boolean };
-  /** X research comes with OpenMausBot Cloud plans: `included` while this server holds the plan's relay credential. */
-  xResearch?: { included: boolean };
+  /** X research comes with OpenMausBot Cloud plans: `included` while this server holds the plan's relay credential;
+   * `unavailable` when the Admin said no to this desktop's paid sign-in. */
+  xResearch?: { included: boolean; unavailable?: boolean };
   /** `everyClaudeBot`: the key runs every Claude bot, not only "Claude (API key)". */
   anthropic?: { configured: boolean; everyClaudeBot?: boolean };
   openai?: { configured: boolean };

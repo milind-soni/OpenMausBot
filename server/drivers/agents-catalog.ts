@@ -29,7 +29,7 @@ export interface CatalogProfile {
   sharedComputers: boolean;
   /** A voice is actually configured for this bot (tts voiceReady). */
   voiceNotes: boolean;
-  /** The bot is switched on for X research and a treg token is saved.
+  /** The bot is switched on for X research and the Cloud plan's relay credential is held.
    * Absent means off: these tools count against the person's Cloud plan's X calls. */
   xResearch?: boolean;
   /** The server is a Cloud home (server/cloud-home.ts): no "this computer"

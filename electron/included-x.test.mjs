@@ -5,8 +5,8 @@ const access = { url: "https://cloud.openmausbot.com/api/cloud/services/x", toke
 const paid = (deviceId = "device-1") => ({ status: "connected", deviceId, entitlement: { plan: "pro", status: "active", tier: "pro" } });
 
 function sync(fetchAccess = vi.fn(async () => access)) {
-  const sent = [];
-  return { sent, fetchAccess, x: createIncludedXSync({ fetchAccess, send: (value) => sent.push(value) }) };
+  const sent = [], notes = [];
+  return { sent, notes, fetchAccess, x: createIncludedXSync({ fetchAccess, send: (value, note) => { sent.push(value); notes.push(note ?? null); } }) };
 }
 
 describe("included X research access on the desktop", () => {
@@ -52,6 +52,7 @@ describe("included X research access on the desktop", () => {
     const refused = sync(vi.fn(async () => null));
     await refused.x.onState(paid());
     expect(refused.sent).toEqual([null]);
+    expect(refused.notes).toEqual([{ offered: false }]);
   });
 
   it("keeps trying on later state changes after a failed fetch, without sending anything for it", async () => {
@@ -81,5 +82,48 @@ describe("included X research access on the desktop", () => {
     await Promise.all([first, second]);
     expect(fetchAccess).toHaveBeenCalledTimes(1);
     expect(sent).toEqual([access]);
+  });
+});
+
+describe("when the Admin says no to a paid sign-in", () => {
+  const versioned = (version) => ({ ...paid(), entitlement: { plan: "pro", status: "active", tier: "pro", version } });
+
+  it("asks once for that sign-in and plan version, not on every refresh, and asks again when the plan changes", async () => {
+    const { x, sent, fetchAccess } = sync(vi.fn(async () => null));
+    await x.onState(versioned(1));
+    await x.onState(versioned(1));
+    await x.onState({ ...versioned(1), checking: true });
+    expect(fetchAccess).toHaveBeenCalledTimes(1);
+    expect(sent).toEqual([null]);
+    fetchAccess.mockResolvedValueOnce(access);
+    await x.onState(versioned(2));
+    expect(fetchAccess).toHaveBeenCalledTimes(2);
+    expect(sent).toEqual([null, access]);
+  });
+
+  it("clears the server's not-offered note once the plan stops or the app signs out, so the card offers the way back", async () => {
+    const { x, sent, notes } = sync(vi.fn(async () => null));
+    await x.onState(versioned(1));
+    await x.onState({ status: "signed-out" });
+    expect(sent).toEqual([null, null]);
+    expect(notes).toEqual([{ offered: false }, null]);
+  });
+
+  it("sends nothing for a fetch that ends after the plan stopped, or after another sign-in took over", async () => {
+    let finish;
+    const fetchAccess = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const lapsed = sync(fetchAccess);
+    const asking = lapsed.x.onState(paid());
+    await lapsed.x.onState({ status: "signed-out" });
+    finish(access);
+    await asking;
+    expect(lapsed.sent).toEqual([]);
+    const other = sync(vi.fn().mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; })).mockResolvedValueOnce(access));
+    const first = other.x.onState(paid("device-1"));
+    void other.x.onState(paid("device-2"));
+    finish(access);
+    await first;
+    await vi.waitFor(() => expect(other.fetchAccess).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(other.sent).toEqual([access]));
   });
 });

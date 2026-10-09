@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { jevEndpoint } from "./decider/jev.ts";
-import { applyIncludedXMessage, boatCredential, deciderCredential, voiceCredential, xCredential } from "./included-services.ts";
+import { applyIncludedXMessage, boatCredential, deciderCredential, voiceCredential, xCredential, xResearchStatus } from "./included-services.ts";
 
 const RELAY_BOAT = "https://cloud.example.test/api/cloud/services/boat/api/box/v1";
 const RELAY_VOICE = "https://cloud.example.test/api/cloud/services/voice/v1";
@@ -176,5 +176,21 @@ describe("X research credential", () => {
   it("lets a loopback relay through for development and tests only over http", () => {
     applyIncludedXMessage({ type: "openmausbot:included-x", access: { url: "http://127.0.0.1:4300/api/cloud/services/x", token: desktopToken } });
     expect(xCredential({})?.api).toBe("http://127.0.0.1:4300/api/cloud/services/x");
+  });
+});
+
+describe("X research status for the app's Settings", () => {
+  const RELAY_X = "https://cloud.example.test/api/cloud/services/x";
+  afterEach(() => { applyIncludedXMessage({ type: "openmausbot:included-x", access: null }); });
+
+  it("is included with a credential, not offered once the Admin said no, and plain not-included otherwise", () => {
+    expect(xResearchStatus({})).toEqual({ included: false });
+    applyIncludedXMessage({ type: "openmausbot:included-x", access: null, offered: false });
+    expect(xResearchStatus({})).toEqual({ included: false, unavailable: true });
+    applyIncludedXMessage({ type: "openmausbot:included-x", access: { url: RELAY_X, token: `omb_xd_${"b".repeat(43)}` } });
+    expect(xResearchStatus({})).toEqual({ included: true });
+    applyIncludedXMessage({ type: "openmausbot:included-x", access: null });
+    expect(xResearchStatus({})).toEqual({ included: false });
+    expect(xResearchStatus({ OMB_CLOUD_X_URL: RELAY_X, OMB_CLOUD_X_TOKEN: "omb_x_home" })).toEqual({ included: true });
   });
 });

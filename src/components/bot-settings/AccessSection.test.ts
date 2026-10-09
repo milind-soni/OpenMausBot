@@ -221,6 +221,22 @@ describe("X research card", () => {
     expect(on).toContain("Included with your OpenMausBot Cloud plan.");
   });
 
+  it("says plainly when the plan's Cloud does not offer X research right now, instead of connecting forever", () => {
+    fixture.config = { xResearch: { included: false, unavailable: true } } as Partial<ConfigStatus>;
+    const html = render(makeBot());
+    expect(html).toContain("X research isn’t available from OpenMausBot Cloud right now.");
+    expect(html).not.toContain("Connecting");
+  });
+
+  it("is not offered while a new bot or the New bot defaults are being drafted", async () => {
+    fixture.config = { xResearch: { included: true } } as Partial<ConfigStatus>;
+    const { BotEditorContext } = await import("./BotEditorContext");
+    const { api } = await import("@/state/store");
+    const html = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(AccessSection, { bot: makeBot(), derived: makeDerived() }))));
+    expect(html).not.toContain("Let this bot search and read X");
+  });
+
   it("still lets a bot that is on be turned off after the plan has gone", () => {
     fixture.config = { xResearch: { included: false } } as Partial<ConfigStatus>;
     const html = render(makeBot({ xResearch: true }));

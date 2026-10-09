@@ -103,6 +103,8 @@ export function deciderCredential(
  * (electron/main.mjs) and hands it over on the private parent port. Held in
  * memory only, never written to config. */
 let desktopX: ServiceCredential | null = null;
+/** The Admin said this desktop's paid sign-in gets no X research (the plan is not active there, or the service is off). */
+let desktopXRefused = false;
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -114,6 +116,7 @@ export function applyIncludedXMessage(message: unknown): boolean {
   const access = (message as { access?: unknown }).access;
   if (access === null) {
     desktopX = null;
+    desktopXRefused = (message as { offered?: unknown }).offered === false;
     return true;
   }
   const { url, token } = (access && typeof access === "object" ? access : {}) as { url?: unknown; token?: unknown };
@@ -127,7 +130,16 @@ export function applyIncludedXMessage(message: unknown): boolean {
   // The token goes only to our relay: https, or a loopback relay in development and tests.
   if (!(parsed.protocol === "https:" || (parsed.protocol === "http:" && LOOPBACK.has(parsed.hostname)))) throw new Error("invalid X research relay URL");
   desktopX = { token, api: url.trim().replace(/\/+$/, ""), included: true };
+  desktopXRefused = false;
   return true;
+}
+
+/** What the app's Settings show (configStatus `xResearch`): included while a
+ * credential is held; `unavailable` when the Admin said no to this desktop's
+ * paid sign-in, so the card says so instead of connecting forever. */
+export function xResearchStatus(env: NodeJS.ProcessEnv = process.env): { included: boolean; unavailable?: true } {
+  if (xCredential(env)) return { included: true };
+  return desktopXRefused ? { included: false, unavailable: true } : { included: false };
 }
 
 /** X research's credential: a Cloud home's included token, else a signed-in
