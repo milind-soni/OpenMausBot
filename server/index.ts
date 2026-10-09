@@ -7,6 +7,7 @@ import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, rmSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { writeFileAtomic } from "./atomic.ts";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -112,6 +113,12 @@ import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
 import { pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts";
 import { cloudComputerRpc } from "./cloud-computer-tools.ts";
+import { chartRenderer, compileChart, dataEngine, validateVegaLite } from "./data/deps.ts";
+import { BUILT_IN_DATA_SYSTEM_PROMPT } from "./data/instructions.ts";
+import { DATA_INTERNAL_MCP_PATH, dataRpc } from "./data/rpc.ts";
+import { createDataRoutes } from "./data/routes.ts";
+import { DataSheetRegistry } from "./data/sheet.ts";
+import { DataFailure } from "./data/types.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import { isEffortLevel, type BotVisibility, type CardAnswerer, type ResolvedSender, type SteerQueueReason, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import { isPersistentQuestionCard, QUESTION_DISMISS_MESSAGE, shouldSettleRequestCard } from "../shared/ask-question.ts";
@@ -2167,7 +2174,7 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone";
+  kind: "agents" | "connectors" | "computer" | "browser" | "hooks" | "phone" | "data";
   skillAuthoring: boolean;
   createdBots: number;
   createdRooms?: number;
@@ -3122,6 +3129,44 @@ async function browserIntegration(botId: string, profile: string | undefined, tu
   } };
 }
 let engineUnavailableLogged = false;
+
+// ── the Data tools (server/data) ──
+// One sheet store per bot, shared by the tools (internal MCP route) and the
+// panel routes; a pruned or deleted card's result table is dropped with it.
+const dataSheets = new DataSheetRegistry({
+  broadcast: (frame) => broadcast({ ...frame }),
+  dropResult: async (botId, name) => {
+    if (dataEngine.unavailable() !== null) return;
+    await (await dataEngine.forBot(botId)).dropResult(name);
+  },
+});
+/** Where a bot's exports may land, most preferred first: the person's
+ * Downloads when it exists, the bot's working folder, its workspace. */
+function dataExportRoots(bot: { id: string; cwd?: string }): string[] {
+  const downloads = join(homedir(), "Downloads");
+  return [...(existsSync(downloads) ? [downloads] : []), ...(bot.cwd ? [bot.cwd] : []), workspaceDir(bot.id)];
+}
+let dataUnavailableLogged = false;
+/** The Data tools for a turn: the harness proxy with a turn-scoped
+ * capability, or null when DuckDB cannot run here (said once in the log).
+ * No place, no plan, no per-bot switch: bots already have the computer
+ * (PLAN D17), and the same mount serves desktop, server and Cloud. */
+function dataIntegration(botId: string, turn: { threadId: string; generation: string }) {
+  const unavailable = dataEngine.unavailable();
+  if (unavailable !== null) {
+    if (!dataUnavailableLogged) {
+      dataUnavailableLogged = true;
+      console.warn(`Data tools unavailable: ${unavailable}`);
+    }
+    return null;
+  }
+  const token = mintInternalCapability({ botId, ...turn, kind: "data", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 });
+  return {
+    command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, "data"], env: {
+      ...AGENTS_NODE_FLAG, OMB_MCP_TOKEN: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+    },
+  };
+}
 
 let browserEngineInstall: Promise<void> | null = null;
 let browserEngineInstallError: string | null = null;
@@ -10689,6 +10734,10 @@ async function startTurn(
           description: liveBot?.description ?? bot.description,
           text: providerText,
         });
+      if (liveBot && instance.adapter.capabilities.dataMcp === true) {
+        const data = dataIntegration(bot.id, { threadId, generation: dispatchClaimId });
+        if (data) integrations.data = data;
+      }
       // One place per turn. On Auto the branches above may have reached a
       // computer; then the built-in browser stays unmounted and web work
       // happens in that computer's own browser, where the person can see it.
@@ -10773,6 +10822,7 @@ async function startTurn(
         { id: "composio", label: "Connected apps", text: integrations.composio ? composioSystemPrompt(liveBot?.connectorTools ?? bot.connectorTools) + describeConnectorScopes((liveBot ?? bot).connectorScopes) : "" },
         { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
         { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
+        { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" },
         { id: "coordination", label: "Team", text: coordinationPrompt ? ` ${coordinationPrompt}` : "" },
         { id: "assignment", label: "Teammate task", text: coordinationNode ? `\n${coordinationSystemInstructions()}` : "" },
         { id: "outstanding", label: "Outstanding teammate work", text: outstandingAssignmentsPrompt(threadId) },
@@ -11819,6 +11869,10 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           calendarCalls!.removeBot(bot.id);
           browserLive.closeForBot(bot.id);
           await forgetTemporaryBrowser(bot.id);
+          // The bot's database and sheet go with the bot; a failure here
+          // must not undo a deletion the store already made durable.
+          dataSheets.delete(bot.id);
+          if (dataEngine.unavailable() === null) await dataEngine.deleteBot(bot.id).catch((error) => console.warn(`data: could not delete ${bot.id}'s database`, error));
         } catch (error) {
           if (browserCleanupRequest) {
             // Store removal is already durable once the in-memory owner is
@@ -12936,6 +12990,10 @@ async function runGroupMemberTurn(
       ?? computerToolsRefusal(readyBot.toolScope, "room", readyBot.name);
     if (unsupported) throw unsupported;
   }
+  if (instance.adapter.capabilities.dataMcp === true) {
+    const data = dataIntegration(readyBot.id, { threadId, generation: internalGeneration });
+    if (data) integrations.data = data;
+  }
   // One place per room turn as well: a team computer reached on Auto means
   // no separate built-in browser.
   if (roomPlan.browser && !(roomPlan.computer === undefined && roomTeamComputer)) {
@@ -13191,6 +13249,7 @@ async function runGroupMemberTurn(
     { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note, cloudHome: Boolean(CLOUD_HOME) }) },
     { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled()) : "" },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
+    { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents && bot.memoryEnabled !== false ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     teamAvailabilityPart(outsideRoom),
     { id: "recent", label: "Recent work", text: recentWorkPrompt(recentLines) },
@@ -16099,6 +16158,13 @@ const liveCalls = new LiveCallController({
 // check would only notice within 15 s). A paired phone's unpairing arrives
 // from the companion instead (POST /api/live/device-revoked).
 sessions.onSessionRevoked((sessionId) => liveCalls.sessionRevoked(sessionId));
+ROUTES.push(createDataRoutes({
+  bot: (id) => store.bot(id),
+  engine: dataEngine,
+  sheets: dataSheets,
+  compileChart, validateVegaLite, renderer: chartRenderer,
+  exportRoots: dataExportRoots,
+}));
 ROUTES.push(createLiveRoutes({
   calls: liveCalls,
   resolveTarget: (botId, threadId) => {
@@ -16652,6 +16718,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? "hooks"
         : path === "/api/internal/browser/mcp"
         ? "browser"
+        : path === DATA_INTERNAL_MCP_PATH
+        ? "data"
         : path === "/api/internal/phone/claim"
         ? "phone"
         : path.startsWith("/api/internal/connectors/")
@@ -16863,6 +16931,29 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           boxId: () => internalCapability.boxId ?? claimedBoatId(internalCapability),
           gate: () => computerCallGate(internalCapability),
           assertActive: requireActiveInternalCapability,
+        }) });
+      }
+      // The Data tools (harness-mcp-proxy data): DuckDB runs here on the
+      // bot's own database; the agent process holds only the turn's capability.
+      if (method === "POST" && path === DATA_INTERNAL_MCP_PATH) {
+        const body = await readInternalBody();
+        const unavailable = dataEngine.unavailable();
+        if (unavailable !== null) return json(res, 503, { error: `Data tools are unavailable: ${unavailable}` });
+        const abort = new AbortController();
+        res.once("close", () => { if (!res.writableEnded) abort.abort(); });
+        let database;
+        try {
+          database = await dataEngine.forBot(internalSender.id);
+        } catch (error) {
+          if (error instanceof DataFailure) return json(res, 503, { error: error.message });
+          throw error;
+        }
+        requireActiveInternalCapability();
+        return json(res, 200, { result: await dataRpc(body, {
+          database, sheet: dataSheets.for(internalSender.id),
+          compileChart, validateVegaLite, renderer: chartRenderer,
+          exportRoots: () => dataExportRoots(internalSender),
+          signal: abort.signal, assertActive: requireActiveInternalCapability,
         }) });
       }
       if (method === "POST" && path === "/api/internal/phone/claim") {
@@ -25758,6 +25849,8 @@ const gracefulShutdown = createGracefulShutdown({
       tunnelListener?.close();
     },
     async () => { await managedDesktop.close(); await registry.disposeAll(); },
+    // Every open DuckDB database flushes and closes; the next start reopens them.
+    async () => { await dataEngine.closeAll().catch((error) => console.warn("data: close failed", error)); },
     async () => {
       await Promise.all([...temporaryBrowserSessions.keys()].map((botId) => forgetTemporaryBrowser(botId)));
       await browserRuntime.closeAll();
