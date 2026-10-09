@@ -202,7 +202,8 @@ export class DataSheetStore {
  * and the panel routes must see the same cards. */
 export class DataSheetRegistry {
   private readonly stores = new Map<string, DataSheetStore>();
-  constructor(private readonly deps: { broadcast: (frame: DataBroadcast) => void; dropResult: (botId: string, name: string) => Promise<void>; dir?: (botId: string) => string }) {}
+  private readonly deps: { broadcast: (frame: DataBroadcast) => void; dropResult: (botId: string, name: string) => Promise<void>; dir?: (botId: string) => string };
+  constructor(deps: { broadcast: (frame: DataBroadcast) => void; dropResult: (botId: string, name: string) => Promise<void>; dir?: (botId: string) => string }) { this.deps = deps; }
 
   for(botId: string): DataSheetStore {
     let store = this.stores.get(botId);

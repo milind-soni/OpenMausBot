@@ -13,6 +13,9 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "isolatedModules": true,
+    // node --experimental-strip-types runs this code in development; it refuses
+    // parameter properties, enums and namespaces, so the compiler does too.
+    "erasableSyntaxOnly": true,
     "noEmit": true,
     "types": [
       "node"

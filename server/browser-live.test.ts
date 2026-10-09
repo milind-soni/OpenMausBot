@@ -41,8 +41,9 @@ class SocketFixture extends EventTarget {
   readyState = 1;
   bufferedAmount = 0;
   messages: unknown[] = [];
-  constructor(readonly url: string) {
-    super(); SocketFixture.instances.push(this);
+  readonly url: string;
+  constructor(url: string) {
+    super(); this.url = url; SocketFixture.instances.push(this);
     queueMicrotask(() => {
       this.dispatchEvent(new Event(SocketFixture.failOpen ? "error" : "open"));
       for (const message of SocketFixture.initialMessages) this.receive(message);

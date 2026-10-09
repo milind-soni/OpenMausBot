@@ -188,7 +188,8 @@ class Lane {
   private queue: Promise<unknown> = Promise.resolve();
   private running: { interrupted: InterruptCause | null } | null = null;
 
-  constructor(readonly connection: DuckDB.DuckDBConnection) {}
+  readonly connection: DuckDB.DuckDBConnection;
+  constructor(connection: DuckDB.DuckDBConnection) { this.connection = connection; }
 
   run<T>(sql: string, options: { timeoutMs?: number; signal?: AbortSignal }, work: (connection: DuckDB.DuckDBConnection) => Promise<T>): Promise<T> {
     const turn = this.queue.then(() => this.execute(sql, options, work));
@@ -260,7 +261,9 @@ class BotDb implements BotDatabase {
   private inFlight = 0;
   private readonly statsCache = new Map<string, DataColumnStats>();
 
-  constructor(readonly botId: string, private readonly engine: Engine) {}
+  readonly botId: string;
+  private readonly engine: Engine;
+  constructor(botId: string, engine: Engine) { this.botId = botId; this.engine = engine; }
 
   private open(): Promise<Open> {
     if (!this.state) {
