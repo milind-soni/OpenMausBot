@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-// The store keeps one data sheet per bot and talks to the panel routes. A
-// `data` frame replaces the sheet whole; run, cancel, patch and delete post
-// to their routes and leave the answer to the frame.
+// The store keeps one data sheet per bot and loads it from the panel route.
+// A `data` frame replaces the sheet whole; the panel itself runs and cancels
+// SQL (DataPanel.test.ts) and leaves the answer to the frame.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -126,40 +126,16 @@ describe("data sheets in the store", () => {
     expect(seen.dataSheets.bot?.botId).toBe("bot");
   });
 
-  it("post the person's SQL to run, with the card to update when editing", async () => {
-    dispatch({ type: "runDataSql", botId: "bot", request: { sql: "select 1" } });
-    dispatch({ type: "runDataSql", botId: "bot", request: { sql: "select 2", cardId: "b" } });
-    await settle();
-    expect(sent(DATA_ROUTES.run("bot")).map((request) => [request.method, request.body])).toEqual([
-      ["POST", { sql: "select 1" }],
-      ["POST", { sql: "select 2", cardId: "b" }],
-    ]);
-    // The reply changes nothing: the frame does.
-    expect(seen.dataSheets.bot?.cards.map((card) => card.id)).toEqual(["b"]);
-  });
-
-  it("post cancel, patch and delete to their routes", async () => {
-    dispatch({ type: "cancelDataCard", botId: "bot", cardId: "b" });
-    dispatch({ type: "patchDataCard", botId: "bot", cardId: "b", patch: { pinned: true } });
-    dispatch({ type: "deleteDataCard", botId: "bot", cardId: "b" });
-    await settle();
-    expect(sent(DATA_ROUTES.cancel("bot")).map((request) => [request.method, request.body])).toEqual([["POST", { cardId: "b" }]]);
-    expect(sent(DATA_ROUTES.card("bot", "b")).map((request) => [request.method, request.body])).toEqual([
-      ["PATCH", { pinned: true }],
-      ["DELETE", undefined],
-    ]);
-  });
-
-  it("tell the panel, not the app, when a route refuses", async () => {
-    answers[DATA_ROUTES.sheet("other")] = undefined;
-    vi.stubGlobal("fetch", (path: string) => path === DATA_ROUTES.run("other")
+  it("tell the panel, not the app, when the route refuses", async () => {
+    vi.stubGlobal("fetch", (path: string) => path === DATA_ROUTES.sheet("other")
       ? Promise.resolve(new Response(JSON.stringify({ error: "Not Found" }), { status: 404 }))
       : json(answers[path] ?? {}));
     const onError = vi.fn();
-    dispatch({ type: "runDataSql", botId: "other", request: { sql: "select 1" }, onError });
+    dispatch({ type: "loadDataSheet", botId: "other", onError });
     await settle();
     expect(onError).toHaveBeenCalledWith("Not Found");
     expect(seen.error).toBeNull();
+    expect(seen.dataSheets.other).toBeUndefined();
   });
 
   it("read a sheet from either answer shape, and an empty sheet from nothing", () => {
