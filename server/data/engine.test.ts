@@ -10,7 +10,7 @@ import type { DuckDBConnection } from "@duckdb/node-api";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
-import { EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
+import { CLOSE_DRAIN_MS, EXTENSION_INSTALL_TIMEOUT_MS, Lane, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, loadExtensions, type DataEngineOptions } from "./engine.ts";
 import { DataFailure, type BotDatabase, type DataEngine } from "./types.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-data-engine-"));
@@ -50,16 +50,34 @@ const bot = { connection: "bot" as const };
 const panel = { connection: "panel" as const };
 
 afterAll(async () => {
-  await Promise.all(engines.map((e) => e.closeAll()));
+  // On Windows CI, DuckDB's native close blocks the worker thread after
+  // these tests (the hook timed out with no JavaScript timer firing), so no
+  // bound in here can help. The process exit reclaims the handles; the
+  // tests themselves have already decided the result.
+  if (process.platform === "win32") {
+    console.warn("engine.test: leaving the databases to the process on Windows (native close blocks the thread)");
+    return;
+  }
+  // A close gives up on a stuck statement after CLOSE_DRAIN_MS; the hook must
+  // outlast that for every engine.
+  const closing = Promise.all(engines.map((e) => e.closeAll()));
+  const gaveUp = new Promise<"gave-up">((resolve) => setTimeout(() => resolve("gave-up"), CLOSE_DRAIN_MS * 2).unref());
+  if (await Promise.race([closing.then(() => "closed" as const), gaveUp]) === "gave-up") throw new Error("closeAll did not finish");
   // Windows keeps a just-closed database busy for a while (EPERM on rm); a
   // temp directory left on a runner is not a test failure there. rm's retry
   // delay grows linearly, so 10 × 100 ms stays well inside the hook timeout.
-  try {
-    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  } catch (error) {
-    if (process.platform !== "win32") throw error;
-    console.warn(`engine.test: left ${root} behind: ${(error as Error).message}`);
-  }
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}, CLOSE_DRAIN_MS * 4);
+
+describe("closing", () => {
+  it("drains idle lanes at once, and gives up on one that never finishes", async () => {
+    const idle = { run: async <T,>(_sql: string, _options: object, work: () => Promise<T>) => work() };
+    expect(await drainLanes([idle, idle], 1_000)).toBe(true);
+    const stuck = { run: <T,>() => new Promise<T>(() => undefined) };
+    const started = Date.now();
+    expect(await drainLanes([idle, stuck], 50)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
 });
 
 describe("loading the binding", () => {
