@@ -652,8 +652,10 @@ export async function describeTarget(ctx: DataContext, target: string): Promise<
   return { ...(name ? { name } : {}), ...(sql ? { sql } : {}), rowCount: described.rowCount, columns, ...(truncated ? { truncated } : {}), elapsedMs: Date.now() - started };
 }
 
-/** Read saved state, not a rerun: a person's SQL edits are visible to the next bot turn. */
-function describeSavedResult(ctx: DataContext, id?: string): Record<string, unknown> {
+/** Read saved state, not a rerun: a person's SQL edits are visible to the
+ * next bot turn. The table list is DuckDB's own catalog (a catalog read,
+ * not a query), so a table derived with SQL is listed exactly once. */
+async function describeSavedResult(ctx: DataContext, id?: string): Promise<Record<string, unknown>> {
   const sheet = ctx.sheet.sheet();
   const cards = [...sheet.cards].reverse().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   const selected = id ? cards.find((card) => card.id === id) : cards[0];
@@ -674,7 +676,7 @@ function describeSavedResult(ctx: DataContext, id?: string): Record<string, unkn
     result.cards.push(summary(entry));
     if (!fits()) { result.cards.pop(); result.truncated = true; break; }
   }
-  for (const { name, sqlName, rowCount } of sheet.tables ?? sheet.sources) {
+  for (const { name, sqlName, rowCount } of await ctx.database.listTables()) {
     result.tables.push({ name, ...(sqlName ? { sqlName } : {}), rowCount });
     if (!fits()) { result.tables.pop(); result.truncated = true; break; }
   }
@@ -701,7 +703,6 @@ export async function runSql(ctx: DataContext, input: SqlInput): Promise<SqlOutp
   if (kind.kind === "create") {
     await ctx.database.run(input.sql, runOptions(ctx));
     const described = await ctx.database.describe(kind.target, runOptions(ctx));
-    ctx.sheet.recordTable({ name: kind.target, sqlName: kind.target, rowCount: described.rowCount, columns: described.columns });
     return { table: kind.target, columns: boundColumns(described.columns, DATA_LIMITS.describeBytesMax).columns, rowCount: described.rowCount, rows: [], truncated: false, elapsedMs: Date.now() - started };
   }
   if (!kind.materialisable) {
@@ -1002,7 +1003,7 @@ export async function runDataTool(ctx: DataContext, name: string, args: Record<s
       case "data_describe": {
         const { target, id } = args as { target?: string; id?: string };
         if (target && id) throw fail("invalid_input", "Give target or id, not both.");
-        return ok(target ? { ...(await describeTarget(ctx, target)) } : describeSavedResult(ctx, id));
+        return ok(target ? { ...(await describeTarget(ctx, target)) } : await describeSavedResult(ctx, id));
       }
       case "data_sql": return ok({ ...(await runSql(ctx, args as unknown as SqlInput)) });
       case "data_show": return ok({ ...(await showCard(ctx, args as unknown as ShowInput, onCardReady)) });

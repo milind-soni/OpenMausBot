@@ -80,6 +80,16 @@ describe("the Data routes", () => {
     expect((await call("GET", "/api/bots/bot-1/data/nothing")).status).toBe(400);
   });
 
+  it("reads the sheet without writing it or telling every client about the catalog", async () => {
+    const { call, frames, dir } = await serve();
+    await call("GET", "/api/bots/bot-1/data");
+    const read = await call("GET", "/api/bots/bot-1/data");
+    expect(read.body.sheet).not.toHaveProperty("tables");
+    expect(read.body.tables.map((table: { name: string }) => table.name)).toEqual(["orders"]);
+    expect(frames).toEqual([]);
+    expect(existsSync(join(dir, "bots", "bot-1", "sheet.json"))).toBe(false);
+  });
+
   it("answers 503 engine_unavailable before touching anything when DuckDB cannot run", async () => {
     const { call, database } = await serve({ engine: { unavailable: () => "the DuckDB binding did not load", forBot: async () => { throw new Error("never"); } } });
     const reply = await call("GET", "/api/bots/bot-1/data");

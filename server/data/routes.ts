@@ -121,9 +121,8 @@ export function createDataRoutes(deps: DataRouteDeps): RouteHandler {
     };
     try {
       if (rest === "" && method === "GET") {
-        const tables = await database.listTables();
-        sheet.recordTables(tables);
-        return ctx.json(res, 200, { sheet: sheet.sheet(), tables });
+        // The catalog comes from DuckDB each time; a read never writes the sheet.
+        return ctx.json(res, 200, { sheet: sheet.sheet(), tables: await database.listTables() });
       }
       if (rest === "page" && method === "POST") {
         const input = await body(ctx, pageBody);

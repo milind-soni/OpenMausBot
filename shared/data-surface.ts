@@ -164,13 +164,13 @@ export interface DataSheet {
   botId: string;
   cards: DataCard[];
   sources: DataSource[];
-  /** Current database catalog, including tables derived with SQL. No rows. */
-  tables?: Array<{ name: string; sqlName?: string; rowCount: number; columns: DataColumn[] }>;
   updatedAt: string;
 }
 
 /** Server → client. One message carries the whole sheet; sheets are small
- * (no rows), so no patches. */
+ * (no rows), so no patches. The database's catalog (every table, including
+ * ones derived with SQL) is not on the sheet: DuckDB owns it, and GET
+ * /api/bots/:id/data reads it fresh as `tables`. */
 export interface DataBroadcast {
   kind: "data";
   botId: string;

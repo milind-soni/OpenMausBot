@@ -155,9 +155,11 @@ describe("dataRpc", () => {
     expect(published).toEqual([]);
   });
 
-  it("broadcasts a derived table without counting unrelated tables", async () => {
+  it("lists a derived table from the database's catalog, never from a copy on the sheet", async () => {
     const { deps } = harness();
-    await dataRpc({ method: "tools/call", params: { name: "data_sql", arguments: { sql: "CREATE TABLE derived AS SELECT 1" } } }, deps);
-    expect(deps.sheet.sheet().tables?.[0]).toMatchObject({ name: "derived" });
+    await dataRpc({ method: "tools/call", params: { name: "data_sql", arguments: { sql: 'CREATE TABLE "derived" AS SELECT 1' } } }, deps);
+    expect(deps.sheet.sheet()).not.toHaveProperty("tables");
+    const described = await dataRpc({ method: "tools/call", params: { name: "data_describe", arguments: {} } }, deps) as { structuredContent: { tables: unknown[] } };
+    expect(described.structuredContent.tables).toEqual([{ name: "derived", rowCount: 3 }]);
   });
 });

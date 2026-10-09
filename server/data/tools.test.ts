@@ -305,7 +305,7 @@ describe("data_describe saved results", () => {
     await showCard(ctx, { kind: "table", sql: "SELECT 2", title: "Second" });
     sheet.card("c_2")!.updatedAt = "2020-01-01T00:00:00.000Z";
     await showCard({ ...ctx, by: "person", connection: "panel" }, { id: "c_1", sql: "SELECT 3 AS edited", live: true });
-    sheet.recordTable({ name: "Order Details", sqlName: '"Order Details"', rowCount: 3, columns: [] });
+    database.tables.set("Order Details", { columns: [], rows: [[1], [2], [3]] });
     database.calls.length = 0;
     const read = await runDataTool(ctx, "data_describe", {});
     expect(read.structuredContent).toMatchObject({
@@ -313,7 +313,8 @@ describe("data_describe saved results", () => {
       cards: [{ id: "c_1" }, { id: "c_2" }], tables: [{ name: "Order Details", sqlName: '"Order Details"', rowCount: 3 }],
       truncated: false, omitted: [],
     });
-    expect(database.calls).toEqual([]);
+    // the catalog is read, no query runs
+    expect(database.calls).toEqual([{ method: "listTables" }]);
     const explicit = await runDataTool(ctx, "data_describe", { id: "c_2" });
     expect(explicit.structuredContent).toMatchObject({ card: { id: "c_2", sql: "SELECT 2" } });
   });
@@ -342,7 +343,17 @@ describe("data_describe saved results", () => {
     expect(result.structuredContent!.card).not.toHaveProperty("sql");
     expect(Buffer.byteLength(result.content[0]!.text)).toBeLessThanOrEqual(DATA_LIMITS.describeBytesMax);
     expect(result.content[0]!.text).not.toContain("source-secret");
-    expect(database.calls).toEqual([]);
+    expect(database.calls).toEqual([{ method: "listTables" }]);
+  });
+
+  it("lists each of the database's tables once, even after a quoted CREATE OR REPLACE of a loaded one", async () => {
+    const { ctx, database, sheet } = context();
+    database.tables.set("orders", { columns: [{ name: "id", type: "INTEGER" }], rows: [[1], [2], [3]] });
+    await runSql(ctx, { sql: 'CREATE OR REPLACE TABLE "orders" AS SELECT 1 AS id' });
+    await runSql(ctx, { sql: 'CREATE TABLE "Order Details" AS SELECT 1 AS id' });
+    const read = await runDataTool(ctx, "data_describe", {});
+    expect(read.structuredContent!.tables).toEqual([{ name: "orders", rowCount: 3 }, { name: "Order Details", sqlName: '"Order Details"', rowCount: 3 }]);
+    expect(sheet.sheet()).not.toHaveProperty("tables");
   });
 
   it("handles empty state and refuses unknown or conflicting targets without leaking input", async () => {
@@ -352,7 +363,7 @@ describe("data_describe saved results", () => {
     const conflicting = await runDataTool(ctx, "data_describe", { id: "c_1", target: "SELECT 'secret-target'" });
     expect(conflicting.structuredContent).toMatchObject({ code: "invalid_input" });
     expect(conflicting.content[0]!.text).not.toContain("secret-target");
-    expect(database.calls).toEqual([]);
+    expect(database.calls).toEqual([{ method: "listTables" }]);
   });
 });
 

@@ -144,9 +144,14 @@ export class FakeDataDatabase implements BotDatabase {
     return { table, column, bins: [{ label: "1", count: 1 }, { label: "2", count: 2 }] };
   }
 
-  async listTables(): Promise<Array<{ name: string; rowCount: number; columns: DataColumn[] }>> {
+  async listTables(): Promise<Array<{ name: string; sqlName?: string; rowCount: number; columns: DataColumn[] }>> {
     this.calls.push({ method: "listTables" });
-    return [...this.tables.entries()].map(([name, table]) => ({ name, rowCount: table.rows.length, columns: table.columns }));
+    return [...this.tables.entries()].map(([name, table]) => ({
+      name,
+      ...(/^[a-z_][a-z0-9_]*$/.test(name) ? {} : { sqlName: `"${name.replaceAll('"', '""')}"` }),
+      rowCount: table.rows.length,
+      columns: table.columns,
+    }));
   }
 
   interrupt(connection: DataConnection): void {
