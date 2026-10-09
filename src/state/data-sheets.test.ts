@@ -89,6 +89,23 @@ describe("data sheets in the store", () => {
     expect(reducer(consumed, { type: "openDataResult", botId: "bot", cardId: "c_1" }).dataResultFocus).toMatchObject({ consumed: false, requestId: 2 });
     expect(reducer(opened, { type: "openDataResult", botId: "deleted", cardId: "c_1" })).toBe(opened);
   });
+  it("opens a receipt's bot the way selecting it does: unread clears and the read is posted", async () => {
+    // Another bot with unread messages, not the one on screen.
+    const other: BotAnnouncement = { ...bot, id: "other", name: "Other", unread: true, tasks: [{ ...bot.tasks![0]!, unread: true }] };
+    await send({ kind: "bot", bot: other as unknown as Extract<ServerFrame, { kind: "bot" }>["bot"] });
+    expect(seen.selectedId).toBe("bot");
+    expect(seen.bots.find((candidate) => candidate.id === "other")?.unread).toBe(true);
+    expect(sent("/api/bots/other/read")).toHaveLength(0);
+    dispatch({ type: "openDataResult", botId: "other", cardId: "c_1" });
+    await settle();
+    expect(seen).toMatchObject({ selectedId: "other", activeView: "chat", computerOpen: true, dataResultFocus: { botId: "other", id: "c_1", consumed: false } });
+    const openedBot = seen.bots.find((candidate) => candidate.id === "other");
+    expect(openedBot?.unread).toBe(false);
+    expect(openedBot?.tasks?.[0]?.unread).toBe(false);
+    expect(sent("/api/bots/other/read").map((request) => [request.method, request.body])).toEqual([["POST", { threadId: "thread" }]]);
+    dispatch({ type: "select", id: "bot" });
+    await settle();
+  });
   it("start empty and are not fetched with the app", () => {
     expect(seen.dataSheets).toEqual({});
     expect(sent(DATA_ROUTES.sheet("bot"))).toHaveLength(0);

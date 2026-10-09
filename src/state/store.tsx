@@ -2162,9 +2162,10 @@ export function reducer(state: AppState, action: Action): AppState {
       return state.unreadDivider?.threadId === action.threadId ? { ...state, unreadDivider: null } : state;
     case "openDataResult": {
       if (!state.bots.some((bot) => bot.id === action.botId)) return state;
-      return { ...state, selectedId: action.botId, activeView: "chat", computerOpen: true,
-        settingsOpen: false, inspectorOpen: false, activityOpen: false, appSettingsOpen: false,
-        dataResultFocus: { botId: action.botId, id: action.cardId, requestId: (state.dataResultFocus?.requestId ?? 0) + 1, consumed: false } };
+      // The same path as clicking the bot, so unread and the read cursor
+      // settle the way `select` does; then the Computer panel opens on it.
+      const selected = reducer(reducer(state, { type: "select", id: action.botId }), { type: "toggleComputer", open: true });
+      return { ...selected, dataResultFocus: { botId: action.botId, id: action.cardId, requestId: (state.dataResultFocus?.requestId ?? 0) + 1, consumed: false } };
     }
     case "dataResultFocusConsumed":
       return state.dataResultFocus?.requestId === action.requestId
@@ -3549,13 +3550,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             () => {},
           );
           break;
+        case "openDataResult":
         case "select": {
-          const bot = stateRef.current.bots.find((b) => b.id === action.id);
-          const group = stateRef.current.groups.find((g) => g.id === action.id);
+          const id = action.type === "select" ? action.id : action.botId;
+          const bot = stateRef.current.bots.find((b) => b.id === id);
+          const group = stateRef.current.groups.find((g) => g.id === id);
           if (bot?.unread) {
-            api(`/api/bots/${action.id}/read`, { method: "POST", body: JSON.stringify({ threadId: bot.threadId }) }).catch(() => {});
+            api(`/api/bots/${id}/read`, { method: "POST", body: JSON.stringify({ threadId: bot.threadId }) }).catch(() => {});
           } else if (group?.unread) {
-            api(`/api/groups/${action.id}/read`, { method: "POST" }).catch(() => {});
+            api(`/api/groups/${id}/read`, { method: "POST" }).catch(() => {});
           }
           break;
         }
