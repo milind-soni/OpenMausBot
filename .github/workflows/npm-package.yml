@@ -47,6 +47,8 @@ jobs:
           node cli.js --help | grep -q "openmausbot serve"
           HOME=/tmp/omb-pack/home node cli.js serve --no-pair --port 18799 --data-dir /tmp/omb-pack/data --label ci --public-url https://ci.example > serve.log 2>&1 &
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:18799/api/health >/dev/null && break; sleep 1; done
+          # The server answers /api/health before the CLI prints its "running" line, so wait for the line too.
+          for i in $(seq 1 30); do grep -q "reachable at https://ci.example" serve.log && break; sleep 1; done
           grep -q "reachable at https://ci.example" serve.log
           OMB_PORT=18799 node cli.js status | grep -q "ci ·"
           OMB_PORT=18799 node cli.js pair --label "CI phone" | grep -q "open or scan:  https://ci.example/pair#code="

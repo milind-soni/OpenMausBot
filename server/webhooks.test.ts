@@ -96,6 +96,31 @@ describe("WebhookManager", () => {
     expect(reloaded.listAttempts()).toEqual([]);
   });
 
+  it("refuses to overwrite a webhooks file it could not read", () => {
+    const h = harness();
+    create(h.manager);
+    const corrupt = readFileSync(h.file, "utf8").slice(0, 100);
+    writeFileSync(h.file, corrupt);
+    const reloaded = new WebhookManager(h.options);
+    expect(reloaded.list()).toEqual([]);
+    expect(() => create(reloaded)).toThrow(expect.objectContaining({ status: 503 }));
+    expect(readFileSync(h.file, "utf8")).toBe(corrupt);
+  });
+
+  it("refuses to overwrite a webhooks file with a row the schema rejects", () => {
+    const h = harness();
+    create(h.manager);
+    create(h.manager);
+    const disk = JSON.parse(readFileSync(h.file, "utf8")) as { webhooks: Array<Record<string, unknown>> };
+    disk.webhooks[0].runOn = "future-engine";
+    const damaged = JSON.stringify(disk);
+    writeFileSync(h.file, damaged);
+    const reloaded = new WebhookManager(h.options);
+    expect(reloaded.list()).toEqual([]);
+    expect(() => create(reloaded)).toThrow(expect.objectContaining({ status: 503 }));
+    expect(readFileSync(h.file, "utf8")).toBe(damaged);
+  });
+
   it("stores only a secret digest and exposes the secret once", () => {
     const h = harness();
     const created = create(h.manager);

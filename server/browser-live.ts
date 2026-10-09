@@ -31,6 +31,18 @@ export class BrowserLiveError extends Error {
   constructor(message: string, status = 400) { super(message); this.name = "BrowserLiveError"; this.status = status; }
 }
 
+/** The engine ran the person's command and answered that it failed, such as
+ * an address that does not resolve. The browser is fine: the view says what
+ * failed and keeps working (isSettledBrowserFailure), with no restart. */
+export class BrowserActionFailedError extends BrowserLiveError {
+  readonly settled = true;
+  constructor(args: readonly string[]) {
+    const opening = args[0] === "open" || (args[0] === "tab" && args[1] === "new" && args.length > 2);
+    super(opening ? "This page could not be opened. Check the address and try again." : "The browser could not do that. Try again.", 422);
+    this.name = "BrowserActionFailedError";
+  }
+}
+
 /** The engine is there but did not answer in time: another command, usually
  * the bot's own, holds the same browser session. Not a missing engine. */
 export class BrowserBusyError extends BrowserLiveError {
@@ -73,6 +85,15 @@ function displayUrl(value: unknown): string {
  * Distinct from a missing engine — the fix is a fresh session, not an
  * install, so the generic "check the engine is installed" guidance would
  * send the operator the wrong way (#1383). */
+/** The engine's own JSON answer says the command failed, whether it exited
+ * non-zero or not: it ran to the end. A timeout, an abort or a crash leaves
+ * no such answer, and stays an interrupted action. */
+function engineAnsweredFailure(error: unknown): boolean {
+  const stdout = (error as { stdout?: unknown } | null)?.stdout;
+  if (typeof stdout !== "string" || !stdout.trim()) return false;
+  try { return object(JSON.parse(stdout))?.success === false; } catch { return false; }
+}
+
 function browserLaunchFailure(error: unknown): boolean {
   const detail = [
     (error as { stderr?: unknown })?.stderr,
@@ -302,7 +323,10 @@ export class BrowserLive {
     if (viewer.pressedKeys.size || viewer.pressedButtons.size) this.runtime.abandonHumanInput(viewer.session, viewer.id);
   }
 
-  private async command(viewer: Viewer, args: string[], timeout = COMMAND_TIMEOUT_MS): Promise<ObjectValue> {
+  /** `person`: the person's own command (navigate, a tab), whose answered
+   * failure is theirs to see and retry. The view's own setup keeps its
+   * engine errors. */
+  private async command(viewer: Viewer, args: string[], timeout = COMMAND_TIMEOUT_MS, person = false): Promise<ObjectValue> {
     if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
     const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
     try {
@@ -317,7 +341,7 @@ export class BrowserLive {
         // Keep the engine's own error internal (logged, never sent) so a
         // launch failure is recognized for what it is below.
         const detail = [result?.error, result?.message].filter((part): part is string => typeof part === "string").join(" ");
-        throw new Error(detail ? `browser command failed: ${detail}` : "browser command failed");
+        throw Object.assign(new Error(detail ? `browser command failed: ${detail}` : "browser command failed"), { stdout });
       }
       return data;
     } catch (error) {
@@ -341,6 +365,7 @@ export class BrowserLive {
         }
         throw new BrowserLiveError("The browser could not start on this server. Reconnect to retry with a fresh browser session.", 503);
       }
+      if (person && engineAnsweredFailure(error)) throw new BrowserActionFailedError(args);
       throw new BrowserLiveError("The browser could not complete this action. Check that the browser engine is installed, then reconnect.", 503);
     }
   }
@@ -568,7 +593,7 @@ export class BrowserLive {
       await this.runtime.withHumanAction(viewer.session, viewer.id, async () => {
         if (!this.current(viewer)) throw new BrowserLiveError("This browser view closed.", 409);
         if (action.type === "input") await this.input(viewer, action.message);
-        else if (action.type === "command") await this.command(viewer, action.args);
+        else if (action.type === "command") await this.command(viewer, action.args, COMMAND_TIMEOUT_MS, true);
       });
       return { ok: true };
     } catch (error) { throw error instanceof BrowserLiveError ? error : this.refusal(viewer, "Browser control changed. Try again."); }

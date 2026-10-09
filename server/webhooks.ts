@@ -323,6 +323,10 @@ export class WebhookManager {
   private rate = new Map<string, number[]>();
   /** Bad-secret requests folded into each webhook's rolling record. */
   private unauthorized = new Map<string, number>();
+  /** The file existed but could not be read (corrupt JSON or a row that
+   * fails validation). Saves are refused while set so a fresh empty state
+   * can never overwrite whatever is on disk. Missing means a first run. */
+  private unreadable = false;
 
   constructor(options: WebhookManagerOptions) {
     this.options = options;
@@ -334,10 +338,21 @@ export class WebhookManager {
       this.webhooks = parsed.data.webhooks;
       this.deliveries = parsed.data.deliveries.slice(-MAX_DELIVERIES);
       this.attempts = (parsed.data.attempts ?? []).slice(-MAX_ATTEMPTS);
-    } catch {
+    } catch (error) {
       this.webhooks = [];
       this.deliveries = [];
       this.attempts = [];
+      // Missing means no webhooks yet. Any other read/validation failure
+      // disables overwriting the file: the next save must not replace it
+      // with nothing.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        this.unreadable = true;
+        // JSON.parse echoes a fragment of its input in some messages, so a
+        // malformed file must never be copied into the server log.
+        const reason = error instanceof SyntaxError ? "invalid JSON"
+          : error instanceof Error ? error.message : "unable to read webhooks";
+        console.error(`webhooks: ignoring unreadable ${this.file}: ${reason}`);
+      }
     }
   }
 
@@ -350,6 +365,7 @@ export class WebhookManager {
   }
 
   create(input: JsonValue): CreatedWebhook {
+    this.assertWritable();
     const clean = cleanInput(parseTriggerInput(input));
     if (this.options.botState(clean.botId) === "missing") fail(400, "That MAUS no longer exists");
     const now = this.now();
@@ -370,6 +386,7 @@ export class WebhookManager {
   }
 
   update(id: string, value: JsonValue): WebhookTrigger | null {
+    this.assertWritable();
     const trigger = this.webhooks.find((candidate) => candidate.id === id);
     if (!trigger) return null;
     const patch = parseTriggerPatch(value);
@@ -398,6 +415,7 @@ export class WebhookManager {
   }
 
   remove(id: string): boolean {
+    this.assertWritable();
     const at = this.webhooks.findIndex((candidate) => candidate.id === id);
     if (at === -1) return false;
     const [trigger] = this.webhooks.splice(at, 1);
@@ -412,6 +430,7 @@ export class WebhookManager {
   }
 
   rotateSecret(id: string): { webhook: WebhookTrigger; secret: string } | null {
+    this.assertWritable();
     const trigger = this.webhooks.find((candidate) => candidate.id === id);
     if (!trigger) return null;
     const secret = newSecret();
@@ -688,7 +707,15 @@ export class WebhookManager {
     this.options.emit?.({ kind: "webhook", webhook: publicTrigger(trigger) });
   }
 
+  private assertWritable(): void {
+    if (this.unreadable) throw Object.assign(new Error("Saved webhooks could not be read. Repair webhooks.json before changing them."), { status: 503 });
+  }
+
   private save(): void {
+    // The file on disk failed to load, so it may still hold webhooks this
+    // process cannot see. Management writes refuse above; delivery bookkeeping
+    // skips here rather than replacing it with nothing.
+    if (this.unreadable) return;
     mkdirSync(dirname(this.file), { recursive: true });
     writeFileAtomic(
       this.file,

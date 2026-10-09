@@ -12,6 +12,7 @@ import { launchVerificationServer, runControlOmb, verificationServerEnvironment 
 import { request } from "../scripts/mcp-server.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { withoutTurnClock } from "./testing/turn-clock-text.ts";
 
 const count = (text: string, needle: string) => text.split(needle).length - 1;
 const jsonl = (path: string) => existsSync(path)
@@ -903,7 +904,7 @@ it("keeps resuming an ordinary turn after a soul change, as before", () => fixtu
   await f.send("Second message.");
   await f.wait();
   expect(f.launches().at(-1).resume).not.toBeNull();
-  expect(f.prompt(f.turns().at(-1))).toBe("Second message.");
+  expect(withoutTurnClock(f.prompt(f.turns().at(-1)))).toBe("Second message.");
 }), hostTimeout(60_000));
 
 // ── Steers: never counted as received on output alone ──

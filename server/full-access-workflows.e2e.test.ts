@@ -147,6 +147,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
         step("propose_team_setup", { reason: "Requested Research specialist and Chief description", newTeams: ["Research"], operations: [
           specialist("Mira", "Research"), { action: "update", botId: chief.id, fields: { description: "Coordinates monthly fixture reports" } },
         ] }),
+        step("create_bot", { name: "Theo", role: "Totals checker", instructions: "Check fixture totals before each report." }),
       ], { guarded: "full" });
     expect(created.permissionMode).toBe("bypassPermissions");
     for (const entry of created.evidence.filter((item: any) => ["propose_profile", "propose_routine", "skill_manage", "propose_team_setup"].includes(item.step?.tool))) {
@@ -155,6 +156,11 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     }
     const updatedChief = (await bots()).find(bot => bot.id === chief.id);
     expect(updatedChief).toMatchObject({ title: "Monthly reporting Chief", description: "Coordinates monthly fixture reports", soul: "Report only verified fixture results.", approvalMode: "full", approvePeerComms: true, managedSections: ["Research"] });
+    // create_bot takes the same reviewed path, which Full access applies now.
+    const createdTheo = created.evidence.find((item: any) => item.step?.tool === "create_bot");
+    expect(createdTheo.response.result.content[0].text).toMatch(/^Created @Theo in Operations/);
+    expect((await bots()).find(bot => bot.name === "Theo")).toMatchObject({ section: "Operations", title: "Totals checker",
+      soul: "Check fixture totals before each report.", approvalMode: "ask", autoApprove: false, composio: false });
     const mira = (await bots()).find(bot => bot.name === "Mira");
     expect(mira).toMatchObject({ section: "Research", approvalMode: "ask", autoApprove: false, composio: false });
     const routine = (await api("GET", "/api/routines")).routines.find((item: any) => item.name === "Monthly fixture report");

@@ -4,7 +4,7 @@
 // message, and this helper keeps the eventual file handle inside one of them.
 import { constants } from "node:fs";
 import { lstat, open, readdir, realpath, stat, type FileHandle } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { fromMarkdown } from "mdast-util-from-markdown";
@@ -445,6 +445,48 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
 
   if (sawOutsideRoot) throw outsideWorkspace();
   throw statusError(404, "the linked file is unavailable");
+}
+
+/** Filesystems such as HFS+ and FAT keep whole or even seconds, so a file
+ * written in the first moments of a turn can carry a slightly earlier time. */
+const SAVED_SINCE_SLACK_MS = 2_000;
+
+/**
+ * Open one file a turn saved outside every root, for a bot to deliver by copy
+ * (server/bot-attachment.ts). This grants no folder and is never used for a
+ * message link: only an absolute path to a regular file last written at or
+ * after `since`, outside hidden folders and outside `refuse`. The open itself
+ * is openMessageFile with the file's own folder as the root, so the realpath,
+ * O_NOFOLLOW, regular file and size checks are exactly the ones above.
+ */
+export async function openFileSavedSince(
+  href: string,
+  options: { since: number; refuse: readonly string[] },
+): Promise<OpenedMessageFile> {
+  const requested = referencedPath(href, false, false);
+  if (!isAbsolute(requested) || requested.startsWith("\\\\") || requested.startsWith("//")) throw outsideWorkspace();
+  let canonical: string;
+  try {
+    canonical = await realpath(requested);
+  } catch {
+    throw statusError(404, "the linked file is unavailable");
+  }
+  const refused = (await Promise.all(options.refuse.map((root) => realpath(root).catch(() => null))))
+    .filter((root): root is string => Boolean(root));
+  const hidden = canonical.split(/[\\/]/).some((part) => part.startsWith("."));
+  if (hidden || refused.some((root) => containedBy(root, canonical))) {
+    throw statusError(403, "files in hidden folders or in the app's own data can't be attached", "outside_workspace");
+  }
+  const file = await openMessageFile(canonical, [dirname(canonical)]);
+  const opened = await file.handle.stat().catch(async (error: unknown) => {
+    await file.handle.close().catch(() => undefined);
+    throw error;
+  });
+  if (opened.mtimeMs < options.since - SAVED_SINCE_SLACK_MS) {
+    await file.handle.close().catch(() => undefined);
+    throw statusError(403, "that file is outside your working folder and was not saved during this turn, so it can't be attached", "outside_workspace");
+  }
+  return file;
 }
 
 export const MESSAGE_FOLDER_MAX_ENTRIES = 200;
