@@ -181,19 +181,18 @@ describe("the person's Cloud as a destination on this computer", () => {
     status: "connected", entitlement: { plan: "pro", tier: "personal", status: "active", expiresAt: null, version: 1 }, machine: { status: "ready", origin }, ...patch,
   });
 
-  it("a paid plan, any tier, with the Cloud Ready, is offered", () => {
+  it("a paid plan, any tier, with the Cloud Ready, is not offered (Vopwe local-only)", () => {
     for (const tier of [undefined, "personal", "pro", "max", "team"]) {
-      expect(cloudPhoneDestination(paid({ entitlement: { plan: "pro", ...(tier ? { tier } : {}), status: "active", expiresAt: null, version: 1 } }))).toBe("ready");
+      expect(cloudPhoneDestination(paid({ entitlement: { plan: "pro", ...(tier ? { tier } : {}), status: "active", expiresAt: null, version: 1 } }))).toBeNull();
     }
-    // the last checks failed: still the verified paid plan
-    expect(cloudPhoneDestination(paid({ checking: true }))).toBe("ready");
+    expect(cloudPhoneDestination(paid({ checking: true }))).toBeNull();
   });
 
-  it("a paid plan whose Cloud is not Ready is a hint only", () => {
+  it("a paid plan whose Cloud is not Ready is nothing (Vopwe local-only)", () => {
     for (const machine of [{ status: "provisioning" }, { status: "stopped", origin }, { status: "payment-problem", origin }, { status: "failed", origin }] as const) {
-      expect(cloudPhoneDestination(paid({ machine }))).toBe("not-ready");
+      expect(cloudPhoneDestination(paid({ machine }))).toBeNull();
     }
-    expect(cloudPhoneDestination(paid({ machine: undefined }))).toBe("not-ready");
+    expect(cloudPhoneDestination(paid({ machine: undefined }))).toBeNull();
   });
 
   it("no paid plan, signed out or not known yet: nothing", () => {

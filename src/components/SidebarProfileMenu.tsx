@@ -17,15 +17,19 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
+  CalendarDays,
   Check,
   Download,
   Info,
   HelpCircle,
   Keyboard,
   Loader2,
+  Network,
+  Puzzle,
   RefreshCw,
   Settings as SettingsIcon,
   Smartphone,
+  Zap,
 } from "lucide-react";
 
 import { InitialsAvatar } from "./Avatar";
@@ -311,6 +315,30 @@ export function SidebarProfileMenu() {
       onConnect: connectTo,
       onGetApp: () => setPhoneAppOpen(true),
     }),
+    {
+      key: "routines",
+      label: t("sidebar.nav.routines"),
+      icon: <CalendarDays size={18} />,
+      onSelect: () => dispatch({ type: "showRoutines" }),
+    },
+    {
+      key: "triggers",
+      label: t("sidebar.nav.triggers"),
+      icon: <Zap size={18} />,
+      onSelect: () => dispatch({ type: "toggleTriggers", open: true }),
+    },
+    {
+      key: "apps",
+      label: t("sidebar.nav.apps"),
+      icon: <Puzzle size={18} />,
+      onSelect: () => dispatch({ type: "togglePlugins", open: true }),
+    },
+    {
+      key: "team-map",
+      label: t("sidebar.nav.teamMap"),
+      icon: <Network size={18} />,
+      onSelect: () => dispatch({ type: "showTeamMap" }),
+    },
     {
       key: "settings",
       label: t("sidebar.menu.settings"),

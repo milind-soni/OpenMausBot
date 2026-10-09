@@ -31,7 +31,6 @@ import {
   Moon,
   Power,
   Settings,
-  Smartphone,
   X,
 } from "lucide-react";
 import { api, ApiError, currentTaskBot, useStore, type Bot, type ConfigStatus } from "@/state/store";
@@ -50,7 +49,6 @@ import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
 import { routineRunLabel, routineRunTone } from "@/lib/routine-display";
-import { AndroidDevicePanel, useAndroidUsbDevices } from "./AndroidDevicePanel";
 import { BrowserPanel } from "./BrowserPanel";
 // The Data tab's code (and, behind it, vega-embed) loads the
 // first time the tab opens, never with the app.
@@ -381,9 +379,7 @@ export function ComputerPanel({
   const [dataRequest, setDataRequest] = useState<{ id: string; requestId: number }>();
   const panelView: ComputerPanelView = advanced
     ? storedPanelView === "files" ? "computer" : storedPanelView
-    : storedPanelView === "routines" || storedPanelView === "android" ? "computer" : storedPanelView;
-  const androidStatus = useAndroidUsbDevices();
-  const androidConnected = androidStatus.devices.length > 0;
+    : storedPanelView === "routines" ? "computer" : storedPanelView;
   // Keep installation reachable before the engine is ready. Actual browser
   // operations below still require browserAvailableHere.
   const browserAvailableHere = browserAvailable(state.config);
@@ -478,14 +474,6 @@ export function ComputerPanel({
     };
   }, [bot.id]);
 
-  useEffect(() => {
-    // Simple mode keeps the Browser tab when the browser is off: it explains
-    // how to turn it on instead of disappearing.
-    if (!androidConnected && panelView === "android") {
-      setPanelView("computer");
-      writeComputerPanelView(bot.id, "computer");
-    }
-  }, [androidConnected, bot.id, panelView]);
   useEffect(() => {
     vmReadinessAttempts.current = 0;
   }, [bot.id, bot.computer]);
@@ -1462,15 +1450,6 @@ export function ComputerPanel({
               className={tabClass(panelView === "routines")}
             ><CalendarClock size={13} />{t("computer.tab.routines")}</button>
             )}
-            {advanced && androidConnected && (
-            <button
-              onClick={() => selectPanelView("android")}
-              aria-pressed={panelView === "android"}
-              className={tabClass(panelView === "android")}
-            >
-              <Smartphone size={13} /> {t("computer.tab.android")}
-            </button>
-            )}
             {(
             <button
               data-tour="computer-browser"
@@ -1554,10 +1533,6 @@ export function ComputerPanel({
         </div>
       ) : panelView === "files" ? (
         <ComputerFilesPane bot={bot} />
-      ) : panelView === "android" && androidConnected ? (
-        <div className="flex-1 overflow-y-auto px-4 pt-2">
-          <AndroidDevicePanel status={androidStatus} />
-        </div>
       ) : (
       <div className="flex-1 overflow-y-auto px-5 pb-5">
           {/* Screen preview */}

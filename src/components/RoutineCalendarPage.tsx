@@ -53,7 +53,7 @@ import { routineRunLabel, routineRunsOn, routineRunTime, routineScheduleState } 
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
-import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
+import { useCaptionChrome, useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
 import type { CalendarCall, CalendarCallAttachment, CalendarCallInput } from "@/lib/calendar-calls";
 import { cn } from "@/lib/cn";
@@ -98,7 +98,6 @@ import {
   type RoutineTarget,
 } from "@/lib/routines";
 import { api, openNotificationTarget, useStore, type Bot, type Group } from "@/state/store";
-import { RoutineScheduleNote } from "./RoutineScheduleNote";
 
 const HOUR_HEIGHT = 64;
 const DAY_CHIP_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -670,7 +669,11 @@ export function EventEditor({
                 </select>
               </div>
   );
-  const scheduleNote = kind === "routine" && <RoutineScheduleNote />;
+  const scheduleNote = kind === "routine" && (
+                <p className="text-[11px] leading-relaxed text-ink-secondary">
+                  Runs while OpenMausBot is open on this computer. A run missed by less than 12 hours still happens when the app is back.
+                </p>
+              );
   const repeatDetails = (
     <>
               {isCronChoice(recurrence) && kind === "routine" && cron && <CronScheduleFields choice={recurrence} value={cronDraft} onChange={(draft) => { setCronDraft(draft); setCronChanged(true); }} runs={cron.runs} error={cron.error} />}
@@ -1413,7 +1416,7 @@ function CalendarGrid({
 
   return (
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto border-l border-t border-hairline/40 bg-app">
-      <div className="sticky top-0 z-30 grid bg-app/95 backdrop-blur" style={{ gridTemplateColumns, minWidth }}>
+      <div className="sticky top-0 z-10 grid bg-app/95 backdrop-blur" style={{ gridTemplateColumns, minWidth }}>
         <div className="border-b border-r border-hairline/40 px-2 py-3 text-center text-[9px] uppercase tracking-wider text-ink-secondary">{formatGmtOffset(-new Date(anchor).getTimezoneOffset())}</div>
         {starts.map((start) => {
           const date = new Date(start);
@@ -1889,6 +1892,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
     if (item.kind === "routine" && item.run && ["failed", "missed"].includes(item.run.status) && !item.run.seenAt) dispatch({ type: "markRoutineRunSeen", runId: item.run.id });
   };
   const macInset = capabilities.windowChrome === "mac-inset";
+  const { controlsShiftStyle } = useCaptionChrome();
   const windowDragStyle = macInset
     ? ({ WebkitAppRegion: "drag" } as CSSProperties)
     : undefined;
@@ -1981,7 +1985,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-app animate-workspace-in">
       <header
-        className={cn("shrink-0 border-b border-hairline/35 bg-app py-3 pr-4", macInset ? "pl-[86px]" : "pl-4")}
+        className={cn("sticky top-0 z-20 shrink-0 border-b border-hairline/35 bg-app py-3 pr-4", macInset ? "pl-[86px]" : "pl-4")}
         style={windowDragStyle}
       >
         <div className="flex flex-wrap items-center gap-2">
@@ -2005,7 +2009,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
               <button type="button" onClick={goToday} className="ml-1 rounded-lg border border-hairline/50 bg-panel px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-raised">{t("routines.today")}</button>
             </div>
           )}
-          <div className="ml-auto flex flex-wrap items-center gap-2" style={windowNoDragStyle}>
+          <div className="ml-auto flex flex-wrap items-center gap-2" style={{ ...windowNoDragStyle, ...controlsShiftStyle }}>
             <div role="group" className="flex items-center rounded-lg border border-hairline/50 bg-panel p-0.5" aria-label={t("routines.view.label")}>
               <button type="button" aria-pressed={shownSection === "calendar" && layout === "day"} onClick={() => showLayout("day")} className={segment(shownSection === "calendar" && layout === "day")}>{t("routines.view.day")}</button>
               <button type="button" aria-pressed={shownSection === "calendar" && layout === "week"} onClick={() => showLayout("week")} className={segment(shownSection === "calendar" && layout === "week")}>{t("routines.view.week")}</button>
@@ -2033,7 +2037,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
       </header>
       <RoutineWakeBar />
 
-      <div className="@container/routines relative flex min-h-0 flex-1">
+      <div className="@container/routines relative flex min-h-0 flex-1 pt-2">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {shownSection === "webhooks" ? <WebhooksPanel bots={visibleBots} createRequest={webhookCreateRequest} onCreateHandled={handleWebhookCreateHandled} /> : shownSection === "logs" ? (
             <div className="min-h-0 flex-1 overflow-y-auto"><RoutineLogs runs={filteredRuns} bots={state.bots} loading={state.routinesLoadState === "loading" && filteredRuns.length === 0} error={state.routinesLoadState === "error"} routineId={routineFilter} status={statusFilter} onStatusChange={setStatusFilter} onClearRoutine={() => setRoutineFilter(undefined)} onOpen={openRun} /></div>
@@ -2052,7 +2056,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
         </div>
         {/* Beside the grid when there is room; over it on a narrow window. */}
         {drawerOpen && liveSelected && (
-          <div className="absolute inset-y-0 right-0 z-30 flex shadow-2xl @min-[760px]/routines:static @min-[760px]/routines:shadow-none">
+          <div className="absolute inset-y-0 right-0 z-20 flex shadow-2xl @min-[760px]/routines:static @min-[760px]/routines:shadow-none">
             <EventDetails key={`${liveSelected.kind}:${liveSelected.id}`} item={liveSelected} bots={state.bots} onClose={() => setSelected(null)} onEdit={editSelected} onOpenRun={openRun} onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} onOpenRoom={onOpenRoom} />
           </div>
         )}

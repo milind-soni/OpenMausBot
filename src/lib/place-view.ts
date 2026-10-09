@@ -3,10 +3,7 @@
 // what each next action does. The Computer panel's cards and Simple grid, the
 // composer chip, a failed turn's row and the bot's Access line all render
 // through here, so for the same facts they say the same thing.
-import { useEffect, useState } from "react";
-import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import { activeLocale, t } from "@/lib/i18n";
-import { cloudPlanView } from "@/lib/cloud-plan";
 import { engineSignedOut } from "@/lib/failed-turn";
 import { browserAvailable, builtInBrowserEnabled, type FeatureFlagConfig } from "@/lib/feature-flags";
 import { writeComputerPanelView } from "@/lib/computer-panel-view";
@@ -104,20 +101,9 @@ export function placeHasIssue(view: PlaceView): boolean {
     || view.state === "cc-unavailable";
 }
 
-/** The desktop bridge's plan: paid or not. Reads the native snapshot only;
- * never signs in or refreshes. False without a bridge (a browser, a server's
- * page). */
+/** The desktop bridge's plan: paid or not. Vopwe trim: local-only, never paid. */
 export function useCloudPlanPaid(): boolean {
-  const bridge = typeof window === "undefined" || window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
-  const [account, setAccount] = useState<CloudAccountState | null>(null);
-  useEffect(() => {
-    if (!bridge) return;
-    let active = true, updated = false;
-    const unsubscribe = bridge.onState((next) => { updated = true; if (active) setAccount(next); });
-    void bridge.state().then((next) => { if (active && !updated) setAccount(next); }).catch(() => {});
-    return () => { active = false; unsubscribe(); };
-  }, [bridge]);
-  return Boolean(bridge) && cloudPlanView(account).kind === "paid";
+  return false;
 }
 
 /** Where this app runs and who is looking: one hook for every place control. */

@@ -1,0 +1,26 @@
+name: vopwe-trim
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [trim/**]
+
+jobs:
+  guard:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: node scripts/sync-upstream.mjs
+      - run: npx tsc -b
+      - run: npx tsc -p tsconfig.server.json --noEmit
+      - run: npx vitest run src/components/SettingsModal.simple.test.ts src/components/SidebarProfileMenu.test.ts src/components/SidebarFooterNav.test.ts server/drivers/tool-scope-coverage.test.ts server/drivers/capability-fields.test.ts src/state/store.test.ts src/lib/phone-pairing.test.ts
+      - run: npx vite build

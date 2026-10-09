@@ -45,30 +45,23 @@ const { marker } = vi.hoisted(() => ({
   marker: (name: string) => () => `MARKER:${name};`,
 }));
 vi.mock("./EnginesSettings", () => ({ EnginesSettings: marker("engines") }));
-vi.mock("./DecisionModelSettings", () => ({ DecisionModelSettings: marker("decisionModel") }));
 vi.mock("./ApiKeys", () => ({
   ApiKeyRow: marker("apiKey"),
   AnthropicEveryClaudeBot: marker("anthropicEvery"),
   OpenAiCompatUrl: marker("compatUrl"),
   OpenCodeProviderKeys: marker("opencodeProviderKeys"),
-  VpsConnection: marker("vps"),
 }));
 vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: marker("companion") }));
-vi.mock("./CustomDomainSettings", () => ({ CustomDomainSettings: () => null }));
 vi.mock("./CompanionSection", () => ({ CompanionSection: () => null }));
 vi.mock("./ServerPairingCard", () => ({ ServerPairingCard: () => null }));
 vi.mock("./ConnectedWorkspacesSettings", () => ({ ConnectedWorkspacesSettings: marker("desktopWorkspaces") }));
 vi.mock("./LocalComputerSection", () => ({ LocalComputerSection: marker("computer") }));
-vi.mock("./CloudAccountSettings", () => ({ CloudAccountSettings: marker("cloudAccount") }));
-vi.mock("./OrganizationSettings", () => ({ OrganizationSettings: marker("organization") }));
-vi.mock("./PeopleSection", () => ({ PeopleSection: marker("people") }));
-vi.mock("./ActivitySection", () => ({ ActivitySection: marker("activity") }));
 vi.mock("./UsageSection", () => ({ UsageSection: marker("usage") }));
 vi.mock("./WorkspaceBackupSettings", () => ({ WorkspaceBackupSettings: marker("backups") }));
 vi.mock("./RoomTurnTimeoutSettings", () => ({ RoomTurnTimeoutSettings: () => null }));
 vi.mock("./CompanyBackupSettings", () => ({ CompanyBackupSettings: () => null }));
 
-const desktop = { ogb: { environments: {}, organization: {}, cloudAccount: {} } };
+const desktop = { ogb: { environments: {}, organization: {} } };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -95,26 +88,24 @@ const blocks = (html: string) => [...html.matchAll(/data-settings-block="([^"]+)
 const markers = (html: string) => [...html.matchAll(/MARKER:([^;]+);/g)].map((match) => match[1]);
 
 describe("Settings in Simple mode", () => {
-  it("draws at most five pages on the desktop, and none of the Advanced-only ones", () => {
+  it("draws four pages on the desktop, and none of the Advanced-only ones", () => {
     const html = render();
-    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account"]);
+    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers"]);
     expect(SIMPLE_PAGES.length).toBeLessThanOrEqual(5);
     // a flat list: no group headings, no per-section rail entries
     expect(html).not.toContain("data-settings-group=");
     expect(html).not.toContain("data-settings-section=");
     for (const hidden of ["usage", "backups", "experimental", "workspaces", "skills"]) expect(html).not.toContain(`value="${hidden}"`);
-    // the narrow-window picker offers the same five pages
+    // the narrow-window picker offers the same four pages
     const picker = html.match(/<select aria-label="Settings"[\s\S]*?<\/select>/)![0];
-    expect([...picker.matchAll(/<option value="([^"]+)"/g)].map((match) => match[1])).toEqual(["general", "appearance", "ai", "computers", "account"]);
+    expect([...picker.matchAll(/<option value="([^"]+)"/g)].map((match) => match[1])).toEqual(["general", "appearance", "ai", "computers"]);
   });
 
   it("files every Advanced page under one Simple page, or hides it", () => {
     const placed = SIMPLE_PAGES.flatMap((page) => page.sections);
     expect(new Set(placed).size).toBe(placed.length);
     const hidden = SECTIONS.map((entry) => entry.id).filter((id) => !placed.includes(id));
-    // Skills (the shared library, main's new page) is Advanced-only too, so
-    // Simple stays at five pages; a deep link still opens it.
-    expect(hidden).toEqual(["skills", "usage", "backups", "workspaces", "experimental"]);
+    expect(hidden).toEqual(["skills", "usage", "backups"]);
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
 
@@ -126,14 +117,14 @@ describe("Settings in Simple mode", () => {
     expect(blocks(html)).toEqual(["general"]);
   });
 
-  it("stacks Model providers, API keys and Decision model on AI, each under its heading", () => {
+  it("stacks Model providers and API keys on AI, each under its heading", () => {
     fixture.section = "engines";
     const html = render();
     expect(currentPage(html)).toBe("ai");
-    expect(blocks(html)).toEqual(["engines", "connections", "decisionModel"]);
+    expect(blocks(html)).toEqual(["engines", "connections"]);
     const headings = [...html.matchAll(/<h3[^>]*>([^<]+)<\/h3>/g)].map((match) => match[1]);
-    expect(headings).toEqual(["Model providers", "API keys", "Decision model"]);
-    expect(markers(html).filter((name) => name === "engines" || name === "decisionModel")).toEqual(["engines", "decisionModel"]);
+    expect(headings).toEqual(["Model providers", "API keys"]);
+    expect(markers(html).filter((name) => name === "engines")).toEqual(["engines"]);
     expect(html).toContain("More providers for OpenCode bots");
   });
 
@@ -147,21 +138,9 @@ describe("Settings in Simple mode", () => {
     expect(html).toContain('aria-label="Enable the built-in browser"');
   });
 
-  it("stacks OMB Cloud and Organization on Account in the desktop app", () => {
-    fixture.section = "cloudAccount";
+  it("has no Account page: organization, people and activity are gone", () => {
     const html = render();
-    expect(currentPage(html)).toBe("account");
-    expect(blocks(html)).toEqual(["cloudAccount", "organization"]);
-  });
-
-  it("adds People and Activity to Account for a hosted workspace's admins in a browser", () => {
-    vi.stubGlobal("window", {});
-    fixture.ownerOrAdmin = true;
-    fixture.section = "people";
-    const html = render();
-    // no Servers page without the desktop bridge, and no desktop-only account pages
-    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account"]);
-    expect(blocks(html)).toEqual(["people", "activity"]);
+    expect(pages(html)).not.toContain("account");
   });
 
   it("drops Account when nothing on it is shown", () => {
@@ -186,13 +165,10 @@ describe("Settings in Simple mode", () => {
     ["appearance", "appearance"],
     ["engines", "ai"],
     ["connections", "ai"],
-    ["decisionModel", "ai"],
     ["companion", "computers"],
     ["remote", "computers"],
     ["desktopWorkspaces", "computers"],
     ["computer", "computers"],
-    ["cloudAccount", "account"],
-    ["organization", "account"],
   ])("lands a deep link to %s on %s", (section, page) => {
     fixture.section = section;
     const html = render();
@@ -203,14 +179,12 @@ describe("Settings in Simple mode", () => {
   it.each<[AppSettingsSection, string]>([
     ["usage", "usage"],
     ["backups", "backups"],
-    ["experimental", "skillAuthoring"],
   ])("opens a hidden page (%s) for as long as it is the open one", (section, content) => {
     fixture.section = section;
     const html = render();
-    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account", section]);
+    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", section]);
     expect(currentPage(html)).toBe(section);
-    if (content === "skillAuthoring") expect(html).toContain("Bots may write their own skills");
-    else expect(markers(html)).toContain(content);
+    expect(markers(html)).toContain(content);
   });
 
   it("scrolls a later section of a stacked page into view, and starts a page at its top", () => {
@@ -249,19 +223,9 @@ describe("the built-in browser switch", () => {
     });
   });
 
-  it("is no longer on Experimental, which keeps skill drafting", () => {
-    fixture.advancedMode = true;
-    fixture.section = "experimental";
-    const html = render();
-    expect(html).not.toContain('aria-label="Enable the built-in browser"');
-    expect(html).toContain("Bots may write their own skills");
-    expect(browserSwitch()).toBeUndefined();
-  });
-
   it("is found by searching for the browser under Local VM in Advanced", () => {
     const computer = SECTIONS.find((entry) => entry.id === "computer")!;
-    const experimental = SECTIONS.find((entry) => entry.id === "experimental")!;
     expect(computer.keywords).toContain("browser");
-    expect(experimental.keywords).not.toContain("browser");
+    expect(SECTIONS.some((entry) => entry.id === "experimental")).toBe(false);
   });
 });

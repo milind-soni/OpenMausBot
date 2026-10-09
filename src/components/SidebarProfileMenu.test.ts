@@ -199,10 +199,9 @@ describe("the phone entries", () => {
     expect(shown("computer", null)).toEqual([["Connect your phone", "to this computer"], APP]);
   });
 
-  it("on this computer with a paid Cloud that is Ready: both, the Cloud first", () => {
+  it("on this computer with a paid Cloud that is Ready: only this computer (Vopwe local-only)", () => {
     for (const tier of ["personal", "pro", "max"]) {
       expect(shown("computer", null, paid(tier, ready))).toEqual([
-        ["Connect your phone", "to My Cloud (always on)"],
         ["Connect your phone", "to this computer"],
         APP,
       ]);
@@ -220,10 +219,10 @@ describe("the phone entries", () => {
       .toEqual([["Connect your phone", "to this computer"], APP]);
   });
 
-  it("on this computer with a paid Cloud that is not Ready: only this computer, and a hint", () => {
+  it("on this computer with a paid Cloud that is not Ready: only this computer (Vopwe local-only)", () => {
     for (const machine of [undefined, { status: "provisioning" }, { status: "stopped", origin: ready.origin }, { status: "failed", origin: ready.origin }] as Array<CloudMachine | undefined>) {
       expect(shown("computer", null, paid("pro", machine))).toEqual([
-        ["Connect your phone", "to this computer", "My Cloud shows here once it is ready."],
+        ["Connect your phone", "to this computer"],
         APP,
       ]);
     }
@@ -252,50 +251,27 @@ describe("the phone entries", () => {
   it("each line hands on its own destination", () => {
     const { list, onConnect, onGetApp } = items("computer", null, paid("pro", ready));
     list[0]!.onSelect();
-    expect(onConnect).toHaveBeenLastCalledWith(expect.objectContaining({ id: "cloud" }));
-    list[1]!.onSelect();
     expect(onConnect).toHaveBeenLastCalledWith(expect.objectContaining({ id: "here", target: "computer" }));
     expect(onGetApp).not.toHaveBeenCalled();
-    list[2]!.onSelect();
+    list[1]!.onSelect();
     expect(onGetApp).toHaveBeenCalledOnce();
   });
 
   it("shows this computer's live phone on this computer's line only", () => {
     expect(items("computer", null, null, true).list[0]!.trailing).toBeTruthy();
     expect(items("computer", null, null, false).list[0]!.trailing).toBeUndefined();
-    const both = items("computer", null, paid("pro", ready), true).list;
-    expect(both[0]!.trailing).toBeUndefined();
-    expect(both[1]!.trailing).toBeTruthy();
     expect(items("cloud", admin, null, true).list[0]!.trailing).toBeUndefined();
   });
 });
 
 describe("choosing where the phone connects", () => {
-  const destinations = (account: CloudAccountState | null) => phoneDestinations(connectPhoneEntry("computer", null), cloudPhoneDestination(account));
+  const destinations = (_account: CloudAccountState | null) => phoneDestinations(connectPhoneEntry("computer", null), cloudPhoneDestination(_account));
   const readyCloud: CloudAccountState = { status: "connected", entitlement: { plan: "pro", status: "active", expiresAt: null, version: 1 }, machine: { status: "ready", origin: "https://home-7f3k2.fly.dev" } };
-  const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
-
-  it("to My Cloud opens the Cloud on its phone pairing, as Use My Cloud on your phone does, sending nothing", async () => {
-    const bridge = { connectHomeForPhone: vi.fn().mockResolvedValue({ status: "connected" }) };
-    const dispatch = vi.fn();
-    selectPhoneDestination(destinations(readyCloud)[0]!, { bridge, dispatch });
-    await flush();
-    expect(bridge.connectHomeForPhone).toHaveBeenCalledExactlyOnceWith();
-    expect(dispatch).not.toHaveBeenCalled();
-  });
-
-  it("when the Cloud cannot be opened, lands on Settings → MausBot Cloud, which says what to do", async () => {
-    const bridge = { connectHomeForPhone: vi.fn().mockRejectedValue(new Error("offline")) };
-    const dispatch = vi.fn();
-    selectPhoneDestination(destinations(readyCloud)[0]!, { bridge, dispatch });
-    await flush();
-    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
-  });
 
   it("to this computer opens this computer's phone pairing and never touches the Cloud", () => {
     const bridge = { connectHomeForPhone: vi.fn() };
     const dispatch = vi.fn();
-    selectPhoneDestination(destinations(readyCloud)[1]!, { bridge, dispatch });
+    selectPhoneDestination(destinations(readyCloud)[0]!, { bridge, dispatch });
     expect(dispatch).toHaveBeenCalledExactlyOnceWith(phonePairingSettingsAction());
     expect(bridge.connectHomeForPhone).not.toHaveBeenCalled();
   });

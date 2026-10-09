@@ -11,9 +11,7 @@
 //
 // On this computer, someone with a paid Cloud that is Ready is offered both:
 // their Cloud first (always on), then this computer.
-import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import type { LocaleKey } from "@/locales";
-import { cloudPlanView } from "./cloud-plan";
 import type { Action } from "@/state/store";
 import { readMembership } from "./membership";
 import { isOwnerOrAdmin, readSessionState, type SessionState } from "./session";
@@ -84,9 +82,8 @@ export function connectPhoneEntry(target: PhonePairingTarget, access: PhonePairi
  * from the verified native snapshot only. */
 export type CloudPhoneDestination = "ready" | "not-ready" | null;
 
-export function cloudPhoneDestination(account: CloudAccountState | null | undefined): CloudPhoneDestination {
-  if (cloudPlanView(account).kind !== "paid") return null;
-  return account?.status === "connected" && account.machine?.status === "ready" ? "ready" : "not-ready";
+export function cloudPhoneDestination(_account: unknown): CloudPhoneDestination {
+  return null;
 }
 
 /** One "Connect your phone" line. `id` "cloud": open the person's Cloud in
