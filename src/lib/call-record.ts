@@ -17,9 +17,11 @@ export type CallRecordLine =
   | { kind: "step"; id: string; tool: NonNullable<Message["tool"]> }
   | { kind: "approval"; id: string; card: NonNullable<Message["card"]> };
 
-/** A call's steps and approval cards, in transcript order. Status rows,
- * failed-turn rows, chips that link to another conversation and question
- * cards are not work the bot did, so they are left out. */
+/** A call's steps and approval cards, in transcript order. A step is a tool
+ * the provider ran, which is what carries an item id. Status rows, failed-turn
+ * rows, chips that link to another conversation, the harness's own chips
+ * (the receipt of an automatic approval, a notice, a rejected action, a retry)
+ * and question cards are not work the bot did, so they are left out. */
 export function callRecordLines(transcript: readonly Message[], callId: string): CallRecordLine[] {
   const requests = new Set<string>();
   for (const message of transcript) {
@@ -31,7 +33,11 @@ export function callRecordLines(transcript: readonly Message[], callId: string):
     if (!message.requestMessageId || !requests.has(message.requestMessageId)) continue;
     const { card } = message;
     if (isToolStep(message)) {
-      lines.push({ kind: "step", id: message.id, tool: message.tool });
+      // The harness writes chips of its own inside a turn. Each looks like a
+      // step to the chat's fold, but none has a provider item behind it:
+      // listing them would show an auto-approved action twice, or a note as
+      // work.
+      if (message.tool.itemId !== undefined) lines.push({ kind: "step", id: message.id, tool: message.tool });
     } else if (message.kind === "options" && card?.requestId && card.tool && !card.questionRequest) {
       lines.push({ kind: "approval", id: message.id, card });
     }

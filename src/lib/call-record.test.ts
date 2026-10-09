@@ -6,7 +6,11 @@ import { callRecordLines } from "./call-record";
 let at = 0;
 const msg = (id: string, fields: Partial<Message>): Message => ({ id, role: "bot", kind: "text", at: ++at, ...fields }) as Message;
 const spoken = (id: string, text: string, callId: string) => msg(id, { role: "user", text, via: "call", callId });
+// A step is a tool the provider ran, so it carries the provider's item id.
 const step = (id: string, request: string, name: string, extra: Partial<NonNullable<Message["tool"]>> = {}) =>
+  msg(id, { kind: "activity", requestMessageId: request, tool: { name, ok: true, itemId: `item-${id}`, ...extra } });
+// A chip the harness writes itself inside a turn: nothing the provider ran is behind it.
+const chip = (id: string, request: string, name: string, extra: Partial<NonNullable<Message["tool"]>> = {}) =>
   msg(id, { kind: "activity", requestMessageId: request, tool: { name, ok: true, ...extra } });
 const approval = (id: string, request: string, extra: Partial<NonNullable<Message["card"]>> = {}) =>
   msg(id, {
@@ -74,6 +78,25 @@ describe("callRecordLines", () => {
     expect(callRecordLines(transcript, "c1")).toEqual([]);
   });
 
+  it("lists a step only when the provider ran it: the harness's own chips inside a turn are not steps", () => {
+    const transcript = [
+      spoken("m1", "search the web and run the tests", "c1"),
+      step("s1", "m1", "WebSearch", { spoken: "searching the web" }),
+      step("s2", "m1", "Bash", { spoken: "running the tests" }),
+      // what the harness writes beside them, each with no provider item behind it
+      chip("h1", "m1", "approved WebSearch (web search): weather in Pune"),
+      chip("h2", "m1", "approved Bash (saved command): pnpm test"),
+      chip("h3", "m1", "approved Bash (full access): pnpm test"),
+      chip("h4", "m1", "Approve for me: Claude's automatic reviewer is not available for Haiku 4.5, so this bot asks before each action."),
+      chip("h5", "m1", "The provider rejected this action despite Full access.", { ok: false }),
+      chip("h6", "m1", "generated image could not be attached — invalid image", { ok: false }),
+      chip("h7", "m1", "retrying — attempt 2/3 in 5s — the engine dropped the connection"),
+      callRow("r1", "c1"),
+    ];
+    // an auto-approved action is listed once, by its step, never by its receipt as well
+    expect(ids(transcript, "c1")).toEqual(["step:s1", "step:s2"]);
+  });
+
   it("is empty for a call nothing was asked on", () => {
     expect(callRecordLines([callRow("r1", "c1")], "c1")).toEqual([]);
   });
@@ -116,8 +139,8 @@ describe("callRecordLines", () => {
       approval("o1", "m1", { answered: "allow" }),
     ];
     expect(callRecordLines(transcript, "c1")).toEqual([
-      { kind: "step", id: "s1", tool: { name: "Bash", ok: true, spoken: "running a command", summary: "pnpm test" } },
-      { kind: "step", id: "s2", tool: { name: "Write", ok: false } },
+      { kind: "step", id: "s1", tool: { name: "Bash", ok: true, itemId: "item-s1", spoken: "running a command", summary: "pnpm test" } },
+      { kind: "step", id: "s2", tool: { name: "Write", ok: false, itemId: "item-s2" } },
       { kind: "approval", id: "o1", card: expect.objectContaining({ requestId: "req-o1", tool: "Bash", answered: "allow" }) },
     ]);
   });

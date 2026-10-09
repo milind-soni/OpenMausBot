@@ -7,6 +7,9 @@ import { CallRecordRow } from "./CallRecordRow";
 
 const at = 1_700_000_000_000;
 const msg = (id: string, fields: Partial<Message>): Message => ({ id, role: "bot", kind: "text", at, ...fields }) as Message;
+/** A tool the provider ran: the only kind of chip a record lists as a step. */
+const step = (id: string, request: string, tool: NonNullable<Message["tool"]>) =>
+  msg(id, { kind: "activity", requestMessageId: request, tool: { ...tool, itemId: `item-${id}` } });
 const row = (call: Partial<NonNullable<Message["call"]>> = {}) => msg("row", {
   kind: "call",
   text: "Call with Pepper · 1:42",
@@ -14,7 +17,7 @@ const row = (call: Partial<NonNullable<Message["call"]>> = {}) => msg("row", {
 });
 const transcript: Message[] = [
   msg("m1", { role: "user", text: "what's the weather", via: "call", callId: "c1" }),
-  msg("a1", { kind: "activity", requestMessageId: "m1", tool: { name: "WebSearch", spoken: "searching the web", ok: true, input: "weather pune secret-query" } }),
+  step("a1", "m1", { name: "WebSearch", spoken: "searching the web", ok: true, input: "weather pune secret-query" }),
   msg("o1", {
     kind: "options",
     requestMessageId: "m1",
@@ -22,7 +25,7 @@ const transcript: Message[] = [
   }),
   msg("b1", { text: "Sunny.", requestMessageId: "m1" }),
   msg("m2", { role: "user", text: "thanks" }),
-  msg("a2", { kind: "activity", requestMessageId: "m2", tool: { name: "Read", spoken: "reading a file", ok: true } }),
+  step("a2", "m2", { name: "Read", spoken: "reading a file", ok: true }),
 ];
 const draw = (message: Message, messages: Message[] = transcript) =>
   renderToStaticMarkup(createElement(CallRecordRow, { message, transcript: [...messages, message], botName: "Pepper" }));
@@ -60,9 +63,9 @@ describe("CallRecordRow", () => {
   it("tells a screen reader how each step went, which its glyph only shows", () => {
     const work: Message[] = [
       msg("m1", { role: "user", text: "check the build", via: "call", callId: "c1" }),
-      msg("a1", { kind: "activity", requestMessageId: "m1", tool: { name: "WebSearch", spoken: "searching the web", ok: true } }),
-      msg("a2", { kind: "activity", requestMessageId: "m1", tool: { name: "Bash", spoken: "running the tests", ok: false } }),
-      msg("a3", { kind: "activity", requestMessageId: "m1", tool: { name: "Read", spoken: "reading a file" } }),
+      step("a1", "m1", { name: "WebSearch", spoken: "searching the web", ok: true }),
+      step("a2", "m1", { name: "Bash", spoken: "running the tests", ok: false }),
+      step("a3", "m1", { name: "Read", spoken: "reading a file" }),
       msg("o1", { kind: "options", requestMessageId: "m1", card: { title: "Approval needed", subtitle: "rm -rf build", options: ["Allow", "Deny"], requestId: "r1", tool: "Bash", answered: "deny" } }),
     ];
     const markup = draw(row(), work);

@@ -214,7 +214,11 @@ Added 2026-10-06 (the harness half of SupaMaus/mausbot-mobile
   and the bot's own engine already saw those requests.
 - **What a call's record lists.** The messages whose `requestMessageId` points
   at one of the call's spoken lines: the steps and the approval cards of the
-  turns those requests started. A line steered into a running turn starts no
+  turns those requests started. A step is a tool the provider ran, a chip with
+  a provider item id (`tool.itemId`). The harness's own chips inside a turn (the
+  receipt of an automatic approval, a notice, a rejected action, a retry) have
+  none, so they are never steps, and an auto-approved action is listed once.
+  A line steered into a running turn starts no
   turn of its own, so its work is the work of the turn it was steered into: it
   counts for this call when that turn began with one of the call's lines (a
   typed line steered into it included), and not when it began with a typed line

@@ -94,7 +94,7 @@ describe("a call's record at the end of a chat that is still working", () => {
   it("keeps naming the step that is running when the call ended under it", () => {
     const markup = drawWorking([
       spoken,
-      message("a1", "", { role: "bot", kind: "activity", requestMessageId: "m1", tool: { name: "Bash", spoken: "running the tests" } }),
+      message("a1", "", { role: "bot", kind: "activity", requestMessageId: "m1", tool: { name: "Bash", spoken: "running the tests", itemId: "item-a1" } }),
       record,
     ]);
     expect(markup).toContain('data-testid="call-record"');

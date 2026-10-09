@@ -25,9 +25,12 @@ const record = msg("row", {
   call: { callId: "c1", botId: "bot", client: "ios", startedAt: at - 102_000, endedAt: at, seconds: 102, endReason: "hung-up" },
 });
 const withCall = (fields: Partial<NonNullable<Message["call"]>>): Message => ({ ...record, call: { ...record.call!, ...fields } });
+/** A tool the provider ran (it carries an item id), asked for by the call's request. */
+const step = (id: string, tool: NonNullable<Message["tool"]>) =>
+  msg(id, { kind: "activity", requestMessageId: "m1", tool: { ...tool, itemId: `item-${id}` } });
 const transcript: Message[] = [
   msg("m1", { role: "user", text: "what's the weather", via: "call", callId: "c1" }),
-  msg("a1", { kind: "activity", requestMessageId: "m1", tool: { name: "WebSearch", spoken: "searching the web", ok: true } }),
+  step("a1", { name: "WebSearch", spoken: "searching the web", ok: true }),
   record,
 ];
 
@@ -54,7 +57,7 @@ describe("CallRecordRow's lines", () => {
     expect(callRecordLines).toHaveBeenCalledTimes(1);
 
     // a step lands: the transcript is a new array, and the lines follow it
-    const later = [...transcript, msg("a2", { kind: "activity", requestMessageId: "m1", tool: { name: "Read", spoken: "reading a file", ok: true } })];
+    const later = [...transcript, step("a2", { name: "Read", spoken: "reading a file", ok: true })];
     draw(record, later);
     expect(callRecordLines).toHaveBeenCalledTimes(2);
     expect(host.textContent).toContain("Reading a file");

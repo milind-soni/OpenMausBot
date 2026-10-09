@@ -156,6 +156,18 @@ describe("isToolStep", () => {
     expect(rows.filter((row) => isToolStep(row))).toEqual([]);
   });
 
+  // Only a call's record asks for the provider's item id (call-record.ts): the
+  // chat folds the harness's own chips, such as an automatic approval's receipt,
+  // with the steps around them, and has always done so.
+  it("does not ask for a provider item id: the chat still folds the harness's own chips", () => {
+    const receipt = tool("approved Bash (full access): pnpm test");
+    expect(receipt.tool).not.toHaveProperty("itemId");
+    expect(isToolStep(receipt)).toBe(true);
+    const items = groupActivityRuns([tool("Edit"), receipt, tool("Write")]);
+    expect(items.map((i) => i.kind)).toEqual(["run"]);
+    expect(items[0].kind === "run" && items[0].messages).toHaveLength(3);
+  });
+
   it("is false for anything that is not an activity row with a tool", () => {
     const noTool: Message = { id: "n1", at: 1, role: "bot", kind: "activity" };
     const notActivity: Message = { ...tool("Edit"), kind: "text" };
