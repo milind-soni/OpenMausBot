@@ -215,6 +215,16 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
+  --identity-green: #009957;
+  --identity-blue: #377FE6;
+  --identity-red: #D94B52;
+  --identity-orange: #E78531;
+  --identity-purple: #8963cc;
+  --identity-cyan: #0EA5C6;
+  --identity-pink: #D84F8B;
+  --identity-yellow: #D8A729;
+  --identity-teal: #01A492;
+  --identity-coral: #E5634E;
 }
 
 /* ── Atelier ───────────────────────────────────────────────────────────────
@@ -268,6 +278,16 @@
     Roboto, sans-serif;
   --radius-lg: 6px;
   --radius-xl: 10px;
+  --identity-green: #007f48;
+  --identity-blue: #1b6adc;
+  --identity-red: #d12c34;
+  --identity-orange: #a95914;
+  --identity-purple: #8057C8;
+  --identity-cyan: #0a7891;
+  --identity-pink: #ca2d72;
+  --identity-yellow: #896a19;
+  --identity-teal: #017c6f;
+  --identity-coral: #cd361e;
 }
 
 /* ── Foundry ───────────────────────────────────────────────────────────────
@@ -326,6 +346,16 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 4px;
   --radius-xl: 8px;
+  --identity-green: #009957;
+  --identity-blue: #377FE6;
+  --identity-red: #D94B52;
+  --identity-orange: #E78531;
+  --identity-purple: #8c67cd;
+  --identity-cyan: #0EA5C6;
+  --identity-pink: #D84F8B;
+  --identity-yellow: #D8A729;
+  --identity-teal: #01A492;
+  --identity-coral: #E5634E;
 }
 
 /* ── Lagoon ────────────────────────────────────────────────────────────────
@@ -391,6 +421,16 @@
     Roboto, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 14px;
+  --identity-green: #007945;
+  --identity-blue: #1a65d1;
+  --identity-red: #c82a32;
+  --identity-orange: #a25513;
+  --identity-purple: #7c51c6;
+  --identity-cyan: #0a738b;
+  --identity-pink: #c12b6d;
+  --identity-yellow: #836518;
+  --identity-teal: #01776a;
+  --identity-coral: #c3341d;
 }
 
 /* ── Graphite ─────────────────────────────────────────────────────────────
@@ -436,6 +476,16 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 6px;
   --radius-xl: 10px;
+  --identity-green: #009957;
+  --identity-blue: #377FE6;
+  --identity-red: #D94B52;
+  --identity-orange: #E78531;
+  --identity-purple: #8d69ce;
+  --identity-cyan: #0EA5C6;
+  --identity-pink: #D84F8B;
+  --identity-yellow: #D8A729;
+  --identity-teal: #01A492;
+  --identity-coral: #E5634E;
 }
 
 /* ── Linen ────────────────────────────────────────────────────────────────
@@ -481,6 +531,16 @@
     Roboto, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 12px;
+  --identity-green: #007d47;
+  --identity-blue: #1b68d7;
+  --identity-red: #ce2c34;
+  --identity-orange: #a75713;
+  --identity-purple: #7f55c8;
+  --identity-cyan: #0a778e;
+  --identity-pink: #c72c70;
+  --identity-yellow: #886819;
+  --identity-teal: #017a6d;
+  --identity-coral: #c9361e;
 }
 
 /* ── Dusk ─────────────────────────────────────────────────────────────────
@@ -525,6 +585,16 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 12px;
+  --identity-green: #009957;
+  --identity-blue: #377FE6;
+  --identity-red: #D94B52;
+  --identity-orange: #E78531;
+  --identity-purple: #8d68ce;
+  --identity-cyan: #0EA5C6;
+  --identity-pink: #D84F8B;
+  --identity-yellow: #D8A729;
+  --identity-teal: #01A492;
+  --identity-coral: #E5634E;
 }
 
 /* ── Daylight ─────────────────────────────────────────────────────────────
@@ -585,6 +655,16 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 14px;
+  --identity-green: #00864c;
+  --identity-blue: #2271e3;
+  --identity-red: #d63a42;
+  --identity-orange: #b35e15;
+  --identity-purple: #8057C8;
+  --identity-cyan: #0b7f99;
+  --identity-pink: #d2357a;
+  --identity-yellow: #91701b;
+  --identity-teal: #018375;
+  --identity-coral: #d83920;
 }
 
 /* ── Meadow ───────────────────────────────────────────────────────────────
@@ -633,6 +713,16 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 10px;
   --radius-xl: 16px;
+  --identity-green: #00884e;
+  --identity-blue: #2573e4;
+  --identity-red: #d63f47;
+  --identity-orange: #b65f15;
+  --identity-purple: #8057C8;
+  --identity-cyan: #0b819b;
+  --identity-pink: #d3397d;
+  --identity-yellow: #93721b;
+  --identity-teal: #018577;
+  --identity-coral: #db3a20;
 }
 
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
@@ -665,6 +755,27 @@
 .chat-text {
   unicode-bidi: plaintext;
   text-align: start;
+}
+
+/* Chat copy. 15px stays; the line box goes from Tailwind's leading-relaxed
+   (1.625) to 1.75 so Arabic and Latin both get a little more air without
+   moving the surrounding chrome. Arabic and Hebrew use a local face when
+   the machine has one. Inter and the UI stack do not carry those glyphs,
+   and a generic family listed later would otherwise win. */
+@font-face {
+  font-family: "omb-chat";
+  src: local("Noto Naskh Arabic"), local("Noto Sans Arabic"), local("Geeza Pro"), local("SF Arabic");
+  unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+@font-face {
+  font-family: "omb-chat";
+  src: local("Noto Sans Hebrew"), local("Arial Hebrew"), local("SF Hebrew");
+  unicode-range: U+0590-05FF, U+FB1D-FB4F;
+}
+.chat-text,
+.chat-md {
+  line-height: 1.75;
+  font-family: "omb-chat", var(--font-sans);
 }
 
 html,
@@ -1766,6 +1877,34 @@ button:disabled.bg-danger {
 }
 ::highlight(omb-citation-source) {
   background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+/* Room speaker names. Each skin sets a tone of the bot's palette that clears
+   4.5:1 on the thread (--color-app). The class below only picks the token. */
+.bot-identity[data-bot-color="green"] { color: var(--identity-green); }
+.bot-identity[data-bot-color="blue"] { color: var(--identity-blue); }
+.bot-identity[data-bot-color="red"] { color: var(--identity-red); }
+.bot-identity[data-bot-color="orange"] { color: var(--identity-orange); }
+.bot-identity[data-bot-color="purple"] { color: var(--identity-purple); }
+.bot-identity[data-bot-color="cyan"] { color: var(--identity-cyan); }
+.bot-identity[data-bot-color="pink"] { color: var(--identity-pink); }
+.bot-identity[data-bot-color="yellow"] { color: var(--identity-yellow); }
+.bot-identity[data-bot-color="teal"] { color: var(--identity-teal); }
+.bot-identity[data-bot-color="coral"] { color: var(--identity-coral); }
+
+
+/* A colored user bubble sets its own tokens inline. Mentions and selection
+   still have to clear white text: the chip keeps a little of the named bot's
+   color, and selection darkens the fill instead of washing it out. */
+.user-bubble-colored .mention-highlight {
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--mention-color) 22%, var(--color-inset));
+  text-decoration-color: var(--color-ink);
+}
+.user-bubble-colored::selection,
+.user-bubble-colored *::selection {
+  background-color: color-mix(in srgb, #000000 35%, var(--color-bubble-user));
+  color: #ffffff;
 }
 
 /* Wide-gamut displays. The sRGB values above stay the fallback.

@@ -16,6 +16,8 @@ const fixture = vi.hoisted(() => ({
   setSidebarDensity: vi.fn(),
   notificationSounds: true,
   setNotificationSounds: vi.fn(),
+  colorUserBubbles: false,
+  setColorUserBubbles: vi.fn(),
   advancedMode: false,
   setAdvancedMode: vi.fn(),
   api: vi.fn(),
@@ -48,6 +50,10 @@ vi.mock("@/lib/notification-preferences", () => ({
   useNotificationSounds: () => fixture.notificationSounds,
   setNotificationSounds: fixture.setNotificationSounds,
 }));
+vi.mock("@/lib/user-bubble-preference", () => ({
+  useColorUserBubbles: () => fixture.colorUserBubbles,
+  setColorUserBubbles: fixture.setColorUserBubbles,
+}));
 vi.mock("@/lib/interface-mode", () => ({
   useAdvancedMode: () => fixture.advancedMode,
   setAdvancedMode: fixture.setAdvancedMode,
@@ -71,6 +77,7 @@ beforeEach(() => {
   fixture.showRunCard = true;
   fixture.sidebarDensity = "comfortable";
   fixture.notificationSounds = true;
+  fixture.colorUserBubbles = false;
   // these pin the Advanced rail; Simple has its own suite (SettingsModal.simple.test.ts)
   fixture.advancedMode = true;
   fixture.switches = [];
@@ -168,6 +175,18 @@ describe("Settings → Appearance", () => {
     expect(fixture.setSidebarDensity).not.toHaveBeenCalled();
     expect(fixture.api).not.toHaveBeenCalled();
     expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("offers the bot-colored message toggle in Appearance, off until chosen", () => {
+    const html = render();
+    expect(html).toContain("Color my messages");
+    expect(html).toContain("bot&#x27;s color");
+    expect(html).toContain("Rooms keep the neutral bubble");
+    const toggle = fixture.switches.find((props) => props["aria-label"] === "Color my messages with the bot's color")!;
+    expect(toggle.checked).toBe(false);
+    toggle.onClick!({} as never);
+    expect(fixture.setColorUserBubbles).toHaveBeenCalledWith(true);
+    expect(fixture.api).not.toHaveBeenCalled();
   });
 
   it("offers the run card visibility toggle in Appearance", () => {

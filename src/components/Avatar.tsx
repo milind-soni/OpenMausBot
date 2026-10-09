@@ -78,6 +78,18 @@ const gradientFor = (color: MausColor): [string, string, string] => {
   return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
 };
 
+/** Room speaker mark. The mid stop is the skin's identity tone, which clears
+ * 4.5:1 on the thread. Highlight and shadow stay within 18% of that tone so
+ * the whole mark stays above 3:1 on the same ground. */
+export function roomAvatarGradient(color: MausColor): [string, string, string] {
+  const fill = `var(--identity-${color})`;
+  return [
+    `color-mix(in srgb, ${fill} 82%, #ffffff)`,
+    fill,
+    `color-mix(in srgb, ${fill} 82%, #000000)`,
+  ];
+}
+
 export type MausAvatarHandle = CursorAvatarHandle;
 
 export type MausAvatarProps = {
@@ -110,6 +122,8 @@ export type MausAvatarProps = {
   animated?: boolean;
   /** Which body the bot wears. Unknown values fall back to the cursor. */
   bodyId?: MascotBodyId;
+  /** Replaces the palette gradient. Room labels pass the identity tone. */
+  gradient?: [string, string, string];
 };
 
 function MausAvatarComponent(
@@ -132,6 +146,7 @@ function MausAvatarComponent(
     trackPointer = true,
     animated = true,
     bodyId,
+    gradient,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
@@ -182,7 +197,7 @@ function MausAvatarComponent(
         expression={expression}
         size={size}
         silhouette={silhouette}
-        gradient={gradientFor(color)}
+        gradient={gradient ?? gradientFor(color)}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
         gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
@@ -199,7 +214,9 @@ function MausAvatarComponent(
 
 export const MausAvatar = memo(forwardRef(MausAvatarComponent));
 
-export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
+export type BotAvatarProps = Omit<MausAvatarProps, "color" | "gradient"> & {
+  /** Paint the mascot with the skin's readable tone of this bot's color. */
+  readable?: boolean;
   bot: {
     name?: string;
     color: MausColor;
@@ -243,7 +260,7 @@ export function resolveBotAvatarOutcome(params: {
  * values and images that fail to load both fall back to the animated mascot,
  * so an old/corrupt profile can never leave a broken-image icon in the app.
  */
-export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarProps) {
+export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotProps }: BotAvatarProps) {
   const profile = botAvatarProfile(bot);
   const [imageFailed, setImageFailed] = useState(false);
 
@@ -261,6 +278,7 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
         bodyId={bot.mascotBody ?? undefined}
         {...mascotProps}
         color={bot.color}
+        gradient={readable ? roomAvatarGradient(bot.color) : undefined}
         size={size}
         label={label ?? bot.name}
       />
