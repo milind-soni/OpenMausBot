@@ -215,20 +215,20 @@ Added 2026-10-06 (the harness half of SupaMaus/mausbot-mobile
 - **What a call's record lists.** The messages whose `requestMessageId` points
   at one of the call's spoken lines: the steps and the approval cards of the
   turns those requests started. A step is a tool the provider ran, a chip with
-  a provider item id (`tool.itemId`). The harness's own chips inside a turn (the
-  receipt of an automatic approval, a notice, a rejected action, a retry) have
-  none, so they are never steps, and an auto-approved action is listed once.
-  A line steered into a running turn starts no
-  turn of its own, so its work is the work of the turn it was steered into: it
-  counts for this call when that turn began with one of the call's lines (a
-  typed line steered into it included), and not when it began with a typed line
-  or another call's. Only what the server ties to a turn carries
-  `requestMessageId`: provider permission cards do, but cards the server
-  appends itself never do (skill proposals, team memory, "Send on your
-  behalf?", and the receipt with Undo of a change a bot made to its own
-  profile, model, routines or skills without a card), so a record never lists
-  them, and question cards are left out. A turn still running at hang-up keeps
-  adding steps after the row, and the record keeps listing them.
+  a provider item id (`tool.itemId`). The harness's own chips inside a turn
+  (the receipt of an automatic approval, a notice, a rejected action, a retry)
+  have none, so they are never steps, and an auto-approved action is listed
+  once. A line steered into a running turn starts no turn of its own, so its
+  work is the work of the turn it was steered into: it counts for this call
+  when that turn began with one of the call's lines (a typed line steered into
+  it included), and not when it began with a typed line or another call's.
+  Only what the server ties to a turn carries `requestMessageId`: provider
+  permission cards do, but cards the server appends itself never do (skill
+  proposals, team memory, "Send on your behalf?", and the receipt with Undo of
+  a change a bot made to its own profile, model, routines or skills without a
+  card), so a record never lists them, and question cards are left out. A turn
+  still running at hang-up keeps adding steps after the row, and the record
+  keeps listing them.
 - **Never context.** The row is not conversation context for the bot
   (`isContextMessage` keeps text, digest, compaction and room-result
   messages, and the row is none of those), and not startup history for the

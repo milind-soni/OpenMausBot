@@ -144,21 +144,22 @@ describe("a call's record in a chat whose older messages are not all loaded", ()
     kind: "call",
     call: { callId: "c1", botId: "bot", client: "ios", startedAt, endedAt: 1_700_000_000_000, seconds: 250, endReason: "hung-up" },
   });
-  const draw = (hasMore: boolean, startedAt: number) =>
-    renderToStaticMarkup(createElement(ChatView, { bot: { ...bot([spoken, step, recordFrom(startedAt)]), hasMore } }));
-  const began = 1_700_000_000_000 - 250_000; // before every loaded message
+  const began = 1_700_000_000_000 - 250_000; // before the call's own lines
+  const draw = (hasMore: boolean, earlier: Message[] = []) =>
+    renderToStaticMarkup(createElement(ChatView, { bot: { ...bot([...earlier, spoken, step, recordFrom(began)]), hasMore } }));
 
   it("says its lines may be incomplete when the call began before the oldest loaded message", () => {
-    const markup = draw(true, began);
+    const markup = draw(true);
     expect(markup).toContain('data-testid="call-record"');
     expect(markup).toContain("Some of this call may be in earlier messages");
   });
 
   it("says nothing once the whole conversation is loaded", () => {
-    expect(draw(false, began)).not.toContain("Some of this call may be in earlier messages");
+    expect(draw(false)).not.toContain("Some of this call may be in earlier messages");
   });
 
-  it("says nothing for a call that began within the loaded messages", () => {
-    expect(draw(true, 1_700_000_000_000 + 1_000)).not.toContain("Some of this call may be in earlier messages");
+  it("says nothing when the loaded messages reach back to before the call began, though older ones remain", () => {
+    const typedEarlier = message("m0", "typed before the call", { at: began - 1_000 });
+    expect(draw(true, [typedEarlier])).not.toContain("Some of this call may be in earlier messages");
   });
 });
