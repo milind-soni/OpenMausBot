@@ -55,7 +55,7 @@ import { setNotificationSounds, useNotificationSounds } from "@/lib/notification
 import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
 import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
-import { parseSidebarDensity, setSidebarDensity, SIDEBAR_DENSITIES, useSidebarDensity, type SidebarDensity } from "@/lib/sidebar-preferences";
+import { parseSidebarDensity, parseSidebarToolsLayout, setSidebarDensity, setSidebarToolsLayout, SIDEBAR_DENSITIES, SIDEBAR_TOOLS_LAYOUTS, useSidebarDensity, useSidebarToolsLayout, type SidebarDensity, type SidebarToolsLayout } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 
@@ -81,7 +81,7 @@ export const SECTIONS: Array<{
   keywords: string[];
 }> = [
   { id: "general", group: "you", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "about me", "about", "suggestions", "suggested", "memory", "analytics", "updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule"] },
-  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top"] },
+  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "toolbar", "tools layout", "footer", "routines", "triggers", "team map"] },
   { id: "companion", group: "you", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "engines", group: "ai", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "model providers", "engines", "claude", "codex", "grok", "providers", "cli", "sign in", "subscription"] },
   { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "opencode", "provider"] },
@@ -520,6 +520,29 @@ function SidebarDensityRow() {
   );
 }
 
+const SIDEBAR_TOOLS_LAYOUT_LABEL_KEYS: Record<SidebarToolsLayout, LocaleKey> = {
+  rows: "sidebar.toolsLayout.rows",
+  toolbar: "sidebar.toolsLayout.toolbar",
+};
+
+function SidebarToolsLayoutRow() {
+  const layout = useSidebarToolsLayout();
+  return (
+    <SettingRow title={t("sidebar.toolsLayout.title")} subtitle={t("sidebar.toolsLayout.subtitle")}>
+      <select
+        value={layout}
+        aria-label={t("sidebar.toolsLayout.chooseAria")}
+        onChange={(event) => setSidebarToolsLayout(parseSidebarToolsLayout(event.target.value))}
+        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+      >
+        {SIDEBAR_TOOLS_LAYOUTS.map((option) => (
+          <option key={option} value={option}>{t(SIDEBAR_TOOLS_LAYOUT_LABEL_KEYS[option])}</option>
+        ))}
+      </select>
+    </SettingRow>
+  );
+}
+
 function RunCardRow() {
   const enabled = useShowRunCard();
   return (
@@ -948,6 +971,9 @@ export function SettingsModal() {
               {remoteActive && <AdvancedModeRow />}
               <FontRow />
               <SidebarDensityRow />
+              {/* Simple mode's footer has no rows to lay out, so the layout
+                  choice only means something in Advanced. */}
+              {advanced && <SidebarToolsLayoutRow />}
               {/* Simple mode keeps one conversation per bot, so the switch
                   only means something in Advanced. */}
               {advanced && <ShowThreadsRow />}

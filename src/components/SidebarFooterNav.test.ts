@@ -1,15 +1,22 @@
 import { Children, createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SidebarDensity } from "@/lib/sidebar-preferences";
+import type { SidebarDensity, SidebarToolsLayout } from "@/lib/sidebar-preferences";
 
 const fixture = vi.hoisted(() => ({
   advanced: false,
   dispatch: vi.fn(),
   state: {} as Record<string, unknown>,
+  toolsLayout: "rows" as SidebarToolsLayout,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) }));
+// The footer reads the shared layout store itself; the store's own tests cover
+// the storage default, so only the rendering under a chosen layout is pinned here.
+vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/sidebar-preferences")>(),
+  useSidebarToolsLayout: () => fixture.toolsLayout,
+}));
 import { SidebarAppsButton, SidebarFooterNav } from "./SidebarFooterNav";
 
 type Props = { children?: ReactNode; [key: string]: unknown };
@@ -20,7 +27,9 @@ function nodes(value: ReactNode): ReactElement<Props>[] {
     return [node, ...nodes(node.props.children)];
   });
 }
-function render(density: SidebarDensity) {
+// toolsLayout defaults to rows: a fresh install never stores the key.
+function render(density: SidebarDensity, toolsLayout: SidebarToolsLayout = "rows") {
+  fixture.toolsLayout = toolsLayout;
   let tree!: ReturnType<typeof SidebarFooterNav>;
   function Capture() { tree = SidebarFooterNav({ density }); return tree; }
   const html = renderToStaticMarkup(createElement(Capture));
@@ -31,6 +40,7 @@ beforeEach(() => {
   fixture.advanced = false;
   fixture.dispatch.mockReset();
   fixture.state = { activeView: "chat", routineRuns: [], triggersOpen: false, pluginsOpen: false };
+  fixture.toolsLayout = "rows";
   vi.stubGlobal("window", {});
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -96,7 +106,7 @@ describe("sidebar footer places", () => {
   it("draws icons with tooltips in the avatars-only density", () => {
     fixture.advanced = true;
     const { html } = render("icons");
-    for (const label of ["Routines", "Triggers", "Apps", "Team map"]) {
+    for (const label of ["Routines", "Triggers", "Team map"]) {
       expect(html).toContain(`aria-label="${label}" title="${label}"`);
       expect(html).not.toContain(`>${label}</span>`);
     }
@@ -113,5 +123,70 @@ describe("Apps beside the profile", () => {
     expect(html).toContain('aria-label="Apps"');
     (tree.props.onClick as () => void)();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "togglePlugins", open: true });
+  });
+});
+
+describe("toolbar tools layout", () => {
+  it.each(["comfortable", "compact"] as const)("toolbar renders the places as icon buttons with labels (%s)", (density) => {
+    fixture.advanced = true;
+    const { html } = render(density, "toolbar");
+    expect(html).toContain('class="flex flex-row gap-1"');
+    expect(html).not.toContain("flex-col");
+    for (const label of ["Routines", "Triggers", "Team map"]) {
+      expect(html).toContain(`aria-label="${label}" title="${label}"`);
+      expect(html).not.toContain(`>${label}</span>`);
+    }
+  });
+
+  it("toolbar keeps tour anchors and aria-current", () => {
+    fixture.advanced = true;
+    fixture.state.activeView = "routines";
+    const { html } = render("comfortable", "toolbar");
+    expect(html).toContain('data-tour="tools"');
+    expect(html).toMatch(/data-tour="nav-automations" data-sidebar-nav="routines"/);
+    expect(html).toMatch(/data-tour="team-tools" data-sidebar-nav="team-map"/);
+    const place = (id: string) => {
+      const at = html.indexOf(`data-sidebar-nav="${id}"`);
+      const next = html.indexOf("data-sidebar-nav=", at + 1);
+      return html.slice(at, next === -1 ? undefined : next);
+    };
+    expect(place("routines")).toContain('aria-current="page"');
+    expect(place("team-map")).not.toContain('aria-current="page"');
+  });
+
+  it("toolbar shows the routines attention dot and clears it once seen", () => {
+    fixture.advanced = true;
+    fixture.state.routineRuns = [{ id: "r", status: "failed", scheduledFor: 1 }];
+    expect(render("comfortable", "toolbar").html).toContain('data-testid="routines-attention"');
+    fixture.state.routineRuns = [{ id: "r", status: "failed", scheduledFor: 1, seenAt: 1 }];
+    expect(render("comfortable", "toolbar").html).not.toContain('data-testid="routines-attention"');
+  });
+
+  it("toolbar shows Team map only in Advanced mode", () => {
+    fixture.advanced = true;
+    expect(render("comfortable", "toolbar").html.match(/data-sidebar-nav="/g)).toHaveLength(3);
+    fixture.advanced = false;
+    expect(render("comfortable", "toolbar").html).toBe("");
+  });
+
+  it("icons density ignores the tools layout", () => {
+    fixture.advanced = true;
+    const rows = render("icons").html;
+    expect(render("icons", "toolbar").html).toBe(rows);
+    expect(rows).toContain('class="flex flex-col gap-0.5"');
+  });
+
+  it("rows layout renders exactly as before", () => {
+    fixture.advanced = true;
+    const unset = render("comfortable").html;
+    expect(render("comfortable", "rows").html).toBe(unset);
+    expect(unset).toContain('<nav data-tour="tools"');
+    expect(unset).toContain('class="flex flex-col gap-0.5"');
+    expect(unset).not.toContain("flex-row");
+    for (const label of ["Routines", "Triggers", "Team map"]) {
+      expect(unset).toContain(`>${label}</span>`);
+      expect(unset).not.toContain(`title="${label}"`);
+      expect(unset).not.toContain(`aria-label="${label}"`);
+    }
   });
 });

@@ -6,6 +6,7 @@ import {
   UNIVERSAL_PINS_KEY,
   SIDEBAR_COLLAPSED_SECTIONS_KEY,
   SIDEBAR_DENSITY_KEY,
+  SIDEBAR_TOOLS_LAYOUT_KEY,
   SIDEBAR_WIDTH_KEY,
   SIDEBAR_SECTION_ORDER_KEY,
   clampSidebarWidth,
@@ -15,18 +16,23 @@ import {
   loadCollapsedSections,
   loadSectionOrder,
   loadSidebarDensity,
+  loadSidebarToolsLayout,
   loadSidebarWidth,
   parsePinnedCircles,
   parseUniversalPins,
   parseSidebarAttentionPinned,
   parseSidebarDensity,
+  parseSidebarToolsLayout,
   saveCollapsedSections,
   savePinnedCircles,
   saveUniversalPins,
   saveSectionOrder,
   saveSidebarAttentionPinned,
   saveSidebarDensity,
+  saveSidebarToolsLayout,
   saveSidebarWidth,
+  setSidebarToolsLayout,
+  subscribeSidebarToolsLayout,
   toggleCollapsedSection,
 } from "./sidebar-preferences";
 import { userSectionId } from "./sidebar-layout";
@@ -191,5 +197,45 @@ describe("sidebar attention pin preference", () => {
     expect(loadSidebarAttentionPinned({ getItem: () => "true" })).toBe(true);
     expect(loadSidebarAttentionPinned({ getItem: () => "untrusted" })).toBe(false);
     expect(loadSidebarAttentionPinned({ getItem: () => { throw new Error("blocked"); } })).toBe(false);
+  });
+});
+
+describe("sidebar tools layout preference", () => {
+  it("tools layout defaults to rows and ignores malformed values", () => {
+    expect(parseSidebarToolsLayout("rows")).toBe("rows");
+    expect(parseSidebarToolsLayout("toolbar")).toBe("toolbar");
+    expect(parseSidebarToolsLayout("icons")).toBe("rows");
+    expect(parseSidebarToolsLayout("")).toBe("rows");
+    expect(parseSidebarToolsLayout(null)).toBe("rows");
+    expect(loadSidebarToolsLayout({ getItem: () => null })).toBe("rows");
+    expect(loadSidebarToolsLayout({ getItem: () => "menu" })).toBe("rows");
+    expect(loadSidebarToolsLayout({ getItem: () => { throw new Error("blocked"); } })).toBe("rows");
+
+    const setItem = vi.fn();
+    saveSidebarToolsLayout("toolbar", { setItem });
+    expect(setItem).toHaveBeenCalledWith(SIDEBAR_TOOLS_LAYOUT_KEY, "toolbar");
+    expect(loadSidebarToolsLayout({ getItem: (key) => (key === SIDEBAR_TOOLS_LAYOUT_KEY ? "toolbar" : null) })).toBe("toolbar");
+  });
+
+  it("setSidebarToolsLayout notifies subscribers and persists", () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+    });
+    const listener = vi.fn();
+    const unsubscribe = subscribeSidebarToolsLayout(listener);
+    try {
+      setSidebarToolsLayout("toolbar");
+      expect(listener).toHaveBeenCalledOnce();
+      expect(values.get(SIDEBAR_TOOLS_LAYOUT_KEY)).toBe("toolbar");
+      expect(loadSidebarToolsLayout()).toBe("toolbar");
+      setSidebarToolsLayout("rows");
+      expect(listener).toHaveBeenCalledTimes(2);
+      expect(values.get(SIDEBAR_TOOLS_LAYOUT_KEY)).toBe("rows");
+    } finally {
+      unsubscribe();
+      vi.unstubAllGlobals();
+    }
   });
 });
